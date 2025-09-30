@@ -90,6 +90,28 @@
 - Single Docker image serving UI and API on one port; multi-arch (linux/amd64, linux/arm64).
 - Use volumes `datasets/`, `models/`, `state/` for persistence.
 - Optional GUI wrapper (technology TBD) may orchestrate startup, port selection, updates, and offline pack import.
+ - Expose endpoints: `/ui` (web UI), `/api` (JSON APIs), `/health` and `/ready` (health checks).
+
+## Acceptance Criteria
+- Runs as a single container image that serves the web UI and API on a single localhost port by default.
+- Cross-platform support with multi-arch images: linux/amd64 and linux/arm64; verified to run on Windows (WSL2), macOS (Intel/Apple Silicon), and Linux.
+- DataHub compatibility: container can be hosted by DataHub and accept routed uploads; exposes endpoints suitable for both interactive sessions and headless API use when needed.
+- Non-technical usability: a simple GUI wrapper (technology TBD) can start/stop/update the container without CLI; automatically selects an open port, writes minimal configuration, and opens the browser.
+- Minimal configuration: sane defaults; optional `.env` for advanced settings; no mandatory CLI flags for end users.
+- Privacy by default: local-only processing unless explicitly enabled; per-task/column policy toggles for any external calls; PII redaction before any egress when enabled.
+- Model handling: supports lazy model downloads to a local `models/` cache; supports importing signed Offline Model Packs for airgapped environments; visible progress and clear error handling.
+- Persistence and audit: uses durable volumes (`datasets/`, `models/`, `state/`); exports an audit bundle including plan JSON, ontology/model versions, input hash, model confidences, and curator decisions; runs are reproducible given fixed versions.
+- GPU optionality: detects GPU availability where applicable; runs correctly without GPU on CPU with clear time expectations; uses GPU acceleration when present without additional user steps.
+- Health and diagnostics: provides basic health endpoints; structured, redacted logs; ability to generate a redacted support bundle without exposing raw data.
+- Updates and provenance: supports pulling a new signed image and restarting cleanly with rollback on failure; publishes SBOM and image signatures.
+- Performance expectations: handles typical dataset sizes for interactive review without timeouts; supports bulk actions and keyboard shortcuts for curation at scale.
+- Accessibility and UX: responsive web UI with clear workflow steps; keyboard-friendly interactions; conveys model confidence and conflicts clearly for human review.
+
+## Open Questions
+- Which ontologies/standards are priority and what are their version cadences?
+- Minimum viable offline experience: which zero-shot features must work without egress?
+- Preferred persistence model for on-prem (SQLite vs Postgres) and backup expectations?
+- SLA/SLO expectations for DataHub and for commercial on-prem support?
 
 ## Out of Scope (for now)
 - Multi-service orchestration (Compose/Kubernetes) as baseline.
