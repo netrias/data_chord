@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mockup Playground</title>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/alpinejs@3.13.3/dist/cdn.min.js" defer></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom animations */
+        .fade-in {
+            animation: fadeIn 0.3s ease-in-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* HTMX loading indicator */
+        .htmx-indicator {
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out;
+        }
+
+        .htmx-request .htmx-indicator {
+            opacity: 1;
+        }
+
+        .htmx-request.htmx-indicator {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-gray-800 mb-2">Mockup Playground</h1>
+            <p class="text-gray-600">Lightweight prototyping with HTMX + Alpine.js</p>
+        </div>
+
+        <!-- Tab Navigation -->
+        <div class="mb-8" x-data="{ activeTab: 'components' }">
+            <div class="flex space-x-4 border-b border-gray-200">
+                <button @click="activeTab = 'components'"
+                        :class="{'border-blue-500 text-blue-600': activeTab === 'components', 'border-transparent text-gray-500': activeTab !== 'components'}"
+                        class="py-2 px-4 border-b-2 font-medium text-sm">
+                    Components
+                </button>
+                <button @click="activeTab = 'forms'"
+                        :class="{'border-blue-500 text-blue-600': activeTab === 'forms', 'border-transparent text-gray-500': activeTab !== 'forms'}"
+                        class="py-2 px-4 border-b-2 font-medium text-sm">
+                    Forms
+                </button>
+                <button @click="activeTab = 'layouts'"
+                        :class="{'border-blue-500 text-blue-600': activeTab === 'layouts', 'border-transparent text-gray-500': activeTab !== 'layouts'}"
+                        class="py-2 px-4 border-b-2 font-medium text-sm">
+                    Layouts
+                </button>
+            </div>
+
+            <!-- Components Tab -->
+            <div x-show="activeTab === 'components'" class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Interactive Card -->
+                <div class="bg-white rounded-lg shadow-md p-6" x-data="{ expanded: false }">
+                    <h3 class="text-lg font-semibold mb-4">Interactive Card</h3>
+                    <div class="space-y-4">
+                        <button @click="expanded = !expanded"
+                                class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded">
+                            <span x-text="expanded ? 'Collapse' : 'Expand'"></span>
+                        </button>
+                        <div x-show="expanded" x-transition class="bg-gray-50 p-4 rounded">
+                            <p class="text-gray-700">This content is toggled with Alpine.js!</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Counter Component -->
+                <div class="bg-white rounded-lg shadow-md p-6" x-data="{ count: 0 }">
+                    <h3 class="text-lg font-semibold mb-4">Counter</h3>
+                    <div class="flex items-center space-x-4">
+                        <button @click="count--" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded">
+                            -
+                        </button>
+                        <span class="text-xl font-bold" x-text="count"></span>
+                        <button @click="count++" class="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded">
+                            +
+                        </button>
+                    </div>
+                </div>
+
+                <!-- HTMX Echo -->
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <h3 class="text-lg font-semibold mb-4">HTMX Echo</h3>
+                    <form hx-post="/api/echo" hx-target="#echo-result" hx-swap="innerHTML">
+                        <div class="space-y-3">
+                            <input type="text" name="message" placeholder="Type something..."
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <button type="submit"
+                                    class="w-full bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded">
+                                Send
+                                <span class="htmx-indicator">...</span>
+                            </button>
+                        </div>
+                    </form>
+                    <div id="echo-result" class="mt-4"></div>
+                </div>
+
+                <!-- Dynamic Content -->
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <h3 class="text-lg font-semibold mb-4">Dynamic Content</h3>
+                    <button hx-post="/api/toggle" hx-target="#dynamic-content" hx-swap="innerHTML"
+                            class="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded mb-4">
+                        Load Content
+                    </button>
+                    <div id="dynamic-content" class="min-h-16"></div>
+                </div>
+            </div>
+
+            <!-- Forms Tab -->
+            <div x-show="activeTab === 'forms'" class="mt-6">
+                <div class="bg-white rounded-lg shadow-md p-6" x-data="{ formData: {}, showPreview: false }">
+                    <h3 class="text-lg font-semibold mb-4">Form Builder</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <form class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                                    <input type="text" x-model="formData.name"
+                                           class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                                    <input type="email" x-model="formData.email"
+                                           class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Message</label>
+                                    <textarea x-model="formData.message" rows="3"
+                                              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                                </div>
+                                <button type="button" @click="showPreview = !showPreview"
+                                        class="w-full bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded">
+                                    <span x-text="showPreview ? 'Hide Preview' : 'Show Preview'"></span>
+                                </button>
+                            </form>
+                        </div>
+                        <div x-show="showPreview" x-transition>
+                            <h4 class="text-md font-semibold mb-3">Form Preview</h4>
+                            <div class="bg-gray-50 p-4 rounded">
+                                <div class="space-y-2">
+                                    <p><strong>Name:</strong> <span x-text="formData.name || 'Not provided'"></span></p>
+                                    <p><strong>Email:</strong> <span x-text="formData.email || 'Not provided'"></span></p>
+                                    <p><strong>Message:</strong> <span x-text="formData.message || 'Not provided'"></span></p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Layouts Tab -->
+            <div x-show="activeTab === 'layouts'" class="mt-6">
+                <div class="space-y-6">
+                    <!-- Dashboard Layout -->
+                    <div class="bg-white rounded-lg shadow-md p-6">
+                        <h3 class="text-lg font-semibold mb-4">Dashboard Layout</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div class="bg-blue-100 p-4 rounded-lg text-center">
+                                <h4 class="font-semibold text-blue-800">Metric 1</h4>
+                                <p class="text-2xl font-bold text-blue-600">123</p>
+                            </div>
+                            <div class="bg-green-100 p-4 rounded-lg text-center">
+                                <h4 class="font-semibold text-green-800">Metric 2</h4>
+                                <p class="text-2xl font-bold text-green-600">456</p>
+                            </div>
+                            <div class="bg-purple-100 p-4 rounded-lg text-center">
+                                <h4 class="font-semibold text-purple-800">Metric 3</h4>
+                                <p class="text-2xl font-bold text-purple-600">789</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Card Grid -->
+                    <div class="bg-white rounded-lg shadow-md p-6">
+                        <h3 class="text-lg font-semibold mb-4">Card Grid</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            <div class="border border-gray-200 rounded-lg p-4">
+                                <h4 class="font-semibold mb-2">Card 1</h4>
+                                <p class="text-gray-600">Sample content for card 1</p>
+                            </div>
+                            <div class="border border-gray-200 rounded-lg p-4">
+                                <h4 class="font-semibold mb-2">Card 2</h4>
+                                <p class="text-gray-600">Sample content for card 2</p>
+                            </div>
+                            <div class="border border-gray-200 rounded-lg p-4">
+                                <h4 class="font-semibold mb-2">Card 3</h4>
+                                <p class="text-gray-600">Sample content for card 3</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="text-center text-gray-500 mt-12">
+            <p>Quick mockup system - Edit this HTML file to customize your prototypes</p>
+        </div>
+    </div>
+</body>
+</html>
