@@ -8,3 +8,10 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Node artifacts
+frontend/node_modules
+frontend/dist
+
+# macOS noise
+.DS_Store
