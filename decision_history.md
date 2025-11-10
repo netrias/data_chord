@@ -1,4 +1,4 @@
-# Decision History (Condensed)
+<!-- # Decision History (Condensed)
 
 ## Baseline Deployment Strategy
 - **Decision**: Ship a single multi-arch Docker image (linux/amd64, linux/arm64) that serves both the web UI and API on one port, with an optional desktop wrapper (technology TBD) for one-click launch.
@@ -51,4 +51,4 @@
 - Priority ontologies/standards and their version cadence.
 - Minimum viable offline capabilities (which zero-shot features must work without egress).
 - Preferred persistence strategy for on-prem installs (SQLite vs Postgres) and backup expectations.
-- SLA/SLO targets for DataHub vs commercial on-prem environments.
+- SLA/SLO targets for DataHub vs commercial on-prem environments. -->

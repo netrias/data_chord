@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Data Chord · Harmonize</title>
+    <link rel="stylesheet" href="{{ request.url_for('stage_one_static', path='stage_1_upload.css') }}" />
+  </head>
+  <body>
+    <nav class="progress-tracker">
+      <ol class="progress-track">
+        <li class="step" data-stage="upload">
+          <span class="step-index">1</span>
+          <span class="step-label">Upload</span>
+        </li>
+        <li class="connector"></li>
+        <li class="step" data-stage="mapping">
+          <span class="step-index">2</span>
+          <span class="step-label">Mappings</span>
+        </li>
+        <li class="connector"></li>
+        <li class="step active" data-stage="harmonize">
+          <span class="step-index">3</span>
+          <span class="step-label">Harmonize</span>
+        </li>
+        <li class="connector"></li>
+        <li class="step" data-stage="review">
+          <span class="step-index">4</span>
+          <span class="step-label">Review</span>
+        </li>
+        <li class="connector"></li>
+        <li class="step" data-stage="export">
+          <span class="step-index">5</span>
+          <span class="step-label">Export</span>
+        </li>
+      </ol>
+    </nav>
+
+    <main class="stage-shell">
+      <section class="stage-card progress-card">
+        <header class="stage-section-header">
+          <p class="stage-pill">Stage 3 · Harmonize</p>
+          <h2>Processing your dataset</h2>
+          <p class="stage-subtitle">Hang tight while we harmonize each column.</p>
+        </header>
+
+        <div class="progress-panel">
+          <p class="label">Job ID</p>
+          <p class="value" id="jobIdValue">—</p>
+          <p class="label">Status</p>
+          <p class="value" id="jobStatusValue">Checking…</p>
+          <p class="label">Details</p>
+          <p class="value" id="jobDetailValue">Preparing harmonization run.</p>
+        </div>
+
+        <div class="progress-actions">
+          <button id="reviewButton" class="netrias-btn" type="button">Continue to Review</button>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      window.stageThreeConfig = {
+        nextStageUrl: "/stage-4", // placeholder
+      };
+    </script>
+    <script type="module" src="{{ request.url_for('stage_one_static', path='stage_3_progress.js') }}"></script>
+  </body>
+</html>
