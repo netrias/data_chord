@@ -1,4 +1,25 @@
 # Requirements: Data Harmonization Guided Workflow (Initial Draft)
+Context:
+We are creating a data harmonization application with a guided workflow. (there may be more screens than steps, steps mostly constitute discrete
+work the user must do)
+Step 1:
+Users will upload a single (for now csv) file.
+There will be an "Analyze button" that will make an API call to determine the best model to harmonize each column
+progressing the system to step 2.
+Step 2: 
+Users will review the column to model mapping. They can leave suggestions as is or make manual adjustments.
+On completion of the work, they can say "Harmonize".
+This will launch an intermediate load screen.
+On completion, we will proceed to a review screen.
+This will show some overview stats--total number of harmonized elements, perhaps confidence metrics etc.
+We will then proceed to the manual review step.
+Step 3:
+Users will be presented with a tabular, batch-oriented review ui, they can make manual corrections as needed until they are finished harmonizing
+Finally, they can download the data--one button will download
+the original sheet but with harmonization
+an expanded sheet that includes columns that include metadata, like the other top suggestions for the row, confidence score, etc. 
+@mockups contains our starting prototype *example* we will not modify that code, but we can reference it as a starting point for real work.
+
 
 ## Scope
 - Provide a web-based, GUI-first application to harmonize tabular data (CSV/Excel) to target standards via automated suggestions and human review.
@@ -6,8 +27,9 @@
 
 ## Workflow Stages
 - Upload Data
-  - Accept CSV and Excel files; surface file name, size, sheet selection (for Excel).
+  - Accept CSV; surface file name, size, sheet selection (for Excel).
   - Provide clear guidance text and call-to-action (“Analyze Columns”).
+  - See @cde_recommendation_endpoint.md
   - Validate format and encoding; show friendly errors with remedies.
 - Review & Confirm Column→Model Mappings
   - Display detected columns with AI-suggested target models and confidence (bucketed: low/medium/high).
@@ -17,9 +39,8 @@
   - Provide hover/selection states for columns; ensure columns are visually represented as columns (not rows).
   - Offer help text and tips early in this step; consistent, accessible color palette.
 - Harmonize (Execute Plan)
-  - Show overall progress and per-column progress; allow cancel/return to mapping.
-  - Respect egress policy toggles per column/task; proceed locally when disabled.
-  - Persist intermediate state for resumability.
+  - Show loading indicator while harmonization is occurring; allow cancel/return to mapping.
+  - We will install this library and use it to make the harmonization call: https://pypi.org/project/netrias-client/
 - Review & Approve Results (Data Work)
   - Present a tabular, batch-oriented review UI sorted by lowest confidence first; show low/medium/high color bands.
   - Enable cell-level inspection: original value, harmonized value, confidence bar, top model, alternatives, and manual override entry.
@@ -29,31 +50,15 @@
 - Export
   - Export conformant dataset and an audit bundle (plan JSON, diffs/overrides, confidences, model/ontology versions, input hash).
 
-## Data Handling
-- Ingestion
-  - CSV: delimiter/quote/encoding handling; robust error messages.
-  - Excel: sheet selection; basic date/number parsing; preserve headers.
-- Profiling
-  - Detect columns needing harmonization; infer types/semantics where feasible; record confidence.
-- Plan JSON
-  - Emit a machine-readable plan describing column mappings, tactics (model/rules), and execution order; include versions and hashes for reproducibility.
-- Persistence
-  - Store session state, plan, decisions, and progress in durable storage to resume work.
 
 ## Models & Policies
 - Model Selection
   - Support AI suggestions and manual selection per column from a known catalog of models.
   - Allow “skip column” choice.
 - Confidence
-  - Present confidence as buckets (low/medium/high); show numeric values where helpful but keep buckets primary.
-- Egress Controls
-  - Global and per-column/task toggles for external calls; default to local-only; enable PII redaction when egress is allowed.
-- Model Delivery
-  - Lazy download to a local cache on first use; support signed offline Model Packs for airgapped environments.
+  - Present confidence as buckets (low/medium/high) (note actual numbers will be 0.0-1.0 Low will be 0-0.4, medium = 0.5-0.7, high 0.8-1);
 
 ## UI/UX
-- Table-first
-  - High-performance, virtualized tables with inline editing, and bulk actions.
 - Clarity
   - Clear stage indicators; consistent naming (“Analyze Columns” → mapping; “Harmonize” → execution; “Review Results” → data work).
 - Feedback items (from mockups)
@@ -61,59 +66,18 @@
   - Sorting/filtering controls on mapping screen; data preview optionally on the right; add hover/selection states.
   - Allow manually adding context columns to previews; clearly show which column is active.
   - Clarify row vs column representation in review; clarify “batch” terminology.
-- Accessibility
-  - Keyboard-first workflows; ARIA-compliant components; sufficient contrast.
 - Branding
-  - Support configurable product name and color theme.
-
-## Performance & Scale
-- Handle typical datasets for interactive use with low-latency operations (upload, mapping list, previews, batch navigation).
-- Use server-side pagination/viewport queries for large tables; stream slices efficiently.
-- Provide realistic ETA messaging for CPU-mode inference when no GPU is present.
-
-## Privacy & Security
-- Local-only by default; explicit opt-in for any external calls; capture policy decisions without logging raw cell contents.
-- Redact or obfuscate PII before any egress when enabled.
-- Signed images and Model Packs; publish SBOMs/provenance; allow internal mirroring.
-
-## Observability & Support
-- Health endpoints for readiness/liveness.
-- Structured, redacted logs with correlation IDs.
-- Generate a redacted support bundle containing config/versions/metrics without raw data.
-
-## Integration
-- DataHub
-  - Support headless entry (API) and interactive handoff (preloaded session) using a single container image.
-  - Return conformant dataset and audit bundle to the caller or provide download links.
+  - Use Netrias colors
 
 ## Deployment
-- Single Docker image serving UI and API on one port; multi-arch (linux/amd64, linux/arm64).
-- Use volumes `datasets/`, `models/`, `state/` for persistence.
-- Optional GUI wrapper (technology TBD) may orchestrate startup, port selection, updates, and offline pack import.
- - Expose endpoints: `/ui` (web UI), `/api` (JSON APIs), `/health` and `/ready` (health checks).
+- Single Docker image serving UI on some port
+- Pyinstaller creates beautiful launch application that basically just launches the docker image and opens a tab in browser to view it
 
-## Acceptance Criteria
-- Runs as a single container image that serves the web UI and API on a single localhost port by default.
-- Cross-platform support with multi-arch images: linux/amd64 and linux/arm64; verified to run on Windows (WSL2), macOS (Intel/Apple Silicon), and Linux.
-- DataHub compatibility: container can be hosted by DataHub and accept routed uploads; exposes endpoints suitable for both interactive sessions and headless API use when needed.
-- Non-technical usability: a simple GUI wrapper (technology TBD) can start/stop/update the container without CLI; automatically selects an open port, writes minimal configuration, and opens the browser.
-- Minimal configuration: sane defaults; optional `.env` for advanced settings; no mandatory CLI flags for end users.
-- Privacy by default: local-only processing unless explicitly enabled; per-task/column policy toggles for any external calls; PII redaction before any egress when enabled.
-- Model handling: supports lazy model downloads to a local `models/` cache; supports importing signed Offline Model Packs for airgapped environments; visible progress and clear error handling.
-- Persistence and audit: uses durable volumes (`datasets/`, `models/`, `state/`); exports an audit bundle including plan JSON, ontology/model versions, input hash, model confidences, and curator decisions; runs are reproducible given fixed versions.
-- GPU optionality: detects GPU availability where applicable; runs correctly without GPU on CPU with clear time expectations; uses GPU acceleration when present without additional user steps.
-- Health and diagnostics: provides basic health endpoints; structured, redacted logs; ability to generate a redacted support bundle without exposing raw data.
-- Updates and provenance: supports pulling a new signed image and restarting cleanly with rollback on failure; publishes SBOM and image signatures.
-- Performance expectations: handles typical dataset sizes for interactive review without timeouts; supports bulk actions and keyboard shortcuts for curation at scale.
-- Accessibility and UX: responsive web UI with clear workflow steps; keyboard-friendly interactions; conveys model confidence and conflicts clearly for human review.
 
-## Open Questions
-- Which ontologies/standards are priority and what are their version cadences?
-- Minimum viable offline experience: which zero-shot features must work without egress?
-- Preferred persistence model for on-prem (SQLite vs Postgres) and backup expectations?
-- SLA/SLO expectations for DataHub and for commercial on-prem support?
 
 ## Out of Scope (for now)
 - Multi-service orchestration (Compose/Kubernetes) as baseline.
 - Dedicated model-serving cluster; cloud bursting.
 - Offline browser-only processing (WASM) beyond early experiments.
+- Excel support
+- DataHub compatibility: container can be hosted by DataHub and accept routed uploads; exposes endpoints suitable for both interactive sessions and headless API use when needed.

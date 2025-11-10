@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Data Chord · Mapping Suggestions</title>
+    <link rel="stylesheet" href="{{ request.url_for('stage_one_static', path='stage_1_upload.css') }}" />
+  </head>
+  <body>
+    <nav class="progress-tracker">
+      <ol class="progress-track">
+        <li class="step" data-stage="upload">
+          <span class="step-index">1</span>
+          <span class="step-label">Upload</span>
+        </li>
+        <li class="connector"></li>
+        <li class="step active" data-stage="mapping">
+          <span class="step-index">2</span>
+          <span class="step-label">Mappings</span>
+        </li>
+        <li class="connector"></li>
+        <li class="step" data-stage="harmonize">
+          <span class="step-index">3</span>
+          <span class="step-label">Harmonize</span>
+        </li>
+        <li class="connector"></li>
+        <li class="step" data-stage="review">
+          <span class="step-index">4</span>
+          <span class="step-label">Review</span>
+        </li>
+        <li class="connector"></li>
+        <li class="step" data-stage="export">
+          <span class="step-index">5</span>
+          <span class="step-label">Export</span>
+        </li>
+      </ol>
+    </nav>
+
+    <main class="stage-shell">
+      <section class="stage-card">
+        <div class="mapping-header">
+          <div>
+            <p class="stage-pill">Stage 2 · Review mappings</p>
+            <h2>Mapping suggestions</h2>
+          </div>
+          <p id="mappingHint" class="mapping-hint">Preparing AI suggestions…</p>
+        </div>
+
+        <div class="mapping-meta">
+          <div>
+            <p class="label">File</p>
+            <p class="value" id="mappingFileName">—</p>
+          </div>
+          <div>
+            <p class="label">Rows scanned</p>
+            <p class="value" id="mappingRowCount">—</p>
+          </div>
+        </div>
+
+        <div class="mapping-toolbar">
+          <div class="toolbar-group">
+            <button id="toggleLowConfidence" class="ghost-btn" type="button">
+              Hide low confidence
+            </button>
+            <span id="hiddenCount" class="toolbar-meta"></span>
+          </div>
+          <button id="harmonizeButton" class="netrias-btn" type="button">Harmonize</button>
+        </div>
+
+        <div id="mappingResults" class="mapping-grid"></div>
+        <div id="mappingEmptyState" class="mapping-empty hidden"></div>
+      </section>
+    </main>
+
+    <script>
+      window.stageTwoConfig = {
+        analyzeEndpoint: "{{ request.url_for('stage_one_upload_analyze') }}",
+        targetSchema: "{{ default_schema }}",
+        manualOptions: {{ manual_options | tojson }},
+        minConfidence: 0.5,
+        storageKey: 'stage2Payload',
+      };
+    </script>
+    <script type="module" src="{{ request.url_for('stage_one_static', path='stage_2_mappings.js') }}"></script>
+  </body>
+</html>
