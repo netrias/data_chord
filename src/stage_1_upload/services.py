@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -85,12 +85,14 @@ class UploadStorage:
         self._data_dir: Path = base_dir / "files"
         self._meta_dir: Path = base_dir / "meta"
         self._constraints: UploadConstraints = constraints
+        self._manifest_dir: Path = base_dir / "manifests"
         self._ensure_workspace()
 
     def _ensure_workspace(self) -> None:
         """why: make sure upload directories are ready."""
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._meta_dir.mkdir(parents=True, exist_ok=True)
+        self._manifest_dir.mkdir(parents=True, exist_ok=True)
 
     async def store(self, upload: UploadFile) -> UploadedFileMeta:
         """why: validate and persist the upload stream."""
@@ -160,6 +162,26 @@ class UploadStorage:
         }
         meta_path = self._meta_dir / f"{meta.file_id}.json"
         _ = meta_path.write_text(json.dumps(meta_payload, indent=2))
+
+    def save_manifest(self, file_id: str, manifest: Mapping[str, object]) -> Path:
+        """why: persist the harmonization manifest for reuse across stages."""
+
+        path = self._manifest_dir / f"{file_id}.json"
+        _ = path.write_text(json.dumps(manifest, indent=2))
+        logger.info("Stored manifest", extra={"file_id": file_id, "manifest_path": str(path)})
+        return path
+
+    def load_manifest(self, file_id: str) -> Mapping[str, object] | None:
+        """why: retrieve a previously stored manifest."""
+
+        path = self._manifest_dir / f"{file_id}.json"
+        if not path.exists():
+            return None
+        try:
+            return cast(Mapping[str, object], json.loads(path.read_text()))
+        except json.JSONDecodeError:
+            logger.warning("Manifest file corrupt", extra={"file_id": file_id, "path": str(path)})
+            return None
 
     def _validate_upload(self, suffix: str, content_type: str) -> None:
         """why: guard against unsupported file types."""

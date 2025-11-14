@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 ConfidenceBucket = Literal["low", "medium", "high"]
 DEFAULT_TARGET_SCHEMA = "ccdi"
+ManifestPayload = dict[str, dict[str, dict[str, object]]]
 
 
 class UploadResponse(BaseModel):
@@ -56,6 +57,7 @@ class AnalyzeResponse(BaseModel):
     next_stage: str
     next_step_hint: str
     manual_overrides: dict[str, str] = Field(default_factory=dict)
+    manifest: ManifestPayload = Field(default_factory=lambda: {"column_mappings": {}})
 
 
 class HarmonizeRequest(BaseModel):
@@ -64,6 +66,7 @@ class HarmonizeRequest(BaseModel):
     file_id: str = Field(..., min_length=8, pattern=r"^[a-f0-9]+$")
     target_schema: str
     manual_overrides: dict[str, str] = Field(default_factory=dict)
+    manifest: ManifestPayload | None = None
 
 
 class HarmonizeResponse(BaseModel):
@@ -73,3 +76,4 @@ class HarmonizeResponse(BaseModel):
     status: str
     detail: str
     next_stage_url: str
+    job_id_available: bool = False

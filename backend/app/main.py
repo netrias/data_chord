@@ -12,7 +12,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from src.stage_1_upload.router import STAGE_ONE_STATIC_PATH, stage_one_router, stage_two_router
+from src.stage_1_upload.router import STAGE_ONE_STATIC_PATH, stage_one_router
+from src.stage_2_review_columns.router import STAGE_TWO_STATIC_PATH, stage_two_router
+from src.stage_3_harmonize.router import STAGE_THREE_STATIC_PATH, stage_three_router
+from src.stage_4_review_results.router import STAGE_FOUR_STATIC_PATH, stage_four_router
 
 APP_TITLE = "Data Chord"
 APP_DESCRIPTION = "Data harmonization workflow bootstrap application."
@@ -54,8 +57,16 @@ def create_app() -> FastAPI:
 
     app.include_router(stage_one_router)
     app.include_router(stage_two_router)
-    static_mount = StaticFiles(directory=str(STAGE_ONE_STATIC_PATH))
-    app.mount("/assets/stage-1", static_mount, name="stage_one_static")
+    app.include_router(stage_three_router)
+    app.include_router(stage_four_router)
+    stage_one_static = StaticFiles(directory=str(STAGE_ONE_STATIC_PATH))
+    stage_two_static = StaticFiles(directory=str(STAGE_TWO_STATIC_PATH))
+    stage_three_static = StaticFiles(directory=str(STAGE_THREE_STATIC_PATH))
+    stage_four_static = StaticFiles(directory=str(STAGE_FOUR_STATIC_PATH))
+    app.mount("/assets/stage-1", stage_one_static, name="stage_one_static")
+    app.mount("/assets/stage-2", stage_two_static, name="stage_two_static")
+    app.mount("/assets/stage-3", stage_three_static, name="stage_three_static")
+    app.mount("/assets/stage-4", stage_four_static, name="stage_four_static")
     app.add_api_route("/", _redirect_to_stage_one, include_in_schema=False)
 
     return app

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Data Chord · Harmonize</title>
+    <link rel="stylesheet" href="{{ request.url_for('stage_one_static', path='stage_1_upload.css') }}" />
+    <link rel="stylesheet" href="{{ request.url_for('stage_three_static', path='stage_3_harmonize.css') }}" />
+  </head>
+  <body>
+    <nav class="progress-tracker">
+      <ol class="progress-track">
+        <li class="step complete" data-stage="upload">
+          <span class="step-index">1</span>
+          <span class="step-label">Upload</span>
+        </li>
+        <li class="connector complete"></li>
+        <li class="step complete" data-stage="mapping">
+          <span class="step-index">2</span>
+          <span class="step-label">Mappings</span>
+        </li>
+        <li class="connector complete"></li>
+        <li class="step active" data-stage="harmonize">
+          <span class="step-index">3</span>
+          <span class="step-label">Harmonize</span>
+        </li>
+        <li class="connector"></li>
+        <li class="step" data-stage="review">
+          <span class="step-index">4</span>
+          <span class="step-label">Review</span>
+        </li>
+        <li class="connector"></li>
+        <li class="step" data-stage="export">
+          <span class="step-index">5</span>
+          <span class="step-label">Export</span>
+        </li>
+      </ol>
+    </nav>
+
+    <main class="stage-shell">
+      <section class="stage-card progress-card">
+        <header class="stage-section-header">
+          <p class="stage-pill">Stage 3 · Harmonize</p>
+          <h2 id="stageThreeTitle">Harmonizing your data</h2>
+          <p id="stageThreeSubtitle" class="stage-subtitle">
+            Netrias is processing your dataset and will report back shortly.
+          </p>
+          <p class="stage-meta hidden" id="stageThreeMeta" aria-live="polite"></p>
+        </header>
+
+        <div id="stageThreeEmptyState" class="stage-empty hidden">
+          <p class="stage-empty-title">We need mapping context</p>
+          <p class="stage-empty-copy">
+            Head back to Stage 2 to confirm mappings, then launch harmonization again.
+          </p>
+          <button id="returnToStageTwo" class="netrias-btn" type="button">Back to mappings</button>
+        </div>
+
+        <div id="loadingState" class="loading-state" aria-live="assertive">
+          <div class="loading-spinner" role="presentation"></div>
+          <p class="loading-primary" id="loadingPrimaryText">Harmonization in progress…</p>
+          <p class="loading-secondary" id="loadingSecondaryText">This typically takes a minute or two. Keep this tab open while we process.</p>
+          <p class="loading-meta hidden" id="jobStatusValue">Status: pending…</p>
+          <p class="loading-meta hidden" id="jobIdValue">Job ID: —</p>
+          <div class="loading-pips" aria-hidden="true">
+            <span class="pip"></span>
+            <span class="pip"></span>
+            <span class="pip"></span>
+          </div>
+        </div>
+
+        <p id="stageThreeError" class="stage-error hidden" role="alert"></p>
+
+        <div class="progress-actions">
+          <button id="retryButton" class="ghost-btn hidden" type="button">Retry</button>
+          <button id="reviewButton" class="netrias-btn" type="button" disabled>Continue to Review</button>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      window.stageThreeConfig = {
+        harmonizeEndpoint: "{{ request.url_for('stage_three_harmonize') }}",
+        storageKey: "stage3HarmonizePayload",
+        jobStorageKey: "stage3HarmonizeJob",
+        nextStageUrl: "{{ next_stage_url }}",
+        stageTwoUrl: "{{ request.url_for('stage_two_mapping_page') }}",
+      };
+    </script>
+    <script type="module" src="{{ request.url_for('stage_three_static', path='stage_3_harmonize.js') }}?v=20250216"></script>
+  </body>
+</html>

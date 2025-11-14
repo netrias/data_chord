@@ -2,13 +2,12 @@ const config = window.stageTwoConfig ?? {};
 const STORAGE_KEY = config.storageKey ?? 'stage2Payload';
 const MIN_CONFIDENCE = Number(config.minConfidence ?? 0.5);
 const manualOptions = config.manualOptions ?? [];
+const stageThreeUrl = config.stageThreeUrl ?? '/stage-3';
+const stageThreePayloadKey = config.stageThreePayloadKey ?? 'stage3HarmonizePayload';
+const stageThreeJobKey = config.stageThreeJobKey ?? 'stage3HarmonizeJob';
 
 const mappingResults = document.getElementById('mappingResults');
 const mappingHint = document.getElementById('mappingHint');
-const mappingFileName = document.getElementById('mappingFileName');
-const mappingRowCount = document.getElementById('mappingRowCount');
-const toggleLowConfidenceButton = document.getElementById('toggleLowConfidence');
-const hiddenCountLabel = document.getElementById('hiddenCount');
 const emptyState = document.getElementById('mappingEmptyState');
 const harmonizeButton = document.getElementById('harmonizeButton');
 const progressSteps = document.querySelectorAll('.progress-tracker [data-stage]');
@@ -21,7 +20,6 @@ const CONFIDENCE_LABELS = {
 
 const state = {
   payload: null,
-  showLowConfidence: false,
   manualSelections: new Map(),
   isSubmitting: false,
 };
@@ -85,9 +83,24 @@ const persistManualOverrides = () => {
   const nextPayload = { ...state.payload, manual_overrides: overrides };
   state.payload = nextPayload;
   savePayloadToStorage(nextPayload);
-  const toggle = document.getElementById('toggleLowConfidence');
-  if (toggle) {
-    toggle.textContent = state.showLowConfidence ? 'Hide low confidence' : 'Show low confidence';
+};
+
+const persistStageThreePayload = (body) => {
+  const payloadForStageThree = {
+    request: body,
+    context: {
+      fileName: state.payload?.file_name || 'Uploaded dataset',
+      totalRows: state.payload?.total_rows ?? null,
+      targetSchema: config.targetSchema,
+    },
+    manifest: state.payload?.manifest || null,
+  };
+  try {
+    sessionStorage.setItem(stageThreePayloadKey, JSON.stringify(payloadForStageThree));
+    return true;
+  } catch (error) {
+    console.error('Unable to persist stage three payload', error);
+    return false;
   }
 };
 
@@ -102,15 +115,15 @@ const renderMappingRows = () => {
   const columns = state.payload.columns ?? [];
   mappingResults.innerHTML = '';
 
-  let hiddenCount = 0;
+  const sortedColumns = [...columns].sort((a, b) => {
+    const aHasRecommendation = getColumnSuggestions(a).length > 0;
+    const bHasRecommendation = getColumnSuggestions(b).length > 0;
+    if (aHasRecommendation && !bHasRecommendation) return -1;
+    if (!aHasRecommendation && bHasRecommendation) return 1;
+    return 0;
+  });
 
-  columns.forEach((column) => {
-    const score = topSuggestionScore(column);
-    const shouldHide = !state.showLowConfidence && score < MIN_CONFIDENCE;
-    if (shouldHide) {
-      hiddenCount += 1;
-      return;
-    }
+  sortedColumns.forEach((column) => {
 
     const row = document.createElement('article');
     row.className = `mapping-row confidence-${column.confidence_bucket}`;
@@ -120,19 +133,14 @@ const renderMappingRows = () => {
     columnCell.innerHTML = `
       <p class="label">Column</p>
       <h3>${column.column_name}</h3>
-      <p class="meta">Detected ${column.inferred_type}</p>
     `;
-    const badge = document.createElement('span');
-    badge.className = `confidence-badge ${column.confidence_bucket}`;
-    badge.textContent = CONFIDENCE_LABELS[column.confidence_bucket] || 'Confidence';
-    columnCell.appendChild(badge);
 
     const suggestionCell = document.createElement('div');
     suggestionCell.className = 'mapping-cell suggestion-cell';
 
     const suggestionLabel = document.createElement('p');
     suggestionLabel.className = 'label';
-    suggestionLabel.textContent = 'AI target';
+    suggestionLabel.textContent = 'AI recommended model';
     suggestionCell.appendChild(suggestionLabel);
 
   const suggestions = getColumnSuggestions(column);
@@ -142,6 +150,10 @@ const renderMappingRows = () => {
     state.manualSelections.get(column.column_name.toLowerCase()) ||
     null;
 
+    if (!topTarget) {
+      row.className = 'mapping-row confidence-medium';
+    }
+
     const suggestionTarget = document.createElement('p');
     suggestionTarget.className = 'suggestion-target';
     const suggestionScore = document.createElement('p');
@@ -149,40 +161,45 @@ const renderMappingRows = () => {
 
     if (manualSelection) {
       suggestionTarget.textContent = manualSelection;
-      suggestionScore.textContent = 'Mapped via Netrias CDE ID';
     } else if (topTarget) {
-      const topScoreRounded = Math.round(Number(topTarget.similarity) * 100) / 100;
       suggestionTarget.textContent = topTarget.target;
-      suggestionScore.textContent = `Confidence score ${topScoreRounded}`;
     } else {
-      suggestionTarget.textContent = 'No recommendation yet';
-      suggestionScore.textContent = 'Upload a richer sample to improve suggestions.';
+      suggestionTarget.textContent = 'No recommendation';
     }
 
     suggestionCell.appendChild(suggestionTarget);
-    suggestionCell.appendChild(suggestionScore);
 
-    const selectLabel = document.createElement('label');
-    selectLabel.className = 'label select-label';
-    selectLabel.textContent = 'Manual override';
     const select = document.createElement('select');
     select.className = 'select-control';
     select.dataset.column = column.column_name;
 
-    const placeholderOption = document.createElement('option');
-    placeholderOption.value = '';
-    placeholderOption.textContent = 'Keep AI suggestion';
-    select.appendChild(placeholderOption);
+    if (topTarget) {
+      const placeholderOption = document.createElement('option');
+      placeholderOption.value = '';
+      placeholderOption.textContent = 'Keep AI suggestion';
+      if (!manualSelection) {
+        placeholderOption.selected = true;
+      }
+      select.appendChild(placeholderOption);
+    } else {
+      const noModelOption = document.createElement('option');
+      noModelOption.value = '';
+      noModelOption.textContent = 'No model';
+      if (!manualSelection) {
+        noModelOption.selected = true;
+      }
+      select.appendChild(noModelOption);
+    }
 
     manualOptions.forEach((option) => {
       const opt = document.createElement('option');
       opt.value = option;
       opt.textContent = option;
+      if (manualSelection && option === manualSelection) {
+        opt.selected = true;
+      }
       select.appendChild(opt);
     });
-
-    const defaultValue = manualSelection || topTarget?.target || '';
-    select.value = defaultValue;
     select.addEventListener('change', () => {
       if (select.value) {
         state.manualSelections.set(column.column_name, select.value);
@@ -193,15 +210,7 @@ const renderMappingRows = () => {
       renderMappingRows();
     });
 
-    selectLabel.appendChild(select);
-    suggestionCell.appendChild(selectLabel);
-
-    if (manualSelection) {
-      const manualPill = document.createElement('p');
-      manualPill.className = 'manual-pill';
-      manualPill.textContent = `Manual: ${manualSelection}`;
-      suggestionCell.appendChild(manualPill);
-    }
+    suggestionCell.appendChild(select);
 
     if (suggestions.length > 1) {
       const list = document.createElement('ul');
@@ -215,40 +224,18 @@ const renderMappingRows = () => {
       suggestionCell.appendChild(list);
     }
 
-    const sampleCell = document.createElement('div');
-    sampleCell.className = 'mapping-cell';
-    const sampleLabel = document.createElement('p');
-    sampleLabel.className = 'label';
-    sampleLabel.textContent = 'Sample values';
-    sampleCell.appendChild(sampleLabel);
-
-    const sampleList = document.createElement('ul');
-    sampleList.className = 'sample-chips';
-    (column.sample_values || []).slice(0, 5).forEach((value) => {
-      const chip = document.createElement('li');
-      chip.className = 'sample-chip';
-      chip.textContent = value || '—';
-      sampleList.appendChild(chip);
-    });
-    sampleCell.appendChild(sampleList);
-
     row.appendChild(columnCell);
     row.appendChild(suggestionCell);
-    row.appendChild(sampleCell);
     mappingResults.appendChild(row);
   });
 
   if (!mappingResults.children.length) {
     emptyState.classList.remove('hidden');
-    emptyState.textContent = 'All visible columns are below the confidence threshold.';
+    emptyState.textContent = 'No columns to display.';
   } else {
     emptyState.classList.add('hidden');
   }
 
-  hiddenCountLabel.textContent = hiddenCount
-    ? `${hiddenCount} column${hiddenCount === 1 ? '' : 's'} hidden (< ${MIN_CONFIDENCE})`
-    : '';
-  toggleLowConfidenceButton.textContent = state.showLowConfidence ? 'Hide low confidence' : 'Show low confidence';
   if (harmonizeButton) {
     harmonizeButton.disabled = !state.payload;
   }
@@ -257,15 +244,10 @@ const renderMappingRows = () => {
 const hydrateView = () => {
   if (!state.payload) {
     mappingHint.textContent = 'Upload a file on Stage 1 to get started.';
-    mappingFileName.textContent = '—';
-    mappingRowCount.textContent = '—';
     renderMappingRows();
     return;
   }
 
-  mappingHint.textContent = state.payload.next_step_hint || 'Review AI suggestions before proceeding.';
-  mappingFileName.textContent = state.payload.file_name || '—';
-  mappingRowCount.textContent = state.payload.total_rows?.toLocaleString?.() ?? String(state.payload.total_rows ?? '—');
   renderMappingRows();
 };
 
@@ -298,44 +280,51 @@ const submitHarmonize = async () => {
 
   state.isSubmitting = true;
   harmonizeButton.disabled = true;
-  harmonizeButton.textContent = 'Harmonizing…';
+  harmonizeButton.textContent = 'Preparing harmonize…';
 
   const overrides = Object.fromEntries(state.manualSelections.entries());
+  const manifest = state.payload?.manifest;
+  if (!manifest || !manifest.column_mappings) {
+    state.isSubmitting = false;
+    harmonizeButton.disabled = false;
+    harmonizeButton.textContent = 'Harmonize';
+    mappingHint.textContent = 'Manifest missing. Please rerun analysis before harmonizing.';
+    return;
+  }
   const body = {
     file_id: state.payload.file_id,
     target_schema: config.targetSchema,
     manual_overrides: overrides,
+    manifest,
   };
 
   try {
-    const response = await fetch('/stage-2/harmonize', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(payload.detail || 'Harmonization failed.');
-    }
-    window.location.assign(payload.next_stage_url);
+    sessionStorage.removeItem(stageThreeJobKey);
   } catch (error) {
-    console.error(error);
+    console.warn('Unable to reset previous harmonize job', error);
+  }
+
+  const payloadSaved = persistStageThreePayload({ ...body });
+  if (!payloadSaved) {
+    state.isSubmitting = false;
     harmonizeButton.disabled = false;
     harmonizeButton.textContent = 'Harmonize';
-    mappingHint.textContent = error.message;
-  } finally {
-    state.isSubmitting = false;
+    mappingHint.textContent = 'Unable to prepare harmonization request. Please enable browser storage and retry.';
+    return;
   }
+
+  const url = new URL(stageThreeUrl, window.location.origin);
+  url.searchParams.set('file_id', state.payload.file_id);
+  url.searchParams.set('target_schema', config.targetSchema);
+
+  window.requestAnimationFrame(() => {
+    state.isSubmitting = false;
+    window.location.assign(url.toString());
+  });
 };
 
 const initialize = async () => {
   setActiveStage('mapping');
-  toggleLowConfidenceButton.addEventListener('click', () => {
-    state.showLowConfidence = !state.showLowConfidence;
-    renderMappingRows();
-  });
 
   if (harmonizeButton) {
     harmonizeButton.addEventListener('click', submitHarmonize);
