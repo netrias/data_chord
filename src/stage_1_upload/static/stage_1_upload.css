@@ -49,9 +49,10 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 0.3rem;
-  color: var(--gray-600);
+  color: var(--gray-400);
   font-weight: 600;
   min-width: 70px;
+  transition: all 200ms ease;
 }
 
 .step-index {
@@ -64,12 +65,15 @@ body {
   justify-content: center;
   font-size: 0.95rem;
   background: var(--white);
+  transition: all 200ms ease;
+  position: relative;
 }
 
 .step-label {
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  transition: all 200ms ease;
 }
 
 .step.active {
@@ -78,24 +82,52 @@ body {
 
 .step.active .step-index {
   border-color: var(--teal-700);
+  border-width: 3px;
+  color: var(--white);
+  background: var(--teal-700);
+  box-shadow: 0 4px 16px rgba(0, 124, 136, 0.4), 0 0 0 4px rgba(0, 124, 136, 0.1);
+  transform: scale(1.1);
+}
+
+.step.active .step-label {
+  font-weight: 700;
   color: var(--teal-700);
 }
 
 .step.complete {
-  color: var(--gray-700);
+  color: var(--teal-700);
 }
 
 .step.complete .step-index {
-  background: var(--teal-700);
+  background: var(--green-500);
+  color: transparent;
+  border-color: var(--green-500);
+  border-width: 2px;
+}
+
+.step.complete .step-index::after {
+  content: "✓";
+  position: absolute;
+  font-size: 1.1rem;
+  font-weight: bold;
   color: var(--white);
-  border-color: var(--teal-700);
+}
+
+.step.complete .step-label {
+  color: var(--teal-700);
 }
 
 .connector {
   flex: 1;
-  height: 2px;
+  height: 3px;
   background: var(--gray-200);
   min-width: 40px;
+  border-radius: 2px;
+  transition: background 300ms ease;
+}
+
+.connector.complete {
+  background: linear-gradient(to right, var(--green-500), var(--teal-500));
 }
 
 .stage-shell {
@@ -329,7 +361,7 @@ button.linklike {
 .mapping-toolbar {
   margin-top: 1.5rem;
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   gap: 1rem;
   flex-wrap: wrap;
@@ -364,14 +396,14 @@ button.linklike {
 }
 
 .mapping-row {
-  border-radius: 20px;
+  border-radius: 8px;
   border: 1px solid var(--gray-200);
-  padding: 1.25rem 1.5rem;
+  padding: 0.5rem 0.75rem;
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.1fr) minmax(0, 1.2fr);
-  gap: 1.25rem;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr);
+  gap: 0.5rem;
   align-items: center;
-  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.08);
+  box-shadow: 0 1px 4px rgba(16, 24, 40, 0.04);
 }
 
 .mapping-row.confidence-high {
@@ -390,16 +422,16 @@ button.linklike {
 }
 
 .mapping-cell .label {
-  font-size: 0.75rem;
+  font-size: 0.6rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--gray-600);
-  margin: 0 0 0.35rem;
+  margin: 0 0 0.2rem;
 }
 
 .mapping-cell h3 {
   margin: 0;
-  font-size: 1.3rem;
+  font-size: 0.9rem;
 }
 
 .mapping-cell .meta {
@@ -410,7 +442,7 @@ button.linklike {
 .suggestion-cell {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.25rem;
 }
 
 .confidence-badge {
@@ -439,22 +471,23 @@ button.linklike {
 
 .suggestion-target {
   margin: 0;
-  font-size: 1.2rem;
+  font-size: 0.85rem;
   font-weight: 600;
 }
 
 .suggestion-score {
-  margin: 0.2rem 0 0;
+  margin: 0.1rem 0 0;
   color: var(--gray-600);
+  font-size: 0.7rem;
 }
 
 .suggestion-list {
-  margin: 0.6rem 0 0;
+  margin: 0.3rem 0 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: 0.25rem;
 }
 
 .select-label {
@@ -463,11 +496,11 @@ button.linklike {
 
 .select-control {
   width: 100%;
-  margin-top: 0.35rem;
+  margin-top: 0.2rem;
   border: 1px solid var(--gray-300);
   border-radius: 999px;
-  padding: 0.5rem 1rem;
-  font-size: 0.95rem;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.75rem;
   background: var(--white);
   color: var(--gray-900);
 }
@@ -485,8 +518,8 @@ button.linklike {
 .suggestion-list li {
   border: 1px solid var(--gray-200);
   border-radius: 999px;
-  padding: 0.2rem 0.75rem;
-  font-size: 0.8rem;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.65rem;
   color: var(--gray-700);
   background: var(--white);
 }
@@ -496,16 +529,18 @@ button.linklike {
   padding: 0;
   list-style: none;
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 
 .sample-chip {
-  border-radius: 12px;
+  border-radius: 8px;
   background: rgba(16, 24, 40, 0.05);
-  padding: 0.35rem 0.75rem;
-  font-size: 0.85rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
   color: var(--gray-700);
+  width: fit-content;
+  display: block;
 }
 
 .mapping-empty {

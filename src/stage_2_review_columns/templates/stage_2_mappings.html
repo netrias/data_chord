@@ -9,14 +9,14 @@
   <body>
     <nav class="progress-tracker">
       <ol class="progress-track">
-        <li class="step" data-stage="upload">
+        <li class="step complete" data-stage="upload">
           <span class="step-index">1</span>
           <span class="step-label">Upload</span>
         </li>
-        <li class="connector"></li>
+        <li class="connector complete"></li>
         <li class="step active" data-stage="mapping">
           <span class="step-index">2</span>
-          <span class="step-label">Mappings</span>
+          <span class="step-label">Review mappings</span>
         </li>
         <li class="connector"></li>
         <li class="step" data-stage="harmonize">
@@ -39,31 +39,10 @@
     <main class="stage-shell">
       <section class="stage-card">
         <div class="mapping-header">
-          <div>
-            <p class="stage-pill">Stage 2 · Review mappings</p>
-            <h2>Mapping suggestions</h2>
-          </div>
-          <p id="mappingHint" class="mapping-hint">Preparing AI suggestions…</p>
-        </div>
-
-        <div class="mapping-meta">
-          <div>
-            <p class="label">File</p>
-            <p class="value" id="mappingFileName">—</p>
-          </div>
-          <div>
-            <p class="label">Rows scanned</p>
-            <p class="value" id="mappingRowCount">—</p>
-          </div>
+          <p id="mappingHint" class="mapping-hint">Review AI suggested model recommendations</p>
         </div>
 
         <div class="mapping-toolbar">
-          <div class="toolbar-group">
-            <button id="toggleLowConfidence" class="ghost-btn" type="button">
-              Hide low confidence
-            </button>
-            <span id="hiddenCount" class="toolbar-meta"></span>
-          </div>
           <button id="harmonizeButton" class="netrias-btn" type="button">Harmonize</button>
         </div>
 
@@ -79,8 +58,11 @@
         manualOptions: {{ manual_options | tojson }},
         minConfidence: 0.5,
         storageKey: 'stage2Payload',
+        stageThreeUrl: "{{ request.url_for('stage_three_entry') }}",
+        stageThreePayloadKey: 'stage3HarmonizePayload',
+        stageThreeJobKey: 'stage3HarmonizeJob',
       };
     </script>
-    <script type="module" src="{{ request.url_for('stage_one_static', path='stage_2_mappings.js') }}"></script>
+    <script type="module" src="{{ request.url_for('stage_two_static', path='stage_2_mappings.js') }}?v=20250216"></script>
   </body>
 </html>

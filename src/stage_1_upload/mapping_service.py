@@ -9,7 +9,7 @@ from pathlib import Path
 from collections.abc import Callable, Mapping, Sequence
 from typing import Protocol, cast
 
-from .schemas import ModelSuggestion
+from .schemas import ManifestPayload, ModelSuggestion
 
 logger = logging.getLogger(__name__)
 DEFAULT_SAMPLE_LIMIT = 50
@@ -81,7 +81,7 @@ class MappingDiscoveryService:
         csv_path: Path,
         target_schema: str,
         sample_limit: int = DEFAULT_SAMPLE_LIMIT,
-    ) -> tuple[dict[str, list[ModelSuggestion]], dict[str, str]]:
+    ) -> tuple[dict[str, list[ModelSuggestion]], dict[str, str], ManifestPayload]:
         if not self._client:
             raise RuntimeError("Netrias mapping discovery client is not configured.")
         try:
@@ -99,7 +99,7 @@ class MappingDiscoveryService:
                 )
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception("Netrias mapping discovery failed", exc_info=exc)
-            return {}, {}
+            return {}, {}, {"column_mappings": {}}
 
         suggestions = cast(Sequence[object], getattr(raw_result, "suggestions", ()))
         column_suggestions: dict[str, list[ModelSuggestion]] = {}
@@ -166,7 +166,8 @@ class MappingDiscoveryService:
                 "Netrias mapping discovery returned zero columns",
                 extra={"target_schema": target_schema, "raw_keys": list(raw_payload.keys())},
             )
-        return filtered_mapping, manual_overrides
+        manifest_payload = _manifest_payload_from_raw(raw_payload, column_entries)
+        return filtered_mapping, manual_overrides, manifest_payload
 
 
 def _raw_payload_from_result(result: object) -> dict[str, object]:
@@ -225,6 +226,19 @@ def _normalize_column_entries(value: object) -> dict[str, dict[str, object]]:
                 entries[column] = entry_dict
         return entries
     return {}
+
+
+def _manifest_payload_from_raw(
+    payload: Mapping[str, object],
+    fallback_entries: Mapping[str, dict[str, object]],
+) -> ManifestPayload:
+    """why: coerce discovery output into the manifest format harmonize expects."""
+
+    column_mappings = payload.get("column_mappings") or payload.get("columnMappings")
+    normalized = _normalize_column_entries(column_mappings)
+    if not normalized:
+        normalized = dict(fallback_entries)
+    return {"column_mappings": normalized}
 
 
 def _column_name_from_entry(entry: Mapping[str, object]) -> str | None:

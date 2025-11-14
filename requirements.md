@@ -8,12 +8,13 @@ There will be an "Analyze button" that will make an API call to determine the be
 progressing the system to step 2.
 Step 2: 
 Users will review the column to model mapping. They can leave suggestions as is or make manual adjustments.
-On completion of the work, they can say "Harmonize".
-This will launch an intermediate load screen.
+On completion of the work, they can say "Harmonize" which will progress to step 3
+Step 3:
+Harmonization loading/status
 On completion, we will proceed to a review screen.
 This will show some overview stats--total number of harmonized elements, perhaps confidence metrics etc.
 We will then proceed to the manual review step.
-Step 3:
+Step 4.
 Users will be presented with a tabular, batch-oriented review ui, they can make manual corrections as needed until they are finished harmonizing
 Finally, they can download the data--one button will download
 the original sheet but with harmonization
