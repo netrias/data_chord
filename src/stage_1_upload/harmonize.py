@@ -67,6 +67,7 @@ class HarmonizeResult:
     status: str
     detail: str
     job_id_available: bool = False
+    manifest_path: Path | None = None
 
 
 class HarmonizeService:
@@ -117,6 +118,7 @@ class HarmonizeService:
                 if has_remote_job_id
                 else str(getattr(netrias_result, "mapping_id", "")) or job_id
             )
+            manifest_path = _extract_manifest_path(netrias_result)
             logger.info(
                 "Harmonization finished",
                 extra={"file_path": str(file_path), "job_id": remote_job_id, "status": status},
@@ -126,6 +128,7 @@ class HarmonizeService:
                 status=status,
                 detail=detail,
                 job_id_available=has_remote_job_id,
+                manifest_path=manifest_path,
             )
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception("Harmonize call failed; falling back to stub", exc_info=exc)
@@ -181,7 +184,6 @@ def _normalize_target_name(selection: str | None) -> str | None:
 
 def _override_entry(existing: Mapping[str, object] | None, target: str) -> dict[str, object]:
     """why: build a column entry dict with the target and its metadata."""
-
     entry = dict(existing or {})
     metadata = TARGET_METADATA.get(target)
     if metadata:
@@ -189,3 +191,16 @@ def _override_entry(existing: Mapping[str, object] | None, target: str) -> dict[
     else:
         entry["targetField"] = target
     return entry
+
+
+def _extract_manifest_path(netrias_result: object) -> Path | None:
+    """why: safely extract manifest_path from netrias client result."""
+    raw_path = getattr(netrias_result, "manifest_path", None)
+    if raw_path is None:
+        return None
+    if isinstance(raw_path, Path):
+        return raw_path if raw_path.exists() else None
+    if isinstance(raw_path, str) and raw_path:
+        path = Path(raw_path)
+        return path if path.exists() else None
+    return None

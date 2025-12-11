@@ -69,6 +69,27 @@ class HarmonizeRequest(BaseModel):
     manifest: ManifestPayload | None = None
 
 
+class ManifestRowSchema(BaseModel):
+    """why: API representation of a manifest row for frontend consumption."""
+
+    column_name: str
+    to_harmonize: str
+    top_harmonization: str
+    confidence_score: float | None
+    row_indices: list[int] = Field(default_factory=list)
+
+
+class ManifestSummarySchema(BaseModel):
+    """why: aggregate manifest metrics for dashboard widgets."""
+
+    total_terms: int
+    changed_terms: int
+    high_confidence_count: int
+    medium_confidence_count: int
+    low_confidence_count: int
+    preview_rows: list[ManifestRowSchema] = Field(default_factory=list)
+
+
 class HarmonizeResponse(BaseModel):
     """why: provide the job metadata to the UI."""
 
@@ -77,3 +98,4 @@ class HarmonizeResponse(BaseModel):
     detail: str
     next_stage_url: str
     job_id_available: bool = False
+    manifest_summary: ManifestSummarySchema | None = None
