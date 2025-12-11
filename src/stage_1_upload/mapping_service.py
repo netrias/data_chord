@@ -15,14 +15,13 @@ from .schemas import ManifestPayload, ModelSuggestion
 logger = logging.getLogger(__name__)
 DEFAULT_SAMPLE_LIMIT = 50
 
-manual_cde_id_mappings = {
+MANUAL_CDE_ID_MAPPINGS: dict[int, str] = {
     1: "therapeutic_agents",
     2: "primary_diagnosis",
     3: "morphology",
     4: "tissue_or_organ_of_origin",
     5: "sample_anatomic_site",
 }
-
 
 
 class MappingClientProtocol(Protocol):
@@ -54,7 +53,9 @@ class MappingDiscoveryService:
         self._client: MappingClientProtocol = NetriasClient(api_key=self._api_key, confidence_threshold=0.0)
 
     def available(self) -> bool:
-        return self._client is not None
+        """why: expose whether the underlying mapping client was initialized."""
+
+        return True
 
     def discover(
         self,
@@ -107,7 +108,7 @@ class MappingDiscoveryService:
 
         filtered_mapping: dict[str, list[ModelSuggestion]] = {}
         for column, cde_id in recognized.items():
-            target_label = manual_cde_id_mappings.get(cde_id)
+            target_label = MANUAL_CDE_ID_MAPPINGS.get(cde_id)
             if not target_label:
                 continue
             manual_overrides[column] = target_label
