@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import importlib
 import logging
 import os
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from collections.abc import Callable, Mapping, Sequence
 from typing import Protocol, cast
+
+from netrias_client import NetriasClient
 
 from .schemas import ManifestPayload, ModelSuggestion
 
@@ -26,9 +27,6 @@ manual_cde_id_mappings = {
 
 class MappingClientProtocol(Protocol):
     """why: describe just the methods we consume from NetriasClient."""
-
-    def configure(self, *, api_key: str) -> None:
-        ...
 
     def discover_mapping_from_csv(
         self,
@@ -53,24 +51,7 @@ class MappingDiscoveryService:
 
     def __init__(self) -> None:
         self._api_key: str | None = os.getenv("NETRIAS_API_KEY")
-        self._client: MappingClientProtocol | None = self._build_client()
-        if not self._client:
-            raise RuntimeError("Netrias mapping discovery requires NETRIAS_API_KEY and netrias_client.")
-
-    def _build_client(self) -> MappingClientProtocol | None:
-        try:
-            module = importlib.import_module("netrias_client")
-            client_cls = cast(type[MappingClientProtocol], getattr(module, "NetriasClient"))
-        except (ModuleNotFoundError, AttributeError):
-            logger.warning("netrias_client not available; mapping suggestions will be empty.")
-            return None
-        if not self._api_key:
-            logger.warning("NETRIAS_API_KEY missing; mapping suggestions will be empty.")
-            return None
-        client = client_cls()  # type: ignore[call-arg]
-        configure = cast(Callable[..., None], getattr(client, "configure"))
-        configure(api_key=self._api_key, confidence_threshold=0.0)
-        return client
+        self._client: MappingClientProtocol = NetriasClient(api_key=self._api_key, confidence_threshold=0.0)
 
     def available(self) -> bool:
         return self._client is not None
@@ -82,21 +63,12 @@ class MappingDiscoveryService:
         target_schema: str,
         sample_limit: int = DEFAULT_SAMPLE_LIMIT,
     ) -> tuple[dict[str, list[ModelSuggestion]], dict[str, str], ManifestPayload]:
-        if not self._client:
-            raise RuntimeError("Netrias mapping discovery client is not configured.")
         try:
-            if hasattr(self._client, "discover_cde_mapping"):
-                raw_result = self._client.discover_cde_mapping(
-                    source_csv=csv_path,
-                    target_schema=target_schema,
-                    sample_limit=sample_limit,
-                )
-            else:
-                raw_result = self._client.discover_mapping_from_csv(
-                    source_csv=csv_path,
-                    target_schema=target_schema,
-                    sample_limit=sample_limit,
-                )
+            raw_result = self._client.discover_cde_mapping(
+                source_csv=csv_path,
+                target_schema=target_schema,
+                sample_limit=sample_limit,
+            )
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception("Netrias mapping discovery failed", exc_info=exc)
             return {}, {}, {"column_mappings": {}}

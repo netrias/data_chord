@@ -1,0 +1,242 @@
+.stage-five-shell {
+  max-width: min(1900px, 96vw);
+  padding: 3rem 2rem 4rem;
+}
+
+.summary-card .summary-header {
+  flex-wrap: wrap;
+  gap: 1.5rem;
+}
+
+.download-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.metric-grid {
+  margin-top: 1.5rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.metric-card {
+  border: 1px solid var(--gray-200);
+  border-radius: 18px;
+  padding: 1.25rem;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.metric-card h4 {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--gray-500);
+}
+
+.metric-card strong {
+  font-size: 1.8rem;
+  color: var(--gray-900);
+}
+
+.metric-link {
+  margin-top: auto;
+  align-self: flex-start;
+  border: none;
+  background: transparent;
+  color: var(--teal-700);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.metric-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.metric-delta.up {
+  color: #16a34a;
+}
+
+.metric-delta.down {
+  color: #dc2626;
+}
+
+.insight-card {
+  margin-top: 1.5rem;
+}
+
+.insight-tags {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.insight-tag {
+  border-radius: 999px;
+  border: 1px solid var(--gray-200);
+  padding: 0.25rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--gray-600);
+  background: #fff;
+}
+
+.change-table {
+  margin-top: 1rem;
+  border: 1px solid var(--gray-200);
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.change-table-header,
+.change-table-row {
+  display: grid;
+  grid-template-columns: 2fr repeat(3, minmax(140px, 1fr));
+  gap: 0.5rem;
+  padding: 0.9rem 1rem;
+}
+
+.change-table-header {
+  background: #f8fafc;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.8rem;
+  color: var(--gray-500);
+}
+
+.change-table-row:nth-child(every) {
+  background: var(--white);
+}
+
+.change-table-row span:last-child {
+  justify-self: end;
+}
+
+.recap-card {
+  margin-top: 1.5rem;
+}
+
+.recap-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+.recap-item {
+  border: 1px solid var(--gray-200);
+  border-radius: 18px;
+  padding: 1rem;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.recap-item h4 {
+  margin: 0;
+}
+
+.recap-item p {
+  margin: 0;
+  color: var(--gray-600);
+}
+
+
+.stage-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 50;
+}
+
+.stage-modal.hidden {
+  display: none;
+}
+
+.stage-modal-card {
+  background: var(--white);
+  border-radius: 24px;
+  padding: 1.5rem;
+  width: min(640px, 90vw);
+  max-height: 80vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.stage-modal-card header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.stage-modal-card button {
+  border: none;
+  background: transparent;
+  font-size: 1.5rem;
+  cursor: pointer;
+}
+
+.modal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.modal-item {
+  border: 1px solid var(--gray-200);
+  border-radius: 16px;
+  padding: 1rem;
+  background: #f8fafc;
+}
+
+.modal-item h4 {
+  margin: 0 0 0.5rem;
+}
+
+.modal-item dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  row-gap: 0.25rem;
+}
+
+.modal-item dt {
+  font-weight: 600;
+  color: var(--gray-500);
+}
+
+.modal-item dd {
+  margin: 0;
+  color: var(--gray-800);
+}
+
+@media (max-width: 640px) {
+  .download-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .change-table-header,
+  .change-table-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .change-table-row span:nth-child(3),
+  .change-table-row span:nth-child(4) {
+    justify-self: flex-start;
+  }
+}

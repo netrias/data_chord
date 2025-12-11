@@ -10,624 +10,26 @@ const previousBatchButton = document.getElementById('previousBatchButton');
 const nextBatchButton = document.getElementById('nextBatchButton');
 const completeBatchButton = document.getElementById('completeBatchButton');
 const reviewTable = document.getElementById('reviewTable');
+const helpMenuToggle = document.getElementById('helpMenuToggle');
+const stageHelp = document.getElementById('stageFourHelp');
+const stageFiveButton = document.getElementById('stageFiveButton');
+const stageFiveUrl = config.stageFiveUrl ?? '/stage-5';
+const resultsEndpoint = config.resultsEndpoint ?? '/stage-4/rows';
 const batchProgressList = document.getElementById('batchProgressList');
 const batchProgressHint = document.getElementById('batchProgressHint');
 const currentBatchIndicator = document.getElementById('currentBatchIndicator');
-const confidenceGuide = document.getElementById('confidenceGuide');
 
 const COLUMN_CONFIG = [
   { key: 'therapeutic_agents', label: 'Therapeutic Agents' },
   { key: 'primary_diagnosis', label: 'Primary Diagnosis' },
   { key: 'morphology', label: 'Morphology' },
-  { key: 'tissue_origin', label: 'Tissue / Organ Origin' },
-  { key: 'sample_site', label: 'Sample Anatomic Site' },
+  { key: 'tissue_or_organ_of_origin', label: 'Tissue / Organ Origin' },
+  { key: 'sample_anatomic_site', label: 'Sample Anatomic Site' },
 ];
 
-const toAlternatives = (entries) =>
-  entries.map(([value, confidence, model]) => ({
-    value,
-    confidence,
-    model,
-  }));
-
-const SAMPLE_RECORDS = [
-  {
-    recordId: 'PT-001',
-    cells: [
-      {
-        columnKey: 'therapeutic_agents',
-        originalValue: 'Keytruda',
-        harmonizedValue: 'Pembrolizumab',
-        confidence: 0.41,
-        topModel: 'Therapeutic Agents v2',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['Pembrolizumab', 0.41, 'Therapeutic Agents v2'],
-          ['Nivolumab', 0.26, 'Therapeutic Agents v2'],
-          ['Atezolizumab', 0.19, 'Therapeutic Agents v2'],
-        ]),
-      },
-      {
-        columnKey: 'primary_diagnosis',
-        originalValue: 'Adenocarcinoma, lung',
-        harmonizedValue: 'Lung adenocarcinoma',
-        confidence: 0.67,
-        topModel: 'Primary Diagnosis v3',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['Lung adenocarcinoma', 0.67, 'Primary Diagnosis v3'],
-          ['NSCLC', 0.51, 'Primary Diagnosis v3'],
-          ['Pulmonary carcinoma', 0.32, 'Primary Diagnosis v3'],
-        ]),
-      },
-      {
-        columnKey: 'morphology',
-        originalValue: 'Acinar',
-        harmonizedValue: 'Acinar adenocarcinoma',
-        confidence: 0.53,
-        topModel: 'Morphology v2',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['Acinar adenocarcinoma', 0.53, 'Morphology v2'],
-          ['Solid adenocarcinoma', 0.22, 'Morphology v2'],
-        ]),
-      },
-      {
-        columnKey: 'tissue_origin',
-        originalValue: 'Lung',
-        harmonizedValue: 'Lung',
-        confidence: 0.91,
-        topModel: 'Tissue Origin v1',
-        changeType: 'no_change',
-        alternatives: toAlternatives([
-          ['Lung', 0.91, 'Tissue Origin v1'],
-          ['Left lung', 0.4, 'Tissue Origin v1'],
-        ]),
-      },
-      {
-        columnKey: 'sample_site',
-        originalValue: 'Left lower lobe',
-        harmonizedValue: 'Left lower lobe lung',
-        confidence: 0.78,
-        topModel: 'Sample Site v2',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['Left lower lobe lung', 0.78, 'Sample Site v2'],
-          ['Lower lobe', 0.49, 'Sample Site v2'],
-        ]),
-      },
-    ],
-  },
-  {
-    recordId: 'PT-002',
-    cells: [
-      {
-        columnKey: 'therapeutic_agents',
-        originalValue: 'Opdivo',
-        harmonizedValue: 'Nivolumab',
-        confidence: 0.86,
-        topModel: 'Therapeutic Agents v2',
-        changeType: 'no_change',
-        alternatives: toAlternatives([
-          ['Nivolumab', 0.86, 'Therapeutic Agents v2'],
-          ['Pembrolizumab', 0.33, 'Therapeutic Agents v2'],
-        ]),
-      },
-      {
-        columnKey: 'primary_diagnosis',
-        originalValue: 'Breast ca',
-        harmonizedValue: 'Invasive ductal carcinoma of breast',
-        confidence: 0.38,
-        topModel: 'Primary Diagnosis v3',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['Invasive ductal carcinoma of breast', 0.38, 'Primary Diagnosis v3'],
-          ['Triple negative breast cancer', 0.27, 'Primary Diagnosis v3'],
-        ]),
-      },
-      {
-        columnKey: 'morphology',
-        originalValue: 'IDC',
-        harmonizedValue: 'Infiltrating duct carcinoma',
-        confidence: 0.35,
-        topModel: 'Morphology v2',
-        changeType: 'ai_adjustment',
-        needsRerun: true,
-        alternatives: toAlternatives([
-          ['Infiltrating duct carcinoma', 0.35, 'Morphology v2'],
-          ['Medullary carcinoma', 0.22, 'Morphology v2'],
-        ]),
-      },
-      {
-        columnKey: 'tissue_origin',
-        originalValue: 'Breast',
-        harmonizedValue: 'Left breast',
-        confidence: 0.58,
-        topModel: 'Tissue Origin v1',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['Left breast', 0.58, 'Tissue Origin v1'],
-          ['Breast', 0.49, 'Tissue Origin v1'],
-        ]),
-      },
-      {
-        columnKey: 'sample_site',
-        originalValue: 'Left breast',
-        harmonizedValue: 'Left breast',
-        confidence: 0.52,
-        manualOverride: 'Left breast quadrant',
-        changeType: 'manual_override',
-        topModel: 'Sample Site v2',
-        alternatives: toAlternatives([
-          ['Upper outer quadrant breast', 0.36, 'Sample Site v2'],
-          ['Left breast quadrant', 0.31, 'Sample Site v2'],
-        ]),
-      },
-    ],
-  },
-  {
-    recordId: 'PT-003',
-    cells: [
-      {
-        columnKey: 'therapeutic_agents',
-        originalValue: 'Atezo',
-        harmonizedValue: 'Atezolizumab',
-        confidence: 0.72,
-        topModel: 'Therapeutic Agents v2',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['Atezolizumab', 0.72, 'Therapeutic Agents v2'],
-          ['Durvalumab', 0.43, 'Therapeutic Agents v2'],
-        ]),
-      },
-      {
-        columnKey: 'primary_diagnosis',
-        originalValue: 'Melanoma',
-        harmonizedValue: 'Cutaneous melanoma',
-        confidence: 0.81,
-        topModel: 'Primary Diagnosis v3',
-        changeType: 'no_change',
-        alternatives: toAlternatives([
-          ['Cutaneous melanoma', 0.81, 'Primary Diagnosis v3'],
-          ['Melanoma', 0.74, 'Primary Diagnosis v3'],
-        ]),
-      },
-      {
-        columnKey: 'morphology',
-        originalValue: 'Superficial spreading',
-        harmonizedValue: 'Superficial spreading melanoma',
-        confidence: 0.64,
-        topModel: 'Morphology v2',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['Superficial spreading melanoma', 0.64, 'Morphology v2'],
-          ['Nodular melanoma', 0.39, 'Morphology v2'],
-        ]),
-      },
-      {
-        columnKey: 'tissue_origin',
-        originalValue: 'Skin',
-        harmonizedValue: 'Skin',
-        confidence: 0.89,
-        topModel: 'Tissue Origin v1',
-        changeType: 'no_change',
-        alternatives: toAlternatives([
-          ['Skin', 0.89, 'Tissue Origin v1'],
-          ['Epidermis', 0.51, 'Tissue Origin v1'],
-        ]),
-      },
-      {
-        columnKey: 'sample_site',
-        originalValue: 'Right shoulder lesion',
-        harmonizedValue: null,
-        confidence: 0.0,
-        topModel: 'Sample Site v2',
-        changeType: 'missing',
-        needsRerun: true,
-        alternatives: [],
-      },
-    ],
-  },
-  {
-    recordId: 'PT-004',
-    cells: [
-      {
-        columnKey: 'therapeutic_agents',
-        originalValue: 'Revlimid',
-        harmonizedValue: 'Lenalidomide',
-        confidence: 0.9,
-        topModel: 'Therapeutic Agents v2',
-        changeType: 'no_change',
-        alternatives: toAlternatives([
-          ['Lenalidomide', 0.9, 'Therapeutic Agents v2'],
-          ['Pomalidomide', 0.46, 'Therapeutic Agents v2'],
-        ]),
-      },
-      {
-        columnKey: 'primary_diagnosis',
-        originalValue: 'Multiple myeloma',
-        harmonizedValue: 'Multiple myeloma',
-        confidence: 0.93,
-        topModel: 'Primary Diagnosis v3',
-        changeType: 'no_change',
-        alternatives: toAlternatives([
-          ['Multiple myeloma', 0.93, 'Primary Diagnosis v3'],
-          ['Smoldering myeloma', 0.51, 'Primary Diagnosis v3'],
-        ]),
-      },
-      {
-        columnKey: 'morphology',
-        originalValue: 'Plasma cell',
-        harmonizedValue: 'Plasma cell myeloma',
-        confidence: 0.74,
-        topModel: 'Morphology v2',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['Plasma cell myeloma', 0.74, 'Morphology v2'],
-          ['Diffuse large B-cell lymphoma', 0.33, 'Morphology v2'],
-        ]),
-      },
-      {
-        columnKey: 'tissue_origin',
-        originalValue: 'Bone marrow',
-        harmonizedValue: 'Bone marrow',
-        confidence: 0.84,
-        topModel: 'Tissue Origin v1',
-        changeType: 'no_change',
-        alternatives: toAlternatives([
-          ['Bone marrow', 0.84, 'Tissue Origin v1'],
-          ['Iliac crest marrow', 0.39, 'Tissue Origin v1'],
-        ]),
-      },
-      {
-        columnKey: 'sample_site',
-        originalValue: 'Left iliac crest',
-        harmonizedValue: 'Left iliac crest marrow',
-        confidence: 0.69,
-        topModel: 'Sample Site v2',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['Left iliac crest marrow', 0.69, 'Sample Site v2'],
-          ['Bone marrow aspirate', 0.44, 'Sample Site v2'],
-        ]),
-      },
-    ],
-  },
-  {
-    recordId: 'PT-005',
-    cells: [
-      {
-        columnKey: 'therapeutic_agents',
-        originalValue: 'Carbo/Taxol',
-        harmonizedValue: 'Carboplatin + Paclitaxel',
-        confidence: 0.48,
-        topModel: 'Therapeutic Agents v2',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['Carboplatin + Paclitaxel', 0.48, 'Therapeutic Agents v2'],
-          ['Cisplatin + Paclitaxel', 0.31, 'Therapeutic Agents v2'],
-        ]),
-      },
-      {
-        columnKey: 'primary_diagnosis',
-        originalValue: 'Ovarian ca',
-        harmonizedValue: 'High-grade serous ovarian carcinoma',
-        confidence: 0.44,
-        topModel: 'Primary Diagnosis v3',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['High-grade serous ovarian carcinoma', 0.44, 'Primary Diagnosis v3'],
-          ['Epithelial ovarian cancer', 0.38, 'Primary Diagnosis v3'],
-        ]),
-      },
-      {
-        columnKey: 'morphology',
-        originalValue: 'Serous',
-        harmonizedValue: 'Serous carcinoma',
-        confidence: 0.57,
-        topModel: 'Morphology v2',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['Serous carcinoma', 0.57, 'Morphology v2'],
-          ['Clear cell carcinoma', 0.25, 'Morphology v2'],
-        ]),
-      },
-      {
-        columnKey: 'tissue_origin',
-        originalValue: 'Ovary',
-        harmonizedValue: 'Ovary',
-        confidence: 0.73,
-        topModel: 'Tissue Origin v1',
-        changeType: 'no_change',
-        alternatives: toAlternatives([
-          ['Ovary', 0.73, 'Tissue Origin v1'],
-          ['Pelvis', 0.28, 'Tissue Origin v1'],
-        ]),
-      },
-      {
-        columnKey: 'sample_site',
-        originalValue: 'Right adnexa',
-        harmonizedValue: 'Right adnexa',
-        confidence: 0.32,
-        topModel: 'Sample Site v2',
-        changeType: 'ai_adjustment',
-        needsRerun: true,
-        alternatives: toAlternatives([
-          ['Right adnexa', 0.32, 'Sample Site v2'],
-          ['Pelvic mass', 0.29, 'Sample Site v2'],
-        ]),
-      },
-    ],
-  },
-  {
-    recordId: 'PT-006',
-    cells: [
-      {
-        columnKey: 'therapeutic_agents',
-        originalValue: 'FOLFOX',
-        harmonizedValue: 'FOLFOX',
-        confidence: 0.61,
-        topModel: 'Therapeutic Agents v2',
-        changeType: 'no_change',
-        alternatives: toAlternatives([
-          ['FOLFOX', 0.61, 'Therapeutic Agents v2'],
-          ['FOLFIRI', 0.42, 'Therapeutic Agents v2'],
-        ]),
-      },
-      {
-        columnKey: 'primary_diagnosis',
-        originalValue: 'Colon cancer',
-        harmonizedValue: 'Colon adenocarcinoma',
-        confidence: 0.59,
-        topModel: 'Primary Diagnosis v3',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['Colon adenocarcinoma', 0.59, 'Primary Diagnosis v3'],
-          ['Colorectal carcinoma', 0.49, 'Primary Diagnosis v3'],
-        ]),
-      },
-      {
-        columnKey: 'morphology',
-        originalValue: 'Moderately differentiated',
-        harmonizedValue: 'Moderately differentiated adenocarcinoma',
-        confidence: 0.63,
-        topModel: 'Morphology v2',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['Moderately differentiated adenocarcinoma', 0.63, 'Morphology v2'],
-          ['Well differentiated adenocarcinoma', 0.38, 'Morphology v2'],
-        ]),
-      },
-      {
-        columnKey: 'tissue_origin',
-        originalValue: 'Colon',
-        harmonizedValue: 'Ascending colon',
-        confidence: 0.47,
-        topModel: 'Tissue Origin v1',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['Ascending colon', 0.47, 'Tissue Origin v1'],
-          ['Colon', 0.44, 'Tissue Origin v1'],
-        ]),
-      },
-      {
-        columnKey: 'sample_site',
-        originalValue: 'Hepatic flexure',
-        harmonizedValue: 'Hepatic flexure colon',
-        confidence: 0.51,
-        topModel: 'Sample Site v2',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['Hepatic flexure colon', 0.51, 'Sample Site v2'],
-          ['Transverse colon', 0.33, 'Sample Site v2'],
-        ]),
-      },
-    ],
-  },
-  {
-    recordId: 'PT-007',
-    cells: [
-      {
-        columnKey: 'therapeutic_agents',
-        originalValue: 'Iressa',
-        harmonizedValue: 'Gefitinib',
-        confidence: 0.56,
-        topModel: 'Therapeutic Agents v2',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['Gefitinib', 0.56, 'Therapeutic Agents v2'],
-          ['Erlotinib', 0.37, 'Therapeutic Agents v2'],
-        ]),
-      },
-      {
-        columnKey: 'primary_diagnosis',
-        originalValue: 'EGFR mutant NSCLC',
-        harmonizedValue: 'Non-small cell lung cancer (EGFR+)',
-        confidence: 0.62,
-        topModel: 'Primary Diagnosis v3',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['Non-small cell lung cancer (EGFR+)', 0.62, 'Primary Diagnosis v3'],
-          ['Lung adenocarcinoma', 0.45, 'Primary Diagnosis v3'],
-        ]),
-      },
-      {
-        columnKey: 'morphology',
-        originalValue: 'Papillary',
-        harmonizedValue: 'Papillary adenocarcinoma',
-        confidence: 0.52,
-        topModel: 'Morphology v2',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['Papillary adenocarcinoma', 0.52, 'Morphology v2'],
-          ['Micropapillary adenocarcinoma', 0.36, 'Morphology v2'],
-        ]),
-      },
-      {
-        columnKey: 'tissue_origin',
-        originalValue: 'Lung',
-        harmonizedValue: 'Right upper lobe lung',
-        confidence: 0.55,
-        topModel: 'Tissue Origin v1',
-        changeType: 'ai_adjustment',
-        needsRerun: true,
-        alternatives: toAlternatives([
-          ['Right upper lobe lung', 0.55, 'Tissue Origin v1'],
-          ['Lung', 0.52, 'Tissue Origin v1'],
-        ]),
-      },
-      {
-        columnKey: 'sample_site',
-        originalValue: 'Bronchial brush',
-        harmonizedValue: 'Bronchial brush',
-        confidence: 0.76,
-        topModel: 'Sample Site v2',
-        changeType: 'no_change',
-        alternatives: toAlternatives([
-          ['Bronchial brush', 0.76, 'Sample Site v2'],
-          ['Bronchoalveolar lavage', 0.41, 'Sample Site v2'],
-        ]),
-      },
-    ],
-  },
-  {
-    recordId: 'PT-008',
-    cells: [
-      {
-        columnKey: 'therapeutic_agents',
-        originalValue: 'Trametinib',
-        harmonizedValue: 'Trametinib',
-        confidence: 0.88,
-        topModel: 'Therapeutic Agents v2',
-        changeType: 'no_change',
-        alternatives: toAlternatives([
-          ['Trametinib', 0.88, 'Therapeutic Agents v2'],
-          ['Cobimetinib', 0.42, 'Therapeutic Agents v2'],
-        ]),
-      },
-      {
-        columnKey: 'primary_diagnosis',
-        originalValue: 'BRAF v600E melanoma',
-        harmonizedValue: 'BRAF V600E-positive melanoma',
-        confidence: 0.74,
-        topModel: 'Primary Diagnosis v3',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['BRAF V600E-positive melanoma', 0.74, 'Primary Diagnosis v3'],
-          ['Cutaneous melanoma', 0.52, 'Primary Diagnosis v3'],
-        ]),
-      },
-      {
-        columnKey: 'morphology',
-        originalValue: 'Spindle cell melanoma',
-        harmonizedValue: 'Spindle cell melanoma',
-        confidence: 0.47,
-        topModel: 'Morphology v2',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['Spindle cell melanoma', 0.47, 'Morphology v2'],
-          ['Desmoplastic melanoma', 0.34, 'Morphology v2'],
-        ]),
-      },
-      {
-        columnKey: 'tissue_origin',
-        originalValue: 'Skin',
-        harmonizedValue: 'Skin of back',
-        confidence: 0.46,
-        topModel: 'Tissue Origin v1',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['Skin of back', 0.46, 'Tissue Origin v1'],
-          ['Skin', 0.42, 'Tissue Origin v1'],
-        ]),
-      },
-      {
-        columnKey: 'sample_site',
-        originalValue: 'Back lesion',
-        harmonizedValue: 'Upper back skin',
-        confidence: 0.58,
-        topModel: 'Sample Site v2',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['Upper back skin', 0.58, 'Sample Site v2'],
-          ['Trunk skin', 0.41, 'Sample Site v2'],
-        ]),
-      },
-    ],
-  },
-  {
-    recordId: 'PT-009',
-    cells: [
-      {
-        columnKey: 'therapeutic_agents',
-        originalValue: 'Temodar',
-        harmonizedValue: 'Temozolomide',
-        confidence: 0.82,
-        topModel: 'Therapeutic Agents v2',
-        changeType: 'no_change',
-        alternatives: toAlternatives([
-          ['Temozolomide', 0.82, 'Therapeutic Agents v2'],
-          ['Procarbazine', 0.29, 'Therapeutic Agents v2'],
-        ]),
-      },
-      {
-        columnKey: 'primary_diagnosis',
-        originalValue: 'GBM',
-        harmonizedValue: null,
-        confidence: 0.0,
-        changeType: 'missing',
-        needsRerun: true,
-        topModel: 'Primary Diagnosis v3',
-        alternatives: toAlternatives([
-          ['Glioblastoma multiforme', 0.45, 'Primary Diagnosis v3'],
-          ['WHO grade IV astrocytoma', 0.31, 'Primary Diagnosis v3'],
-        ]),
-      },
-      {
-        columnKey: 'morphology',
-        originalValue: 'Glioblastoma',
-        harmonizedValue: 'Glioblastoma',
-        confidence: 0.71,
-        topModel: 'Morphology v2',
-        changeType: 'no_change',
-        alternatives: toAlternatives([
-          ['Glioblastoma', 0.71, 'Morphology v2'],
-          ['Astrocytoma', 0.41, 'Morphology v2'],
-        ]),
-      },
-      {
-        columnKey: 'tissue_origin',
-        originalValue: 'Brain',
-        harmonizedValue: 'Frontal lobe',
-        confidence: 0.52,
-        topModel: 'Tissue Origin v1',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['Frontal lobe', 0.52, 'Tissue Origin v1'],
-          ['Brain', 0.49, 'Tissue Origin v1'],
-        ]),
-      },
-      {
-        columnKey: 'sample_site',
-        originalValue: 'Right frontal tumor',
-        harmonizedValue: 'Right frontal lobe tumor',
-        confidence: 0.46,
-        topModel: 'Sample Site v2',
-        changeType: 'ai_adjustment',
-        alternatives: toAlternatives([
-          ['Right frontal lobe tumor', 0.46, 'Sample Site v2'],
-          ['Frontal resection cavity', 0.33, 'Sample Site v2'],
-        ]),
-      },
-    ],
-  },
-];
 
 const STAGE_ORDER = ['upload', 'mapping', 'harmonize', 'review', 'export'];
-const CONFIDENCE_THRESHOLDS = {
-  low: 0.4,
-  medium: 0.8,
-};
+const HIGH_CONFIDENCE_MIN = 0.8;
 const SORT_LABEL_COPY = {
   'confidence-asc': 'Sorted by lowest confidence first.',
   'confidence-desc': 'Sorted by highest confidence first.',
@@ -636,14 +38,67 @@ const SORT_LABEL_COPY = {
 
 const state = {
   rows: [],
-  sortMode: 'confidence-asc',
+  sortMode: 'original',
   batchSize: 5,
   currentBatch: 1,
   completedBatches: new Set(),
   flaggedBatches: new Set(),
-  context: {},
+  context: null,
   job: null,
   alertTimer: null,
+  hasLoadedRows: false,
+  sourceContext: null,
+};
+
+const loadSourceContext = () => {
+  const stored = readFromSession(stageThreePayloadKey);
+  const fileId = stored?.request?.file_id;
+  if (!fileId) {
+    return null;
+  }
+  const manualColumns = Object.keys(stored?.request?.manual_overrides ?? {});
+  return { fileId, manualColumns };
+};
+
+const fetchRows = async () => {
+  if (state.hasLoadedRows) {
+    render();
+    return;
+  }
+  if (!state.sourceContext) {
+    state.sourceContext = loadSourceContext();
+  }
+  if (!state.sourceContext?.fileId) {
+    notify('Unable to locate harmonized data. Please rerun Stage 3.', 'warning');
+    return;
+  }
+  try {
+    const response = await fetch(resultsEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        file_id: state.sourceContext.fileId,
+        manual_columns: state.sourceContext.manualColumns ?? [],
+      }),
+    });
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(detail || 'Unable to load harmonized results.');
+    }
+    const body = await response.json();
+    state.rows = (body.rows || []).map((row) => ({
+      ...row,
+      originalIndex: Math.max(0, (row.sourceRowNumber ?? row.rowNumber) - 1),
+    }));
+    state.hasLoadedRows = true;
+    state.currentBatch = 1;
+    state.completedBatches.clear();
+    state.flaggedBatches.clear();
+    render();
+  } catch (error) {
+    console.error(error);
+    notify(error.message || 'Unable to load harmonized results.', 'warning');
+  }
 };
 
 const setActiveStage = (stage) => {
@@ -660,13 +115,10 @@ const setActiveStage = (stage) => {
 
 const bucketFromConfidence = (value) => {
   const score = Number(value ?? 0);
-  if (Number.isNaN(score) || score <= CONFIDENCE_THRESHOLDS.low) {
-    return 'low';
+  if (!Number.isNaN(score) && score >= HIGH_CONFIDENCE_MIN) {
+    return 'high';
   }
-  if (score < CONFIDENCE_THRESHOLDS.medium) {
-    return 'medium';
-  }
-  return 'high';
+  return 'low';
 };
 
 const safeJsonParse = (raw) => {
@@ -695,39 +147,6 @@ const writeToSession = (key, value) => {
     console.warn('Unable to write to session storage', error);
   }
 };
-
-const augmentCell = (recordId, column, source) => {
-  const base = source || {};
-  const confidence = Number(base.confidence ?? 0);
-  const harmonizedValue = base.manualOverride ?? base.harmonizedValue ?? null;
-  const originalValue = base.originalValue ?? null;
-  const isChanged = harmonizedValue !== originalValue || harmonizedValue === null;
-  return {
-    recordId,
-    columnKey: column.key,
-    columnLabel: column.label,
-    originalValue,
-    harmonizedValue,
-    confidence,
-    bucket: base.bucket ?? bucketFromConfidence(confidence),
-    needsRerun: Boolean(base.needsRerun),
-    isChanged,
-  };
-};
-
-const buildRows = () =>
-  SAMPLE_RECORDS.map((record, index) => {
-    const cells = COLUMN_CONFIG.map((column) => {
-      const match = record.cells.find((cell) => cell.columnKey === column.key);
-      return augmentCell(record.recordId, column, match);
-    });
-    return {
-      recordId: record.recordId,
-      rowNumber: index + 1,
-      originalIndex: index,
-      cells,
-    };
-  });
 
 const getRowAttentionCell = (row) => {
   const changed = row.cells.filter((cell) => cell.isChanged);
@@ -854,27 +273,6 @@ const notify = (message, tone = 'info') => {
   }, 5000);
 };
 
-const renderConfidenceGuide = () => {
-  if (!confidenceGuide) {
-    return;
-  }
-  const lowMax = Math.round(CONFIDENCE_THRESHOLDS.low * 100);
-  const mediumMin = lowMax + 1;
-  const mediumMax = Math.max(Math.round(CONFIDENCE_THRESHOLDS.medium * 100) - 1, mediumMin);
-  const highMin = Math.round(CONFIDENCE_THRESHOLDS.medium * 100);
-  confidenceGuide.innerHTML = `
-    <details class="confidence-details">
-      <summary>Confidence guide</summary>
-      <ul>
-        <li><span class="confidence-badge low"></span><strong>Low (≤ ${lowMax}%):</strong> highlighted red and queued for review.</li>
-        <li><span class="confidence-badge medium"></span><strong>Medium (${mediumMin}–${mediumMax}%):</strong> shown in yellow to encourage double-checking.</li>
-        <li><span class="confidence-badge high"></span><strong>High (≥ ${highMin}%):</strong> displayed in green when the model is confident.</li>
-        <li><span class="confidence-badge none"></span><strong>No change:</strong> gray cards indicate the model kept the original value.</li>
-      </ul>
-    </details>
-  `;
-};
-
 const PROGRESS_STATUS_LABELS = {
   complete: 'Complete',
   flagged: 'Needs review',
@@ -958,7 +356,6 @@ const createCellCard = (cell) => {
   }
   card.className = classes.join(' ');
   card.innerHTML = `
-    <p class="cell-column">${cell.columnLabel}</p>
     <div class="value-pair" role="group" aria-label="${cell.columnLabel} comparison">
       <div class="value-group recommended">
         <p class="value-label">Recommended</p>
@@ -968,6 +365,20 @@ const createCellCard = (cell) => {
         <p class="value-label">Original input</p>
         <p class="value-text original-text">${cell.originalValue ?? '—'}</p>
       </div>
+      <label class="value-group value-override">
+        <span class="value-label sr-only">Override ${cell.columnLabel}</span>
+        <span class="value-input-wrapper">
+          <input
+            class="value-input"
+            type="text"
+            value=""
+            aria-label="Manual override for ${cell.columnLabel}"
+          />
+          <svg class="value-input-icon" viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M2 14.5V18h3.5l8.4-8.4-3.5-3.5L2 14.5zm11.8-9.1a1 1 0 0 1 1.4 0l1.4 1.4a1 1 0 0 1 0 1.4l-1.2 1.2-3.5-3.5 1.2-1.2z"/>
+          </svg>
+        </span>
+      </label>
     </div>
   `;
   return card;
@@ -986,34 +397,41 @@ const renderRows = (batchMeta) => {
     return;
   }
 
+  const columnsTemplate = ['100px', ...COLUMN_CONFIG.map(() => 'minmax(280px, 1fr)')].join(' ');
+  const wrapper = document.createElement('div');
+  wrapper.className = 'row-table-wrapper';
+  wrapper.style.setProperty('--table-columns', columnsTemplate);
+
+  const viewport = document.createElement('div');
+  viewport.className = 'row-table-viewport';
+
+  const header = document.createElement('div');
+  header.className = 'row-table-header';
+  header.innerHTML = [`<div class="row-index-header">Row</div>`, ...COLUMN_CONFIG.map((column) => `<div class="column-header">${column.label}</div>`)].join('');
+
+  const body = document.createElement('div');
+  body.className = 'row-table-body';
+
   batchMeta.rows.forEach((row) => {
-    const rowCard = document.createElement('article');
-    rowCard.className = 'review-row-card';
-
-    const rowHeader = document.createElement('header');
-    rowHeader.className = 'row-card-header';
-    const attentionCell = getRowAttentionCell(row);
-    const hint = document.createElement('p');
-    hint.className = 'row-card-hint';
-    const changeCount = row.cells.filter((cell) => cell.isChanged).length;
-    if (changeCount) {
-      hint.innerHTML = `<strong>${changeCount}</strong> column${changeCount === 1 ? '' : 's'} updated · Min confidence ${Math.round(attentionCell.confidence * 100)}%`;
-    } else {
-      hint.textContent = 'No harmonization changes detected for this row.';
-    }
-    rowHeader.innerHTML = `<h3 class="row-card-title"><span class="row-id">${row.rowNumber}</span>Row ${row.rowNumber} <small>${row.recordId}</small></h3>`;
-    rowHeader.append(hint);
-
-    const grid = document.createElement('div');
-    grid.className = 'row-cell-grid';
-    grid.style.setProperty('--cell-count', Math.max(row.cells.length, 1));
+    const rowEl = document.createElement('div');
+    rowEl.className = 'row-table-row';
+    const indexCell = document.createElement('div');
+    indexCell.className = 'row-index-cell';
+    indexCell.textContent = `Row ${row.rowNumber}`;
+    indexCell.title = row.recordId;
+    rowEl.append(indexCell);
     row.cells.forEach((cell) => {
-      grid.append(createCellCard(cell));
+      const cellWrapper = document.createElement('div');
+      cellWrapper.className = 'table-cell';
+      cellWrapper.append(createCellCard(cell));
+      rowEl.append(cellWrapper);
     });
-
-    rowCard.append(rowHeader, grid);
-    reviewTable.append(rowCard);
+    body.append(rowEl);
   });
+
+  viewport.append(header, body);
+  wrapper.append(viewport);
+  reviewTable.append(wrapper);
 };
 
 const render = () => {
@@ -1085,6 +503,13 @@ const hydrateContext = () => {
   if (stored?.context) {
     state.context = stored.context;
   }
+  const fileId = stored?.request?.file_id;
+  if (fileId) {
+    state.sourceContext = {
+      fileId,
+      manualColumns: Object.keys(stored?.request?.manual_overrides ?? {}),
+    };
+  }
 };
 
 const hydrateJob = () => {
@@ -1130,18 +555,47 @@ const attachEventListeners = () => {
       markBatchComplete();
     }
   });
+
+  if (helpMenuToggle && stageHelp) {
+    helpMenuToggle.addEventListener('click', () => {
+      const expanded = helpMenuToggle.getAttribute('aria-expanded') === 'true';
+      helpMenuToggle.setAttribute('aria-expanded', String(!expanded));
+      stageHelp.classList.toggle('hidden', expanded);
+    });
+  }
+  if (stageFiveButton) {
+    stageFiveButton.addEventListener('click', () => {
+      window.location.assign(stageFiveUrl);
+    });
+  }
 };
 
 const init = () => {
   setActiveStage('review');
-  state.rows = buildRows();
   hydrateContext();
   hydrateJob();
   sortModeSelect.value = state.sortMode;
   batchSizeSelect.value = state.batchSize.toString();
   attachEventListeners();
-  renderConfidenceGuide();
   render();
+  fetchRows();
 };
 
 init();
+document.querySelectorAll('.step[data-url]').forEach((step) => {
+  step.addEventListener('click', () => {
+    const target = step.dataset.url;
+    if (target) {
+      window.location.assign(target);
+    }
+  });
+});
+
+document.querySelectorAll('[data-nav-target]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const target = button.dataset.navTarget;
+    if (target) {
+      window.location.assign(target);
+    }
+  });
+});

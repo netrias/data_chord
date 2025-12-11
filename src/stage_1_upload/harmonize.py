@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import importlib
 import logging
 import os
 from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, cast
 from uuid import uuid4
+
+from netrias_client import NetriasClient
 
 logger = logging.getLogger(__name__)
 
@@ -69,50 +69,22 @@ class HarmonizeResult:
     job_id_available: bool = False
 
 
-class HarmonizeClientProtocol(Protocol):
-    """why: describe the subset of the SDK we rely on."""
-
-    def configure(self, *, api_key: str) -> None:
-        ...
-
-    def discover_cde_mapping(self, *, source_csv: Path, target_schema: str, sample_limit: int = 25) -> Mapping[str, object]:
-        ...
-
-    def harmonize(
-        self,
-        *,
-        source_path: Path,
-        manifest: Path | Mapping[str, object],
-    ) -> object:
-        ...
-
-
-class NetriasClientConstructor(Protocol):
-    """why: describe how to instantiate the Netrias client."""
-
-    def __call__(self) -> HarmonizeClientProtocol:
-        ...
-
-
 class HarmonizeService:
     """why: abstract the Netrias client and allow graceful fallbacks."""
 
     def __init__(self) -> None:
         self._api_key: str | None = os.getenv("NETRIAS_API_KEY")
-        self._client: HarmonizeClientProtocol | None = self._build_client()
+        self._client: NetriasClient | None = self._build_client()
 
-    def _build_client(self) -> HarmonizeClientProtocol | None:
-        try:
-            module = importlib.import_module("netrias_client")
-            client_cls = cast(NetriasClientConstructor, getattr(module, "NetriasClient"))
-        except (ModuleNotFoundError, AttributeError):
-            return None
+    def _build_client(self) -> NetriasClient | None:
         if not self._api_key:
             logger.warning("NETRIAS_API_KEY missing; harmonize calls will be stubbed.")
             return None
-        client = client_cls()  # type: ignore[call-arg]
-        client.configure(api_key=self._api_key)
-        return client
+        try:
+            return NetriasClient(api_key=self._api_key)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception("Failed to initialize NetriasClient", exc_info=exc)
+            return None
 
     def run(
         self,
@@ -130,12 +102,12 @@ class HarmonizeService:
 
         try:
             if manifest is None:
-                manifest_payload = self._discover_manifest(file_path=file_path, target_schema=target_schema)
+                cde_map = self._discover_cde_map(file_path=file_path, target_schema=target_schema)
             else:
-                manifest_payload = _normalize_manifest(manifest)
+                cde_map = _normalize_manifest(manifest)
             if manual_overrides:
-                self._apply_manual_overrides(manifest_payload, manual_overrides)
-            netrias_result = self._client.harmonize(source_path=file_path, manifest=manifest_payload)
+                self._apply_manual_overrides(cde_map, manual_overrides)
+            netrias_result = self._client.harmonize(source_path=file_path, cde_map=cde_map)
             detail = str(getattr(netrias_result, "description", "Harmonization completed."))
             status = str(getattr(netrias_result, "status", "succeeded"))
             raw_job_id = getattr(netrias_result, "job_id", None)
@@ -159,16 +131,16 @@ class HarmonizeService:
             logger.exception("Harmonize call failed; falling back to stub", exc_info=exc)
             return HarmonizeResult(job_id=job_id, status="failed", detail=str(exc))
 
-    def _discover_manifest(self, *, file_path: Path, target_schema: str) -> ManifestPayload:
+    def _discover_cde_map(self, *, file_path: Path, target_schema: str) -> ManifestPayload:
         if not self._client:
             raise RuntimeError("Netrias client unavailable")
-        raw_manifest = self._client.discover_cde_mapping(source_csv=file_path, target_schema=target_schema)
-        manifest = _normalize_manifest(raw_manifest)
+        raw_cde_map = self._client.discover_cde_mapping(source_csv=file_path, target_schema=target_schema)
+        cde_map = _normalize_manifest(raw_cde_map)
         logger.info(
-            "Discovered manifest for harmonization",
-            extra={"column_count": len(manifest.get("column_mappings", {})), "target_schema": target_schema},
+            "Discovered CDE map for harmonization",
+            extra={"column_count": len(cde_map.get("column_mappings", {})), "target_schema": target_schema},
         )
-        return manifest
+        return cde_map
 
     def _apply_manual_overrides(self, manifest: ManifestPayload, overrides: Mapping[str, str]) -> None:
         column_mappings: MutableMapping[str, dict[str, object]] = manifest.setdefault("column_mappings", {})

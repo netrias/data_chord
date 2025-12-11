@@ -53,6 +53,16 @@ body {
   font-weight: 600;
   min-width: 70px;
   transition: all 200ms ease;
+  cursor: pointer;
+}
+
+.step:hover {
+  color: var(--teal-500);
+}
+
+.step:hover .step-index {
+  border-color: var(--teal-500);
+  transform: scale(1.05);
 }
 
 .step-index {
@@ -134,6 +144,55 @@ body {
   max-width: 1100px;
   margin: 0 auto;
   padding: 3rem 1.5rem 4rem;
+}
+
+.stage-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.nav-btn {
+  border: none;
+  border-radius: 999px;
+  padding: 0.75rem 1.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.nav-btn::after {
+  content: '→';
+}
+
+.nav-btn.nav-back::after {
+  content: '';
+}
+
+.nav-btn.nav-back::before {
+  content: '←';
+}
+
+.nav-btn.nav-back {
+  border: 1px solid var(--gray-200);
+  background: transparent;
+  color: var(--gray-700);
+  padding: 0.75rem 1.25rem;
+}
+
+.nav-btn.nav-forward {
+  background: var(--teal-700);
+  color: var(--white);
+}
+
+.nav-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .stage-card {
