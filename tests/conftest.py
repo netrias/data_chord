@@ -58,6 +58,7 @@ class MockHarmonizeResult:
     description: str
     job_id: str | None = None
     mapping_id: str | None = None
+    manifest_path: Path | None = None
 
 
 @pytest.fixture
@@ -147,6 +148,8 @@ async def app_client(
     import src.stage_1_upload.dependencies as deps_module
     import src.stage_1_upload.router as router_module
     import src.stage_3_harmonize.router as stage3_router
+    import src.stage_4_review_results.router as stage4_router
+    import src.stage_5_review_summary.router as stage5_router
 
     original_storage = deps_module._storage
     original_router_storage = router_module._storage
@@ -158,6 +161,13 @@ async def app_client(
 
     original_stage3_storage = stage3_router._storage
     stage3_router._storage = temp_storage
+
+    # Patch stage 4 and 5 to use test storage via get_upload_storage
+    original_stage4_get_storage = stage4_router.get_upload_storage
+    stage4_router.get_upload_storage = lambda: temp_storage
+
+    original_stage5_get_storage = stage5_router.get_upload_storage
+    stage5_router.get_upload_storage = lambda: temp_storage
 
     try:
         from backend.app.main import create_app
@@ -171,6 +181,8 @@ async def app_client(
         router_module._storage = original_router_storage
         deps_module.get_upload_storage = original_get_storage
         stage3_router._storage = original_stage3_storage
+        stage4_router.get_upload_storage = original_stage4_get_storage
+        stage5_router.get_upload_storage = original_stage5_get_storage
 
 
 @pytest.fixture
@@ -231,3 +243,42 @@ def create_harmonized_csv(original_path: Path, changes: dict[int, dict[str, str]
         writer.writerows(rows)
 
     return harmonized_path
+
+
+def create_test_manifest_parquet(
+    output_path: Path,
+    rows: list[dict[str, Any]],
+) -> Path:
+    """why: create a test manifest.parquet file with the expected schema."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    schema = pa.schema([
+        ("job_id", pa.string()),
+        ("column_id", pa.int32()),
+        ("column_name", pa.string()),
+        ("to_harmonize", pa.string()),
+        ("top_harmonization", pa.string()),
+        ("ontology_id", pa.string()),
+        ("top_harmonizations", pa.list_(pa.string())),
+        ("confidence_score", pa.float32()),
+        ("error", pa.string()),
+        ("row_indices", pa.list_(pa.int64())),
+    ])
+
+    arrays = {
+        "job_id": [row.get("job_id", "test-job") for row in rows],
+        "column_id": [row.get("column_id", 0) for row in rows],
+        "column_name": [row.get("column_name", "") for row in rows],
+        "to_harmonize": [row.get("to_harmonize", "") for row in rows],
+        "top_harmonization": [row.get("top_harmonization", "") for row in rows],
+        "ontology_id": [row.get("ontology_id") for row in rows],
+        "top_harmonizations": [row.get("top_harmonizations", []) for row in rows],
+        "confidence_score": [row.get("confidence_score") for row in rows],
+        "error": [row.get("error") for row in rows],
+        "row_indices": [row.get("row_indices", []) for row in rows],
+    }
+
+    table = pa.table(arrays, schema=schema)
+    pq.write_table(table, output_path)
+    return output_path
