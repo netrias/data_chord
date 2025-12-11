@@ -17,6 +17,8 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from src.stage_1_upload.dependencies import get_upload_storage
+from src.stage_1_upload.manifest_reader import ManifestSummary, read_manifest_parquet
+from src.stage_1_upload.services import UploadStorage
 
 MODULE_DIR = Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"
@@ -62,6 +64,9 @@ class StageFiveSummaryResponse(BaseModel):
     column_summaries: list[ColumnSummary]
     ai_examples: list[ChangeExample]
     manual_examples: list[ChangeExample]
+    high_confidence_changes: int = 0
+    medium_confidence_changes: int = 0
+    low_confidence_changes: int = 0
 
 
 @stage_five_router.get("", response_class=HTMLResponse, name="stage_five_review_page")
@@ -81,8 +86,8 @@ async def render_stage_five(request: Request) -> HTMLResponse:
 
 @stage_five_router.post("/summary", response_model=StageFiveSummaryResponse, name="stage_five_summary")
 async def summarize_harmonized_results(payload: StageFiveSummaryRequest) -> StageFiveSummaryResponse:
-    'Load both CSVs and compute AI vs manual change statistics.'
-    storage = get_upload_storage()
+    """why: load both CSVs and compute AI vs manual change statistics."""
+    storage: UploadStorage = get_upload_storage()
     meta = storage.load(payload.file_id)
     if not meta:
         raise HTTPException(status_code=404, detail="Upload not found. Please rerun harmonization.")
@@ -93,11 +98,14 @@ async def summarize_harmonized_results(payload: StageFiveSummaryRequest) -> Stag
     if not effective_headers:
         raise HTTPException(status_code=400, detail="Unable to read harmonized dataset headers.")
 
+    manifest = _load_manifest_summary(storage, payload.file_id)
+
     return _summarize_differences(
         effective_headers,
         original_rows,
         harmonized_rows,
         payload.manual_columns,
+        manifest,
     )
 
 
@@ -131,8 +139,9 @@ def _summarize_differences(
     original_rows: list[dict[str, str]],
     harmonized_rows: list[dict[str, str]],
     manual_columns: list[str],
+    manifest: ManifestSummary | None,
 ) -> StageFiveSummaryResponse:
-    'Walk rows cell-by-cell to tally changes and collect examples.'
+    """why: walk rows cell-by-cell to tally changes and collect examples."""
     header_list = list(headers)
     total_rows = min(len(original_rows), len(harmonized_rows))
     manual_set = {column.strip().lower() for column in manual_columns if column}
@@ -185,6 +194,8 @@ def _summarize_differences(
     ai_changes = sum(summary.ai_changes for summary in column_summaries)
     manual_changes = sum(summary.manual_changes for summary in column_summaries)
 
+    high_confidence, medium_confidence, low_confidence = _extract_confidence_counts(manifest)
+
     return StageFiveSummaryResponse(
         total_rows=total_rows,
         columns_reviewed=len(header_list),
@@ -193,6 +204,28 @@ def _summarize_differences(
         column_summaries=column_summaries,
         ai_examples=ai_examples,
         manual_examples=manual_examples,
+        high_confidence_changes=high_confidence,
+        medium_confidence_changes=medium_confidence,
+        low_confidence_changes=low_confidence,
+    )
+
+
+def _load_manifest_summary(storage: UploadStorage, file_id: str) -> ManifestSummary | None:
+    """why: load the harmonization manifest for confidence metrics."""
+    manifest_path = storage.load_harmonization_manifest_path(file_id)
+    if manifest_path is None:
+        return None
+    return read_manifest_parquet(manifest_path)
+
+
+def _extract_confidence_counts(manifest: ManifestSummary | None) -> tuple[int, int, int]:
+    """why: extract confidence breakdown from manifest or return zeros."""
+    if manifest is None:
+        return (0, 0, 0)
+    return (
+        manifest.high_confidence_count,
+        manifest.medium_confidence_count,
+        manifest.low_confidence_count,
     )
 
 

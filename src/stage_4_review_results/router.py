@@ -15,6 +15,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from src.stage_1_upload.dependencies import get_upload_storage
+from src.stage_1_upload.manifest_reader import confidence_bucket, read_manifest_parquet
 from src.stage_1_upload.schemas import DEFAULT_TARGET_SCHEMA
 from src.stage_1_upload.services import UploadStorage
 
@@ -121,7 +122,8 @@ async def fetch_stage_four_rows(payload: StageFourResultsRequest) -> StageFourRe
     harmonized_path = _resolve_harmonized_path(meta.saved_path, payload.file_id)
     _, original_rows = _load_csv(meta.saved_path)
     _, harmonized_rows = _load_csv(harmonized_path)
-    rows = _build_rows(original_rows, harmonized_rows, payload.manual_columns)
+    manifest_lookup = _build_manifest_lookup(storage, payload.file_id)
+    rows = _build_rows(original_rows, harmonized_rows, payload.manual_columns, manifest_lookup)
     return StageFourResultsResponse(rows=rows)
 
 
@@ -151,10 +153,14 @@ def _load_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
     return headers, rows
 
 
+ManifestLookup = dict[tuple[str, str], float]
+
+
 def _build_rows(
     original_rows: list[dict[str, str]],
     harmonized_rows: list[dict[str, str]],
     manual_columns: list[str],
+    manifest_lookup: ManifestLookup,
 ) -> list[StageFourRow]:
     """why: generate grouped rows for Stage 4 review."""
     manual_set = {col.strip().lower() for col in manual_columns if col}
@@ -165,7 +171,7 @@ def _build_rows(
         original_row = original_rows[idx]
         harmonized_row = harmonized_rows[idx]
         record_id = harmonized_row.get("record_id") or original_row.get("record_id") or f"Row {idx + 1}"
-        cells = _build_cells_for_row(original_row, harmonized_row, manual_set)
+        cells = _build_cells_for_row(original_row, harmonized_row, manual_set, manifest_lookup)
         key = tuple((c.columnKey, c.originalValue or "", c.harmonizedValue or "") for c in cells)
 
         if key not in grouped:
@@ -188,20 +194,29 @@ def _build_cells_for_row(
     original_row: dict[str, str],
     harmonized_row: dict[str, str],
     manual_set: set[str],
+    manifest_lookup: ManifestLookup,
 ) -> list[StageFourCell]:
-    """why: create cell comparisons for a single row."""
+    """why: create cell comparisons for a single row using manifest confidence."""
     cells: list[StageFourCell] = []
 
     for col_def in _COLUMN_CONFIG:
         original_value = (original_row.get(col_def.key) or "").strip() or None
         harmonized_value = (harmonized_row.get(col_def.key) or "").strip() or None
         is_changed = (original_value or "") != (harmonized_value or "")
-        bucket = "low" if is_changed else "high"
         is_manual = col_def.key.lower() in manual_set and is_changed
+
         if is_manual:
             confidence = _MANUAL_OVERRIDE_CONFIDENCE
+            bucket = "low"
         else:
-            confidence = _HIGH_CONFIDENCE if bucket == "high" else _LOW_CONFIDENCE
+            lookup_key = (col_def.key, original_value or "")
+            manifest_confidence = manifest_lookup.get(lookup_key)
+            if manifest_confidence is not None:
+                confidence = manifest_confidence
+                bucket = confidence_bucket(confidence)
+            else:
+                bucket = "low" if is_changed else "high"
+                confidence = _HIGH_CONFIDENCE if bucket == "high" else _LOW_CONFIDENCE
 
         cells.append(
             StageFourCell(
@@ -226,6 +241,21 @@ def _summarize_record_ids(record_ids: list[str]) -> str:
     if len(filtered) == 1:
         return filtered[0]
     return f"{filtered[0]} + {len(filtered) - 1} more"
+
+
+def _build_manifest_lookup(storage: UploadStorage, file_id: str) -> ManifestLookup:
+    """why: create a confidence lookup from stored manifest."""
+    manifest_path = storage.load_harmonization_manifest_path(file_id)
+    if manifest_path is None:
+        return {}
+    manifest = read_manifest_parquet(manifest_path)
+    if manifest is None:
+        return {}
+    return {
+        (row.column_name, row.to_harmonize): row.confidence_score
+        for row in manifest.rows
+        if row.confidence_score is not None
+    }
 
 
 __all__ = ["stage_four_router", "STAGE_FOUR_STATIC_PATH"]
