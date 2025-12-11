@@ -1,3 +1,6 @@
+import StageThreeMetricsDashboard from './metrics/dashboard.js';
+import buildDashboardDataset from './metrics/manifest_adapter.js';
+
 const config = window.stageThreeConfig ?? {};
 const harmonizeEndpoint = config.harmonizeEndpoint ?? '/stage-3/harmonize';
 const storageKey = config.storageKey ?? 'stage3HarmonizePayload';
@@ -24,11 +27,33 @@ const progressIndicators = [
   document.querySelector('#loadingState .loading-pips'),
 ].filter(Boolean);
 
+const metricsDashboard = StageThreeMetricsDashboard.initFromDom();
+
 const state = {
   payload: null,
   requestBody: null,
   job: null,
   isProcessing: false,
+};
+
+// "why: keep dashboard orchestration isolated from the job rendering logic."
+const hideMetricsDashboard = () => {
+  if (metricsDashboard) {
+    metricsDashboard.hide();
+  }
+};
+
+// "why: expose a single call site for wiring harmonizer telemetry into the UI."
+const renderMetricsDashboard = (job) => {
+  if (!metricsDashboard) {
+    return;
+  }
+  const dataset = buildDashboardDataset({ job, payload: state.payload });
+  if (!dataset) {
+    metricsDashboard.hide();
+    return;
+  }
+  metricsDashboard.render(dataset);
 };
 
 const STAGE_ORDER = ['upload', 'mapping', 'harmonize', 'review', 'export'];
@@ -269,13 +294,16 @@ const renderJob = (job) => {
   toggleProgressIndicators(shouldShowLoader);
   clearError();
   if (isFailedStatus(normalized)) {
+    hideMetricsDashboard();
     showError(job.detail || 'Harmonization failed. Please retry.');
     reviewButton.disabled = true;
     retryButton.classList.remove('hidden');
   } else if (isCompleteStatus(normalized)) {
+    renderMetricsDashboard(job);
     reviewButton.disabled = false;
     retryButton.classList.add('hidden');
   } else {
+    hideMetricsDashboard();
     reviewButton.disabled = true;
     retryButton.classList.add('hidden');
   }
@@ -315,6 +343,7 @@ const startHarmonize = async (payloadOverride = null) => {
     toggleLoadingState(false);
     toggleEmptyState(true);
     hideJobMeta();
+    hideMetricsDashboard();
     return;
   }
 
@@ -322,6 +351,7 @@ const startHarmonize = async (payloadOverride = null) => {
   state.requestBody = payload;
 
   clearError();
+  hideMetricsDashboard();
   toggleEmptyState(false);
   toggleLoadingState(true);
   reviewButton.disabled = true;
@@ -356,6 +386,9 @@ const startHarmonize = async (payloadOverride = null) => {
 const hydrateFromStoredJob = () => {
   const job = readFromSession(jobStorageKey);
   if (job) {
+    if (!state.payload) {
+      extractRequestPayload();
+    }
     renderJob(job);
     return true;
   }

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Data Chord · Results Summary</title>
+    <link rel="stylesheet" href="{{ request.url_for('stage_one_static', path='stage_1_upload.css') }}" />
+    <link rel="stylesheet" href="{{ request.url_for('stage_five_static', path='stage_5_review.css') }}" />
+  </head>
+  <body>
+    <nav class="progress-tracker">
+      <ol class="progress-track">
+        <li class="step complete" data-stage="upload" data-url="{{ stage_one_url }}">
+          <span class="step-index">1</span>
+          <span class="step-label">Upload</span>
+        </li>
+        <li class="connector complete"></li>
+        <li class="step complete" data-stage="mapping" data-url="{{ stage_two_url }}">
+          <span class="step-index">2</span>
+          <span class="step-label">Mappings</span>
+        </li>
+        <li class="connector complete"></li>
+        <li class="step complete" data-stage="harmonize" data-url="{{ stage_three_url }}">
+          <span class="step-index">3</span>
+          <span class="step-label">Harmonize</span>
+        </li>
+        <li class="connector complete"></li>
+        <li class="step complete" data-stage="review" data-url="{{ stage_four_url }}">
+          <span class="step-index">4</span>
+          <span class="step-label">Review</span>
+        </li>
+        <li class="connector complete"></li>
+        <li class="step active" data-stage="export" data-url="{{ request.url_for('stage_five_review_page') }}">
+          <span class="step-index">5</span>
+          <span class="step-label">Results</span>
+        </li>
+      </ol>
+    </nav>
+
+    <main class="stage-shell stage-five-shell">
+      <div class="stage-nav">
+        <button class="nav-btn nav-back" type="button" data-nav-target="{{ stage_four_url }}">Back</button>
+        <button class="nav-btn nav-forward netrias-btn" type="button" data-nav-target="{{ stage_one_url }}">Start new harmonization</button>
+      </div>
+      <section class="stage-card summary-card">
+        <header class="stage-section-header summary-header">
+          <div>
+            <p class="stage-pill">Stage 5 · Results summary</p>
+            <h2>Review harmonization outcomes</h2>
+            <p class="stage-subtitle">Review the harmonization outcome and grab a consolidated export.</p>
+          </div>
+          <div class="download-actions">
+            <button id="downloadResults" class="netrias-btn" type="button">Download</button>
+          </div>
+        </header>
+        <p id="summaryError" class="stage-error hidden"></p>
+        <div class="metric-grid" id="summaryMetricGrid"></div>
+      </section>
+
+      <section class="stage-card insight-card">
+        <header class="stage-section-header">
+          <div>
+            <h3>Change mix</h3>
+            <p class="stage-subtitle">Understand which columns relied most on AI vs manual overrides.</p>
+          </div>
+          <div class="insight-tags" id="insightTags"></div>
+        </header>
+        <div class="change-table" role="table" aria-live="polite">
+          <div class="change-table-header" role="row">
+            <span>Column</span>
+            <span>AI updates</span>
+            <span>Manual overrides</span>
+            <span>Reviewed rows</span>
+          </div>
+          <div id="changeTableBody"></div>
+        </div>
+      </section>
+
+      <section class="stage-card recap-card">
+        <header class="stage-section-header">
+          <div>
+            <h3>Next steps</h3>
+            <p class="stage-subtitle">Share results or revisit earlier stages if additional adjustments are needed.</p>
+          </div>
+        </header>
+        <div class="recap-grid">
+          <article class="recap-item">
+            <h4>Start new harmonization</h4>
+            <p>Ready for the next file? Restart the workflow from Stage 1 with a fresh upload.</p>
+            <button class="ghost-btn" type="button" id="startNewButton">Start over</button>
+          </article>
+        </div>
+      </section>
+    </main>
+    <aside id="changeModal" class="stage-modal hidden" role="dialog" aria-modal="true">
+      <div class="stage-modal-card">
+        <header>
+          <h3 id="changeModalTitle">Adjusted values</h3>
+          <button id="closeChangeModal" type="button" aria-label="Close">×</button>
+        </header>
+        <div id="changeModalBody" class="modal-list"></div>
+      </div>
+    </aside>
+
+    <script>
+      window.stageFiveConfig = {
+        stageOneUrl: "{{ stage_one_url }}",
+        stageFourUrl: "{{ stage_four_url }}",
+        stageThreePayloadKey: "{{ stage_three_payload_key }}",
+        summaryEndpoint: "{{ summary_endpoint }}",
+      };
+    </script>
+    <script>
+      document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('.step[data-url]').forEach(step => {
+          step.addEventListener('click', () => {
+            const url = step.dataset.url;
+            if (url) window.location.href = url;
+          });
+        });
+      });
+    </script>
+    <script type="module" src="{{ request.url_for('stage_five_static', path='stage_5_review.js') }}?v=20250216"></script>
+  </body>
+</html>

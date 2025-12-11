@@ -124,3 +124,125 @@
     transform: scale(1);
   }
 }
+
+.metrics-card {
+  margin-top: 1.5rem;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1.5rem;
+  margin-top: 1rem;
+}
+
+.metric-widget {
+  border: 1px solid #e2e8f0;
+  border-radius: 1rem;
+  padding: 1.25rem;
+  background-color: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 180px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.metric-widget__title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #0f172a;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.metric-widget__value {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.metric-widget__subtitle {
+  color: #475569;
+  font-size: 0.9rem;
+}
+
+.metric-widget__pill {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background-color: #eef2ff;
+  color: #4338ca;
+}
+
+.metric-split {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.metric-progress {
+  height: 10px;
+  border-radius: 999px;
+  background-color: #e2e8f0;
+  overflow: hidden;
+}
+
+.metric-progress__fill {
+  height: 100%;
+  border-radius: inherit;
+  transition: width 0.3s ease;
+}
+
+.metric-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.metric-chart__row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.metric-chart__label {
+  flex: 0 0 120px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.metric-chart__bar {
+  flex: 1;
+  height: 12px;
+  border-radius: 999px;
+  background-color: #e2e8f0;
+  position: relative;
+}
+
+.metric-chart__bar-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.metric-chart__value {
+  font-weight: 600;
+  color: #0f172a;
+  min-width: 3rem;
+  text-align: right;
+}
+
+.metric-note {
+  font-size: 0.8rem;
+  color: #9a3412;
+  background-color: #fffbeb;
+  border: 1px solid #fed7aa;
+  border-radius: 0.75rem;
+  padding: 0.5rem 0.75rem;
+}

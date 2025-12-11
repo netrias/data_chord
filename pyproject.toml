@@ -9,7 +9,7 @@ dependencies = [
     "jinja2>=3.1.4",
     "python-multipart>=0.0.9",
     "uvicorn[standard]>=0.30.0",
-    "netrias-client==0.0.5",
+    "netrias-client==0.0.8",
     "python-dotenv"
 ]
 
