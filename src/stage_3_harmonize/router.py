@@ -12,11 +12,14 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from src.stage_1_upload.dependencies import get_harmonize_service, get_upload_storage
+from src.stage_1_upload.manifest_reader import ManifestSummary, read_manifest_parquet
 from src.stage_1_upload.schemas import (
     DEFAULT_TARGET_SCHEMA,
     HarmonizeRequest,
     HarmonizeResponse,
     ManifestPayload,
+    ManifestRowSchema,
+    ManifestSummarySchema,
 )
 
 MODULE_DIR = Path(__file__).parent
@@ -68,6 +71,9 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
         "Harmonization job dispatched",
         extra={"file_id": payload.file_id, "job_id": result.job_id, "status": result.status},
     )
+
+    manifest_summary = _read_and_store_manifest(payload.file_id, result.manifest_path)
+
     next_stage_url = f"/stage-4?job_id={result.job_id}&status={result.status}&detail={result.detail}"
     return HarmonizeResponse(
         job_id=result.job_id,
@@ -75,6 +81,45 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
         detail=result.detail,
         next_stage_url=next_stage_url,
         job_id_available=result.job_id_available,
+        manifest_summary=manifest_summary,
+    )
+
+
+MANIFEST_PREVIEW_LIMIT: int = 100
+
+
+def _read_and_store_manifest(file_id: str, manifest_path: Path | None) -> ManifestSummarySchema | None:
+    """why: read manifest parquet and store for later stages."""
+    if manifest_path is None or not manifest_path.exists():
+        return None
+
+    manifest_data = read_manifest_parquet(manifest_path)
+    if manifest_data is None:
+        return None
+
+    _ = _storage.save_harmonization_manifest(file_id, manifest_path)
+    return _convert_to_schema(manifest_data)
+
+
+def _convert_to_schema(manifest: ManifestSummary) -> ManifestSummarySchema:
+    """why: transform internal manifest data into API response schema."""
+    preview_rows = [
+        ManifestRowSchema(
+            column_name=row.column_name,
+            to_harmonize=row.to_harmonize,
+            top_harmonization=row.top_harmonization,
+            confidence_score=row.confidence_score,
+            row_indices=row.row_indices,
+        )
+        for row in manifest.rows[:MANIFEST_PREVIEW_LIMIT]
+    ]
+    return ManifestSummarySchema(
+        total_terms=manifest.total_terms,
+        changed_terms=manifest.changed_terms,
+        high_confidence_count=manifest.high_confidence_count,
+        medium_confidence_count=manifest.medium_confidence_count,
+        low_confidence_count=manifest.low_confidence_count,
+        preview_rows=preview_rows,
     )
 
 

@@ -173,7 +173,6 @@ class UploadStorage:
 
     def load_manifest(self, file_id: str) -> Mapping[str, object] | None:
         """why: retrieve a previously stored manifest."""
-
         path = self._manifest_dir / f"{file_id}.json"
         if not path.exists():
             return None
@@ -182,6 +181,20 @@ class UploadStorage:
         except json.JSONDecodeError:
             logger.warning("Manifest file corrupt", extra={"file_id": file_id, "path": str(path)})
             return None
+
+    def save_harmonization_manifest(self, file_id: str, manifest_path: Path) -> Path:
+        """why: copy the parquet manifest to storage for cross-stage access."""
+        import shutil
+
+        destination = self._manifest_dir / f"{file_id}_harmonization.parquet"
+        shutil.copy2(manifest_path, destination)
+        logger.info("Stored harmonization manifest", extra={"file_id": file_id, "path": str(destination)})
+        return destination
+
+    def load_harmonization_manifest_path(self, file_id: str) -> Path | None:
+        """why: retrieve the stored harmonization manifest path."""
+        path = self._manifest_dir / f"{file_id}_harmonization.parquet"
+        return path if path.exists() else None
 
     def _validate_upload(self, suffix: str, content_type: str) -> None:
         """why: guard against unsupported file types."""
