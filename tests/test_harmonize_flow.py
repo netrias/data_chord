@@ -8,21 +8,7 @@ from unittest.mock import MagicMock, patch
 from httpx import AsyncClient
 
 from src.stage_1_upload.harmonize import _normalize_target_name
-
-
-async def _upload_and_analyze(client: AsyncClient, csv_path: Path) -> str:
-    """why: helper to upload and analyze a file, returning file_id."""
-    upload_response = await client.post(
-        "/stage-1/upload",
-        files={"file": (csv_path.name, csv_path.read_bytes(), "text/csv")},
-    )
-    file_id = upload_response.json()["file_id"]
-
-    await client.post(
-        "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": "CCDI"},
-    )
-    return file_id
+from tests.conftest import TEST_TARGET_SCHEMA, upload_and_analyze
 
 
 async def test_harmonize_returns_job_id(
@@ -32,14 +18,14 @@ async def test_harmonize_returns_job_id(
     """Harmonize endpoint returns a job_id for tracking."""
 
     # Given
-    file_id = await _upload_and_analyze(app_client, sample_csv_path)
+    file_id = await upload_and_analyze(app_client, sample_csv_path)
 
     # When
     response = await app_client.post(
         "/stage-3/harmonize",
         json={
             "file_id": file_id,
-            "target_schema": "CCDI",
+            "target_schema": TEST_TARGET_SCHEMA,
             "manual_overrides": {},
         },
     )
@@ -58,14 +44,14 @@ async def test_harmonize_returns_status(
     """Harmonize endpoint returns execution status."""
 
     # Given
-    file_id = await _upload_and_analyze(app_client, sample_csv_path)
+    file_id = await upload_and_analyze(app_client, sample_csv_path)
 
     # When
     response = await app_client.post(
         "/stage-3/harmonize",
         json={
             "file_id": file_id,
-            "target_schema": "CCDI",
+            "target_schema": TEST_TARGET_SCHEMA,
             "manual_overrides": {},
         },
     )
@@ -84,7 +70,7 @@ async def test_harmonize_with_manual_overrides(
     """Manual overrides are passed to the harmonize service."""
 
     # Given
-    file_id = await _upload_and_analyze(app_client, sample_csv_path)
+    file_id = await upload_and_analyze(app_client, sample_csv_path)
     overrides = {"primary_diagnosis": "primary_diagnosis"}
 
     # When
@@ -92,7 +78,7 @@ async def test_harmonize_with_manual_overrides(
         "/stage-3/harmonize",
         json={
             "file_id": file_id,
-            "target_schema": "CCDI",
+            "target_schema": TEST_TARGET_SCHEMA,
             "manual_overrides": overrides,
         },
     )
@@ -112,7 +98,7 @@ async def test_harmonize_file_not_found(app_client: AsyncClient) -> None:
         "/stage-3/harmonize",
         json={
             "file_id": invalid_file_id,
-            "target_schema": "CCDI",
+            "target_schema": TEST_TARGET_SCHEMA,
             "manual_overrides": {},
         },
     )
@@ -128,14 +114,14 @@ async def test_harmonize_returns_next_stage_url(
     """Harmonize response includes URL for next stage."""
 
     # Given
-    file_id = await _upload_and_analyze(app_client, sample_csv_path)
+    file_id = await upload_and_analyze(app_client, sample_csv_path)
 
     # When
     response = await app_client.post(
         "/stage-3/harmonize",
         json={
             "file_id": file_id,
-            "target_schema": "CCDI",
+            "target_schema": TEST_TARGET_SCHEMA,
             "manual_overrides": {},
         },
     )
@@ -227,7 +213,7 @@ async def test_harmonize_without_client_returns_stubbed_job(
     """When Netrias client is unavailable, return a stubbed job."""
 
     # Given
-    _ = await _upload_and_analyze(app_client, sample_csv_path)
+    _ = await upload_and_analyze(app_client, sample_csv_path)
 
     with patch("src.stage_1_upload.harmonize.HarmonizeService._build_client", return_value=None):
         from src.stage_1_upload.harmonize import HarmonizeService
@@ -238,7 +224,7 @@ async def test_harmonize_without_client_returns_stubbed_job(
         # When
         result = service.run(
             file_path=Path("/tmp/test.csv"),
-            target_schema="CCDI",
+            target_schema=TEST_TARGET_SCHEMA,
             manual_overrides={},
             manifest=None,
         )

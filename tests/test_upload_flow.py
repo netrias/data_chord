@@ -45,9 +45,10 @@ async def test_unsupported_file_type_rejected(app_client: AsyncClient) -> None:
     xlsx_content = b"fake xlsx content"
 
     # When
+    xlsx_mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     response = await app_client.post(
         "/stage-1/upload",
-        files={"file": ("test.xlsx", xlsx_content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        files={"file": ("test.xlsx", xlsx_content, xlsx_mime)},
     )
 
     # Then

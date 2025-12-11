@@ -2,43 +2,19 @@
 
 from __future__ import annotations
 
-import csv
 from pathlib import Path
 
 from httpx import AsyncClient
 
 from src.stage_1_upload.services import UploadStorage
 from src.stage_5_review_summary.router import _summarize_differences
-
-
-def _create_harmonized_csv(original_path: Path, changes: dict[int, dict[str, str]]) -> Path:
-    """why: create a .harmonized.csv alongside the original with specified changes."""
-
-    with original_path.open("r", newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        rows = list(reader)
-        headers = reader.fieldnames or []
-
-    for row_idx, column_changes in changes.items():
-        if row_idx < len(rows):
-            rows[row_idx].update(column_changes)
-
-    harmonized_path = original_path.with_name(f"{original_path.stem}.harmonized.csv")
-    with harmonized_path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=headers)
-        writer.writeheader()
-        writer.writerows(rows)
-
-    return harmonized_path
-
-
-async def _upload_file(client: AsyncClient, csv_path: Path) -> str:
-    """why: helper to upload a file and return its file_id."""
-    response = await client.post(
-        "/stage-1/upload",
-        files={"file": (csv_path.name, csv_path.read_bytes(), "text/csv")},
-    )
-    return response.json()["file_id"]
+from tests.conftest import (
+    MAX_EXAMPLES_LIMIT,
+    SAMPLE_CSV_COLUMN_COUNT,
+    SAMPLE_CSV_ROW_COUNT,
+    create_harmonized_csv,
+    upload_file,
+)
 
 
 async def test_summary_counts_ai_changes(
@@ -49,10 +25,10 @@ async def test_summary_counts_ai_changes(
     """Summary correctly counts AI-made changes."""
 
     # Given
-    file_id = await _upload_file(app_client, sample_csv_path)
+    file_id = await upload_file(app_client, sample_csv_path)
     meta = temp_storage.load(file_id)
     assert meta is not None
-    _create_harmonized_csv(meta.saved_path, {
+    create_harmonized_csv(meta.saved_path, {
         0: {"primary_diagnosis": "AI_CHANGE_1"},
         1: {"primary_diagnosis": "AI_CHANGE_2"},
     })
@@ -77,10 +53,10 @@ async def test_summary_counts_manual_changes(
     """Summary correctly counts manual changes when specified."""
 
     # Given
-    file_id = await _upload_file(app_client, sample_csv_path)
+    file_id = await upload_file(app_client, sample_csv_path)
     meta = temp_storage.load(file_id)
     assert meta is not None
-    _create_harmonized_csv(meta.saved_path, {
+    create_harmonized_csv(meta.saved_path, {
         0: {"therapeutic_agents": "MANUAL_1"},
         1: {"therapeutic_agents": "MANUAL_2"},
         2: {"therapeutic_agents": "MANUAL_3"},
@@ -105,10 +81,10 @@ async def test_summary_returns_column_summaries(
     """Summary includes per-column breakdown."""
 
     # Given
-    file_id = await _upload_file(app_client, sample_csv_path)
+    file_id = await upload_file(app_client, sample_csv_path)
     meta = temp_storage.load(file_id)
     assert meta is not None
-    _create_harmonized_csv(meta.saved_path, {})
+    create_harmonized_csv(meta.saved_path, {})
 
     # When
     response = await app_client.post(
@@ -135,11 +111,11 @@ async def test_summary_limits_examples_to_20(
     """AI and manual examples are limited to 20 each."""
 
     # Given
-    file_id = await _upload_file(app_client, sample_csv_path)
+    file_id = await upload_file(app_client, sample_csv_path)
     meta = temp_storage.load(file_id)
     assert meta is not None
     changes = {i: {"primary_diagnosis": f"CHANGE_{i}"} for i in range(10)}
-    _create_harmonized_csv(meta.saved_path, changes)
+    create_harmonized_csv(meta.saved_path, changes)
 
     # When
     response = await app_client.post(
@@ -149,8 +125,8 @@ async def test_summary_limits_examples_to_20(
 
     # Then
     data = response.json()
-    assert len(data["ai_examples"]) <= 20
-    assert len(data["manual_examples"]) <= 20
+    assert len(data["ai_examples"]) <= MAX_EXAMPLES_LIMIT
+    assert len(data["manual_examples"]) <= MAX_EXAMPLES_LIMIT
 
 
 async def test_summary_file_not_found_returns_404(app_client: AsyncClient) -> None:
@@ -176,7 +152,7 @@ async def test_summary_harmonized_missing_returns_404(
     """Request without harmonized file returns 404."""
 
     # Given
-    file_id = await _upload_file(app_client, sample_csv_path)
+    file_id = await upload_file(app_client, sample_csv_path)
 
     # When
     response = await app_client.post(
@@ -196,10 +172,10 @@ async def test_summary_returns_total_rows(
     """Summary includes total row count."""
 
     # Given
-    file_id = await _upload_file(app_client, sample_csv_path)
+    file_id = await upload_file(app_client, sample_csv_path)
     meta = temp_storage.load(file_id)
     assert meta is not None
-    _create_harmonized_csv(meta.saved_path, {})
+    create_harmonized_csv(meta.saved_path, {})
 
     # When
     response = await app_client.post(
@@ -209,7 +185,7 @@ async def test_summary_returns_total_rows(
 
     # Then
     data = response.json()
-    assert data["total_rows"] == 10
+    assert data["total_rows"] == SAMPLE_CSV_ROW_COUNT
 
 
 async def test_summary_returns_columns_reviewed_count(
@@ -220,10 +196,10 @@ async def test_summary_returns_columns_reviewed_count(
     """Summary includes count of columns reviewed."""
 
     # Given
-    file_id = await _upload_file(app_client, sample_csv_path)
+    file_id = await upload_file(app_client, sample_csv_path)
     meta = temp_storage.load(file_id)
     assert meta is not None
-    _create_harmonized_csv(meta.saved_path, {})
+    create_harmonized_csv(meta.saved_path, {})
 
     # When
     response = await app_client.post(
@@ -233,7 +209,7 @@ async def test_summary_returns_columns_reviewed_count(
 
     # Then
     data = response.json()
-    assert data["columns_reviewed"] == 6
+    assert data["columns_reviewed"] == SAMPLE_CSV_COLUMN_COUNT
 
 
 def test_summarize_differences_unchanged_rows() -> None:

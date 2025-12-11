@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 from collections.abc import AsyncGenerator, Generator
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,15 @@ from httpx import ASGITransport, AsyncClient
 from src.stage_1_upload.services import UploadConstraints, UploadStorage
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+# Test constants
+TEST_CSV_CONTENT_TYPE = "text/csv"
+TEST_TARGET_SCHEMA = "CCDI"
+HARMONIZED_SUFFIX = ".harmonized.csv"
+SAMPLE_CSV_ROW_COUNT = 10
+SAMPLE_CSV_COLUMN_COUNT = 6
+MAX_EXAMPLES_LIMIT = 20
+MANUAL_COLUMN_CONFIDENCE = 0.2
 
 
 @dataclass
@@ -55,7 +65,7 @@ def test_constraints() -> UploadConstraints:
     """why: provide smaller limits for faster test execution."""
     return UploadConstraints(
         allowed_suffixes=(".csv",),
-        allowed_content_types=("text/csv", "application/csv", "application/vnd.ms-excel"),
+        allowed_content_types=(TEST_CSV_CONTENT_TYPE, "application/csv", "application/vnd.ms-excel"),
         max_bytes=25 * 1024 * 1024,
     )
 
@@ -67,7 +77,7 @@ def temp_storage(tmp_path: Path, test_constraints: UploadConstraints) -> UploadS
 
 
 @pytest.fixture
-def mock_netrias_client() -> Generator[MagicMock, None, None]:
+def mock_netrias_client() -> Generator[MagicMock]:
     """why: avoid real network calls and control mapping responses."""
     mock_client = MagicMock()
 
@@ -128,19 +138,11 @@ def with_nulls_csv_path() -> Path:
     return FIXTURES_DIR / "with_nulls.csv"
 
 
-def _patch_storage(storage: UploadStorage) -> Generator[None, None, None]:
-    """why: replace global storage singleton with test instance."""
-    with patch("src.stage_1_upload.dependencies._storage", storage):
-        with patch("src.stage_1_upload.router._storage", storage):
-            with patch("src.stage_1_upload.dependencies.get_upload_storage", return_value=storage):
-                yield
-
-
 @pytest.fixture
 async def app_client(
     temp_storage: UploadStorage,
     mock_netrias_client: MagicMock,
-) -> AsyncGenerator[AsyncClient, None]:
+) -> AsyncGenerator[AsyncClient]:
     """why: provide an async HTTP client for testing the full API."""
     import src.stage_1_upload.dependencies as deps_module
     import src.stage_1_upload.router as router_module
@@ -181,3 +183,51 @@ def create_csv_content(rows: list[list[str]]) -> bytes:
     """why: dynamically generate CSV content for specific test scenarios."""
     lines = [",".join(row) for row in rows]
     return "\n".join(lines).encode("utf-8")
+
+
+async def upload_file(client: AsyncClient, csv_path: Path) -> str:
+    """why: upload a file and return its file_id for use in subsequent test steps."""
+    response = await client.post(
+        "/stage-1/upload",
+        files={"file": (csv_path.name, csv_path.read_bytes(), TEST_CSV_CONTENT_TYPE)},
+    )
+    return response.json()["file_id"]
+
+
+async def upload_content(client: AsyncClient, content: bytes, filename: str = "test.csv") -> str:
+    """why: upload raw content and return its file_id for dynamic test scenarios."""
+    response = await client.post(
+        "/stage-1/upload",
+        files={"file": (filename, content, TEST_CSV_CONTENT_TYPE)},
+    )
+    return response.json()["file_id"]
+
+
+async def upload_and_analyze(client: AsyncClient, csv_path: Path) -> str:
+    """why: upload and analyze a file, returning file_id for harmonization tests."""
+    file_id = await upload_file(client, csv_path)
+    await client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
+    )
+    return file_id
+
+
+def create_harmonized_csv(original_path: Path, changes: dict[int, dict[str, str]]) -> Path:
+    """why: create a .harmonized.csv alongside the original with specified changes."""
+    with original_path.open("r", newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+        headers = reader.fieldnames or []
+
+    for row_idx, column_changes in changes.items():
+        if row_idx < len(rows):
+            rows[row_idx].update(column_changes)
+
+    harmonized_path = original_path.with_name(f"{original_path.stem}{HARMONIZED_SUFFIX}")
+    with harmonized_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    return harmonized_path

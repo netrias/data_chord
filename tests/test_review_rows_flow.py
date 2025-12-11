@@ -8,37 +8,7 @@ from httpx import AsyncClient
 
 from src.stage_1_upload.services import UploadStorage
 from src.stage_4_review_results.router import _build_rows, _summarize_record_ids
-
-
-def _create_harmonized_csv(original_path: Path, changes: dict[int, dict[str, str]]) -> Path:
-    """why: create a .harmonized.csv alongside the original with specified changes."""
-    import csv
-
-    with original_path.open("r", newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        rows = list(reader)
-        headers = reader.fieldnames or []
-
-    for row_idx, column_changes in changes.items():
-        if row_idx < len(rows):
-            rows[row_idx].update(column_changes)
-
-    harmonized_path = original_path.with_name(f"{original_path.stem}.harmonized.csv")
-    with harmonized_path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=headers)
-        writer.writeheader()
-        writer.writerows(rows)
-
-    return harmonized_path
-
-
-async def _upload_file(client: AsyncClient, csv_path: Path) -> str:
-    """why: helper to upload a file and return its file_id."""
-    response = await client.post(
-        "/stage-1/upload",
-        files={"file": (csv_path.name, csv_path.read_bytes(), "text/csv")},
-    )
-    return response.json()["file_id"]
+from tests.conftest import MANUAL_COLUMN_CONFIDENCE, create_harmonized_csv, upload_file
 
 
 async def test_rows_returned_with_harmonized_file(
@@ -49,10 +19,10 @@ async def test_rows_returned_with_harmonized_file(
     """Stage 4 returns rows when harmonized file exists."""
 
     # Given
-    file_id = await _upload_file(app_client, sample_csv_path)
+    file_id = await upload_file(app_client, sample_csv_path)
     meta = temp_storage.load(file_id)
     assert meta is not None
-    _create_harmonized_csv(meta.saved_path, {})
+    create_harmonized_csv(meta.saved_path, {})
 
     # When
     response = await app_client.post(
@@ -75,10 +45,10 @@ async def test_unchanged_row_has_high_confidence(
     """Rows with no changes have 'high' confidence bucket."""
 
     # Given
-    file_id = await _upload_file(app_client, sample_csv_path)
+    file_id = await upload_file(app_client, sample_csv_path)
     meta = temp_storage.load(file_id)
     assert meta is not None
-    _create_harmonized_csv(meta.saved_path, {})
+    create_harmonized_csv(meta.saved_path, {})
 
     # When
     response = await app_client.post(
@@ -102,10 +72,10 @@ async def test_changed_row_has_low_confidence(
     """Rows with changes have 'low' confidence bucket."""
 
     # Given
-    file_id = await _upload_file(app_client, sample_csv_path)
+    file_id = await upload_file(app_client, sample_csv_path)
     meta = temp_storage.load(file_id)
     assert meta is not None
-    _create_harmonized_csv(meta.saved_path, {0: {"primary_diagnosis": "CHANGED_VALUE"}})
+    create_harmonized_csv(meta.saved_path, {0: {"primary_diagnosis": "CHANGED_VALUE"}})
 
     # When
     response = await app_client.post(
@@ -132,10 +102,10 @@ async def test_manual_column_gets_lower_confidence(
     """Changed cells in manual columns get confidence 0.2."""
 
     # Given
-    file_id = await _upload_file(app_client, sample_csv_path)
+    file_id = await upload_file(app_client, sample_csv_path)
     meta = temp_storage.load(file_id)
     assert meta is not None
-    _create_harmonized_csv(meta.saved_path, {0: {"primary_diagnosis": "MANUAL_CHANGE"}})
+    create_harmonized_csv(meta.saved_path, {0: {"primary_diagnosis": "MANUAL_CHANGE"}})
 
     # When
     response = await app_client.post(
@@ -149,7 +119,7 @@ async def test_manual_column_gets_lower_confidence(
     for row in data["rows"]:
         for cell in row["cells"]:
             if cell["columnKey"] == "primary_diagnosis" and cell["isChanged"]:
-                assert cell["confidence"] == 0.2
+                assert cell["confidence"] == MANUAL_COLUMN_CONFIDENCE
                 found_manual = True
     assert found_manual
 
@@ -177,7 +147,7 @@ async def test_harmonized_missing_returns_404(
     """Request without harmonized file returns 404."""
 
     # Given
-    file_id = await _upload_file(app_client, sample_csv_path)
+    file_id = await upload_file(app_client, sample_csv_path)
 
     # When
     response = await app_client.post(
@@ -233,13 +203,20 @@ def test_build_rows_groups_identical_rows() -> None:
     """Identical rows are grouped together."""
 
     # Given
+    row_base = {
+        "therapeutic_agents": "Aspirin",
+        "primary_diagnosis": "Cancer",
+        "morphology": "A",
+        "tissue_or_organ_of_origin": "Lung",
+        "sample_anatomic_site": "Left",
+    }
     original_rows = [
-        {"record_id": "R001", "therapeutic_agents": "Aspirin", "primary_diagnosis": "Cancer", "morphology": "A", "tissue_or_organ_of_origin": "Lung", "sample_anatomic_site": "Left"},
-        {"record_id": "R002", "therapeutic_agents": "Aspirin", "primary_diagnosis": "Cancer", "morphology": "A", "tissue_or_organ_of_origin": "Lung", "sample_anatomic_site": "Left"},
+        {"record_id": "R001", **row_base},
+        {"record_id": "R002", **row_base},
     ]
     harmonized_rows = [
-        {"record_id": "R001", "therapeutic_agents": "Aspirin", "primary_diagnosis": "Cancer", "morphology": "A", "tissue_or_organ_of_origin": "Lung", "sample_anatomic_site": "Left"},
-        {"record_id": "R002", "therapeutic_agents": "Aspirin", "primary_diagnosis": "Cancer", "morphology": "A", "tissue_or_organ_of_origin": "Lung", "sample_anatomic_site": "Left"},
+        {"record_id": "R001", **row_base},
+        {"record_id": "R002", **row_base},
     ]
 
     # When
@@ -254,12 +231,16 @@ def test_build_rows_preserves_source_row_number() -> None:
     """Built rows include the source row number."""
 
     # Given
-    original_rows = [
-        {"record_id": "R001", "therapeutic_agents": "A", "primary_diagnosis": "B", "morphology": "C", "tissue_or_organ_of_origin": "D", "sample_anatomic_site": "E"},
-    ]
-    harmonized_rows = [
-        {"record_id": "R001", "therapeutic_agents": "A", "primary_diagnosis": "B", "morphology": "C", "tissue_or_organ_of_origin": "D", "sample_anatomic_site": "E"},
-    ]
+    row_data = {
+        "record_id": "R001",
+        "therapeutic_agents": "A",
+        "primary_diagnosis": "B",
+        "morphology": "C",
+        "tissue_or_organ_of_origin": "D",
+        "sample_anatomic_site": "E",
+    }
+    original_rows = [row_data]
+    harmonized_rows = [row_data]
 
     # When
     rows = _build_rows(original_rows, harmonized_rows, [])
