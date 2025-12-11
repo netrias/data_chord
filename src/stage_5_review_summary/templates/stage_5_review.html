@@ -63,14 +63,17 @@
             <h3>Change mix</h3>
             <p class="stage-subtitle">Understand which columns relied most on AI vs manual overrides.</p>
           </div>
-          <div class="insight-tags" id="insightTags"></div>
+          <div class="insight-header-actions">
+            <button id="filterChangesToggle" class="filter-toggle-btn" type="button">Show changed only</button>
+            <div class="insight-tags" id="insightTags"></div>
+          </div>
         </header>
         <div class="change-table" role="table" aria-live="polite">
           <div class="change-table-header" role="row">
-            <span>Column</span>
-            <span>AI updates</span>
-            <span>Manual overrides</span>
-            <span>Reviewed rows</span>
+            <span class="sortable-header" data-sort-key="column">Column</span>
+            <span class="sortable-header" data-sort-key="ai_changes">AI updates</span>
+            <span class="sortable-header" data-sort-key="manual_changes">Manual overrides</span>
+            <span class="sortable-header" data-sort-key="reviewed">Reviewed rows</span>
           </div>
           <div id="changeTableBody"></div>
         </div>
