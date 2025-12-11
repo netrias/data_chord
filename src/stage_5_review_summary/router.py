@@ -1,11 +1,15 @@
-"""Serve Stage 5 results reflection routes."""
+"""
+Serve the Stage 5 harmonization summary UI and compute change metrics.
+
+Compare original vs harmonized CSVs to show AI and manual change statistics.
+"""
 
 from __future__ import annotations
 
 from collections import defaultdict
 from csv import DictReader
 from pathlib import Path
-from typing import Iterable
+from collections.abc import Iterable
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -13,7 +17,6 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from src.stage_1_upload.dependencies import get_upload_storage
-from src.stage_1_upload.services import UploadStorage
 
 MODULE_DIR = Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"
@@ -25,11 +28,15 @@ stage_five_router = APIRouter(prefix="/stage-5", tags=["Stage 5 Review Results"]
 
 
 class StageFiveSummaryRequest(BaseModel):
+    """Identify which file to summarize and which columns had manual edits."""
+
     file_id: str
     manual_columns: list[str] = []
 
 
 class ColumnSummary(BaseModel):
+    """Per-column breakdown of AI vs manual vs unchanged cell counts."""
+
     column: str
     ai_changes: int
     manual_changes: int
@@ -37,6 +44,8 @@ class ColumnSummary(BaseModel):
 
 
 class ChangeExample(BaseModel):
+    """Single cell change with before/after values for display."""
+
     row_index: int
     column: str
     original: str | None
@@ -44,6 +53,8 @@ class ChangeExample(BaseModel):
 
 
 class StageFiveSummaryResponse(BaseModel):
+    """Aggregate change statistics returned to the Stage 5 UI."""
+
     total_rows: int
     columns_reviewed: int
     ai_changes: int
@@ -55,8 +66,7 @@ class StageFiveSummaryResponse(BaseModel):
 
 @stage_five_router.get("", response_class=HTMLResponse, name="stage_five_review_page")
 async def render_stage_five(request: Request) -> HTMLResponse:
-    """why: serve the harmonization results reflection UI."""
-
+    'Serve the harmonization results reflection UI.'
     context = {
         "request": request,
         "stage_one_url": request.url_for("stage_one_upload_page"),
@@ -71,7 +81,8 @@ async def render_stage_five(request: Request) -> HTMLResponse:
 
 @stage_five_router.post("/summary", response_model=StageFiveSummaryResponse, name="stage_five_summary")
 async def summarize_harmonized_results(payload: StageFiveSummaryRequest) -> StageFiveSummaryResponse:
-    storage: UploadStorage = get_upload_storage()
+    'Load both CSVs and compute AI vs manual change statistics.'
+    storage = get_upload_storage()
     meta = storage.load(payload.file_id)
     if not meta:
         raise HTTPException(status_code=404, detail="Upload not found. Please rerun harmonization.")
@@ -91,6 +102,7 @@ async def summarize_harmonized_results(payload: StageFiveSummaryRequest) -> Stag
 
 
 def _resolve_harmonized_path(original_path: Path, file_id: str) -> Path:
+    'Find the harmonized output file using naming conventions.'
     candidate = original_path.with_name(f"{original_path.stem}.harmonized.csv")
     if candidate.exists():
         return candidate
@@ -104,12 +116,13 @@ def _resolve_harmonized_path(original_path: Path, file_id: str) -> Path:
 
 
 def _load_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
+    'Read CSV into headers list and row dictionaries.'
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Dataset missing: {path.name}")
     with path.open(encoding="utf-8", newline="") as handle:
         reader = DictReader(handle)
-        rows = [row for row in reader]
-        headers = reader.fieldnames or []
+        rows = list(reader)
+        headers = list(reader.fieldnames) if reader.fieldnames else []
     return headers, rows
 
 
@@ -119,10 +132,11 @@ def _summarize_differences(
     harmonized_rows: list[dict[str, str]],
     manual_columns: list[str],
 ) -> StageFiveSummaryResponse:
+    'Walk rows cell-by-cell to tally changes and collect examples.'
     header_list = list(headers)
     total_rows = min(len(original_rows), len(harmonized_rows))
     manual_set = {column.strip().lower() for column in manual_columns if column}
-    stats = {column: defaultdict(int) for column in header_list}
+    stats: dict[str, defaultdict[str, int]] = {column: defaultdict(int) for column in header_list}
     ai_examples: list[ChangeExample] = []
     manual_examples: list[ChangeExample] = []
 
