@@ -1,0 +1,11 @@
+record_id,therapeutic_agents,primary_diagnosis,morphology,tissue_or_organ_of_origin,sample_anatomic_site
+R001,Aspirin,Lung Cancer,Adenocarcinoma,Lung,Right Lung
+R002,Ibuprofen,Breast Cancer,Ductal Carcinoma,Breast,Left Breast
+R003,Metformin,Diabetes,N/A,Pancreas,Pancreas
+R004,Lisinopril,Hypertension,N/A,Heart,Heart
+R005,Atorvastatin,High Cholesterol,N/A,Liver,Liver
+R006,Omeprazole,GERD,N/A,Stomach,Stomach
+R007,Aspirin,Colon Cancer,Adenocarcinoma,Colon,Ascending Colon
+R008,Tamoxifen,Breast Cancer,Lobular Carcinoma,Breast,Right Breast
+R009,Carboplatin,Ovarian Cancer,Serous Carcinoma,Ovary,Left Ovary
+R010,Pembrolizumab,Melanoma,Melanoma,Skin,Back

@@ -1,0 +1,6 @@
+numeric_col,date_col,text_col,mixed_col
+100,2024-01-15,Hello World,abc123
+200,2024-02-20,Test String,def456
+300,2024-03-25,Another Value,ghi789
+400,2024-04-30,Sample Text,jkl012
+500,2024-05-05,Final Entry,mno345
