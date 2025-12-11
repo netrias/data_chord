@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Data Chord · Mapping Suggestions</title>
+    <link rel="stylesheet" href="/assets/shared/tokens.css" />
     <link rel="stylesheet" href="{{ request.url_for('stage_one_static', path='stage_1_upload.css') }}" />
   </head>
   <body>
@@ -16,7 +17,7 @@
         <li class="connector complete"></li>
         <li class="step active" data-stage="mapping" data-url="{{ request.url_for('stage_two_mapping_page') }}">
           <span class="step-index">2</span>
-          <span class="step-label">Review mappings</span>
+          <span class="step-label">Mappings</span>
         </li>
         <li class="connector"></li>
         <li class="step" data-stage="harmonize" data-url="{{ request.url_for('stage_three_entry') }}">
@@ -31,7 +32,7 @@
         <li class="connector"></li>
         <li class="step" data-stage="export" data-url="{{ request.url_for('stage_five_review_page') }}">
           <span class="step-index">5</span>
-          <span class="step-label">Export</span>
+          <span class="step-label">Results</span>
         </li>
       </ol>
     </nav>

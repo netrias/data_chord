@@ -1,3 +1,6 @@
+/* Stage 4 Review Results - stage-specific styles */
+
+/* Wider layout for review stage */
 .stage-four-shell {
   max-width: min(1900px, 98vw);
   padding-left: clamp(1rem, 2.5vw, 3rem);
@@ -9,15 +12,16 @@
   padding-right: clamp(2rem, 2.5vw, 3.5rem);
 }
 
+/* Batch progress panel */
 .batch-progress-panel {
   background: var(--white);
-  border-radius: 20px;
-  padding: 1.5rem;
-  margin-bottom: 1.5rem;
-  box-shadow: var(--shadow);
+  border-radius: var(--radius-xl);
+  padding: var(--space-6);
+  margin-bottom: var(--space-6);
+  box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: var(--space-4);
 }
 
 .batch-progress-heading {
@@ -25,7 +29,7 @@
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: var(--space-3);
 }
 
 .help-toggle {
@@ -33,28 +37,28 @@
   background: var(--white);
   color: var(--gray-700);
   padding: 0.4rem 0.9rem;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   font-weight: 600;
   cursor: pointer;
 }
 
-.help-toggle[aria-expanded='true'] {
+.help-toggle[aria-expanded="true"] {
   border-color: var(--teal-500);
   color: var(--teal-500);
 }
 
 .stage-help {
   border: 1px solid var(--gray-200);
-  border-radius: 16px;
-  background: #f8fafc;
-  padding: 1rem;
-  margin-top: 1rem;
+  border-radius: var(--radius-lg);
+  background: var(--gray-50);
+  padding: var(--space-4);
+  margin-top: var(--space-4);
   font-size: 0.9rem;
   color: var(--gray-600);
 }
 
 .stage-help ul {
-  margin: 0.5rem 0 0;
+  margin: var(--space-2) 0 0;
   padding-left: 1.1rem;
   display: flex;
   flex-direction: column;
@@ -63,10 +67,6 @@
 
 .stage-help li {
   list-style: disc;
-}
-
-.stage-help.hidden {
-  display: none;
 }
 
 .batch-progress-title {
@@ -85,7 +85,7 @@
 .batch-progress-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 .batch-progress-item {
@@ -101,7 +101,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+  transition: transform var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
   cursor: pointer;
   padding: 0;
 }
@@ -118,9 +118,9 @@
 }
 
 .batch-progress-item.flagged {
-  border-color: #fbbf24;
-  background: #fff7ed;
-  color: #b45309;
+  border-color: var(--warning-500);
+  background: var(--warning-50);
+  color: var(--warning-700);
 }
 
 .batch-progress-item.current {
@@ -142,7 +142,7 @@
 }
 
 .current-batch-indicator {
-  margin: 0.5rem 0 0;
+  margin: var(--space-2) 0 0;
   font-weight: 600;
   color: var(--gray-700);
   flex-basis: 100%;
@@ -152,10 +152,11 @@
   color: var(--gray-400);
 }
 
+/* Review grid header */
 .review-grid-header {
   display: flex;
   justify-content: space-between;
-  gap: 2rem;
+  gap: var(--space-8);
   flex-wrap: wrap;
   align-items: flex-start;
 }
@@ -163,13 +164,12 @@
 .review-controls {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: var(--space-4);
 }
-
 
 .control-row {
   display: flex;
-  gap: 1.5rem;
+  gap: var(--space-6);
   flex-wrap: wrap;
 }
 
@@ -187,7 +187,7 @@
 
 .control-group select {
   border: 1px solid var(--gray-200);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   padding: 0.55rem 0.75rem;
   font-weight: 600;
   color: var(--gray-900);
@@ -196,55 +196,55 @@
 
 .review-alert {
   border-radius: 14px;
-  border: 1px solid #c7d2fe;
-  background: #eef2ff;
-  padding: 0.85rem 1rem;
-  color: #312e81;
+  border: 1px solid var(--info-200);
+  background: var(--info-50);
+  padding: 0.85rem var(--space-4);
+  color: var(--info-700);
 }
 
 .review-alert.success {
-  border-color: #bbf7d0;
-  background: #ecfdf5;
-  color: #065f46;
+  border-color: var(--success-100);
+  background: var(--success-50);
+  color: var(--success-700);
 }
 
 .review-alert.warning {
-  border-color: #fcd34d;
-  background: #fffbeb;
-  color: #92400e;
+  border-color: var(--warning-200);
+  background: var(--warning-50);
+  color: var(--warning-700);
 }
 
 .batch-actions {
   display: flex;
-  gap: 0.75rem;
+  gap: var(--space-3);
   flex-wrap: wrap;
   justify-content: flex-end;
   margin-left: auto;
 }
 
+/* Review table */
 .review-table {
-  margin-top: 1.5rem;
+  margin-top: var(--space-6);
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: var(--space-4);
 }
 
 .review-empty {
-  padding: 2rem;
+  padding: var(--space-8);
   text-align: center;
   border: 1px dashed var(--gray-300);
-  border-radius: 20px;
-  background: var(--gray-50, #f8fafc);
+  border-radius: var(--radius-xl);
+  background: var(--gray-50);
   color: var(--gray-600);
   font-weight: 600;
 }
 
-
 .row-table-wrapper {
   border: 1px solid var(--gray-200);
-  border-radius: 24px;
+  border-radius: var(--radius-2xl);
   background: var(--white);
-  box-shadow: 0 18px 30px rgba(16, 24, 40, 0.08);
+  box-shadow: var(--shadow-md);
   overflow: hidden;
 }
 
@@ -256,13 +256,13 @@
 .row-table-row {
   display: grid;
   grid-template-columns: var(--table-columns);
-  gap: 0.75rem;
+  gap: var(--space-3);
   align-items: stretch;
 }
 
 .row-table-header {
-  padding: 0.9rem 1.25rem;
-  background: #f8fafc;
+  padding: 0.9rem var(--space-5);
+  background: var(--gray-50);
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -281,11 +281,11 @@
 
 .row-table-body::-webkit-scrollbar-thumb {
   background: var(--gray-200);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
 }
 
 .row-table-row {
-  padding: 0.75rem 1.25rem;
+  padding: var(--space-3) var(--space-5);
   border-top: 1px solid var(--gray-100);
 }
 
@@ -315,11 +315,11 @@
 .row-cell {
   border-radius: 18px;
   border: 2px solid var(--gray-200);
-  padding: 1.5rem 1.75rem;
-  background: var(--gray-50, #fafbff);
+  padding: var(--space-6) 1.75rem;
+  background: var(--gray-50);
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: var(--space-4);
   min-width: 0;
   flex: 1 1 0;
   height: 100%;
@@ -331,7 +331,7 @@
 .value-pair {
   display: grid;
   grid-template-rows: minmax(90px, auto) minmax(70px, auto) minmax(60px, auto);
-  gap: 0.75rem;
+  gap: var(--space-3);
   min-height: 220px;
   height: 100%;
 }
@@ -377,7 +377,7 @@
 
 .value-input {
   border: 1px dashed var(--gray-300);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   padding: 0.45rem 1.75rem 0.45rem 0.75rem;
   background: rgba(255, 255, 255, 0.8);
   color: var(--gray-600);
@@ -405,14 +405,15 @@
   fill: var(--gray-400);
 }
 
+/* Confidence states */
 .row-cell.confidence-low {
-  border-color: #fecaca;
-  background: #fff5f5;
+  border-color: var(--error-200);
+  background: var(--error-50);
 }
 
 .row-cell.confidence-high {
-  border-color: #bbf7d0;
-  background: #effdf5;
+  border-color: var(--success-100);
+  background: var(--success-50);
 }
 
 .row-cell.no-change {
@@ -425,19 +426,15 @@
 }
 
 .row-cell.needs-review {
-  border-color: #fcd34d;
-  background: #fff7ed;
+  border-color: var(--warning-200);
+  background: var(--warning-50);
 }
 
 .value-text.missing {
-  color: #b45309;
+  color: var(--warning-700);
 }
 
-@media (max-width: 720px) {
-  .value-pair {
-    grid-template-columns: 1fr;
-  }
-}
+/* Value override input */
 .value-override {
   position: relative;
   margin-top: auto;
@@ -449,13 +446,9 @@
   width: 100%;
 }
 
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  border: 0;
+/* Responsive */
+@media (max-width: 720px) {
+  .value-pair {
+    grid-template-columns: 1fr;
+  }
 }
