@@ -18,3 +18,6 @@ frontend/dist
 
 # Stage 1 runtime files
 src/stage_1_upload/uploads/
+
+# Lock file (regenerate with uv lock)
+uv.lock

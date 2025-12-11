@@ -10,18 +10,19 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+
 from .dependencies import get_mapping_service, get_upload_constraints, get_upload_storage
 from .schemas import (
+    DEFAULT_TARGET_SCHEMA,
     AnalyzeRequest,
     AnalyzeResponse,
     ColumnPreview,
-    DEFAULT_TARGET_SCHEMA,
     ModelSuggestion,
     UploadResponse,
 )
 from .services import (
-    UploadTooLargeError,
     UnsupportedUploadError,
+    UploadTooLargeError,
     analyze_columns,
     describe_constraints,
 )
@@ -102,7 +103,9 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except Exception as exc:  # pragma: no cover - defensive
         _router_logger.exception("Failed discovering mappings", exc_info=exc)
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to fetch mapping suggestions.") from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to fetch mapping suggestions."
+        ) from exc
 
     missing_columns = [
         column.column_name

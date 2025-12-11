@@ -7,7 +7,7 @@ import json
 import logging
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypedDict, cast
 from uuid import uuid4
@@ -127,7 +127,7 @@ class UploadStorage:
             content_type=content_type,
             size_bytes=total_bytes,
             saved_path=destination,
-            uploaded_at=datetime.now(timezone.utc),
+            uploaded_at=datetime.now(UTC),
         )
         self._write_metadata(meta)
         logger.info("Stored upload", extra={"file_id": file_id, "size_bytes": total_bytes})
