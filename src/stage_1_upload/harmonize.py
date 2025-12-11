@@ -11,52 +11,11 @@ from uuid import uuid4
 
 from netrias_client import NetriasClient
 
+from src.domain import CDEField, get_cde, normalize_target_name
+
 logger = logging.getLogger(__name__)
 
 ManifestPayload = dict[str, dict[str, dict[str, object]]]
-TARGET_ALIAS_MAP: Mapping[str, str] = {
-    "primary diagnosis": "primary_diagnosis",
-    "primary_diagnosis": "primary_diagnosis",
-    "morphology": "morphology",
-    "sample anatomic site": "sample_anatomic_site",
-    "sample_anatomic_site": "sample_anatomic_site",
-    "therapeutic agents": "therapeutic_agents",
-    "therapeutic_agents": "therapeutic_agents",
-    "tissue or organ of origin": "tissue_or_organ_of_origin",
-    "tissue_or_organ_of_origin": "tissue_or_organ_of_origin",
-}
-TARGET_METADATA: Mapping[str, dict[str, object]] = {
-    "primary_diagnosis": {
-        "route": "sagemaker:primary",
-        "targetField": "primary_diagnosis",
-        "cdeId": 2,
-        "cde_id": 2,
-    },
-    "morphology": {
-        "route": "sagemaker:morphology",
-        "targetField": "morphology",
-        "cdeId": 3,
-        "cde_id": 3,
-    },
-    "sample_anatomic_site": {
-        "route": "sagemaker:sample_anatomic_site",
-        "targetField": "sample_anatomic_site",
-        "cdeId": 5,
-        "cde_id": 5,
-    },
-    "therapeutic_agents": {
-        "route": "sagemaker:therapeutic_agents",
-        "targetField": "therapeutic_agents",
-        "cdeId": 1,
-        "cde_id": 1,
-    },
-    "tissue_or_organ_of_origin": {
-        "route": "sagemaker:tissue_or_organ_of_origin",
-        "targetField": "tissue_or_organ_of_origin",
-        "cdeId": 4,
-        "cde_id": 4,
-    },
-}
 
 
 @dataclass(frozen=True)
@@ -149,12 +108,12 @@ class HarmonizeService:
         column_mappings: MutableMapping[str, dict[str, object]] = manifest.setdefault("column_mappings", {})
         applied: dict[str, str] = {}
         for column, selection in overrides.items():
-            normalized_target = _normalize_target_name(selection)
-            if not normalized_target:
+            cde_field = normalize_target_name(selection)
+            if not cde_field:
                 continue
-            entry = _override_entry(column_mappings.get(column), normalized_target)
+            entry = _override_entry(column_mappings.get(column), cde_field)
             column_mappings[column] = entry
-            applied[column] = normalized_target
+            applied[column] = cde_field.value
         if applied:
             logger.info("Applied manual overrides", extra={"overrides": applied})
 
@@ -172,24 +131,14 @@ def _normalize_manifest(manifest: Mapping[str, object] | object) -> ManifestPayl
     return {"column_mappings": normalized}
 
 
-def _normalize_target_name(selection: str | None) -> str | None:
-    if not selection:
-        return None
-    cleaned = selection.strip().lower().replace("-", " ")
-    slug = "_".join(part for part in cleaned.split() if part)
-    if not slug:
-        return None
-    return TARGET_ALIAS_MAP.get(slug, slug)
-
-
-def _override_entry(existing: Mapping[str, object] | None, target: str) -> dict[str, object]:
-    """why: build a column entry dict with the target and its metadata."""
+def _override_entry(existing: Mapping[str, object] | None, cde_field: CDEField) -> dict[str, object]:
+    """why: build a column entry dict with the target and its metadata from CDE registry."""
     entry = dict(existing or {})
-    metadata = TARGET_METADATA.get(target)
-    if metadata:
-        entry.update(metadata)
-    else:
-        entry["targetField"] = target
+    cde_def = get_cde(cde_field)
+    entry["route"] = cde_def.route
+    entry["targetField"] = cde_field.value
+    entry["cdeId"] = cde_def.cde_id
+    entry["cde_id"] = cde_def.cde_id
     return entry
 
 
