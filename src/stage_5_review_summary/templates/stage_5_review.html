@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Data Chord · Results Summary</title>
+    <link rel="stylesheet" href="/assets/shared/tokens.css" />
     <link rel="stylesheet" href="{{ request.url_for('stage_one_static', path='stage_1_upload.css') }}" />
     <link rel="stylesheet" href="{{ request.url_for('stage_five_static', path='stage_5_review.css') }}" />
   </head>
@@ -119,6 +120,14 @@
           step.addEventListener('click', () => {
             const url = step.dataset.url;
             if (url) window.location.href = url;
+          });
+        });
+        document.querySelectorAll('[data-nav-target]').forEach(button => {
+          button.addEventListener('click', () => {
+            const target = button.dataset.navTarget;
+            if (target) {
+              window.location.assign(target);
+            }
           });
         });
       });
