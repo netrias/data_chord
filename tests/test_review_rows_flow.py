@@ -233,7 +233,6 @@ def test_build_rows_groups_identical_rows() -> None:
     """Identical rows are grouped together."""
 
     # Given
-    headers = ["therapeutic_agents", "primary_diagnosis", "morphology", "tissue_or_organ_of_origin", "sample_anatomic_site"]
     original_rows = [
         {"record_id": "R001", "therapeutic_agents": "Aspirin", "primary_diagnosis": "Cancer", "morphology": "A", "tissue_or_organ_of_origin": "Lung", "sample_anatomic_site": "Left"},
         {"record_id": "R002", "therapeutic_agents": "Aspirin", "primary_diagnosis": "Cancer", "morphology": "A", "tissue_or_organ_of_origin": "Lung", "sample_anatomic_site": "Left"},
@@ -244,7 +243,7 @@ def test_build_rows_groups_identical_rows() -> None:
     ]
 
     # When
-    rows = _build_rows(headers, original_rows, harmonized_rows, [])
+    rows = _build_rows(original_rows, harmonized_rows, [])
 
     # Then
     assert len(rows) == 1
@@ -255,7 +254,6 @@ def test_build_rows_preserves_source_row_number() -> None:
     """Built rows include the source row number."""
 
     # Given
-    headers = ["therapeutic_agents", "primary_diagnosis", "morphology", "tissue_or_organ_of_origin", "sample_anatomic_site"]
     original_rows = [
         {"record_id": "R001", "therapeutic_agents": "A", "primary_diagnosis": "B", "morphology": "C", "tissue_or_organ_of_origin": "D", "sample_anatomic_site": "E"},
     ]
@@ -264,7 +262,7 @@ def test_build_rows_preserves_source_row_number() -> None:
     ]
 
     # When
-    rows = _build_rows(headers, original_rows, harmonized_rows, [])
+    rows = _build_rows(original_rows, harmonized_rows, [])
 
     # Then
     assert rows[0].sourceRowNumber == 1
