@@ -8,18 +8,12 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from src.domain import get_cde_labels
 from src.stage_1_upload.schemas import DEFAULT_TARGET_SCHEMA
 
 MODULE_DIR = Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"
 STAGE_TWO_STATIC_PATH = MODULE_DIR / "static"
-MANUAL_MODEL_OPTIONS: tuple[str, ...] = (
-    "Primary Diagnosis",
-    "Morphology",
-    "Sample Anatomic Site",
-    "Therapeutic Agents",
-    "Tissue or Organ of Origin",
-)
 
 _templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 
@@ -29,11 +23,10 @@ stage_two_router = APIRouter(tags=["Stage 2 Mapping"])
 @stage_two_router.get("/stage-2", response_class=HTMLResponse, name="stage_two_mapping_page")
 async def render_stage_two(request: Request) -> HTMLResponse:
     """why: serve the mapping review UI."""
-
     context = {
         "request": request,
         "default_schema": DEFAULT_TARGET_SCHEMA,
-        "manual_options": MANUAL_MODEL_OPTIONS,
+        "manual_options": get_cde_labels(),
     }
     return _templates.TemplateResponse("stage_2_mappings.html", context)
 

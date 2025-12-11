@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from httpx import AsyncClient
 
-from src.stage_1_upload.harmonize import _normalize_target_name
+from src.domain import CDEField, normalize_target_name
 from tests.conftest import TEST_TARGET_SCHEMA, upload_and_analyze
 
 
@@ -133,77 +133,77 @@ async def test_harmonize_returns_next_stage_url(
 
 
 def test_target_alias_resolution_primary_diagnosis() -> None:
-    """Target alias 'Primary Diagnosis' normalizes to 'primary_diagnosis'."""
+    """Target alias 'Primary Diagnosis' normalizes to CDEField.PRIMARY_DIAGNOSIS."""
 
     # Given
     input_value = "Primary Diagnosis"
 
     # When
-    result = _normalize_target_name(input_value)
+    result = normalize_target_name(input_value)
 
     # Then
-    assert result == "primary_diagnosis"
+    assert result == CDEField.PRIMARY_DIAGNOSIS
 
 
 def test_target_alias_resolution_therapeutic_agents() -> None:
-    """Target alias 'Therapeutic Agents' normalizes to 'therapeutic_agents'."""
+    """Target alias 'Therapeutic Agents' normalizes to CDEField.THERAPEUTIC_AGENTS."""
 
     # Given
     input_value = "Therapeutic Agents"
 
     # When
-    result = _normalize_target_name(input_value)
+    result = normalize_target_name(input_value)
 
     # Then
-    assert result == "therapeutic_agents"
+    assert result == CDEField.THERAPEUTIC_AGENTS
 
 
 def test_target_alias_resolution_sample_anatomic_site() -> None:
-    """Target alias 'Sample Anatomic Site' normalizes to 'sample_anatomic_site'."""
+    """Target alias 'Sample Anatomic Site' normalizes to CDEField.SAMPLE_ANATOMIC_SITE."""
 
     # Given
     input_value = "Sample Anatomic Site"
 
     # When
-    result = _normalize_target_name(input_value)
+    result = normalize_target_name(input_value)
 
     # Then
-    assert result == "sample_anatomic_site"
+    assert result == CDEField.SAMPLE_ANATOMIC_SITE
 
 
 def test_target_alias_resolution_tissue_or_organ_of_origin() -> None:
-    """Target alias 'Tissue or Organ of Origin' normalizes correctly."""
+    """Target alias 'Tissue or Organ of Origin' normalizes to CDEField.TISSUE_OR_ORGAN_OF_ORIGIN."""
 
     # Given
     input_value = "Tissue or Organ of Origin"
 
     # When
-    result = _normalize_target_name(input_value)
+    result = normalize_target_name(input_value)
 
     # Then
-    assert result == "tissue_or_organ_of_origin"
+    assert result == CDEField.TISSUE_OR_ORGAN_OF_ORIGIN
 
 
 def test_target_alias_resolution_already_normalized() -> None:
-    """Already normalized target names pass through unchanged."""
+    """Already normalized target names return the CDEField enum."""
 
     # Given
     input_value = "morphology"
 
     # When
-    result = _normalize_target_name(input_value)
+    result = normalize_target_name(input_value)
 
     # Then
-    assert result == "morphology"
+    assert result == CDEField.MORPHOLOGY
 
 
 def test_target_alias_resolution_empty_returns_none() -> None:
     """Empty or None input returns None."""
 
     # Given / When / Then
-    assert _normalize_target_name("") is None
-    assert _normalize_target_name(None) is None
-    assert _normalize_target_name("   ") is None
+    assert normalize_target_name("") is None
+    assert normalize_target_name(None) is None
+    assert normalize_target_name("   ") is None
 
 
 async def test_harmonize_without_client_returns_stubbed_job(

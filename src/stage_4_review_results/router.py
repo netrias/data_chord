@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
+from src.domain import CONFIDENCE, SessionKey, get_all_cdes
 from src.stage_1_upload.dependencies import get_upload_storage
 from src.stage_1_upload.schemas import DEFAULT_TARGET_SCHEMA
 from src.stage_1_upload.services import UploadStorage
@@ -23,23 +24,6 @@ _TEMPLATE_DIR = _MODULE_DIR / "templates"
 STAGE_FOUR_STATIC_PATH = _MODULE_DIR / "static"
 
 _templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
-
-
-@dataclass(frozen=True)
-class _ColumnDefinition:
-    """why: define column key-label pairs for review display."""
-
-    key: str
-    label: str
-
-
-_COLUMN_CONFIG: tuple[_ColumnDefinition, ...] = (
-    _ColumnDefinition("therapeutic_agents", "Therapeutic Agents"),
-    _ColumnDefinition("primary_diagnosis", "Primary Diagnosis"),
-    _ColumnDefinition("morphology", "Morphology"),
-    _ColumnDefinition("tissue_or_organ_of_origin", "Tissue / Organ Origin"),
-    _ColumnDefinition("sample_anatomic_site", "Sample Anatomic Site"),
-)
 
 
 class StageFourResultsRequest(BaseModel):
@@ -88,21 +72,14 @@ class _StageFourRowGroup:
 stage_four_router = APIRouter(prefix="/stage-4", tags=["Stage 4 Review"])
 
 
-_STAGE_THREE_PAYLOAD_KEY = "stage3HarmonizePayload"
-_STAGE_THREE_JOB_KEY = "stage3HarmonizeJob"
-_HIGH_CONFIDENCE = 0.9
-_LOW_CONFIDENCE = 0.3
-_MANUAL_OVERRIDE_CONFIDENCE = 0.2
-
-
 @stage_four_router.get("", response_class=HTMLResponse, name="stage_four_review_page")
 async def render_stage_four(request: Request) -> HTMLResponse:
     """why: serve the batch review and approval UI."""
     context = {
         "request": request,
         "default_schema": DEFAULT_TARGET_SCHEMA,
-        "stage_three_payload_key": _STAGE_THREE_PAYLOAD_KEY,
-        "stage_three_job_key": _STAGE_THREE_JOB_KEY,
+        "stage_three_payload_key": SessionKey.STAGE_THREE_PAYLOAD.value,
+        "stage_three_job_key": SessionKey.STAGE_THREE_JOB.value,
         "stage_two_url": request.url_for("stage_two_mapping_page"),
         "stage_three_url": request.url_for("stage_three_entry"),
         "results_endpoint": request.url_for("stage_four_harmonized_rows"),
@@ -192,21 +169,22 @@ def _build_cells_for_row(
     """why: create cell comparisons for a single row."""
     cells: list[StageFourCell] = []
 
-    for col_def in _COLUMN_CONFIG:
-        original_value = (original_row.get(col_def.key) or "").strip() or None
-        harmonized_value = (harmonized_row.get(col_def.key) or "").strip() or None
+    for cde_def in get_all_cdes():
+        col_key = cde_def.field.value
+        original_value = (original_row.get(col_key) or "").strip() or None
+        harmonized_value = (harmonized_row.get(col_key) or "").strip() or None
         is_changed = (original_value or "") != (harmonized_value or "")
         bucket = "low" if is_changed else "high"
-        is_manual = col_def.key.lower() in manual_set and is_changed
+        is_manual = col_key.lower() in manual_set and is_changed
         if is_manual:
-            confidence = _MANUAL_OVERRIDE_CONFIDENCE
+            confidence = CONFIDENCE.MANUAL
         else:
-            confidence = _HIGH_CONFIDENCE if bucket == "high" else _LOW_CONFIDENCE
+            confidence = CONFIDENCE.HIGH if bucket == "high" else CONFIDENCE.LOW
 
         cells.append(
             StageFourCell(
-                columnKey=col_def.key,
-                columnLabel=col_def.label,
+                columnKey=col_key,
+                columnLabel=cde_def.label,
                 originalValue=original_value,
                 harmonizedValue=harmonized_value,
                 bucket=bucket,
@@ -226,6 +204,3 @@ def _summarize_record_ids(record_ids: list[str]) -> str:
     if len(filtered) == 1:
         return filtered[0]
     return f"{filtered[0]} + {len(filtered) - 1} more"
-
-
-__all__ = ["stage_four_router", "STAGE_FOUR_STATIC_PATH"]
