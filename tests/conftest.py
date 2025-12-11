@@ -147,6 +147,8 @@ async def app_client(
     import src.stage_1_upload.dependencies as deps_module
     import src.stage_1_upload.router as router_module
     import src.stage_3_harmonize.router as stage3_router
+    import src.stage_4_review_results.router as stage4_router
+    import src.stage_5_review_summary.router as stage5_router
 
     original_storage = deps_module._storage
     original_router_storage = router_module._storage
@@ -158,6 +160,13 @@ async def app_client(
 
     original_stage3_storage = stage3_router._storage
     stage3_router._storage = temp_storage
+
+    # Patch stage 4 and 5 to use test storage via get_upload_storage
+    original_stage4_get_storage = stage4_router.get_upload_storage
+    stage4_router.get_upload_storage = lambda: temp_storage
+
+    original_stage5_get_storage = stage5_router.get_upload_storage
+    stage5_router.get_upload_storage = lambda: temp_storage
 
     try:
         from backend.app.main import create_app
@@ -171,6 +180,8 @@ async def app_client(
         router_module._storage = original_router_storage
         deps_module.get_upload_storage = original_get_storage
         stage3_router._storage = original_stage3_storage
+        stage4_router.get_upload_storage = original_stage4_get_storage
+        stage5_router.get_upload_storage = original_stage5_get_storage
 
 
 @pytest.fixture
