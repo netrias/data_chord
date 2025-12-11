@@ -94,7 +94,7 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
             csv_path=meta.saved_path,
             target_schema=payload.target_schema,
         )
-        _storage.save_manifest(meta.file_id, manifest)
+        _ = _storage.save_manifest(meta.file_id, manifest)
     except FileNotFoundError as exc:
         _router_logger.exception("Upload missing on disk", extra={"file_id": payload.file_id})
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="Upload missing. Please upload again.") from exc

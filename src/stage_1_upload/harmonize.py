@@ -180,6 +180,8 @@ def _normalize_target_name(selection: str | None) -> str | None:
 
 
 def _override_entry(existing: Mapping[str, object] | None, target: str) -> dict[str, object]:
+    """why: build a column entry dict with the target and its metadata."""
+
     entry = dict(existing or {})
     metadata = TARGET_METADATA.get(target)
     if metadata:
