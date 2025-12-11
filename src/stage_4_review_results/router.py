@@ -198,7 +198,10 @@ def _build_cells_for_row(
         is_changed = (original_value or "") != (harmonized_value or "")
         bucket = "low" if is_changed else "high"
         is_manual = col_def.key.lower() in manual_set and is_changed
-        confidence = _MANUAL_OVERRIDE_CONFIDENCE if is_manual else (_HIGH_CONFIDENCE if bucket == "high" else _LOW_CONFIDENCE)
+        if is_manual:
+            confidence = _MANUAL_OVERRIDE_CONFIDENCE
+        else:
+            confidence = _HIGH_CONFIDENCE if bucket == "high" else _LOW_CONFIDENCE
 
         cells.append(
             StageFourCell(

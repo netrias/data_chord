@@ -7,9 +7,9 @@ Compare original vs harmonized CSVs to show AI and manual change statistics.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable
 from csv import DictReader
 from pathlib import Path
-from collections.abc import Iterable
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
