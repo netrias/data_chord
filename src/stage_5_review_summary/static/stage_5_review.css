@@ -114,6 +114,50 @@
   color: var(--gray-500);
 }
 
+.sortable-header {
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s ease;
+}
+
+.sortable-header:hover {
+  color: var(--teal-700);
+}
+
+.sortable-header.active {
+  color: var(--gray-900);
+  font-weight: 600;
+}
+
+.insight-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.filter-toggle-btn {
+  border: 1px solid var(--gray-300);
+  border-radius: 999px;
+  padding: 0.35rem 0.85rem;
+  font-size: 0.85rem;
+  background: var(--white);
+  color: var(--gray-600);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.filter-toggle-btn:hover {
+  border-color: var(--teal-600);
+  color: var(--teal-700);
+}
+
+.filter-toggle-btn.active {
+  background: var(--teal-50, #f0fdfa);
+  border-color: var(--teal-600);
+  color: var(--teal-700);
+}
+
 .change-table-row:nth-child(every) {
   background: var(--white);
 }
