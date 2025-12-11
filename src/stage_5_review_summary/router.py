@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
+from src.domain import ChangeType, SessionKey
 from src.stage_1_upload.dependencies import get_upload_storage
 from src.stage_1_upload.manifest_reader import ManifestSummary, read_manifest_parquet
 from src.stage_1_upload.services import UploadStorage
@@ -71,14 +72,14 @@ class StageFiveSummaryResponse(BaseModel):
 
 @stage_five_router.get("", response_class=HTMLResponse, name="stage_five_review_page")
 async def render_stage_five(request: Request) -> HTMLResponse:
-    'Serve the harmonization results reflection UI.'
+    """why: serve the harmonization results reflection UI."""
     context = {
         "request": request,
         "stage_one_url": request.url_for("stage_one_upload_page"),
         "stage_two_url": request.url_for("stage_two_mapping_page"),
         "stage_three_url": request.url_for("stage_three_entry"),
         "stage_four_url": request.url_for("stage_four_review_page"),
-        "stage_three_payload_key": "stage3HarmonizePayload",
+        "stage_three_payload_key": SessionKey.STAGE_THREE_PAYLOAD.value,
         "summary_endpoint": request.url_for("stage_five_summary"),
     }
     return _templates.TemplateResponse("stage_5_review.html", context)
@@ -156,10 +157,10 @@ def _summarize_differences(
             original_value = (original_row.get(column) or "").strip()
             harmonized_value = (harmonized_row.get(column) or "").strip()
             if original_value == harmonized_value:
-                stats[column]["unchanged"] += 1
+                stats[column][ChangeType.UNCHANGED.value] += 1
                 continue
             if column.lower() in manual_set:
-                stats[column]["manual"] += 1
+                stats[column][ChangeType.MANUAL_OVERRIDE.value] += 1
                 if len(manual_examples) < 20:
                     manual_examples.append(
                         ChangeExample(
@@ -170,7 +171,7 @@ def _summarize_differences(
                         ),
                     )
             else:
-                stats[column]["ai"] += 1
+                stats[column][ChangeType.AI_HARMONIZED.value] += 1
                 if len(ai_examples) < 20:
                     ai_examples.append(
                         ChangeExample(
@@ -184,9 +185,9 @@ def _summarize_differences(
     column_summaries = [
         ColumnSummary(
             column=column,
-            ai_changes=stats[column]["ai"],
-            manual_changes=stats[column]["manual"],
-            unchanged=stats[column]["unchanged"],
+            ai_changes=stats[column][ChangeType.AI_HARMONIZED.value],
+            manual_changes=stats[column][ChangeType.MANUAL_OVERRIDE.value],
+            unchanged=stats[column][ChangeType.UNCHANGED.value],
         )
         for column in header_list
     ]
@@ -227,6 +228,3 @@ def _extract_confidence_counts(manifest: ManifestSummary | None) -> tuple[int, i
         manifest.medium_confidence_count,
         manifest.low_confidence_count,
     )
-
-
-__all__ = ["stage_five_router", "STAGE_FIVE_STATIC_PATH"]
