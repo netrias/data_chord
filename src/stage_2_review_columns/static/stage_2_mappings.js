@@ -1,6 +1,10 @@
+/**
+ * Handle column mapping review and user overrides before harmonization.
+ * Reads analysis payload from storage, renders mapping UI, and persists user selections.
+ */
+
 const config = window.stageTwoConfig ?? {};
 const STORAGE_KEY = config.storageKey ?? 'stage2Payload';
-const MIN_CONFIDENCE = Number(config.minConfidence ?? 0.5);
 const manualOptions = config.manualOptions ?? [];
 const stageThreeUrl = config.stageThreeUrl ?? '/stage-3';
 const stageThreePayloadKey = config.stageThreePayloadKey ?? 'stage3HarmonizePayload';
@@ -12,24 +16,20 @@ const emptyState = document.getElementById('mappingEmptyState');
 const harmonizeButton = document.getElementById('harmonizeButton');
 const progressSteps = document.querySelectorAll('.progress-tracker [data-stage]');
 
-const CONFIDENCE_LABELS = {
-  low: 'Low confidence',
-  medium: 'Medium confidence',
-  high: 'High confidence',
-};
-
 const state = {
   payload: null,
   manualSelections: new Map(),
   isSubmitting: false,
 };
 
+const STAGE_ORDER = ['upload', 'mapping', 'harmonize', 'review', 'export'];
+
+/** Update progress tracker UI to reflect current stage. */
 const setActiveStage = (stage) => {
-  const order = ['upload', 'mapping', 'harmonize', 'review', 'export'];
-  const targetIndex = order.indexOf(stage);
+  const targetIndex = STAGE_ORDER.indexOf(stage);
   progressSteps.forEach((step) => {
     const stepStage = step.dataset.stage;
-    const stepIndex = order.indexOf(stepStage);
+    const stepIndex = STAGE_ORDER.indexOf(stepStage);
     const isActive = stepStage === stage;
     const isComplete = stepIndex >= 0 && stepIndex < targetIndex;
     step.classList.toggle('active', isActive);
@@ -37,7 +37,8 @@ const setActiveStage = (stage) => {
   });
 };
 
-const savePayloadToStorage = (payload) => {
+/** Persist payload to session storage for cross-page state. */
+const _savePayloadToStorage = (payload) => {
   try {
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   } catch (error) {
@@ -45,7 +46,8 @@ const savePayloadToStorage = (payload) => {
   }
 };
 
-const readPayloadFromStorage = () => {
+/** Read payload from session storage. */
+const _readPayloadFromStorage = () => {
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY);
     return raw ? JSON.parse(raw) : null;
@@ -55,7 +57,8 @@ const readPayloadFromStorage = () => {
   }
 };
 
-const getColumnSuggestions = (column) => {
+/** Look up CDE target suggestions for a column, checking case variants. */
+const _getColumnSuggestions = (column) => {
   const targets = state.payload?.cde_targets ?? {};
   return (
     targets[column.column_name] ||
@@ -65,27 +68,19 @@ const getColumnSuggestions = (column) => {
   );
 };
 
-const topSuggestionScore = (column) => {
-  const suggestions = getColumnSuggestions(column);
-  if (suggestions.length) {
-    const value = Number(suggestions[0].similarity ?? 0);
-    return Number.isNaN(value) ? 0 : value;
-  }
-  const fallback = Number(column.confidence_score ?? 0);
-  return Number.isNaN(fallback) ? 0 : fallback;
-};
-
-const persistManualOverrides = () => {
+/** Save user overrides to payload and persist to storage. */
+const _persistManualOverrides = () => {
   if (!state.payload) {
     return;
   }
   const overrides = Object.fromEntries(state.manualSelections.entries());
   const nextPayload = { ...state.payload, manual_overrides: overrides };
   state.payload = nextPayload;
-  savePayloadToStorage(nextPayload);
+  _savePayloadToStorage(nextPayload);
 };
 
-const persistStageThreePayload = (body) => {
+/** Store stage 3 payload in session storage for handoff. */
+const _persistStageThreePayload = (body) => {
   const payloadForStageThree = {
     request: body,
     context: {
@@ -104,7 +99,113 @@ const persistStageThreePayload = (body) => {
   }
 };
 
-const renderMappingRows = () => {
+/** Build and render a single mapping row for a column. */
+const _buildMappingRow = (column) => {
+  const row = document.createElement('article');
+  row.className = `mapping-row confidence-${column.confidence_bucket}`;
+
+  const columnCell = document.createElement('div');
+  columnCell.className = 'mapping-cell';
+  columnCell.innerHTML = `
+    <p class="label">Column</p>
+    <h3>${column.column_name}</h3>
+  `;
+
+  const suggestionCell = document.createElement('div');
+  suggestionCell.className = 'mapping-cell suggestion-cell';
+
+  const suggestionLabel = document.createElement('p');
+  suggestionLabel.className = 'label';
+  suggestionLabel.textContent = 'AI recommended model';
+  suggestionCell.appendChild(suggestionLabel);
+
+  const suggestions = _getColumnSuggestions(column);
+  const topTarget = suggestions[0];
+  const manualSelection =
+    state.manualSelections.get(column.column_name) ||
+    state.manualSelections.get(column.column_name.toLowerCase()) ||
+    null;
+
+  if (!topTarget) {
+    row.className = 'mapping-row confidence-medium';
+  }
+
+  const suggestionTarget = document.createElement('p');
+  suggestionTarget.className = 'suggestion-target';
+
+  if (manualSelection) {
+    suggestionTarget.textContent = manualSelection;
+  } else if (topTarget) {
+    suggestionTarget.textContent = topTarget.target;
+  } else {
+    suggestionTarget.textContent = 'No recommendation';
+  }
+
+  suggestionCell.appendChild(suggestionTarget);
+
+  const select = document.createElement('select');
+  select.className = 'select-control';
+  select.dataset.column = column.column_name;
+
+  if (topTarget) {
+    const placeholderOption = document.createElement('option');
+    placeholderOption.value = '';
+    placeholderOption.textContent = 'Keep AI suggestion';
+    if (!manualSelection) {
+      placeholderOption.selected = true;
+    }
+    select.appendChild(placeholderOption);
+  } else {
+    const noModelOption = document.createElement('option');
+    noModelOption.value = '';
+    noModelOption.textContent = 'No model';
+    if (!manualSelection) {
+      noModelOption.selected = true;
+    }
+    select.appendChild(noModelOption);
+  }
+
+  manualOptions.forEach((option) => {
+    const opt = document.createElement('option');
+    opt.value = option;
+    opt.textContent = option;
+    if (manualSelection && option === manualSelection) {
+      opt.selected = true;
+    }
+    select.appendChild(opt);
+  });
+
+  select.addEventListener('change', () => {
+    if (select.value) {
+      state.manualSelections.set(column.column_name, select.value);
+    } else {
+      state.manualSelections.delete(column.column_name);
+    }
+    _persistManualOverrides();
+    _renderMappingRows();
+  });
+
+  suggestionCell.appendChild(select);
+
+  if (suggestions.length > 1) {
+    const list = document.createElement('ul');
+    list.className = 'suggestion-list';
+    suggestions.slice(1, 4).forEach((item) => {
+      const chip = document.createElement('li');
+      const scoreRounded = Math.round(Number(item.similarity) * 100) / 100;
+      chip.textContent = `${item.target} · ${scoreRounded}`;
+      list.appendChild(chip);
+    });
+    suggestionCell.appendChild(list);
+  }
+
+  row.appendChild(columnCell);
+  row.appendChild(suggestionCell);
+  return row;
+};
+
+/** Render all column mapping rows sorted by recommendation availability. */
+const _renderMappingRows = () => {
   if (!state.payload) {
     mappingResults.innerHTML = '';
     emptyState.classList.remove('hidden');
@@ -116,116 +217,15 @@ const renderMappingRows = () => {
   mappingResults.innerHTML = '';
 
   const sortedColumns = [...columns].sort((a, b) => {
-    const aHasRecommendation = getColumnSuggestions(a).length > 0;
-    const bHasRecommendation = getColumnSuggestions(b).length > 0;
+    const aHasRecommendation = _getColumnSuggestions(a).length > 0;
+    const bHasRecommendation = _getColumnSuggestions(b).length > 0;
     if (aHasRecommendation && !bHasRecommendation) return -1;
     if (!aHasRecommendation && bHasRecommendation) return 1;
     return 0;
   });
 
   sortedColumns.forEach((column) => {
-
-    const row = document.createElement('article');
-    row.className = `mapping-row confidence-${column.confidence_bucket}`;
-
-    const columnCell = document.createElement('div');
-    columnCell.className = 'mapping-cell';
-    columnCell.innerHTML = `
-      <p class="label">Column</p>
-      <h3>${column.column_name}</h3>
-    `;
-
-    const suggestionCell = document.createElement('div');
-    suggestionCell.className = 'mapping-cell suggestion-cell';
-
-    const suggestionLabel = document.createElement('p');
-    suggestionLabel.className = 'label';
-    suggestionLabel.textContent = 'AI recommended model';
-    suggestionCell.appendChild(suggestionLabel);
-
-  const suggestions = getColumnSuggestions(column);
-  const topTarget = suggestions[0];
-  const manualSelection =
-    state.manualSelections.get(column.column_name) ||
-    state.manualSelections.get(column.column_name.toLowerCase()) ||
-    null;
-
-    if (!topTarget) {
-      row.className = 'mapping-row confidence-medium';
-    }
-
-    const suggestionTarget = document.createElement('p');
-    suggestionTarget.className = 'suggestion-target';
-    const suggestionScore = document.createElement('p');
-    suggestionScore.className = 'suggestion-score';
-
-    if (manualSelection) {
-      suggestionTarget.textContent = manualSelection;
-    } else if (topTarget) {
-      suggestionTarget.textContent = topTarget.target;
-    } else {
-      suggestionTarget.textContent = 'No recommendation';
-    }
-
-    suggestionCell.appendChild(suggestionTarget);
-
-    const select = document.createElement('select');
-    select.className = 'select-control';
-    select.dataset.column = column.column_name;
-
-    if (topTarget) {
-      const placeholderOption = document.createElement('option');
-      placeholderOption.value = '';
-      placeholderOption.textContent = 'Keep AI suggestion';
-      if (!manualSelection) {
-        placeholderOption.selected = true;
-      }
-      select.appendChild(placeholderOption);
-    } else {
-      const noModelOption = document.createElement('option');
-      noModelOption.value = '';
-      noModelOption.textContent = 'No model';
-      if (!manualSelection) {
-        noModelOption.selected = true;
-      }
-      select.appendChild(noModelOption);
-    }
-
-    manualOptions.forEach((option) => {
-      const opt = document.createElement('option');
-      opt.value = option;
-      opt.textContent = option;
-      if (manualSelection && option === manualSelection) {
-        opt.selected = true;
-      }
-      select.appendChild(opt);
-    });
-    select.addEventListener('change', () => {
-      if (select.value) {
-        state.manualSelections.set(column.column_name, select.value);
-      } else {
-        state.manualSelections.delete(column.column_name);
-      }
-      persistManualOverrides();
-      renderMappingRows();
-    });
-
-    suggestionCell.appendChild(select);
-
-    if (suggestions.length > 1) {
-      const list = document.createElement('ul');
-      list.className = 'suggestion-list';
-      suggestions.slice(1, 4).forEach((item) => {
-        const chip = document.createElement('li');
-        const scoreRounded = Math.round(Number(item.similarity) * 100) / 100;
-        chip.textContent = `${item.target} · ${scoreRounded}`;
-        list.appendChild(chip);
-      });
-      suggestionCell.appendChild(list);
-    }
-
-    row.appendChild(columnCell);
-    row.appendChild(suggestionCell);
+    const row = _buildMappingRow(column);
     mappingResults.appendChild(row);
   });
 
@@ -241,17 +241,19 @@ const renderMappingRows = () => {
   }
 };
 
-const hydrateView = () => {
+/** Populate hint text and render rows based on current state. */
+const _hydrateView = () => {
   if (!state.payload) {
     mappingHint.textContent = 'Upload a file on Stage 1 to get started.';
-    renderMappingRows();
+    _renderMappingRows();
     return;
   }
 
-  renderMappingRows();
+  _renderMappingRows();
 };
 
-const fetchPayload = async (fileId, targetSchema) => {
+/** Fetch analysis payload from backend. */
+const _fetchPayload = async (fileId, targetSchema) => {
   if (!fileId) {
     return null;
   }
@@ -269,18 +271,19 @@ const fetchPayload = async (fileId, targetSchema) => {
   if (!response.ok) {
     throw new Error(payload.detail || 'Unable to fetch mapping data');
   }
-  savePayloadToStorage(payload);
+  _savePayloadToStorage(payload);
   return payload;
 };
 
-const submitHarmonize = async () => {
+/** Prepare and navigate to stage 3 with harmonization payload. */
+const _submitHarmonize = async () => {
   if (!state.payload || state.isSubmitting) {
     return;
   }
 
   state.isSubmitting = true;
   harmonizeButton.disabled = true;
-  harmonizeButton.textContent = 'Preparing harmonize…';
+  harmonizeButton.textContent = 'Preparing harmonize...';
 
   const overrides = Object.fromEntries(state.manualSelections.entries());
   const manifest = state.payload?.manifest;
@@ -304,7 +307,7 @@ const submitHarmonize = async () => {
     console.warn('Unable to reset previous harmonize job', error);
   }
 
-  const payloadSaved = persistStageThreePayload({ ...body });
+  const payloadSaved = _persistStageThreePayload({ ...body });
   if (!payloadSaved) {
     state.isSubmitting = false;
     harmonizeButton.disabled = false;
@@ -323,21 +326,22 @@ const submitHarmonize = async () => {
   });
 };
 
-const initialize = async () => {
+/** Bootstrap page state from storage or backend. */
+const _initialize = async () => {
   setActiveStage('mapping');
 
   if (harmonizeButton) {
-    harmonizeButton.addEventListener('click', submitHarmonize);
+    harmonizeButton.addEventListener('click', _submitHarmonize);
   }
 
-  let payload = readPayloadFromStorage();
+  let payload = _readPayloadFromStorage();
   const params = new URLSearchParams(window.location.search);
   const fileId = params.get('file_id') || payload?.file_id;
   const schema = params.get('schema') || config.targetSchema;
 
   if (!payload) {
     try {
-      payload = await fetchPayload(fileId, schema);
+      payload = await _fetchPayload(fileId, schema);
     } catch (error) {
       console.error(error);
       mappingHint.textContent = error.message;
@@ -345,14 +349,14 @@ const initialize = async () => {
   }
 
   if (!payload) {
-    hydrateView();
+    _hydrateView();
     return;
   }
 
   state.payload = payload;
   const overrides = payload.manual_overrides ? Object.entries(payload.manual_overrides) : [];
   state.manualSelections = new Map(overrides);
-  hydrateView();
+  _hydrateView();
 };
 
-initialize();
+_initialize();

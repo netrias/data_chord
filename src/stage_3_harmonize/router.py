@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import cast
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
@@ -11,7 +12,12 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from src.stage_1_upload.dependencies import get_harmonize_service, get_upload_storage
-from src.stage_1_upload.schemas import DEFAULT_TARGET_SCHEMA, HarmonizeRequest, HarmonizeResponse
+from src.stage_1_upload.schemas import (
+    DEFAULT_TARGET_SCHEMA,
+    HarmonizeRequest,
+    HarmonizeResponse,
+    ManifestPayload,
+)
 
 MODULE_DIR = Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"
@@ -48,7 +54,8 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
     if not meta:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please rerun analysis.")
 
-    manifest_payload = payload.manifest or _storage.load_manifest(payload.file_id)
+    stored_manifest = _storage.load_manifest(payload.file_id)
+    manifest_payload = payload.manifest or cast(ManifestPayload | None, stored_manifest)
     harmonizer = get_harmonize_service()
     result = await run_in_threadpool(
         harmonizer.run,
