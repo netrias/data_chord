@@ -18,3 +18,21 @@ dev = [
     "basedpyright>=1.17.0",
     "ruff>=0.6.5",
 ]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "UP",     # pyupgrade
+]
+
+[tool.basedpyright]
+pythonVersion = "3.13"
+typeCheckingMode = "standard"
