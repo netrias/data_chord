@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-
 import os
 from pathlib import Path
 
@@ -17,6 +16,8 @@ from src.stage_2_review_columns.router import STAGE_TWO_STATIC_PATH, stage_two_r
 from src.stage_3_harmonize.router import STAGE_THREE_STATIC_PATH, stage_three_router
 from src.stage_4_review_results.router import STAGE_FOUR_STATIC_PATH, stage_four_router
 from src.stage_5_review_summary.router import STAGE_FIVE_STATIC_PATH, stage_five_router
+
+SHARED_STATIC_PATH: Path = Path(__file__).resolve().parents[2] / "src" / "shared" / "static"
 
 APP_TITLE = "Data Chord"
 APP_DESCRIPTION = "Data harmonization workflow bootstrap application."
@@ -61,11 +62,13 @@ def create_app() -> FastAPI:
     app.include_router(stage_three_router)
     app.include_router(stage_four_router)
     app.include_router(stage_five_router)
+    shared_static = StaticFiles(directory=str(SHARED_STATIC_PATH))
     stage_one_static = StaticFiles(directory=str(STAGE_ONE_STATIC_PATH))
     stage_two_static = StaticFiles(directory=str(STAGE_TWO_STATIC_PATH))
     stage_three_static = StaticFiles(directory=str(STAGE_THREE_STATIC_PATH))
     stage_four_static = StaticFiles(directory=str(STAGE_FOUR_STATIC_PATH))
     stage_five_static = StaticFiles(directory=str(STAGE_FIVE_STATIC_PATH))
+    app.mount("/assets/shared", shared_static, name="shared_static")
     app.mount("/assets/stage-1", stage_one_static, name="stage_one_static")
     app.mount("/assets/stage-2", stage_two_static, name="stage_two_static")
     app.mount("/assets/stage-3", stage_three_static, name="stage_three_static")
