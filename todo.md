@@ -162,7 +162,66 @@ Dockerfile                    # Add Node.js and npm build step
 
 ---
 
+## 3. Backward Navigation
+
+Add ability for users to navigate backward through the 5-stage workflow.
+
+**Current state**: The workflow is strictly linear—users proceed forward through stages but cannot return to earlier steps without starting over.
+
+**Problem**: After seeing harmonization results (Stage 4), users may want to:
+- Re-map a column they realize was incorrectly assigned (Stage 2)
+- Re-upload a corrected source file (Stage 1)
+- Adjust confidence thresholds and re-run harmonization (Stage 3)
+
+**Implementation considerations**:
+- Add breadcrumb/step indicator component showing current position
+- Enable clicking previous stages to navigate back
+- Preserve state when navigating backward (mappings, overrides, etc.)
+- Warn users if backward navigation will invalidate downstream results
+- Consider "branching" vs "reset" semantics—does going back discard later work or create a new branch?
+
+**UI approach**:
+- Horizontal stepper at top of each stage template
+- Visual indication of completed vs current vs future stages
+- Disabled forward steps until prerequisites complete
+
+---
+
+## 4. Session Persistence
+
+Add mechanism for users to resume incomplete workflows.
+
+**Current state**: No session tracking—if a user closes the browser or navigates away, they lose their progress and must re-upload.
+
+**Problem**: Data harmonization can be a multi-session task, especially for:
+- Large datasets requiring careful review
+- Workflows interrupted by meetings or end-of-day
+- Collaborative review where multiple people inspect results
+
+**Implementation considerations**:
+- Generate session/workflow ID at upload time
+- Store workflow state (current stage, file_id, mappings, overrides) in persistent storage
+- Add "Recent Workflows" landing page or sidebar showing incomplete sessions
+- Consider authentication implications (anonymous vs user-scoped sessions)
+- Define session TTL and cleanup policy (ties into item #1)
+
+**Data to persist per session**:
+- `file_id` and upload metadata
+- Column-to-CDE mapping selections and overrides (Stage 2)
+- Harmonization job ID and status (Stage 3)
+- Row-level approvals and manual corrections (Stage 4)
+- Current stage position
+
+**UI approach**:
+- Show session ID or friendly name in header
+- "Save & Exit" button to explicitly checkpoint
+- Landing page listing recent sessions with resume links
+
+---
+
 ## Priority
 
-1. **File cleanup** - Quick win, prevents disk issues
-2. **Vite conversion** - Larger effort, better dev experience
+1. **File storage strategy** - Blocking for production; prerequisite for session persistence
+2. **Session persistence** - Enables multi-session workflows
+3. **Backward navigation** - Improves iterative refinement UX
+4. **Vite conversion** - Larger effort, better dev experience
