@@ -5,6 +5,7 @@ const summaryEndpoint = config.summaryEndpoint ?? '/stage-5/summary';
 const progressSteps = document.querySelectorAll('.progress-tracker [data-stage]');
 const summaryMetricGrid = document.getElementById('summaryMetricGrid');
 const changeTableBody = document.getElementById('changeTableBody');
+const changeTableHeader = document.querySelector('.change-table-header');
 const insightTags = document.getElementById('insightTags');
 const downloadResults = document.getElementById('downloadResults');
 const startNewButton = document.getElementById('startNewButton');
@@ -13,11 +14,17 @@ const changeModalTitle = document.getElementById('changeModalTitle');
 const changeModalBody = document.getElementById('changeModalBody');
 const closeChangeModal = document.getElementById('closeChangeModal');
 const summaryError = document.getElementById('summaryError');
+const filterChangesToggle = document.getElementById('filterChangesToggle');
+
+const SORT_KEYS = ['column', 'ai_changes', 'manual_changes', 'reviewed'];
 
 const state = {
   summary: null,
   fileId: null,
   manualColumns: [],
+  sortKey: null,
+  sortAscending: true,
+  filterChangesOnly: false,
 };
 
 const setActiveStage = (stage) => {
@@ -123,14 +130,52 @@ const renderSummaryMetrics = () => {
     .join('');
 };
 
+const getReviewedPercent = (entry) => {
+  const touched = entry.ai_changes + entry.manual_changes;
+  return state.summary?.total_rows ? (touched / state.summary.total_rows) * 100 : 0;
+};
+
+const sortColumnSummaries = (summaries) => {
+  if (!state.sortKey) {
+    return summaries;
+  }
+  const sorted = [...summaries];
+  sorted.sort((a, b) => {
+    let aVal, bVal;
+    if (state.sortKey === 'column') {
+      aVal = a.column.toLowerCase();
+      bVal = b.column.toLowerCase();
+    } else if (state.sortKey === 'reviewed') {
+      aVal = getReviewedPercent(a);
+      bVal = getReviewedPercent(b);
+    } else {
+      aVal = a[state.sortKey];
+      bVal = b[state.sortKey];
+    }
+    if (aVal < bVal) return state.sortAscending ? -1 : 1;
+    if (aVal > bVal) return state.sortAscending ? 1 : -1;
+    return 0;
+  });
+  return sorted;
+};
+
+const filterColumnSummaries = (summaries) => {
+  if (!state.filterChangesOnly) {
+    return summaries;
+  }
+  return summaries.filter((entry) => entry.ai_changes > 0 || entry.manual_changes > 0);
+};
+
 const renderChangeTable = () => {
   if (!state.summary || !changeTableBody) {
     return;
   }
-  const rows = state.summary.column_summaries
+  const filtered = filterColumnSummaries(state.summary.column_summaries);
+  const sorted = sortColumnSummaries(filtered);
+  const rows = sorted
     .map((entry) => {
-      const touched = entry.ai_changes + entry.manual_changes;
-      const reviewed = state.summary.total_rows ? `${Math.round((touched / state.summary.total_rows) * 100)}%` : '—';
+      const reviewedPercent = getReviewedPercent(entry);
+      const reviewed = state.summary.total_rows ? `${Math.round(reviewedPercent)}%` : '—';
       return `
         <div class="change-table-row" role="row">
           <span>${entry.column}</span>
@@ -142,6 +187,26 @@ const renderChangeTable = () => {
     })
     .join('');
   changeTableBody.innerHTML = rows || '<div class="change-table-row" role="row">No changes detected.</div>';
+  renderTableHeader();
+};
+
+const renderTableHeader = () => {
+  if (!changeTableHeader) {
+    return;
+  }
+  const headers = [
+    { key: 'column', label: 'Column' },
+    { key: 'ai_changes', label: 'AI updates' },
+    { key: 'manual_changes', label: 'Manual overrides' },
+    { key: 'reviewed', label: 'Reviewed rows' },
+  ];
+  changeTableHeader.innerHTML = headers
+    .map((header) => {
+      const isActive = state.sortKey === header.key;
+      const arrow = isActive ? (state.sortAscending ? ' ▲' : ' ▼') : '';
+      return `<span class="sortable-header${isActive ? ' active' : ''}" data-sort-key="${header.key}">${header.label}${arrow}</span>`;
+    })
+    .join('');
 };
 
 const renderInsightTags = () => {
@@ -203,6 +268,25 @@ const attachStageEvents = () => {
   });
 };
 
+const handleSortClick = (sortKey) => {
+  if (state.sortKey === sortKey) {
+    state.sortAscending = !state.sortAscending;
+  } else {
+    state.sortKey = sortKey;
+    state.sortAscending = true;
+  }
+  renderChangeTable();
+};
+
+const handleFilterToggle = () => {
+  state.filterChangesOnly = !state.filterChangesOnly;
+  if (filterChangesToggle) {
+    filterChangesToggle.textContent = state.filterChangesOnly ? 'Show all columns' : 'Show changed only';
+    filterChangesToggle.classList.toggle('active', state.filterChangesOnly);
+  }
+  renderChangeTable();
+};
+
 const attachStageFiveEvents = () => {
   if (downloadResults) {
     downloadResults.addEventListener('click', () => {
@@ -228,6 +312,13 @@ const attachStageFiveEvents = () => {
       changeModal.classList.add('hidden');
     }
   });
+  changeTableHeader?.addEventListener('click', (event) => {
+    const target = event.target;
+    if (target.matches('[data-sort-key]')) {
+      handleSortClick(target.getAttribute('data-sort-key'));
+    }
+  });
+  filterChangesToggle?.addEventListener('click', handleFilterToggle);
 };
 
 const fetchSummary = async () => {
