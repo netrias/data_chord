@@ -10,7 +10,9 @@ from typing import Protocol, cast
 
 from netrias_client import NetriasClient
 
-from .schemas import ManifestPayload, ModelSuggestion
+from src.domain.manifest import ManifestPayload
+
+from .schemas import ModelSuggestion
 
 logger = logging.getLogger(__name__)
 DEFAULT_SAMPLE_LIMIT = 50

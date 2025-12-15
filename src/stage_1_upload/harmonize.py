@@ -12,10 +12,9 @@ from uuid import uuid4
 from netrias_client import NetriasClient
 
 from src.domain import CDEField, get_cde, normalize_target_name
+from src.domain.manifest import ManifestPayload
 
 logger = logging.getLogger(__name__)
-
-ManifestPayload = dict[str, dict[str, dict[str, object]]]
 
 
 @dataclass(frozen=True)

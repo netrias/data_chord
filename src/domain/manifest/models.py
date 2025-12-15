@@ -8,7 +8,7 @@ including manual override tracking with audit trail.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, TypedDict
 
 import pyarrow as pa
 
@@ -16,6 +16,36 @@ ConfidenceBucket = Literal["low", "medium", "high"]
 
 HIGH_CONFIDENCE_THRESHOLD: float = 0.8
 MEDIUM_CONFIDENCE_THRESHOLD: float = 0.45
+
+
+class ColumnMappingEntry(TypedDict, total=False):
+    """why: describe a single column's CDE mapping configuration.
+
+    Fields:
+        route: The routing endpoint for harmonization (e.g., "sagemaker:primary")
+        targetField: The canonical CDE field name
+        cdeId: The numeric CDE identifier (camelCase variant from external API)
+        cde_id: The numeric CDE identifier (snake_case variant from external API)
+
+    Note: Both cdeId and cde_id exist because the external Netrias API returns
+    responses with inconsistent casing. We accept both variants at the boundary
+    and normalize internally.
+    """
+
+    route: str
+    targetField: str
+    cdeId: int
+    cde_id: int
+
+
+class ManifestPayload(TypedDict, total=False):
+    """why: structure for CDE mapping payloads passed to harmonization.
+
+    The column_mappings dict maps source column names to their CDE configurations.
+    Uses total=False to allow flexible construction of the dict.
+    """
+
+    column_mappings: dict[str, dict[str, object]]
 
 
 @dataclass(frozen=True)
@@ -91,12 +121,14 @@ def get_manifest_schema() -> pa.Schema:
 
 
 __all__ = [
+    "ColumnMappingEntry",
     "ConfidenceBucket",
-    "ManualOverride",
-    "ManifestRow",
-    "ManifestSummary",
-    "confidence_bucket",
-    "get_manifest_schema",
     "HIGH_CONFIDENCE_THRESHOLD",
     "MEDIUM_CONFIDENCE_THRESHOLD",
+    "ManifestPayload",
+    "ManifestRow",
+    "ManifestSummary",
+    "ManualOverride",
+    "confidence_bucket",
+    "get_manifest_schema",
 ]

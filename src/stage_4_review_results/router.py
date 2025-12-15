@@ -16,7 +16,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from src.domain import CONFIDENCE, SessionKey
+from src.domain import CONFIDENCE, DEFAULT_TARGET_SCHEMA, SessionKey
+from src.domain.dependencies import get_file_store, get_upload_storage
 from src.domain.manifest import (
     ManifestSummary,
     ManualOverride,
@@ -24,10 +25,7 @@ from src.domain.manifest import (
     confidence_bucket,
     read_manifest_parquet,
 )
-from src.domain.storage import FileType
-from src.stage_1_upload.dependencies import get_file_store, get_upload_storage
-from src.stage_1_upload.schemas import DEFAULT_TARGET_SCHEMA
-from src.stage_1_upload.services import UploadStorage
+from src.domain.storage import FileType, UploadStorage
 from src.stage_4_review_results.schemas import (
     DeleteOverridesResponse,
     ReviewOverridesSchema,
