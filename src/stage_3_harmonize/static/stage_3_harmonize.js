@@ -12,7 +12,6 @@ const progressSteps = document.querySelectorAll('.progress-tracker [data-stage]'
 const loadingState = document.getElementById('loadingState');
 const loadingPrimaryText = document.getElementById('loadingPrimaryText');
 const loadingSecondaryText = document.getElementById('loadingSecondaryText');
-const jobIdValue = document.getElementById('jobIdValue');
 const jobStatusValue = document.getElementById('jobStatusValue');
 const reviewButton = document.getElementById('reviewButton');
 const retryButton = document.getElementById('retryButton');
@@ -20,8 +19,13 @@ const emptyState = document.getElementById('stageThreeEmptyState');
 const errorBanner = document.getElementById('stageThreeError');
 const stageThreeTitle = document.getElementById('stageThreeTitle');
 const stageThreeSubtitle = document.getElementById('stageThreeSubtitle');
-const stageThreeMeta = document.getElementById('stageThreeMeta');
 const returnToStageTwo = document.getElementById('returnToStageTwo');
+const metadataBar = document.getElementById('metadataBar');
+const metadataPreview = document.getElementById('metadataPreview');
+const metaFileName = document.getElementById('metaFileName');
+const metaRowCount = document.getElementById('metaRowCount');
+const metaSchemaValue = document.getElementById('metaSchemaValue');
+const metaJobId = document.getElementById('metaJobId');
 const progressIndicators = [
   document.querySelector('#loadingState .loading-spinner'),
   document.querySelector('#loadingState .loading-pips'),
@@ -159,27 +163,40 @@ const toggleProgressIndicators = (show) => {
 };
 
 const updateMetadata = (context) => {
-  if (!stageThreeMeta) {
-    return;
+  // "why: store context for later use when showing job summary."
+  if (context) {
+    state.context = context;
   }
-  if (!context) {
-    stageThreeMeta.textContent = '';
-    stageThreeMeta.classList.add('hidden');
-    return;
+};
+
+const updateMetadataBar = (job) => {
+  // "why: populate the collapsible metadata bar with session context."
+  const context = state.context ?? state.payload?.context ?? {};
+  const fileName = context.fileName;
+  const rowCount = typeof context.totalRows === 'number' ? context.totalRows.toLocaleString() : null;
+  const schema = context.targetSchema;
+  const jobId = job?.job_id;
+
+  if (metaFileName) {
+    metaFileName.textContent = fileName ?? '—';
   }
-  const parts = [];
-  if (context.fileName) {
-    parts.push(context.fileName);
+  if (metaRowCount) {
+    metaRowCount.textContent = rowCount ?? '—';
   }
-  if (typeof context.totalRows === 'number') {
-    const formatted = context.totalRows.toLocaleString();
-    parts.push(`${formatted} rows`);
+  if (metaSchemaValue) {
+    metaSchemaValue.textContent = schema ?? '—';
   }
-  if (context.targetSchema) {
-    parts.push(`Schema: ${context.targetSchema}`);
+  if (metaJobId) {
+    metaJobId.textContent = jobId ?? '—';
   }
-  stageThreeMeta.textContent = parts.join(' · ');
-  stageThreeMeta.classList.remove('hidden');
+
+  // "why: update preview text to show key info at a glance."
+  if (metadataPreview) {
+    const parts = [];
+    if (fileName) parts.push(fileName);
+    if (rowCount) parts.push(`${rowCount} rows`);
+    metadataPreview.textContent = parts.length ? parts.join(' · ') : 'Session info';
+  }
 };
 
 const clearError = () => {
@@ -227,23 +244,22 @@ const updateTitleForStatus = (status) => {
   if (normalized === 'failed') {
     stageThreeTitle.textContent = 'Harmonization failed';
     stageThreeSubtitle.textContent = 'Retry the run or return to Stage 2 to adjust mappings.';
+    stageThreeSubtitle.classList.remove('hidden');
     return;
   }
   if (isCompleteStatus(normalized)) {
     stageThreeTitle.textContent = 'Harmonization complete';
-    stageThreeSubtitle.textContent = 'Review the results to approve or override values.';
+    stageThreeSubtitle.classList.add('hidden');
     return;
   }
   stageThreeTitle.textContent = 'Harmonization is running';
   stageThreeSubtitle.textContent = 'Feel free to monitor progress here while Netrias processes your dataset.';
+  stageThreeSubtitle.classList.remove('hidden');
 };
 
 const hideJobMeta = () => {
   if (jobStatusValue) {
     jobStatusValue.classList.add('hidden');
-  }
-  if (jobIdValue) {
-    jobIdValue.classList.add('hidden');
   }
 };
 
@@ -267,42 +283,37 @@ const updateStatusDisplay = (status, detail) => {
   }
 };
 
-const updateJobIdDisplay = (job) => {
-  if (!jobIdValue) {
-    return;
-  }
-  if (job.job_id_available && job.job_id) {
-    jobIdValue.textContent = `Job ID: ${job.job_id}`;
-    jobIdValue.classList.remove('hidden');
-  } else {
-    jobIdValue.classList.add('hidden');
-  }
-};
-
 const renderJob = (job) => {
+  // "why: update UI based on job status; metadata bar always visible."
   if (!job) {
     return;
   }
   state.job = job;
   persistJobMeta(job);
+  updateMetadataBar(job);
+
   const status = job.status ?? 'running';
   const normalized = normalizeStatus(status);
   updateTitleForStatus(status);
-  updateStatusDisplay(status, job.detail);
-  updateJobIdDisplay(job);
-  const shouldShowLoader = !isCompleteStatus(normalized) && !isFailedStatus(normalized);
-  toggleProgressIndicators(shouldShowLoader);
   clearError();
+
   if (isFailedStatus(normalized)) {
+    toggleLoadingState(true);
+    toggleProgressIndicators(false);
+    updateStatusDisplay(status, job.detail);
     hideMetricsDashboard();
     showError(job.detail || 'Harmonization failed. Please retry.');
     reviewButton.disabled = true;
     retryButton.classList.remove('hidden');
   } else if (isCompleteStatus(normalized)) {
+    toggleLoadingState(false);
     renderMetricsDashboard(job);
     reviewButton.disabled = false;
     retryButton.classList.add('hidden');
   } else {
+    toggleLoadingState(true);
+    toggleProgressIndicators(true);
+    updateStatusDisplay(status, job.detail);
     hideMetricsDashboard();
     reviewButton.disabled = true;
     retryButton.classList.add('hidden');
@@ -310,6 +321,7 @@ const renderJob = (job) => {
 };
 
 const extractRequestPayload = () => {
+  // "why: extract session payload and populate metadata bar early."
   let payload = readFromSession(storageKey);
   if (payload && payload.context) {
     updateMetadata(payload.context);
@@ -331,6 +343,7 @@ const extractRequestPayload = () => {
   }
   state.payload = payload;
   state.requestBody = harmonizePayload;
+  updateMetadataBar(null);
   return harmonizePayload;
 };
 
