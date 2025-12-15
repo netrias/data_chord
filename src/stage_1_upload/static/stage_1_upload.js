@@ -1,3 +1,5 @@
+import { initStepInstruction } from '/assets/shared/step-instruction-ui.js';
+
 const config = window.stageOneUploadConfig ?? {};
 const STORAGE_KEY = 'stage2Payload';
 
@@ -244,6 +246,7 @@ const wireDragEvents = () => {
 const init = () => {
   resetUploadState();
   wireDragEvents();
+  initStepInstruction('upload');
 
   dropzone.addEventListener('click', () => openFilePicker());
   dropzone.addEventListener('keydown', (event) => {

@@ -233,7 +233,8 @@ button.linklike {
 .progress-tracker {
   background: var(--white);
   box-shadow: var(--shadow-lg);
-  overflow-x: auto;
+  overflow: visible;
+  position: relative;
 }
 
 .progress-track {
@@ -341,6 +342,137 @@ button.linklike {
 
 .connector.complete {
   background: linear-gradient(to right, var(--green-500), var(--teal-500));
+}
+
+/* Step instruction text - shown below progress tracker for active step */
+.step-instruction {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: var(--space-3) var(--space-6) var(--space-4);
+  text-align: center;
+  position: relative;
+}
+
+.step-instruction-text {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--gray-600);
+  line-height: 1.5;
+  cursor: help;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--gray-300);
+  background: var(--gray-50);
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.step-instruction-text::after {
+  content: "\24D8"; /* circled info symbol */
+  font-size: 0.85em;
+  color: var(--gray-400);
+  transition: color var(--transition-fast);
+}
+
+.step-instruction-text:hover {
+  background: var(--gray-100);
+  border-color: var(--gray-400);
+}
+
+.step-instruction-text:hover::after {
+  color: var(--azure-500);
+}
+
+/* Tooltip for long description on hover */
+.step-instruction-tooltip {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: calc(100% - 4px);
+  width: max-content;
+  max-width: 450px;
+  padding: var(--space-4) var(--space-5);
+  background: var(--gray-800);
+  color: var(--white);
+  font-size: 0.85rem;
+  line-height: 1.6;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xl);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--transition-normal), visibility var(--transition-normal);
+  z-index: 1000;
+  pointer-events: none;
+  text-align: left;
+}
+
+.step-instruction-tooltip::before {
+  content: "";
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 8px solid transparent;
+  border-bottom-color: var(--gray-800);
+}
+
+.step-instruction:hover .step-instruction-tooltip,
+.step-instruction-text:focus + .step-instruction-tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Tooltip on step numbers/labels when hovered */
+.step[data-tooltip] {
+  position: relative;
+}
+
+.step[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 320px;
+  padding: var(--space-3) var(--space-4);
+  background: var(--gray-800);
+  color: var(--white);
+  font-size: 0.8rem;
+  font-weight: 400;
+  line-height: 1.5;
+  text-transform: none;
+  letter-spacing: normal;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--transition-normal), visibility var(--transition-normal);
+  z-index: 1000;
+  pointer-events: none;
+  text-align: left;
+}
+
+.step[data-tooltip]::before {
+  content: "";
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-bottom-color: var(--gray-800);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--transition-normal), visibility var(--transition-normal);
+  z-index: 1001;
+}
+
+.step[data-tooltip]:hover::after,
+.step[data-tooltip]:hover::before {
+  opacity: 1;
+  visibility: visible;
 }
 
 /* Stage shell layout */

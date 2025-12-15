@@ -2,6 +2,7 @@
  * Handle column mapping review and user overrides before harmonization.
  * Reads analysis payload from storage, renders mapping UI, and persists user selections.
  */
+import { initStepInstruction } from '/assets/shared/step-instruction-ui.js';
 
 const config = window.stageTwoConfig ?? {};
 const STORAGE_KEY = config.storageKey ?? 'stage2Payload';
@@ -329,6 +330,7 @@ const _submitHarmonize = async () => {
 /** Bootstrap page state from storage or backend. */
 const _initialize = async () => {
   setActiveStage('mapping');
+  initStepInstruction('mapping');
 
   if (harmonizeButton) {
     harmonizeButton.addEventListener('click', _submitHarmonize);
