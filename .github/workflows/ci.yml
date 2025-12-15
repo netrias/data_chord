@@ -7,6 +7,24 @@ on:
     branches: [main]
 
 jobs:
+  test-js:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install JS test dependencies
+        run: npm ci
+        working-directory: tests/js
+
+      - name: Run JS tests
+        run: npm test
+        working-directory: tests/js
+
   test:
     runs-on: ubuntu-latest
     steps:
