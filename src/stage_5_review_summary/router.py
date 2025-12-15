@@ -17,8 +17,8 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from src.domain import ChangeType, SessionKey
+from src.domain.manifest import ManifestSummary, read_manifest_parquet
 from src.stage_1_upload.dependencies import get_upload_storage
-from src.stage_1_upload.manifest_reader import ManifestSummary, read_manifest_parquet
 from src.stage_1_upload.services import UploadStorage
 
 MODULE_DIR = Path(__file__).parent
