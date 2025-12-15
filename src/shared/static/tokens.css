@@ -1,13 +1,72 @@
 /* Design tokens for Data Chord application */
 :root {
-  /* Primary colors */
+  /* ==========================================================================
+     BRAND TRIADIC COLOR SYSTEM
+     These three colors form a triadic harmony (120° apart on the color wheel).
+
+     SEMANTIC RULES:
+     - Green = Interactive & Success: buttons, CTAs, checkmarks, completion states
+     - Blue  = Informational: data visualizations, metrics, charts, progress bars
+     - Magenta = Attention: alerts, badges, notifications, items needing review
+
+     When users see green, they know it's clickable or indicates success.
+     When users see blue, they know it's showing them information about what happened.
+     When users see magenta, they know something needs their attention.
+     ========================================================================== */
+
+  /* --------------------------------------------------------------------------
+     NETRIAS GREEN (Interactive & Success)
+     Use for: Primary CTAs, forward-action buttons, completion checkmarks,
+              success states, confirmed/done indicators
+     DO NOT use for: Data visualizations, metric bars, informational displays
+     Conveys: "Click me" or "This succeeded"
+     -------------------------------------------------------------------------- */
+  --netrias-500: #73b306;
+  --netrias-600: #5e9205;
+  --netrias-700: #4a7304;
+  --netrias-100: #e8f5cc;
+  --netrias-50: #f4fae6;
+
+  /* --------------------------------------------------------------------------
+     AZURE BLUE (Informational)
+     Use for: All data visualizations, metric bars, progress indicators,
+              charts, confidence distributions, links, help text
+     DO NOT use for: Primary action buttons, success/completion states
+     Conveys: "Here's information about what happened"
+     -------------------------------------------------------------------------- */
+  --azure-500: #0673b3;
+  --azure-600: #055c91;
+  --azure-700: #044770;
+  --azure-100: #cce4f5;
+  --azure-50: #e6f2fa;
+
+  /* --------------------------------------------------------------------------
+     MAGENTA (Attention & Alerts)
+     Use for: Badges, notifications, items requiring review, special callouts,
+              warning states (non-destructive), distinctive highlights
+     DO NOT use for: Errors (use semantic error colors), routine data display
+     Conveys: "This needs your attention"
+     -------------------------------------------------------------------------- */
+  --magenta-500: #b30673;
+  --magenta-600: #91055c;
+  --magenta-700: #700447;
+  --magenta-100: #f5cce4;
+  --magenta-50: #fae6f2;
+
+  /* Legacy alias - prefer --netrias-500 for new code */
+  --green-500: var(--netrias-500);
+
+  /* ==========================================================================
+     SUPPORTING COLORS
+     ========================================================================== */
+
+  /* Teal - used for stage/step indicators and navigation chrome */
   --teal-700: #007c88;
   --teal-600: #009199;
   --teal-500: #00a7b3;
   --teal-50: #f0fdfa;
 
-  /* Accent colors */
-  --green-500: #73b306;
+  /* Purple - legacy CTA color, prefer --netrias-500 for primary actions */
   --purple-500: #6c63ff;
 
   /* Gray scale - unified palette */
@@ -280,7 +339,7 @@ button.linklike {
 
 /* Stage shell layout */
 .stage-shell {
-  max-width: 1100px;
+  max-width: 1400px;
   margin: 0 auto;
   padding: var(--space-12) var(--space-6) 4rem;
 }

@@ -1,15 +1,20 @@
 // """Translate harmonization manifest metadata into dashboard datasets."""
 
-const MANIFEST_PILL = 'Manifest snapshot';
-const ESTIMATE_PILL = 'Estimated snapshot';
+// "why: confidence buckets use a single color for visual simplicity."
+const CONFIDENCE_COLOR_VAR = '--azure-500';
 
 const CONFIDENCE_BUCKETS = [
-  { id: 'high', label: 'High confidence', color: '#16a34a', min: 0.8 },
-  { id: 'medium', label: 'Medium confidence', color: '#f97316', min: 0.45 },
-  { id: 'low', label: 'Low confidence', color: '#dc2626', min: 0 },
+  { id: 'high', label: 'High', min: 0.8 },
+  { id: 'medium', label: 'Medium', min: 0.45 },
+  { id: 'low', label: 'Low', min: 0 },
 ];
 
-const toSafeNumber = (value, fallback = 0) => {
+const _resolveColor = (colorVar) => {
+  // "why: read CSS custom property value at runtime for theme consistency."
+  return getComputedStyle(document.documentElement).getPropertyValue(colorVar).trim() || colorVar;
+};
+
+const _toSafeNumber = (value, fallback = 0) => {
   // "why: convert stringified metrics into predictable numeric inputs."
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value;
@@ -18,9 +23,13 @@ const toSafeNumber = (value, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const safeArray = (candidate) => {
+const _safeArray = (candidate) => {
+  // "why: extract row arrays from various manifest response shapes."
   if (Array.isArray(candidate)) {
     return candidate;
+  }
+  if (candidate && Array.isArray(candidate.preview_rows)) {
+    return candidate.preview_rows;
   }
   if (candidate && Array.isArray(candidate.rows)) {
     return candidate.rows;
@@ -34,7 +43,7 @@ const safeArray = (candidate) => {
   return [];
 };
 
-const looksLikeManifestRow = (entry) => {
+const _looksLikeManifestRow = (entry) => {
   if (!entry || typeof entry !== 'object') {
     return false;
   }
@@ -42,173 +51,130 @@ const looksLikeManifestRow = (entry) => {
   return keys.includes('to_harmonize') || keys.includes('top_harmonization') || keys.includes('confidence_score');
 };
 
-const normalizeValue = (value) => (value ?? '').toString().trim().toLowerCase();
+const _normalizeValue = (value) => (value ?? '').toString().trim().toLowerCase();
 
-const isChangedRow = (row) => {
-  const original = normalizeValue(row?.to_harmonize);
-  const harmonized = normalizeValue(row?.top_harmonization);
+const _isChangedRow = (row) => {
+  const original = _normalizeValue(row?.to_harmonize);
+  const harmonized = _normalizeValue(row?.top_harmonization);
   if (!harmonized) {
     return false;
   }
   return original !== harmonized;
 };
 
-const selectChangeLabel = (row) => {
-  // "why: map manifest change types into user-friendly labels."
-  const raw = normalizeValue(row?.change_type ?? row?.harmonization_type ?? row?.action);
-  if (raw.includes('merge')) {
-    return 'Attribute merges';
+const _getRowCount = (row) => {
+  // "why: count actual CSV row occurrences, not just unique terms."
+  const indices = row?.row_indices;
+  if (Array.isArray(indices) && indices.length > 0) {
+    return indices.length;
   }
-  if (raw.includes('conflict') || raw.includes('override')) {
-    return 'Conflict resolutions';
-  }
-  if (raw.includes('rename') || raw.includes('map') || raw.includes('standardize')) {
-    return 'Entity renames';
-  }
-  if (Array.isArray(row?.top_harmonizations) && row.top_harmonizations.length > 1) {
-    return 'Attribute merges';
-  }
-  if (toSafeNumber(row?.confidence_score, 0) < 0.45) {
-    return 'Conflict resolutions';
-  }
-  return 'Entity renames';
+  return 1;
 };
 
-const buildChangeTypeCounts = (rows) => {
-  const counts = new Map();
+const _formatColumnLabel = (columnName) => {
+  // "why: convert snake_case column names to readable labels."
+  if (!columnName) {
+    return 'Unknown';
+  }
+  return columnName
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+};
+
+const _getConfidenceBucket = (score) => {
+  const safeScore = _toSafeNumber(score, -1);
+  return (
+    CONFIDENCE_BUCKETS.find((bucket) => safeScore >= bucket.min) ??
+    CONFIDENCE_BUCKETS[CONFIDENCE_BUCKETS.length - 1]
+  );
+};
+
+const _buildColumnBreakdown = (rows) => {
+  // "why: aggregate per-column statistics using row_indices for actual row counts."
+  const columnMap = new Map();
+
   rows.forEach((row) => {
-    if (!isChangedRow(row)) {
-      return;
+    const columnName = row?.column_name ?? 'unknown';
+    if (!columnMap.has(columnName)) {
+      columnMap.set(columnName, {
+        columnName,
+        label: _formatColumnLabel(columnName),
+        rows: [],
+      });
     }
-    const label = selectChangeLabel(row);
-    counts.set(label, (counts.get(label) ?? 0) + 1);
+    columnMap.get(columnName).rows.push(row);
   });
-  return Array.from(counts.entries()).map(([label, count]) => ({ label, count }));
-};
 
-const bucketConfidence = (rows) => {
-  const counts = CONFIDENCE_BUCKETS.reduce((acc, bucket) => ({ ...acc, [bucket.id]: 0 }), {});
-  rows.forEach((row) => {
-    const score = toSafeNumber(row?.confidence_score, -1);
-    const bucket =
-      CONFIDENCE_BUCKETS.find((candidate) => score >= candidate.min) ??
-      CONFIDENCE_BUCKETS[CONFIDENCE_BUCKETS.length - 1];
-    counts[bucket.id] += 1;
+  const columns = Array.from(columnMap.values()).map((column) => {
+    let totalRows = 0;
+    let changedRows = 0;
+    let uniqueTermsChanged = 0;
+    const confidenceTermCounts = { high: 0, medium: 0, low: 0 };
+
+    column.rows.forEach((row) => {
+      const rowCount = _getRowCount(row);
+      const isChanged = _isChangedRow(row);
+      const bucket = _getConfidenceBucket(row?.confidence_score);
+
+      totalRows += rowCount;
+      if (isChanged) {
+        changedRows += rowCount;
+        uniqueTermsChanged += 1;
+        // "why: count unique terms (not row occurrences) per confidence bucket."
+        confidenceTermCounts[bucket.id] += 1;
+      }
+    });
+
+    const uniqueTerms = column.rows.length;
+    const unchangedRows = totalRows - changedRows;
+
+    return {
+      columnName: column.columnName,
+      label: column.label,
+      totalRows,
+      changedRows,
+      unchangedRows,
+      uniqueTerms,
+      uniqueTermsChanged,
+      confidenceBuckets: CONFIDENCE_BUCKETS.map((bucket) => ({
+        id: bucket.id,
+        label: bucket.label,
+        termCount: confidenceTermCounts[bucket.id],
+        color: _resolveColor(CONFIDENCE_COLOR_VAR),
+      })),
+    };
   });
-  return {
-    buckets: CONFIDENCE_BUCKETS.map((bucket) => ({
-      id: bucket.id,
-      label: bucket.label,
-      count: counts[bucket.id],
-      color: bucket.color,
-    })),
-    isMocked: false,
-    note: 'Confidence scores bucketed from the harmonization manifest.',
-  };
+
+  // "why: sort columns with changes first (by row count), then zero-change columns at bottom."
+  return columns.sort((a, b) => {
+    if (a.changedRows === 0 && b.changedRows > 0) return 1;
+    if (a.changedRows > 0 && b.changedRows === 0) return -1;
+    return b.totalRows - a.totalRows;
+  });
 };
 
-const mockConfidenceBuckets = (fallbackTotal) => {
-  // "why: keep the widget visible until real manifest data is wired up."
-  const base = Math.max(fallbackTotal, 120);
-  const high = Math.round(base * 0.68);
-  const medium = Math.round(base * 0.22);
-  const low = Math.max(base - high - medium, 0);
-  return {
-    buckets: [
-      { id: 'high', label: 'High confidence', count: high, color: '#16a34a' },
-      { id: 'medium', label: 'Medium confidence', count: medium, color: '#f97316' },
-      { id: 'low', label: 'Low confidence', count: low, color: '#dc2626' },
-    ],
-    isMocked: true,
-    note: 'Confidence scores are mocked until the parquet manifest is exposed.',
-  };
-};
-
-const fallbackChangeTypes = (total) => {
-  const safeTotal = Math.max(total, 0);
-  const renameCount = Math.round(safeTotal * 0.4);
-  const mergeCount = Math.round(safeTotal * 0.32);
-  const conflictCount = Math.max(safeTotal - renameCount - mergeCount, 0);
-  return [
-    { label: 'Entity renames', count: renameCount },
-    { label: 'Attribute merges', count: mergeCount },
-    { label: 'Conflict resolutions', count: conflictCount },
-  ];
-};
-
-const buildDatasetFromManifest = (manifest, context) => {
-  const rows = safeArray(manifest).filter(looksLikeManifestRow);
+const _buildDatasetFromManifest = (manifest) => {
+  const rows = _safeArray(manifest).filter(_looksLikeManifestRow);
   if (!rows.length) {
     return null;
   }
-  const totalItems = rows.length;
-  const changedItems = rows.reduce((total, row) => total + (isChangedRow(row) ? 1 : 0), 0);
-  const changeTypes = buildChangeTypeCounts(rows);
-  const confidence = bucketConfidence(rows);
-  return {
-    totalItems,
-    totalItemsPill: MANIFEST_PILL,
-    totalItemsNote: context?.fileName
-      ? `Counts for ${context.fileName} pulled directly from the manifest.`
-      : 'Counts pulled directly from the harmonization manifest.',
-    changedItems,
-    unchangedItems: Math.max(totalItems - changedItems, 0),
-    changeSplitNote: 'Changed counts compare manifest inputs with harmonized values.',
-    changeTypes,
-    changeTypesNote: 'Manifest change types aggregated per harmonized cell.',
-    confidenceBuckets: confidence.buckets,
-    isConfidenceMocked: confidence.isMocked,
-    confidenceNote: confidence.note,
-  };
-};
 
-const buildDatasetFromMetrics = (metrics = {}, context) => {
-  const totalItems = Math.max(
-    0,
-    toSafeNumber(metrics.total_items ?? metrics.totalItems ?? context?.totalRows ?? 0),
-  );
-  const changedFallback = Math.round(totalItems * 0.65);
-  const changedItems = Math.min(
-    totalItems,
-    toSafeNumber(metrics.changed_items ?? metrics.changedItems, changedFallback),
-  );
-  const changeTypes =
-    (metrics.change_types ?? metrics.changeTypes)?.map((entry, index) => ({
-      label: entry.label ?? entry.id ?? `Type ${index + 1}`,
-      count: toSafeNumber(entry.count, 0),
-    })) ?? fallbackChangeTypes(changedItems);
-  const confidence = mockConfidenceBuckets(Math.max(changedItems, totalItems));
+  const columnBreakdown = _buildColumnBreakdown(rows);
+
   return {
-    totalItems,
-    totalItemsPill: ESTIMATE_PILL,
-    totalItemsNote: context?.fileName
-      ? `Counts estimated from job payload for ${context.fileName}.`
-      : 'Counts estimated from job payload while manifest access is pending.',
-    changedItems,
-    unchangedItems: Math.max(totalItems - changedItems, 0),
-    changeSplitNote: 'Changed counts are estimated until the parquet manifest arrives.',
-    changeTypes,
-    changeTypesNote: 'Breakdown relies on heuristics until manifest telemetry is wired up.',
-    confidenceBuckets: confidence.buckets,
-    isConfidenceMocked: confidence.isMocked,
-    confidenceNote: confidence.note,
+    columnBreakdown,
   };
 };
 
 export const buildDashboardDataset = ({ job, payload }) => {
-  // "why: derive widget-friendly metrics from either manifest or fallback telemetry."
+  // "why: derive widget-friendly metrics from the manifest; returns null if no manifest data."
   const manifest =
     job?.manifest_summary ??
     job?.manifest_preview ??
     job?.manifest ??
     payload?.manifest ??
     null;
-  const context = payload?.context ?? {};
-  const manifestDataset = buildDatasetFromManifest(manifest, context);
-  if (manifestDataset) {
-    return manifestDataset;
-  }
-  return buildDatasetFromMetrics(job?.metrics ?? {}, context);
+  return _buildDatasetFromManifest(manifest);
 };
 
 export default buildDashboardDataset;
