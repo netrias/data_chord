@@ -8,8 +8,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from src.domain import get_cde_labels
-from src.stage_1_upload.schemas import DEFAULT_TARGET_SCHEMA
+from src.domain import DEFAULT_TARGET_SCHEMA, get_cde_labels
 
 MODULE_DIR = Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"

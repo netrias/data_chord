@@ -8,7 +8,9 @@ including manual override tracking with audit trail.
 from src.domain.manifest.models import (
     HIGH_CONFIDENCE_THRESHOLD,
     MEDIUM_CONFIDENCE_THRESHOLD,
+    ColumnMappingEntry,
     ConfidenceBucket,
+    ManifestPayload,
     ManifestRow,
     ManifestSummary,
     ManualOverride,
@@ -22,15 +24,17 @@ from src.domain.manifest.writer import (
 )
 
 __all__ = [
+    "ColumnMappingEntry",
     "ConfidenceBucket",
-    "ManualOverride",
-    "ManifestRow",
-    "ManifestSummary",
-    "confidence_bucket",
-    "read_manifest_parquet",
-    "add_manual_override",
-    "add_manual_overrides_batch",
-    "get_manifest_schema",
     "HIGH_CONFIDENCE_THRESHOLD",
     "MEDIUM_CONFIDENCE_THRESHOLD",
+    "ManifestPayload",
+    "ManifestRow",
+    "ManifestSummary",
+    "ManualOverride",
+    "add_manual_override",
+    "add_manual_overrides_batch",
+    "confidence_bucket",
+    "get_manifest_schema",
+    "read_manifest_parquet",
 ]

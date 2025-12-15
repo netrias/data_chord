@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from src.stage_1_upload.services import UploadConstraints, UploadStorage
+from src.domain.storage import UploadConstraints, UploadStorage
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -98,11 +98,11 @@ def mock_netrias_client() -> Generator[MagicMock]:
             "column_mappings": {
                 "primary_diagnosis": {
                     "targetField": "primary_diagnosis",
-                    "cdeId": 2,
+                    "cde_id": 2,
                 },
                 "therapeutic_agents": {
                     "targetField": "therapeutic_agents",
-                    "cdeId": 1,
+                    "cde_id": 1,
                 },
             },
         },
@@ -145,7 +145,7 @@ async def app_client(
     mock_netrias_client: MagicMock,
 ) -> AsyncGenerator[AsyncClient]:
     """why: provide an async HTTP client for testing the full API."""
-    import src.stage_1_upload.dependencies as deps_module
+    import src.domain.dependencies as deps_module
     import src.stage_1_upload.router as router_module
     import src.stage_3_harmonize.router as stage3_router
     import src.stage_4_review_results.router as stage4_router

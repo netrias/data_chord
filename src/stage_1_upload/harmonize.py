@@ -12,10 +12,9 @@ from uuid import uuid4
 from netrias_client import NetriasClient
 
 from src.domain import CDEField, get_cde, normalize_target_name
+from src.domain.manifest import ManifestPayload
 
 logger = logging.getLogger(__name__)
-
-ManifestPayload = dict[str, dict[str, dict[str, object]]]
 
 
 @dataclass(frozen=True)
@@ -137,7 +136,6 @@ def _override_entry(existing: Mapping[str, object] | None, cde_field: CDEField) 
     cde_def = get_cde(cde_field)
     entry["route"] = cde_def.route
     entry["targetField"] = cde_field.value
-    entry["cdeId"] = cde_def.cde_id
     entry["cde_id"] = cde_def.cde_id
     return entry
 
