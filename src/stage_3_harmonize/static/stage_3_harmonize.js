@@ -1,5 +1,6 @@
 import StageThreeMetricsDashboard from './metrics/dashboard.js';
 import buildDashboardDataset from './metrics/manifest_adapter.js';
+import { initStepInstruction, updateStepInstruction } from '/assets/shared/step-instruction-ui.js';
 
 const config = window.stageThreeConfig ?? {};
 const harmonizeEndpoint = config.harmonizeEndpoint ?? '/stage-3/harmonize';
@@ -310,6 +311,7 @@ const renderJob = (job) => {
     renderMetricsDashboard(job);
     reviewButton.disabled = false;
     retryButton.classList.add('hidden');
+    updateStepInstruction('harmonize_complete');
   } else {
     toggleLoadingState(true);
     toggleProgressIndicators(true);
@@ -410,6 +412,7 @@ const hydrateFromStoredJob = () => {
 
 const init = () => {
   setActiveStage('harmonize');
+  initStepInstruction('harmonize');
 
   if (reviewButton) {
     reviewButton.addEventListener('click', handleContinue);

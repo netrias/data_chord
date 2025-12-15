@@ -1,3 +1,5 @@
+import { initStepInstruction } from '/assets/shared/step-instruction-ui.js';
+
 const config = window.stageFiveConfig ?? {};
 const stageThreePayloadKey = config.stageThreePayloadKey ?? 'stage3HarmonizePayload';
 const summaryEndpoint = config.summaryEndpoint ?? '/stage-5/summary';
@@ -351,6 +353,7 @@ const fetchSummary = async () => {
 
 const init = () => {
   setActiveStage('export');
+  initStepInstruction('export');
   attachStageEvents();
   attachStageFiveEvents();
   fetchSummary();

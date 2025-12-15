@@ -1,3 +1,5 @@
+import { initStepInstruction } from '/assets/shared/step-instruction-ui.js';
+
 const config = window.stageFourConfig ?? {};
 const stageThreePayloadKey = config.stageThreePayloadKey ?? 'stage3HarmonizePayload';
 const stageThreeJobKey = config.stageThreeJobKey ?? 'stage3HarmonizeJob';
@@ -572,6 +574,7 @@ const attachEventListeners = () => {
 
 const init = () => {
   setActiveStage('review');
+  initStepInstruction('review');
   hydrateContext();
   hydrateJob();
   sortModeSelect.value = state.sortMode;
