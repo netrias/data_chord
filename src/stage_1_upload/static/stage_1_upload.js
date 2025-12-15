@@ -57,6 +57,11 @@ const setStatus = (message = '', tone = '') => {
   }
 };
 
+const _setAnalyzeButtonVisible = (visible) => {
+  analyzeButton.classList.toggle('reserve-space', !visible);
+  analyzeButton.disabled = !visible;
+};
+
 const showDropzoneCopy = () => {
   dropzoneCopy.classList.remove('hidden');
   dropzoneFile.classList.add('hidden');
@@ -81,8 +86,8 @@ const resetUploadState = () => {
   state.isUploading = false;
   state.isAnalyzing = false;
   fileInput.value = '';
-  analyzeButton.classList.add('hidden');
-  analyzeButton.disabled = true;
+  _setAnalyzeButtonVisible(false);
+  dropzone.classList.remove('has-file');
   showDropzoneCopy();
   setStatus('');
   setActiveStage('upload');
@@ -121,8 +126,7 @@ const uploadDataset = async () => {
     return;
   }
   state.isUploading = true;
-  analyzeButton.classList.add('hidden');
-  analyzeButton.disabled = true;
+  _setAnalyzeButtonVisible(false);
   showDropzoneSummary(state.file, 'Uploading…');
 
   const formData = new FormData();
@@ -138,9 +142,9 @@ const uploadDataset = async () => {
       throw new Error(payload.detail || 'Upload failed.');
     }
     state.uploaded = payload;
+    dropzone.classList.add('has-file');
     showDropzoneSummary(state.file, 'Uploaded');
-    analyzeButton.classList.remove('hidden');
-    analyzeButton.disabled = false;
+    _setAnalyzeButtonVisible(true);
   } catch (error) {
     console.error(error);
     showDropzoneSummary(state.file, 'Upload failed');
@@ -195,7 +199,7 @@ const analyzeDataset = async () => {
   } catch (error) {
     console.error(error);
     setStatus(error.message, 'error');
-    analyzeButton.disabled = false;
+    _setAnalyzeButtonVisible(true);
     showDropzoneSummary(state.file, 'Uploaded');
   } finally {
     state.isAnalyzing = false;
@@ -204,6 +208,8 @@ const analyzeDataset = async () => {
 };
 
 const wireDragEvents = () => {
+  let dragCounter = 0;
+
   const preventDefaults = (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -213,15 +219,21 @@ const wireDragEvents = () => {
     dropzone.addEventListener(eventName, preventDefaults);
   });
 
-  ['dragenter', 'dragover'].forEach((eventName) => {
-    dropzone.addEventListener(eventName, () => dropzone.classList.add('dragging'));
+  dropzone.addEventListener('dragenter', () => {
+    dragCounter += 1;
+    dropzone.classList.add('dragging');
   });
 
-  ['dragleave', 'drop'].forEach((eventName) => {
-    dropzone.addEventListener(eventName, () => dropzone.classList.remove('dragging'));
+  dropzone.addEventListener('dragleave', () => {
+    dragCounter -= 1;
+    if (dragCounter === 0) {
+      dropzone.classList.remove('dragging');
+    }
   });
 
   dropzone.addEventListener('drop', (event) => {
+    dragCounter = 0;
+    dropzone.classList.remove('dragging');
     const file = event.dataTransfer?.files?.[0];
     if (file) {
       handleFileSelection(file);
@@ -234,7 +246,7 @@ const init = () => {
   wireDragEvents();
 
   dropzone.addEventListener('click', () => openFilePicker());
-  dropzone.addEventListener('keyup', (event) => {
+  dropzone.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       openFilePicker();

@@ -53,6 +53,12 @@
   --magenta-100: #f5cce4;
   --magenta-50: #fae6f2;
 
+  /* Netrias green glow/shadow colors */
+  --netrias-glow-light: rgba(115, 179, 6, 0.1);
+  --netrias-glow-medium: rgba(115, 179, 6, 0.3);
+  --netrias-glow-strong: rgba(115, 179, 6, 0.35);
+  --netrias-glow-intense: rgba(115, 179, 6, 0.4);
+
   /* Legacy alias - prefer --netrias-500 for new code */
   --green-500: var(--netrias-500);
 
@@ -220,7 +226,7 @@ button.linklike {
 .netrias-btn {
   background: var(--green-500);
   color: var(--white);
-  box-shadow: 0 12px 40px rgba(115, 179, 6, 0.35);
+  box-shadow: 0 12px 40px var(--netrias-glow-strong);
 }
 
 /* Progress tracker */
@@ -284,21 +290,21 @@ button.linklike {
 }
 
 .step.active {
-  color: var(--teal-700);
+  color: var(--netrias-700);
 }
 
 .step.active .step-index {
-  border-color: var(--teal-700);
+  border-color: var(--netrias-500);
   border-width: 3px;
   color: var(--white);
-  background: var(--teal-700);
-  box-shadow: 0 4px 16px rgba(0, 124, 136, 0.4), 0 0 0 4px rgba(0, 124, 136, 0.1);
+  background: var(--netrias-500);
+  box-shadow: 0 4px 16px var(--netrias-glow-intense), 0 0 0 4px var(--netrias-glow-light);
   transform: scale(1.1);
 }
 
 .step.active .step-label {
   font-weight: 700;
-  color: var(--teal-700);
+  color: var(--netrias-700);
 }
 
 .step.complete {
@@ -385,8 +391,9 @@ button.linklike {
 }
 
 .nav-btn.nav-forward {
-  background: var(--teal-700);
+  background: var(--netrias-500);
   color: var(--white);
+  box-shadow: 0 8px 24px var(--netrias-glow-strong);
 }
 
 .nav-btn:disabled {
