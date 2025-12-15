@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from src.domain.storage import FileStore, LocalStorageBackend
+
 from .harmonize import HarmonizeService
 from .mapping_service import MappingDiscoveryService
 from .services import UploadConstraints, UploadStorage
@@ -20,6 +22,7 @@ _upload_constraints = UploadConstraints(
     max_bytes=25 * 1024 * 1024,
 )
 _storage = UploadStorage(UPLOAD_BASE_DIR, _upload_constraints)
+_file_store: FileStore | None = None
 _mapping_discovery: MappingDiscoveryService | None = None
 _harmonizer: HarmonizeService | None = None
 
@@ -56,6 +59,17 @@ def get_harmonize_service() -> HarmonizeService:
     return _harmonizer
 
 
+def get_file_store() -> FileStore:
+    """why: provide typed file storage for all stages."""
+
+    global _file_store  # noqa: PLW0603 - intentional singleton
+    if _file_store is None:
+        logger.info("Initializing file store")
+        backend = LocalStorageBackend(UPLOAD_BASE_DIR / "manifests")
+        _file_store = FileStore(backend)
+    return _file_store
+
+
 __all__ = [
     "MODULE_DIR",
     "UPLOAD_BASE_DIR",
@@ -63,4 +77,5 @@ __all__ = [
     "get_upload_storage",
     "get_mapping_service",
     "get_harmonize_service",
+    "get_file_store",
 ]

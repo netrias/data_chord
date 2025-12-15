@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from csv import DictReader
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -15,10 +16,18 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from src.domain import CONFIDENCE, SessionKey, get_all_cdes
-from src.stage_1_upload.dependencies import get_upload_storage
+from src.domain.storage import FileType
+from src.stage_1_upload.dependencies import get_file_store, get_upload_storage
 from src.stage_1_upload.manifest_reader import confidence_bucket, read_manifest_parquet
 from src.stage_1_upload.schemas import DEFAULT_TARGET_SCHEMA
 from src.stage_1_upload.services import UploadStorage
+from src.stage_4_review_results.schemas import (
+    DeleteOverridesResponse,
+    ReviewOverridesSchema,
+    ReviewStateSchema,
+    SaveOverridesRequest,
+    SaveOverridesResponse,
+)
 
 _MODULE_DIR = Path(__file__).parent
 _TEMPLATE_DIR = _MODULE_DIR / "templates"
@@ -234,3 +243,59 @@ def _build_manifest_lookup(storage: UploadStorage, file_id: str) -> ManifestLook
         for row in manifest.rows
         if row.confidence_score is not None
     }
+
+
+@stage_four_router.get(
+    "/overrides/{file_id}",
+    response_model=ReviewOverridesSchema | None,
+    name="stage_four_get_overrides",
+)
+async def get_overrides(file_id: str) -> ReviewOverridesSchema | None:
+    """why: load existing review overrides for a file."""
+    store = get_file_store()
+    data = store.load(file_id, FileType.REVIEW_OVERRIDES)
+    if data is None:
+        return None
+    return ReviewOverridesSchema(
+        file_id=data.get("file_id", file_id),
+        created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else datetime.now(UTC),
+        updated_at=datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else datetime.now(UTC),
+        overrides=data.get("overrides", {}),
+        review_state=ReviewStateSchema(**data.get("review_state", {})),
+    )
+
+
+@stage_four_router.post("/overrides", response_model=SaveOverridesResponse, name="stage_four_save_overrides")
+async def save_overrides(payload: SaveOverridesRequest) -> SaveOverridesResponse:
+    """why: persist human review overrides to storage."""
+    store = get_file_store()
+    now = datetime.now(UTC)
+
+    existing = store.load(payload.file_id, FileType.REVIEW_OVERRIDES)
+    created_at = existing.get("created_at") if existing else now.isoformat()
+
+    data = {
+        "file_id": payload.file_id,
+        "created_at": created_at,
+        "updated_at": now.isoformat(),
+        "overrides": {
+            row_key: {col: override.model_dump() for col, override in cols.items()}
+            for row_key, cols in payload.overrides.items()
+        },
+        "review_state": payload.review_state.model_dump(),
+    }
+    store.save(payload.file_id, FileType.REVIEW_OVERRIDES, data)
+    return SaveOverridesResponse(file_id=payload.file_id, updated_at=now)
+
+
+@stage_four_router.delete(
+    "/overrides/{file_id}",
+    response_model=DeleteOverridesResponse,
+    name="stage_four_delete_overrides",
+)
+async def delete_overrides(file_id: str) -> DeleteOverridesResponse:
+    """why: remove review overrides for a file."""
+    store = get_file_store()
+    existed = store.exists(file_id, FileType.REVIEW_OVERRIDES)
+    store.delete(file_id, FileType.REVIEW_OVERRIDES)
+    return DeleteOverridesResponse(file_id=file_id, deleted=existed)

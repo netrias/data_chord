@@ -1,6 +1,6 @@
 const config = window.stageFourConfig ?? {};
-const stageThreePayloadKey = config.stageThreePayloadKey ?? 'stage3HarmonizePayload';
-const stageThreeJobKey = config.stageThreeJobKey ?? 'stage3HarmonizeJob';
+const stageFiveUrl = config.stageFiveUrl ?? '/stage-5';
+const resultsEndpoint = config.resultsEndpoint ?? '/stage-4/rows';
 
 const progressSteps = document.querySelectorAll('.progress-tracker [data-stage]');
 const sortModeSelect = document.getElementById('sortModeSelect');
@@ -13,8 +13,6 @@ const reviewTable = document.getElementById('reviewTable');
 const helpMenuToggle = document.getElementById('helpMenuToggle');
 const stageHelp = document.getElementById('stageFourHelp');
 const stageFiveButton = document.getElementById('stageFiveButton');
-const stageFiveUrl = config.stageFiveUrl ?? '/stage-5';
-const resultsEndpoint = config.resultsEndpoint ?? '/stage-4/rows';
 const batchProgressList = document.getElementById('batchProgressList');
 const batchProgressHint = document.getElementById('batchProgressHint');
 const currentBatchIndicator = document.getElementById('currentBatchIndicator');
@@ -36,6 +34,8 @@ const SORT_LABEL_COPY = {
   original: 'Sorted by the original upload order.',
 };
 
+const SAVE_DEBOUNCE_MS = 500;
+
 const state = {
   rows: [],
   sortMode: 'original',
@@ -43,32 +43,23 @@ const state = {
   currentBatch: 1,
   completedBatches: new Set(),
   flaggedBatches: new Set(),
-  context: null,
-  job: null,
   alertTimer: null,
   hasLoadedRows: false,
-  sourceContext: null,
+  pendingOverrides: {},
+  saveDebounceTimer: null,
 };
 
-const loadSourceContext = () => {
-  const stored = readFromSession(stageThreePayloadKey);
-  const fileId = stored?.request?.file_id;
-  if (!fileId) {
-    return null;
-  }
-  const manualColumns = Object.keys(stored?.request?.manual_overrides ?? {});
-  return { fileId, manualColumns };
+const getFileIdFromUrl = () => {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('file_id');
 };
 
 const fetchRows = async () => {
   if (state.hasLoadedRows) {
-    render();
     return;
   }
-  if (!state.sourceContext) {
-    state.sourceContext = loadSourceContext();
-  }
-  if (!state.sourceContext?.fileId) {
+  const fileId = getFileIdFromUrl();
+  if (!fileId) {
     notify('Unable to locate harmonized data. Please rerun Stage 3.', 'warning');
     return;
   }
@@ -77,8 +68,8 @@ const fetchRows = async () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        file_id: state.sourceContext.fileId,
-        manual_columns: state.sourceContext.manualColumns ?? [],
+        file_id: fileId,
+        manual_columns: [],
       }),
     });
     if (!response.ok) {
@@ -91,10 +82,6 @@ const fetchRows = async () => {
       originalIndex: Math.max(0, (row.sourceRowNumber ?? row.rowNumber) - 1),
     }));
     state.hasLoadedRows = true;
-    state.currentBatch = 1;
-    state.completedBatches.clear();
-    state.flaggedBatches.clear();
-    render();
   } catch (error) {
     console.error(error);
     notify(error.message || 'Unable to load harmonized results.', 'warning');
@@ -121,31 +108,89 @@ const bucketFromConfidence = (value) => {
   return 'low';
 };
 
-const safeJsonParse = (raw) => {
+
+const fetchOverrides = async (fileId) => {
   try {
-    return JSON.parse(raw);
+    const response = await fetch(`/stage-4/overrides/${fileId}`);
+    if (response.ok) {
+      const data = await response.json();
+      return data;
+    }
+    if (response.status === 404) {
+      return null;
+    }
+    console.warn('Failed to fetch overrides', response.status);
+    return null;
   } catch (error) {
-    console.warn('Unable to parse JSON payload', error);
+    console.warn('Error fetching overrides', error);
     return null;
   }
 };
 
-const readFromSession = (key) => {
+const saveOverrides = async () => {
+  const fileId = getFileIdFromUrl();
+  if (!fileId) {
+    return;
+  }
+  const payload = {
+    file_id: fileId,
+    overrides: state.pendingOverrides,
+    review_state: {
+      completed_batches: Array.from(state.completedBatches),
+      flagged_batches: Array.from(state.flaggedBatches),
+      current_batch: state.currentBatch,
+      sort_mode: state.sortMode,
+      batch_size: state.batchSize,
+    },
+  };
   try {
-    const raw = sessionStorage.getItem(key);
-    return raw ? safeJsonParse(raw) : null;
+    const response = await fetch('/stage-4/overrides', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      throw new Error('Server returned an error');
+    }
   } catch (error) {
-    console.warn('Unable to read session storage', error);
-    return null;
+    console.warn('Failed to save overrides', error);
+    notify('Unable to save your changes. Please try again.', 'warning');
   }
 };
 
-const writeToSession = (key, value) => {
-  try {
-    sessionStorage.setItem(key, JSON.stringify(value));
-  } catch (error) {
-    console.warn('Unable to write to session storage', error);
+const debouncedSave = () => {
+  if (state.saveDebounceTimer) {
+    clearTimeout(state.saveDebounceTimer);
   }
+  state.saveDebounceTimer = setTimeout(saveOverrides, SAVE_DEBOUNCE_MS);
+};
+
+const saveOverridesImmediate = () => {
+  if (state.saveDebounceTimer) {
+    clearTimeout(state.saveDebounceTimer);
+    state.saveDebounceTimer = null;
+  }
+  saveOverrides();
+};
+
+const recordOverride = (rowIndex, columnKey, aiValue, humanValue, originalValue) => {
+  const rowKey = String(rowIndex);
+  if (!state.pendingOverrides[rowKey]) {
+    state.pendingOverrides[rowKey] = {};
+  }
+  if (humanValue && humanValue.trim()) {
+    state.pendingOverrides[rowKey][columnKey] = {
+      ai_value: aiValue,
+      human_value: humanValue.trim(),
+      original_value: originalValue,
+    };
+  } else {
+    delete state.pendingOverrides[rowKey][columnKey];
+    if (Object.keys(state.pendingOverrides[rowKey]).length === 0) {
+      delete state.pendingOverrides[rowKey];
+    }
+  }
+  debouncedSave();
 };
 
 const getRowAttentionCell = (row) => {
@@ -343,7 +388,7 @@ const renderBatchProgress = (batchMeta) => {
   });
 };
 
-const createCellCard = (cell) => {
+const createCellCard = (cell, rowIndex) => {
   const card = document.createElement('div');
   const classes = ['row-cell'];
   if (cell.isChanged) {
@@ -355,6 +400,10 @@ const createCellCard = (cell) => {
     classes.push('no-change');
   }
   card.className = classes.join(' ');
+
+  const existingOverride = state.pendingOverrides[String(rowIndex)]?.[cell.columnKey];
+  const inputValue = existingOverride?.human_value ?? '';
+
   card.innerHTML = `
     <div class="value-pair" role="group" aria-label="${cell.columnLabel} comparison">
       <div class="value-group recommended">
@@ -371,8 +420,10 @@ const createCellCard = (cell) => {
           <input
             class="value-input"
             type="text"
-            value=""
+            value="${inputValue}"
             aria-label="Manual override for ${cell.columnLabel}"
+            data-row-index="${rowIndex}"
+            data-column-key="${cell.columnKey}"
           />
           <svg class="value-input-icon" viewBox="0 0 20 20" aria-hidden="true">
             <path d="M2 14.5V18h3.5l8.4-8.4-3.5-3.5L2 14.5zm11.8-9.1a1 1 0 0 1 1.4 0l1.4 1.4a1 1 0 0 1 0 1.4l-1.2 1.2-3.5-3.5 1.2-1.2z"/>
@@ -381,6 +432,18 @@ const createCellCard = (cell) => {
       </label>
     </div>
   `;
+
+  const input = card.querySelector('.value-input');
+  input.addEventListener('input', (event) => {
+    recordOverride(
+      rowIndex,
+      cell.columnKey,
+      cell.harmonizedValue,
+      event.target.value,
+      cell.originalValue,
+    );
+  });
+
   return card;
 };
 
@@ -420,10 +483,11 @@ const renderRows = (batchMeta) => {
     indexCell.textContent = `Row ${row.rowNumber}`;
     indexCell.title = row.recordId;
     rowEl.append(indexCell);
+    const rowIndex = row.sourceRowNumber ?? row.rowNumber;
     row.cells.forEach((cell) => {
       const cellWrapper = document.createElement('div');
       cellWrapper.className = 'table-cell';
-      cellWrapper.append(createCellCard(cell));
+      cellWrapper.append(createCellCard(cell, rowIndex));
       rowEl.append(cellWrapper);
     });
     body.append(rowEl);
@@ -469,6 +533,7 @@ const markBatchComplete = () => {
   if (remaining) {
     state.currentBatch = remaining.index;
   }
+  saveOverridesImmediate();
   render();
 };
 
@@ -485,6 +550,7 @@ const flagCurrentBatch = () => {
   state.completedBatches.delete(state.currentBatch);
   state.flaggedBatches.add(state.currentBatch);
   notify(`Batch ${state.currentBatch} flagged for review.`, 'warning');
+  saveOverridesImmediate();
   render();
 };
 
@@ -496,38 +562,6 @@ const changeBatch = (delta) => {
   }
   state.currentBatch = next;
   render();
-};
-
-const hydrateContext = () => {
-  const stored = readFromSession(stageThreePayloadKey);
-  if (stored?.context) {
-    state.context = stored.context;
-  }
-  const fileId = stored?.request?.file_id;
-  if (fileId) {
-    state.sourceContext = {
-      fileId,
-      manualColumns: Object.keys(stored?.request?.manual_overrides ?? {}),
-    };
-  }
-};
-
-const hydrateJob = () => {
-  const params = new URLSearchParams(window.location.search);
-  const job = {
-    job_id: params.get('job_id'),
-    status: params.get('status') || 'completed',
-    detail: params.get('detail') || 'Ready for review.',
-  };
-  if (!job.job_id && !job.status) {
-    const stored = readFromSession(stageThreeJobKey);
-    if (stored) {
-      state.job = stored;
-      return;
-    }
-  }
-  state.job = job;
-  writeToSession(stageThreeJobKey, job);
 };
 
 const attachEventListeners = () => {
@@ -570,15 +604,61 @@ const attachEventListeners = () => {
   }
 };
 
-const init = () => {
+const loadStateFromDisk = async () => {
+  const fileId = getFileIdFromUrl();
+  if (!fileId) {
+    return;
+  }
+  const stored = await fetchOverrides(fileId);
+  if (!stored) {
+    return;
+  }
+  state.pendingOverrides = stored.overrides || {};
+  const reviewState = stored.review_state || {};
+  state.completedBatches = new Set(reviewState.completed_batches || []);
+  state.flaggedBatches = new Set(reviewState.flagged_batches || []);
+  state.currentBatch = reviewState.current_batch || 1;
+  state.sortMode = reviewState.sort_mode || 'original';
+  state.batchSize = reviewState.batch_size || 5;
+};
+
+const init = async () => {
   setActiveStage('review');
-  hydrateContext();
-  hydrateJob();
+
+  await loadStateFromDisk();
+
   sortModeSelect.value = state.sortMode;
   batchSizeSelect.value = state.batchSize.toString();
   attachEventListeners();
+
+  window.addEventListener('beforeunload', () => {
+    if (state.saveDebounceTimer) {
+      clearTimeout(state.saveDebounceTimer);
+      state.saveDebounceTimer = null;
+      navigator.sendBeacon(
+        '/stage-4/overrides',
+        new Blob(
+          [
+            JSON.stringify({
+              file_id: getFileIdFromUrl(),
+              overrides: state.pendingOverrides,
+              review_state: {
+                completed_batches: Array.from(state.completedBatches),
+                flagged_batches: Array.from(state.flaggedBatches),
+                current_batch: state.currentBatch,
+                sort_mode: state.sortMode,
+                batch_size: state.batchSize,
+              },
+            }),
+          ],
+          { type: 'application/json' },
+        ),
+      );
+    }
+  });
+
+  await fetchRows();
   render();
-  fetchRows();
 };
 
 init();
