@@ -43,8 +43,8 @@
 }
 
 .help-toggle[aria-expanded="true"] {
-  border-color: var(--teal-500);
-  color: var(--teal-500);
+  border-color: var(--azure-500);
+  color: var(--azure-600);
 }
 
 .stage-help {
@@ -85,7 +85,7 @@
 .batch-progress-list {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
+  gap: var(--space-3);
 }
 
 .batch-progress-item {
@@ -124,7 +124,11 @@
 }
 
 .batch-progress-item.current {
-  box-shadow: 0 0 0 3px rgba(0, 124, 136, 0.12);
+  box-shadow: 0 0 0 3px var(--azure-500);
+  border-color: var(--azure-600);
+  transform: scale(1.1);
+  z-index: 1;
+  position: relative;
 }
 
 .batch-progress-item:disabled {
@@ -137,19 +141,28 @@
 }
 
 .batch-progress-item:focus-visible {
-  outline: 3px solid var(--teal-500);
+  outline: 3px solid var(--azure-500);
   outline-offset: 2px;
 }
 
 .current-batch-indicator {
-  margin: var(--space-2) 0 0;
-  font-weight: 600;
-  color: var(--gray-700);
+  margin: var(--space-4) 0 0;
+  font-weight: 700;
+  font-size: 1.25rem;
+  color: var(--azure-700);
+  background: var(--azure-50);
+  border: 2px solid var(--azure-100);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3) var(--space-4);
   flex-basis: 100%;
+  text-align: center;
 }
 
 .current-batch-indicator.muted {
   color: var(--gray-400);
+  background: var(--gray-50);
+  border-color: var(--gray-200);
+  font-size: 1rem;
 }
 
 /* Review grid header */
@@ -389,8 +402,8 @@
 }
 
 .value-input:focus-visible {
-  outline: 2px solid var(--teal-500);
-  border-color: var(--teal-500);
+  outline: 2px solid var(--azure-500);
+  border-color: var(--azure-500);
   background: var(--white);
   color: var(--gray-800);
 }
@@ -405,29 +418,17 @@
   fill: var(--gray-400);
 }
 
-/* Confidence states */
-.row-cell.confidence-low {
-  border-color: var(--error-200);
-  background: var(--error-50);
-}
-
-.row-cell.confidence-high {
-  border-color: var(--success-100);
-  background: var(--success-50);
-}
-
-.row-cell.no-change {
+/* Confidence states - temporarily standardized to gray */
+.row-cell.confidence-low,
+.row-cell.confidence-high,
+.row-cell.no-change,
+.row-cell.needs-review {
   border-color: var(--gray-200);
-  background: var(--gray-100);
+  background: var(--gray-50);
 }
 
 .row-cell.no-change .value-text {
   color: var(--gray-600);
-}
-
-.row-cell.needs-review {
-  border-color: var(--warning-200);
-  background: var(--warning-50);
 }
 
 .value-text.missing {
