@@ -34,10 +34,16 @@ export function updateStepInstruction(instructionKey, targetStage) {
 /** Populate the main instruction banner below the progress tracker. */
 function _populateInstructionBanner(instructionKey) {
   const instructionContainer = document.getElementById('stepInstruction');
-  if (!instructionContainer) return;
+  if (!instructionContainer) {
+    console.warn('[step-instruction-ui] stepInstruction container not found');
+    return;
+  }
 
   const instructions = STEP_INSTRUCTIONS[instructionKey];
-  if (!instructions) return;
+  if (!instructions) {
+    console.warn(`[step-instruction-ui] No instructions found for key: ${instructionKey}`);
+    return;
+  }
 
   const textEl = instructionContainer.querySelector('.step-instruction-text');
   const tooltipEl = instructionContainer.querySelector('.step-instruction-tooltip');
@@ -47,12 +53,16 @@ function _populateInstructionBanner(instructionKey) {
     textEl.setAttribute('tabindex', '0');
     textEl.setAttribute('role', 'note');
     textEl.setAttribute('aria-describedby', 'stepInstructionTooltip');
+  } else {
+    console.warn('[step-instruction-ui] .step-instruction-text element not found');
   }
 
   if (tooltipEl) {
     tooltipEl.textContent = instructions.long;
     tooltipEl.id = 'stepInstructionTooltip';
     tooltipEl.setAttribute('role', 'tooltip');
+  } else {
+    console.warn('[step-instruction-ui] .step-instruction-tooltip element not found');
   }
 }
 

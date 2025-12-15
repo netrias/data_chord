@@ -1,362 +1,224 @@
+/**
+ * Stage 5 Download - Final step to download harmonized data with manual overrides applied.
+ */
+
 import { initStepInstruction } from '/assets/shared/step-instruction-ui.js';
 
-const config = window.stageFiveConfig ?? {};
-const stageThreePayloadKey = config.stageThreePayloadKey ?? 'stage3HarmonizePayload';
-const summaryEndpoint = config.summaryEndpoint ?? '/stage-5/summary';
+const _DEFAULT_STAGE_THREE_KEY = 'stage3HarmonizePayload';
+const _DEFAULT_SUMMARY_ENDPOINT = '/stage-5/summary';
+const _DEFAULT_DOWNLOAD_ENDPOINT = '/stage-5/download';
+const _DEFAULT_ZIP_FILENAME = 'harmonized_data.zip';
+const _STAGE_ORDER = ['upload', 'mapping', 'harmonize', 'review', 'export'];
 
-const progressSteps = document.querySelectorAll('.progress-tracker [data-stage]');
-const summaryMetricGrid = document.getElementById('summaryMetricGrid');
-const changeTableBody = document.getElementById('changeTableBody');
-const changeTableHeader = document.querySelector('.change-table-header');
-const insightTags = document.getElementById('insightTags');
-const downloadResults = document.getElementById('downloadResults');
-const startNewButton = document.getElementById('startNewButton');
-const changeModal = document.getElementById('changeModal');
-const changeModalTitle = document.getElementById('changeModalTitle');
-const changeModalBody = document.getElementById('changeModalBody');
-const closeChangeModal = document.getElementById('closeChangeModal');
-const summaryError = document.getElementById('summaryError');
-const filterChangesToggle = document.getElementById('filterChangesToggle');
+const _config = window.stageFiveConfig ?? {};
+const _stageThreePayloadKey = _config.stageThreePayloadKey ?? _DEFAULT_STAGE_THREE_KEY;
+const _summaryEndpoint = _config.summaryEndpoint ?? _DEFAULT_SUMMARY_ENDPOINT;
+const _downloadEndpoint = _config.downloadEndpoint ?? _DEFAULT_DOWNLOAD_ENDPOINT;
 
-const SORT_KEYS = ['column', 'ai_changes', 'manual_changes', 'reviewed'];
+const _downloadBtn = document.getElementById('downloadResults');
+const _downloadError = document.getElementById('downloadError');
+const _summaryGrid = document.getElementById('summaryGrid');
 
-const state = {
-  summary: null,
+const _state = {
   fileId: null,
-  manualColumns: [],
-  sortKey: null,
-  sortAscending: true,
-  filterChangesOnly: false,
 };
 
-const setActiveStage = (stage) => {
-  const order = ['upload', 'mapping', 'harmonize', 'review', 'export'];
-  const targetIndex = order.indexOf(stage);
-  progressSteps.forEach((step) => {
-    const stepStage = step.dataset.stage;
-    const stepIndex = order.indexOf(stepStage);
-    const isActive = stepStage === stage;
-    const isComplete = stepIndex >= 0 && stepIndex < targetIndex;
-    step.classList.toggle('active', isActive);
-    step.classList.toggle('complete', isComplete);
+const _escapeHtml = (str) => {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+};
+
+const _safeNumber = (value) => {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+};
+
+const _extractFilename = (disposition) => {
+  const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/);
+  if (utf8Match) {
+    return decodeURIComponent(utf8Match[1]);
+  }
+  const basicMatch = disposition.match(/filename="([^"]+)"/);
+  if (basicMatch) {
+    return basicMatch[1];
+  }
+  return _DEFAULT_ZIP_FILENAME;
+};
+
+const _setDownloadButtonState = (isLoading) => {
+  if (!_downloadBtn) return;
+  _downloadBtn.disabled = isLoading;
+  _downloadBtn.textContent = isLoading ? 'Preparing download...' : 'Download harmonized data';
+};
+
+const _triggerBrowserDownload = (blob, filename) => {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+};
+
+const _showError = (message) => {
+  if (!_downloadError) return;
+  _downloadError.textContent = message;
+  _downloadError.classList.remove('hidden');
+};
+
+const _hideError = () => {
+  if (_downloadError) {
+    _downloadError.classList.add('hidden');
+  }
+};
+
+const _setActiveStage = (stage) => {
+  const targetIndex = _STAGE_ORDER.indexOf(stage);
+  document.querySelectorAll('.progress-tracker [data-stage]').forEach((step) => {
+    const stepIndex = _STAGE_ORDER.indexOf(step.dataset.stage);
+    step.classList.toggle('active', step.dataset.stage === stage);
+    step.classList.toggle('complete', stepIndex >= 0 && stepIndex < targetIndex);
   });
 };
 
-const safeJsonParse = (raw) => {
+const _loadSourceContext = () => {
   try {
-    return JSON.parse(raw);
+    const raw = sessionStorage.getItem(_stageThreePayloadKey);
+    const stored = raw ? JSON.parse(raw) : null;
+    const id = stored?.request?.file_id;
+    if (!id) return null;
+    return { fileId: id, manualColumns: Object.keys(stored?.request?.manual_overrides ?? {}) };
   } catch (error) {
-    console.warn('Unable to parse session payload', error);
+    console.warn('Failed to load source context:', error);
     return null;
   }
 };
 
-const readFromSession = (key) => {
+const _handleDownload = async () => {
+  if (!_state.fileId) {
+    _showError('Unable to locate file. Please restart the harmonization process.');
+    return;
+  }
+
+  _hideError();
+  _setDownloadButtonState(true);
+
   try {
-    const raw = sessionStorage.getItem(key);
-    return raw ? safeJsonParse(raw) : null;
+    const response = await fetch(_downloadEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_id: _state.fileId }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Download failed.');
+    }
+
+    const blob = await response.blob();
+    const disposition = response.headers.get('Content-Disposition') ?? '';
+    const filename = _extractFilename(disposition);
+
+    _triggerBrowserDownload(blob, filename);
   } catch (error) {
-    console.warn('Unable to read session storage', error);
-    return null;
+    console.error('Download failed:', error);
+    _showError('Download failed. Please try again.');
+  } finally {
+    _setDownloadButtonState(false);
   }
 };
 
-const loadSourceContext = () => {
-  const stored = readFromSession(stageThreePayloadKey);
-  const fileId = stored?.request?.file_id;
-  if (!fileId) {
-    return null;
-  }
-  const manualColumns = Object.keys(stored?.request?.manual_overrides ?? {});
-  return { fileId, manualColumns };
+const _createColumnCard = (col) => {
+  const columnName = _escapeHtml(col.column);
+  const distinctTerms = _safeNumber(col.distinct_terms).toLocaleString();
+  const aiChanges = _safeNumber(col.ai_changes).toLocaleString();
+  const manualChanges = _safeNumber(col.manual_changes).toLocaleString();
+
+  return `
+    <article class="summary-column-card">
+      <h4 class="summary-column-name">${columnName}</h4>
+      <dl class="summary-stats">
+        <div class="summary-stat"><dt>Distinct terms</dt><dd>${distinctTerms}</dd></div>
+        <div class="summary-stat"><dt>AI harmonized</dt><dd>${aiChanges}</dd></div>
+        <div class="summary-stat"><dt>Manual overrides</dt><dd>${manualChanges}</dd></div>
+      </dl>
+    </article>
+  `;
 };
 
-const showSummaryError = (message) => {
-  if (!summaryError) {
-    window.alert(message);
+const _renderSummary = (columnSummaries) => {
+  if (!_summaryGrid) return;
+
+  const changed = columnSummaries.filter((col) => col.ai_changes > 0 || col.manual_changes > 0);
+
+  if (changed.length === 0) {
+    _summaryGrid.innerHTML = '<p class="summary-empty">No columns were modified during harmonization.</p>';
     return;
   }
-  summaryError.textContent = message;
-  summaryError.classList.remove('hidden');
+
+  _summaryGrid.innerHTML = changed.map(_createColumnCard).join('');
 };
 
-const renderSummaryMetrics = () => {
-  if (!state.summary || !summaryMetricGrid) {
-    return;
-  }
-  const cards = [
-    {
-      label: 'Total rows',
-      value: state.summary.total_rows.toLocaleString(),
-      hint: `${state.summary.columns_reviewed} columns reviewed`,
-    },
-    {
-      label: 'AI adjustments',
-      value: state.summary.ai_changes,
-      delta:
-        state.summary.total_rows > 0
-          ? `${Math.round((state.summary.ai_changes / state.summary.total_rows) * 100)}% of rows`
-          : '—',
-      tone: 'up',
-      action: { label: 'View adjusted values', type: 'ai' },
-    },
-    {
-      label: 'Manual overrides',
-      value: state.summary.manual_changes,
-      delta:
-        state.summary.total_rows > 0
-          ? `${Math.round((state.summary.manual_changes / state.summary.total_rows) * 100)}% curated`
-          : '—',
-      tone: 'down',
-      action: { label: 'View manual overrides', type: 'manual' },
-    },
-  ];
-
-  summaryMetricGrid.innerHTML = cards
-    .map((card) => {
-      const delta = card.delta ? `<span class="metric-delta ${card.tone ?? ''}">${card.delta}</span>` : '';
-      const hint = card.hint ? `<p class="metric-hint">${card.hint}</p>` : '';
-      const action = card.action
-        ? `<button class="metric-link" data-change-link="${card.action.type}">${card.action.label}</button>`
-        : '';
-      return `
-        <article class="metric-card">
-          <h4>${card.label}</h4>
-          <strong>${card.value}</strong>
-          ${delta}
-          ${hint}
-          ${action}
-        </article>
-      `;
-    })
-    .join('');
-};
-
-const getReviewedPercent = (entry) => {
-  const touched = entry.ai_changes + entry.manual_changes;
-  return state.summary?.total_rows ? (touched / state.summary.total_rows) * 100 : 0;
-};
-
-const sortColumnSummaries = (summaries) => {
-  if (!state.sortKey) {
-    return summaries;
-  }
-  const sorted = [...summaries];
-  sorted.sort((a, b) => {
-    let aVal, bVal;
-    if (state.sortKey === 'column') {
-      aVal = a.column.toLowerCase();
-      bVal = b.column.toLowerCase();
-    } else if (state.sortKey === 'reviewed') {
-      aVal = getReviewedPercent(a);
-      bVal = getReviewedPercent(b);
-    } else {
-      aVal = a[state.sortKey];
-      bVal = b[state.sortKey];
-    }
-    if (aVal < bVal) return state.sortAscending ? -1 : 1;
-    if (aVal > bVal) return state.sortAscending ? 1 : -1;
-    return 0;
-  });
-  return sorted;
-};
-
-const filterColumnSummaries = (summaries) => {
-  if (!state.filterChangesOnly) {
-    return summaries;
-  }
-  return summaries.filter((entry) => entry.ai_changes > 0 || entry.manual_changes > 0);
-};
-
-const renderChangeTable = () => {
-  if (!state.summary || !changeTableBody) {
-    return;
-  }
-  const filtered = filterColumnSummaries(state.summary.column_summaries);
-  const sorted = sortColumnSummaries(filtered);
-  const rows = sorted
-    .map((entry) => {
-      const reviewedPercent = getReviewedPercent(entry);
-      const reviewed = state.summary.total_rows ? `${Math.round(reviewedPercent)}%` : '—';
-      return `
-        <div class="change-table-row" role="row">
-          <span>${entry.column}</span>
-          <span>${entry.ai_changes}</span>
-          <span>${entry.manual_changes}</span>
-          <span>${reviewed}</span>
-        </div>
-      `;
-    })
-    .join('');
-  changeTableBody.innerHTML = rows || '<div class="change-table-row" role="row">No changes detected.</div>';
-  renderTableHeader();
-};
-
-const renderTableHeader = () => {
-  if (!changeTableHeader) {
-    return;
-  }
-  const headers = [
-    { key: 'column', label: 'Column' },
-    { key: 'ai_changes', label: 'AI updates' },
-    { key: 'manual_changes', label: 'Manual overrides' },
-    { key: 'reviewed', label: 'Reviewed rows' },
-  ];
-  changeTableHeader.innerHTML = headers
-    .map((header) => {
-      const isActive = state.sortKey === header.key;
-      const arrow = isActive ? (state.sortAscending ? ' ▲' : ' ▼') : '';
-      return `<span class="sortable-header${isActive ? ' active' : ''}" data-sort-key="${header.key}">${header.label}${arrow}</span>`;
-    })
-    .join('');
-};
-
-const renderInsightTags = () => {
-  if (!state.summary || !insightTags) {
-    return;
-  }
-  const tags = [
-    `${state.summary.ai_changes} AI adjustments`,
-    `${state.summary.manual_changes} manual overrides`,
-    `${state.summary.columns_reviewed} columns reviewed`,
-  ];
-  insightTags.innerHTML = tags.map((tag) => `<span class="insight-tag">${tag}</span>`).join('');
-};
-
-const openChangeModal = (type) => {
-  if (!state.summary || !changeModal || !changeModalBody || !changeModalTitle) {
-    return;
-  }
-  const entries = type === 'ai' ? state.summary.ai_examples : state.summary.manual_examples;
-  changeModalTitle.textContent = type === 'ai' ? 'AI adjusted values' : 'Manual overrides';
-  if (!entries.length) {
-    changeModalBody.innerHTML = '<p>No changes recorded.</p>';
-  } else {
-    changeModalBody.innerHTML = entries
-      .map(
-        (entry) => `
-          <article class="modal-item">
-            <h4>${entry.column} · Row ${entry.row_index}</h4>
-            <dl>
-              <dt>Original</dt>
-              <dd>${entry.original ?? '—'}</dd>
-              <dt>Updated</dt>
-              <dd>${entry.harmonized ?? '—'}</dd>
-            </dl>
-          </article>
-        `,
-      )
-      .join('');
-  }
-  changeModal.classList.remove('hidden');
-};
-
-const attachStageEvents = () => {
-  document.querySelectorAll('.progress-tracker .step[data-url]').forEach((step) => {
-    step.addEventListener('click', () => {
-      const target = step.dataset.url;
-      if (target) {
-        window.location.assign(target);
-      }
-    });
-  });
-  document.querySelectorAll('[data-nav-target]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const target = button.dataset.navTarget;
-      if (target) {
-        window.location.assign(target);
-      }
-    });
-  });
-};
-
-const handleSortClick = (sortKey) => {
-  if (state.sortKey === sortKey) {
-    state.sortAscending = !state.sortAscending;
-  } else {
-    state.sortKey = sortKey;
-    state.sortAscending = true;
-  }
-  renderChangeTable();
-};
-
-const handleFilterToggle = () => {
-  state.filterChangesOnly = !state.filterChangesOnly;
-  if (filterChangesToggle) {
-    filterChangesToggle.textContent = state.filterChangesOnly ? 'Show all columns' : 'Show changed only';
-    filterChangesToggle.classList.toggle('active', state.filterChangesOnly);
-  }
-  renderChangeTable();
-};
-
-const attachStageFiveEvents = () => {
-  if (downloadResults) {
-    downloadResults.addEventListener('click', () => {
-      window.alert('Download will be available in a future release.');
-    });
-  }
-  if (startNewButton) {
-    startNewButton.addEventListener('click', () => {
-      if (config.stageOneUrl) {
-        window.location.assign(config.stageOneUrl);
-      }
-    });
-  }
-  summaryMetricGrid?.addEventListener('click', (event) => {
-    const target = event.target;
-    if (target.matches('[data-change-link]')) {
-      openChangeModal(target.getAttribute('data-change-link'));
-    }
-  });
-  closeChangeModal?.addEventListener('click', () => changeModal?.classList.add('hidden'));
-  changeModal?.addEventListener('click', (event) => {
-    if (event.target === changeModal) {
-      changeModal.classList.add('hidden');
-    }
-  });
-  changeTableHeader?.addEventListener('click', (event) => {
-    const target = event.target;
-    if (target.matches('[data-sort-key]')) {
-      handleSortClick(target.getAttribute('data-sort-key'));
-    }
-  });
-  filterChangesToggle?.addEventListener('click', handleFilterToggle);
-};
-
-const fetchSummary = async () => {
-  const context = loadSourceContext();
+const _fetchSummary = async () => {
+  const context = _loadSourceContext();
   if (!context) {
-    showSummaryError('Unable to locate harmonization context. Please rerun Stage 4.');
+    if (_summaryGrid) {
+      _summaryGrid.innerHTML = '<p class="summary-empty">Unable to locate harmonization context.</p>';
+    }
     return;
   }
-  state.fileId = context.fileId;
-  state.manualColumns = context.manualColumns;
+
+  _state.fileId = context.fileId;
+
   try {
-    const response = await fetch(summaryEndpoint, {
+    const response = await fetch(_summaryEndpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ file_id: context.fileId, manual_columns: context.manualColumns }),
     });
+
     if (!response.ok) {
-      const detail = await response.text();
-      throw new Error(detail || 'Unable to load harmonized results.');
+      throw new Error('Unable to load summary.');
     }
-    state.summary = await response.json();
-    summaryError?.classList.add('hidden');
-    renderSummaryMetrics();
-    renderChangeTable();
-    renderInsightTags();
+
+    const data = await response.json();
+    _renderSummary(data.column_summaries ?? []);
   } catch (error) {
-    showSummaryError(error.message || 'Unable to load harmonized results.');
+    console.error('Failed to fetch summary:', error);
+    if (_summaryGrid) {
+      _summaryGrid.innerHTML = '<p class="summary-empty">Unable to load harmonization summary.</p>';
+    }
   }
 };
 
-const init = () => {
-  setActiveStage('export');
-  initStepInstruction('export');
-  attachStageEvents();
-  attachStageFiveEvents();
-  fetchSummary();
+const _attachNavigationEvents = () => {
+  document.querySelectorAll('.progress-tracker .step[data-url]').forEach((el) => {
+    el.addEventListener('click', () => {
+      if (el.dataset.url) {
+        window.location.assign(el.dataset.url);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-nav-target]').forEach((el) => {
+    el.addEventListener('click', () => {
+      if (el.dataset.navTarget) {
+        window.location.assign(el.dataset.navTarget);
+      }
+    });
+  });
 };
 
-init();
+const _init = () => {
+  _setActiveStage('export');
+  initStepInstruction('export');
+  _attachNavigationEvents();
+
+  if (_downloadBtn) {
+    _downloadBtn.addEventListener('click', _handleDownload);
+  }
+
+  _fetchSummary();
+};
+
+_init();

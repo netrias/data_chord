@@ -1,292 +1,90 @@
-/* Stage 5 Review Summary - stage-specific styles */
+/* Stage 5 Download - stage-specific styles */
 
-/* Wider layout for summary stage */
 .stage-five-shell {
-  max-width: min(1900px, 96vw);
+  max-width: min(900px, 96vw);
   padding: var(--space-12) var(--space-8) 4rem;
 }
 
-.summary-card .summary-header {
-  flex-wrap: wrap;
-  gap: var(--space-6);
-}
-
-.download-actions {
-  display: flex;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-  align-items: center;
-}
-
-/* Metric grid */
-.metric-grid {
-  margin-top: var(--space-6);
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: var(--space-4);
-}
-
-.metric-card {
-  border: 1px solid var(--gray-200);
-  border-radius: 18px;
-  padding: var(--space-5);
-  background: var(--gray-50);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.metric-card h4 {
-  margin: 0 0 0.35rem;
-  font-size: 0.9rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--gray-500);
-}
-
-.metric-card strong {
-  font-size: 1.8rem;
-  color: var(--gray-900);
-}
-
-.metric-link {
-  margin-top: auto;
-  align-self: flex-start;
-  border: none;
-  background: transparent;
-  color: var(--teal-700);
-  font-weight: 600;
-  cursor: pointer;
-  padding: 0;
-}
-
-.metric-delta {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-weight: 600;
-  font-size: 0.9rem;
-}
-
-.metric-delta.up {
-  color: var(--success-600);
-}
-
-.metric-delta.down {
-  color: var(--error-600);
-}
-
-/* Insight card */
-.insight-card {
-  margin-top: var(--space-6);
-}
-
-.insight-tags {
-  display: flex;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-}
-
-.insight-tag {
-  border-radius: var(--radius-full);
-  border: 1px solid var(--gray-200);
-  padding: var(--space-1) var(--space-3);
-  font-size: 0.85rem;
-  color: var(--gray-600);
-  background: var(--white);
-}
-
-/* Change table */
-.change-table {
-  margin-top: var(--space-4);
-  border: 1px solid var(--gray-200);
-  border-radius: 18px;
-  overflow: hidden;
-}
-
-.change-table-header,
-.change-table-row {
-  display: grid;
-  grid-template-columns: 2fr repeat(3, minmax(140px, 1fr));
-  gap: var(--space-2);
-  padding: 0.9rem var(--space-4);
-}
-
-.change-table-header {
-  background: var(--gray-50);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-size: 0.8rem;
-  color: var(--gray-500);
-}
-
-.sortable-header {
-  cursor: pointer;
-  user-select: none;
-  transition: color 0.15s ease;
-}
-
-.sortable-header:hover {
-  color: var(--teal-700);
-}
-
-.sortable-header.active {
-  color: var(--gray-900);
-  font-weight: 600;
-}
-
-.insight-header-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  flex-wrap: wrap;
-}
-
-.filter-toggle-btn {
-  border: 1px solid var(--gray-300);
-  border-radius: var(--radius-full);
-  padding: 0.35rem 0.85rem;
-  font-size: 0.85rem;
-  background: var(--white);
-  color: var(--gray-600);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.filter-toggle-btn:hover {
-  border-color: var(--teal-600);
-  color: var(--teal-700);
-}
-
-.filter-toggle-btn.active {
-  background: var(--teal-50);
-  border-color: var(--teal-600);
-  color: var(--teal-700);
-}
-
-.change-table-row:nth-child(even) {
-  background: var(--white);
-}
-
-.change-table-row span:last-child {
-  justify-self: end;
-}
-
-/* Recap card */
-.recap-card {
-  margin-top: var(--space-6);
-}
-
-.recap-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: var(--space-4);
-}
-
-.recap-item {
-  border: 1px solid var(--gray-200);
-  border-radius: 18px;
-  padding: var(--space-4);
-  background: var(--gray-50);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-.recap-item h4 {
-  margin: 0;
-}
-
-.recap-item p {
-  margin: 0;
-  color: var(--gray-600);
-}
-
-/* Modal */
-.stage-modal {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--space-4);
-  z-index: 50;
-}
-
-.stage-modal-card {
-  background: var(--white);
-  border-radius: var(--radius-2xl);
+/* Download card */
+.download-card {
+  text-align: center;
   padding: var(--space-6);
-  width: min(640px, 90vw);
-  max-height: 80vh;
-  overflow: auto;
+}
+
+.download-action-container {
   display: flex;
-  flex-direction: column;
+  justify-content: center;
+}
+
+.download-btn {
+  font-size: 1.1rem;
+  padding: var(--space-4) var(--space-8);
+}
+
+/* Summary card */
+.summary-card {
+  margin-top: var(--space-6);
+}
+
+.summary-card .stage-section-header {
+  margin-bottom: var(--space-4);
+}
+
+.summary-card h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--gray-700);
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: var(--space-4);
 }
 
-.stage-modal-card header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.summary-loading,
+.summary-empty {
+  color: var(--gray-500);
+  font-style: italic;
+  grid-column: 1 / -1;
 }
 
-.stage-modal-card button {
-  border: none;
-  background: transparent;
-  font-size: 1.5rem;
-  cursor: pointer;
-}
-
-.modal-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-.modal-item {
+/* Column summary card */
+.summary-column-card {
   border: 1px solid var(--gray-200);
   border-radius: var(--radius-lg);
   padding: var(--space-4);
   background: var(--gray-50);
 }
 
-.modal-item h4 {
-  margin: 0 0 var(--space-2);
-}
-
-.modal-item dl {
-  margin: 0;
-  display: grid;
-  grid-template-columns: 120px 1fr;
-  row-gap: var(--space-1);
-}
-
-.modal-item dt {
+.summary-column-name {
+  margin: 0 0 var(--space-3);
+  font-size: 1rem;
   font-weight: 600;
+  color: var(--gray-900);
+}
+
+.summary-stats {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.summary-stat {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.summary-stat dt {
+  font-size: 0.85rem;
   color: var(--gray-500);
 }
 
-.modal-item dd {
+.summary-stat dd {
   margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
   color: var(--gray-800);
-}
-
-/* Responsive */
-@media (max-width: 640px) {
-  .download-actions {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .change-table-header,
-  .change-table-row {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .change-table-row span:nth-child(3),
-  .change-table-row span:nth-child(4) {
-    justify-self: flex-start;
-  }
 }
