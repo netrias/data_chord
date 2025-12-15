@@ -26,4 +26,5 @@ uv.lock
 # Harmonization outputs
 outputs/
 *.harmonized.csv
+*.harmonized.v*.csv
 *_manifest.parquet

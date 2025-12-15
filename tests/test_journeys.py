@@ -152,13 +152,11 @@ async def test_review_to_summary_journey(
         json={"file_id": file_id, "manual_columns": []},
     )
 
-    # Then: Summary shows aggregate change statistics
+    # Then: Summary shows column change statistics
     assert summary_response.status_code == 200
     summary_data = summary_response.json()
-    assert summary_data["total_rows"] > 0
-    assert summary_data["columns_reviewed"] > 0
-    assert "ai_changes" in summary_data
     assert "column_summaries" in summary_data
+    assert len(summary_data["column_summaries"]) > 0
 
 
 async def test_full_pipeline_journey(
@@ -228,11 +226,12 @@ async def test_full_pipeline_journey(
         "/stage-5/summary",
         json={"file_id": file_id, "manual_columns": []},
     )
-    # Then: Summary shows expected change counts
+    # Then: Summary shows column summaries with changes
     assert summary_response.status_code == 200
     summary = summary_response.json()
-    assert summary["total_rows"] > 0
-    assert summary["ai_changes"] >= 2
+    assert "column_summaries" in summary
+    total_ai_changes = sum(col["ai_changes"] for col in summary["column_summaries"])
+    assert total_ai_changes >= 2
 
 
 async def test_manual_columns_flow_through_pipeline(
@@ -281,4 +280,43 @@ async def test_manual_columns_flow_through_pipeline(
 
     # Then: Changes are counted as manual (not AI) in summary
     summary = summary_response.json()
-    assert summary["manual_changes"] >= 1
+    total_manual_changes = sum(col["manual_changes"] for col in summary["column_summaries"])
+    assert total_manual_changes >= 1
+
+
+async def test_download_returns_zip_with_csv(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+    sample_csv_path: Path,
+) -> None:
+    """Download endpoint returns a zip containing the harmonized CSV."""
+    import zipfile
+    from io import BytesIO
+
+    # Given: An uploaded file with harmonized output available
+    upload_response = await app_client.post(
+        "/stage-1/upload",
+        files={"file": (sample_csv_path.name, sample_csv_path.read_bytes(), TEST_CSV_CONTENT_TYPE)},
+    )
+    file_id = upload_response.json()["file_id"]
+    meta = temp_storage.load(file_id)
+    assert meta is not None
+    create_harmonized_csv(meta.saved_path, {
+        0: {"primary_diagnosis": "Harmonized Value"},
+    })
+
+    # When: User requests download
+    download_response = await app_client.post(
+        "/stage-5/download",
+        json={"file_id": file_id},
+    )
+
+    # Then: Response is a zip file containing the CSV
+    assert download_response.status_code == 200
+    assert download_response.headers.get("content-type") == "application/zip"
+    assert "attachment" in download_response.headers.get("content-disposition", "")
+
+    zip_content = BytesIO(download_response.content)
+    with zipfile.ZipFile(zip_content, "r") as zf:
+        names = zf.namelist()
+        assert any(name.endswith(".csv") for name in names)

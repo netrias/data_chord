@@ -390,16 +390,11 @@ class TestSummaryContract:
             json={"file_id": file_id, "manual_columns": []},
         )
 
-        # Then: Response contains all required summary statistics fields
+        # Then: Response contains column summaries
         assert response.status_code == 200
         data = response.json()
-        assert "total_rows" in data
-        assert "columns_reviewed" in data
-        assert "ai_changes" in data
-        assert "manual_changes" in data
         assert "column_summaries" in data
-        assert "ai_examples" in data
-        assert "manual_examples" in data
+        assert len(data["column_summaries"]) > 0
 
     async def test_column_summary_structure(
         self,
@@ -426,6 +421,6 @@ class TestSummaryContract:
         assert len(summaries) > 0
         for summary in summaries:
             assert "column" in summary
+            assert "distinct_terms" in summary
             assert "ai_changes" in summary
             assert "manual_changes" in summary
-            assert "unchanged" in summary
