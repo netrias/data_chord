@@ -12,8 +12,8 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from src.domain.manifest import ManifestSummary, read_manifest_parquet
 from src.stage_1_upload.dependencies import get_harmonize_service, get_upload_storage
-from src.stage_1_upload.manifest_reader import ManifestSummary, read_manifest_parquet
 from src.stage_1_upload.schemas import (
     DEFAULT_TARGET_SCHEMA,
     HarmonizeRequest,
