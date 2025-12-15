@@ -104,7 +104,7 @@ class MappingDiscoveryService:
 
         if not recognized:
             for column, entry in column_entries.items():
-                cde_id = entry.get("cdeId") or entry.get("cde_id")
+                cde_id = entry.get("cde_id")
                 if isinstance(cde_id, int):
                     recognized[column] = cde_id
 

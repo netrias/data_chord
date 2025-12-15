@@ -136,7 +136,6 @@ def _override_entry(existing: Mapping[str, object] | None, cde_field: CDEField) 
     cde_def = get_cde(cde_field)
     entry["route"] = cde_def.route
     entry["targetField"] = cde_field.value
-    entry["cdeId"] = cde_def.cde_id
     entry["cde_id"] = cde_def.cde_id
     return entry
 

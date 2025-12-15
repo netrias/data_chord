@@ -98,11 +98,11 @@ def mock_netrias_client() -> Generator[MagicMock]:
             "column_mappings": {
                 "primary_diagnosis": {
                     "targetField": "primary_diagnosis",
-                    "cdeId": 2,
+                    "cde_id": 2,
                 },
                 "therapeutic_agents": {
                     "targetField": "therapeutic_agents",
-                    "cdeId": 1,
+                    "cde_id": 1,
                 },
             },
         },

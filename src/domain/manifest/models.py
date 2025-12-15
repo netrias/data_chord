@@ -24,17 +24,11 @@ class ColumnMappingEntry(TypedDict, total=False):
     Fields:
         route: The routing endpoint for harmonization (e.g., "sagemaker:primary")
         targetField: The canonical CDE field name
-        cdeId: The numeric CDE identifier (camelCase variant from external API)
-        cde_id: The numeric CDE identifier (snake_case variant from external API)
-
-    Note: Both cdeId and cde_id exist because the external Netrias API returns
-    responses with inconsistent casing. We accept both variants at the boundary
-    and normalize internally.
+        cde_id: The numeric CDE identifier
     """
 
     route: str
     targetField: str
-    cdeId: int
     cde_id: int
 
 
