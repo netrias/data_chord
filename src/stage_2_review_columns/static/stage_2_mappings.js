@@ -4,6 +4,8 @@
  */
 import { initStepInstruction } from '/assets/shared/step-instruction-ui.js';
 
+import { createCombobox } from '/assets/shared/combobox.js';
+
 const config = window.stageTwoConfig ?? {};
 const STORAGE_KEY = config.storageKey ?? 'stage2Payload';
 const manualOptions = config.manualOptions ?? [];
@@ -102,24 +104,6 @@ const _persistStageThreePayload = (body) => {
 
 /** Build and render a single mapping row for a column. */
 const _buildMappingRow = (column) => {
-  const row = document.createElement('article');
-  row.className = `mapping-row confidence-${column.confidence_bucket}`;
-
-  const columnCell = document.createElement('div');
-  columnCell.className = 'mapping-cell';
-  columnCell.innerHTML = `
-    <p class="label">Column</p>
-    <h3>${column.column_name}</h3>
-  `;
-
-  const suggestionCell = document.createElement('div');
-  suggestionCell.className = 'mapping-cell suggestion-cell';
-
-  const suggestionLabel = document.createElement('p');
-  suggestionLabel.className = 'label';
-  suggestionLabel.textContent = 'AI recommended model';
-  suggestionCell.appendChild(suggestionLabel);
-
   const suggestions = _getColumnSuggestions(column);
   const topTarget = suggestions[0];
   const manualSelection =
@@ -127,81 +111,77 @@ const _buildMappingRow = (column) => {
     state.manualSelections.get(column.column_name.toLowerCase()) ||
     null;
 
-  if (!topTarget) {
-    row.className = 'mapping-row confidence-medium';
-  }
+  const row = document.createElement('div');
+  const hasRecommendation = Boolean(topTarget);
+  const aiRecommendation = topTarget?.target ?? null;
+  const isOverrideDifferentFromAI =
+    manualSelection &&
+    manualSelection.toLowerCase() !== (aiRecommendation ?? '').toLowerCase();
 
-  const suggestionTarget = document.createElement('p');
+  /* Determine row state and corresponding icon */
+  let rowState;
+  let statusIcon;
+  if (isOverrideDifferentFromAI) {
+    rowState = 'override';
+    statusIcon = '✎'; /* Pencil - manual edit */
+  } else if (hasRecommendation || manualSelection) {
+    rowState = 'recommended';
+    statusIcon = '✓'; /* Checkmark - AI recommendation accepted */
+  } else {
+    rowState = 'no-recommendation';
+    statusIcon = '○'; /* Empty circle - no recommendation */
+  }
+  row.className = `mapping-row mapping-row--${rowState}`;
+
+  /* Status icon cell (first column, no header) */
+  const statusCell = document.createElement('div');
+  statusCell.className = 'mapping-td mapping-td-status';
+  statusCell.setAttribute('aria-hidden', 'true');
+  statusCell.textContent = statusIcon;
+
+  const columnCell = document.createElement('div');
+  columnCell.className = 'mapping-td mapping-td-column';
+  columnCell.textContent = column.column_name;
+
+  const suggestionCell = document.createElement('div');
+  suggestionCell.className = 'mapping-td mapping-td-suggestion';
+
+  const suggestionTarget = document.createElement('span');
   suggestionTarget.className = 'suggestion-target';
 
-  if (manualSelection) {
-    suggestionTarget.textContent = manualSelection;
-  } else if (topTarget) {
+  if (topTarget) {
     suggestionTarget.textContent = topTarget.target;
   } else {
-    suggestionTarget.textContent = 'No recommendation';
+    suggestionTarget.textContent = '—';
+    suggestionTarget.className = 'suggestion-target suggestion-target--empty';
   }
 
   suggestionCell.appendChild(suggestionTarget);
 
-  const select = document.createElement('select');
-  select.className = 'select-control';
-  select.dataset.column = column.column_name;
-
-  if (topTarget) {
-    const placeholderOption = document.createElement('option');
-    placeholderOption.value = '';
-    placeholderOption.textContent = 'Keep AI suggestion';
-    if (!manualSelection) {
-      placeholderOption.selected = true;
-    }
-    select.appendChild(placeholderOption);
-  } else {
-    const noModelOption = document.createElement('option');
-    noModelOption.value = '';
-    noModelOption.textContent = 'No model';
-    if (!manualSelection) {
-      noModelOption.selected = true;
-    }
-    select.appendChild(noModelOption);
-  }
-
-  manualOptions.forEach((option) => {
-    const opt = document.createElement('option');
-    opt.value = option;
-    opt.textContent = option;
-    if (manualSelection && option === manualSelection) {
-      opt.selected = true;
-    }
-    select.appendChild(opt);
+  /* Use the Combobox widget for override selection */
+  const combobox = createCombobox({
+    options: manualOptions,
+    initialValue: manualSelection,
+    placeholder: topTarget ? 'Keep AI suggestion' : 'No ontology',
+    onChange: (newValue) => {
+      if (newValue) {
+        state.manualSelections.set(column.column_name, newValue);
+      } else {
+        state.manualSelections.delete(column.column_name);
+      }
+      _persistManualOverrides();
+      _renderMappingRows();
+    },
   });
 
-  select.addEventListener('change', () => {
-    if (select.value) {
-      state.manualSelections.set(column.column_name, select.value);
-    } else {
-      state.manualSelections.delete(column.column_name);
-    }
-    _persistManualOverrides();
-    _renderMappingRows();
-  });
+  const overrideCell = document.createElement('div');
+  overrideCell.className = 'mapping-td mapping-td-override';
+  overrideCell.appendChild(combobox);
 
-  suggestionCell.appendChild(select);
-
-  if (suggestions.length > 1) {
-    const list = document.createElement('ul');
-    list.className = 'suggestion-list';
-    suggestions.slice(1, 4).forEach((item) => {
-      const chip = document.createElement('li');
-      const scoreRounded = Math.round(Number(item.similarity) * 100) / 100;
-      chip.textContent = `${item.target} · ${scoreRounded}`;
-      list.appendChild(chip);
-    });
-    suggestionCell.appendChild(list);
-  }
-
+  row.appendChild(statusCell);
   row.appendChild(columnCell);
   row.appendChild(suggestionCell);
+  row.appendChild(overrideCell);
   return row;
 };
 
