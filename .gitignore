@@ -10,6 +10,7 @@ wheels/
 .venv
 
 # Node artifacts
+node_modules/
 frontend/node_modules
 frontend/dist
 

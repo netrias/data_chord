@@ -28,13 +28,15 @@ class TestUploadContract:
     ) -> None:
         """Upload response includes all UploadResponse schema fields."""
 
-        # When
+        # Given: A valid CSV file ready for upload
+
+        # When: The file is uploaded via POST
         response = await app_client.post(
             "/stage-1/upload",
             files={"file": (sample_csv_path.name, sample_csv_path.read_bytes(), TEST_CSV_CONTENT_TYPE)},
         )
 
-        # Then
+        # Then: Response contains all required UploadResponse fields
         assert response.status_code == 201
         data = response.json()
         assert "file_id" in data
@@ -50,13 +52,15 @@ class TestUploadContract:
     ) -> None:
         """file_id is a valid hex string for use in subsequent requests."""
 
-        # When
+        # Given: A valid CSV file ready for upload
+
+        # When: The file is uploaded via POST
         response = await app_client.post(
             "/stage-1/upload",
             files={"file": (sample_csv_path.name, sample_csv_path.read_bytes(), TEST_CSV_CONTENT_TYPE)},
         )
 
-        # Then
+        # Then: file_id is a valid hex string suitable for URL paths
         file_id = response.json()["file_id"]
         assert len(file_id) >= 8
         assert all(c in "0123456789abcdef" for c in file_id)
@@ -79,13 +83,15 @@ class TestUploadContract:
     ) -> None:
         """Only CSV content types are accepted."""
 
-        # When
+        # Given: A file with specific filename and content type (parameterized)
+
+        # When: The file is uploaded via POST
         response = await app_client.post(
             "/stage-1/upload",
             files={"file": (filename, b"col1,col2\na,b", content_type)},
         )
 
-        # Then
+        # Then: Response status matches expected (201 for CSV, 415 for others)
         assert response.status_code == expected_status
 
 
@@ -99,16 +105,16 @@ class TestAnalyzeContract:
     ) -> None:
         """Analyze response includes all AnalyzeResponse schema fields."""
 
-        # Given
+        # Given: An uploaded CSV file
         file_id = await upload_file(app_client, sample_csv_path)
 
-        # When
+        # When: The file is analyzed
         response = await app_client.post(
             "/stage-1/analyze",
             json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
         )
 
-        # Then
+        # Then: Response contains all required AnalyzeResponse fields
         assert response.status_code == 200
         data = response.json()
         assert data["file_id"] == file_id
@@ -126,16 +132,16 @@ class TestAnalyzeContract:
     ) -> None:
         """Each column in response has ColumnPreview fields."""
 
-        # Given
+        # Given: An uploaded CSV file
         file_id = await upload_file(app_client, sample_csv_path)
 
-        # When
+        # When: The file is analyzed
         response = await app_client.post(
             "/stage-1/analyze",
             json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
         )
 
-        # Then
+        # Then: Each column contains all required ColumnPreview fields
         columns = response.json()["columns"]
         assert len(columns) > 0
         for col in columns:
@@ -162,16 +168,16 @@ class TestAnalyzeContract:
     ) -> None:
         """Columns are detected with correct inferred types."""
 
-        # Given
+        # Given: An uploaded CSV with columns of different data types
         file_id = await upload_file(app_client, types_csv_path)
 
-        # When
+        # When: The file is analyzed
         response = await app_client.post(
             "/stage-1/analyze",
             json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
         )
 
-        # Then
+        # Then: Column type is correctly inferred (numeric, date, or text)
         data = response.json()
         col = next(col for col in data["columns"] if col["column_name"] == column_name)
         assert col["inferred_type"] == expected_type
@@ -193,16 +199,16 @@ class TestAnalyzeContract:
     ) -> None:
         """Confidence bucket assigned based on non-null ratio."""
 
-        # Given
+        # Given: An uploaded CSV with columns having different null ratios
         file_id = await upload_file(app_client, with_nulls_csv_path)
 
-        # When
+        # When: The file is analyzed
         response = await app_client.post(
             "/stage-1/analyze",
             json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
         )
 
-        # Then
+        # Then: Confidence bucket reflects data quality (high/medium/low)
         data = response.json()
         col = next(col for col in data["columns"] if col["column_name"] == column_name)
         assert col["confidence_bucket"] == expected_bucket
@@ -218,14 +224,14 @@ class TestHarmonizeContract:
     ) -> None:
         """Harmonize response includes all HarmonizeResponse schema fields."""
 
-        # Given
+        # Given: An uploaded and analyzed CSV file
         file_id = await upload_file(app_client, sample_csv_path)
         await app_client.post(
             "/stage-1/analyze",
             json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
         )
 
-        # When
+        # When: Harmonization is triggered
         response = await app_client.post(
             "/stage-3/harmonize",
             json={
@@ -235,7 +241,7 @@ class TestHarmonizeContract:
             },
         )
 
-        # Then
+        # Then: Response contains all required HarmonizeResponse fields
         assert response.status_code == 200
         data = response.json()
         assert "job_id" in data
@@ -250,14 +256,14 @@ class TestHarmonizeContract:
     ) -> None:
         """Status is one of the expected harmonization states."""
 
-        # Given
+        # Given: An uploaded and analyzed CSV file
         file_id = await upload_file(app_client, sample_csv_path)
         await app_client.post(
             "/stage-1/analyze",
             json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
         )
 
-        # When
+        # When: Harmonization is triggered
         response = await app_client.post(
             "/stage-3/harmonize",
             json={
@@ -267,7 +273,7 @@ class TestHarmonizeContract:
             },
         )
 
-        # Then
+        # Then: Status is one of the valid harmonization states
         status = response.json()["status"]
         assert status in ("succeeded", "queued", "running", "failed")
 
@@ -283,19 +289,19 @@ class TestRowsContract:
     ) -> None:
         """Rows response includes StageFourResultsResponse fields."""
 
-        # Given
+        # Given: An uploaded file with harmonized output available
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
         create_harmonized_csv(meta.saved_path, {})
 
-        # When
+        # When: Rows are requested for review
         response = await app_client.post(
             "/stage-4/rows",
             json={"file_id": file_id, "manual_columns": []},
         )
 
-        # Then
+        # Then: Response contains rows array
         assert response.status_code == 200
         data = response.json()
         assert "rows" in data
@@ -309,19 +315,19 @@ class TestRowsContract:
     ) -> None:
         """Each row has StageFourRow fields."""
 
-        # Given
+        # Given: An uploaded file with harmonized output available
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
         create_harmonized_csv(meta.saved_path, {})
 
-        # When
+        # When: Rows are requested for review
         response = await app_client.post(
             "/stage-4/rows",
             json={"file_id": file_id, "manual_columns": []},
         )
 
-        # Then
+        # Then: Each row contains required StageFourRow fields
         rows = response.json()["rows"]
         assert len(rows) > 0
         for row in rows:
@@ -337,19 +343,19 @@ class TestRowsContract:
     ) -> None:
         """Each cell has StageFourCell fields."""
 
-        # Given
+        # Given: An uploaded file with harmonized output available
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
         create_harmonized_csv(meta.saved_path, {})
 
-        # When
+        # When: Rows are requested for review
         response = await app_client.post(
             "/stage-4/rows",
             json={"file_id": file_id, "manual_columns": []},
         )
 
-        # Then
+        # Then: Each cell contains required StageFourCell fields
         cells = response.json()["rows"][0]["cells"]
         for cell in cells:
             assert "columnKey" in cell
@@ -372,19 +378,19 @@ class TestSummaryContract:
     ) -> None:
         """Summary response includes all StageFiveSummaryResponse fields."""
 
-        # Given
+        # Given: An uploaded file with harmonized output available
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
         create_harmonized_csv(meta.saved_path, {})
 
-        # When
+        # When: Summary is requested
         response = await app_client.post(
             "/stage-5/summary",
             json={"file_id": file_id, "manual_columns": []},
         )
 
-        # Then
+        # Then: Response contains all required summary statistics fields
         assert response.status_code == 200
         data = response.json()
         assert "total_rows" in data
@@ -403,19 +409,19 @@ class TestSummaryContract:
     ) -> None:
         """Each column summary has ColumnSummary fields."""
 
-        # Given
+        # Given: An uploaded file with harmonized output available
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
         create_harmonized_csv(meta.saved_path, {})
 
-        # When
+        # When: Summary is requested
         response = await app_client.post(
             "/stage-5/summary",
             json={"file_id": file_id, "manual_columns": []},
         )
 
-        # Then
+        # Then: Each column summary contains required ColumnSummary fields
         summaries = response.json()["column_summaries"]
         assert len(summaries) > 0
         for summary in summaries:

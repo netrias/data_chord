@@ -37,31 +37,31 @@ class CDEDefinition:
 CDE_REGISTRY: Mapping[CDEField, CDEDefinition] = {
     CDEField.PRIMARY_DIAGNOSIS: CDEDefinition(
         field=CDEField.PRIMARY_DIAGNOSIS,
-        label="Primary Diagnosis",
+        label="primary_diagnosis",
         cde_id=2,
         route="sagemaker:primary",
     ),
     CDEField.MORPHOLOGY: CDEDefinition(
         field=CDEField.MORPHOLOGY,
-        label="Morphology",
+        label="morphology",
         cde_id=3,
         route="sagemaker:morphology",
     ),
     CDEField.SAMPLE_ANATOMIC_SITE: CDEDefinition(
         field=CDEField.SAMPLE_ANATOMIC_SITE,
-        label="Sample Anatomic Site",
+        label="sample_anatomic_site",
         cde_id=5,
         route="sagemaker:sample_anatomic_site",
     ),
     CDEField.THERAPEUTIC_AGENTS: CDEDefinition(
         field=CDEField.THERAPEUTIC_AGENTS,
-        label="Therapeutic Agents",
+        label="therapeutic_agents",
         cde_id=1,
         route="sagemaker:therapeutic_agents",
     ),
     CDEField.TISSUE_OR_ORGAN_OF_ORIGIN: CDEDefinition(
         field=CDEField.TISSUE_OR_ORGAN_OF_ORIGIN,
-        label="Tissue / Organ Origin",
+        label="tissue_or_organ_of_origin",
         cde_id=4,
         route="sagemaker:tissue_or_organ_of_origin",
     ),

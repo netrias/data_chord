@@ -1,0 +1,328 @@
+/* Stage 2 Map - column mapping table styles */
+
+/* Override stage-card padding for edge-to-edge table */
+.stage-card {
+  padding: 0;
+}
+
+/* Table wrapper - fixed height with internal scroll */
+.mapping-table-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 220px);
+  min-height: 400px;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--gray-200);
+}
+
+/* Legend bar */
+.mapping-legend {
+  display: flex;
+  gap: var(--space-6);
+  padding: var(--space-2) var(--space-4);
+  background: var(--white);
+  border-bottom: 1px solid var(--gray-100);
+  flex-shrink: 0;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.legend-icon {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.legend-item--recommended .legend-icon {
+  color: var(--netrias-500);
+}
+
+.legend-item--override .legend-icon {
+  color: var(--azure-500);
+}
+
+.legend-item--no-recommendation .legend-icon {
+  color: var(--gray-400);
+}
+
+.legend-label {
+  font-size: 0.75rem;
+  color: var(--gray-600);
+}
+
+/* Fixed table header */
+.mapping-table-header {
+  display: grid;
+  grid-template-columns: 32px 1fr 1fr 1fr;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: var(--gray-50);
+  border-bottom: 1px solid var(--gray-200);
+  flex-shrink: 0;
+}
+
+.mapping-th {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--gray-500);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Scrollable table body */
+.mapping-table-body {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* Individual mapping row */
+.mapping-row {
+  display: grid;
+  grid-template-columns: 32px 1fr 1fr 1fr;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--gray-100);
+  align-items: center;
+  transition: background-color var(--transition-fast);
+}
+
+.mapping-row:last-child {
+  border-bottom: none;
+}
+
+/* Row state styling */
+.mapping-row.mapping-row--recommended {
+  background-color: var(--netrias-50);
+  border-left: 4px solid var(--netrias-500);
+}
+
+.mapping-row.mapping-row--recommended:hover {
+  background-color: var(--netrias-100);
+}
+
+.mapping-row.mapping-row--no-recommendation {
+  background-color: var(--white);
+  border-left: 4px solid var(--gray-300);
+}
+
+.mapping-row.mapping-row--no-recommendation:hover {
+  background-color: var(--gray-50);
+}
+
+.mapping-row.mapping-row--override {
+  background-color: var(--azure-50);
+  border-left: 4px solid var(--azure-500);
+}
+
+.mapping-row.mapping-row--override:hover {
+  background-color: var(--azure-100);
+}
+
+/* Status icon in row */
+.mapping-td-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+}
+
+.mapping-row--recommended .mapping-td-status {
+  color: var(--netrias-500);
+}
+
+.mapping-row--override .mapping-td-status {
+  color: var(--azure-500);
+}
+
+.mapping-row--no-recommendation .mapping-td-status {
+  color: var(--gray-400);
+}
+
+/* Table cells */
+.mapping-td {
+  font-size: 0.9rem;
+  color: var(--gray-800);
+  min-width: 0;
+}
+
+.mapping-td-column {
+  font-weight: 500;
+  word-break: break-word;
+}
+
+.mapping-td-suggestion {
+  color: var(--gray-700);
+}
+
+.suggestion-target {
+  display: block;
+}
+
+.suggestion-target--empty {
+  color: var(--gray-400);
+}
+
+/* Combobox - searchable dropdown */
+.combobox {
+  position: relative;
+  width: 100%;
+  max-width: 220px;
+}
+
+.combobox-input {
+  appearance: none;
+  background: var(--white);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 2rem 0.4rem 0.6rem;
+  font-size: 0.85rem;
+  font-family: inherit;
+  color: var(--gray-700);
+  cursor: text;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  width: 100%;
+}
+
+.combobox-input::placeholder {
+  color: var(--gray-400);
+}
+
+.combobox-input:hover {
+  border-color: var(--gray-300);
+}
+
+.combobox-input:focus {
+  outline: none;
+  border-color: var(--netrias-500);
+  box-shadow: 0 0 0 2px var(--netrias-glow-light);
+}
+
+.combobox-toggle {
+  position: absolute;
+  right: 1px;
+  top: 1px;
+  bottom: 1px;
+  width: 28px;
+  background: transparent;
+  border: none;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--gray-500);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 0.7rem;
+}
+
+.combobox-toggle:hover {
+  background: var(--gray-50);
+  color: var(--gray-700);
+}
+
+.combobox-dropdown {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin: 4px 0 0;
+  padding: 4px 0;
+  background: var(--white);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  list-style: none;
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 100;
+}
+
+.combobox-dropdown--open {
+  display: block;
+}
+
+.combobox-option {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--gray-700);
+  cursor: pointer;
+}
+
+.combobox-option:hover {
+  background: var(--gray-50);
+}
+
+.combobox-option--empty {
+  color: var(--gray-400);
+  font-style: italic;
+  cursor: default;
+}
+
+.combobox-option--empty:hover {
+  background: transparent;
+}
+
+/* Empty state */
+.mapping-empty {
+  padding: var(--space-6);
+  text-align: center;
+  color: var(--gray-500);
+  background: var(--gray-50);
+  border: 1px dashed var(--gray-200);
+  border-radius: var(--radius-lg);
+}
+
+/* Responsive layout */
+@media (max-width: 700px) {
+  .mapping-table-header,
+  .mapping-row {
+    grid-template-columns: 32px 1fr 1fr;
+  }
+
+  .mapping-th:last-child,
+  .mapping-td-override {
+    display: none;
+  }
+}
+
+@media (max-width: 500px) {
+  .mapping-table-header {
+    display: none;
+  }
+
+  .mapping-row {
+    grid-template-columns: 32px 1fr;
+    gap: var(--space-2);
+    padding: var(--space-4);
+  }
+
+  .mapping-td-column {
+    font-weight: 600;
+  }
+
+  .mapping-td-suggestion::before {
+    content: 'Ontology: ';
+    color: var(--gray-400);
+    font-size: 0.8rem;
+  }
+
+  .mapping-td-override {
+    display: block;
+  }
+
+  .combobox {
+    max-width: 100%;
+  }
+}
