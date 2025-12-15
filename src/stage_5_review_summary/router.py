@@ -24,9 +24,8 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from src.domain import SessionKey
-from src.domain.storage import FileType
-from src.stage_1_upload.dependencies import get_file_store, get_upload_storage
-from src.stage_1_upload.services import UploadStorage
+from src.domain.dependencies import get_file_store, get_upload_storage
+from src.domain.storage import FileType, UploadStorage
 
 _logger = logging.getLogger(__name__)
 

@@ -7,10 +7,10 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from src.stage_1_upload.harmonize import ManifestPayload
+from src.domain import DEFAULT_TARGET_SCHEMA
+from src.domain.manifest import ManifestPayload
 
 ConfidenceBucket = Literal["low", "medium", "high"]
-DEFAULT_TARGET_SCHEMA = "ccdi"
 
 
 class UploadResponse(BaseModel):

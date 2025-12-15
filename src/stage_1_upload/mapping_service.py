@@ -10,7 +10,9 @@ from typing import Protocol, cast
 
 from netrias_client import NetriasClient
 
-from .schemas import ManifestPayload, ModelSuggestion
+from src.domain.manifest import ManifestPayload
+
+from .schemas import ModelSuggestion
 
 logger = logging.getLogger(__name__)
 DEFAULT_SAMPLE_LIMIT = 50
@@ -102,7 +104,7 @@ class MappingDiscoveryService:
 
         if not recognized:
             for column, entry in column_entries.items():
-                cde_id = entry.get("cdeId") or entry.get("cde_id")
+                cde_id = entry.get("cde_id")
                 if isinstance(cde_id, int):
                     recognized[column] = cde_id
 

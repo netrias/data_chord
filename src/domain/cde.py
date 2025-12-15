@@ -12,6 +12,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 
+DEFAULT_TARGET_SCHEMA: str = "ccdi"
+
 
 class CDEField(str, Enum):
     """why: canonical identifiers for the 5 CCDI CDE columns."""

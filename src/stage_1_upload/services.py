@@ -1,18 +1,26 @@
-"""Handle persistence and lightweight profiling for the upload stage."""
+"""
+Provide lightweight CSV profiling for the upload stage.
+
+Re-exports storage classes from domain for backward compatibility.
+"""
 
 from __future__ import annotations
 
 import csv
-import json
 import logging
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
-from datetime import UTC, datetime
+from collections.abc import Iterable
+from datetime import datetime
 from pathlib import Path
-from typing import TypedDict, cast
-from uuid import uuid4
 
-from fastapi import UploadFile
+from src.domain.storage import (
+    UnsupportedUploadError,
+    UploadConstraints,
+    UploadedFileMeta,
+    UploadError,
+    UploadStorage,
+    UploadTooLargeError,
+    describe_constraints,
+)
 
 from .schemas import ColumnPreview, ConfidenceBucket
 
@@ -20,198 +28,17 @@ logger = logging.getLogger(__name__)
 DEFAULT_CDE_SAMPLE_LIMIT = 50
 CSVRow = dict[str, str | None]
 
-
-class StoredMeta(TypedDict):
-    """why: describe the JSON payload that mirrors uploads on disk."""
-
-    file_id: str
-    original_name: str
-    content_type: str
-    size_bytes: int
-    saved_name: str
-    uploaded_at: str
-
-
-@dataclass(frozen=True)
-class UploadConstraints:
-    """why: capture allowed file characteristics for uploads."""
-
-    allowed_suffixes: tuple[str, ...]
-    allowed_content_types: tuple[str, ...]
-    max_bytes: int
-    chunk_size: int = 1024 * 1024
-
-
-@dataclass(frozen=True)
-class UploadedFileMeta:
-    """why: describe where an uploaded file lives on disk."""
-
-    file_id: str
-    original_name: str
-    content_type: str
-    size_bytes: int
-    saved_path: Path
-    uploaded_at: datetime
-
-    @property
-    def human_size(self) -> str:
-        """why: convert byte counts into a UI-friendly message."""
-        size = float(self.size_bytes)
-        units = ["B", "KB", "MB", "GB"]
-        for unit in units:
-            if size < 1024 or unit == units[-1]:
-                return f"{size:.1f} {unit}"
-            size /= 1024
-        return f"{self.size_bytes} B"
-
-
-class UploadError(RuntimeError):
-    """why: represent upload-specific failures."""
-
-
-class UnsupportedUploadError(UploadError):
-    """why: signal when the file type is not allowed."""
-
-
-class UploadTooLargeError(UploadError):
-    """why: indicate the payload exceeded configured limits."""
-
-
-class UploadStorage:
-    """why: persist uploaded files and expose their metadata."""
-
-    def __init__(self, base_dir: Path, constraints: UploadConstraints) -> None:
-        self._base_dir: Path = base_dir
-        self._data_dir: Path = base_dir / "files"
-        self._meta_dir: Path = base_dir / "meta"
-        self._constraints: UploadConstraints = constraints
-        self._manifest_dir: Path = base_dir / "manifests"
-        self._ensure_workspace()
-
-    def _ensure_workspace(self) -> None:
-        """why: make sure upload directories are ready."""
-        self._data_dir.mkdir(parents=True, exist_ok=True)
-        self._meta_dir.mkdir(parents=True, exist_ok=True)
-        self._manifest_dir.mkdir(parents=True, exist_ok=True)
-
-    async def store(self, upload: UploadFile) -> UploadedFileMeta:
-        """why: validate and persist the upload stream."""
-        filename = upload.filename or "dataset.csv"
-        suffix = Path(filename).suffix.lower() or ".csv"
-        content_type = (upload.content_type or "text/csv").lower()
-        self._validate_upload(suffix, content_type)
-
-        file_id = uuid4().hex
-        destination = self._data_dir / f"{file_id}{suffix}"
-        total_bytes = 0
-
-        try:
-            with destination.open("wb") as target:
-                while chunk := await upload.read(self._constraints.chunk_size):
-                    total_bytes += len(chunk)
-                    if total_bytes > self._constraints.max_bytes:
-                        raise UploadTooLargeError(
-                            f"File exceeds {self._constraints.max_bytes} bytes limit",
-                        )
-                    _ = target.write(chunk)
-        except UploadTooLargeError:
-            destination.unlink(missing_ok=True)
-            logger.warning("Upload aborted because it was too large", extra={"file": filename})
-            raise
-        finally:
-            await upload.close()
-
-        meta = UploadedFileMeta(
-            file_id=file_id,
-            original_name=filename,
-            content_type=content_type,
-            size_bytes=total_bytes,
-            saved_path=destination,
-            uploaded_at=datetime.now(UTC),
-        )
-        self._write_metadata(meta)
-        logger.info("Stored upload", extra={"file_id": file_id, "size_bytes": total_bytes})
-        return meta
-
-    def load(self, file_id: str) -> UploadedFileMeta | None:
-        """why: reconstruct metadata for a previously stored upload."""
-        meta_path = self._meta_dir / f"{file_id}.json"
-        if not meta_path.exists():
-            return None
-
-        payload = cast(StoredMeta, json.loads(meta_path.read_text()))
-        saved_name: str = payload["saved_name"]
-        return UploadedFileMeta(
-            file_id=file_id,
-            original_name=payload["original_name"],
-            content_type=payload["content_type"],
-            size_bytes=payload["size_bytes"],
-            saved_path=self._data_dir / saved_name,
-            uploaded_at=datetime.fromisoformat(payload["uploaded_at"]),
-        )
-
-    def _write_metadata(self, meta: UploadedFileMeta) -> None:
-        """why: persist metadata alongside the file."""
-        meta_payload = {
-            "file_id": meta.file_id,
-            "original_name": meta.original_name,
-            "content_type": meta.content_type,
-            "size_bytes": meta.size_bytes,
-            "saved_name": meta.saved_path.name,
-            "uploaded_at": meta.uploaded_at.isoformat(),
-        }
-        meta_path = self._meta_dir / f"{meta.file_id}.json"
-        _ = meta_path.write_text(json.dumps(meta_payload, indent=2))
-
-    def save_manifest(self, file_id: str, manifest: Mapping[str, object]) -> Path:
-        """why: persist the harmonization manifest for reuse across stages."""
-
-        path = self._manifest_dir / f"{file_id}.json"
-        _ = path.write_text(json.dumps(manifest, indent=2))
-        logger.info("Stored manifest", extra={"file_id": file_id, "manifest_path": str(path)})
-        return path
-
-    def load_manifest(self, file_id: str) -> Mapping[str, object] | None:
-        """why: retrieve a previously stored manifest."""
-        path = self._manifest_dir / f"{file_id}.json"
-        if not path.exists():
-            return None
-        try:
-            return cast(Mapping[str, object], json.loads(path.read_text()))
-        except json.JSONDecodeError:
-            logger.warning("Manifest file corrupt", extra={"file_id": file_id, "path": str(path)})
-            return None
-
-    def save_harmonization_manifest(self, file_id: str, manifest_path: Path) -> Path:
-        """why: copy the parquet manifest to storage for cross-stage access."""
-        import shutil
-
-        destination = self._manifest_dir / f"{file_id}_harmonization.parquet"
-        shutil.copy2(manifest_path, destination)
-        logger.info("Stored harmonization manifest", extra={"file_id": file_id, "path": str(destination)})
-        return destination
-
-    def load_harmonization_manifest_path(self, file_id: str) -> Path | None:
-        """why: retrieve the stored harmonization manifest path."""
-        path = self._manifest_dir / f"{file_id}_harmonization.parquet"
-        return path if path.exists() else None
-
-    def _validate_upload(self, suffix: str, content_type: str) -> None:
-        """why: guard against unsupported file types."""
-        if suffix not in self._constraints.allowed_suffixes:
-            raise UnsupportedUploadError(f"Unsupported file extension: {suffix}")
-        if content_type not in self._constraints.allowed_content_types:
-            raise UnsupportedUploadError(f"Unsupported content type: {content_type}")
-
-
-def describe_constraints(constraints: UploadConstraints) -> dict[str, str | int]:
-    """why: present constraint information to the UI layer."""
-    max_mb = constraints.max_bytes / (1024 * 1024)
-    return {
-        "max_mb": f"{max_mb:.0f}",
-        "allowed_types": ", ".join(sorted(constraints.allowed_suffixes)),
-        "max_bytes": constraints.max_bytes,
-    }
+__all__ = [
+    "UploadConstraints",
+    "UploadedFileMeta",
+    "UploadError",
+    "UploadStorage",
+    "UploadTooLargeError",
+    "UnsupportedUploadError",
+    "describe_constraints",
+    "analyze_columns",
+    "build_cde_payload",
+]
 
 
 def analyze_columns(csv_path: Path, max_preview_rows: int = 5) -> tuple[int, list[ColumnPreview]]:
@@ -219,36 +46,39 @@ def analyze_columns(csv_path: Path, max_preview_rows: int = 5) -> tuple[int, lis
     if not csv_path.exists():
         raise FileNotFoundError(csv_path)
 
+    total_rows, headers, sample_rows = _read_csv_sample(csv_path, max_preview_rows)
+    columns = [_analyze_single_column(header, sample_rows) for header in headers]
+    return total_rows, columns
+
+
+def _read_csv_sample(csv_path: Path, max_rows: int) -> tuple[int, list[str], list[dict[str, str]]]:
+    """why: extract headers and sample rows from CSV."""
     with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
-        headers = reader.fieldnames or []
+        headers = list(reader.fieldnames or [])
         total_rows = 0
         sample_rows: list[dict[str, str]] = []
         for row in reader:
             total_rows += 1
-            if len(sample_rows) < max_preview_rows:
+            if len(sample_rows) < max_rows:
                 sample_rows.append(row)
+    return total_rows, headers, sample_rows
 
-    columns: list[ColumnPreview] = []
-    for header in headers:
-        samples = [_normalize_sample(row.get(header, "")) for row in sample_rows]
-        trimmed = [value for value in samples if value]
-        non_empty = len(trimmed)
-        sample_size = max(len(samples), 1)
-        confidence = _confidence_bucket(non_empty, sample_size)
-        score = non_empty / sample_size if sample_size else 0.0
-        inferred_type = _infer_type(trimmed)
-        columns.append(
-            ColumnPreview(
-                column_name=header,
-                inferred_type=inferred_type,
-                sample_values=samples,
-                confidence_bucket=confidence,
-                confidence_score=round(score, 2),
-            )
-        )
 
-    return total_rows, columns
+def _analyze_single_column(header: str, sample_rows: list[dict[str, str]]) -> ColumnPreview:
+    """why: compute preview metrics for a single column."""
+    samples = [_normalize_sample(row.get(header, "")) for row in sample_rows]
+    non_empty_values = [value for value in samples if value]
+    non_empty_count = len(non_empty_values)
+    sample_size = max(len(samples), 1)
+
+    return ColumnPreview(
+        column_name=header,
+        inferred_type=_infer_type(non_empty_values),
+        sample_values=samples,
+        confidence_bucket=_confidence_bucket(non_empty_count, sample_size),
+        confidence_score=round(non_empty_count / sample_size, 2),
+    )
 
 
 def _normalize_sample(value: str | None) -> str:
@@ -287,7 +117,7 @@ def _looks_numeric(values: list[str]) -> bool:
     """why: check if every value parses as a float."""
     try:
         for value in values:
-            _ = float(value)
+            float(value)
         return True
     except ValueError:
         return False
@@ -295,17 +125,21 @@ def _looks_numeric(values: list[str]) -> bool:
 
 def _looks_date(values: list[str]) -> bool:
     """why: approximate detection for short, common date formats."""
+    if not values:
+        return False
     formats = ["%Y-%m-%d", "%m/%d/%Y", "%Y/%m/%d"]
-    for candidate in values:
-        for fmt in formats:
-            try:
-                _ = datetime.strptime(candidate, fmt)
-                break
-            except ValueError:
-                continue
-        else:
-            return False
-    return bool(values)
+    return all(_matches_any_date_format(candidate, formats) for candidate in values)
+
+
+def _matches_any_date_format(value: str, formats: list[str]) -> bool:
+    """why: check if a value matches any of the given date formats."""
+    for fmt in formats:
+        try:
+            datetime.strptime(value, fmt)
+            return True
+        except ValueError:
+            continue
+    return False
 
 
 def build_cde_payload(
