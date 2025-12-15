@@ -1,5 +1,83 @@
 /* Stage 3 Harmonize - stage-specific styles */
 
+/* Collapsible metadata bar */
+.metadata-bar {
+  background-color: var(--gray-50);
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.metadata-bar__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.metadata-bar__toggle::-webkit-details-marker {
+  display: none;
+}
+
+.metadata-bar__preview {
+  font-size: 0.8rem;
+  color: var(--gray-500);
+}
+
+.metadata-bar__icon {
+  font-size: 0.7rem;
+  color: var(--gray-400);
+  transition: transform 0.2s ease;
+}
+
+.metadata-bar[open] .metadata-bar__icon {
+  transform: rotate(180deg);
+}
+
+.metadata-bar__content {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--gray-200);
+  background-color: var(--white);
+}
+
+.metadata-bar__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 80px;
+}
+
+.metadata-bar__label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--gray-400);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.metadata-bar__value {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--gray-700);
+}
+
+.metadata-bar__value--mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 0.75rem;
+  color: var(--gray-500);
+}
+
+/* Stage header */
+.stage-section-header {
+  text-align: center;
+}
+
 /* Loading state */
 .loading-state {
   display: flex;
@@ -17,7 +95,7 @@
   height: 64px;
   border-radius: 50%;
   border: 6px solid var(--gray-200);
-  border-top-color: var(--green-500);
+  border-top-color: var(--netrias-500);
   animation: stage3-spin 1s linear infinite;
 }
 
@@ -100,125 +178,133 @@
   }
 }
 
-/* Metrics card */
-.metrics-card {
+/* Metrics grid */
+.metrics-grid {
   margin-top: var(--space-6);
 }
 
-.metrics-grid {
+/* Column breakdown */
+.column-breakdown__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(2, 1fr);
   gap: var(--space-6);
-  margin-top: var(--space-4);
 }
 
-.metric-widget {
+@media (max-width: 800px) {
+  .column-breakdown__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Column metric card */
+.column-metric-card {
   border: 1px solid var(--gray-200);
   border-radius: var(--radius-lg);
-  padding: var(--space-5);
+  padding: var(--space-6);
   background-color: var(--white);
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-  min-height: 180px;
+  gap: var(--space-5);
   box-shadow: var(--shadow-sm);
 }
 
-.metric-widget__title {
-  font-size: 0.95rem;
+.column-metric-card--no-changes {
+  background-color: var(--gray-50);
+  gap: var(--space-2);
+  padding: var(--space-4);
+}
+
+.column-metric-card--no-changes .column-metric-card__title {
+  font-size: 1rem;
+  color: var(--gray-600);
+}
+
+.column-metric-card__title {
+  font-size: 1.15rem;
   font-weight: 600;
   color: var(--gray-900);
+  margin: 0;
+}
+
+.column-metric-card__no-changes {
+  font-size: 0.95rem;
+  color: var(--gray-400);
+  font-style: italic;
+}
+
+.column-metric-card__unique-terms {
+  font-size: 1.05rem;
+  color: var(--gray-700);
+  font-weight: 500;
+}
+
+/* Terms display */
+.column-terms-display {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
   gap: var(--space-2);
 }
 
-.metric-widget__value {
-  font-size: 2rem;
-  font-weight: 700;
+.column-terms-display__count {
+  font-size: 1rem;
+  color: var(--gray-600);
+}
+
+.column-terms-display__count strong {
   color: var(--gray-900);
 }
 
-.metric-widget__subtitle {
-  color: var(--gray-600);
-  font-size: 0.9rem;
-}
-
-.metric-widget__pill {
-  font-size: 0.75rem;
-  padding: 0.2rem 0.6rem;
-  border-radius: var(--radius-full);
-  background-color: var(--info-50);
-  color: var(--info-700);
-}
-
-.metric-split {
-  display: flex;
-  justify-content: space-between;
-  font-weight: 600;
-  color: var(--gray-800);
-}
-
-.metric-progress {
-  height: 10px;
+.column-terms-bar {
+  height: 12px;
   border-radius: var(--radius-full);
   background-color: var(--gray-200);
   overflow: hidden;
 }
 
-.metric-progress__fill {
+.column-terms-bar__fill {
   height: 100%;
   border-radius: inherit;
-  transition: width var(--transition-slow);
+  background-color: var(--azure-500);
+  transition: width 0.3s ease;
 }
 
-.metric-chart {
+/* Confidence display */
+.column-confidence-display {
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
-}
-
-.metric-chart__row {
-  display: flex;
-  align-items: center;
   gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--gray-100);
 }
 
-.metric-chart__label {
-  flex: 0 0 120px;
+.column-confidence-label {
+  font-size: 0.85rem;
   font-weight: 600;
-  color: var(--gray-800);
+  color: var(--gray-500);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
-.metric-chart__bar {
-  flex: 1;
-  height: 12px;
-  border-radius: var(--radius-full);
-  background-color: var(--gray-200);
-  position: relative;
+.column-confidence-columns {
+  display: flex;
+  justify-content: space-around;
+  gap: var(--space-4);
 }
 
-.metric-chart__bar-fill {
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 100%;
-  border-radius: inherit;
+.column-confidence-columns__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
 }
 
-.metric-chart__value {
+.column-confidence-columns__label {
+  font-size: 0.9rem;
   font-weight: 600;
-  color: var(--gray-900);
-  min-width: 3rem;
-  text-align: right;
+  color: var(--gray-700);
 }
 
-.metric-note {
-  font-size: 0.8rem;
-  color: var(--warning-700);
-  background-color: var(--warning-50);
-  border: 1px solid var(--warning-200);
-  border-radius: var(--radius-md);
-  padding: var(--space-2) var(--space-3);
+.column-confidence-columns__count {
+  font-size: 0.85rem;
+  color: var(--gray-500);
 }
