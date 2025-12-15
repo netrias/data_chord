@@ -1,5 +1,5 @@
 """
-Read and model harmonization manifest parquet files.
+Read harmonization manifest parquet files.
 
 Parse the parquet output from harmonization into typed structures for use
 across workflow stages.
@@ -8,58 +8,20 @@ across workflow stages.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from src.domain.manifest.models import (
+    ManifestRow,
+    ManifestSummary,
+    ManualOverride,
+    confidence_bucket,
+)
+
 logger = logging.getLogger(__name__)
-
-ConfidenceBucket = Literal["low", "medium", "high"]
-
-HIGH_CONFIDENCE_THRESHOLD: float = 0.8
-MEDIUM_CONFIDENCE_THRESHOLD: float = 0.45
-
-
-@dataclass(frozen=True)
-class ManifestRow:
-    """why: represent a single row from the harmonization manifest parquet."""
-
-    job_id: str
-    column_id: int
-    column_name: str
-    to_harmonize: str
-    top_harmonization: str
-    ontology_id: str | None
-    top_harmonizations: list[str]
-    confidence_score: float | None
-    error: str | None
-    row_indices: list[int]
-
-
-@dataclass(frozen=True)
-class ManifestSummary:
-    """why: aggregate manifest data for frontend consumption."""
-
-    total_terms: int
-    changed_terms: int
-    high_confidence_count: int
-    medium_confidence_count: int
-    low_confidence_count: int
-    rows: list[ManifestRow]
-
-
-def confidence_bucket(score: float | None) -> ConfidenceBucket:
-    """why: classify confidence scores into UI-friendly buckets."""
-    if score is None:
-        return "low"
-    if score >= HIGH_CONFIDENCE_THRESHOLD:
-        return "high"
-    if score >= MEDIUM_CONFIDENCE_THRESHOLD:
-        return "medium"
-    return "low"
 
 
 def read_manifest_parquet(manifest_path: Path) -> ManifestSummary | None:
@@ -100,6 +62,7 @@ def _extract_row(batch: pa.RecordBatch, index: int) -> ManifestRow:
         confidence_score=_get_float_nullable(batch, "confidence_score", index),
         error=_get_string_nullable(batch, "error", index),
         row_indices=_get_int_list(batch, "row_indices", index),
+        manual_overrides=_get_manual_overrides(batch, "manual_overrides", index),
     )
 
 
@@ -186,12 +149,26 @@ def _get_int_list(batch: Any, column: str, index: int) -> list[int]:
     return [int(item) for item in value]
 
 
+def _get_manual_overrides(batch: Any, column: str, index: int) -> list[ManualOverride]:
+    """why: safely extract list of ManualOverride structs from batch column."""
+    if column not in batch.schema.names:
+        return []
+    value = batch.column(column)[index].as_py()
+    if value is None:
+        return []
+    overrides: list[ManualOverride] = []
+    for item in value:
+        if isinstance(item, dict):
+            overrides.append(
+                ManualOverride(
+                    user_id=item.get("user_id"),
+                    timestamp=str(item.get("timestamp", "")),
+                    value=str(item.get("value", "")),
+                )
+            )
+    return overrides
+
+
 __all__ = [
-    "ConfidenceBucket",
-    "ManifestRow",
-    "ManifestSummary",
-    "confidence_bucket",
     "read_manifest_parquet",
-    "HIGH_CONFIDENCE_THRESHOLD",
-    "MEDIUM_CONFIDENCE_THRESHOLD",
 ]
