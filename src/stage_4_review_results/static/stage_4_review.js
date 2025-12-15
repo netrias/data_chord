@@ -1,3 +1,5 @@
+import { initStepInstruction } from '/assets/shared/step-instruction-ui.js';
+
 const config = window.stageFourConfig ?? {};
 const stageFiveUrl = config.stageFiveUrl ?? '/stage-5';
 const resultsEndpoint = config.resultsEndpoint ?? '/stage-4/rows';
@@ -627,6 +629,7 @@ const loadStateFromDisk = async () => {
 
 const init = async () => {
   setActiveStage('review');
+  initStepInstruction('review');
 
   await loadStateFromDisk();
 

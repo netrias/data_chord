@@ -6,6 +6,7 @@
     <title>Data Chord · Mapping Suggestions</title>
     <link rel="stylesheet" href="/assets/shared/tokens.css" />
     <link rel="stylesheet" href="{{ request.url_for('stage_one_static', path='stage_1_upload.css') }}" />
+    <link rel="stylesheet" href="{{ request.url_for('stage_two_static', path='stage_2_mappings.css') }}" />
   </head>
   <body>
     <nav class="progress-tracker">
@@ -35,6 +36,10 @@
           <span class="step-label">Download</span>
         </li>
       </ol>
+      <div id="stepInstruction" class="step-instruction">
+        <p class="step-instruction-text"></p>
+        <span class="step-instruction-tooltip" aria-hidden="true"></span>
+      </div>
     </nav>
 
     <main class="stage-shell">
@@ -43,11 +48,29 @@
         <button id="harmonizeButton" class="nav-btn nav-forward netrias-btn" type="button" disabled>Harmonize data</button>
       </div>
       <section class="stage-card">
-        <div class="mapping-header">
-          <p id="mappingHint" class="mapping-hint">Review AI suggested model recommendations</p>
+        <div class="mapping-table-wrapper">
+          <div class="mapping-legend">
+            <div class="legend-item legend-item--recommended">
+              <span class="legend-icon" aria-hidden="true">✓</span>
+              <span class="legend-label">Use AI recommendation</span>
+            </div>
+            <div class="legend-item legend-item--override">
+              <span class="legend-icon" aria-hidden="true">✎</span>
+              <span class="legend-label">Manual override</span>
+            </div>
+            <div class="legend-item legend-item--no-recommendation">
+              <span class="legend-icon" aria-hidden="true">○</span>
+              <span class="legend-label">No recommendation</span>
+            </div>
+          </div>
+          <div class="mapping-table-header">
+            <div class="mapping-th mapping-th--status"><span class="sr-only">Status</span></div>
+            <div class="mapping-th">Column</div>
+            <div class="mapping-th">AI Recommended Ontology</div>
+            <div class="mapping-th">Override</div>
+          </div>
+          <div id="mappingResults" class="mapping-table-body"></div>
         </div>
-
-        <div id="mappingResults" class="mapping-grid"></div>
         <div id="mappingEmptyState" class="mapping-empty hidden"></div>
       </section>
     </main>
