@@ -5,6 +5,7 @@ Render the batch review UI and provide harmonized row data for approval.
 
 from __future__ import annotations
 
+import logging
 from csv import DictReader
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -15,10 +16,16 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from src.domain import CONFIDENCE, SessionKey, get_all_cdes
+from src.domain import CONFIDENCE, SessionKey
+from src.domain.manifest import (
+    ManifestSummary,
+    ManualOverride,
+    add_manual_overrides_batch,
+    confidence_bucket,
+    read_manifest_parquet,
+)
 from src.domain.storage import FileType
 from src.stage_1_upload.dependencies import get_file_store, get_upload_storage
-from src.stage_1_upload.manifest_reader import confidence_bucket, read_manifest_parquet
 from src.stage_1_upload.schemas import DEFAULT_TARGET_SCHEMA
 from src.stage_1_upload.services import UploadStorage
 from src.stage_4_review_results.schemas import (
@@ -28,6 +35,8 @@ from src.stage_4_review_results.schemas import (
     SaveOverridesRequest,
     SaveOverridesResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 _MODULE_DIR = Path(__file__).parent
 _TEMPLATE_DIR = _MODULE_DIR / "templates"
@@ -53,6 +62,7 @@ class StageFourCell(BaseModel):
     bucket: str
     confidence: float
     isChanged: bool
+    manualOverride: str | None = None
 
 
 class StageFourRow(BaseModel):
@@ -99,17 +109,20 @@ async def render_stage_four(request: Request) -> HTMLResponse:
 
 @stage_four_router.post("/rows", response_model=StageFourResultsResponse, name="stage_four_harmonized_rows")
 async def fetch_stage_four_rows(payload: StageFourResultsRequest) -> StageFourResultsResponse:
-    """why: load and compare original vs harmonized data for review."""
+    """why: load manifest-driven harmonization data for review."""
     storage: UploadStorage = get_upload_storage()
     meta = storage.load(payload.file_id)
     if not meta:
         raise HTTPException(status_code=404, detail="Upload not found. Please rerun harmonization.")
 
-    harmonized_path = _resolve_harmonized_path(meta.saved_path, payload.file_id)
     _, original_rows = _load_csv(meta.saved_path)
-    _, harmonized_rows = _load_csv(harmonized_path)
-    manifest_lookup = _build_manifest_lookup(storage, payload.file_id)
-    rows = _build_rows(original_rows, harmonized_rows, payload.manual_columns, manifest_lookup)
+    manifest = _load_manifest(storage, payload.file_id)
+    if manifest is None:
+        raise HTTPException(status_code=404, detail="Harmonization manifest not found. Please rerun Stage 3.")
+
+    columns = _extract_columns_from_manifest(manifest)
+    row_lookup = _build_row_lookup(manifest)
+    rows = _build_rows_from_manifest(original_rows, columns, row_lookup)
     return StageFourResultsResponse(rows=rows)
 
 
@@ -139,25 +152,72 @@ def _load_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
     return headers, rows
 
 
-ManifestLookup = dict[tuple[str, str], float]
+@dataclass
+class _ColumnInfo:
+    """why: metadata for a harmonized column derived from manifest."""
+
+    column_name: str
+    label: str
 
 
-def _build_rows(
+@dataclass
+class _ManifestEntry:
+    """why: harmonization data for a specific (column, original_value) pair."""
+
+    to_harmonize: str
+    top_harmonization: str
+    top_harmonizations: list[str]
+    confidence_score: float | None
+    row_indices: list[int]
+    manual_overrides: list[ManualOverride]
+
+
+RowLookup = dict[tuple[str, int], _ManifestEntry]
+
+
+def _extract_columns_from_manifest(manifest: ManifestSummary) -> list[_ColumnInfo]:
+    """why: derive column list and labels from manifest data."""
+    seen: set[str] = set()
+    columns: list[_ColumnInfo] = []
+    for row in manifest.rows:
+        col_name = row.column_name
+        if col_name and col_name not in seen:
+            seen.add(col_name)
+            label = col_name.replace("_", " ").title()
+            columns.append(_ColumnInfo(column_name=col_name, label=label))
+    return columns
+
+
+def _build_row_lookup(manifest: ManifestSummary) -> RowLookup:
+    """why: create lookup from (column_name, row_index) to manifest entry."""
+    lookup: RowLookup = {}
+    for row in manifest.rows:
+        entry = _ManifestEntry(
+            to_harmonize=row.to_harmonize,
+            top_harmonization=row.top_harmonization,
+            top_harmonizations=row.top_harmonizations,
+            confidence_score=row.confidence_score,
+            row_indices=row.row_indices,
+            manual_overrides=row.manual_overrides,
+        )
+        for row_idx in row.row_indices:
+            lookup[(row.column_name, row_idx)] = entry
+    return lookup
+
+
+def _build_rows_from_manifest(
     original_rows: list[dict[str, str]],
-    harmonized_rows: list[dict[str, str]],
-    manual_columns: list[str],
-    manifest_lookup: ManifestLookup,
+    columns: list[_ColumnInfo],
+    row_lookup: RowLookup,
 ) -> list[StageFourRow]:
-    """why: generate grouped rows for Stage 4 review."""
-    manual_set = {col.strip().lower() for col in manual_columns if col}
-    total_rows = min(len(original_rows), len(harmonized_rows))
+    """why: generate grouped rows for Stage 4 review using manifest data."""
+    total_rows = len(original_rows)
     grouped: dict[tuple[tuple[str, str, str], ...], _StageFourRowGroup] = {}
 
     for idx in range(total_rows):
         original_row = original_rows[idx]
-        harmonized_row = harmonized_rows[idx]
-        record_id = harmonized_row.get("record_id") or original_row.get("record_id") or f"Row {idx + 1}"
-        cells = _build_cells_for_row(original_row, harmonized_row, manual_set, manifest_lookup)
+        record_id = original_row.get("record_id") or f"Row {idx + 1}"
+        cells = _build_cells_from_manifest(idx, columns, row_lookup)
         key = tuple((c.columnKey, c.originalValue or "", c.harmonizedValue or "") for c in cells)
 
         if key not in grouped:
@@ -176,48 +236,56 @@ def _build_rows(
     ]
 
 
-def _build_cells_for_row(
-    original_row: dict[str, str],
-    harmonized_row: dict[str, str],
-    manual_set: set[str],
-    manifest_lookup: ManifestLookup,
+def _build_cells_from_manifest(
+    row_index: int,
+    columns: list[_ColumnInfo],
+    row_lookup: RowLookup,
 ) -> list[StageFourCell]:
-    """why: create cell comparisons for a single row using manifest confidence."""
+    """why: create cell comparisons for a single row using manifest data."""
     cells: list[StageFourCell] = []
 
-    for cde_def in get_all_cdes():
-        col_key = cde_def.field.value
-        original_value = (original_row.get(col_key) or "").strip() or None
-        harmonized_value = (harmonized_row.get(col_key) or "").strip() or None
-        is_changed = (original_value or "") != (harmonized_value or "")
-        is_manual = col_key.lower() in manual_set and is_changed
+    for col_info in columns:
+        col_key = col_info.column_name
+        lookup_key = (col_key, row_index)
+        entry = row_lookup.get(lookup_key)
 
-        if is_manual:
-            confidence = CONFIDENCE.MANUAL
-            bucket = "low"
+        if entry is None:
+            continue
+
+        original_value = entry.to_harmonize.strip() or None
+        harmonized_value = entry.top_harmonization.strip() or None
+        confidence = entry.confidence_score
+        is_changed = (original_value or "") != (harmonized_value or "")
+
+        if confidence is not None:
+            bucket = confidence_bucket(confidence)
         else:
-            lookup_key = (col_key, original_value or "")
-            manifest_confidence = manifest_lookup.get(lookup_key)
-            if manifest_confidence is not None:
-                confidence = manifest_confidence
-                bucket = confidence_bucket(confidence)
-            else:
-                bucket = "low" if is_changed else "high"
-                confidence = CONFIDENCE.HIGH if bucket == "high" else CONFIDENCE.LOW
+            bucket = "low" if is_changed else "high"
+            confidence = CONFIDENCE.HIGH if bucket == "high" else CONFIDENCE.LOW
+
+        manual_override = _get_latest_override(entry.manual_overrides)
 
         cells.append(
             StageFourCell(
                 columnKey=col_key,
-                columnLabel=cde_def.label,
+                columnLabel=col_info.label,
                 originalValue=original_value,
                 harmonizedValue=harmonized_value,
                 bucket=bucket,
                 confidence=confidence,
                 isChanged=is_changed,
+                manualOverride=manual_override,
             ),
         )
 
     return cells
+
+
+def _get_latest_override(overrides: list[ManualOverride]) -> str | None:
+    """why: extract the most recent manual override value."""
+    if not overrides:
+        return None
+    return overrides[-1].value
 
 
 def _summarize_record_ids(record_ids: list[str]) -> str:
@@ -230,19 +298,12 @@ def _summarize_record_ids(record_ids: list[str]) -> str:
     return f"{filtered[0]} + {len(filtered) - 1} more"
 
 
-def _build_manifest_lookup(storage: UploadStorage, file_id: str) -> ManifestLookup:
-    """why: create a confidence lookup from stored manifest."""
+def _load_manifest(storage: UploadStorage, file_id: str) -> ManifestSummary | None:
+    """why: load the harmonization manifest for a file."""
     manifest_path = storage.load_harmonization_manifest_path(file_id)
     if manifest_path is None:
-        return {}
-    manifest = read_manifest_parquet(manifest_path)
-    if manifest is None:
-        return {}
-    return {
-        (row.column_name, row.to_harmonize): row.confidence_score
-        for row in manifest.rows
-        if row.confidence_score is not None
-    }
+        return None
+    return read_manifest_parquet(manifest_path)
 
 
 @stage_four_router.get(
@@ -267,8 +328,9 @@ async def get_overrides(file_id: str) -> ReviewOverridesSchema | None:
 
 @stage_four_router.post("/overrides", response_model=SaveOverridesResponse, name="stage_four_save_overrides")
 async def save_overrides(payload: SaveOverridesRequest) -> SaveOverridesResponse:
-    """why: persist human review overrides to storage."""
+    """why: persist human review overrides to JSON storage and parquet manifest."""
     store = get_file_store()
+    storage = get_upload_storage()
     now = datetime.now(UTC)
 
     existing = store.load(payload.file_id, FileType.REVIEW_OVERRIDES)
@@ -285,7 +347,41 @@ async def save_overrides(payload: SaveOverridesRequest) -> SaveOverridesResponse
         "review_state": payload.review_state.model_dump(),
     }
     store.save(payload.file_id, FileType.REVIEW_OVERRIDES, data)
+
+    _sync_overrides_to_manifest(storage, payload)
+
     return SaveOverridesResponse(file_id=payload.file_id, updated_at=now)
+
+
+def _sync_overrides_to_manifest(storage: UploadStorage, payload: SaveOverridesRequest) -> None:
+    """why: write manual overrides from UI back to parquet manifest."""
+    manifest_path = storage.load_harmonization_manifest_path(payload.file_id)
+    if manifest_path is None:
+        logger.warning("Cannot sync overrides: manifest path not found", extra={"file_id": payload.file_id})
+        return
+
+    overrides_batch = _collect_overrides_for_batch(payload)
+    if not overrides_batch:
+        return
+
+    add_manual_overrides_batch(
+        manifest_path=manifest_path,
+        overrides=overrides_batch,
+        user_id=None,
+    )
+
+
+def _collect_overrides_for_batch(
+    payload: SaveOverridesRequest,
+) -> list[tuple[str, str, str]]:
+    """why: gather all overrides into a list for batch processing."""
+    overrides: list[tuple[str, str, str]] = []
+    for _row_key, cols in payload.overrides.items():
+        for col_key, override in cols.items():
+            if override.original_value is None:
+                continue
+            overrides.append((col_key, override.original_value, override.human_value))
+    return overrides
 
 
 @stage_four_router.delete(

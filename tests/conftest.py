@@ -249,22 +249,13 @@ def create_test_manifest_parquet(
     output_path: Path,
     rows: list[dict[str, Any]],
 ) -> Path:
-    """why: create a test manifest.parquet file with the expected schema."""
+    """why: create a test manifest.parquet file using the canonical schema."""
     import pyarrow as pa
     import pyarrow.parquet as pq
 
-    schema = pa.schema([
-        ("job_id", pa.string()),
-        ("column_id", pa.int32()),
-        ("column_name", pa.string()),
-        ("to_harmonize", pa.string()),
-        ("top_harmonization", pa.string()),
-        ("ontology_id", pa.string()),
-        ("top_harmonizations", pa.list_(pa.string())),
-        ("confidence_score", pa.float32()),
-        ("error", pa.string()),
-        ("row_indices", pa.list_(pa.int64())),
-    ])
+    from src.domain.manifest import get_manifest_schema
+
+    schema = get_manifest_schema()
 
     arrays = {
         "job_id": [row.get("job_id", "test-job") for row in rows],
@@ -277,8 +268,56 @@ def create_test_manifest_parquet(
         "confidence_score": [row.get("confidence_score") for row in rows],
         "error": [row.get("error") for row in rows],
         "row_indices": [row.get("row_indices", []) for row in rows],
+        "manual_overrides": [row.get("manual_overrides", []) for row in rows],
     }
 
     table = pa.table(arrays, schema=schema)
     pq.write_table(table, output_path)
     return output_path
+
+
+def create_manifest_for_file(
+    storage: UploadStorage,
+    file_id: str,
+    original_path: Path,
+    changes: dict[int, dict[str, str]],
+) -> Path:
+    """why: create a manifest parquet for Stage 4 tests in the correct storage location."""
+    import csv as csv_module
+
+    with original_path.open("r", newline="", encoding="utf-8") as f:
+        reader = csv_module.DictReader(f)
+        original_rows = list(reader)
+        headers = list(reader.fieldnames or [])
+
+    manifest_rows: list[dict[str, Any]] = []
+    columns_with_changes = set()
+    for _row_idx, col_changes in changes.items():
+        columns_with_changes.update(col_changes.keys())
+
+    if not columns_with_changes:
+        columns_with_changes = set(headers[:2]) if len(headers) >= 2 else set(headers)
+
+    for col_name in columns_with_changes:
+        for row_idx, original_row in enumerate(original_rows):
+            original_value = original_row.get(col_name, "")
+            harmonized_value = changes.get(row_idx, {}).get(col_name, original_value)
+
+            manifest_rows.append({
+                "job_id": f"test-job-{file_id}",
+                "column_id": headers.index(col_name) if col_name in headers else 0,
+                "column_name": col_name,
+                "to_harmonize": original_value,
+                "top_harmonization": harmonized_value,
+                "ontology_id": None,
+                "top_harmonizations": [harmonized_value] if harmonized_value else [],
+                "confidence_score": 0.95 if original_value != harmonized_value else 0.99,
+                "error": None,
+                "row_indices": [row_idx],
+                "manual_overrides": [],
+            })
+
+    manifest_dir = storage._base_dir / "manifests"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = manifest_dir / f"{file_id}_harmonization.parquet"
+    return create_test_manifest_parquet(manifest_path, manifest_rows)

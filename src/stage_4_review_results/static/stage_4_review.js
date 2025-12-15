@@ -19,13 +19,6 @@ const batchProgressList = document.getElementById('batchProgressList');
 const batchProgressHint = document.getElementById('batchProgressHint');
 const currentBatchIndicator = document.getElementById('currentBatchIndicator');
 
-const COLUMN_CONFIG = [
-  { key: 'therapeutic_agents', label: 'Therapeutic Agents' },
-  { key: 'primary_diagnosis', label: 'Primary Diagnosis' },
-  { key: 'morphology', label: 'Morphology' },
-  { key: 'tissue_or_organ_of_origin', label: 'Tissue / Organ Origin' },
-  { key: 'sample_anatomic_site', label: 'Sample Anatomic Site' },
-];
 
 
 const STAGE_ORDER = ['upload', 'mapping', 'harmonize', 'review', 'export'];
@@ -393,24 +386,32 @@ const renderBatchProgress = (batchMeta) => {
 const createCellCard = (cell, rowIndex) => {
   const card = document.createElement('div');
   const classes = ['row-cell'];
-  if (cell.isChanged) {
+  const originalWasEmpty = !cell.originalValue || cell.originalValue.trim() === '';
+  const isDisabled = originalWasEmpty;
+
+  if (isDisabled) {
+    classes.push('no-change');
+  } else if (cell.isChanged) {
     classes.push(`confidence-${cell.bucket}`);
     if (cell.harmonizedValue === null) {
       classes.push('needs-review');
     }
   } else {
-    classes.push('no-change');
+    classes.push(`confidence-${cell.bucket}`);
   }
   card.className = classes.join(' ');
 
   const existingOverride = state.pendingOverrides[String(rowIndex)]?.[cell.columnKey];
-  const inputValue = existingOverride?.human_value ?? '';
+  const inputValue = existingOverride?.human_value ?? cell.manualOverride ?? '';
+  const recommendedText = isDisabled ? '—' : (cell.harmonizedValue ?? cell.originalValue ?? '—');
+  const recommendedClass = isDisabled ? ' no-recommendation' : (cell.harmonizedValue === null ? ' missing' : '');
+  const inputDisabled = isDisabled ? 'disabled' : '';
 
   card.innerHTML = `
     <div class="value-pair" role="group" aria-label="${cell.columnLabel} comparison">
       <div class="value-group recommended">
         <p class="value-label">Recommended</p>
-        <p class="value-text recommended-text${cell.harmonizedValue === null ? ' missing' : ''}">${cell.harmonizedValue ?? '—'}</p>
+        <p class="value-text recommended-text${recommendedClass}">${recommendedText}</p>
       </div>
       <div class="value-group original">
         <p class="value-label">Original input</p>
@@ -426,6 +427,7 @@ const createCellCard = (cell, rowIndex) => {
             aria-label="Manual override for ${cell.columnLabel}"
             data-row-index="${rowIndex}"
             data-column-key="${cell.columnKey}"
+            ${inputDisabled}
           />
           <svg class="value-input-icon" viewBox="0 0 20 20" aria-hidden="true">
             <path d="M2 14.5V18h3.5l8.4-8.4-3.5-3.5L2 14.5zm11.8-9.1a1 1 0 0 1 1.4 0l1.4 1.4a1 1 0 0 1 0 1.4l-1.2 1.2-3.5-3.5 1.2-1.2z"/>
@@ -462,7 +464,8 @@ const renderRows = (batchMeta) => {
     return;
   }
 
-  const columnsTemplate = ['100px', ...COLUMN_CONFIG.map(() => 'minmax(280px, 1fr)')].join(' ');
+  const columns = batchMeta.rows[0]?.cells || [];
+  const columnsTemplate = ['100px', ...columns.map(() => 'minmax(280px, 1fr)')].join(' ');
   const wrapper = document.createElement('div');
   wrapper.className = 'row-table-wrapper';
   wrapper.style.setProperty('--table-columns', columnsTemplate);
@@ -472,7 +475,7 @@ const renderRows = (batchMeta) => {
 
   const header = document.createElement('div');
   header.className = 'row-table-header';
-  header.innerHTML = [`<div class="row-index-header">Row</div>`, ...COLUMN_CONFIG.map((column) => `<div class="column-header">${column.label}</div>`)].join('');
+  header.innerHTML = [`<div class="row-index-header">Row</div>`, ...columns.map((cell) => `<div class="column-header">${cell.columnLabel}</div>`)].join('');
 
   const body = document.createElement('div');
   body.className = 'row-table-body';

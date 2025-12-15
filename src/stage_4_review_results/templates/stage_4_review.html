@@ -53,19 +53,9 @@
             <p class="batch-progress-title">Batch progress</p>
             <p id="batchProgressHint" class="batch-progress-hint">Awaiting harmonized rows.</p>
           </div>
-          <button id="helpMenuToggle" class="help-toggle" type="button" aria-expanded="false" aria-controls="stageFourHelp">
-            Help
-          </button>
         </div>
         <div id="batchProgressList" class="batch-progress-list" role="list" aria-live="polite"></div>
-        <aside id="stageFourHelp" class="stage-help hidden" aria-live="polite">
-          <p class="help-title">Review tips</p>
-          <ul>
-            <li><strong>Confidence colors:</strong> green ≥ 80% (high), red otherwise, gray when no changes were made.</li>
-            <li><strong>Overrides:</strong> click the pencil-marked input beneath any recommendation to enter a manual value.</li>
-            <li><strong>Batch workflow:</strong> use Mark complete/Flag for review to track progress; navigation buttons move between batches.</li>
-          </ul>
-        </aside>
+        <p id="currentBatchIndicator" class="current-batch-indicator">Reviewing batch 1 of 1</p>
       </section>
 
       <section class="stage-card review-grid">
@@ -96,7 +86,6 @@
             <button id="nextBatchButton" class="ghost-btn" type="button">Next batch →</button>
             <button id="completeBatchButton" class="netrias-btn" type="button">Mark batch complete</button>
           </div>
-          <p id="currentBatchIndicator" class="current-batch-indicator">Reviewing batch 1 of 1</p>
         </header>
         <div id="reviewTable" class="review-table" role="table" aria-live="polite"></div>
       </section>
