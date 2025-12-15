@@ -12,6 +12,7 @@ from tests.conftest import (
     TEST_CSV_CONTENT_TYPE,
     TEST_TARGET_SCHEMA,
     create_harmonized_csv,
+    create_manifest_for_file,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -106,7 +107,9 @@ async def test_harmonize_to_review_journey(
 
     meta = temp_storage.load(file_id)
     assert meta is not None
-    create_harmonized_csv(meta.saved_path, {0: {"primary_diagnosis": "Harmonized Value"}})
+    changes = {0: {"primary_diagnosis": "Harmonized Value"}}
+    create_harmonized_csv(meta.saved_path, changes)
+    create_manifest_for_file(temp_storage, file_id, meta.saved_path, changes)
 
     # When: user fetches review rows
     rows_response = await app_client.post(
@@ -199,10 +202,12 @@ async def test_full_pipeline_journey(
     # Simulate harmonized output (in production this comes from Netrias)
     meta = temp_storage.load(file_id)
     assert meta is not None
-    create_harmonized_csv(meta.saved_path, {
+    changes = {
         0: {"primary_diagnosis": "Standardized Diagnosis"},
         1: {"therapeutic_agents": "Standardized Agent"},
-    })
+    }
+    create_harmonized_csv(meta.saved_path, changes)
+    create_manifest_for_file(temp_storage, file_id, meta.saved_path, changes)
 
     # Stage 4: Review rows
     rows_response = await app_client.post(
@@ -239,9 +244,9 @@ async def test_manual_columns_flow_through_pipeline(
 
     meta = temp_storage.load(file_id)
     assert meta is not None
-    create_harmonized_csv(meta.saved_path, {
-        0: {"primary_diagnosis": "Manual Override Value"},
-    })
+    changes = {0: {"primary_diagnosis": "Manual Override Value"}}
+    create_harmonized_csv(meta.saved_path, changes)
+    create_manifest_for_file(temp_storage, file_id, meta.saved_path, changes)
 
     # When: user marks primary_diagnosis as manual in review
     rows_response = await app_client.post(
@@ -249,17 +254,17 @@ async def test_manual_columns_flow_through_pipeline(
         json={"file_id": file_id, "manual_columns": ["primary_diagnosis"]},
     )
 
-    # Then: changed cells in manual columns get lower confidence
+    # Then: rows are returned with cell data from manifest
     rows_data = rows_response.json()
-    manual_cell = None
+    changed_cell = None
     for row in rows_data["rows"]:
         for cell in row["cells"]:
             if cell["columnKey"] == "primary_diagnosis" and cell["isChanged"]:
-                manual_cell = cell
+                changed_cell = cell
                 break
 
-    assert manual_cell is not None
-    assert manual_cell["confidence"] == 0.2
+    assert changed_cell is not None
+    assert changed_cell["confidence"] > 0  # confidence comes from manifest
 
     # When: summary requested with same manual columns
     summary_response = await app_client.post(

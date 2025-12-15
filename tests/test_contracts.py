@@ -12,6 +12,7 @@ from tests.conftest import (
     TEST_CSV_CONTENT_TYPE,
     TEST_TARGET_SCHEMA,
     create_harmonized_csv,
+    create_manifest_for_file,
     upload_file,
 )
 
@@ -288,6 +289,7 @@ class TestRowsContract:
         meta = temp_storage.load(file_id)
         assert meta is not None
         create_harmonized_csv(meta.saved_path, {})
+        create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
 
         # When
         response = await app_client.post(
@@ -314,6 +316,7 @@ class TestRowsContract:
         meta = temp_storage.load(file_id)
         assert meta is not None
         create_harmonized_csv(meta.saved_path, {})
+        create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
 
         # When
         response = await app_client.post(
@@ -342,6 +345,7 @@ class TestRowsContract:
         meta = temp_storage.load(file_id)
         assert meta is not None
         create_harmonized_csv(meta.saved_path, {})
+        create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
 
         # When
         response = await app_client.post(

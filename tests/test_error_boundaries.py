@@ -63,7 +63,7 @@ class TestMissingHarmonizedFileErrors:
         app_client: AsyncClient,
         sample_csv_path: Path,
     ) -> None:
-        """Rows returns 404 when harmonized CSV doesn't exist."""
+        """Rows returns 404 when harmonization manifest doesn't exist."""
         file_id = await upload_file(app_client, sample_csv_path)
 
         response = await app_client.post(
@@ -72,7 +72,7 @@ class TestMissingHarmonizedFileErrors:
         )
 
         assert response.status_code == 404
-        assert "harmonized" in response.json()["detail"].lower()
+        assert "manifest" in response.json()["detail"].lower()
 
     async def test_summary_missing_harmonized(
         self,
