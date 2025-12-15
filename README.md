@@ -2,6 +2,8 @@
 
 Data harmonization workflow application. Upload tabular data, review AI-suggested column mappings, run harmonization, and approve results before export.
 
+For a comprehensive overview of what Data Chord does and why, see [app.md](app.md).
+
 ## Requirements
 
 - Python 3.13+
