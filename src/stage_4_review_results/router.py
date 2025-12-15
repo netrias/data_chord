@@ -20,7 +20,7 @@ from src.domain import CONFIDENCE, SessionKey
 from src.domain.manifest import (
     ManifestSummary,
     ManualOverride,
-    add_manual_override,
+    add_manual_overrides_batch,
     confidence_bucket,
     read_manifest_parquet,
 )
@@ -360,22 +360,28 @@ def _sync_overrides_to_manifest(storage: UploadStorage, payload: SaveOverridesRe
         logger.warning("Cannot sync overrides: manifest path not found", extra={"file_id": payload.file_id})
         return
 
-    manifest = read_manifest_parquet(manifest_path)
-    if manifest is None:
-        logger.warning("Cannot sync overrides: manifest not readable", extra={"file_id": payload.file_id})
+    overrides_batch = _collect_overrides_for_batch(payload)
+    if not overrides_batch:
         return
 
+    add_manual_overrides_batch(
+        manifest_path=manifest_path,
+        overrides=overrides_batch,
+        user_id=None,
+    )
+
+
+def _collect_overrides_for_batch(
+    payload: SaveOverridesRequest,
+) -> list[tuple[str, str, str]]:
+    """why: gather all overrides into a list for batch processing."""
+    overrides: list[tuple[str, str, str]] = []
     for _row_key, cols in payload.overrides.items():
         for col_key, override in cols.items():
             if override.original_value is None:
                 continue
-            add_manual_override(
-                manifest_path=manifest_path,
-                column_name=col_key,
-                to_harmonize=override.original_value,
-                override_value=override.human_value,
-                user_id=None,
-            )
+            overrides.append((col_key, override.original_value, override.human_value))
+    return overrides
 
 
 @stage_four_router.delete(

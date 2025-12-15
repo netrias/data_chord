@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+import pyarrow as pa
+
 ConfidenceBucket = Literal["low", "medium", "high"]
 
 HIGH_CONFIDENCE_THRESHOLD: float = 0.8
@@ -65,12 +67,36 @@ def confidence_bucket(score: float | None) -> ConfidenceBucket:
     return "low"
 
 
+def get_manifest_schema() -> pa.Schema:
+    """why: define the canonical parquet schema for manifest files."""
+    override_struct = pa.struct([
+        ("user_id", pa.string()),
+        ("timestamp", pa.string()),
+        ("value", pa.string()),
+    ])
+
+    return pa.schema([
+        ("job_id", pa.string()),
+        ("column_id", pa.int64()),
+        ("column_name", pa.string()),
+        ("to_harmonize", pa.string()),
+        ("top_harmonization", pa.string()),
+        ("ontology_id", pa.string()),
+        ("top_harmonizations", pa.list_(pa.string())),
+        ("confidence_score", pa.float64()),
+        ("error", pa.string()),
+        ("row_indices", pa.list_(pa.int64())),
+        ("manual_overrides", pa.list_(override_struct)),
+    ])
+
+
 __all__ = [
     "ConfidenceBucket",
     "ManualOverride",
     "ManifestRow",
     "ManifestSummary",
     "confidence_bucket",
+    "get_manifest_schema",
     "HIGH_CONFIDENCE_THRESHOLD",
     "MEDIUM_CONFIDENCE_THRESHOLD",
 ]

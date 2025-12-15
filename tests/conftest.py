@@ -249,29 +249,13 @@ def create_test_manifest_parquet(
     output_path: Path,
     rows: list[dict[str, Any]],
 ) -> Path:
-    """why: create a test manifest.parquet file with the expected schema."""
+    """why: create a test manifest.parquet file using the canonical schema."""
     import pyarrow as pa
     import pyarrow.parquet as pq
 
-    override_struct = pa.struct([
-        ("user_id", pa.string()),
-        ("timestamp", pa.string()),
-        ("value", pa.string()),
-    ])
+    from src.domain.manifest import get_manifest_schema
 
-    schema = pa.schema([
-        ("job_id", pa.string()),
-        ("column_id", pa.int32()),
-        ("column_name", pa.string()),
-        ("to_harmonize", pa.string()),
-        ("top_harmonization", pa.string()),
-        ("ontology_id", pa.string()),
-        ("top_harmonizations", pa.list_(pa.string())),
-        ("confidence_score", pa.float32()),
-        ("error", pa.string()),
-        ("row_indices", pa.list_(pa.int64())),
-        ("manual_overrides", pa.list_(override_struct)),
-    ])
+    schema = get_manifest_schema()
 
     arrays = {
         "job_id": [row.get("job_id", "test-job") for row in rows],

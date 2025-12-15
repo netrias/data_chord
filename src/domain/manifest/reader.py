@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -97,7 +96,7 @@ def _summarize_manifest(rows: list[ManifestRow]) -> ManifestSummary:
     )
 
 
-def _get_string(batch: Any, column: str, index: int, default: str) -> str:
+def _get_string(batch: pa.RecordBatch, column: str, index: int, default: str) -> str:
     """why: safely extract string value from batch column."""
     if column not in batch.schema.names:
         return default
@@ -105,7 +104,7 @@ def _get_string(batch: Any, column: str, index: int, default: str) -> str:
     return str(value) if value is not None else default
 
 
-def _get_string_nullable(batch: Any, column: str, index: int) -> str | None:
+def _get_string_nullable(batch: pa.RecordBatch, column: str, index: int) -> str | None:
     """why: safely extract nullable string value from batch column."""
     if column not in batch.schema.names:
         return None
@@ -113,7 +112,7 @@ def _get_string_nullable(batch: Any, column: str, index: int) -> str | None:
     return str(value) if value is not None else None
 
 
-def _get_int(batch: Any, column: str, index: int, default: int) -> int:
+def _get_int(batch: pa.RecordBatch, column: str, index: int, default: int) -> int:
     """why: safely extract integer value from batch column."""
     if column not in batch.schema.names:
         return default
@@ -121,7 +120,7 @@ def _get_int(batch: Any, column: str, index: int, default: int) -> int:
     return int(value) if value is not None else default
 
 
-def _get_float_nullable(batch: Any, column: str, index: int) -> float | None:
+def _get_float_nullable(batch: pa.RecordBatch, column: str, index: int) -> float | None:
     """why: safely extract nullable float value from batch column."""
     if column not in batch.schema.names:
         return None
@@ -129,7 +128,7 @@ def _get_float_nullable(batch: Any, column: str, index: int) -> float | None:
     return float(value) if value is not None else None
 
 
-def _get_string_list(batch: Any, column: str, index: int) -> list[str]:
+def _get_string_list(batch: pa.RecordBatch, column: str, index: int) -> list[str]:
     """why: safely extract list of strings from batch column."""
     if column not in batch.schema.names:
         return []
@@ -139,7 +138,7 @@ def _get_string_list(batch: Any, column: str, index: int) -> list[str]:
     return [str(item) for item in value]
 
 
-def _get_int_list(batch: Any, column: str, index: int) -> list[int]:
+def _get_int_list(batch: pa.RecordBatch, column: str, index: int) -> list[int]:
     """why: safely extract list of integers from batch column."""
     if column not in batch.schema.names:
         return []
@@ -149,7 +148,7 @@ def _get_int_list(batch: Any, column: str, index: int) -> list[int]:
     return [int(item) for item in value]
 
 
-def _get_manual_overrides(batch: Any, column: str, index: int) -> list[ManualOverride]:
+def _get_manual_overrides(batch: pa.RecordBatch, column: str, index: int) -> list[ManualOverride]:
     """why: safely extract list of ManualOverride structs from batch column."""
     if column not in batch.schema.names:
         return []
