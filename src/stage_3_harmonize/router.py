@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import cast
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
@@ -74,7 +75,13 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
 
     manifest_summary = _read_and_store_manifest(payload.file_id, result.manifest_path)
 
-    next_stage_url = f"/stage-4?job_id={result.job_id}&status={result.status}&detail={result.detail}"
+    query_params = urlencode({
+        "file_id": payload.file_id,
+        "job_id": result.job_id,
+        "status": result.status,
+        "detail": result.detail or "",
+    })
+    next_stage_url = f"/stage-4?{query_params}"
     return HarmonizeResponse(
         job_id=result.job_id,
         status=result.status,
