@@ -45,7 +45,7 @@
     <main class="stage-shell stage-four-shell">
       <div class="stage-nav">
         <button class="nav-btn nav-back" type="button" data-nav-target="{{ request.url_for('stage_three_entry') }}">Back</button>
-        <button id="stageFiveButton" class="nav-btn nav-forward netrias-btn" type="button">Results summary</button>
+        <button id="stageFiveButton" class="nav-btn nav-forward netrias-btn" type="button">Proceed to download</button>
       </div>
       <section class="batch-progress-panel">
         <div class="batch-progress-heading">
@@ -53,40 +53,57 @@
             <p class="batch-progress-title">Batch progress</p>
             <p id="batchProgressHint" class="batch-progress-hint">Awaiting harmonized rows.</p>
           </div>
+          <div class="batch-controls">
+            <div class="control-group">
+              <label for="reviewModeSelect">Review by</label>
+              <select id="reviewModeSelect">
+                <option value="column">Column</option>
+                <option value="row">Row</option>
+              </select>
+            </div>
+            <div class="control-group">
+              <label for="sortModeSelect">Sort by</label>
+              <select id="sortModeSelect">
+                <option value="confidence-asc">Confidence · Lowest first</option>
+                <option value="confidence-desc">Confidence · Highest first</option>
+                <option value="original">Original order</option>
+              </select>
+            </div>
+            <div class="control-group">
+              <label for="batchSizeSelect">Grid size</label>
+              <select id="batchSizeSelect">
+                <!-- Options populated dynamically based on review mode -->
+              </select>
+            </div>
+          </div>
         </div>
         <div id="batchProgressList" class="batch-progress-list" role="list" aria-live="polite"></div>
         <p id="currentBatchIndicator" class="current-batch-indicator">Reviewing batch 1 of 1</p>
       </section>
 
       <section class="stage-card review-grid">
-        <header class="stage-section-header review-grid-header">
-          <div class="review-controls">
-            <div class="control-row">
-              <div class="control-group">
-                <label for="sortModeSelect">Sort batch by</label>
-                <select id="sortModeSelect">
-                  <option value="confidence-asc">Confidence · Lowest first</option>
-                  <option value="confidence-desc">Confidence · Highest first</option>
-                  <option value="original">Original order</option>
-                </select>
-              </div>
-              <div class="control-group">
-                <label for="batchSizeSelect">Batch size</label>
-                <select id="batchSizeSelect">
-                  <option value="5">5 rows</option>
-                  <option value="10">10 rows</option>
-                  <option value="15">15 rows</option>
-                </select>
-              </div>
+        <div class="review-toolbar">
+          <div class="confidence-legend">
+            <div class="legend-item legend-item--high">
+              <span class="legend-icon" aria-hidden="true">✓</span>
+              <span class="legend-label">High confidence</span>
             </div>
-            <div id="reviewAlerts" class="review-alert hidden" role="status" aria-live="polite"></div>
+            <div class="legend-item legend-item--medium">
+              <span class="legend-icon" aria-hidden="true">~</span>
+              <span class="legend-label">Medium confidence</span>
+            </div>
+            <div class="legend-item legend-item--low">
+              <span class="legend-icon" aria-hidden="true">!</span>
+              <span class="legend-label">Low confidence</span>
+            </div>
           </div>
           <div class="batch-actions">
-            <button id="previousBatchButton" class="ghost-btn" type="button">← Previous batch</button>
-            <button id="nextBatchButton" class="ghost-btn" type="button">Next batch →</button>
+            <button id="previousBatchButton" class="ghost-btn" type="button">← Previous</button>
+            <button id="nextBatchButton" class="ghost-btn" type="button">Next →</button>
             <button id="completeBatchButton" class="netrias-btn" type="button">Mark batch complete</button>
           </div>
-        </header>
+        </div>
+        <div id="reviewAlerts" class="review-alert hidden" role="status" aria-live="polite"></div>
         <div id="reviewTable" class="review-table" role="table" aria-live="polite"></div>
       </section>
     </main>
@@ -101,24 +118,7 @@
         stageFiveUrl: "{{ request.url_for('stage_five_review_page') }}",
         resultsEndpoint: "{{ results_endpoint }}",
       };
-
-      document.addEventListener('DOMContentLoaded', () => {
-        document.querySelectorAll('.step[data-url]').forEach(step => {
-          step.addEventListener('click', () => {
-            const url = step.dataset.url;
-            if (url) window.location.href = url;
-          });
-        });
-        document.querySelectorAll('[data-nav-target]').forEach(button => {
-          button.addEventListener('click', () => {
-            const target = button.dataset.navTarget;
-            if (target) {
-              window.location.assign(target);
-            }
-          });
-        });
-      });
     </script>
-    <script type="module" src="{{ request.url_for('stage_four_static', path='stage_4_review.js') }}?v=20250216"></script>
+    <script type="module" src="{{ request.url_for('stage_four_static', path='stage_4_review.js') }}?v=20251216"></script>
   </body>
 </html>

@@ -74,10 +74,7 @@
       </div>
       <section id="stageThreeMetrics" class="stage-card progress-card">
         <header class="stage-section-header">
-          <h2 id="stageThreeTitle">Harmonizing your data</h2>
-          <p id="stageThreeSubtitle" class="stage-subtitle">
-            Netrias is processing your dataset and will report back shortly.
-          </p>
+          <h2 id="stageThreeTitle" class="stage-title">Harmonizing</h2>
         </header>
 
         <div id="stageThreeEmptyState" class="stage-empty hidden">
@@ -90,14 +87,8 @@
 
         <div id="loadingState" class="loading-state" aria-live="assertive">
           <div class="loading-spinner" role="presentation"></div>
-          <p class="loading-primary" id="loadingPrimaryText">Harmonization in progress…</p>
-          <p class="loading-secondary" id="loadingSecondaryText">This typically takes a minute or two. Keep this tab open while we process.</p>
-          <p class="loading-meta hidden" id="jobStatusValue">Status: pending…</p>
-          <div class="loading-pips" aria-hidden="true">
-            <span class="pip"></span>
-            <span class="pip"></span>
-            <span class="pip"></span>
-          </div>
+          <p class="loading-message">Netrias is harmonizing your dataset and will report back shortly.</p>
+          <p class="loading-meta hidden" id="jobIdDisplay"></p>
         </div>
 
         <div class="metrics-grid hidden" data-metrics-grid aria-live="polite"></div>
