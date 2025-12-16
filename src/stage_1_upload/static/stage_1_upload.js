@@ -2,6 +2,8 @@ import { initStepInstruction } from '/assets/shared/step-instruction-ui.js';
 
 const config = window.stageOneUploadConfig ?? {};
 const STORAGE_KEY = 'stage2Payload';
+const STAGE_THREE_PAYLOAD_KEY = 'stage3HarmonizePayload';
+const STAGE_THREE_JOB_KEY = 'stage3HarmonizeJob';
 
 const dropzone = document.getElementById('dropzone');
 const fileInput = document.getElementById('fileInput');
@@ -116,6 +118,7 @@ const handleFileSelection = (file) => {
     setStatus(issues.join(' '), 'error');
     return;
   }
+  clearStaleSessionData();
   state.file = file;
   state.uploaded = null;
   showDropzoneSummary(file, 'Ready to upload');
@@ -153,6 +156,16 @@ const uploadDataset = async () => {
     setStatus(error.message, 'error');
   } finally {
     state.isUploading = false;
+  }
+};
+
+const clearStaleSessionData = () => {
+  try {
+    sessionStorage.removeItem(STORAGE_KEY);
+    sessionStorage.removeItem(STAGE_THREE_PAYLOAD_KEY);
+    sessionStorage.removeItem(STAGE_THREE_JOB_KEY);
+  } catch (error) {
+    console.warn('Unable to clear stale session data', error);
   }
 };
 

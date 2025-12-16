@@ -5,21 +5,18 @@ import { initStepInstruction, updateStepInstruction } from '/assets/shared/step-
 const config = window.stageThreeConfig ?? {};
 const harmonizeEndpoint = config.harmonizeEndpoint ?? '/stage-3/harmonize';
 const storageKey = config.storageKey ?? 'stage3HarmonizePayload';
-const jobStorageKey = config.jobStorageKey ?? `${storageKey}:job`;
+const jobStorageKey = config.jobStorageKey ?? 'stage3HarmonizeJob';
 const nextStageUrl = config.nextStageUrl ?? '/stage-4';
 const stageTwoUrl = config.stageTwoUrl ?? '/stage-2';
 
 const progressSteps = document.querySelectorAll('.progress-tracker [data-stage]');
 const loadingState = document.getElementById('loadingState');
-const loadingPrimaryText = document.getElementById('loadingPrimaryText');
-const loadingSecondaryText = document.getElementById('loadingSecondaryText');
-const jobStatusValue = document.getElementById('jobStatusValue');
+const jobIdDisplay = document.getElementById('jobIdDisplay');
 const reviewButton = document.getElementById('reviewButton');
 const retryButton = document.getElementById('retryButton');
 const emptyState = document.getElementById('stageThreeEmptyState');
 const errorBanner = document.getElementById('stageThreeError');
 const stageThreeTitle = document.getElementById('stageThreeTitle');
-const stageThreeSubtitle = document.getElementById('stageThreeSubtitle');
 const returnToStageTwo = document.getElementById('returnToStageTwo');
 const metadataBar = document.getElementById('metadataBar');
 const metadataPreview = document.getElementById('metadataPreview');
@@ -27,10 +24,7 @@ const metaFileName = document.getElementById('metaFileName');
 const metaRowCount = document.getElementById('metaRowCount');
 const metaSchemaValue = document.getElementById('metaSchemaValue');
 const metaJobId = document.getElementById('metaJobId');
-const progressIndicators = [
-  document.querySelector('#loadingState .loading-spinner'),
-  document.querySelector('#loadingState .loading-pips'),
-].filter(Boolean);
+const loadingSpinner = document.querySelector('#loadingState .loading-spinner');
 
 const metricsDashboard = StageThreeMetricsDashboard.initFromDom();
 
@@ -78,29 +72,7 @@ const setActiveStage = (stage) => {
 const COMPLETE_STATUSES = new Set(['completed', 'succeeded', 'success', 'done']);
 const FAILED_STATUSES = new Set(['failed', 'error', 'cancelled', 'canceled']);
 
-const STATUS_LABEL_MAP = {
-  queued: 'Harmonizing',
-  running: 'Harmonizing',
-  pending: 'Harmonizing',
-  started: 'Harmonizing',
-  harmonizing: 'Harmonizing',
-  completed: 'Completed',
-  succeeded: 'Completed',
-  success: 'Completed',
-  done: 'Completed',
-  failed: 'Failed',
-  error: 'Failed',
-  cancelled: 'Failed',
-  canceled: 'Failed',
-};
-
 const normalizeStatus = (status) => (status ?? '').toString().trim().toLowerCase();
-
-const getDisplayStatus = (status) => {
-  const normalized = normalizeStatus(status);
-  return STATUS_LABEL_MAP[normalized] || (status ? status.toString() : 'Unknown');
-};
-
 const isCompleteStatus = (normalized) => COMPLETE_STATUSES.has(normalized);
 const isFailedStatus = (normalized) => FAILED_STATUSES.has(normalized);
 
@@ -139,15 +111,6 @@ const removeFromSession = (key) => {
   }
 };
 
-const setLoadingCopy = (primary, secondary) => {
-  if (primary) {
-    loadingPrimaryText.textContent = primary;
-  }
-  if (secondary) {
-    loadingSecondaryText.textContent = secondary;
-  }
-};
-
 const toggleLoadingState = (show) => {
   loadingState.classList.toggle('hidden', !show);
 };
@@ -156,11 +119,8 @@ const toggleEmptyState = (show) => {
   emptyState.classList.toggle('hidden', !show);
 };
 
-const toggleProgressIndicators = (show) => {
-  // "why: ensure indeterminate spinner only appears while harmonization runs."
-  progressIndicators.forEach((element) => {
-    element.classList.toggle('hidden', !show);
-  });
+const toggleSpinner = (show) => {
+  loadingSpinner.classList.toggle('hidden', !show);
 };
 
 const updateMetadata = (context) => {
@@ -243,44 +203,26 @@ const persistJobMeta = (job) => {
 const updateTitleForStatus = (status) => {
   const normalized = normalizeStatus(status);
   if (normalized === 'failed') {
-    stageThreeTitle.textContent = 'Harmonization failed';
-    stageThreeSubtitle.textContent = 'Retry the run or return to Stage 2 to adjust mappings.';
-    stageThreeSubtitle.classList.remove('hidden');
+    if (stageThreeTitle) stageThreeTitle.textContent = 'Harmonization failed';
     return;
   }
   if (isCompleteStatus(normalized)) {
-    stageThreeTitle.textContent = 'Harmonization complete';
-    stageThreeSubtitle.classList.add('hidden');
+    if (stageThreeTitle) stageThreeTitle.textContent = 'Harmonization complete';
     return;
   }
-  stageThreeTitle.textContent = 'Harmonization is running';
-  stageThreeSubtitle.textContent = 'Feel free to monitor progress here while Netrias processes your dataset.';
-  stageThreeSubtitle.classList.remove('hidden');
+  if (stageThreeTitle) stageThreeTitle.textContent = 'Harmonizing';
 };
 
 const hideJobMeta = () => {
-  if (jobStatusValue) {
-    jobStatusValue.classList.add('hidden');
+  if (jobIdDisplay) {
+    jobIdDisplay.classList.add('hidden');
   }
 };
 
-const updateStatusDisplay = (status, detail) => {
-  const normalized = normalizeStatus(status);
-  const label = getDisplayStatus(status);
-  let secondary = detail;
-  if (!secondary) {
-    if (isFailedStatus(normalized)) {
-      secondary = 'Harmonization failed. Please retry.';
-    } else if (isCompleteStatus(normalized)) {
-      secondary = 'Harmonization complete. Continue to review results.';
-    } else {
-      secondary = 'Hang tight while Netrias processes your dataset.';
-    }
-  }
-  setLoadingCopy(`Status: ${label}`, secondary);
-  if (jobStatusValue) {
-    jobStatusValue.textContent = `Status: ${label}`;
-    jobStatusValue.classList.remove('hidden');
+const showJobId = (jobId) => {
+  if (jobIdDisplay && jobId) {
+    jobIdDisplay.textContent = `Job ID: ${jobId}`;
+    jobIdDisplay.classList.remove('hidden');
   }
 };
 
@@ -292,6 +234,7 @@ const renderJob = (job) => {
   state.job = job;
   persistJobMeta(job);
   updateMetadataBar(job);
+  showJobId(job.job_id);
 
   const status = job.status ?? 'running';
   const normalized = normalizeStatus(status);
@@ -300,8 +243,7 @@ const renderJob = (job) => {
 
   if (isFailedStatus(normalized)) {
     toggleLoadingState(true);
-    toggleProgressIndicators(false);
-    updateStatusDisplay(status, job.detail);
+    toggleSpinner(false);
     hideMetricsDashboard();
     showError(job.detail || 'Harmonization failed. Please retry.');
     reviewButton.disabled = true;
@@ -314,8 +256,7 @@ const renderJob = (job) => {
     updateStepInstruction('harmonize_complete');
   } else {
     toggleLoadingState(true);
-    toggleProgressIndicators(true);
-    updateStatusDisplay(status, job.detail);
+    toggleSpinner(true);
     hideMetricsDashboard();
     reviewButton.disabled = true;
     retryButton.classList.add('hidden');
@@ -350,11 +291,15 @@ const extractRequestPayload = () => {
 };
 
 const startHarmonize = async (payloadOverride = null) => {
+  console.log('[Stage3] startHarmonize called, isProcessing:', state.isProcessing);
   if (state.isProcessing) {
+    console.log('[Stage3] already processing, returning');
     return;
   }
   const payload = payloadOverride || state.requestBody || extractRequestPayload();
+  console.log('[Stage3] resolved payload:', payload);
   if (!payload) {
+    console.log('[Stage3] no payload in startHarmonize, showing empty state');
     toggleLoadingState(false);
     toggleEmptyState(true);
     hideJobMeta();
@@ -371,9 +316,9 @@ const startHarmonize = async (payloadOverride = null) => {
   toggleLoadingState(true);
   reviewButton.disabled = true;
   retryButton.classList.add('hidden');
-  setLoadingCopy('Harmonization in progress', '');
 
   state.isProcessing = true;
+  console.log('[Stage3] about to fetch:', harmonizeEndpoint);
   try {
     const response = await fetch(harmonizeEndpoint, {
       method: 'POST',
@@ -411,6 +356,7 @@ const hydrateFromStoredJob = () => {
 };
 
 const init = () => {
+  console.log('[Stage3] init() starting');
   setActiveStage('harmonize');
   initStepInstruction('harmonize');
 
@@ -426,18 +372,26 @@ const init = () => {
     });
   }
 
+  console.log('[Stage3] checking for stored job at key:', jobStorageKey);
+  const storedJob = readFromSession(jobStorageKey);
+  console.log('[Stage3] stored job:', storedJob);
+
   if (hydrateFromStoredJob()) {
+    console.log('[Stage3] hydrated from stored job, returning early');
     toggleLoadingState(false);
     return;
   }
 
   const payload = extractRequestPayload();
+  console.log('[Stage3] extracted payload:', payload);
   if (!payload) {
+    console.log('[Stage3] no payload, showing empty state');
     toggleLoadingState(false);
     toggleEmptyState(true);
     return;
   }
 
+  console.log('[Stage3] calling startHarmonize with payload');
   startHarmonize(payload);
 };
 
