@@ -1,12 +1,26 @@
+/**
+ * Stage 4 Review - Main orchestrator.
+ * Delegates to review mode modules (column or row) based on user selection.
+ * Manages state persistence, navigation, and user interactions.
+ */
 import { initStepInstruction } from '/assets/shared/step-instruction-ui.js';
+import * as columnMode from './review_mode_column.js?v=20251216';
+import * as rowMode from './review_mode_row.js?v=20251216';
 
+/** @type {Object} */
 const config = window.stageFourConfig ?? {};
+
+/** @type {string} */
 const stageFiveUrl = config.stageFiveUrl ?? '/stage-5';
+
+/** @type {string} */
 const resultsEndpoint = config.resultsEndpoint ?? '/stage-4/rows';
 
-const progressSteps = document.querySelectorAll('.progress-tracker [data-stage]');
+/* DOM element references */
 const sortModeSelect = document.getElementById('sortModeSelect');
 const batchSizeSelect = document.getElementById('batchSizeSelect');
+const batchSizeLabel = batchSizeSelect?.previousElementSibling;
+const reviewModeSelect = document.getElementById('reviewModeSelect');
 const reviewAlerts = document.getElementById('reviewAlerts');
 const previousBatchButton = document.getElementById('previousBatchButton');
 const nextBatchButton = document.getElementById('nextBatchButton');
@@ -19,45 +33,117 @@ const batchProgressList = document.getElementById('batchProgressList');
 const batchProgressHint = document.getElementById('batchProgressHint');
 const currentBatchIndicator = document.getElementById('currentBatchIndicator');
 
-
-
+/** @type {string[]} */
 const STAGE_ORDER = ['upload', 'mapping', 'harmonize', 'review', 'export'];
-const HIGH_CONFIDENCE_MIN = 0.8;
-const SORT_LABEL_COPY = {
-  'confidence-asc': 'Sorted by lowest confidence first.',
-  'confidence-desc': 'Sorted by highest confidence first.',
-  original: 'Sorted by the original upload order.',
-};
 
+/**
+ * Debounce delay for auto-save in milliseconds.
+ * 500ms balances responsive feel (user sees saves happen quickly) with
+ * avoiding excessive server requests during rapid typing.
+ * @type {number}
+ */
 const SAVE_DEBOUNCE_MS = 500;
 
+/**
+ * Batch size options for column mode.
+ * Values represent grid dimension (e.g., 3 = 3x3 = 9 entries per batch).
+ * @type {Array<{value: number, label: string}>}
+ */
+const COLUMN_MODE_BATCH_OPTIONS = [
+  { value: 3, label: '3×3 grid' },
+  { value: 4, label: '4×4 grid' },
+  { value: 5, label: '5×5 grid' },
+];
+
+/**
+ * Batch size options for row mode.
+ * Values represent number of rows per batch.
+ * @type {Array<{value: number, label: string}>}
+ */
+const ROW_MODE_BATCH_OPTIONS = [
+  { value: 5, label: '5 rows' },
+  { value: 10, label: '10 rows' },
+  { value: 15, label: '15 rows' },
+];
+
+/** @type {number} Default grid dimension for column mode */
+const DEFAULT_COLUMN_BATCH_SIZE = 5;
+
+/** @type {number} Default rows per batch for row mode */
+const DEFAULT_ROW_BATCH_SIZE = 5;
+
+/**
+ * Application state for Stage 4 review.
+ * @type {Object}
+ */
 const state = {
   rows: [],
   sortMode: 'original',
-  batchSize: 5,
-  currentBatch: 1,
-  completedBatches: new Set(),
-  flaggedBatches: new Set(),
+  reviewMode: 'column',
   alertTimer: null,
   hasLoadedRows: false,
   pendingOverrides: {},
   saveDebounceTimer: null,
+
+  columnMode: {
+    currentUnit: 1,
+    completedUnits: new Set(),
+    flaggedUnits: new Set(),
+    batchSize: DEFAULT_COLUMN_BATCH_SIZE,
+  },
+
+  rowMode: {
+    currentUnit: 1,
+    completedUnits: new Set(),
+    flaggedUnits: new Set(),
+    batchSize: DEFAULT_ROW_BATCH_SIZE,
+  },
 };
 
+/**
+ * Get the state object for the current review mode.
+ * @returns {Object}
+ */
+const getModeState = () => {
+  return state.reviewMode === 'column' ? state.columnMode : state.rowMode;
+};
+
+/**
+ * Get the current batch size based on mode.
+ * For column mode, returns entries per batch (gridSize^2).
+ * For row mode, returns rows per batch directly.
+ * @returns {number}
+ */
+const getCurrentBatchSize = () => {
+  const modeState = getModeState();
+  if (state.reviewMode === 'column') {
+    return modeState.batchSize * modeState.batchSize;
+  }
+  return modeState.batchSize;
+};
+
+/**
+ * Extract file_id from URL query parameters.
+ * @returns {string|null}
+ */
 const getFileIdFromUrl = () => {
   const params = new URLSearchParams(window.location.search);
   return params.get('file_id');
 };
 
+/**
+ * Fetch harmonized rows from the server.
+ * @returns {Promise<void>}
+ */
 const fetchRows = async () => {
-  if (state.hasLoadedRows) {
-    return;
-  }
+  if (state.hasLoadedRows) return;
+
   const fileId = getFileIdFromUrl();
   if (!fileId) {
     notify('Unable to locate harmonized data. Please rerun Stage 3.', 'warning');
     return;
   }
+
   try {
     const response = await fetch(resultsEndpoint, {
       method: 'POST',
@@ -83,8 +169,13 @@ const fetchRows = async () => {
   }
 };
 
+/**
+ * Update progress tracker to show the active stage.
+ * @param {string} stage - Stage identifier
+ */
 const setActiveStage = (stage) => {
   const targetIndex = STAGE_ORDER.indexOf(stage);
+  const progressSteps = document.querySelectorAll('.progress-tracker [data-stage]');
   progressSteps.forEach((step) => {
     const stepStage = step.dataset.stage;
     const stepIndex = STAGE_ORDER.indexOf(stepStage);
@@ -95,21 +186,16 @@ const setActiveStage = (stage) => {
   });
 };
 
-const bucketFromConfidence = (value) => {
-  const score = Number(value ?? 0);
-  if (!Number.isNaN(score) && score >= HIGH_CONFIDENCE_MIN) {
-    return 'high';
-  }
-  return 'low';
-};
-
-
+/**
+ * Fetch saved overrides from server.
+ * @param {string} fileId
+ * @returns {Promise<Object|null>}
+ */
 const fetchOverrides = async (fileId) => {
   try {
     const response = await fetch(`/stage-4/overrides/${fileId}`);
     if (response.ok) {
-      const data = await response.json();
-      return data;
+      return await response.json();
     }
     if (response.status === 404) {
       return null;
@@ -122,27 +208,46 @@ const fetchOverrides = async (fileId) => {
   }
 };
 
+/**
+ * Serialize a mode state object for persistence.
+ * @param {Object} modeState - Mode state with currentUnit, completedUnits, flaggedUnits, batchSize
+ * @returns {Object}
+ */
+const _serializeModeState = (modeState) => ({
+  current_unit: modeState.currentUnit,
+  completed_units: Array.from(modeState.completedUnits),
+  flagged_units: Array.from(modeState.flaggedUnits),
+  batch_size: modeState.batchSize,
+});
+
+/**
+ * Build the save payload for overrides and review state.
+ * @returns {Object}
+ */
+const _buildSavePayload = () => ({
+  file_id: getFileIdFromUrl(),
+  overrides: state.pendingOverrides,
+  review_state: {
+    review_mode: state.reviewMode,
+    sort_mode: state.sortMode,
+    column_mode: _serializeModeState(state.columnMode),
+    row_mode: _serializeModeState(state.rowMode),
+  },
+});
+
+/**
+ * Save overrides to server.
+ * @returns {Promise<void>}
+ */
 const saveOverrides = async () => {
   const fileId = getFileIdFromUrl();
-  if (!fileId) {
-    return;
-  }
-  const payload = {
-    file_id: fileId,
-    overrides: state.pendingOverrides,
-    review_state: {
-      completed_batches: Array.from(state.completedBatches),
-      flagged_batches: Array.from(state.flaggedBatches),
-      current_batch: state.currentBatch,
-      sort_mode: state.sortMode,
-      batch_size: state.batchSize,
-    },
-  };
+  if (!fileId) return;
+
   try {
     const response = await fetch('/stage-4/overrides', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(_buildSavePayload()),
     });
     if (!response.ok) {
       throw new Error('Server returned an error');
@@ -153,6 +258,9 @@ const saveOverrides = async () => {
   }
 };
 
+/**
+ * Schedule a debounced save operation.
+ */
 const debouncedSave = () => {
   if (state.saveDebounceTimer) {
     clearTimeout(state.saveDebounceTimer);
@@ -160,6 +268,9 @@ const debouncedSave = () => {
   state.saveDebounceTimer = setTimeout(saveOverrides, SAVE_DEBOUNCE_MS);
 };
 
+/**
+ * Save overrides immediately, cancelling any pending debounced save.
+ */
 const saveOverridesImmediate = () => {
   if (state.saveDebounceTimer) {
     clearTimeout(state.saveDebounceTimer);
@@ -168,143 +279,53 @@ const saveOverridesImmediate = () => {
   saveOverrides();
 };
 
-const recordOverride = (rowIndex, columnKey, aiValue, humanValue, originalValue) => {
-  const rowKey = String(rowIndex);
-  if (!state.pendingOverrides[rowKey]) {
-    state.pendingOverrides[rowKey] = {};
-  }
-  if (humanValue && humanValue.trim()) {
-    state.pendingOverrides[rowKey][columnKey] = {
-      ai_value: aiValue,
-      human_value: humanValue.trim(),
-      original_value: originalValue,
-    };
-  } else {
-    delete state.pendingOverrides[rowKey][columnKey];
-    if (Object.keys(state.pendingOverrides[rowKey]).length === 0) {
-      delete state.pendingOverrides[rowKey];
+/**
+ * Record an override for multiple row indices sharing the same original value.
+ * @param {number[]} rowIndices - Array of row indices
+ * @param {string} columnKey - Column identifier
+ * @param {string|null} aiValue - AI-recommended value
+ * @param {string} humanValue - User-entered override value
+ * @param {string} originalValue - Original input value
+ */
+const recordOverrideForRows = (rowIndices, columnKey, aiValue, humanValue, originalValue) => {
+  for (const rowIndex of rowIndices) {
+    const rowKey = String(rowIndex);
+    if (!state.pendingOverrides[rowKey]) {
+      state.pendingOverrides[rowKey] = {};
+    }
+    if (humanValue && humanValue.trim()) {
+      state.pendingOverrides[rowKey][columnKey] = {
+        ai_value: aiValue,
+        human_value: humanValue.trim(),
+        original_value: originalValue,
+      };
+    } else {
+      delete state.pendingOverrides[rowKey][columnKey];
+      if (Object.keys(state.pendingOverrides[rowKey]).length === 0) {
+        delete state.pendingOverrides[rowKey];
+      }
     }
   }
   debouncedSave();
 };
 
-const getRowAttentionCell = (row) => {
-  const changed = row.cells.filter((cell) => cell.isChanged);
-  const pool = changed.length ? changed : row.cells;
-  return [...pool].sort((a, b) => a.confidence - b.confidence)[0];
-};
-
-const sortRows = (rows) => {
-  const sorted = [...rows];
-  sorted.sort((a, b) => {
-    if (state.sortMode === 'original') {
-      return a.originalIndex - b.originalIndex;
-    }
-    const aCell = getRowAttentionCell(a);
-    const bCell = getRowAttentionCell(b);
-    if (state.sortMode === 'confidence-desc') {
-      return bCell.confidence - aCell.confidence || a.originalIndex - b.originalIndex;
-    }
-    return aCell.confidence - bCell.confidence || a.originalIndex - b.originalIndex;
-  });
-  return sorted;
-};
-
-const doesRowNeedAttention = (row) => row.cells.some((cell) => cell.needsRerun || cell.harmonizedValue === null);
-
-const buildBatchSummaries = () => {
-  const rows = sortRows(state.rows);
-  const batchSize = Math.max(1, state.batchSize);
-  if (!rows.length) {
-    return {
-      summaries: [
-        {
-          index: 1,
-          rows: [],
-          startRow: 0,
-          endRow: 0,
-          flagged: false,
-        },
-      ],
-      totalRows: 0,
-    };
-  }
-  const summaries = [];
-  for (let start = 0; start < rows.length; start += batchSize) {
-    const slice = rows.slice(start, start + batchSize);
-    summaries.push({
-      index: summaries.length + 1,
-      rows: slice,
-      startRow: start + 1,
-      endRow: start + slice.length,
-      flagged: slice.some(doesRowNeedAttention),
-    });
-  }
-  return {
-    summaries,
-    totalRows: rows.length,
-  };
-};
-
-const getCurrentBatchRows = () => {
-  const { summaries, totalRows } = buildBatchSummaries();
-  const totalBatches = summaries.length;
-  state.currentBatch = Math.min(Math.max(state.currentBatch, 1), totalBatches);
-  Array.from(state.completedBatches).forEach((index) => {
-    if (index > totalBatches) {
-      state.completedBatches.delete(index);
-    }
-  });
-  Array.from(state.flaggedBatches).forEach((index) => {
-    if (index > totalBatches) {
-      state.flaggedBatches.delete(index);
-    }
-  });
-  const current = summaries[state.currentBatch - 1];
-  return {
-    rows: current.rows,
-    totalRows,
-    totalBatches,
-    summaries,
-  };
-};
-
-const updateBatchMetadata = (batchMeta) => {
-  const totalBatches = Math.max(1, batchMeta.totalBatches);
-  const hasRows = batchMeta.rows.length > 0;
-  previousBatchButton.disabled = state.currentBatch <= 1 || !hasRows;
-  nextBatchButton.disabled = state.currentBatch >= totalBatches || !hasRows;
-  completeBatchButton.disabled = !hasRows;
-  const actionMode = hasRows && state.completedBatches.has(state.currentBatch) ? 'flag' : 'complete';
-  completeBatchButton.dataset.mode = actionMode;
-  completeBatchButton.textContent = actionMode === 'flag' ? 'Flag batch for review' : 'Mark batch complete';
-};
-
-const updateCurrentBatchIndicator = (batchMeta) => {
-  if (!currentBatchIndicator) {
-    return;
-  }
-  const total = Math.max(1, batchMeta.totalBatches);
-  if (!batchMeta.rows.length) {
-    currentBatchIndicator.textContent = 'No batches ready for review yet.';
-    currentBatchIndicator.classList.add('muted');
-  } else {
-    currentBatchIndicator.textContent = `Reviewing batch ${state.currentBatch} of ${total}`;
-    currentBatchIndicator.classList.remove('muted');
-  }
-};
-
+/**
+ * Display a notification message.
+ * @param {string} message - Message text
+ * @param {string} tone - 'info' | 'success' | 'warning'
+ */
 const notify = (message, tone = 'info') => {
-  if (!reviewAlerts) {
-    return;
-  }
+  if (!reviewAlerts) return;
+
   reviewAlerts.textContent = message;
   reviewAlerts.classList.remove('hidden', 'success', 'warning');
+
   if (tone === 'success') {
     reviewAlerts.classList.add('success');
   } else if (tone === 'warning') {
     reviewAlerts.classList.add('warning');
   }
+
   if (state.alertTimer) {
     window.clearTimeout(state.alertTimer);
   }
@@ -313,285 +334,347 @@ const notify = (message, tone = 'info') => {
   }, 5000);
 };
 
-const PROGRESS_STATUS_LABELS = {
-  complete: 'Complete',
-  flagged: 'Needs review',
-  pending: 'Pending',
+/**
+ * Get batch metadata from the active mode module.
+ * @returns {Object}
+ */
+const getCurrentBatchMeta = () => {
+  const modeState = getModeState();
+  const batchSize = getCurrentBatchSize();
+  if (state.reviewMode === 'column') {
+    return columnMode.getCurrentEntries(state.rows, modeState.currentUnit, batchSize);
+  }
+  return rowMode.getCurrentEntries(state.rows, modeState.currentUnit, batchSize);
 };
 
-const renderBatchProgress = (batchMeta) => {
-  if (!batchProgressList) {
+/**
+ * Get progress summary from the active mode module.
+ * @returns {Object}
+ */
+const getProgressSummary = () => {
+  const modeState = getModeState();
+  const batchSize = getCurrentBatchSize();
+  if (state.reviewMode === 'column') {
+    return columnMode.getProgressSummary(state.rows, modeState.completedUnits, modeState.flaggedUnits, batchSize);
+  }
+  return rowMode.getProgressSummary(state.rows, batchSize, modeState.completedUnits, modeState.flaggedUnits);
+};
+
+/**
+ * Get total unit count from the active mode module.
+ * @returns {number}
+ */
+const getTotalUnits = () => {
+  const batchSize = getCurrentBatchSize();
+  if (state.reviewMode === 'column') {
+    return columnMode.getTotalUnits(state.rows, batchSize);
+  }
+  return rowMode.getTotalUnits(state.rows, batchSize);
+};
+
+/**
+ * Update navigation button states based on current batch.
+ * @param {Object} batchMeta
+ */
+const updateNavigationButtons = (batchMeta) => {
+  const modeState = getModeState();
+  const totalUnits = batchMeta.totalUnits;
+  const hasEntries = batchMeta.entries.length > 0;
+
+  previousBatchButton.disabled = modeState.currentUnit <= 1 || !hasEntries;
+  nextBatchButton.disabled = modeState.currentUnit >= totalUnits || !hasEntries;
+  completeBatchButton.disabled = !hasEntries;
+
+  const actionMode = hasEntries && modeState.completedUnits.has(modeState.currentUnit) ? 'flag' : 'complete';
+  completeBatchButton.dataset.mode = actionMode;
+  completeBatchButton.textContent = actionMode === 'flag' ? 'Flag for review' : 'Mark complete';
+};
+
+/**
+ * Update the current batch indicator text.
+ * @param {Object} batchMeta
+ */
+const updateCurrentBatchIndicator = (batchMeta) => {
+  if (!currentBatchIndicator) return;
+
+  const modeState = getModeState();
+  const batchSize = getCurrentBatchSize();
+
+  if (!batchMeta.entries.length) {
+    currentBatchIndicator.textContent = 'No entries ready for review yet.';
+    currentBatchIndicator.classList.add('muted');
     return;
   }
-  batchProgressList.innerHTML = '';
-  const meaningful = batchMeta.summaries.filter((summary) => summary.rows.length);
-  const displayBatches = meaningful.length ? meaningful : batchMeta.summaries.slice(0, 1);
-  const total = meaningful.length;
-  const completedCount = meaningful.filter((summary) => state.completedBatches.has(summary.index)).length;
-  const flaggedCount = meaningful.filter((summary) => {
-    const index = summary.index;
-    if (state.flaggedBatches.has(index)) {
-      return true;
-    }
-    return !state.completedBatches.has(index) && summary.flagged;
-  }).length;
 
-  if (batchProgressHint) {
-    if (!total) {
-      batchProgressHint.textContent = 'Awaiting harmonized rows.';
-    } else if (completedCount === total) {
-      batchProgressHint.textContent = 'All batches reviewed.';
-    } else {
-      let copy = `${completedCount}/${total} batches complete`;
-      if (flaggedCount > 0) {
-        copy += ` · ${flaggedCount} flagged`;
-      }
-      batchProgressHint.textContent = copy;
-    }
-  }
+  currentBatchIndicator.classList.remove('muted');
 
-  displayBatches.forEach((summary) => {
-    const hasRows = summary.rows.length > 0;
-    const manualFlagged = state.flaggedBatches.has(summary.index);
-    const isComplete = state.completedBatches.has(summary.index);
-    const status = manualFlagged
-      ? 'flagged'
-      : isComplete
-        ? 'complete'
-        : summary.flagged
-          ? 'flagged'
-          : 'pending';
-    const item = document.createElement('button');
-    item.type = 'button';
-    item.className = `batch-progress-item ${status}${summary.index === state.currentBatch ? ' current' : ''}`;
-    item.textContent = hasRows ? summary.index : '—';
-    item.disabled = !hasRows;
-    item.setAttribute(
-      'aria-label',
-      hasRows ? `Batch ${summary.index}: ${PROGRESS_STATUS_LABELS[status]}` : 'No harmonized batches yet',
-    );
-    if (hasRows) {
-      item.addEventListener('click', () => {
-        if (state.currentBatch === summary.index) {
-          return;
-        }
-        state.currentBatch = summary.index;
-        render();
-      });
-    }
-    batchProgressList.append(item);
-  });
-};
-
-const createCellCard = (cell, rowIndex) => {
-  const card = document.createElement('div');
-  const classes = ['row-cell'];
-  const originalWasEmpty = !cell.originalValue || cell.originalValue.trim() === '';
-  const isDisabled = originalWasEmpty;
-
-  if (isDisabled) {
-    classes.push('no-change');
-  } else if (cell.isChanged) {
-    classes.push(`confidence-${cell.bucket}`);
-    if (cell.harmonizedValue === null) {
-      classes.push('needs-review');
-    }
+  if (state.reviewMode === 'column') {
+    currentBatchIndicator.textContent = columnMode.getCurrentUnitLabel(state.rows, modeState.currentUnit, batchSize);
   } else {
-    classes.push(`confidence-${cell.bucket}`);
+    currentBatchIndicator.textContent = rowMode.getCurrentUnitLabel(state.rows, modeState.currentUnit, batchSize);
   }
-  card.className = classes.join(' ');
+};
 
-  const existingOverride = state.pendingOverrides[String(rowIndex)]?.[cell.columnKey];
-  const inputValue = existingOverride?.human_value ?? cell.manualOverride ?? '';
-  const recommendedText = isDisabled ? '—' : (cell.harmonizedValue ?? cell.originalValue ?? '—');
-  const recommendedClass = isDisabled ? ' no-recommendation' : (cell.harmonizedValue === null ? ' missing' : '');
-  const inputDisabled = isDisabled ? 'disabled' : '';
+/**
+ * Update the progress hint text.
+ * @param {Object} progressSummary
+ */
+const updateProgressHint = (progressSummary) => {
+  if (!batchProgressHint) return;
 
-  card.innerHTML = `
-    <div class="value-pair" role="group" aria-label="${cell.columnLabel} comparison">
-      <div class="value-group recommended">
-        <p class="value-label">Recommended</p>
-        <p class="value-text recommended-text${recommendedClass}">${recommendedText}</p>
-      </div>
-      <div class="value-group original">
-        <p class="value-label">Original input</p>
-        <p class="value-text original-text">${cell.originalValue ?? '—'}</p>
-      </div>
-      <label class="value-group value-override">
-        <span class="value-label sr-only">Override ${cell.columnLabel}</span>
-        <span class="value-input-wrapper">
-          <input
-            class="value-input"
-            type="text"
-            value="${inputValue}"
-            aria-label="Manual override for ${cell.columnLabel}"
-            data-row-index="${rowIndex}"
-            data-column-key="${cell.columnKey}"
-            ${inputDisabled}
-          />
-          <svg class="value-input-icon" viewBox="0 0 20 20" aria-hidden="true">
-            <path d="M2 14.5V18h3.5l8.4-8.4-3.5-3.5L2 14.5zm11.8-9.1a1 1 0 0 1 1.4 0l1.4 1.4a1 1 0 0 1 0 1.4l-1.2 1.2-3.5-3.5 1.2-1.2z"/>
-          </svg>
-        </span>
-      </label>
-    </div>
-  `;
+  const total = progressSummary.totalCount;
+  const completed = progressSummary.completedCount;
+  const flagged = progressSummary.flaggedCount;
 
-  const input = card.querySelector('.value-input');
-  input.addEventListener('input', (event) => {
-    recordOverride(
-      rowIndex,
-      cell.columnKey,
-      cell.harmonizedValue,
-      event.target.value,
-      cell.originalValue,
+  if (!total) {
+    batchProgressHint.textContent = 'Awaiting harmonized entries.';
+    return;
+  }
+
+  if (completed === total) {
+    batchProgressHint.textContent = state.reviewMode === 'column'
+      ? 'All columns reviewed.'
+      : 'All batches reviewed.';
+    return;
+  }
+
+  const unitLabel = state.reviewMode === 'column' ? 'columns' : 'batches';
+  let copy = `${completed}/${total} ${unitLabel} complete`;
+  if (flagged > 0) {
+    copy += ` · ${flagged} flagged`;
+  }
+  batchProgressHint.textContent = copy;
+};
+
+/**
+ * Render progress pills using the active mode module.
+ * @param {Object} batchMeta
+ */
+const renderProgressPillsUI = (batchMeta) => {
+  if (!batchProgressList) return;
+
+  const modeState = getModeState();
+  const onUnitClick = (unitIndex) => {
+    modeState.currentUnit = unitIndex;
+    render();
+  };
+
+  if (state.reviewMode === 'column') {
+    columnMode.renderBatchProgress(
+      batchProgressList,
+      batchMeta,
+      modeState.currentUnit,
+      modeState.completedUnits,
+      modeState.flaggedUnits,
+      onUnitClick,
     );
-  });
-
-  return card;
-};
-
-const renderRows = (batchMeta) => {
-  reviewTable.innerHTML = '';
-  if (!batchMeta.rows.length) {
-    const empty = document.createElement('div');
-    empty.className = 'review-empty';
-    empty.innerHTML = `
-      <p>No harmonized changes to review.</p>
-      <p>Once Stage 3 produces updates, they will appear here automatically.</p>
-    `;
-    reviewTable.append(empty);
-    return;
+  } else {
+    rowMode.renderBatchProgress(
+      batchProgressList,
+      batchMeta,
+      modeState.currentUnit,
+      modeState.completedUnits,
+      modeState.flaggedUnits,
+      onUnitClick,
+    );
   }
-
-  const columns = batchMeta.rows[0]?.cells || [];
-  const columnsTemplate = ['100px', ...columns.map(() => 'minmax(280px, 1fr)')].join(' ');
-  const wrapper = document.createElement('div');
-  wrapper.className = 'row-table-wrapper';
-  wrapper.style.setProperty('--table-columns', columnsTemplate);
-
-  const viewport = document.createElement('div');
-  viewport.className = 'row-table-viewport';
-
-  const header = document.createElement('div');
-  header.className = 'row-table-header';
-  header.innerHTML = [`<div class="row-index-header">Row</div>`, ...columns.map((cell) => `<div class="column-header">${cell.columnLabel}</div>`)].join('');
-
-  const body = document.createElement('div');
-  body.className = 'row-table-body';
-
-  batchMeta.rows.forEach((row) => {
-    const rowEl = document.createElement('div');
-    rowEl.className = 'row-table-row';
-    const indexCell = document.createElement('div');
-    indexCell.className = 'row-index-cell';
-    indexCell.textContent = `Row ${row.rowNumber}`;
-    indexCell.title = row.recordId;
-    rowEl.append(indexCell);
-    const rowIndex = row.sourceRowNumber ?? row.rowNumber;
-    row.cells.forEach((cell) => {
-      const cellWrapper = document.createElement('div');
-      cellWrapper.className = 'table-cell';
-      cellWrapper.append(createCellCard(cell, rowIndex));
-      rowEl.append(cellWrapper);
-    });
-    body.append(rowEl);
-  });
-
-  viewport.append(header, body);
-  wrapper.append(viewport);
-  reviewTable.append(wrapper);
 };
 
+/**
+ * Render entry cards using the active mode module.
+ * @param {Object} batchMeta
+ */
+const renderEntries = (batchMeta) => {
+  if (!reviewTable) return;
+
+  if (state.reviewMode === 'column') {
+    const gridSize = state.columnMode.batchSize;
+    columnMode.renderEntries(reviewTable, batchMeta, state.pendingOverrides, recordOverrideForRows, gridSize);
+  } else {
+    rowMode.renderEntries(reviewTable, batchMeta, state.pendingOverrides, recordOverrideForRows);
+  }
+};
+
+/**
+ * Main render function - updates all UI components.
+ */
 const render = () => {
-  const batchMeta = getCurrentBatchRows();
-  updateBatchMetadata(batchMeta);
+  const batchMeta = getCurrentBatchMeta();
+  const progressSummary = getProgressSummary();
+
+  updateNavigationButtons(batchMeta);
   updateCurrentBatchIndicator(batchMeta);
-  renderBatchProgress(batchMeta);
-  renderRows(batchMeta);
+  updateProgressHint(progressSummary);
+  renderProgressPillsUI(batchMeta);
+  renderEntries(batchMeta);
 };
 
-const markBatchComplete = () => {
-  const meta = getCurrentBatchRows();
-  if (!meta.rows.length) {
-    notify('No rows in this batch to complete.', 'warning');
+/**
+ * Mark current unit as complete and advance to next.
+ */
+const markComplete = () => {
+  const modeState = getModeState();
+  const batchMeta = getCurrentBatchMeta();
+
+  if (!batchMeta.entries.length) {
+    notify('No entries in this batch to complete.', 'warning');
     return;
   }
-  state.completedBatches.add(state.currentBatch);
-  state.flaggedBatches.delete(state.currentBatch);
-  const reviewableBatches = meta.summaries.filter((summary) => summary.rows.length);
-  const completedCount = reviewableBatches.filter((summary) => state.completedBatches.has(summary.index)).length;
-  const allComplete = reviewableBatches.length > 0 && completedCount === reviewableBatches.length;
-  const remaining = reviewableBatches.find((summary) => !state.completedBatches.has(summary.index));
+
+  modeState.completedUnits.add(modeState.currentUnit);
+  modeState.flaggedUnits.delete(modeState.currentUnit);
+
+  const progressSummary = getProgressSummary();
+  const allComplete = progressSummary.totalCount > 0 && progressSummary.completedCount === progressSummary.totalCount;
 
   if (allComplete) {
-    notify('All batches have been reviewed. You can still revisit previous batches.', 'success');
+    const label = state.reviewMode === 'column' ? 'columns' : 'batches';
+    notify(`All ${label} have been reviewed. You can still revisit previous ${label}.`, 'success');
   } else {
-    const remainingCount = Math.max(reviewableBatches.length - completedCount, 0);
-    const copy =
-      remainingCount > 0
-        ? `Batch ${state.currentBatch} marked complete. ${remainingCount} batch${remainingCount === 1 ? '' : 'es'} remaining.`
-        : `Batch ${state.currentBatch} marked complete.`;
+    const remaining = progressSummary.totalCount - progressSummary.completedCount;
+    const label = state.reviewMode === 'column' ? 'Column' : 'Batch';
+    const copy = remaining > 0
+      ? `${label} marked complete. ${remaining} remaining.`
+      : `${label} marked complete.`;
     notify(copy, 'success');
   }
 
-  if (remaining) {
-    state.currentBatch = remaining.index;
+  if (modeState.currentUnit < batchMeta.totalUnits) {
+    modeState.currentUnit = modeState.currentUnit + 1;
   }
+
   saveOverridesImmediate();
   render();
 };
 
-const flagCurrentBatch = () => {
-  const meta = getCurrentBatchRows();
-  if (!meta.rows.length) {
-    notify('No rows to flag yet.', 'warning');
+/**
+ * Flag current unit for review.
+ */
+const flagCurrent = () => {
+  const modeState = getModeState();
+  const batchMeta = getCurrentBatchMeta();
+
+  if (!batchMeta.entries.length) {
+    notify('No entries to flag yet.', 'warning');
     return;
   }
-  if (!state.completedBatches.has(state.currentBatch)) {
-    notify('Only completed batches can be flagged for review.', 'warning');
+
+  if (!modeState.completedUnits.has(modeState.currentUnit)) {
+    notify('Only completed items can be flagged for review.', 'warning');
     return;
   }
-  state.completedBatches.delete(state.currentBatch);
-  state.flaggedBatches.add(state.currentBatch);
-  notify(`Batch ${state.currentBatch} flagged for review.`, 'warning');
+
+  modeState.completedUnits.delete(modeState.currentUnit);
+  modeState.flaggedUnits.add(modeState.currentUnit);
+
+  const label = state.reviewMode === 'column' ? 'Column' : 'Batch';
+  notify(`${label} flagged for review.`, 'warning');
   saveOverridesImmediate();
   render();
 };
 
-const changeBatch = (delta) => {
-  const meta = getCurrentBatchRows();
-  const next = Math.min(Math.max(state.currentBatch + delta, 1), meta.totalBatches);
-  if (next === state.currentBatch) {
-    return;
-  }
-  state.currentBatch = next;
+/**
+ * Navigate to a different unit.
+ * @param {number} delta - Direction to move (-1 or +1)
+ */
+const changeUnit = (delta) => {
+  const modeState = getModeState();
+  const totalUnits = getTotalUnits();
+  const next = Math.min(Math.max(modeState.currentUnit + delta, 1), totalUnits);
+
+  if (next === modeState.currentUnit) return;
+
+  modeState.currentUnit = next;
   render();
 };
 
+/**
+ * Populate batch size dropdown with options for the current mode.
+ */
+const populateBatchSizeOptions = () => {
+  if (!batchSizeSelect) return;
+
+  const options = state.reviewMode === 'column' ? COLUMN_MODE_BATCH_OPTIONS : ROW_MODE_BATCH_OPTIONS;
+  const modeState = getModeState();
+
+  batchSizeSelect.innerHTML = '';
+  for (const opt of options) {
+    const option = document.createElement('option');
+    option.value = String(opt.value);
+    option.textContent = opt.label;
+    batchSizeSelect.append(option);
+  }
+
+  batchSizeSelect.value = String(modeState.batchSize);
+
+  if (batchSizeLabel) {
+    batchSizeLabel.textContent = state.reviewMode === 'column' ? 'Grid size' : 'Batch size';
+  }
+};
+
+/**
+ * Handle review mode toggle (column vs row).
+ */
+const handleReviewModeChange = () => {
+  const newMode = reviewModeSelect.value;
+  if (newMode === state.reviewMode) return;
+
+  state.reviewMode = newMode;
+  populateBatchSizeOptions();
+  notify(`Switched to ${newMode === 'column' ? 'column' : 'row'} view.`, 'info');
+  saveOverridesImmediate();
+  render();
+};
+
+/**
+ * Handle batch size change.
+ */
+const handleBatchSizeChange = () => {
+  const modeState = getModeState();
+  const newSize = Number(batchSizeSelect.value);
+
+  if (newSize === modeState.batchSize) return;
+
+  modeState.batchSize = newSize;
+  modeState.currentUnit = 1;
+  modeState.completedUnits.clear();
+  modeState.flaggedUnits.clear();
+  saveOverridesImmediate();
+  render();
+};
+
+/**
+ * Attach all event listeners.
+ */
 const attachEventListeners = () => {
   sortModeSelect.addEventListener('change', () => {
     state.sortMode = sortModeSelect.value;
-    state.currentBatch = 1;
-    state.completedBatches.clear();
-    state.flaggedBatches.clear();
+    state.columnMode.currentUnit = 1;
+    state.columnMode.completedUnits.clear();
+    state.columnMode.flaggedUnits.clear();
+    state.rowMode.currentUnit = 1;
+    state.rowMode.completedUnits.clear();
+    state.rowMode.flaggedUnits.clear();
     render();
   });
-  batchSizeSelect.addEventListener('change', () => {
-    state.batchSize = Number(batchSizeSelect.value) || 5;
-    state.currentBatch = 1;
-    state.completedBatches.clear();
-    state.flaggedBatches.clear();
-    render();
-  });
-  previousBatchButton.addEventListener('click', () => changeBatch(-1));
-  nextBatchButton.addEventListener('click', () => changeBatch(1));
+
+  if (batchSizeSelect) {
+    batchSizeSelect.addEventListener('change', handleBatchSizeChange);
+  }
+
+  if (reviewModeSelect) {
+    reviewModeSelect.addEventListener('change', handleReviewModeChange);
+  }
+
+  previousBatchButton.addEventListener('click', () => changeUnit(-1));
+  nextBatchButton.addEventListener('click', () => changeUnit(1));
+
   completeBatchButton.addEventListener('click', () => {
     const mode = completeBatchButton.dataset.mode || 'complete';
     if (mode === 'flag') {
-      flagCurrentBatch();
+      flagCurrent();
     } else {
-      markBatchComplete();
+      markComplete();
     }
   });
 
@@ -602,31 +685,68 @@ const attachEventListeners = () => {
       stageHelp.classList.toggle('hidden', expanded);
     });
   }
+
   if (stageFiveButton) {
     stageFiveButton.addEventListener('click', () => {
       window.location.assign(stageFiveUrl);
     });
   }
+
+  /* Navigation via progress tracker steps */
+  document.querySelectorAll('.step[data-url]').forEach((step) => {
+    step.addEventListener('click', () => {
+      const target = step.dataset.url;
+      if (target) {
+        window.location.assign(target);
+      }
+    });
+  });
+
+  /* Navigation via data-nav-target buttons */
+  document.querySelectorAll('[data-nav-target]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const target = button.dataset.navTarget;
+      if (target) {
+        window.location.assign(target);
+      }
+    });
+  });
 };
 
+/**
+ * Load persisted state from server.
+ * @returns {Promise<void>}
+ */
 const loadStateFromDisk = async () => {
   const fileId = getFileIdFromUrl();
-  if (!fileId) {
-    return;
-  }
+  if (!fileId) return;
+
   const stored = await fetchOverrides(fileId);
-  if (!stored) {
-    return;
-  }
+  if (!stored) return;
+
   state.pendingOverrides = stored.overrides || {};
   const reviewState = stored.review_state || {};
-  state.completedBatches = new Set(reviewState.completed_batches || []);
-  state.flaggedBatches = new Set(reviewState.flagged_batches || []);
-  state.currentBatch = reviewState.current_batch || 1;
+
+  state.reviewMode = reviewState.review_mode || 'column';
   state.sortMode = reviewState.sort_mode || 'original';
-  state.batchSize = reviewState.batch_size || 5;
+
+  const columnModeState = reviewState.column_mode || {};
+  state.columnMode.currentUnit = columnModeState.current_unit || 1;
+  state.columnMode.completedUnits = new Set(columnModeState.completed_units || []);
+  state.columnMode.flaggedUnits = new Set(columnModeState.flagged_units || []);
+  state.columnMode.batchSize = columnModeState.batch_size || DEFAULT_COLUMN_BATCH_SIZE;
+
+  const rowModeState = reviewState.row_mode || {};
+  state.rowMode.currentUnit = rowModeState.current_unit || 1;
+  state.rowMode.completedUnits = new Set(rowModeState.completed_units || []);
+  state.rowMode.flaggedUnits = new Set(rowModeState.flagged_units || []);
+  state.rowMode.batchSize = rowModeState.batch_size || DEFAULT_ROW_BATCH_SIZE;
 };
 
+/**
+ * Initialize Stage 4 review page.
+ * @returns {Promise<void>}
+ */
 const init = async () => {
   setActiveStage('review');
   initStepInstruction('review');
@@ -634,31 +754,21 @@ const init = async () => {
   await loadStateFromDisk();
 
   sortModeSelect.value = state.sortMode;
-  batchSizeSelect.value = state.batchSize.toString();
+  if (reviewModeSelect) {
+    reviewModeSelect.value = state.reviewMode;
+  }
+  populateBatchSizeOptions();
+
   attachEventListeners();
 
+  /* Flush pending saves on page unload */
   window.addEventListener('beforeunload', () => {
     if (state.saveDebounceTimer) {
       clearTimeout(state.saveDebounceTimer);
       state.saveDebounceTimer = null;
       navigator.sendBeacon(
         '/stage-4/overrides',
-        new Blob(
-          [
-            JSON.stringify({
-              file_id: getFileIdFromUrl(),
-              overrides: state.pendingOverrides,
-              review_state: {
-                completed_batches: Array.from(state.completedBatches),
-                flagged_batches: Array.from(state.flaggedBatches),
-                current_batch: state.currentBatch,
-                sort_mode: state.sortMode,
-                batch_size: state.batchSize,
-              },
-            }),
-          ],
-          { type: 'application/json' },
-        ),
+        new Blob([JSON.stringify(_buildSavePayload())], { type: 'application/json' }),
       );
     }
   });
@@ -668,20 +778,3 @@ const init = async () => {
 };
 
 init();
-document.querySelectorAll('.step[data-url]').forEach((step) => {
-  step.addEventListener('click', () => {
-    const target = step.dataset.url;
-    if (target) {
-      window.location.assign(target);
-    }
-  });
-});
-
-document.querySelectorAll('[data-nav-target]').forEach((button) => {
-  button.addEventListener('click', () => {
-    const target = button.dataset.navTarget;
-    if (target) {
-      window.location.assign(target);
-    }
-  });
-});
