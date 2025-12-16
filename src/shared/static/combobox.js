@@ -33,9 +33,11 @@
  * @param {string} [config.initialValue] - Initial selected value
  * @param {string} config.placeholder - Placeholder text when no value selected
  * @param {function(string|null): void} config.onChange - Callback when value changes
+ * @param {number} [config.separatorAfterIndex] - Insert separator after this option index
+ * @param {number[]} [config.mutedIndices] - Indices of options to style as muted (gray, italic)
  * @returns {HTMLElement} The combobox wrapper element
  */
-export const createCombobox = ({ options, initialValue, placeholder, onChange }) => {
+export const createCombobox = ({ options, initialValue, placeholder, onChange, separatorAfterIndex, mutedIndices }) => {
   const wrapper = document.createElement('div');
   wrapper.className = 'combobox';
 
@@ -57,15 +59,19 @@ export const createCombobox = ({ options, initialValue, placeholder, onChange })
   /* Track the committed value (value before editing started) */
   let committedValue = initialValue || '';
 
+  const mutedSet = new Set(mutedIndices ?? []);
+
   /** Render dropdown options, optionally filtered by search text. */
   const renderOptions = (filter = '') => {
     dropdown.innerHTML = '';
     const filterLower = filter.toLowerCase();
-    const filteredOptions = options.filter((opt) =>
-      opt.toLowerCase().includes(filterLower)
-    );
 
-    if (filteredOptions.length === 0) {
+    /* Build filtered list with original indices preserved */
+    const filteredWithIndices = options
+      .map((opt, idx) => ({ option: opt, originalIndex: idx }))
+      .filter(({ option }) => option.toLowerCase().includes(filterLower));
+
+    if (filteredWithIndices.length === 0) {
       const noMatch = document.createElement('li');
       noMatch.className = 'combobox-option combobox-option--empty';
       noMatch.textContent = 'No matches';
@@ -73,9 +79,12 @@ export const createCombobox = ({ options, initialValue, placeholder, onChange })
       return;
     }
 
-    filteredOptions.forEach((option) => {
+    filteredWithIndices.forEach(({ option, originalIndex }) => {
       const li = document.createElement('li');
       li.className = 'combobox-option';
+      if (mutedSet.has(originalIndex)) {
+        li.classList.add('combobox-option--muted');
+      }
       li.textContent = option;
       li.addEventListener('mousedown', (e) => {
         e.preventDefault(); /* Prevent blur from firing before selection */
@@ -85,6 +94,14 @@ export const createCombobox = ({ options, initialValue, placeholder, onChange })
         onChange(option);
       });
       dropdown.appendChild(li);
+
+      /* Add separator after specified index if not filtered */
+      if (separatorAfterIndex === originalIndex && !filter) {
+        const separator = document.createElement('li');
+        separator.className = 'combobox-separator';
+        separator.setAttribute('role', 'separator');
+        dropdown.appendChild(separator);
+      }
     });
   };
 

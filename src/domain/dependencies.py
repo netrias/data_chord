@@ -7,9 +7,9 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from src.domain.harmonize import HarmonizeService
+from src.domain.mapping_service import MappingDiscoveryService
 from src.domain.storage import FileStore, LocalStorageBackend, UploadConstraints, UploadStorage
-from src.stage_1_upload.harmonize import HarmonizeService
-from src.stage_1_upload.mapping_service import MappingDiscoveryService
 
 logger = logging.getLogger(__name__)
 

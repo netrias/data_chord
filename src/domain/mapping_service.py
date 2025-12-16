@@ -10,9 +10,8 @@ from typing import Protocol, cast
 
 from netrias_client import NetriasClient
 
+from src.domain.cde import ModelSuggestion
 from src.domain.manifest import ManifestPayload
-
-from .schemas import ModelSuggestion
 
 logger = logging.getLogger(__name__)
 DEFAULT_SAMPLE_LIMIT = 50
@@ -66,88 +65,145 @@ class MappingDiscoveryService:
         target_schema: str,
         sample_limit: int = DEFAULT_SAMPLE_LIMIT,
     ) -> tuple[dict[str, list[ModelSuggestion]], dict[str, str], ManifestPayload]:
+        """why: orchestrate CDE mapping discovery from Netrias API."""
+        raw_result = self._fetch_cde_mapping(csv_path, target_schema, sample_limit)
+        if raw_result is None:
+            return {}, {}, {"column_mappings": {}}
+
+        column_suggestions = _parse_suggestions(raw_result)
+        raw_payload = _raw_payload_from_result(raw_result)
+        column_entries = _extract_column_entries(raw_payload)
+
+        if column_entries:
+            _merge_column_entry_suggestions(column_suggestions, column_entries)
+
+        recognized = _extract_recognized_mappings(raw_payload, column_entries)
+        filtered_mapping, manual_overrides = _filter_by_recognized(recognized, column_suggestions)
+
+        _log_discovery_results(filtered_mapping, recognized, raw_payload, target_schema, manual_overrides)
+
+        manifest_payload = _manifest_payload_from_raw(raw_payload, column_entries)
+        return filtered_mapping, manual_overrides, manifest_payload
+
+    def _fetch_cde_mapping(
+        self,
+        csv_path: Path,
+        target_schema: str,
+        sample_limit: int,
+    ) -> object | None:
+        """why: call Netrias API with error handling."""
         try:
-            raw_result = self._client.discover_cde_mapping(
+            return self._client.discover_cde_mapping(
                 source_csv=csv_path,
                 target_schema=target_schema,
                 sample_limit=sample_limit,
             )
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception("Netrias mapping discovery failed", exc_info=exc)
-            return {}, {}, {"column_mappings": {}}
+            return None
 
-        suggestions = cast(Sequence[object], getattr(raw_result, "suggestions", ()))
-        column_suggestions: dict[str, list[ModelSuggestion]] = {}
-        manual_overrides: dict[str, str] = {}
-        for suggestion in suggestions:
-            column = cast(str | None, getattr(suggestion, "source_column", None))
-            if not column:
-                continue
-            option_candidates = cast(Sequence[object], getattr(suggestion, "options", ())) or ()
-            parsed_options = [_model_suggestion_from_sequence_item(option) for option in option_candidates]
-            options = [option for option in parsed_options if option is not None]
-            if options:
-                column_suggestions[column] = options
 
-        raw_payload = _raw_payload_from_result(raw_result)
-        column_entries = _extract_column_entries(raw_payload)
-        if column_entries:
-            _merge_column_entry_suggestions(column_suggestions, column_entries)
+def _parse_suggestions(raw_result: object) -> dict[str, list[ModelSuggestion]]:
+    """why: extract column suggestions from Netrias response."""
+    suggestions = cast(Sequence[object], getattr(raw_result, "suggestions", ()))
+    column_suggestions: dict[str, list[ModelSuggestion]] = {}
 
-        recognized_payload = raw_payload.get("recognized_mappings") or raw_payload.get("recognizedMappings")
-        recognized: dict[str, int] = {}
-        if isinstance(recognized_payload, dict):
-            recognized_dict = cast(dict[object, object], recognized_payload)
-            for column_key_obj, cde_id_value_obj in recognized_dict.items():
-                if isinstance(column_key_obj, str) and isinstance(cde_id_value_obj, int):
-                    recognized[column_key_obj] = cde_id_value_obj
+    for suggestion in suggestions:
+        column = cast(str | None, getattr(suggestion, "source_column", None))
+        if not column:
+            continue
+        option_candidates = cast(Sequence[object], getattr(suggestion, "options", ())) or ()
+        parsed_options = [_model_suggestion_from_sequence_item(opt) for opt in option_candidates]
+        options = [opt for opt in parsed_options if opt is not None]
+        if options:
+            column_suggestions[column] = options
 
-        if not recognized:
-            for column, entry in column_entries.items():
-                cde_id = entry.get("cde_id")
-                if isinstance(cde_id, int):
-                    recognized[column] = cde_id
+    return column_suggestions
 
-        filtered_mapping: dict[str, list[ModelSuggestion]] = {}
-        for column, cde_id in recognized.items():
-            target_label = MANUAL_CDE_ID_MAPPINGS.get(cde_id)
-            if not target_label:
-                continue
-            manual_overrides[column] = target_label
-            options = column_suggestions.get(column, [])
-            constrained = [opt for opt in options if opt.target == target_label]
-            if not constrained:
-                constrained = [ModelSuggestion(target=target_label, similarity=1.0)]
-            else:
-                constrained.sort(key=lambda opt: opt.similarity, reverse=True)
-            filtered_mapping[column] = constrained
-        logger.info(
-            "Recognized manual mappings",
-            extra={"recognized": recognized, "manual_overrides": manual_overrides},
-        )
-        if filtered_mapping:
-            preview = {key: [opt.target for opt in value[:3]] for key, value in list(filtered_mapping.items())[:5]}
-            logger.info(
-                "Netrias mapping discovery returned data",
-                extra={
-                    "column_count": len(filtered_mapping),
-                    "preview": preview,
-                    "recognized_count": len(recognized),
-                    "raw_keys": list(raw_payload.keys()),
-                },
-            )
+
+def _extract_recognized_mappings(
+    raw_payload: dict[str, object],
+    column_entries: dict[str, dict[str, object]],
+) -> dict[str, int]:
+    """why: extract CDE ID mappings from recognized_mappings or column entries."""
+    recognized_payload = raw_payload.get("recognized_mappings") or raw_payload.get("recognizedMappings")
+    recognized: dict[str, int] = {}
+
+    if isinstance(recognized_payload, dict):
+        recognized_dict = cast(dict[object, object], recognized_payload)
+        for column_key, cde_id_value in recognized_dict.items():
+            if isinstance(column_key, str) and isinstance(cde_id_value, int):
+                recognized[column_key] = cde_id_value
+
+    if not recognized:
+        for column, entry in column_entries.items():
+            cde_id = entry.get("cde_id")
+            if isinstance(cde_id, int):
+                recognized[column] = cde_id
+
+    return recognized
+
+
+def _filter_by_recognized(
+    recognized: dict[str, int],
+    column_suggestions: dict[str, list[ModelSuggestion]],
+) -> tuple[dict[str, list[ModelSuggestion]], dict[str, str]]:
+    """why: filter suggestions to only recognized CDE mappings."""
+    filtered_mapping: dict[str, list[ModelSuggestion]] = {}
+    manual_overrides: dict[str, str] = {}
+
+    for column, cde_id in recognized.items():
+        target_label = MANUAL_CDE_ID_MAPPINGS.get(cde_id)
+        if not target_label:
+            continue
+
+        manual_overrides[column] = target_label
+        options = column_suggestions.get(column, [])
+        constrained = [opt for opt in options if opt.target == target_label]
+
+        if not constrained:
+            constrained = [ModelSuggestion(target=target_label, similarity=1.0)]
         else:
-            logger.warning(
-                "Netrias mapping discovery returned zero columns",
-                extra={"target_schema": target_schema, "raw_keys": list(raw_payload.keys())},
-            )
-        manifest_payload = _manifest_payload_from_raw(raw_payload, column_entries)
-        return filtered_mapping, manual_overrides, manifest_payload
+            constrained.sort(key=lambda opt: opt.similarity, reverse=True)
+
+        filtered_mapping[column] = constrained
+
+    return filtered_mapping, manual_overrides
+
+
+def _log_discovery_results(
+    filtered_mapping: dict[str, list[ModelSuggestion]],
+    recognized: dict[str, int],
+    raw_payload: dict[str, object],
+    target_schema: str,
+    manual_overrides: dict[str, str],
+) -> None:
+    """why: log discovery results for debugging."""
+    logger.info(
+        "Recognized manual mappings",
+        extra={"recognized": recognized, "manual_overrides": manual_overrides},
+    )
+
+    if filtered_mapping:
+        preview = {key: [opt.target for opt in value[:3]] for key, value in list(filtered_mapping.items())[:5]}
+        logger.info(
+            "Netrias mapping discovery returned data",
+            extra={
+                "column_count": len(filtered_mapping),
+                "preview": preview,
+                "recognized_count": len(recognized),
+                "raw_keys": list(raw_payload.keys()),
+            },
+        )
+    else:
+        logger.warning(
+            "Netrias mapping discovery returned zero columns",
+            extra={"target_schema": target_schema, "raw_keys": list(raw_payload.keys())},
+        )
 
 
 def _raw_payload_from_result(result: object) -> dict[str, object]:
     """why: normalize the varying shapes netrias_client may return."""
-
     candidate = getattr(result, "raw", None)
     mapping = _dict_with_string_keys(candidate)
     if mapping is not None:
