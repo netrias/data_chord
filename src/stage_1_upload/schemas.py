@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from src.domain import DEFAULT_TARGET_SCHEMA
+from src.domain import DEFAULT_TARGET_SCHEMA, ModelSuggestion
 from src.domain.manifest import ManifestPayload
 
 ConfidenceBucket = Literal["low", "medium", "high"]
@@ -38,13 +38,6 @@ class ColumnPreview(BaseModel):
     sample_values: list[str]
     confidence_bucket: ConfidenceBucket
     confidence_score: float = Field(ge=0.0, le=1.0)
-
-
-class ModelSuggestion(BaseModel):
-    """why: surface an individual CDE recommendation for the UI."""
-
-    target: str
-    similarity: float
 
 
 class AnalyzeResponse(BaseModel):

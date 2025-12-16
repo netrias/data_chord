@@ -12,7 +12,16 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 
+from pydantic import BaseModel
+
 DEFAULT_TARGET_SCHEMA: str = "ccdi"
+
+
+class ModelSuggestion(BaseModel):
+    """why: surface an individual CDE recommendation for the UI."""
+
+    target: str
+    similarity: float
 
 
 class CDEField(str, Enum):
@@ -107,3 +116,42 @@ def normalize_target_name(selection: str | None) -> CDEField | None:
     if not slug:
         return None
     return TARGET_ALIAS_MAP.get(slug)
+
+
+@dataclass(frozen=True)
+class ColumnMapping:
+    """why: represent a single column's mapping decision from Stage 2."""
+
+    column_name: str
+    target: CDEField | None  # None means explicitly "No mapping"
+
+
+@dataclass(frozen=True)
+class ColumnMappingSet:
+    """why: typed container for all column mappings from Stage 2 to Stage 3."""
+
+    mappings: tuple[ColumnMapping, ...]
+
+    @classmethod
+    def from_dict(cls, overrides: Mapping[str, str]) -> ColumnMappingSet:
+        """why: parse raw string overrides into typed mappings."""
+        mappings: list[ColumnMapping] = []
+        for column, selection in overrides.items():
+            target = normalize_target_name(selection)
+            mappings.append(ColumnMapping(column_name=column, target=target))
+        return cls(mappings=tuple(mappings))
+
+    def to_dict(self) -> dict[str, str | None]:
+        """why: serialize for JSON transport."""
+        return {
+            m.column_name: m.target.value if m.target else None
+            for m in self.mappings
+        }
+
+    def get_applied(self) -> list[ColumnMapping]:
+        """why: return mappings that have a CDE target."""
+        return [m for m in self.mappings if m.target is not None]
+
+    def get_removed(self) -> list[str]:
+        """why: return column names explicitly set to 'No mapping'."""
+        return [m.column_name for m in self.mappings if m.target is None]

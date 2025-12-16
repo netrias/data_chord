@@ -9,6 +9,9 @@ from src.domain.cde import DEFAULT_TARGET_SCHEMA as DEFAULT_TARGET_SCHEMA
 from src.domain.cde import TARGET_ALIAS_MAP as TARGET_ALIAS_MAP
 from src.domain.cde import CDEDefinition as CDEDefinition
 from src.domain.cde import CDEField as CDEField
+from src.domain.cde import ColumnMapping as ColumnMapping
+from src.domain.cde import ColumnMappingSet as ColumnMappingSet
+from src.domain.cde import ModelSuggestion as ModelSuggestion
 from src.domain.cde import get_all_cdes as get_all_cdes
 from src.domain.cde import get_cde as get_cde
 from src.domain.cde import get_cde_labels as get_cde_labels

@@ -12,7 +12,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from src.domain import DEFAULT_TARGET_SCHEMA
+from src.domain import DEFAULT_TARGET_SCHEMA, ColumnMappingSet
 from src.domain.dependencies import get_harmonize_service, get_upload_storage
 from src.domain.manifest import ManifestPayload, ManifestSummary, read_manifest_parquet
 from src.stage_1_upload.schemas import (
@@ -59,12 +59,13 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
 
     stored_manifest = _storage.load_manifest(payload.file_id)
     manifest_payload = payload.manifest or cast(ManifestPayload | None, stored_manifest)
+    column_mappings = ColumnMappingSet.from_dict(payload.manual_overrides)
     harmonizer = get_harmonize_service()
     result = await run_in_threadpool(
         harmonizer.run,
         file_path=meta.saved_path,
         target_schema=payload.target_schema,
-        manual_overrides=payload.manual_overrides,
+        column_mappings=column_mappings,
         manifest=manifest_payload,
     )
     _router_logger.info(

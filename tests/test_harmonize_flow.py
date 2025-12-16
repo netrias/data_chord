@@ -217,8 +217,9 @@ async def test_harmonize_without_client_returns_stubbed_job(
     # Given: An uploaded file, but Netrias client is unavailable
     _ = await upload_and_analyze(app_client, sample_csv_path)
 
-    with patch("src.stage_1_upload.harmonize.HarmonizeService._build_client", return_value=None):
-        from src.stage_1_upload.harmonize import HarmonizeService
+    with patch("src.domain.harmonize.HarmonizeService._build_client", return_value=None):
+        from src.domain import ColumnMappingSet
+        from src.domain.harmonize import HarmonizeService
 
         service = HarmonizeService()
         service._client = None
@@ -227,7 +228,7 @@ async def test_harmonize_without_client_returns_stubbed_job(
         result = service.run(
             file_path=Path("/tmp/test.csv"),
             target_schema=TEST_TARGET_SCHEMA,
-            manual_overrides={},
+            column_mappings=ColumnMappingSet.from_dict({}),
             manifest=None,
         )
 

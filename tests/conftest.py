@@ -115,8 +115,8 @@ def mock_netrias_client() -> Generator[MagicMock]:
     )
 
     with (
-        patch("src.stage_1_upload.mapping_service.NetriasClient", return_value=mock_client),
-        patch("src.stage_1_upload.harmonize.NetriasClient", return_value=mock_client),
+        patch("src.domain.mapping_service.NetriasClient", return_value=mock_client),
+        patch("src.domain.harmonize.NetriasClient", return_value=mock_client),
     ):
         yield mock_client
 
