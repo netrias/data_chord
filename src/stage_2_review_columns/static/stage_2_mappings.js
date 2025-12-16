@@ -8,7 +8,8 @@ import { createCombobox } from '/assets/shared/combobox.js';
 
 const config = window.stageTwoConfig ?? {};
 const STORAGE_KEY = config.storageKey ?? 'stage2Payload';
-const manualOptions = config.manualOptions ?? [];
+const NO_MAPPING_OPTION = 'No mapping';
+const manualOptions = [NO_MAPPING_OPTION, ...(config.manualOptions ?? [])];
 const stageThreeUrl = config.stageThreeUrl ?? '/stage-3';
 const stageThreePayloadKey = config.stageThreePayloadKey ?? 'stage3HarmonizePayload';
 const stageThreeJobKey = config.stageThreeJobKey ?? 'stage3HarmonizeJob';
@@ -102,6 +103,26 @@ const _persistStageThreePayload = (body) => {
   }
 };
 
+/** Determine row state and icon based on AI recommendation and user selection. */
+const _determineRowState = (hasRecommendation, aiRecommendation, manualSelection) => {
+  const isNoMapping = manualSelection === NO_MAPPING_OPTION;
+  const isOverrideDifferentFromAI =
+    manualSelection &&
+    !isNoMapping &&
+    manualSelection.toLowerCase() !== (aiRecommendation ?? '').toLowerCase();
+
+  if (isNoMapping) {
+    return { state: 'no-mapping', icon: '—' };
+  }
+  if (isOverrideDifferentFromAI) {
+    return { state: 'override', icon: '✎' };
+  }
+  if (hasRecommendation || manualSelection) {
+    return { state: 'recommended', icon: '✓' };
+  }
+  return { state: 'no-recommendation', icon: '○' };
+};
+
 /** Build and render a single mapping row for a column. */
 const _buildMappingRow = (column) => {
   const suggestions = _getColumnSuggestions(column);
@@ -114,23 +135,11 @@ const _buildMappingRow = (column) => {
   const row = document.createElement('div');
   const hasRecommendation = Boolean(topTarget);
   const aiRecommendation = topTarget?.target ?? null;
-  const isOverrideDifferentFromAI =
-    manualSelection &&
-    manualSelection.toLowerCase() !== (aiRecommendation ?? '').toLowerCase();
-
-  /* Determine row state and corresponding icon */
-  let rowState;
-  let statusIcon;
-  if (isOverrideDifferentFromAI) {
-    rowState = 'override';
-    statusIcon = '✎'; /* Pencil - manual edit */
-  } else if (hasRecommendation || manualSelection) {
-    rowState = 'recommended';
-    statusIcon = '✓'; /* Checkmark - AI recommendation accepted */
-  } else {
-    rowState = 'no-recommendation';
-    statusIcon = '○'; /* Empty circle - no recommendation */
-  }
+  const { state: rowState, icon: statusIcon } = _determineRowState(
+    hasRecommendation,
+    aiRecommendation,
+    manualSelection
+  );
   row.className = `mapping-row mapping-row--${rowState}`;
 
   /* Status icon cell (first column, no header) */
@@ -162,7 +171,9 @@ const _buildMappingRow = (column) => {
   const combobox = createCombobox({
     options: manualOptions,
     initialValue: manualSelection,
-    placeholder: topTarget ? 'Keep AI suggestion' : 'No ontology',
+    placeholder: topTarget ? 'Keep AI suggestion' : NO_MAPPING_OPTION,
+    separatorAfterIndex: 0,
+    mutedIndices: [0],
     onChange: (newValue) => {
       if (newValue) {
         state.manualSelections.set(column.column_name, newValue);

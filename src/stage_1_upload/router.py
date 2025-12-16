@@ -11,13 +11,13 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from src.domain import DEFAULT_TARGET_SCHEMA, ModelSuggestion
+
 from .dependencies import get_mapping_service, get_upload_constraints, get_upload_storage
 from .schemas import (
-    DEFAULT_TARGET_SCHEMA,
     AnalyzeRequest,
     AnalyzeResponse,
     ColumnPreview,
-    ModelSuggestion,
     UploadResponse,
 )
 from .services import (

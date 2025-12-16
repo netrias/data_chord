@@ -462,6 +462,161 @@ describe('Combobox Widget', () => {
     });
   });
 
+  describe('Separator and Muted Options', () => {
+    it('Separator appears after specified index when unfiltered', () => {
+      // Given: A combobox with separatorAfterIndex set to 0
+      const combobox = createCombobox({
+        options: OPTIONS,
+        initialValue: '',
+        placeholder: 'Select ontology',
+        separatorAfterIndex: 0,
+        onChange: () => {},
+      });
+      dom.window.document.body.appendChild(combobox);
+      const inputEl = combobox.querySelector('.combobox-input');
+      const dropdown = combobox.querySelector('.combobox-dropdown');
+
+      // When: User focuses to open dropdown (unfiltered)
+      focus(inputEl);
+
+      // Then: A separator element appears after the first option
+      const separator = dropdown.querySelector('.combobox-separator');
+      assert.ok(separator, 'Separator should exist');
+      assert.strictEqual(separator.getAttribute('role'), 'separator', 'Should have separator role');
+
+      const children = Array.from(dropdown.children);
+      const separatorIndex = children.indexOf(separator);
+      assert.strictEqual(separatorIndex, 1, 'Separator should appear after first option (index 1)');
+
+      combobox.remove();
+    });
+
+    it('Separator is hidden when filtering', () => {
+      // Given: A combobox with separatorAfterIndex set
+      const combobox = createCombobox({
+        options: OPTIONS,
+        initialValue: '',
+        placeholder: 'Select ontology',
+        separatorAfterIndex: 0,
+        onChange: () => {},
+      });
+      dom.window.document.body.appendChild(combobox);
+      const inputEl = combobox.querySelector('.combobox-input');
+      const dropdown = combobox.querySelector('.combobox-dropdown');
+      focus(inputEl);
+
+      // When: User types to filter options
+      input(inputEl, 'morph');
+
+      // Then: Separator is not shown during filtering
+      const separator = dropdown.querySelector('.combobox-separator');
+      assert.ok(!separator, 'Separator should not appear when filtering');
+
+      combobox.remove();
+    });
+
+    it('Muted option has muted class applied', () => {
+      // Given: A combobox with mutedIndices including index 0
+      const combobox = createCombobox({
+        options: OPTIONS,
+        initialValue: '',
+        placeholder: 'Select ontology',
+        mutedIndices: [0],
+        onChange: () => {},
+      });
+      dom.window.document.body.appendChild(combobox);
+      const inputEl = combobox.querySelector('.combobox-input');
+      const dropdown = combobox.querySelector('.combobox-dropdown');
+
+      // When: User focuses to open dropdown
+      focus(inputEl);
+
+      // Then: First option has muted class, others do not
+      const options = dropdown.querySelectorAll('.combobox-option:not(.combobox-option--empty)');
+      assert.ok(options[0].classList.contains('combobox-option--muted'), 'First option should be muted');
+      assert.ok(!options[1].classList.contains('combobox-option--muted'), 'Second option should not be muted');
+
+      combobox.remove();
+    });
+
+    it('Multiple muted indices are applied correctly', () => {
+      // Given: A combobox with multiple mutedIndices
+      const combobox = createCombobox({
+        options: OPTIONS,
+        initialValue: '',
+        placeholder: 'Select ontology',
+        mutedIndices: [0, 2],
+        onChange: () => {},
+      });
+      dom.window.document.body.appendChild(combobox);
+      const inputEl = combobox.querySelector('.combobox-input');
+      const dropdown = combobox.querySelector('.combobox-dropdown');
+
+      // When: User focuses to open dropdown
+      focus(inputEl);
+
+      // Then: Options at indices 0 and 2 have muted class
+      const options = dropdown.querySelectorAll('.combobox-option:not(.combobox-option--empty)');
+      assert.ok(options[0].classList.contains('combobox-option--muted'), 'Option at index 0 should be muted');
+      assert.ok(!options[1].classList.contains('combobox-option--muted'), 'Option at index 1 should not be muted');
+      assert.ok(options[2].classList.contains('combobox-option--muted'), 'Option at index 2 should be muted');
+
+      combobox.remove();
+    });
+
+    it('Muted option preserves original index when filtering', () => {
+      // Given: A combobox with first option muted
+      const testOptions = ['No mapping', 'primary_diagnosis', 'morphology'];
+      const combobox = createCombobox({
+        options: testOptions,
+        initialValue: '',
+        placeholder: 'Select ontology',
+        mutedIndices: [0],
+        onChange: () => {},
+      });
+      dom.window.document.body.appendChild(combobox);
+      const inputEl = combobox.querySelector('.combobox-input');
+      const dropdown = combobox.querySelector('.combobox-dropdown');
+      focus(inputEl);
+
+      // When: User filters to show only "No mapping"
+      input(inputEl, 'No map');
+
+      // Then: The filtered "No mapping" option still has muted class
+      const options = dropdown.querySelectorAll('.combobox-option:not(.combobox-option--empty)');
+      assert.strictEqual(options.length, 1, 'Should show one filtered option');
+      assert.ok(options[0].classList.contains('combobox-option--muted'), 'Filtered option should retain muted class');
+
+      combobox.remove();
+    });
+
+    it('Selecting muted option works normally', () => {
+      // Given: A combobox with muted first option
+      let receivedValue = null;
+      const combobox = createCombobox({
+        options: OPTIONS,
+        initialValue: '',
+        placeholder: 'Select ontology',
+        mutedIndices: [0],
+        onChange: (value) => { receivedValue = value; },
+      });
+      dom.window.document.body.appendChild(combobox);
+      const inputEl = combobox.querySelector('.combobox-input');
+      const dropdown = combobox.querySelector('.combobox-dropdown');
+      focus(inputEl);
+      const firstOption = dropdown.querySelector('.combobox-option');
+
+      // When: User clicks the muted option
+      mousedown(firstOption);
+
+      // Then: Selection works normally despite muted styling
+      assert.strictEqual(receivedValue, OPTIONS[0], 'onChange should receive muted option value');
+      assert.strictEqual(inputEl.value, OPTIONS[0], 'Input should have muted option value');
+
+      combobox.remove();
+    });
+  });
+
   describe('REQ 5: Toggle Button', () => {
     it('5a. Toggle opens dropdown when closed', () => {
       // Given: A combobox with dropdown closed
