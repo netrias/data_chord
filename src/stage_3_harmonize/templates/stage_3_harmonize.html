@@ -10,32 +10,41 @@
   </head>
   <body>
     <nav class="progress-tracker">
-      <ol class="progress-track">
-        <li class="step complete" data-stage="upload" data-url="{{ request.url_for('stage_one_upload_page') }}">
-          <span class="step-index">1</span>
-          <span class="step-label">Upload</span>
-        </li>
-        <li class="connector complete"></li>
-        <li class="step complete" data-stage="mapping" data-url="{{ request.url_for('stage_two_mapping_page') }}">
-          <span class="step-index">2</span>
-          <span class="step-label">Map</span>
-        </li>
-        <li class="connector complete"></li>
-        <li class="step active" data-stage="harmonize" data-url="{{ request.url_for('stage_three_entry') }}">
-          <span class="step-index">3</span>
-          <span class="step-label">Harmonize</span>
-        </li>
-        <li class="connector"></li>
-        <li class="step" data-stage="review" data-url="{{ request.url_for('stage_four_review_page') }}">
-          <span class="step-index">4</span>
-          <span class="step-label">Review</span>
-        </li>
-        <li class="connector"></li>
-        <li class="step" data-stage="export" data-url="{{ request.url_for('stage_five_review_page') }}">
-          <span class="step-index">5</span>
-          <span class="step-label">Download</span>
-        </li>
-      </ol>
+      <div class="progress-tracker-row">
+        <ol class="progress-track">
+          <li class="step complete" data-stage="upload" data-url="{{ request.url_for('stage_one_upload_page') }}">
+            <span class="step-index">1</span>
+            <span class="step-label">Upload</span>
+          </li>
+          <li class="connector complete"></li>
+          <li class="step complete" data-stage="mapping" data-url="{{ request.url_for('stage_two_mapping_page') }}">
+            <span class="step-index">2</span>
+            <span class="step-label">Map</span>
+          </li>
+          <li class="connector complete"></li>
+          <li class="step active" data-stage="harmonize" data-url="{{ request.url_for('stage_three_entry') }}">
+            <span class="step-index">3</span>
+            <span class="step-label">Harmonize</span>
+          </li>
+          <li class="connector"></li>
+          <li class="step" data-stage="review" data-url="{{ request.url_for('stage_four_review_page') }}">
+            <span class="step-index">4</span>
+            <span class="step-label">Review</span>
+          </li>
+          <li class="connector"></li>
+          <li class="step" data-stage="export" data-url="{{ request.url_for('stage_five_review_page') }}">
+            <span class="step-index">5</span>
+            <span class="step-label">Download</span>
+          </li>
+        </ol>
+        <div class="progress-tracker-action">
+          <button id="reviewButton" class="btn-3d" type="button" disabled>
+            <span class="btn-3d-shadow" aria-hidden="true"></span>
+            <span class="btn-3d-edge" aria-hidden="true"></span>
+            <span class="btn-3d-front">Review →</span>
+          </button>
+        </div>
+      </div>
       <div id="stepInstruction" class="step-instruction">
         <p class="step-instruction-text"></p>
         <span class="step-instruction-tooltip" aria-hidden="true"></span>
@@ -68,10 +77,6 @@
     </details>
 
     <main class="stage-shell">
-      <div class="stage-nav">
-        <button class="nav-btn nav-back" type="button" data-nav-target="{{ request.url_for('stage_two_mapping_page') }}">Back</button>
-        <button id="reviewButton" class="nav-btn nav-forward netrias-btn" type="button" disabled>Review batches</button>
-      </div>
       <section id="stageThreeMetrics" class="stage-card progress-card">
         <header class="stage-section-header">
           <h2 id="stageThreeTitle" class="stage-title">Harmonizing</h2>
