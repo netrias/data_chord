@@ -7,12 +7,13 @@ from pathlib import Path
 import pytest
 from httpx import AsyncClient
 
-from src.stage_1_upload.services import UploadStorage
+from src.domain.storage import UploadStorage
 from tests.conftest import (
     TEST_CSV_CONTENT_TYPE,
     TEST_TARGET_SCHEMA,
     create_harmonized_csv,
     create_manifest_for_file,
+    create_manifest_with_manual_override,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -144,15 +145,17 @@ async def test_review_to_summary_journey(
 
     meta = temp_storage.load(file_id)
     assert meta is not None
-    create_harmonized_csv(meta.saved_path, {
+    changes = {
         0: {"primary_diagnosis": "Changed1"},
         1: {"therapeutic_agents": "Changed2"},
-    })
+    }
+    create_harmonized_csv(meta.saved_path, changes)
+    create_manifest_for_file(temp_storage, file_id, meta.saved_path, changes)
 
     # When: User requests summary of all changes
     summary_response = await app_client.post(
         "/stage-5/summary",
-        json={"file_id": file_id, "manual_columns": []},
+        json={"file_id": file_id},
     )
 
     # Then: Summary shows column change statistics
@@ -229,7 +232,7 @@ async def test_full_pipeline_journey(
     # When: User requests final summary
     summary_response = await app_client.post(
         "/stage-5/summary",
-        json={"file_id": file_id, "manual_columns": []},
+        json={"file_id": file_id},
     )
     # Then: Summary shows column summaries with changes
     assert summary_response.status_code == 200
@@ -239,14 +242,14 @@ async def test_full_pipeline_journey(
     assert total_ai_changes >= 2
 
 
-async def test_manual_columns_flow_through_pipeline(
+async def test_manual_overrides_counted_in_summary(
     app_client: AsyncClient,
     temp_storage: UploadStorage,
     sample_csv_path: Path,
 ) -> None:
-    """Manual column designation flows from harmonize through review to summary."""
+    """Manual overrides in manifest are correctly categorized in summary statistics."""
 
-    # Given: An uploaded file with harmonized output containing changes
+    # Given: An uploaded file with a manifest containing manual overrides
     upload_response = await app_client.post(
         "/stage-1/upload",
         files={"file": (sample_csv_path.name, sample_csv_path.read_bytes(), TEST_CSV_CONTENT_TYPE)},
@@ -255,35 +258,17 @@ async def test_manual_columns_flow_through_pipeline(
 
     meta = temp_storage.load(file_id)
     assert meta is not None
-    changes = {0: {"primary_diagnosis": "Manual Override Value"}}
-    create_harmonized_csv(meta.saved_path, changes)
-    create_manifest_for_file(temp_storage, file_id, meta.saved_path, changes)
+    create_harmonized_csv(meta.saved_path, {0: {"primary_diagnosis": "User Manual Override"}})
+    create_manifest_with_manual_override(temp_storage, file_id, meta.saved_path)
 
-    # When: User marks primary_diagnosis as manual column in review
-    rows_response = await app_client.post(
-        "/stage-4/rows",
-        json={"file_id": file_id, "manual_columns": ["primary_diagnosis"]},
-    )
-
-    # Then: Rows are returned with cell data from manifest
-    rows_data = rows_response.json()
-    changed_cell = None
-    for row in rows_data["rows"]:
-        for cell in row["cells"]:
-            if cell["columnKey"] == "primary_diagnosis" and cell["isChanged"]:
-                changed_cell = cell
-                break
-
-    assert changed_cell is not None
-    assert changed_cell["confidence"] > 0  # confidence comes from manifest
-
-    # When: Summary is requested with same manual columns
+    # When: Summary is requested
     summary_response = await app_client.post(
         "/stage-5/summary",
-        json={"file_id": file_id, "manual_columns": ["primary_diagnosis"]},
+        json={"file_id": file_id},
     )
 
-    # Then: Changes are counted as manual (not AI) in summary
+    # Then: Changes are counted as manual override (not AI) in summary
+    assert summary_response.status_code == 200
     summary = summary_response.json()
     total_manual_changes = sum(col["manual_changes"] for col in summary["column_summaries"])
     assert total_manual_changes >= 1
