@@ -259,7 +259,10 @@ const _fetchPayload = async (fileId, targetSchema) => {
       target_schema: targetSchema || config.targetSchema,
     }),
   });
-  const payload = await response.json().catch(() => ({}));
+  const payload = await response.json().catch((err) => {
+    console.error('Failed to parse response JSON:', err);
+    return {};
+  });
   if (!response.ok) {
     throw new Error(payload.detail || 'Unable to fetch mapping data');
   }

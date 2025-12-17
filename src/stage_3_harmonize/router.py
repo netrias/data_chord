@@ -12,15 +12,16 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from src.domain import DEFAULT_TARGET_SCHEMA, ColumnMappingSet
-from src.domain.dependencies import get_harmonize_service, get_upload_storage
-from src.domain.manifest import ManifestPayload, ManifestSummary, read_manifest_parquet
-from src.stage_1_upload.schemas import (
+from src.domain import (
+    DEFAULT_TARGET_SCHEMA,
+    ColumnMappingSet,
     HarmonizeRequest,
     HarmonizeResponse,
     ManifestRowSchema,
     ManifestSummarySchema,
 )
+from src.domain.dependencies import get_harmonize_service, get_upload_storage
+from src.domain.manifest import ManifestPayload, ManifestSummary, read_manifest_parquet
 
 MODULE_DIR = Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"

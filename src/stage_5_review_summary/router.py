@@ -2,7 +2,7 @@
 Provide the final download step for harmonized data.
 
 Generate downloadable zip files containing harmonized CSV and parquet manifest,
-and compute summary statistics comparing original vs harmonized datasets.
+and compute summary statistics from the harmonization manifest.
 """
 
 from __future__ import annotations
@@ -23,8 +23,9 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from src.domain import SessionKey
+from src.domain import ChangeType, SessionKey
 from src.domain.dependencies import get_file_store, get_upload_storage
+from src.domain.manifest import ManifestRow, ManifestSummary, ManualOverride, read_manifest_parquet
 from src.domain.storage import FileType, UploadStorage
 
 _logger = logging.getLogger(__name__)
@@ -39,6 +40,8 @@ _ERROR_UPLOAD_NOT_FOUND = "Upload not found. Please restart the harmonization pr
 _ERROR_DATASET_NOT_FOUND = "Required dataset file not found."
 _ERROR_HARMONIZED_NOT_FOUND = "Harmonized file not found. Please rerun Stage 3."
 _ERROR_DATASET_UNREADABLE = "Unable to read harmonized dataset."
+_ERROR_MANIFEST_NOT_FOUND = "Harmonization manifest not found. Please rerun Stage 3."
+_ERROR_MANIFEST_UNREADABLE = "Unable to read harmonization manifest."
 
 _templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 
@@ -49,7 +52,6 @@ class StageFiveRequest(BaseModel):
     """why: unified request payload for summary and download operations."""
 
     file_id: str
-    manual_columns: list[str] = []
 
 
 class ColumnSummary(BaseModel):
@@ -85,20 +87,17 @@ async def render_stage_five(request: Request) -> HTMLResponse:
 
 @stage_five_router.post("/summary", response_model=StageFiveSummaryResponse, name="stage_five_summary")
 async def summarize_harmonized_results(payload: StageFiveRequest) -> StageFiveSummaryResponse:
-    """why: compute change statistics by comparing original and harmonized CSVs."""
+    """why: compute change statistics from the harmonization manifest parquet."""
     storage: UploadStorage = get_upload_storage()
-    meta = storage.load(payload.file_id)
-    if not meta:
-        raise HTTPException(status_code=404, detail=_ERROR_UPLOAD_NOT_FOUND)
+    manifest_path = storage.load_harmonization_manifest_path(payload.file_id)
+    if manifest_path is None:
+        raise HTTPException(status_code=404, detail=_ERROR_MANIFEST_NOT_FOUND)
 
-    harmonized_path = _resolve_harmonized_path(meta.saved_path, payload.file_id)
-    _, original_rows = _load_csv(meta.saved_path)
-    headers, harmonized_rows = _load_csv(harmonized_path)
-    if not headers:
-        raise HTTPException(status_code=400, detail=_ERROR_DATASET_UNREADABLE)
+    manifest_summary = read_manifest_parquet(manifest_path)
+    if manifest_summary is None:
+        raise HTTPException(status_code=400, detail=_ERROR_MANIFEST_UNREADABLE)
 
-    manual_set = {col.strip().lower() for col in payload.manual_columns if col and col.strip()}
-    return _build_summary(headers, original_rows, harmonized_rows, manual_set)
+    return _build_summary_from_manifest(manifest_summary)
 
 
 @stage_five_router.post("/download", name="stage_five_download")
@@ -197,8 +196,8 @@ def _apply_overrides(
     return result
 
 
-def _rows_to_csv_bytes(headers: list[str], rows: list[dict[str, str]]) -> str:
-    """why: serialize rows to CSV format for inclusion in zip archive."""
+def _rows_to_csv_string(headers: list[str], rows: list[dict[str, str]]) -> str:
+    """why: serialize rows to CSV string for inclusion in zip archive."""
     csv_output = io.StringIO()
     writer = csv.DictWriter(csv_output, fieldnames=headers, lineterminator="\n")
     writer.writeheader()
@@ -215,7 +214,7 @@ def _create_zip_buffer(
     """why: package CSV and parquet into a zip archive."""
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        csv_content = _rows_to_csv_bytes(headers, rows)
+        csv_content = _rows_to_csv_string(headers, rows)
         zf.writestr(f"{base_name}.csv", csv_content)
 
         if manifest_path and manifest_path.exists():
@@ -235,76 +234,71 @@ def _create_streaming_response(base_name: str, zip_buffer: io.BytesIO) -> Stream
     )
 
 
-def _tally_cell_change(
-    original_value: str,
-    harmonized_value: str,
-    column: str,
-    manual_set: set[str],
-    ai_counts: dict[str, int],
-    manual_counts: dict[str, int],
-) -> None:
-    """why: categorize a single cell change as AI or manual."""
-    if original_value == harmonized_value:
-        return
-    if column.lower() in manual_set:
-        manual_counts[column] += 1
-    else:
-        ai_counts[column] += 1
+def _get_latest_override_value(overrides: list[ManualOverride]) -> str | None:
+    """why: extract the most recent manual override value, if any."""
+    if not overrides:
+        return None
+    return overrides[-1].value
 
 
-def _compute_column_metrics(
-    headers: list[str],
-    original_rows: list[dict[str, str]],
-    harmonized_rows: list[dict[str, str]],
-    manual_set: set[str],
-) -> tuple[dict[str, int], dict[str, int], dict[str, set[str]]]:
-    """why: calculate AI changes, manual changes, and distinct terms per column."""
-    total_rows = min(len(original_rows), len(harmonized_rows))
-    ai_counts: dict[str, int] = defaultdict(int)
-    manual_counts: dict[str, int] = defaultdict(int)
-    distinct_terms: dict[str, set[str]] = defaultdict(set)
+def _classify_change(row: ManifestRow) -> ChangeType:
+    """why: classify a manifest row's change type based on override presence and value.
 
-    for idx in range(total_rows):
-        original_row = original_rows[idx]
-        harmonized_row = harmonized_rows[idx]
-        for column in headers:
-            original_value = (original_row.get(column) or "").strip()
-            harmonized_value = (harmonized_row.get(column) or "").strip()
-            if original_value:
-                distinct_terms[column].add(original_value)
-            _tally_cell_change(original_value, harmonized_value, column, manual_set, ai_counts, manual_counts)
+    Classification logic:
+    - UNCHANGED: The final value equals the original (no effective change)
+    - AI_HARMONIZED: AI changed the value, or user accepted AI suggestion via override
+    - MANUAL_OVERRIDE: User provided an override that differs from AI suggestion
 
-    return ai_counts, manual_counts, distinct_terms
+    Values are compared exactly as stored - no normalization or sanitization.
+    """
+    original = row.to_harmonize
+    ai_value = row.top_harmonization
+    latest_override = _get_latest_override_value(row.manual_overrides)
+
+    final_value = latest_override if latest_override is not None else ai_value
+
+    if original == final_value:
+        return ChangeType.UNCHANGED
+
+    if latest_override is not None and latest_override != ai_value:
+        return ChangeType.MANUAL_OVERRIDE
+
+    return ChangeType.AI_HARMONIZED
 
 
-def _create_summary_response(
-    headers: list[str],
-    ai_counts: dict[str, int],
-    manual_counts: dict[str, int],
-    distinct_terms: dict[str, set[str]],
-) -> StageFiveSummaryResponse:
-    """why: transform metrics into the summary response shape."""
+def _build_summary_from_manifest(summary: ManifestSummary) -> StageFiveSummaryResponse:
+    """why: aggregate change counts per column from manifest rows.
+
+    Uses column_id as the key for aggregation since column names may not be unique.
+    """
+    ai_counts: dict[int, int] = defaultdict(int)
+    manual_counts: dict[int, int] = defaultdict(int)
+    distinct_terms: dict[int, int] = defaultdict(int)
+    column_names: dict[int, str] = {}
+
+    for row in summary.rows:
+        col_id = row.column_id
+        distinct_terms[col_id] += 1
+        column_names[col_id] = row.column_name
+
+        change_type = _classify_change(row)
+        match change_type:
+            case ChangeType.AI_HARMONIZED:
+                ai_counts[col_id] += 1
+            case ChangeType.MANUAL_OVERRIDE:
+                manual_counts[col_id] += 1
+            case ChangeType.UNCHANGED:
+                pass
+
+    column_ids = sorted(distinct_terms.keys())
     return StageFiveSummaryResponse(
         column_summaries=[
             ColumnSummary(
-                column=column,
-                distinct_terms=len(distinct_terms[column]),
-                ai_changes=ai_counts[column],
-                manual_changes=manual_counts[column],
+                column=column_names[col_id],
+                distinct_terms=distinct_terms[col_id],
+                ai_changes=ai_counts[col_id],
+                manual_changes=manual_counts[col_id],
             )
-            for column in headers
+            for col_id in column_ids
         ]
     )
-
-
-def _build_summary(
-    headers: list[str],
-    original_rows: list[dict[str, str]],
-    harmonized_rows: list[dict[str, str]],
-    manual_set: set[str],
-) -> StageFiveSummaryResponse:
-    """why: aggregate change counts per column for the summary UI."""
-    ai_counts, manual_counts, distinct_terms = _compute_column_metrics(
-        headers, original_rows, harmonized_rows, manual_set
-    )
-    return _create_summary_response(headers, ai_counts, manual_counts, distinct_terms)

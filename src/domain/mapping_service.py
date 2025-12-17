@@ -35,7 +35,7 @@ class MappingClientProtocol(Protocol):
         target_schema: str,
         sample_limit: int = DEFAULT_SAMPLE_LIMIT,
     ) -> object:
-        ...
+        pass
 
     def discover_cde_mapping(
         self,
@@ -44,7 +44,7 @@ class MappingClientProtocol(Protocol):
         target_schema: str,
         sample_limit: int = DEFAULT_SAMPLE_LIMIT,
     ) -> object:
-        ...
+        pass
 
 class MappingDiscoveryService:
     """why: wrap Netrias mapping discovery with safe fallbacks."""
