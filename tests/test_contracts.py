@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from httpx import AsyncClient
 
-from src.stage_1_upload.services import UploadStorage
+from src.domain.storage import UploadStorage
 from tests.conftest import (
     TEST_CSV_CONTENT_TYPE,
     TEST_TARGET_SCHEMA,
@@ -382,16 +382,17 @@ class TestSummaryContract:
     ) -> None:
         """Summary response includes all StageFiveSummaryResponse fields."""
 
-        # Given: An uploaded file with harmonized output available
+        # Given: An uploaded file with harmonized output and manifest available
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
         create_harmonized_csv(meta.saved_path, {})
+        create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
 
         # When: Summary is requested
         response = await app_client.post(
             "/stage-5/summary",
-            json={"file_id": file_id, "manual_columns": []},
+            json={"file_id": file_id},
         )
 
         # Then: Response contains column summaries
@@ -408,16 +409,17 @@ class TestSummaryContract:
     ) -> None:
         """Each column summary has ColumnSummary fields."""
 
-        # Given: An uploaded file with harmonized output available
+        # Given: An uploaded file with harmonized output and manifest available
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
         create_harmonized_csv(meta.saved_path, {})
+        create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
 
         # When: Summary is requested
         response = await app_client.post(
             "/stage-5/summary",
-            json={"file_id": file_id, "manual_columns": []},
+            json={"file_id": file_id},
         )
 
         # Then: Each column summary contains required ColumnSummary fields

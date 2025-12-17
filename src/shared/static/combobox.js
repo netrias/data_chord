@@ -26,6 +26,9 @@
  *    - If open: close dropdown
  */
 
+/** Delay before processing blur to allow mousedown on option to fire first. */
+const BLUR_DELAY_MS = 150;
+
 /**
  * Create a combobox widget element.
  * @param {Object} config - Configuration object
@@ -143,7 +146,7 @@ export const createCombobox = ({ options, initialValue, placeholder, onChange, s
         input.value = committedValue;
         input.placeholder = placeholder;
       }
-    }, 150); /* Delay to allow mousedown on option to fire first */
+    }, BLUR_DELAY_MS);
   });
 
   /* REQ 5: Toggle button shows all options and focuses input */

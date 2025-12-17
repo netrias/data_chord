@@ -88,7 +88,7 @@ const _loadSourceContext = () => {
     const stored = raw ? JSON.parse(raw) : null;
     const id = stored?.request?.file_id;
     if (!id) return null;
-    return { fileId: id, manualColumns: Object.keys(stored?.request?.manual_overrides ?? {}) };
+    return { fileId: id };
   } catch (error) {
     console.warn('Failed to load source context:', error);
     return null;
@@ -174,7 +174,7 @@ const _fetchSummary = async () => {
     const response = await fetch(_summaryEndpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file_id: context.fileId, manual_columns: context.manualColumns }),
+      body: JSON.stringify({ file_id: context.fileId }),
     });
 
     if (!response.ok) {

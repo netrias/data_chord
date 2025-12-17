@@ -321,3 +321,46 @@ def create_manifest_for_file(
     manifest_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = manifest_dir / f"{file_id}_harmonization.parquet"
     return create_test_manifest_parquet(manifest_path, manifest_rows)
+
+
+def create_manifest_with_manual_override(
+    storage: UploadStorage,
+    file_id: str,
+    original_path: Path,
+) -> Path:
+    """why: create a manifest with a manual override for testing summary categorization."""
+    import csv as csv_module
+
+    with original_path.open("r", newline="", encoding="utf-8") as f:
+        reader = csv_module.DictReader(f)
+        original_rows = list(reader)
+        headers = list(reader.fieldnames or [])
+
+    if not headers:
+        raise ValueError("CSV must have headers")
+
+    col_name = headers[0]
+    original_value = original_rows[0].get(col_name, "") if original_rows else ""
+    ai_harmonized_value = "AI Harmonized Value"
+    manual_override_value = "User Manual Override"
+
+    manifest_rows: list[dict[str, Any]] = [{
+        "job_id": f"test-job-{file_id}",
+        "column_id": 0,
+        "column_name": col_name,
+        "to_harmonize": original_value,
+        "top_harmonization": ai_harmonized_value,
+        "ontology_id": None,
+        "top_harmonizations": [ai_harmonized_value],
+        "confidence_score": 0.85,
+        "error": None,
+        "row_indices": [0],
+        "manual_overrides": [
+            {"user_id": "test-user", "timestamp": "2024-01-01T00:00:00Z", "value": manual_override_value}
+        ],
+    }]
+
+    manifest_dir = storage._base_dir / "manifests"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = manifest_dir / f"{file_id}_harmonization.parquet"
+    return create_test_manifest_parquet(manifest_path, manifest_rows)
