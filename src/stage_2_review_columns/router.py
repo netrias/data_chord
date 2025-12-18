@@ -8,7 +8,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from src.domain import DEFAULT_TARGET_SCHEMA, get_cde_labels
+from src.domain import DEFAULT_TARGET_SCHEMA, UILabel, get_cde_labels
 
 MODULE_DIR = Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"
@@ -26,6 +26,8 @@ async def render_stage_two(request: Request) -> HTMLResponse:
         "request": request,
         "default_schema": DEFAULT_TARGET_SCHEMA,
         "manual_options": get_cde_labels(),
+        "no_ai_recommendation_label": UILabel.NO_AI_RECOMMENDATION.value,
+        "select_mapping_label": UILabel.SELECT_MAPPING.value,
     }
     return _templates.TemplateResponse("stage_2_mappings.html", context)
 

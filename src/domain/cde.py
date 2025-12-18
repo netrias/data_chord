@@ -123,7 +123,7 @@ class ColumnMapping:
     """why: represent a single column's mapping decision from Stage 2."""
 
     column_name: str
-    target: CDEField | None  # None means explicitly "No mapping"
+    target: CDEField | None  # None means explicitly "No AI Recommendation"
 
 
 @dataclass(frozen=True)
@@ -152,6 +152,6 @@ class ColumnMappingSet:
         """why: return mappings that have a CDE target."""
         return [m for m in self.mappings if m.target is not None]
 
-    def get_removed(self) -> list[str]:
-        """why: return column names explicitly set to 'No mapping'."""
+    def get_skipped(self) -> list[str]:
+        """why: return column names explicitly set to 'No AI Recommendation'."""
         return [m.column_name for m in self.mappings if m.target is None]

@@ -566,7 +566,7 @@ describe('Combobox Widget', () => {
 
     it('Muted option preserves original index when filtering', () => {
       // Given: A combobox with first option muted
-      const testOptions = ['No mapping', 'primary_diagnosis', 'morphology'];
+      const testOptions = ['No AI Recommendation', 'primary_diagnosis', 'morphology'];
       const combobox = createCombobox({
         options: testOptions,
         initialValue: '',
@@ -579,10 +579,10 @@ describe('Combobox Widget', () => {
       const dropdown = combobox.querySelector('.combobox-dropdown');
       focus(inputEl);
 
-      // When: User filters to show only "No mapping"
-      input(inputEl, 'No map');
+      // When: User filters to show only "No AI Recommendation"
+      input(inputEl, 'No AI');
 
-      // Then: The filtered "No mapping" option still has muted class
+      // Then: The filtered "No AI Recommendation" option still has muted class
       const options = dropdown.querySelectorAll('.combobox-option:not(.combobox-option--empty)');
       assert.strictEqual(options.length, 1, 'Should show one filtered option');
       assert.ok(options[0].classList.contains('combobox-option--muted'), 'Filtered option should retain muted class');

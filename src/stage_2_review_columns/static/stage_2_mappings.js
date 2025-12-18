@@ -8,8 +8,9 @@ import { createCombobox } from '/assets/shared/combobox.js';
 
 const config = window.stageTwoConfig ?? {};
 const STORAGE_KEY = config.storageKey ?? 'stage2Payload';
-const NO_MAPPING_OPTION = 'No mapping';
-const manualOptions = [NO_MAPPING_OPTION, ...(config.manualOptions ?? [])];
+const NO_AI_RECOMMENDATION_OPTION = config.noAIRecommendationLabel ?? 'No AI Recommendation';
+const SELECT_MAPPING_PLACEHOLDER = config.selectMappingLabel ?? 'Select mapping';
+const manualOptions = [NO_AI_RECOMMENDATION_OPTION, ...(config.manualOptions ?? [])];
 const stageThreeUrl = config.stageThreeUrl ?? '/stage-3';
 const stageThreePayloadKey = config.stageThreePayloadKey ?? 'stage3HarmonizePayload';
 const stageThreeJobKey = config.stageThreeJobKey ?? 'stage3HarmonizeJob';
@@ -105,14 +106,14 @@ const _persistStageThreePayload = (body) => {
 
 /** Determine row state and icon based on AI recommendation and user selection. */
 const _determineRowState = (hasRecommendation, aiRecommendation, manualSelection) => {
-  const isNoMapping = manualSelection === NO_MAPPING_OPTION;
+  const isNoAIRecommendation = manualSelection === NO_AI_RECOMMENDATION_OPTION;
   const isOverrideDifferentFromAI =
     manualSelection &&
-    !isNoMapping &&
+    !isNoAIRecommendation &&
     manualSelection.toLowerCase() !== (aiRecommendation ?? '').toLowerCase();
 
-  if (isNoMapping) {
-    return { state: 'no-mapping', icon: '—' };
+  if (isNoAIRecommendation) {
+    return { state: 'no-recommendation', icon: '○' };
   }
   if (isOverrideDifferentFromAI) {
     return { state: 'override', icon: '✎' };
@@ -171,7 +172,7 @@ const _buildMappingRow = (column) => {
   const combobox = createCombobox({
     options: manualOptions,
     initialValue: manualSelection,
-    placeholder: topTarget ? 'Keep AI suggestion' : NO_MAPPING_OPTION,
+    placeholder: topTarget ? 'Keep AI suggestion' : SELECT_MAPPING_PLACEHOLDER,
     separatorAfterIndex: 0,
     mutedIndices: [0],
     onChange: (newValue) => {
