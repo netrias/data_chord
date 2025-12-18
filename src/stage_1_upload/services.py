@@ -92,13 +92,13 @@ def _normalize_sample(value: str | None) -> str:
 def _confidence_bucket(non_empty: int, sample_size: int) -> ConfidenceBucket:
     """why: derive a friendly signal for how complete sample data is."""
     if sample_size == 0:
-        return "low"
+        return ConfidenceBucket.LOW
     ratio = non_empty / sample_size
     if ratio >= 0.8:
-        return "high"
+        return ConfidenceBucket.HIGH
     if ratio >= 0.5:
-        return "medium"
-    return "low"
+        return ConfidenceBucket.MEDIUM
+    return ConfidenceBucket.LOW
 
 
 def _infer_type(values: Iterable[str]) -> str:

@@ -21,7 +21,7 @@ const sortModeSelect = document.getElementById('sortModeSelect');
 const batchSizeSelect = document.getElementById('batchSizeSelect');
 const batchSizeLabel = batchSizeSelect?.previousElementSibling;
 const reviewModeSelect = document.getElementById('reviewModeSelect');
-const reviewAlerts = document.getElementById('reviewAlerts');
+/* reviewAlerts element removed - notifications disabled */
 const previousBatchButton = document.getElementById('previousBatchButton');
 const nextBatchButton = document.getElementById('nextBatchButton');
 const completeBatchButton = document.getElementById('completeBatchButton');
@@ -140,7 +140,7 @@ const fetchRows = async () => {
 
   const fileId = getFileIdFromUrl();
   if (!fileId) {
-    notify('Unable to locate harmonized data. Please rerun Stage 3.', 'warning');
+    console.warn('Unable to locate harmonized data. Please rerun Stage 3.');
     return;
   }
 
@@ -164,8 +164,7 @@ const fetchRows = async () => {
     }));
     state.hasLoadedRows = true;
   } catch (error) {
-    console.error(error);
-    notify(error.message || 'Unable to load harmonized results.', 'warning');
+    console.error('Unable to load harmonized results:', error);
   }
 };
 
@@ -253,8 +252,7 @@ const saveOverrides = async () => {
       throw new Error('Server returned an error');
     }
   } catch (error) {
-    console.warn('Failed to save overrides', error);
-    notify('Unable to save your changes. Please try again.', 'warning');
+    console.warn('Failed to save overrides:', error);
   }
 };
 
@@ -309,30 +307,7 @@ const recordOverrideForRows = (rowIndices, columnKey, aiValue, humanValue, origi
   debouncedSave();
 };
 
-/**
- * Display a notification message.
- * @param {string} message - Message text
- * @param {string} tone - 'info' | 'success' | 'warning'
- */
-const notify = (message, tone = 'info') => {
-  if (!reviewAlerts) return;
-
-  reviewAlerts.textContent = message;
-  reviewAlerts.classList.remove('hidden', 'success', 'warning');
-
-  if (tone === 'success') {
-    reviewAlerts.classList.add('success');
-  } else if (tone === 'warning') {
-    reviewAlerts.classList.add('warning');
-  }
-
-  if (state.alertTimer) {
-    window.clearTimeout(state.alertTimer);
-  }
-  state.alertTimer = window.setTimeout(() => {
-    reviewAlerts.classList.add('hidden');
-  }, 5000);
-};
+/* Notification toasts removed - visual clutter reduction */
 
 /**
  * Get batch metadata from the active mode module.
@@ -388,6 +363,8 @@ const updateNavigationButtons = (batchMeta) => {
   const actionMode = hasEntries && modeState.completedUnits.has(modeState.currentUnit) ? 'flag' : 'complete';
   completeBatchButton.dataset.mode = actionMode;
   completeBatchButton.textContent = actionMode === 'flag' ? 'Flag for review' : 'Mark complete';
+  completeBatchButton.classList.toggle('netrias-btn', actionMode === 'complete');
+  completeBatchButton.classList.toggle('warning-btn', actionMode === 'flag');
 };
 
 /**
@@ -401,12 +378,9 @@ const updateCurrentBatchIndicator = (batchMeta) => {
   const batchSize = getCurrentBatchSize();
 
   if (!batchMeta.entries.length) {
-    currentBatchIndicator.textContent = 'No entries ready for review yet.';
-    currentBatchIndicator.classList.add('muted');
+    currentBatchIndicator.textContent = 'Batch progress';
     return;
   }
-
-  currentBatchIndicator.classList.remove('muted');
 
   if (state.reviewMode === 'column') {
     currentBatchIndicator.textContent = columnMode.getCurrentUnitLabel(state.rows, modeState.currentUnit, batchSize);
@@ -517,27 +491,11 @@ const markComplete = () => {
   const batchMeta = getCurrentBatchMeta();
 
   if (!batchMeta.entries.length) {
-    notify('No entries in this batch to complete.', 'warning');
     return;
   }
 
   modeState.completedUnits.add(modeState.currentUnit);
   modeState.flaggedUnits.delete(modeState.currentUnit);
-
-  const progressSummary = getProgressSummary();
-  const allComplete = progressSummary.totalCount > 0 && progressSummary.completedCount === progressSummary.totalCount;
-
-  if (allComplete) {
-    const label = state.reviewMode === 'column' ? 'columns' : 'batches';
-    notify(`All ${label} have been reviewed. You can still revisit previous ${label}.`, 'success');
-  } else {
-    const remaining = progressSummary.totalCount - progressSummary.completedCount;
-    const label = state.reviewMode === 'column' ? 'Column' : 'Batch';
-    const copy = remaining > 0
-      ? `${label} marked complete. ${remaining} remaining.`
-      : `${label} marked complete.`;
-    notify(copy, 'success');
-  }
 
   if (modeState.currentUnit < batchMeta.totalUnits) {
     modeState.currentUnit = modeState.currentUnit + 1;
@@ -555,20 +513,16 @@ const flagCurrent = () => {
   const batchMeta = getCurrentBatchMeta();
 
   if (!batchMeta.entries.length) {
-    notify('No entries to flag yet.', 'warning');
     return;
   }
 
   if (!modeState.completedUnits.has(modeState.currentUnit)) {
-    notify('Only completed items can be flagged for review.', 'warning');
     return;
   }
 
   modeState.completedUnits.delete(modeState.currentUnit);
   modeState.flaggedUnits.add(modeState.currentUnit);
 
-  const label = state.reviewMode === 'column' ? 'Column' : 'Batch';
-  notify(`${label} flagged for review.`, 'warning');
   saveOverridesImmediate();
   render();
 };
@@ -621,7 +575,6 @@ const handleReviewModeChange = () => {
 
   state.reviewMode = newMode;
   populateBatchSizeOptions();
-  notify(`Switched to ${newMode === 'column' ? 'column' : 'row'} view.`, 'info');
   saveOverridesImmediate();
   render();
 };
@@ -649,12 +602,9 @@ const handleBatchSizeChange = () => {
 const attachEventListeners = () => {
   sortModeSelect.addEventListener('change', () => {
     state.sortMode = sortModeSelect.value;
-    state.columnMode.currentUnit = 1;
-    state.columnMode.completedUnits.clear();
-    state.columnMode.flaggedUnits.clear();
-    state.rowMode.currentUnit = 1;
-    state.rowMode.completedUnits.clear();
-    state.rowMode.flaggedUnits.clear();
+    /* Note: Sorting is persisted but not yet implemented in data processing.
+       Progress is preserved since changing sort order doesn't invalidate reviews. */
+    saveOverridesImmediate();
     render();
   });
 

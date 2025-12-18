@@ -1,4 +1,4 @@
-"""End-to-end user journey tests for the harmonization pipeline."""
+"""Test end-to-end user journeys through the harmonization pipeline."""
 
 from __future__ import annotations
 

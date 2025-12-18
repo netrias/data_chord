@@ -12,7 +12,6 @@ import io
 import logging
 import zipfile
 from collections import defaultdict
-from csv import DictReader
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -21,12 +20,18 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.domain import ChangeType, SessionKey
 from src.domain.dependencies import get_file_store, get_upload_storage
-from src.domain.manifest import ManifestRow, ManifestSummary, ManualOverride, read_manifest_parquet
-from src.domain.storage import FileType, UploadStorage
+from src.domain.manifest import (
+    ManifestRow,
+    ManifestSummary,
+    get_latest_override_value,
+    is_value_changed,
+    read_manifest_parquet,
+)
+from src.domain.storage import FileType, UploadStorage, load_csv, resolve_harmonized_path_or_404
 
 _logger = logging.getLogger(__name__)
 
@@ -34,11 +39,7 @@ _MODULE_DIR = Path(__file__).parent
 _TEMPLATE_DIR = _MODULE_DIR / "templates"
 STAGE_FIVE_STATIC_PATH = _MODULE_DIR / "static"
 
-_HARMONIZED_SUFFIX = ".harmonized.csv"
-
 _ERROR_UPLOAD_NOT_FOUND = "Upload not found. Please restart the harmonization process."
-_ERROR_DATASET_NOT_FOUND = "Required dataset file not found."
-_ERROR_HARMONIZED_NOT_FOUND = "Harmonized file not found. Please rerun Stage 3."
 _ERROR_DATASET_UNREADABLE = "Unable to read harmonized dataset."
 _ERROR_MANIFEST_NOT_FOUND = "Harmonization manifest not found. Please rerun Stage 3."
 _ERROR_MANIFEST_UNREADABLE = "Unable to read harmonization manifest."
@@ -51,7 +52,7 @@ stage_five_router = APIRouter(prefix="/stage-5", tags=["Stage 5 Download"])
 class StageFiveRequest(BaseModel):
     """why: unified request payload for summary and download operations."""
 
-    file_id: str
+    file_id: str = Field(..., min_length=8, pattern=r"^[a-f0-9]+$")
 
 
 class ColumnSummary(BaseModel):
@@ -108,10 +109,10 @@ async def download_harmonized_data(payload: StageFiveRequest) -> StreamingRespon
     if not meta:
         raise HTTPException(status_code=404, detail=_ERROR_UPLOAD_NOT_FOUND)
 
-    harmonized_path = _resolve_harmonized_path(meta.saved_path, payload.file_id)
+    harmonized_path = resolve_harmonized_path_or_404(meta.saved_path, payload.file_id)
     manifest_path = storage.load_harmonization_manifest_path(payload.file_id)
 
-    headers, harmonized_rows = _load_csv(harmonized_path)
+    headers, harmonized_rows = load_csv(harmonized_path)
     if not headers:
         raise HTTPException(status_code=400, detail=_ERROR_DATASET_UNREADABLE)
 
@@ -124,30 +125,6 @@ async def download_harmonized_data(payload: StageFiveRequest) -> StreamingRespon
 
     zip_buffer = _create_zip_buffer(base_name, headers, final_rows, manifest_path)
     return _create_streaming_response(base_name, zip_buffer)
-
-
-def _resolve_harmonized_path(original_path: Path, file_id: str) -> Path:
-    """why: harmonized files may be stored in different locations depending on the pipeline."""
-    candidates = [
-        original_path.with_name(f"{original_path.stem}{_HARMONIZED_SUFFIX}"),
-        original_path.with_suffix(original_path.suffix + _HARMONIZED_SUFFIX),
-        Path.cwd() / f"{file_id}{_HARMONIZED_SUFFIX}",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    raise HTTPException(status_code=404, detail=_ERROR_HARMONIZED_NOT_FOUND)
-
-
-def _load_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
-    """why: read CSV into memory for comparison and transformation."""
-    if not path.exists():
-        raise HTTPException(status_code=404, detail=_ERROR_DATASET_NOT_FOUND)
-    with path.open(encoding="utf-8", newline="") as handle:
-        reader = DictReader(handle)
-        rows = list(reader)
-        headers = list(reader.fieldnames) if reader.fieldnames else []
-    return headers, rows
 
 
 def _load_review_overrides(file_id: str) -> dict[str, dict[str, str]]:
@@ -234,30 +211,23 @@ def _create_streaming_response(base_name: str, zip_buffer: io.BytesIO) -> Stream
     )
 
 
-def _get_latest_override_value(overrides: list[ManualOverride]) -> str | None:
-    """why: extract the most recent manual override value, if any."""
-    if not overrides:
-        return None
-    return overrides[-1].value
-
-
 def _classify_change(row: ManifestRow) -> ChangeType:
     """why: classify a manifest row's change type based on override presence and value.
 
     Classification logic:
-    - UNCHANGED: The final value equals the original (no effective change)
+    - UNCHANGED: The final value equals the original (using canonical change detection)
     - AI_HARMONIZED: AI changed the value, or user accepted AI suggestion via override
     - MANUAL_OVERRIDE: User provided an override that differs from AI suggestion
 
-    Values are compared exactly as stored - no normalization or sanitization.
+    Uses is_value_changed for consistent comparison across all stages.
     """
     original = row.to_harmonize
     ai_value = row.top_harmonization
-    latest_override = _get_latest_override_value(row.manual_overrides)
+    latest_override = get_latest_override_value(row.manual_overrides)
 
     final_value = latest_override if latest_override is not None else ai_value
 
-    if original == final_value:
+    if not is_value_changed(original, final_value):
         return ChangeType.UNCHANGED
 
     if latest_override is not None and latest_override != ai_value:

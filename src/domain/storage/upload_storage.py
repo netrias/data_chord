@@ -7,6 +7,7 @@ harmonization workflow.
 
 from __future__ import annotations
 
+import csv
 import json
 import logging
 import shutil
@@ -17,9 +18,11 @@ from pathlib import Path
 from typing import TypedDict, cast
 from uuid import uuid4
 
-from fastapi import UploadFile
+from fastapi import HTTPException, UploadFile
 
 logger = logging.getLogger(__name__)
+
+HARMONIZED_SUFFIX = ".harmonized.csv"
 
 
 class StoredMeta(TypedDict):
@@ -213,6 +216,11 @@ class UploadStorage:
         path = self._manifest_dir / f"{file_id}_harmonization.parquet"
         return path if path.exists() else None
 
+    @property
+    def manifest_dir(self) -> Path:
+        """why: expose manifest directory for tests and direct access scenarios."""
+        return self._manifest_dir
+
     def _validate_upload(self, suffix: str, content_type: str) -> None:
         """why: guard against unsupported file types."""
         if suffix not in self._constraints.allowed_suffixes:
@@ -231,7 +239,47 @@ def describe_constraints(constraints: UploadConstraints) -> dict[str, str | int]
     }
 
 
+def resolve_harmonized_path(original_path: Path, file_id: str) -> Path | None:
+    """why: locate harmonized CSV using multiple naming conventions."""
+    candidates = [
+        original_path.with_name(f"{original_path.stem}{HARMONIZED_SUFFIX}"),
+        original_path.with_suffix(original_path.suffix + HARMONIZED_SUFFIX),
+        Path.cwd() / f"{file_id}{HARMONIZED_SUFFIX}",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+_ERROR_HARMONIZED_NOT_FOUND = "Harmonized file not found. Please rerun Stage 3."
+_ERROR_DATASET_NOT_FOUND = "Required dataset file not found."
+
+
+def resolve_harmonized_path_or_404(original_path: Path, file_id: str) -> Path:
+    """why: locate harmonized CSV or raise HTTP 404."""
+    path = resolve_harmonized_path(original_path, file_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail=_ERROR_HARMONIZED_NOT_FOUND)
+    return path
+
+
+def load_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
+    """why: read CSV into headers and row dictionaries.
+
+    Raises HTTPException 404 if file does not exist.
+    """
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=_ERROR_DATASET_NOT_FOUND)
+    with path.open(encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        rows = list(reader)
+        headers = list(reader.fieldnames) if reader.fieldnames else []
+    return headers, rows
+
+
 __all__ = [
+    "HARMONIZED_SUFFIX",
     "StoredMeta",
     "UploadConstraints",
     "UploadedFileMeta",
@@ -240,4 +288,7 @@ __all__ = [
     "UploadTooLargeError",
     "UploadStorage",
     "describe_constraints",
+    "load_csv",
+    "resolve_harmonized_path",
+    "resolve_harmonized_path_or_404",
 ]

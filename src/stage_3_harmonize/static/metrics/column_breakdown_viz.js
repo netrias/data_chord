@@ -9,7 +9,10 @@ const _createTermsDisplay = (changedRows, totalRows) => {
 
   const countText = document.createElement('div');
   countText.className = 'column-terms-display__count';
-  countText.innerHTML = `<strong>${changedRows.toLocaleString()}</strong> / ${totalRows.toLocaleString()} values changed (${percent}%)`;
+  const strong = document.createElement('strong');
+  strong.textContent = changedRows.toLocaleString();
+  countText.appendChild(strong);
+  countText.appendChild(document.createTextNode(` / ${totalRows.toLocaleString()} values changed (${percent}%)`));
   container.appendChild(countText);
 
   const bar = document.createElement('div');
@@ -74,8 +77,8 @@ const _createColumnCard = (column) => {
   const hasChanges = column.changedRows > 0;
 
   card.className = hasChanges
-    ? 'column-metric-card'
-    : 'column-metric-card column-metric-card--no-changes';
+    ? 'card card--pad-md column-metric-card'
+    : 'card card--inset card--pad-sm column-metric-card column-metric-card--no-changes';
 
   const title = document.createElement('h4');
   title.className = 'column-metric-card__title';

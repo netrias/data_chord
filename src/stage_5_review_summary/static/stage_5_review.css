@@ -16,11 +16,6 @@
   justify-content: center;
 }
 
-.download-btn {
-  font-size: 1.1rem;
-  padding: var(--space-4) var(--space-8);
-}
-
 /* Summary card */
 .summary-card {
   margin-top: var(--space-6);
@@ -49,12 +44,9 @@
   grid-column: 1 / -1;
 }
 
-/* Column summary card */
+/* Column summary card - extends .card from tokens.css */
 .summary-column-card {
-  border: 1px solid var(--gray-200);
-  border-radius: var(--radius-lg);
-  padding: var(--space-4);
-  background: var(--gray-50);
+  /* Layout handled by .card .card--inset .card--pad-sm */
 }
 
 .summary-column-name {

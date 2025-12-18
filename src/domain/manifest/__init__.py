@@ -15,7 +15,9 @@ from src.domain.manifest.models import (
     ManifestSummary,
     ManualOverride,
     confidence_bucket,
+    get_latest_override_value,
     get_manifest_schema,
+    is_value_changed,
 )
 from src.domain.manifest.reader import read_manifest_parquet
 from src.domain.manifest.writer import (
@@ -35,6 +37,8 @@ __all__ = [
     "add_manual_override",
     "add_manual_overrides_batch",
     "confidence_bucket",
+    "get_latest_override_value",
     "get_manifest_schema",
+    "is_value_changed",
     "read_manifest_parquet",
 ]

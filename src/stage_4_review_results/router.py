@@ -6,26 +6,28 @@ Render the batch review UI and provide harmonized row data for approval.
 from __future__ import annotations
 
 import logging
-from csv import DictReader
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path as FilePath
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Path, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.domain import CONFIDENCE, DEFAULT_TARGET_SCHEMA, SessionKey
 from src.domain.dependencies import get_file_store, get_upload_storage
 from src.domain.manifest import (
+    ConfidenceBucket,
     ManifestSummary,
     ManualOverride,
     add_manual_overrides_batch,
     confidence_bucket,
+    get_latest_override_value,
     read_manifest_parquet,
 )
-from src.domain.storage import FileType, UploadStorage
+from src.domain.storage import FileType, UploadStorage, load_csv
 from src.stage_4_review_results.schemas import (
     DeleteOverridesResponse,
     ReviewOverridesSchema,
@@ -36,7 +38,7 @@ from src.stage_4_review_results.schemas import (
 
 logger = logging.getLogger(__name__)
 
-_MODULE_DIR = Path(__file__).parent
+_MODULE_DIR = FilePath(__file__).parent
 _TEMPLATE_DIR = _MODULE_DIR / "templates"
 STAGE_FOUR_STATIC_PATH = _MODULE_DIR / "static"
 
@@ -46,7 +48,7 @@ _templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 class StageFourResultsRequest(BaseModel):
     """why: request payload for fetching harmonized rows."""
 
-    file_id: str
+    file_id: str = Field(..., min_length=8, pattern=r"^[a-f0-9]+$")
     manual_columns: list[str] = []
 
 
@@ -113,7 +115,7 @@ async def fetch_stage_four_rows(payload: StageFourResultsRequest) -> StageFourRe
     if not meta:
         raise HTTPException(status_code=404, detail="Upload not found. Please rerun harmonization.")
 
-    _, original_rows = _load_csv(meta.saved_path)
+    _, original_rows = load_csv(meta.saved_path)
     manifest = _load_manifest(storage, payload.file_id)
     if manifest is None:
         raise HTTPException(status_code=404, detail="Harmonization manifest not found. Please rerun Stage 3.")
@@ -122,32 +124,6 @@ async def fetch_stage_four_rows(payload: StageFourResultsRequest) -> StageFourRe
     row_lookup = _build_row_lookup(manifest)
     rows = _build_rows_from_manifest(original_rows, columns, row_lookup)
     return StageFourResultsResponse(rows=rows)
-
-
-def _resolve_harmonized_path(original_path: Path, file_id: str) -> Path:
-    """why: locate the harmonized CSV using multiple naming conventions."""
-    candidate = original_path.with_name(f"{original_path.stem}.harmonized.csv")
-    if candidate.exists():
-        return candidate
-
-    suffix_candidate = original_path.with_suffix(original_path.suffix + ".harmonized.csv")
-    if suffix_candidate.exists():
-        return suffix_candidate
-
-    root_candidate = Path.cwd() / f"{file_id}.harmonized.csv"
-    if root_candidate.exists():
-        return root_candidate
-
-    raise HTTPException(status_code=404, detail="Harmonized file not found. Please rerun Stage 3.")
-
-
-def _load_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
-    """why: read CSV into headers and row dictionaries."""
-    with path.open(newline="", encoding="utf-8") as handle:
-        reader = DictReader(handle)
-        rows = list(reader)
-        headers = list(reader.fieldnames or [])
-    return headers, rows
 
 
 @dataclass
@@ -258,10 +234,10 @@ def _build_cells_from_manifest(
         if confidence is not None:
             bucket = confidence_bucket(confidence)
         else:
-            bucket = "low" if is_changed else "high"
-            confidence = CONFIDENCE.HIGH if bucket == "high" else CONFIDENCE.LOW
+            bucket = ConfidenceBucket.LOW if is_changed else ConfidenceBucket.HIGH
+            confidence = CONFIDENCE.HIGH if bucket == ConfidenceBucket.HIGH else CONFIDENCE.LOW
 
-        manual_override = _get_latest_override(entry.manual_overrides)
+        manual_override = get_latest_override_value(entry.manual_overrides)
 
         cells.append(
             StageFourCell(
@@ -269,7 +245,7 @@ def _build_cells_from_manifest(
                 columnLabel=col_info.label,
                 originalValue=original_value,
                 harmonizedValue=harmonized_value,
-                bucket=bucket,
+                bucket=bucket.value,
                 confidence=confidence,
                 isChanged=is_changed,
                 manualOverride=manual_override,
@@ -277,13 +253,6 @@ def _build_cells_from_manifest(
         )
 
     return cells
-
-
-def _get_latest_override(overrides: list[ManualOverride]) -> str | None:
-    """why: extract the most recent manual override value."""
-    if not overrides:
-        return None
-    return overrides[-1].value
 
 
 def _summarize_record_ids(record_ids: list[str]) -> str:
@@ -304,12 +273,16 @@ def _load_manifest(storage: UploadStorage, file_id: str) -> ManifestSummary | No
     return read_manifest_parquet(manifest_path)
 
 
+FILE_ID_PATTERN = r"^[a-f0-9]+$"
+FileIdPath = Annotated[str, Path(min_length=8, pattern=FILE_ID_PATTERN)]
+
+
 @stage_four_router.get(
     "/overrides/{file_id}",
     response_model=ReviewOverridesSchema | None,
     name="stage_four_get_overrides",
 )
-async def get_overrides(file_id: str) -> ReviewOverridesSchema | None:
+async def get_overrides(file_id: FileIdPath) -> ReviewOverridesSchema | None:
     """why: load existing review overrides for a file."""
     store = get_file_store()
     data = store.load(file_id, FileType.REVIEW_OVERRIDES)
@@ -387,7 +360,7 @@ def _collect_overrides_for_batch(
     response_model=DeleteOverridesResponse,
     name="stage_four_delete_overrides",
 )
-async def delete_overrides(file_id: str) -> DeleteOverridesResponse:
+async def delete_overrides(file_id: FileIdPath) -> DeleteOverridesResponse:
     """why: remove review overrides for a file."""
     store = get_file_store()
     existed = store.exists(file_id, FileType.REVIEW_OVERRIDES)

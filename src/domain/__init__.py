@@ -19,8 +19,9 @@ from src.domain.cde import normalize_target_name as normalize_target_name
 from src.domain.change import CONFIDENCE as CONFIDENCE
 from src.domain.change import ChangeType as ChangeType
 from src.domain.change import ConfidenceThresholds as ConfidenceThresholds
+from src.domain.schemas import ColumnBreakdownSchema as ColumnBreakdownSchema
+from src.domain.schemas import ConfidenceBucketSchema as ConfidenceBucketSchema
 from src.domain.schemas import HarmonizeRequest as HarmonizeRequest
 from src.domain.schemas import HarmonizeResponse as HarmonizeResponse
-from src.domain.schemas import ManifestRowSchema as ManifestRowSchema
 from src.domain.schemas import ManifestSummarySchema as ManifestSummarySchema
 from src.domain.session import SessionKey as SessionKey

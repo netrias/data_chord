@@ -1,4 +1,4 @@
-"""Shared fixtures for feature-level testing."""
+"""Provide shared fixtures for feature-level testing."""
 
 from __future__ import annotations
 
@@ -9,17 +9,18 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from src.domain.storage import UploadConstraints, UploadStorage
+from src.domain.storage import HARMONIZED_SUFFIX, UploadConstraints, UploadStorage
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 # Test constants
 TEST_CSV_CONTENT_TYPE = "text/csv"
 TEST_TARGET_SCHEMA = "CCDI"
-HARMONIZED_SUFFIX = ".harmonized.csv"
 SAMPLE_CSV_ROW_COUNT = 10
 SAMPLE_CSV_COLUMN_COUNT = 6
 MAX_EXAMPLES_LIMIT = 20
@@ -193,7 +194,7 @@ def upload_csv_content() -> bytes:
 
 def create_csv_content(rows: list[list[str]]) -> bytes:
     """why: dynamically generate CSV content for specific test scenarios."""
-    lines = [",".join(row) for row in rows]
+    lines: list[str] = [",".join(row) for row in rows]
     return "\n".join(lines).encode("utf-8")
 
 
@@ -203,6 +204,7 @@ async def upload_file(client: AsyncClient, csv_path: Path) -> str:
         "/stage-1/upload",
         files={"file": (csv_path.name, csv_path.read_bytes(), TEST_CSV_CONTENT_TYPE)},
     )
+    assert response.status_code == 201, f"Upload failed: {response.status_code} {response.text}"
     return response.json()["file_id"]
 
 
@@ -212,6 +214,7 @@ async def upload_content(client: AsyncClient, content: bytes, filename: str = "t
         "/stage-1/upload",
         files={"file": (filename, content, TEST_CSV_CONTENT_TYPE)},
     )
+    assert response.status_code == 201, f"Upload failed: {response.status_code} {response.text}"
     return response.json()["file_id"]
 
 
@@ -250,9 +253,6 @@ def create_test_manifest_parquet(
     rows: list[dict[str, Any]],
 ) -> Path:
     """why: create a test manifest.parquet file using the canonical schema."""
-    import pyarrow as pa
-    import pyarrow.parquet as pq
-
     from src.domain.manifest import get_manifest_schema
 
     schema = get_manifest_schema()
@@ -283,10 +283,8 @@ def create_manifest_for_file(
     changes: dict[int, dict[str, str]],
 ) -> Path:
     """why: create a manifest parquet for Stage 4 tests in the correct storage location."""
-    import csv as csv_module
-
     with original_path.open("r", newline="", encoding="utf-8") as f:
-        reader = csv_module.DictReader(f)
+        reader = csv.DictReader(f)
         original_rows = list(reader)
         headers = list(reader.fieldnames or [])
 
@@ -317,7 +315,7 @@ def create_manifest_for_file(
                 "manual_overrides": [],
             })
 
-    manifest_dir = storage._base_dir / "manifests"
+    manifest_dir = storage.manifest_dir
     manifest_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = manifest_dir / f"{file_id}_harmonization.parquet"
     return create_test_manifest_parquet(manifest_path, manifest_rows)
@@ -329,10 +327,8 @@ def create_manifest_with_manual_override(
     original_path: Path,
 ) -> Path:
     """why: create a manifest with a manual override for testing summary categorization."""
-    import csv as csv_module
-
     with original_path.open("r", newline="", encoding="utf-8") as f:
-        reader = csv_module.DictReader(f)
+        reader = csv.DictReader(f)
         original_rows = list(reader)
         headers = list(reader.fieldnames or [])
 
@@ -360,7 +356,7 @@ def create_manifest_with_manual_override(
         ],
     }]
 
-    manifest_dir = storage._base_dir / "manifests"
+    manifest_dir = storage.manifest_dir
     manifest_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = manifest_dir / f"{file_id}_harmonization.parquet"
     return create_test_manifest_parquet(manifest_path, manifest_rows)

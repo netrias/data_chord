@@ -18,6 +18,17 @@ export const UNIT_STATUS = {
 };
 
 /**
+ * Escape HTML special characters to prevent XSS.
+ * @param {string} str
+ * @returns {string}
+ */
+const _escapeHtml = (str) => {
+  if (typeof str !== 'string') return str;
+  const escapeMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  return str.replace(/[&<>"']/g, (c) => escapeMap[c]);
+};
+
+/**
  * Determine unit status based on completion and flagged state.
  * @param {boolean} isFlagged
  * @param {boolean} isComplete
@@ -36,6 +47,7 @@ const _determineUnitStatus = (isFlagged, isComplete) => {
  * @returns {boolean}
  */
 export const rowHasChanges = (row) => {
+  if (!row?.cells) return false;
   for (const cell of row.cells) {
     const original = (cell.originalValue ?? '').trim();
     const harmonized = (cell.harmonizedValue ?? '').trim();
@@ -52,6 +64,7 @@ export const rowHasChanges = (row) => {
  * @returns {Array} Array of cells with changes
  */
 export const getChangedCells = (row) => {
+  if (!row?.cells) return [];
   const changedCells = [];
   for (const cell of row.cells) {
     const original = (cell.originalValue ?? '').trim();
@@ -94,10 +107,15 @@ export const calculateProgressSummary = (summaries, completedUnits, flaggedUnits
 export const createEmptyState = () => {
   const empty = document.createElement('div');
   empty.className = 'review-empty';
-  empty.innerHTML = `
-    <p>No harmonized changes to review.</p>
-    <p>All recommendations match the original input values.</p>
-  `;
+
+  const primaryMsg = document.createElement('p');
+  primaryMsg.textContent = 'No harmonized changes to review.';
+  empty.appendChild(primaryMsg);
+
+  const secondaryMsg = document.createElement('p');
+  secondaryMsg.textContent = 'All recommendations match the original input values.';
+  empty.appendChild(secondaryMsg);
+
   return empty;
 };
 
@@ -136,28 +154,33 @@ const _getInputValue = (entry, pendingOverrides) => {
  */
 const _buildCardHTML = (params) => {
   const { columnLabel, labelText, confidenceSymbol, bucket, recommendedText, recommendedClass, originalValue, inputValue } = params;
+  const safeColumnLabel = _escapeHtml(columnLabel);
+  const safeLabelText = _escapeHtml(labelText);
+  const safeRecommendedText = _escapeHtml(recommendedText);
+  const safeOriginalValue = _escapeHtml(originalValue);
+  const safeInputValue = _escapeHtml(inputValue);
   return `
-    <div class="value-pair" role="group" aria-label="${columnLabel} comparison">
+    <div class="value-pair" role="group" aria-label="${safeColumnLabel} comparison">
       <div class="card-header-row">
         <span class="confidence-indicator confidence-${bucket}" aria-label="${bucket} confidence">${confidenceSymbol}</span>
-        <div class="entry-row-label">${labelText}</div>
+        <div class="entry-row-label">${safeLabelText}</div>
       </div>
       <div class="value-group recommended">
         <p class="value-label">Recommended</p>
-        <p class="value-text recommended-text${recommendedClass}">${recommendedText}</p>
+        <p class="value-text recommended-text${recommendedClass}">${safeRecommendedText}</p>
       </div>
       <div class="value-group original">
         <p class="value-label">Original input</p>
-        <p class="value-text original-text">${originalValue}</p>
+        <p class="value-text original-text">${safeOriginalValue}</p>
       </div>
       <label class="value-group value-override">
-        <span class="value-label sr-only">Override ${columnLabel}</span>
+        <span class="value-label sr-only">Override ${safeColumnLabel}</span>
         <span class="value-input-wrapper">
           <input
             class="value-input"
             type="text"
-            value="${inputValue}"
-            aria-label="Manual override for ${columnLabel}"
+            value="${safeInputValue}"
+            aria-label="Manual override for ${safeColumnLabel}"
           />
           <svg class="value-input-icon" viewBox="0 0 20 20" aria-hidden="true">
             <path d="M2 14.5V18h3.5l8.4-8.4-3.5-3.5L2 14.5zm11.8-9.1a1 1 0 0 1 1.4 0l1.4 1.4a1 1 0 0 1 0 1.4l-1.2 1.2-3.5-3.5 1.2-1.2z"/>

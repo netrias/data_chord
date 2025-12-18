@@ -37,6 +37,9 @@
   --azure-500: #0673b3;
   --azure-600: #055c91;
   --azure-700: #044770;
+  --azure-400: #3d94c7;
+  --azure-300: #7ab8db;
+  --azure-200: #a8d1ea;
   --azure-100: #cce4f5;
   --azure-50: #e6f2fa;
 
@@ -92,13 +95,18 @@
   --success-700: #065f46;
   --success-600: #059669;
   --success-500: #10b981;
+  --success-400: #34d399;
+  --success-300: #6ee7b7;
+  --success-200: #a7f3d0;
   --success-100: #d1fae5;
   --success-50: #ecfdf5;
 
   --warning-700: #92400e;
   --warning-600: #d97706;
   --warning-500: #f59e0b;
-  --warning-200: #fcd34d;
+  --warning-400: #fbbf24;
+  --warning-300: #fcd34d;
+  --warning-200: #fde68a;
   --warning-100: #fef3c7;
   --warning-50: #fffbeb;
 
@@ -178,6 +186,42 @@ body {
   border: 0;
 }
 
+/* ==========================================================================
+   TYPOGRAPHY UTILITIES
+   For application labels only - do NOT use on data values from the backend.
+   ========================================================================== */
+
+/* Table/section headers - uppercase, small, spaced
+   Use for column headers, form labels, and section dividers.
+   Prefer this utility over inline uppercase styling in stage CSS. */
+.text-header {
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--gray-500);
+}
+
+/* Section titles - larger, bold */
+.text-title {
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--gray-900);
+}
+
+/* Subtle labels - small, medium weight */
+.text-label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--gray-600);
+}
+
+/* Emphasized text within content */
+.text-emphasis {
+  font-weight: 600;
+  color: var(--gray-900);
+}
+
 /* Shared button styles */
 button {
   border: none;
@@ -207,26 +251,118 @@ button.linklike {
   font-size: 0.9rem;
 }
 
+/* ==========================================================================
+   TACTILE BUTTON HIERARCHY
+   All buttons feel pushable, with varying levels of prominence.
+   ========================================================================== */
+
+/* Secondary actions (Previous, Next) - tactile 3D with highlight */
 .ghost-btn {
-  border: 1px solid var(--gray-300);
+  position: relative;
+  border: none;
   border-radius: var(--radius-full);
-  padding: 0.55rem 1.25rem;
-  background: var(--white);
+  padding: 0.6rem 1.4rem;
+  background: linear-gradient(180deg, var(--white) 0%, var(--gray-100) 100%);
   color: var(--gray-700);
   font-weight: 600;
   cursor: pointer;
-  transition: border-color var(--transition-fast), color var(--transition-fast);
+  box-shadow:
+    0 3px 0 var(--gray-300),
+    0 4px 8px rgba(0, 0, 0, 0.1),
+    inset 0 2px 0 rgba(255, 255, 255, 1),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.03);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), filter var(--transition-fast);
 }
 
 .ghost-btn:hover:enabled {
-  border-color: var(--green-500);
-  color: var(--green-500);
+  transform: translateY(-3px);
+  filter: brightness(102%);
+  box-shadow:
+    0 5px 0 var(--gray-300),
+    0 8px 16px rgba(0, 0, 0, 0.12),
+    inset 0 2px 0 rgba(255, 255, 255, 1),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.03);
+  color: var(--gray-900);
 }
 
+.ghost-btn:active:enabled {
+  transform: translateY(1px);
+  box-shadow:
+    0 1px 0 var(--gray-300),
+    0 2px 4px rgba(0, 0, 0, 0.1),
+    inset 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.ghost-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Primary actions (Mark complete) - elevated 3D with highlight like hero button */
 .netrias-btn {
-  background: var(--green-500);
+  position: relative;
+  background: linear-gradient(180deg, #8bc727 0%, var(--netrias-500) 50%, var(--netrias-600) 100%);
   color: var(--white);
-  box-shadow: 0 12px 40px var(--netrias-glow-strong);
+  border: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  box-shadow:
+    0 4px 0 var(--netrias-700),
+    0 6px 16px var(--netrias-glow-strong),
+    inset 0 2px 0 rgba(255, 255, 255, 0.3),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.1);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), filter var(--transition-fast);
+}
+
+.netrias-btn:hover:enabled {
+  transform: translateY(-3px);
+  filter: brightness(108%);
+  box-shadow:
+    0 6px 0 var(--netrias-700),
+    0 10px 24px var(--netrias-glow-intense),
+    inset 0 2px 0 rgba(255, 255, 255, 0.3),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.1);
+}
+
+.netrias-btn:active:enabled {
+  transform: translateY(1px);
+  box-shadow:
+    0 1px 0 var(--netrias-700),
+    0 2px 8px var(--netrias-glow-medium),
+    inset 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+/* Warning actions (Flag for review) - soft yellow 3D button matching batch indicator */
+.warning-btn {
+  position: relative;
+  background: linear-gradient(180deg, var(--warning-200) 0%, var(--warning-300) 50%, var(--warning-400) 100%);
+  color: var(--warning-700);
+  border: none;
+  font-weight: 600;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
+  box-shadow:
+    0 4px 0 var(--warning-500),
+    0 6px 16px rgba(251, 191, 36, 0.25),
+    inset 0 2px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.05);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), filter var(--transition-fast);
+}
+
+.warning-btn:hover:enabled {
+  transform: translateY(-3px);
+  filter: brightness(102%);
+  box-shadow:
+    0 6px 0 var(--warning-500),
+    0 10px 24px rgba(251, 191, 36, 0.35),
+    inset 0 2px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.05);
+}
+
+.warning-btn:active:enabled {
+  transform: translateY(1px);
+  box-shadow:
+    0 1px 0 var(--warning-500),
+    0 2px 8px rgba(251, 191, 36, 0.2),
+    inset 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 /* Progress tracker */
@@ -601,7 +737,59 @@ button.linklike {
   padding: var(--space-12) var(--space-6) 4rem;
 }
 
-/* Stage card */
+/* ==========================================================================
+   CARD SYSTEM
+   Unified card styles based on Stage 1's curved dropzone design.
+   Use .card as base, add modifiers for variants.
+   ========================================================================== */
+
+/* Base card - the foundation for all card-like containers */
+.card {
+  background: var(--white);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-sm), var(--shadow-md);
+  transition: border-color var(--transition-fast),
+              box-shadow var(--transition-fast),
+              transform var(--transition-fast);
+}
+
+/* Interactive card - hover effects for clickable/actionable cards */
+.card--interactive:hover {
+  border-color: var(--netrias-500);
+  box-shadow: var(--shadow-md), var(--shadow-lg);
+  transform: translateY(-2px);
+}
+
+/* Static card - no hover effects, for display-only content */
+.card--static {
+  cursor: default;
+}
+
+/* Inset card - for nested cards inside a parent card */
+.card--inset {
+  background: var(--gray-50);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Padded card variants */
+.card--pad-sm {
+  padding: var(--space-4);
+}
+
+.card--pad-md {
+  padding: var(--space-6);
+}
+
+.card--pad-lg {
+  padding: var(--space-8);
+}
+
+.card--pad-xl {
+  padding: var(--space-10);
+}
+
+/* Stage card - legacy class, now extends .card system */
 .stage-card {
   background: var(--white);
   border-radius: var(--radius-2xl);
@@ -699,6 +887,33 @@ button.linklike {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* ==========================================================================
+   LEGEND SYSTEM
+   Reusable legend component for displaying color-coded indicators.
+   Stage-specific semantic colors are defined in stage CSS files.
+   ========================================================================== */
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.legend-icon {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.legend-label {
+  font-size: 0.75rem;
+  color: var(--gray-600);
 }
 
 /* Responsive breakpoints */

@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 
 from src.domain import DEFAULT_TARGET_SCHEMA, ModelSuggestion
 from src.domain.dependencies import get_mapping_service, get_upload_constraints, get_upload_storage
+from src.domain.manifest import ManifestPayload
 
 from .schemas import (
     AnalyzeRequest,
@@ -87,6 +88,8 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     total_rows = 0
     columns: list[ColumnPreview] = []
     cde_targets: dict[str, list[ModelSuggestion]] = {}
+    manual_overrides: dict[str, str] = {}
+    manifest: ManifestPayload | None = None
     try:
         total_rows, columns = analyze_columns(meta.saved_path)
         mapping_service = get_mapping_service()

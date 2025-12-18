@@ -8,11 +8,24 @@ including manual override tracking with audit trail.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, TypedDict
+from enum import Enum
+from typing import TypedDict
 
 import pyarrow as pa
 
-ConfidenceBucket = Literal["low", "medium", "high"]
+
+class ConfidenceBucket(str, Enum):
+    """why: classify confidence scores into discrete UI-friendly buckets."""
+
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+    @property
+    def label(self) -> str:
+        """why: provide human-readable label for UI display."""
+        return self.value.title()
+
 
 HIGH_CONFIDENCE_THRESHOLD: float = 0.8
 MEDIUM_CONFIDENCE_THRESHOLD: float = 0.45
@@ -83,12 +96,33 @@ class ManifestSummary:
 def confidence_bucket(score: float | None) -> ConfidenceBucket:
     """why: classify confidence scores into UI-friendly buckets."""
     if score is None:
-        return "low"
+        return ConfidenceBucket.LOW
     if score >= HIGH_CONFIDENCE_THRESHOLD:
-        return "high"
+        return ConfidenceBucket.HIGH
     if score >= MEDIUM_CONFIDENCE_THRESHOLD:
-        return "medium"
-    return "low"
+        return ConfidenceBucket.MEDIUM
+    return ConfidenceBucket.LOW
+
+
+def is_value_changed(original: str | None, harmonized: str | None) -> bool:
+    """why: determine if harmonization produced a meaningfully different value.
+
+    Canonical change detection used across all stages. Returns False if:
+    - harmonized is empty/None (no recommendation made)
+    - normalized values are identical (case-insensitive, trimmed)
+    """
+    original_normalized = (original or "").strip().lower()
+    harmonized_normalized = (harmonized or "").strip().lower()
+    if not harmonized_normalized:
+        return False
+    return original_normalized != harmonized_normalized
+
+
+def get_latest_override_value(overrides: list[ManualOverride]) -> str | None:
+    """why: extract the most recent manual override value, if any."""
+    if not overrides:
+        return None
+    return overrides[-1].value
 
 
 def get_manifest_schema() -> pa.Schema:
@@ -124,5 +158,7 @@ __all__ = [
     "ManifestSummary",
     "ManualOverride",
     "confidence_bucket",
+    "get_latest_override_value",
     "get_manifest_schema",
+    "is_value_changed",
 ]

@@ -53,12 +53,12 @@ class TestMissingFileErrors:
     async def test_rows_missing_file(self, app_client: AsyncClient) -> None:
         """Rows returns 404 for unknown file_id."""
 
-        # Given: A file_id that does not exist in storage
+        # Given: A file_id that does not exist in storage (valid hex format)
 
         # When: Rows are requested with the non-existent file_id
         response = await app_client.post(
             "/stage-4/rows",
-            json={"file_id": "nonexistent123", "manual_columns": []},
+            json={"file_id": "deadbeef12345678", "manual_columns": []},
         )
 
         # Then: 404 response
@@ -67,12 +67,12 @@ class TestMissingFileErrors:
     async def test_summary_missing_file(self, app_client: AsyncClient) -> None:
         """Summary returns 404 for unknown file_id."""
 
-        # Given: A file_id that does not exist in storage
+        # Given: A file_id that does not exist in storage (valid hex format)
 
         # When: Summary is requested with the non-existent file_id
         response = await app_client.post(
             "/stage-5/summary",
-            json={"file_id": "nonexistent123", "manual_columns": []},
+            json={"file_id": "deadbeef12345678", "manual_columns": []},
         )
 
         # Then: 404 response

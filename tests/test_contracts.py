@@ -1,4 +1,4 @@
-"""Contract tests validating HTTP API request/response shapes per endpoint."""
+"""Validate HTTP API request/response shapes per endpoint through contract tests."""
 
 from __future__ import annotations
 
