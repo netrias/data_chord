@@ -28,19 +28,19 @@ const _createTermsDisplay = (changedRows, totalRows) => {
   return container;
 };
 
-const _createConfidenceDisplay = (confidenceBuckets, uniqueTermsChanged) => {
-  // "why: show confidence as columnar text layout; skip if nothing changed."
-  if (uniqueTermsChanged === 0) {
+const _createConfidenceDisplay = (confidenceBuckets, uniqueTerms) => {
+  // "why: show total confidence breakdown for all terms in the column."
+  if (uniqueTerms === 0) {
     return null;
   }
 
   const container = document.createElement('div');
   container.className = 'column-confidence-display';
 
-  const label = document.createElement('div');
-  label.className = 'column-confidence-label';
-  label.textContent = 'Confidence';
-  container.appendChild(label);
+  const header = document.createElement('div');
+  header.className = 'column-confidence-header';
+  header.textContent = `Confidence · ${uniqueTerms} terms`;
+  container.appendChild(header);
 
   const columns = document.createElement('div');
   columns.className = 'column-confidence-columns';
@@ -49,7 +49,7 @@ const _createConfidenceDisplay = (confidenceBuckets, uniqueTermsChanged) => {
   const orderedBuckets = [...confidenceBuckets].reverse();
 
   orderedBuckets.forEach((bucket) => {
-    const termCount = bucket.termCount || 0;
+    const count = bucket.termCount || 0;
     const col = document.createElement('div');
     col.className = 'column-confidence-columns__item';
 
@@ -60,14 +60,13 @@ const _createConfidenceDisplay = (confidenceBuckets, uniqueTermsChanged) => {
 
     const countSpan = document.createElement('span');
     countSpan.className = 'column-confidence-columns__count';
-    countSpan.textContent = `${termCount} ${termCount === 1 ? 'term' : 'terms'}`;
+    countSpan.textContent = `${count}`;
     col.appendChild(countSpan);
 
     columns.appendChild(col);
   });
 
   container.appendChild(columns);
-
   return container;
 };
 
@@ -88,20 +87,20 @@ const _createColumnCard = (column) => {
   if (!hasChanges) {
     const noChanges = document.createElement('div');
     noChanges.className = 'column-metric-card__no-changes';
-    noChanges.textContent = '0 items harmonized';
+    noChanges.textContent = '0 items changed';
     card.appendChild(noChanges);
     return card;
   }
 
   const uniqueTerms = document.createElement('div');
   uniqueTerms.className = 'column-metric-card__unique-terms';
-  uniqueTerms.textContent = `${column.uniqueTermsChanged} unique terms harmonized`;
+  uniqueTerms.textContent = `${column.uniqueTermsChanged} unique terms changed`;
   card.appendChild(uniqueTerms);
 
   const termsDisplay = _createTermsDisplay(column.changedRows, column.totalRows);
   card.appendChild(termsDisplay);
 
-  const confidenceDisplay = _createConfidenceDisplay(column.confidenceBuckets, column.uniqueTermsChanged);
+  const confidenceDisplay = _createConfidenceDisplay(column.confidenceBuckets, column.uniqueTerms);
   if (confidenceDisplay) {
     card.appendChild(confidenceDisplay);
   }

@@ -280,7 +280,7 @@
   border-top: 1px solid var(--gray-100);
 }
 
-.column-confidence-label {
+.column-confidence-header {
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--gray-500);
@@ -290,24 +290,27 @@
 
 .column-confidence-columns {
   display: flex;
-  justify-content: space-around;
   gap: var(--space-4);
 }
 
 .column-confidence-columns__item {
   display: flex;
-  flex-direction: column;
-  align-items: center;
+  align-items: baseline;
   gap: var(--space-1);
 }
 
 .column-confidence-columns__label {
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--gray-700);
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--gray-500);
+}
+
+.column-confidence-columns__label::after {
+  content: ':';
 }
 
 .column-confidence-columns__count {
   font-size: 0.85rem;
-  color: var(--gray-500);
+  font-weight: 600;
+  color: var(--gray-700);
 }

@@ -143,12 +143,12 @@ def _build_column_breakdowns(rows: list[ManifestRow]) -> list[ColumnBreakdownSch
         for row in col_rows:
             row_count = len(row.row_indices) if row.row_indices else 1
             total_rows += row_count
+            bucket = confidence_bucket(row.confidence_score)
+            confidence_counts[bucket] += 1
 
             if is_value_changed(row.to_harmonize, row.top_harmonization):
                 changed_rows += row_count
                 unique_terms_changed += 1
-                bucket = confidence_bucket(row.confidence_score)
-                confidence_counts[bucket] += 1
 
         breakdowns.append(ColumnBreakdownSchema(
             column_name=column_name,

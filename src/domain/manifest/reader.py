@@ -14,10 +14,12 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from src.domain.manifest.models import (
+    ConfidenceBucket,
     ManifestRow,
     ManifestSummary,
     ManualOverride,
     confidence_bucket,
+    is_value_changed,
 )
 
 logger = logging.getLogger(__name__)
@@ -73,15 +75,13 @@ def _summarize_manifest(rows: list[ManifestRow]) -> ManifestSummary:
     low_count = 0
 
     for row in rows:
-        original = (row.to_harmonize or "").strip().lower()
-        harmonized = (row.top_harmonization or "").strip().lower()
-        if original != harmonized:
+        if is_value_changed(row.to_harmonize, row.top_harmonization):
             changed_count += 1
 
         bucket = confidence_bucket(row.confidence_score)
-        if bucket == "high":
+        if bucket == ConfidenceBucket.HIGH:
             high_count += 1
-        elif bucket == "medium":
+        elif bucket == ConfidenceBucket.MEDIUM:
             medium_count += 1
         else:
             low_count += 1

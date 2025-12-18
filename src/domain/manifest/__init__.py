@@ -6,6 +6,8 @@ including manual override tracking with audit trail.
 """
 
 from src.domain.manifest.models import (
+    COMPLETENESS_HIGH_THRESHOLD,
+    COMPLETENESS_MEDIUM_THRESHOLD,
     HIGH_CONFIDENCE_THRESHOLD,
     MEDIUM_CONFIDENCE_THRESHOLD,
     ColumnMappingEntry,
@@ -14,6 +16,7 @@ from src.domain.manifest.models import (
     ManifestRow,
     ManifestSummary,
     ManualOverride,
+    completeness_bucket,
     confidence_bucket,
     get_latest_override_value,
     get_manifest_schema,
@@ -26,6 +29,8 @@ from src.domain.manifest.writer import (
 )
 
 __all__ = [
+    "COMPLETENESS_HIGH_THRESHOLD",
+    "COMPLETENESS_MEDIUM_THRESHOLD",
     "ColumnMappingEntry",
     "ConfidenceBucket",
     "HIGH_CONFIDENCE_THRESHOLD",
@@ -36,6 +41,7 @@ __all__ = [
     "ManualOverride",
     "add_manual_override",
     "add_manual_overrides_batch",
+    "completeness_bucket",
     "confidence_bucket",
     "get_latest_override_value",
     "get_manifest_schema",
