@@ -37,10 +37,6 @@
   color: var(--azure-500);
 }
 
-.legend-item--no-mapping .legend-icon {
-  color: var(--gray-500);
-}
-
 .legend-item--no-recommendation .legend-icon {
   color: var(--gray-400);
 }
@@ -115,14 +111,6 @@
   background-color: var(--azure-100);
 }
 
-.mapping-row.mapping-row--no-mapping {
-  background-color: var(--gray-50);
-  border-left: 4px solid var(--gray-400);
-}
-
-.mapping-row.mapping-row--no-mapping:hover {
-  background-color: var(--gray-100);
-}
 
 /* Status icon in row */
 .mapping-td-status {
@@ -142,10 +130,6 @@
 
 .mapping-row--no-recommendation .mapping-td-status {
   color: var(--gray-400);
-}
-
-.mapping-row--no-mapping .mapping-td-status {
-  color: var(--gray-500);
 }
 
 /* Table cells */

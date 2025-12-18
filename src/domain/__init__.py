@@ -25,3 +25,4 @@ from src.domain.schemas import HarmonizeRequest as HarmonizeRequest
 from src.domain.schemas import HarmonizeResponse as HarmonizeResponse
 from src.domain.schemas import ManifestSummarySchema as ManifestSummarySchema
 from src.domain.session import SessionKey as SessionKey
+from src.domain.session import UILabel as UILabel

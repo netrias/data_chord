@@ -131,20 +131,20 @@ def _apply_column_mappings(manifest: ManifestPayload, mappings: ColumnMappingSet
 
     column_map: MutableMapping[str, dict[str, object]] = manifest.setdefault("column_mappings", {})
     applied = mappings.get_applied()
-    removed = mappings.get_removed()
+    skipped = mappings.get_skipped()
 
     for mapping in applied:
-        if mapping.target is not None:
-            column_map[mapping.column_name] = _build_mapping_entry(
-                column_map.get(mapping.column_name),
-                mapping.target,
-            )
+        assert mapping.target is not None  # guaranteed by get_applied()
+        column_map[mapping.column_name] = _build_mapping_entry(
+            column_map.get(mapping.column_name),
+            mapping.target,
+        )
 
-    for column_name in removed:
+    for column_name in skipped:
         if column_name in column_map:
             del column_map[column_name]
 
-    _log_mapping_results(applied, removed)
+    _log_mapping_results(applied, skipped)
 
 
 def _build_mapping_entry(existing: Mapping[str, object] | None, cde_field: CDEField) -> dict[str, object]:
@@ -157,15 +157,15 @@ def _build_mapping_entry(existing: Mapping[str, object] | None, cde_field: CDEFi
     return entry
 
 
-def _log_mapping_results(applied: list[ColumnMapping], removed: list[str]) -> None:
-    """why: log applied and removed mappings for debugging."""
+def _log_mapping_results(applied: list[ColumnMapping], skipped: list[str]) -> None:
+    """why: log applied and skipped mappings for debugging."""
     if applied:
         logger.info(
             "Applied column mappings",
             extra={"mappings": {m.column_name: m.target.value for m in applied if m.target}},
         )
-    if removed:
-        logger.info("Removed column mappings via 'No mapping'", extra={"columns": removed})
+    if skipped:
+        logger.info("Skipped column mappings via 'No AI Recommendation'", extra={"columns": skipped})
 
 
 def _normalize_manifest(manifest: Mapping[str, object] | object) -> ManifestPayload:
