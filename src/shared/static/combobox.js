@@ -61,6 +61,7 @@ export const createCombobox = ({ options, initialValue, placeholder, onChange, s
 
   /* Track the committed value (value before editing started) */
   let committedValue = initialValue || '';
+  let blurTimeoutId = null;
 
   const mutedSet = new Set(mutedIndices ?? []);
 
@@ -113,6 +114,11 @@ export const createCombobox = ({ options, initialValue, placeholder, onChange, s
 
   /* REQ 1: On focus, clear input, show value as placeholder, show all options */
   input.addEventListener('focus', () => {
+    /* Clear any pending blur handler to prevent stale state updates */
+    if (blurTimeoutId !== null) {
+      clearTimeout(blurTimeoutId);
+      blurTimeoutId = null;
+    }
     if (committedValue) {
       input.placeholder = committedValue;
       input.value = '';
@@ -129,17 +135,20 @@ export const createCombobox = ({ options, initialValue, placeholder, onChange, s
 
   /* REQ 4: On blur, restore or accept value */
   input.addEventListener('blur', () => {
-    setTimeout(() => {
+    blurTimeoutId = setTimeout(() => {
+      blurTimeoutId = null;
       dropdown.classList.remove('combobox-dropdown--open');
       const typedValue = input.value.trim();
-      const isValidOption = options.includes(typedValue);
+      const typedValueLower = typedValue.toLowerCase();
+      /* Case-insensitive matching to align with dropdown filtering behavior */
+      const matchedOption = options.find((opt) => opt.toLowerCase() === typedValueLower);
 
-      if (isValidOption && typedValue !== committedValue) {
-        /* User typed a valid option different from original */
-        committedValue = typedValue;
-        input.value = typedValue;
+      if (matchedOption && matchedOption !== committedValue) {
+        /* User typed a valid option different from original - use canonical option casing */
+        committedValue = matchedOption;
+        input.value = matchedOption;
         input.placeholder = placeholder;
-        onChange(typedValue);
+        onChange(matchedOption);
       } else {
         /* Restore committed value - covers: empty input, invalid input, unchanged input */
         /* Note: To clear a selection, user must explicitly select a different option */
@@ -167,6 +176,14 @@ export const createCombobox = ({ options, initialValue, placeholder, onChange, s
   wrapper.appendChild(input);
   wrapper.appendChild(dropdownBtn);
   wrapper.appendChild(dropdown);
+
+  /** Cleanup function to clear any pending timeout on unmount. */
+  wrapper.destroy = () => {
+    if (blurTimeoutId !== null) {
+      clearTimeout(blurTimeoutId);
+      blurTimeoutId = null;
+    }
+  };
 
   return wrapper;
 };

@@ -12,13 +12,14 @@
   overflow: hidden;
 }
 
-/* Batch progress panel */
+/* Batch progress panel - uses card system */
 .batch-progress-panel {
   background: var(--white);
-  border-radius: var(--radius-xl);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-2xl);
   padding: var(--space-6);
   margin-bottom: var(--space-6);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-sm), var(--shadow-md);
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
@@ -34,8 +35,8 @@
 
 .batch-controls {
   display: flex;
-  gap: var(--space-4);
-  align-items: flex-end;
+  gap: var(--space-5);
+  align-items: stretch;
 }
 
 .help-toggle {
@@ -91,15 +92,17 @@
 .batch-progress-list {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3);
+  gap: var(--space-4);
+  padding: var(--space-1);
 }
 
+/* Batch progress buttons - tactile pill style */
 .batch-progress-item {
   width: 46px;
   height: 46px;
   border-radius: 14px;
-  border: 2px solid var(--gray-200);
-  background: var(--gray-100);
+  border: 1px solid var(--gray-200);
+  background: linear-gradient(180deg, var(--white) 0%, var(--gray-100) 100%);
   color: var(--gray-500);
   font-weight: 600;
   font-size: 1rem;
@@ -107,32 +110,49 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: transform var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
   cursor: pointer;
   padding: 0;
+  box-shadow:
+    0 2px 0 var(--gray-200),
+    0 2px 6px rgba(0, 0, 0, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
 }
 
 .batch-progress-item.pending {
-  background: var(--gray-50);
+  background: linear-gradient(180deg, var(--white) 0%, var(--gray-50) 100%);
   color: var(--gray-600);
 }
 
 .batch-progress-item.complete {
-  border-color: var(--green-500);
-  background: var(--netrias-glow-light);
-  color: var(--green-500);
+  border-color: var(--success-300);
+  background: linear-gradient(180deg, var(--success-50) 0%, var(--white) 100%);
+  color: var(--success-600);
+  box-shadow:
+    0 2px 0 var(--success-200),
+    0 2px 6px rgba(16, 185, 129, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
 .batch-progress-item.flagged {
-  border-color: var(--warning-500);
-  background: var(--warning-50);
+  border-color: var(--warning-300);
+  background: linear-gradient(180deg, var(--warning-50) 0%, var(--white) 100%);
   color: var(--warning-700);
+  box-shadow:
+    0 2px 0 var(--warning-200),
+    0 2px 6px rgba(245, 158, 11, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
 .batch-progress-item.current {
-  box-shadow: 0 0 0 3px var(--azure-500);
-  border-color: var(--azure-600);
-  transform: scale(1.1);
+  border-color: var(--azure-400);
+  background: linear-gradient(180deg, var(--azure-50) 0%, var(--white) 100%);
+  color: var(--azure-700);
+  box-shadow:
+    0 2px 0 var(--azure-200),
+    0 3px 8px rgba(6, 115, 179, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transform: translateY(-2px);
   z-index: 1;
   position: relative;
 }
@@ -142,12 +162,24 @@
   opacity: 0.5;
 }
 
-.batch-progress-item:not(:disabled):hover {
-  transform: translateY(-1px);
+.batch-progress-item:not(:disabled):not(.current):hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 3px 0 var(--gray-200),
+    0 4px 10px rgba(0, 0, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.batch-progress-item:not(:disabled):active {
+  transform: translateY(1px);
+  box-shadow:
+    0 1px 0 var(--gray-200),
+    0 1px 3px rgba(0, 0, 0, 0.08),
+    inset 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .batch-progress-item:focus-visible {
-  outline: 3px solid var(--azure-500);
+  outline: 2px solid var(--azure-500);
   outline-offset: 2px;
 }
 
@@ -161,67 +193,48 @@
   white-space: nowrap;
 }
 
-.current-batch-indicator {
-  margin: var(--space-4) 0 0;
-  font-weight: 700;
-  font-size: 1.25rem;
-  color: var(--azure-700);
-  background: var(--azure-50);
-  border: 2px solid var(--azure-100);
-  border-radius: var(--radius-lg);
-  padding: var(--space-3) var(--space-4);
-  text-align: center;
-}
-
-.current-batch-indicator.muted {
-  color: var(--gray-400);
-  background: var(--gray-50);
-  border-color: var(--gray-200);
-  font-size: 1rem;
-}
+/* current-batch-indicator now uses batch-progress-title styling */
 
 .control-group {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: var(--space-2);
+  min-width: 140px;
 }
 
 .control-group label {
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   font-weight: 600;
-  color: var(--gray-600);
+  color: var(--gray-500);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .control-group select {
+  appearance: none;
   border: 1px solid var(--gray-200);
   border-radius: var(--radius-md);
-  padding: 0.45rem 0.65rem;
+  padding: 0.5rem 2rem 0.5rem 0.75rem;
   font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--gray-900);
-  background: var(--white);
+  font-weight: 500;
+  color: var(--gray-800);
+  background: var(--white) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2364748b' d='M2.5 4.5L6 8l3.5-3.5'/%3E%3C/svg%3E") no-repeat right 0.6rem center;
+  background-size: 12px;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-.review-alert {
-  border-radius: 14px;
-  border: 1px solid var(--info-200);
-  background: var(--info-50);
-  padding: 0.85rem var(--space-4);
-  color: var(--info-700);
-  margin: var(--space-2) var(--space-4);
+.control-group select:hover {
+  border-color: var(--gray-300);
 }
 
-.review-alert.success {
-  border-color: var(--success-100);
-  background: var(--success-50);
-  color: var(--success-700);
+.control-group select:focus {
+  outline: none;
+  border-color: var(--azure-500);
+  box-shadow: 0 0 0 2px var(--azure-50);
 }
 
-.review-alert.warning {
-  border-color: var(--warning-200);
-  background: var(--warning-50);
-  color: var(--warning-700);
-}
+/* review-alert styles removed - notifications disabled */
 
 .batch-actions {
   display: flex;
@@ -269,21 +282,12 @@
   flex-shrink: 0;
 }
 
-.legend-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.legend-icon {
+/* Legend semantic colors - base .legend-* styles in tokens.css */
+/* Stage 4 adds background color and border-radius for confidence indicators */
+.confidence-legend .legend-icon {
   width: 20px;
   height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.85rem;
   font-weight: 700;
-  flex-shrink: 0;
   border-radius: var(--radius-sm);
 }
 
@@ -302,17 +306,15 @@
   background: var(--warning-50);
 }
 
-.legend-label {
-  font-size: 0.75rem;
-  color: var(--gray-600);
-}
-
-/* Value card - used in both column and row modes */
+/* Value card - elevated card with full gradient background */
 .row-cell {
-  border-radius: 14px;
-  border: 2px solid var(--gray-200);
+  border-radius: var(--radius-2xl);
+  border: 1px solid var(--gray-200);
   padding: var(--space-4) var(--space-5);
-  background: var(--gray-50);
+  background: linear-gradient(to bottom, var(--white) 0%, var(--gray-50) 100%);
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.06),
+    0 4px 12px rgba(0, 0, 0, 0.04);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -322,23 +324,59 @@
   word-break: normal;
   overflow-wrap: normal;
   white-space: normal;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 
-/* Confidence states */
+.row-cell:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 4px 8px rgba(0, 0, 0, 0.08),
+    0 8px 24px rgba(0, 0, 0, 0.06);
+}
+
+/* Confidence states - full gradient backgrounds with colored borders */
 .row-cell.confidence-high {
   border-color: var(--success-200);
-  background: var(--success-50);
+  background: linear-gradient(to bottom, var(--success-50) 0%, var(--white) 100%);
+  box-shadow:
+    0 1px 3px rgba(16, 185, 129, 0.1),
+    0 4px 12px rgba(16, 185, 129, 0.06);
+}
+
+.row-cell.confidence-high:hover {
+  box-shadow:
+    0 4px 8px rgba(16, 185, 129, 0.12),
+    0 8px 24px rgba(16, 185, 129, 0.08);
 }
 
 .row-cell.confidence-medium {
   border-color: var(--azure-200);
-  background: var(--azure-50);
+  background: linear-gradient(to bottom, var(--azure-50) 0%, var(--white) 100%);
+  box-shadow:
+    0 1px 3px rgba(6, 115, 179, 0.1),
+    0 4px 12px rgba(6, 115, 179, 0.06);
+}
+
+.row-cell.confidence-medium:hover {
+  box-shadow:
+    0 4px 8px rgba(6, 115, 179, 0.12),
+    0 8px 24px rgba(6, 115, 179, 0.08);
 }
 
 .row-cell.confidence-low,
 .row-cell.needs-review {
   border-color: var(--warning-200);
-  background: var(--warning-50);
+  background: linear-gradient(to bottom, var(--warning-50) 0%, var(--white) 100%);
+  box-shadow:
+    0 1px 3px rgba(245, 158, 11, 0.1),
+    0 4px 12px rgba(245, 158, 11, 0.06);
+}
+
+.row-cell.confidence-low:hover,
+.row-cell.needs-review:hover {
+  box-shadow:
+    0 4px 8px rgba(245, 158, 11, 0.12),
+    0 8px 24px rgba(245, 158, 11, 0.08);
 }
 
 /* Card header row with confidence indicator */

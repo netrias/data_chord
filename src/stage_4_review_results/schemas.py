@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class CellOverrideSchema(BaseModel):
@@ -42,7 +42,7 @@ class ReviewOverridesSchema(BaseModel):
 class SaveOverridesRequest(BaseModel):
     """Request payload for saving review overrides."""
 
-    file_id: str
+    file_id: str = Field(..., min_length=8, pattern=r"^[a-f0-9]+$")
     overrides: dict[str, dict[str, CellOverrideSchema]]
     review_state: ReviewStateSchema
 

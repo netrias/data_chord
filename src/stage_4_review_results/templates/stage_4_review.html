@@ -55,7 +55,7 @@
       <section class="batch-progress-panel">
         <div class="batch-progress-heading">
           <div>
-            <p class="batch-progress-title">Batch progress</p>
+            <p id="currentBatchIndicator" class="batch-progress-title">Batch progress</p>
             <p id="batchProgressHint" class="batch-progress-hint">Awaiting harmonized rows.</p>
           </div>
           <div class="batch-controls">
@@ -83,7 +83,6 @@
           </div>
         </div>
         <div id="batchProgressList" class="batch-progress-list" role="list" aria-live="polite"></div>
-        <p id="currentBatchIndicator" class="current-batch-indicator">Reviewing batch 1 of 1</p>
       </section>
 
       <section class="stage-card review-grid">
@@ -108,7 +107,6 @@
             <button id="completeBatchButton" class="netrias-btn" type="button">Mark batch complete</button>
           </div>
         </div>
-        <div id="reviewAlerts" class="review-alert hidden" role="status" aria-live="polite"></div>
         <div id="reviewTable" class="review-table" role="table" aria-live="polite"></div>
       </section>
     </main>

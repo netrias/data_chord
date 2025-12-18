@@ -14,7 +14,8 @@ from src.domain.storage import FileStore, LocalStorageBackend, UploadConstraints
 logger = logging.getLogger(__name__)
 
 MODULE_DIR: Path = Path(__file__).parent
-UPLOAD_BASE_DIR: Path = MODULE_DIR.parent / "stage_1_upload" / "uploads"
+PROJECT_ROOT: Path = MODULE_DIR.parent.parent
+UPLOAD_BASE_DIR: Path = PROJECT_ROOT / "uploads"
 
 MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024
 ALLOWED_SUFFIXES: tuple[str, ...] = (".csv",)

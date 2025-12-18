@@ -21,14 +21,25 @@ class HarmonizeRequest(BaseModel):
     manifest: ManifestPayload | None = None
 
 
-class ManifestRowSchema(BaseModel):
-    """why: API representation of a manifest row for frontend consumption."""
+class ConfidenceBucketSchema(BaseModel):
+    """why: confidence breakdown for a column's changed terms."""
+
+    id: str
+    label: str
+    term_count: int
+
+
+class ColumnBreakdownSchema(BaseModel):
+    """why: per-column harmonization metrics for dashboard display."""
 
     column_name: str
-    to_harmonize: str
-    top_harmonization: str
-    confidence_score: float | None
-    row_indices: list[int] = Field(default_factory=list)
+    label: str
+    total_rows: int
+    changed_rows: int
+    unchanged_rows: int
+    unique_terms: int
+    unique_terms_changed: int
+    confidence_buckets: list[ConfidenceBucketSchema]
 
 
 class ManifestSummarySchema(BaseModel):
@@ -39,7 +50,7 @@ class ManifestSummarySchema(BaseModel):
     high_confidence_count: int
     medium_confidence_count: int
     low_confidence_count: int
-    preview_rows: list[ManifestRowSchema] = Field(default_factory=list)
+    column_breakdowns: list[ColumnBreakdownSchema] = Field(default_factory=list)
 
 
 class HarmonizeResponse(BaseModel):

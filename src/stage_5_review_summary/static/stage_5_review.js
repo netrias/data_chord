@@ -23,12 +23,6 @@ const _state = {
   fileId: null,
 };
 
-const _escapeHtml = (str) => {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
-};
-
 const _safeNumber = (value) => {
   const num = Number(value);
   return Number.isFinite(num) ? num : 0;
@@ -49,7 +43,9 @@ const _extractFilename = (disposition) => {
 const _setDownloadButtonState = (isLoading) => {
   if (!_downloadBtn) return;
   _downloadBtn.disabled = isLoading;
-  _downloadBtn.textContent = isLoading ? 'Preparing download...' : 'Download harmonized data';
+  const frontEl = _downloadBtn.querySelector('.btn-3d-front');
+  const textTarget = frontEl ?? _downloadBtn;
+  textTarget.textContent = isLoading ? 'Preparing download...' : 'Download harmonized data';
 };
 
 const _triggerBrowserDownload = (blob, filename) => {
@@ -58,7 +54,8 @@ const _triggerBrowserDownload = (blob, filename) => {
   link.href = url;
   link.download = filename;
   link.click();
-  URL.revokeObjectURL(url);
+  /* Delay revocation to allow browser to start download before URL is invalidated. */
+  setTimeout(() => URL.revokeObjectURL(url), 100);
 };
 
 const _showError = (message) => {
@@ -128,22 +125,38 @@ const _handleDownload = async () => {
   }
 };
 
-const _createColumnCard = (col) => {
-  const columnName = _escapeHtml(col.column);
-  const distinctTerms = _safeNumber(col.distinct_terms).toLocaleString();
-  const aiChanges = _safeNumber(col.ai_changes).toLocaleString();
-  const manualChanges = _safeNumber(col.manual_changes).toLocaleString();
+const _createStatElement = (label, value) => {
+  const stat = document.createElement('div');
+  stat.className = 'summary-stat';
 
-  return `
-    <article class="summary-column-card">
-      <h4 class="summary-column-name">${columnName}</h4>
-      <dl class="summary-stats">
-        <div class="summary-stat"><dt>Distinct terms</dt><dd>${distinctTerms}</dd></div>
-        <div class="summary-stat"><dt>AI harmonized</dt><dd>${aiChanges}</dd></div>
-        <div class="summary-stat"><dt>Manual overrides</dt><dd>${manualChanges}</dd></div>
-      </dl>
-    </article>
-  `;
+  const dt = document.createElement('dt');
+  dt.textContent = label;
+
+  const dd = document.createElement('dd');
+  dd.textContent = value;
+
+  stat.appendChild(dt);
+  stat.appendChild(dd);
+  return stat;
+};
+
+const _createColumnCard = (col) => {
+  const article = document.createElement('article');
+  article.className = 'card card--inset card--pad-sm summary-column-card';
+
+  const h4 = document.createElement('h4');
+  h4.className = 'summary-column-name';
+  h4.textContent = col.column;
+  article.appendChild(h4);
+
+  const dl = document.createElement('dl');
+  dl.className = 'summary-stats';
+  dl.appendChild(_createStatElement('Distinct terms', _safeNumber(col.distinct_terms).toLocaleString()));
+  dl.appendChild(_createStatElement('AI harmonized', _safeNumber(col.ai_changes).toLocaleString()));
+  dl.appendChild(_createStatElement('Manual overrides', _safeNumber(col.manual_changes).toLocaleString()));
+  article.appendChild(dl);
+
+  return article;
 };
 
 const _renderSummary = (columnSummaries) => {
@@ -151,20 +164,34 @@ const _renderSummary = (columnSummaries) => {
 
   const changed = columnSummaries.filter((col) => col.ai_changes > 0 || col.manual_changes > 0);
 
+  _summaryGrid.replaceChildren();
+
   if (changed.length === 0) {
-    _summaryGrid.innerHTML = '<p class="summary-empty">No columns were modified during harmonization.</p>';
+    const emptyMsg = document.createElement('p');
+    emptyMsg.className = 'summary-empty';
+    emptyMsg.textContent = 'No columns were modified during harmonization.';
+    _summaryGrid.appendChild(emptyMsg);
     return;
   }
 
-  _summaryGrid.innerHTML = changed.map(_createColumnCard).join('');
+  for (const col of changed) {
+    _summaryGrid.appendChild(_createColumnCard(col));
+  }
+};
+
+const _showEmptyMessage = (message) => {
+  if (!_summaryGrid) return;
+  _summaryGrid.replaceChildren();
+  const emptyMsg = document.createElement('p');
+  emptyMsg.className = 'summary-empty';
+  emptyMsg.textContent = message;
+  _summaryGrid.appendChild(emptyMsg);
 };
 
 const _fetchSummary = async () => {
   const context = _loadSourceContext();
   if (!context) {
-    if (_summaryGrid) {
-      _summaryGrid.innerHTML = '<p class="summary-empty">Unable to locate harmonization context.</p>';
-    }
+    _showEmptyMessage('Unable to locate harmonization context.');
     return;
   }
 
@@ -185,9 +212,7 @@ const _fetchSummary = async () => {
     _renderSummary(data.column_summaries ?? []);
   } catch (error) {
     console.error('Failed to fetch summary:', error);
-    if (_summaryGrid) {
-      _summaryGrid.innerHTML = '<p class="summary-empty">Unable to load harmonization summary.</p>';
-    }
+    _showEmptyMessage('Unable to load harmonization summary.');
   }
 };
 

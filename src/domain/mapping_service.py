@@ -46,6 +46,7 @@ class MappingClientProtocol(Protocol):
     ) -> object:
         pass
 
+
 class MappingDiscoveryService:
     """why: wrap Netrias mapping discovery with safe fallbacks."""
 
@@ -55,8 +56,7 @@ class MappingDiscoveryService:
 
     def available(self) -> bool:
         """why: expose whether the underlying mapping client was initialized."""
-
-        return True
+        return self._api_key is not None
 
     def discover(
         self,
