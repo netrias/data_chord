@@ -13,6 +13,15 @@ const _toSafeNumber = (value, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const _normalizeConfidenceBuckets = (buckets) => {
+  /* "why: transform server bucket array to frontend shape." */
+  return (buckets ?? []).map((bucket) => ({
+    id: bucket.id ?? '',
+    label: bucket.label ?? '',
+    termCount: _toSafeNumber(bucket.term_count),
+  }));
+};
+
 const _normalizeColumnBreakdown = (serverColumn) => {
   /* "why: map snake_case server fields to camelCase frontend convention." */
   return {
@@ -23,11 +32,7 @@ const _normalizeColumnBreakdown = (serverColumn) => {
     unchangedRows: _toSafeNumber(serverColumn.unchanged_rows),
     uniqueTerms: _toSafeNumber(serverColumn.unique_terms),
     uniqueTermsChanged: _toSafeNumber(serverColumn.unique_terms_changed),
-    confidenceBuckets: (serverColumn.confidence_buckets ?? []).map((bucket) => ({
-      id: bucket.id ?? '',
-      label: bucket.label ?? '',
-      termCount: _toSafeNumber(bucket.term_count),
-    })),
+    confidenceBuckets: _normalizeConfidenceBuckets(serverColumn.confidence_buckets),
   };
 };
 

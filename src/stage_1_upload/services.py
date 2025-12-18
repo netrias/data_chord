@@ -12,6 +12,7 @@ from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 
+from src.domain.manifest import completeness_bucket
 from src.domain.storage import (
     UnsupportedUploadError,
     UploadConstraints,
@@ -22,7 +23,7 @@ from src.domain.storage import (
     describe_constraints,
 )
 
-from .schemas import ColumnPreview, ConfidenceBucket
+from .schemas import ColumnPreview
 
 logger = logging.getLogger(__name__)
 DEFAULT_CDE_SAMPLE_LIMIT = 50
@@ -76,7 +77,7 @@ def _analyze_single_column(header: str, sample_rows: list[dict[str, str]]) -> Co
         column_name=header,
         inferred_type=_infer_type(non_empty_values),
         sample_values=samples,
-        confidence_bucket=_confidence_bucket(non_empty_count, sample_size),
+        confidence_bucket=completeness_bucket(non_empty_count, sample_size),
         confidence_score=round(non_empty_count / sample_size, 2),
     )
 
@@ -87,18 +88,6 @@ def _normalize_sample(value: str | None) -> str:
         return ""
     sanitized = value.strip()
     return sanitized[:80]
-
-
-def _confidence_bucket(non_empty: int, sample_size: int) -> ConfidenceBucket:
-    """why: derive a friendly signal for how complete sample data is."""
-    if sample_size == 0:
-        return ConfidenceBucket.LOW
-    ratio = non_empty / sample_size
-    if ratio >= 0.8:
-        return ConfidenceBucket.HIGH
-    if ratio >= 0.5:
-        return ConfidenceBucket.MEDIUM
-    return ConfidenceBucket.LOW
 
 
 def _infer_type(values: Iterable[str]) -> str:

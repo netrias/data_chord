@@ -104,6 +104,22 @@ def confidence_bucket(score: float | None) -> ConfidenceBucket:
     return ConfidenceBucket.LOW
 
 
+COMPLETENESS_HIGH_THRESHOLD: float = 0.8
+COMPLETENESS_MEDIUM_THRESHOLD: float = 0.5
+
+
+def completeness_bucket(non_empty: int, sample_size: int) -> ConfidenceBucket:
+    """why: classify data completeness ratio into UI-friendly buckets."""
+    if sample_size == 0:
+        return ConfidenceBucket.LOW
+    ratio = non_empty / sample_size
+    if ratio >= COMPLETENESS_HIGH_THRESHOLD:
+        return ConfidenceBucket.HIGH
+    if ratio >= COMPLETENESS_MEDIUM_THRESHOLD:
+        return ConfidenceBucket.MEDIUM
+    return ConfidenceBucket.LOW
+
+
 def is_value_changed(original: str | None, harmonized: str | None) -> bool:
     """why: determine if harmonization produced a meaningfully different value.
 
@@ -149,6 +165,8 @@ def get_manifest_schema() -> pa.Schema:
 
 
 __all__ = [
+    "COMPLETENESS_HIGH_THRESHOLD",
+    "COMPLETENESS_MEDIUM_THRESHOLD",
     "ColumnMappingEntry",
     "ConfidenceBucket",
     "HIGH_CONFIDENCE_THRESHOLD",
@@ -157,6 +175,7 @@ __all__ = [
     "ManifestRow",
     "ManifestSummary",
     "ManualOverride",
+    "completeness_bucket",
     "confidence_bucket",
     "get_latest_override_value",
     "get_manifest_schema",
