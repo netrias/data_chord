@@ -22,8 +22,8 @@ class CellOverrideSchema(BaseModel):
 class ReviewStateSchema(BaseModel):
     """Batch review progress state."""
 
-    completed_batches: list[int] = []
-    flagged_batches: list[int] = []
+    completed_batches: list[int] = Field(default_factory=list)  # why: avoid shared mutable defaults across instances
+    flagged_batches: list[int] = Field(default_factory=list)  # why: avoid shared mutable defaults across instances
     current_batch: int = 1
     sort_mode: str = "original"
     batch_size: int = 5
