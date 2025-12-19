@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import os
 from collections.abc import AsyncGenerator, Generator
 from dataclasses import dataclass
 from pathlib import Path
@@ -116,6 +117,7 @@ def mock_netrias_client() -> Generator[MagicMock]:
     )
 
     with (
+        patch.dict(os.environ, {"NETRIAS_API_KEY": "test-api-key"}),
         patch("src.domain.mapping_service.NetriasClient", return_value=mock_client),
         patch("src.domain.harmonize.NetriasClient", return_value=mock_client),
     ):
