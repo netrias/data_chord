@@ -12,7 +12,7 @@ repos:
       - id: no-cross-stage-imports
         name: no cross-stage imports
         description: "Stages must depend on domain, not on each other"
-        entry: bash -c 'found=0; for file in src/stage_*/*.py src/stage_*/**/*.py 2>/dev/null; do [ -f "$file" ] || continue; source_stage=$(echo "$file" | grep -oE "stage_[0-9]" | head -1); grep -n "from src\.stage_" "$file" 2>/dev/null | while read line; do import_stage=$(echo "$line" | grep -oE "stage_[0-9]" | tail -1); if [ "$source_stage" != "$import_stage" ]; then echo "ERROR: $file imports from different stage: $line"; exit 1; fi; done || exit 1; done'
+        entry: bash -c 'set -euo pipefail; while IFS= read -r -d "" file; do source_stage=$(echo "$file" | grep -oE "stage_[0-9]" | head -1 || true); [ -n "$source_stage" ] || continue; while IFS= read -r line; do import_stage=$(echo "$line" | grep -oE "stage_[0-9]" | tail -1 || true); if [ "$source_stage" != "$import_stage" ]; then echo "ERROR: $file imports from different stage: $line"; exit 1; fi; done < <(grep -n "from src\\.stage_" "$file" 2>/dev/null || true); done < <(find src -type f -name "*.py" -path "src/stage_*/*" -print0)'
         language: system
         pass_filenames: false
         types: [python]

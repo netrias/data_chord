@@ -9,6 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
+# Local environment variables
+.env
+
 # Node artifacts
 node_modules/
 frontend/node_modules
@@ -20,9 +23,6 @@ frontend/dist
 # Stage 1 runtime files
 src/stage_1_upload/uploads/
 uploads/
-
-# Lock file (regenerate with uv lock)
-uv.lock
 
 # Harmonization outputs
 outputs/

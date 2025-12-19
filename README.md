@@ -47,13 +47,13 @@ docker run -p 8000:8000 --env-file .env data-chord
 
 ```bash
 # Install with dev dependencies
-uv sync --dev
+uv sync --extra dev
 
 # Run tests
 uv run pytest
 
 # Lint
-uv run ruff check .
+uv run ruff check src backend tests
 
 # Type check
 uv run basedpyright

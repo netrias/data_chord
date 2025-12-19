@@ -44,6 +44,18 @@ def _configure_logging() -> None:
     )
 
 
+def _cors_allow_origins() -> list[str]:
+    """why: allow tightening CORS in hosted environments without breaking local dev."""
+    raw = os.getenv("CORS_ALLOW_ORIGINS", "*").strip()
+    if not raw:
+        return ["*"]
+    if raw == "*":
+        return ["*"]
+
+    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+    return origins or ["*"]
+
+
 def create_app() -> FastAPI:
     """why: construct the FastAPI instance with routers and middleware."""
     _load_env_file()
@@ -52,7 +64,7 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=_cors_allow_origins(),
         allow_methods=["*"],
         allow_headers=["*"],
     )
