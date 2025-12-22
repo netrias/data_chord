@@ -90,12 +90,9 @@
         targetSchema: "{{ default_schema }}",
         manualOptions: {{ manual_options | tojson }},
         minConfidence: 0.5,
-        storageKey: 'stage2Payload',
         stageThreeUrl: "{{ request.url_for('stage_three_entry') }}",
-        stageThreePayloadKey: 'stage3HarmonizePayload',
-        stageThreeJobKey: 'stage3HarmonizeJob',
       };
     </script>
-    <script type="module" src="{{ request.url_for('stage_two_static', path='stage_2_mappings.js') }}?v=20250216"></script>
+    <script type="module" src="{{ request.url_for('stage_two_static', path='stage_2_mappings.js') }}"></script>
   </body>
 </html>

@@ -85,47 +85,13 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     meta = _storage.load(payload.file_id)
     if not meta:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please upload again.")
-    total_rows = 0
-    columns: list[ColumnPreview] = []
-    cde_targets: dict[str, list[ModelSuggestion]] = {}
-    manual_overrides: dict[str, str] = {}
-    manifest: ManifestPayload | None = None
-    try:
-        total_rows, columns = analyze_columns(meta.saved_path)
-        mapping_service = get_mapping_service()
-        cde_targets, manual_overrides, manifest = await run_in_threadpool(
-            mapping_service.discover,
-            csv_path=meta.saved_path,
-            target_schema=payload.target_schema,
-        )
-        _ = _storage.save_manifest(meta.file_id, manifest)
-    except FileNotFoundError as exc:
-        _router_logger.exception("Upload missing on disk", extra={"file_id": payload.file_id})
-        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Upload missing. Please upload again.") from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
-    except Exception as exc:  # pragma: no cover - defensive
-        _router_logger.exception("Failed discovering mappings", exc_info=exc)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to fetch mapping suggestions."
-        ) from exc
 
-    missing_columns = [
-        column.column_name
-        for column in columns
-        if column.column_name not in cde_targets
-        and column.column_name.lower() not in cde_targets
-    ]
-    _router_logger.info(
-        "Analyze completed",
-        extra={
-            "total_rows": total_rows,
-            "column_count": len(columns),
-            "mapped_columns": len(cde_targets),
-            "missing_columns": missing_columns[:10],
-            "missing_count": len(missing_columns),
-        },
+    total_rows, columns = _analyze_columns_safe(meta.saved_path, payload.file_id)
+    cde_targets, manual_overrides, manifest, mapping_available = await _discover_mappings(
+        meta.saved_path, payload.target_schema
     )
+    _storage.save_manifest(meta.file_id, manifest)
+    _log_analysis_results(total_rows, columns, cde_targets, mapping_available)
 
     return AnalyzeResponse(
         file_id=meta.file_id,
@@ -137,4 +103,61 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
         next_step_hint="Review AI-suggested column mappings once ready.",
         manual_overrides=manual_overrides,
         manifest=manifest,
+        mapping_service_available=mapping_available,
+    )
+
+
+def _analyze_columns_safe(csv_path: Path, file_id: str) -> tuple[int, list[ColumnPreview]]:
+    """why: wrap column analysis with error handling."""
+    try:
+        return analyze_columns(csv_path)
+    except FileNotFoundError as exc:
+        _router_logger.exception("Upload missing on disk", extra={"file_id": file_id})
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Upload missing. Please upload again.") from exc
+
+
+async def _discover_mappings(
+    csv_path: Path,
+    target_schema: str,
+) -> tuple[dict[str, list[ModelSuggestion]], dict[str, str], ManifestPayload, bool]:
+    """why: fetch CDE mapping suggestions from the mapping service."""
+    mapping_service = get_mapping_service()
+    mapping_available = mapping_service.available()
+    try:
+        cde_targets, manual_overrides, manifest = await run_in_threadpool(
+            mapping_service.discover,
+            csv_path=csv_path,
+            target_schema=target_schema,
+        )
+        return cde_targets, manual_overrides, manifest, mapping_available
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - defensive
+        _router_logger.exception("Failed discovering mappings", exc_info=exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to fetch mapping suggestions."
+        ) from exc
+
+
+def _log_analysis_results(
+    total_rows: int,
+    columns: list[ColumnPreview],
+    cde_targets: dict[str, list[ModelSuggestion]],
+    mapping_available: bool,
+) -> None:
+    """why: log analysis completion with summary metrics."""
+    cde_target_keys = {k.lower() for k in cde_targets}
+    missing_columns = [
+        col.column_name for col in columns if col.column_name.lower() not in cde_target_keys
+    ]
+    _router_logger.info(
+        "Analyze completed",
+        extra={
+            "total_rows": total_rows,
+            "column_count": len(columns),
+            "mapped_columns": len(cde_targets),
+            "missing_columns": missing_columns[:10],
+            "missing_count": len(missing_columns),
+            "mapping_service_available": mapping_available,
+        },
     )

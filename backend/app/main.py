@@ -10,6 +10,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.responses import Response
+from starlette.types import Scope
 
 from src.stage_1_upload.router import STAGE_ONE_STATIC_PATH, stage_one_router
 from src.stage_2_review_columns.router import STAGE_TWO_STATIC_PATH, stage_two_router
@@ -21,6 +23,21 @@ SHARED_STATIC_PATH: Path = Path(__file__).resolve().parents[2] / "src" / "shared
 
 APP_TITLE = "Data Chord"
 APP_DESCRIPTION = "Data harmonization workflow bootstrap application."
+
+
+def _is_dev_mode() -> bool:
+    """why: check if running in development mode for cache control."""
+    return os.getenv("DEV_MODE", "").lower() == "true"
+
+
+class DevStaticFiles(StaticFiles):
+    """why: disable caching in dev mode to avoid stale JS/CSS issues."""
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        if _is_dev_mode():
+            response.headers["Cache-Control"] = "no-store, must-revalidate"
+        return response
 
 
 def _load_env_file() -> None:
@@ -45,7 +62,11 @@ def _configure_logging() -> None:
 
 
 def _cors_allow_origins() -> list[str]:
-    """why: allow tightening CORS in hosted environments without breaking local dev."""
+    """why: allow tightening CORS in hosted environments without breaking local dev.
+
+    NOTE: Defaults to '*' for local development convenience. In production,
+    set CORS_ALLOW_ORIGINS to explicit origins (e.g., 'https://app.example.com').
+    """
     raw = os.getenv("CORS_ALLOW_ORIGINS", "*").strip()
     if not raw:
         return ["*"]
@@ -74,18 +95,12 @@ def create_app() -> FastAPI:
     app.include_router(stage_three_router)
     app.include_router(stage_four_router)
     app.include_router(stage_five_router)
-    shared_static = StaticFiles(directory=str(SHARED_STATIC_PATH))
-    stage_one_static = StaticFiles(directory=str(STAGE_ONE_STATIC_PATH))
-    stage_two_static = StaticFiles(directory=str(STAGE_TWO_STATIC_PATH))
-    stage_three_static = StaticFiles(directory=str(STAGE_THREE_STATIC_PATH))
-    stage_four_static = StaticFiles(directory=str(STAGE_FOUR_STATIC_PATH))
-    stage_five_static = StaticFiles(directory=str(STAGE_FIVE_STATIC_PATH))
-    app.mount("/assets/shared", shared_static, name="shared_static")
-    app.mount("/assets/stage-1", stage_one_static, name="stage_one_static")
-    app.mount("/assets/stage-2", stage_two_static, name="stage_two_static")
-    app.mount("/assets/stage-3", stage_three_static, name="stage_three_static")
-    app.mount("/assets/stage-4", stage_four_static, name="stage_four_static")
-    app.mount("/assets/stage-5", stage_five_static, name="stage_five_static")
+    app.mount("/assets/shared", DevStaticFiles(directory=str(SHARED_STATIC_PATH)), name="shared_static")
+    app.mount("/assets/stage-1", DevStaticFiles(directory=str(STAGE_ONE_STATIC_PATH)), name="stage_one_static")
+    app.mount("/assets/stage-2", DevStaticFiles(directory=str(STAGE_TWO_STATIC_PATH)), name="stage_two_static")
+    app.mount("/assets/stage-3", DevStaticFiles(directory=str(STAGE_THREE_STATIC_PATH)), name="stage_three_static")
+    app.mount("/assets/stage-4", DevStaticFiles(directory=str(STAGE_FOUR_STATIC_PATH)), name="stage_four_static")
+    app.mount("/assets/stage-5", DevStaticFiles(directory=str(STAGE_FIVE_STATIC_PATH)), name="stage_five_static")
     app.add_api_route("/", _redirect_to_stage_one, include_in_schema=False)
 
     return app

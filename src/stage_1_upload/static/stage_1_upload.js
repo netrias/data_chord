@@ -168,6 +168,9 @@ const _navigateToStageTwo = (fileId, targetSchema, payload) => {
   window.location.assign(`/stage-2?${search.toString()}`);
 };
 
+const CREDENTIAL_ERROR_MESSAGE =
+  'AI mapping service unavailable. Please configure NETRIAS_API_KEY and restart the server.';
+
 const _analyzeDataset = async () => {
   if (!state.uploaded || state.isAnalyzing) {
     _setStatus('Upload a file before analyzing.', 'error');
@@ -193,6 +196,9 @@ const _analyzeDataset = async () => {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       throw new Error(payload.detail || 'Analysis failed.');
+    }
+    if (payload.mapping_service_available === false) {
+      throw new Error(CREDENTIAL_ERROR_MESSAGE);
     }
     _setStatus('Columns analyzed. Redirecting…', 'success');
     _navigateToStageTwo(state.uploaded.file_id, config.targetSchema, payload);

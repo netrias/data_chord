@@ -26,10 +26,16 @@ export function setActiveStage(stage) {
   });
 }
 
-/** Validate URL is a safe relative path (prevents open redirect). */
+/** Validate URL is safe for navigation (relative path or same-origin absolute). */
 export function isSafeRelativeUrl(url) {
   if (!url || typeof url !== 'string') return false;
-  return url.startsWith('/') && !url.startsWith('//');
+  if (url.startsWith('/') && !url.startsWith('//')) return true;
+  try {
+    const parsed = new URL(url);
+    return parsed.origin === window.location.origin;
+  } catch {
+    return false;
+  }
 }
 
 /**

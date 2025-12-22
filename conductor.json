@@ -1,0 +1,6 @@
+{
+  "_comment": "Conductor workspace config: symlinks .env from repo root into each worktree",
+  "scripts": {
+    "setup": "ln -s $CONDUCTOR_ROOT_PATH/.env .env"
+  }
+}
