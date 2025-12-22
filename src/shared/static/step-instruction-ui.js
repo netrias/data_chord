@@ -6,7 +6,7 @@ import { STEP_INSTRUCTIONS, STAGE_ORDER } from './step-instructions.js';
 
 /**
  * Update progress tracker UI to reflect the active stage.
- * Marks earlier stages as complete, current stage as active.
+ * Marks earlier stages as complete, current stage as active, future stages as unreachable.
  * @param {string} stage - The currently active stage identifier
  */
 export function setActiveStage(stage) {
@@ -15,14 +15,19 @@ export function setActiveStage(stage) {
     console.warn(`[step-instruction-ui] Unknown stage: ${stage}. Valid stages: ${STAGE_ORDER.join(', ')}`);
     return;
   }
+
+  const maxReachedIndex = _getMaxReachedStageIndex();
   const progressSteps = document.querySelectorAll('.progress-tracker [data-stage]');
+
   progressSteps.forEach((step) => {
     const stepStage = step.dataset.stage;
     const stepIndex = STAGE_ORDER.indexOf(stepStage);
     const isActive = stepStage === stage;
     const isComplete = stepIndex >= 0 && stepIndex < targetIndex;
+    const isUnreachable = stepIndex > maxReachedIndex;
     step.classList.toggle('active', isActive);
     step.classList.toggle('complete', isComplete);
+    step.classList.toggle('unreachable', isUnreachable);
   });
 }
 
@@ -41,10 +46,14 @@ export function isSafeRelativeUrl(url) {
 /**
  * Attach click handlers for progress tracker step navigation.
  * Enables clicking on steps to navigate to their URLs.
+ * Unreachable stages are blocked from navigation.
  */
 export function initNavigationEvents() {
   document.querySelectorAll('.progress-tracker .step[data-url]').forEach((step) => {
     step.addEventListener('click', () => {
+      if (step.classList.contains('unreachable')) {
+        return;
+      }
       const url = step.dataset.url;
       if (isSafeRelativeUrl(url)) {
         window.location.href = url;
@@ -56,6 +65,10 @@ export function initNavigationEvents() {
     button.addEventListener('click', () => {
       const target = button.dataset.navTarget;
       if (isSafeRelativeUrl(target)) {
+        /* Reset progress when navigating to stage 1 (starting new workflow). */
+        if (target.includes('/stage-1') || target === '/') {
+          resetMaxReachedStage();
+        }
         window.location.assign(target);
       }
     });
@@ -134,4 +147,51 @@ function _populateStepTooltips() {
       step.setAttribute('data-tooltip', instructions.long);
     }
   });
+}
+
+const MAX_REACHED_STAGE_KEY = 'maxReachedStage';
+
+/** Get the index of the max reached stage from session storage. */
+function _getMaxReachedStageIndex() {
+  try {
+    const stored = sessionStorage.getItem(MAX_REACHED_STAGE_KEY);
+    if (stored) {
+      const index = STAGE_ORDER.indexOf(stored);
+      if (index >= 0) return index;
+    }
+  } catch {
+    /* sessionStorage unavailable */
+  }
+  return 0;
+}
+
+/**
+ * Update the max reached stage if the new stage is further than previously reached.
+ * Call this when advancing to a new stage via the forward button.
+ * @param {string} stage - The stage being advanced to
+ */
+export function advanceMaxReachedStage(stage) {
+  const newIndex = STAGE_ORDER.indexOf(stage);
+  if (newIndex === -1) return;
+
+  const currentMax = _getMaxReachedStageIndex();
+  if (newIndex > currentMax) {
+    try {
+      sessionStorage.setItem(MAX_REACHED_STAGE_KEY, stage);
+    } catch {
+      /* sessionStorage unavailable */
+    }
+  }
+}
+
+/**
+ * Reset the max reached stage to the beginning (upload).
+ * Call this when starting a new workflow.
+ */
+export function resetMaxReachedStage() {
+  try {
+    sessionStorage.removeItem(MAX_REACHED_STAGE_KEY);
+  } catch {
+    /* sessionStorage unavailable */
+  }
 }

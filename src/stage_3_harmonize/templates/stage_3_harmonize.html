@@ -51,35 +51,11 @@
       </div>
     </nav>
 
-    <details id="metadataBar" class="metadata-bar">
-      <summary class="metadata-bar__toggle">
-        <span class="metadata-bar__preview" id="metadataPreview">Session info</span>
-        <span class="metadata-bar__icon">▾</span>
-      </summary>
-      <div class="metadata-bar__content">
-        <div class="metadata-bar__item" id="metaFile">
-          <span class="metadata-bar__label">File</span>
-          <span class="metadata-bar__value" id="metaFileName">—</span>
-        </div>
-        <div class="metadata-bar__item" id="metaRows">
-          <span class="metadata-bar__label">Rows</span>
-          <span class="metadata-bar__value" id="metaRowCount">—</span>
-        </div>
-        <div class="metadata-bar__item" id="metaSchema">
-          <span class="metadata-bar__label">Schema</span>
-          <span class="metadata-bar__value" id="metaSchemaValue">—</span>
-        </div>
-        <div class="metadata-bar__item" id="metaJob">
-          <span class="metadata-bar__label">Job ID</span>
-          <span class="metadata-bar__value metadata-bar__value--mono" id="metaJobId">—</span>
-        </div>
-      </div>
-    </details>
-
     <main class="stage-shell">
       <section id="stageThreeMetrics" class="stage-card progress-card">
         <header class="stage-section-header">
           <h2 id="stageThreeTitle" class="stage-title">Harmonizing</h2>
+          <p id="jobIdDisplay" class="stage-job-id hidden"></p>
         </header>
 
         <div id="stageThreeEmptyState" class="stage-empty hidden">
@@ -93,7 +69,6 @@
         <div id="loadingState" class="loading-state" aria-live="assertive">
           <div class="loading-spinner" role="presentation"></div>
           <p class="loading-message">Netrias is harmonizing your dataset and will report back shortly.</p>
-          <p class="loading-meta hidden" id="jobIdDisplay"></p>
         </div>
 
         <div class="metrics-grid hidden" data-metrics-grid aria-live="polite"></div>

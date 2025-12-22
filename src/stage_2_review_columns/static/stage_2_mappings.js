@@ -2,8 +2,8 @@
  * Handle column mapping review and user overrides before harmonization.
  * Reads analysis payload from storage, renders mapping UI, and persists user selections.
  */
-import { initStepInstruction, setActiveStage, initNavigationEvents, isSafeRelativeUrl } from '/assets/shared/step-instruction-ui.js';
-import { STAGE_2_PAYLOAD_KEY, STAGE_3_PAYLOAD_KEY, STAGE_3_JOB_KEY, isValidFileId, removeFromSession } from '/assets/shared/storage-keys.js';
+import { initStepInstruction, setActiveStage, initNavigationEvents, isSafeRelativeUrl, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
+import { STAGE_2_PAYLOAD_KEY, STAGE_3_PAYLOAD_KEY, STAGE_3_JOB_KEY, isValidFileId, removeFromSession, readFromSession, writeToSession } from '/assets/shared/storage-keys.js';
 import { createCombobox } from '/assets/shared/combobox.js';
 
 const config = window.stageTwoConfig ?? {};
@@ -23,24 +23,13 @@ const state = {
   isSubmitting: false,
 };
 
-/** Persist payload to session storage for cross-page state. */
+/* why: use shared utilities for consistent session storage handling. */
 const _savePayloadToStorage = (payload) => {
-  try {
-    sessionStorage.setItem(STAGE_2_PAYLOAD_KEY, JSON.stringify(payload));
-  } catch (error) {
-    console.warn('Unable to persist stage 2 payload', error);
-  }
+  writeToSession(STAGE_2_PAYLOAD_KEY, payload);
 };
 
-/** Read payload from session storage. */
 const _readPayloadFromStorage = () => {
-  try {
-    const raw = sessionStorage.getItem(STAGE_2_PAYLOAD_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch (error) {
-    console.warn('Unable to read stage 2 payload', error);
-    return null;
-  }
+  return readFromSession(STAGE_2_PAYLOAD_KEY);
 };
 
 /** Look up CDE target suggestions for a column, checking case variants. */
@@ -79,13 +68,7 @@ const _persistStageThreePayload = (body) => {
     },
     manifest: state.payload?.manifest || null,
   };
-  try {
-    sessionStorage.setItem(STAGE_3_PAYLOAD_KEY, JSON.stringify(payloadForStageThree));
-    return true;
-  } catch (error) {
-    console.error('Unable to persist stage three payload', error);
-    return false;
-  }
+  return writeToSession(STAGE_3_PAYLOAD_KEY, payloadForStageThree);
 };
 
 /** Determine row state and icon based on AI recommendation and user selection. */
@@ -319,11 +302,12 @@ const _submitHarmonize = async () => {
   url.searchParams.set('target_schema', config.targetSchema);
 
   /* Navigate immediately - isSubmitting stays true to prevent duplicate clicks. */
+  advanceMaxReachedStage('harmonize');
   window.location.assign(url.toString());
 };
 
 /** Bootstrap page state from storage or backend. */
-const init = async () => {
+const _init = async () => {
   setActiveStage('mapping');
   initStepInstruction('mapping');
   initNavigationEvents();
@@ -357,4 +341,4 @@ const init = async () => {
   _hydrateView();
 };
 
-init();
+_init();
