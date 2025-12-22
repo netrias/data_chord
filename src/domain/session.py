@@ -19,5 +19,5 @@ class SessionKey(str, Enum):
 class UILabel(str, Enum):
     """why: centralize UI-facing labels to ensure consistency across frontend and backend."""
 
-    NO_AI_RECOMMENDATION = "No AI Recommendation"
+    NO_MAPPING = "No Mapping"
     SELECT_MAPPING = "Select mapping"
