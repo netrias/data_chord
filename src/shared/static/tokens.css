@@ -371,32 +371,36 @@ button.linklike {
   box-shadow: var(--shadow-lg);
   overflow: visible;
   position: relative;
+  display: flex;
+  align-items: center;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: var(--space-4) var(--space-8);
+  gap: var(--space-6);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
 }
 
 .progress-tracker-row {
   display: flex;
   align-items: center;
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 0 var(--space-6);
+  flex: 1;
+  gap: var(--space-4);
 }
 
 .progress-track {
   flex: 1;
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: var(--space-6) clamp(1rem, 5vw, 2.5rem);
   list-style: none;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-3);
+  gap: var(--space-1);
   flex-wrap: nowrap;
+  padding: 0;
+  margin: 0;
 }
 
 .progress-tracker-action {
   flex-shrink: 0;
-  padding-right: var(--space-6);
 }
 
 /* Magical 3D Button */
@@ -445,15 +449,15 @@ button.linklike {
 .btn-3d-front {
   display: block;
   position: relative;
-  min-width: 220px;
-  padding: 1.4rem 3rem;
+  min-width: 160px;
+  padding: 1rem 2rem;
   border-radius: 9999px;
-  font-size: 1.5rem;
+  font-size: 1.2rem;
   font-weight: 600;
   color: white;
   background: linear-gradient(180deg, #8bc727 0%, #6fa30a 100%);
   will-change: transform;
-  transform: translateY(-6px);
+  transform: translateY(-5px);
   transition: transform 600ms cubic-bezier(.3, .7, .4, 1);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   box-shadow:
@@ -466,7 +470,7 @@ button.linklike {
 }
 
 .btn-3d:hover:not(:disabled) .btn-3d-front {
-  transform: translateY(-8px);
+  transform: translateY(-7px);
   transition: transform 250ms cubic-bezier(.3, .7, .4, 1.5);
 }
 
@@ -491,7 +495,7 @@ button.linklike {
 }
 
 .btn-3d:disabled .btn-3d-front {
-  transform: translateY(-4px);
+  transform: translateY(-3px);
 }
 
 .btn-3d:focus:not(:focus-visible) {
@@ -554,7 +558,6 @@ button.linklike {
   border-width: 3px;
   color: var(--white);
   background: var(--netrias-500);
-  box-shadow: 0 4px 16px var(--netrias-glow-intense), 0 0 0 4px var(--netrias-glow-light);
   transform: scale(1.1);
 }
 
@@ -586,6 +589,23 @@ button.linklike {
   color: var(--teal-700);
 }
 
+.step.unreachable {
+  cursor: not-allowed;
+}
+
+.step.unreachable:hover {
+  color: var(--gray-400);
+}
+
+.step.unreachable .step-index {
+  opacity: 0.5;
+}
+
+.step.unreachable:hover .step-index {
+  border-color: var(--gray-300);
+  transform: none;
+}
+
 .connector {
   flex: 1;
   height: 3px;
@@ -599,20 +619,18 @@ button.linklike {
   background: linear-gradient(to right, var(--green-500), var(--teal-500));
 }
 
-/* Step instruction text - shown below progress tracker for active step */
+/* Step instruction text - shown to left of progress tracker */
 .step-instruction {
-  max-width: 600px;
-  margin: 0 auto;
-  padding: var(--space-3) var(--space-6) var(--space-4);
-  text-align: center;
+  flex-shrink: 0;
   position: relative;
+  order: -1;
 }
 
 .step-instruction-text {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: 0.8rem;
   color: var(--gray-600);
-  line-height: 1.5;
+  line-height: 1.4;
   cursor: help;
   display: inline-flex;
   align-items: center;
@@ -622,6 +640,8 @@ button.linklike {
   border: 1px dashed var(--gray-300);
   background: var(--gray-50);
   transition: background var(--transition-fast), border-color var(--transition-fast);
+  max-width: 280px;
+  white-space: normal;
 }
 
 .step-instruction-text::after {
@@ -643,16 +663,15 @@ button.linklike {
 /* Tooltip for long description on hover */
 .step-instruction-tooltip {
   position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  top: calc(100% - 4px);
+  left: 0;
+  top: calc(100% + 8px);
   width: max-content;
-  max-width: 450px;
-  padding: var(--space-4) var(--space-5);
+  max-width: 350px;
+  padding: var(--space-3) var(--space-4);
   background: var(--gray-800);
   color: var(--white);
-  font-size: 0.85rem;
-  line-height: 1.6;
+  font-size: 0.8rem;
+  line-height: 1.5;
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-xl);
   opacity: 0;
@@ -667,8 +686,7 @@ button.linklike {
   content: "";
   position: absolute;
   bottom: 100%;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 24px;
   border: 8px solid transparent;
   border-bottom-color: var(--gray-800);
 }

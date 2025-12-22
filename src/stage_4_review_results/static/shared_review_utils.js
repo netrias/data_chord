@@ -221,7 +221,7 @@ const _addTooltip = (card, tooltipText) => {
   const rowLabelEl = card.querySelector('.entry-row-label');
   if (rowLabelEl) {
     rowLabelEl.classList.add('has-tooltip');
-    rowLabelEl.dataset.tooltip = tooltipText;
+    rowLabelEl.dataset.tooltip = _escapeHtml(tooltipText);
   }
 };
 

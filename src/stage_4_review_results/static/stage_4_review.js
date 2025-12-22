@@ -3,7 +3,7 @@
  * Delegates to review mode modules (column or row) based on user selection.
  * Manages state persistence, navigation, and user interactions.
  */
-import { initStepInstruction, setActiveStage, initNavigationEvents } from '/assets/shared/step-instruction-ui.js';
+import { initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
 import { isValidFileId } from '/assets/shared/storage-keys.js';
 import {
   getTotalUnits as getColumnTotalUnits,
@@ -654,6 +654,7 @@ const attachEventListeners = () => {
 
   if (stageFiveButton) {
     stageFiveButton.addEventListener('click', () => {
+      advanceMaxReachedStage('review');
       window.location.assign(stageFiveUrl);
     });
   }

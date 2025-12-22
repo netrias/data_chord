@@ -1,6 +1,6 @@
 import StageThreeMetricsDashboard from './metrics/dashboard.js';
 import buildDashboardDataset from './metrics/manifest_adapter.js';
-import { initStepInstruction, updateStepInstruction, setActiveStage, initNavigationEvents, isSafeRelativeUrl } from '/assets/shared/step-instruction-ui.js';
+import { initStepInstruction, updateStepInstruction, setActiveStage, initNavigationEvents, isSafeRelativeUrl, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
 import { STAGE_3_PAYLOAD_KEY, STAGE_3_JOB_KEY, readFromSession, writeToSession, removeFromSession } from '/assets/shared/storage-keys.js';
 
 const config = window.stageThreeConfig ?? {};
@@ -16,12 +16,6 @@ const emptyState = document.getElementById('stageThreeEmptyState');
 const errorBanner = document.getElementById('stageThreeError');
 const stageThreeTitle = document.getElementById('stageThreeTitle');
 const returnToStageTwo = document.getElementById('returnToStageTwo');
-const metadataBar = document.getElementById('metadataBar');
-const metadataPreview = document.getElementById('metadataPreview');
-const metaFileName = document.getElementById('metaFileName');
-const metaRowCount = document.getElementById('metaRowCount');
-const metaSchemaValue = document.getElementById('metaSchemaValue');
-const metaJobId = document.getElementById('metaJobId');
 const loadingSpinner = document.querySelector('#loadingState .loading-spinner');
 
 const metricsDashboard = StageThreeMetricsDashboard.initFromDom();
@@ -30,18 +24,17 @@ const state = {
   payload: null,
   requestBody: null,
   job: null,
-  context: null,
   isProcessing: false,
 };
 
-// "why: keep dashboard orchestration isolated from the job rendering logic."
+/* why: keep dashboard orchestration isolated from the job rendering logic. */
 const _hideMetricsDashboard = () => {
   if (metricsDashboard) {
     metricsDashboard.hide();
   }
 };
 
-// "why: expose a single call site for wiring harmonizer telemetry into the UI."
+/* why: expose a single call site for wiring harmonizer telemetry into the UI. */
 const _renderMetricsDashboard = (job) => {
   if (!metricsDashboard) {
     return;
@@ -75,42 +68,6 @@ const _toggleSpinner = (show) => {
   }
 };
 
-const _updateMetadata = (context) => {
-  // "why: store context for later use when showing job summary."
-  if (context) {
-    state.context = context;
-  }
-};
-
-const _updateMetadataBar = (job) => {
-  // "why: populate the collapsible metadata bar with session context."
-  const context = state.context ?? state.payload?.context ?? {};
-  const fileName = context.fileName;
-  const rowCount = typeof context.totalRows === 'number' ? context.totalRows.toLocaleString() : null;
-  const schema = context.targetSchema;
-  const jobId = job?.job_id;
-
-  if (metaFileName) {
-    metaFileName.textContent = fileName ?? '—';
-  }
-  if (metaRowCount) {
-    metaRowCount.textContent = rowCount ?? '—';
-  }
-  if (metaSchemaValue) {
-    metaSchemaValue.textContent = schema ?? '—';
-  }
-  if (metaJobId) {
-    metaJobId.textContent = jobId ?? '—';
-  }
-
-  // "why: update preview text to show key info at a glance."
-  if (metadataPreview) {
-    const parts = [];
-    if (fileName) parts.push(fileName);
-    if (rowCount) parts.push(`${rowCount} rows`);
-    metadataPreview.textContent = parts.length ? parts.join(' · ') : 'Session info';
-  }
-};
 
 const _clearError = () => {
   errorBanner.classList.add('hidden');
@@ -129,6 +86,7 @@ const _persistJob = (job) => {
 const _handleContinue = () => {
   const serverUrl = state.job?.next_stage_url;
   const nextUrl = isSafeRelativeUrl(serverUrl) ? serverUrl : nextStageUrl;
+  advanceMaxReachedStage('verify');
   window.location.assign(nextUrl);
 };
 
@@ -181,16 +139,16 @@ const _showJobId = (jobId) => {
   }
 };
 
+/* why: update UI based on job status. */
 const _renderJob = (job) => {
-  // "why: update UI based on job status; metadata bar always visible."
   if (!job) {
     return;
   }
   state.job = job;
   _persistJobMeta(job);
-  _updateMetadataBar(job);
   _showJobId(job.job_id);
 
+  /* Default to 'running' when status is missing - job is in progress. */
   const status = job.status ?? 'running';
   const normalized = _normalizeStatus(status);
   _updateTitleForStatus(status);
@@ -218,12 +176,9 @@ const _renderJob = (job) => {
   }
 };
 
+/* why: extract session payload for harmonization request. */
 const _extractRequestPayload = () => {
-  // "why: extract session payload and populate metadata bar early."
   let payload = readFromSession(STAGE_3_PAYLOAD_KEY);
-  if (payload && payload.context) {
-    _updateMetadata(payload.context);
-  }
   let harmonizePayload = payload?.request ?? payload;
   if (!harmonizePayload) {
     const params = new URLSearchParams(window.location.search);
@@ -241,7 +196,6 @@ const _extractRequestPayload = () => {
   }
   state.payload = payload;
   state.requestBody = harmonizePayload;
-  _updateMetadataBar(null);
   return harmonizePayload;
 };
 
@@ -299,8 +253,8 @@ const _startHarmonize = async (payloadOverride = null) => {
   }
 };
 
+/* why: verify stored job belongs to current file_id to prevent stale state. */
 const _hydrateFromStoredJob = () => {
-  // "why: verify stored job belongs to current file_id to prevent stale state."
   const job = readFromSession(STAGE_3_JOB_KEY);
   if (!job) {
     return false;
@@ -335,7 +289,9 @@ const _init = () => {
   }
   if (returnToStageTwo) {
     returnToStageTwo.addEventListener('click', () => {
-      window.location.assign(stageTwoUrl);
+      if (isSafeRelativeUrl(stageTwoUrl)) {
+        window.location.assign(stageTwoUrl);
+      }
     });
   }
 

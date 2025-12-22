@@ -1,4 +1,4 @@
-import { initStepInstruction, setActiveStage, initNavigationEvents } from '/assets/shared/step-instruction-ui.js';
+import { initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
 import { STAGE_2_PAYLOAD_KEY, STAGE_3_PAYLOAD_KEY, STAGE_3_JOB_KEY, removeFromSession, writeToSession } from '/assets/shared/storage-keys.js';
 
 const config = window.stageOneUploadConfig ?? {};
@@ -28,6 +28,9 @@ const _formatBytes = (bytes) => {
   }
   if (bytes < 0) {
     return '—';
+  }
+  if (bytes === 0) {
+    return '0 B';
   }
   const units = ['B', 'KB', 'MB', 'GB'];
   let value = bytes;
@@ -164,6 +167,7 @@ const _persistStageTwoPayload = (payload) => {
 
 const _navigateToStageTwo = (fileId, targetSchema, payload) => {
   _persistStageTwoPayload(payload);
+  advanceMaxReachedStage('mapping');
   const search = new URLSearchParams({ file_id: fileId, schema: targetSchema });
   window.location.assign(`/stage-2?${search.toString()}`);
 };

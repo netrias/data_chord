@@ -1,78 +1,5 @@
 /* Stage 3 Harmonize - stage-specific styles */
 
-/* Collapsible metadata bar */
-.metadata-bar {
-  background-color: var(--gray-50);
-  border-bottom: 1px solid var(--gray-200);
-}
-
-.metadata-bar__toggle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
-  cursor: pointer;
-  user-select: none;
-  list-style: none;
-}
-
-.metadata-bar__toggle::-webkit-details-marker {
-  display: none;
-}
-
-.metadata-bar__preview {
-  font-size: 0.8rem;
-  color: var(--gray-500);
-}
-
-.metadata-bar__icon {
-  font-size: 0.7rem;
-  color: var(--gray-400);
-  transition: transform 0.2s ease;
-}
-
-.metadata-bar[open] .metadata-bar__icon {
-  transform: rotate(180deg);
-}
-
-.metadata-bar__content {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: var(--space-4);
-  padding: var(--space-3) var(--space-4);
-  border-top: 1px solid var(--gray-200);
-  background-color: var(--white);
-}
-
-.metadata-bar__item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 80px;
-}
-
-.metadata-bar__label {
-  font-size: 0.65rem;
-  font-weight: 600;
-  color: var(--gray-400);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.metadata-bar__value {
-  font-size: 0.85rem;
-  font-weight: 500;
-  color: var(--gray-700);
-}
-
-.metadata-bar__value--mono {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-  font-size: 0.75rem;
-  color: var(--gray-500);
-}
-
 /* Stage header */
 .stage-section-header {
   text-align: center;
@@ -82,7 +9,14 @@
   font-size: 1.5rem;
   font-weight: 700;
   color: var(--gray-900);
-  margin: 0 0 var(--space-4) 0;
+  margin: 0;
+}
+
+.stage-job-id {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 0.8rem;
+  color: var(--gray-500);
+  margin: var(--space-2) 0 var(--space-4) 0;
 }
 
 /* Loading state - uses card system */
