@@ -5,12 +5,30 @@
 import { initStepInstruction, setActiveStage, initNavigationEvents, isSafeRelativeUrl, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
 import { STAGE_2_PAYLOAD_KEY, STAGE_3_PAYLOAD_KEY, STAGE_3_JOB_KEY, isValidFileId, removeFromSession, readFromSession, writeToSession } from '/assets/shared/storage-keys.js';
 import { createCombobox } from '/assets/shared/combobox.js';
+import { determineRowState } from '/assets/shared/row-state.js';
 
+/* Configuration and constants */
 const config = window.stageTwoConfig ?? {};
-const NO_MAPPING_OPTION = 'No mapping';
 const HARMONIZE_BUTTON_LABEL = 'Harmonize →';
-const manualOptions = [NO_MAPPING_OPTION, ...(config.manualOptions ?? [])];
+const NO_MAPPING_OPTION = config.noMappingLabel ?? 'No Mapping';
 const stageThreeUrl = config.stageThreeUrl ?? '/stage-3';
+
+/* why: index 0 is the 'No Mapping' option, visually separated from CDE options. */
+const NO_MAPPING_INDEX = 0;
+const manualOptions = [NO_MAPPING_OPTION, ...(config.manualOptions ?? [])];
+
+/* CSS class constants */
+const CSS_MAPPING_ROW = 'mapping-row';
+const CSS_MAPPING_TD = 'mapping-td';
+const CSS_SUGGESTION_TARGET = 'suggestion-target';
+
+/* User-facing messages */
+const MSG_NO_ANALYSIS_DATA = 'No analysis data found. Upload a file on Stage 1 to begin.';
+const MSG_NO_COLUMNS = 'No columns to display.';
+const MSG_UPLOAD_HINT = 'Upload a file on Stage 1 to get started.';
+const MSG_MANIFEST_MISSING = 'Manifest missing. Please rerun analysis before harmonizing.';
+const MSG_INVALID_FILE = 'Invalid file reference. Please restart the upload process.';
+const MSG_STORAGE_ERROR = 'Unable to prepare harmonization request. Please enable browser storage and retry.';
 
 const mappingResults = document.getElementById('mappingResults');
 const mappingHint = document.getElementById('mappingHint');
@@ -71,26 +89,6 @@ const _persistStageThreePayload = (body) => {
   return writeToSession(STAGE_3_PAYLOAD_KEY, payloadForStageThree);
 };
 
-/** Determine row state and icon based on AI recommendation and user selection. */
-const _determineRowState = (hasRecommendation, aiRecommendation, manualSelection) => {
-  const isNoMapping = manualSelection === NO_MAPPING_OPTION;
-  const isOverrideDifferentFromAI =
-    manualSelection &&
-    !isNoMapping &&
-    manualSelection.toLowerCase() !== (aiRecommendation ?? '').toLowerCase();
-
-  if (isNoMapping) {
-    return { state: 'no-mapping', icon: '—' };
-  }
-  if (isOverrideDifferentFromAI) {
-    return { state: 'override', icon: '✎' };
-  }
-  if (hasRecommendation || manualSelection) {
-    return { state: 'recommended', icon: '✓' };
-  }
-  return { state: 'no-recommendation', icon: '○' };
-};
-
 /** Normalize column name for consistent Map key lookups. */
 const _normalizeColumnKey = (columnName) => (columnName ?? '').toLowerCase();
 
@@ -102,36 +100,35 @@ const _buildMappingRow = (column) => {
   const manualSelection = state.manualSelections.get(normalizedKey) ?? null;
 
   const row = document.createElement('div');
-  const hasRecommendation = Boolean(topTarget);
   const aiRecommendation = topTarget?.target ?? null;
-  const { state: rowState, icon: statusIcon } = _determineRowState(
-    hasRecommendation,
+  const { state: rowState, icon: statusIcon } = determineRowState({
     aiRecommendation,
-    manualSelection
-  );
-  row.className = `mapping-row mapping-row--${rowState}`;
+    userSelection: manualSelection,
+    noMappingValue: NO_MAPPING_OPTION,
+  });
+  row.className = `${CSS_MAPPING_ROW} ${CSS_MAPPING_ROW}--${rowState}`;
 
   /* Status icon cell (first column, no header) */
   const statusCell = document.createElement('div');
-  statusCell.className = 'mapping-td mapping-td-status';
+  statusCell.className = `${CSS_MAPPING_TD} ${CSS_MAPPING_TD}-status`;
   statusCell.setAttribute('aria-hidden', 'true');
   statusCell.textContent = statusIcon;
 
   const columnCell = document.createElement('div');
-  columnCell.className = 'mapping-td mapping-td-column';
+  columnCell.className = `${CSS_MAPPING_TD} ${CSS_MAPPING_TD}-column`;
   columnCell.textContent = column.column_name;
 
   const suggestionCell = document.createElement('div');
-  suggestionCell.className = 'mapping-td mapping-td-suggestion';
+  suggestionCell.className = `${CSS_MAPPING_TD} ${CSS_MAPPING_TD}-suggestion`;
 
   const suggestionTarget = document.createElement('span');
-  suggestionTarget.className = 'suggestion-target';
+  suggestionTarget.className = CSS_SUGGESTION_TARGET;
 
   if (topTarget) {
     suggestionTarget.textContent = topTarget.target;
   } else {
     suggestionTarget.textContent = '—';
-    suggestionTarget.className = 'suggestion-target suggestion-target--empty';
+    suggestionTarget.className = `${CSS_SUGGESTION_TARGET} ${CSS_SUGGESTION_TARGET}--empty`;
   }
 
   suggestionCell.appendChild(suggestionTarget);
@@ -141,10 +138,11 @@ const _buildMappingRow = (column) => {
     options: manualOptions,
     initialValue: manualSelection,
     placeholder: topTarget ? 'Keep AI suggestion' : NO_MAPPING_OPTION,
-    separatorAfterIndex: 0,
-    mutedIndices: [0],
+    separatorAfterIndex: NO_MAPPING_INDEX,
+    mutedIndices: [NO_MAPPING_INDEX],
     onChange: (newValue) => {
-      if (newValue) {
+      const isNoMappingSelection = newValue?.toLowerCase() === NO_MAPPING_OPTION.toLowerCase();
+      if (newValue && !isNoMappingSelection) {
         state.manualSelections.set(normalizedKey, newValue);
       } else {
         state.manualSelections.delete(normalizedKey);
@@ -155,7 +153,7 @@ const _buildMappingRow = (column) => {
   });
 
   const overrideCell = document.createElement('div');
-  overrideCell.className = 'mapping-td mapping-td-override';
+  overrideCell.className = `${CSS_MAPPING_TD} ${CSS_MAPPING_TD}-override`;
   overrideCell.appendChild(combobox);
 
   row.appendChild(statusCell);
@@ -170,7 +168,7 @@ const _renderMappingRows = () => {
   if (!state.payload) {
     mappingResults.innerHTML = '';
     emptyState.classList.remove('hidden');
-    emptyState.textContent = 'No analysis data found. Upload a file on Stage 1 to begin.';
+    emptyState.textContent = MSG_NO_ANALYSIS_DATA;
     return;
   }
 
@@ -192,7 +190,7 @@ const _renderMappingRows = () => {
 
   if (!mappingResults.children.length) {
     emptyState.classList.remove('hidden');
-    emptyState.textContent = 'No columns to display.';
+    emptyState.textContent = MSG_NO_COLUMNS;
   } else {
     emptyState.classList.add('hidden');
   }
@@ -205,7 +203,7 @@ const _renderMappingRows = () => {
 /** Populate hint text and render rows based on current state. */
 const _hydrateView = () => {
   if (!state.payload) {
-    if (mappingHint) mappingHint.textContent = 'Upload a file on Stage 1 to get started.';
+    if (mappingHint) mappingHint.textContent = MSG_UPLOAD_HINT;
     _renderMappingRows();
     return;
   }
@@ -255,7 +253,7 @@ const _submitHarmonize = async () => {
     state.isSubmitting = false;
     harmonizeButton.disabled = false;
     if (harmonizeButtonText) harmonizeButtonText.textContent = HARMONIZE_BUTTON_LABEL;
-    if (mappingHint) mappingHint.textContent = 'Manifest missing. Please rerun analysis before harmonizing.';
+    if (mappingHint) mappingHint.textContent = MSG_MANIFEST_MISSING;
     return;
   }
   const fileId = state.payload.file_id;
@@ -266,7 +264,7 @@ const _submitHarmonize = async () => {
     state.isSubmitting = false;
     harmonizeButton.disabled = false;
     if (harmonizeButtonText) harmonizeButtonText.textContent = HARMONIZE_BUTTON_LABEL;
-    if (mappingHint) mappingHint.textContent = 'Invalid file reference. Please restart the upload process.';
+    if (mappingHint) mappingHint.textContent = MSG_INVALID_FILE;
     return;
   }
 
@@ -284,7 +282,7 @@ const _submitHarmonize = async () => {
     state.isSubmitting = false;
     harmonizeButton.disabled = false;
     if (harmonizeButtonText) harmonizeButtonText.textContent = HARMONIZE_BUTTON_LABEL;
-    if (mappingHint) mappingHint.textContent = 'Unable to prepare harmonization request. Please enable browser storage and retry.';
+    if (mappingHint) mappingHint.textContent = MSG_STORAGE_ERROR;
     return;
   }
 

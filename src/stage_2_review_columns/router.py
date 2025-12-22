@@ -26,8 +26,7 @@ async def render_stage_two(request: Request) -> HTMLResponse:
         "request": request,
         "default_schema": DEFAULT_TARGET_SCHEMA,
         "manual_options": get_cde_labels(),
-        "no_ai_recommendation_label": UILabel.NO_AI_RECOMMENDATION.value,
-        "select_mapping_label": UILabel.SELECT_MAPPING.value,
+        "no_mapping_label": UILabel.NO_MAPPING.value,
     }
     return _templates.TemplateResponse("stage_2_mappings.html", context)
 
