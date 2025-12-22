@@ -12,7 +12,7 @@ import {
   getCurrentUnitLabel as getColumnCurrentUnitLabel,
   renderEntries as renderColumnEntries,
   renderBatchProgress as renderColumnBatchProgress,
-} from './review_mode_column.js?v=20251216';
+} from './review_mode_column.js';
 import {
   getTotalUnits as getRowTotalUnits,
   getCurrentEntries as getRowCurrentEntries,
@@ -20,7 +20,7 @@ import {
   getCurrentUnitLabel as getRowCurrentUnitLabel,
   renderEntries as renderRowEntries,
   renderBatchProgress as renderRowBatchProgress,
-} from './review_mode_row.js?v=20251216';
+} from './review_mode_row.js';
 
 /** @type {Object} */
 const config = window.stageFourConfig ?? {};

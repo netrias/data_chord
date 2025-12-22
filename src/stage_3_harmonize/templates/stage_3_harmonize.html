@@ -109,12 +109,10 @@
     <script>
       window.stageThreeConfig = {
         harmonizeEndpoint: "{{ request.url_for('stage_three_harmonize') }}",
-        storageKey: "stage3HarmonizePayload",
-        jobStorageKey: "stage3HarmonizeJob",
         nextStageUrl: "{{ next_stage_url }}",
         stageTwoUrl: "{{ request.url_for('stage_two_mapping_page') }}",
       };
     </script>
-    <script type="module" src="{{ request.url_for('stage_three_static', path='stage_3_harmonize.js') }}?v=20250216"></script>
+    <script type="module" src="{{ request.url_for('stage_three_static', path='stage_3_harmonize.js') }}"></script>
   </body>
 </html>

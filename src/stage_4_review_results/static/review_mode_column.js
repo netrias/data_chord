@@ -10,7 +10,7 @@ import {
   createValueCard,
   renderProgressPills,
   calculateProgressSummary,
-} from './shared_review_utils.js?v=20251216';
+} from './shared_review_utils.js';
 
 /** Default number of entries per batch when not specified. */
 const DEFAULT_ENTRIES_PER_BATCH = 25;

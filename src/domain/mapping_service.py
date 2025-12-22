@@ -10,19 +10,14 @@ from typing import Protocol, cast
 
 from netrias_client import NetriasClient
 
-from src.domain.cde import ModelSuggestion
+from src.domain.cde import CDE_REGISTRY, ModelSuggestion
 from src.domain.manifest import ManifestPayload
 
 logger = logging.getLogger(__name__)
 DEFAULT_SAMPLE_LIMIT = 50
 
-MANUAL_CDE_ID_MAPPINGS: dict[int, str] = {
-    1: "therapeutic_agents",
-    2: "primary_diagnosis",
-    3: "morphology",
-    4: "tissue_or_organ_of_origin",
-    5: "sample_anatomic_site",
-}
+# Derive ID-to-label mapping from the canonical CDE_REGISTRY
+CDE_ID_TO_LABEL: dict[int, str] = {defn.cde_id: defn.label for defn in CDE_REGISTRY.values()}
 
 
 class MappingClientProtocol(Protocol):
@@ -52,11 +47,15 @@ class MappingDiscoveryService:
 
     def __init__(self) -> None:
         self._api_key: str | None = os.getenv("NETRIAS_API_KEY")
-        self._client: MappingClientProtocol = NetriasClient(api_key=self._api_key, confidence_threshold=0.0)
+        self._client: MappingClientProtocol | None = None
+        if self._api_key:
+            self._client = NetriasClient(api_key=self._api_key, confidence_threshold=0.0)
+        else:
+            logger.warning("NETRIAS_API_KEY not set; mapping discovery disabled")
 
     def available(self) -> bool:
         """why: expose whether the underlying mapping client was initialized."""
-        return self._api_key is not None
+        return self._client is not None
 
     def discover(
         self,
@@ -92,6 +91,8 @@ class MappingDiscoveryService:
         sample_limit: int,
     ) -> object | None:
         """why: call Netrias API with error handling."""
+        if self._client is None:
+            return None
         try:
             return self._client.discover_cde_mapping(
                 source_csv=csv_path,
@@ -153,7 +154,7 @@ def _filter_by_recognized(
     manual_overrides: dict[str, str] = {}
 
     for column, cde_id in recognized.items():
-        target_label = MANUAL_CDE_ID_MAPPINGS.get(cde_id)
+        target_label = CDE_ID_TO_LABEL.get(cde_id)
         if not target_label:
             continue
 

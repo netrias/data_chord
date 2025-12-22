@@ -13,7 +13,7 @@ from src.domain.manifest import ConfidenceBucket, ManifestPayload
 class UploadResponse(BaseModel):
     """why: capture the metadata the UI needs after a file upload."""
 
-    file_id: str = Field(..., min_length=8)
+    file_id: str = Field(..., min_length=8, max_length=128)
     file_name: str
     human_size: str
     content_type: str
@@ -23,7 +23,7 @@ class UploadResponse(BaseModel):
 class AnalyzeRequest(BaseModel):
     """why: indicate which file should be profiled for column insight."""
 
-    file_id: str = Field(..., min_length=8, pattern=r"^[a-f0-9]+$")
+    file_id: str = Field(..., min_length=8, max_length=128, pattern=r"^[a-f0-9]+$")
     target_schema: str = Field(default=DEFAULT_TARGET_SCHEMA, min_length=1)
 
 
@@ -49,3 +49,4 @@ class AnalyzeResponse(BaseModel):
     next_step_hint: str
     manual_overrides: dict[str, str] = Field(default_factory=dict)
     manifest: ManifestPayload = Field(default_factory=lambda: {"column_mappings": {}})
+    mapping_service_available: bool = Field(default=True)

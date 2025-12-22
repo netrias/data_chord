@@ -8,6 +8,7 @@ import { createCombobox } from '/assets/shared/combobox.js';
 
 const config = window.stageTwoConfig ?? {};
 const NO_MAPPING_OPTION = 'No mapping';
+const HARMONIZE_BUTTON_LABEL = 'Harmonize →';
 const manualOptions = [NO_MAPPING_OPTION, ...(config.manualOptions ?? [])];
 const stageThreeUrl = config.stageThreeUrl ?? '/stage-3';
 
@@ -15,6 +16,7 @@ const mappingResults = document.getElementById('mappingResults');
 const mappingHint = document.getElementById('mappingHint');
 const emptyState = document.getElementById('mappingEmptyState');
 const harmonizeButton = document.getElementById('harmonizeButton');
+const harmonizeButtonText = harmonizeButton?.querySelector('.btn-3d-front');
 const state = {
   payload: null,
   manualSelections: new Map(),
@@ -220,7 +222,7 @@ const _renderMappingRows = () => {
 /** Populate hint text and render rows based on current state. */
 const _hydrateView = () => {
   if (!state.payload) {
-    mappingHint.textContent = 'Upload a file on Stage 1 to get started.';
+    if (mappingHint) mappingHint.textContent = 'Upload a file on Stage 1 to get started.';
     _renderMappingRows();
     return;
   }
@@ -262,15 +264,15 @@ const _submitHarmonize = async () => {
 
   state.isSubmitting = true;
   harmonizeButton.disabled = true;
-  harmonizeButton.textContent = 'Preparing harmonize...';
+  if (harmonizeButtonText) harmonizeButtonText.textContent = 'Preparing…';
 
   const overrides = Object.fromEntries(state.manualSelections.entries());
   const manifest = state.payload?.manifest;
   if (!manifest || !manifest.column_mappings) {
     state.isSubmitting = false;
     harmonizeButton.disabled = false;
-    harmonizeButton.textContent = 'Harmonize';
-    mappingHint.textContent = 'Manifest missing. Please rerun analysis before harmonizing.';
+    if (harmonizeButtonText) harmonizeButtonText.textContent = HARMONIZE_BUTTON_LABEL;
+    if (mappingHint) mappingHint.textContent = 'Manifest missing. Please rerun analysis before harmonizing.';
     return;
   }
   const fileId = state.payload.file_id;
@@ -280,8 +282,8 @@ const _submitHarmonize = async () => {
     console.error('Invalid file ID format');
     state.isSubmitting = false;
     harmonizeButton.disabled = false;
-    harmonizeButton.textContent = 'Harmonize';
-    mappingHint.textContent = 'Invalid file reference. Please restart the upload process.';
+    if (harmonizeButtonText) harmonizeButtonText.textContent = HARMONIZE_BUTTON_LABEL;
+    if (mappingHint) mappingHint.textContent = 'Invalid file reference. Please restart the upload process.';
     return;
   }
 
@@ -298,8 +300,8 @@ const _submitHarmonize = async () => {
   if (!payloadSaved) {
     state.isSubmitting = false;
     harmonizeButton.disabled = false;
-    harmonizeButton.textContent = 'Harmonize';
-    mappingHint.textContent = 'Unable to prepare harmonization request. Please enable browser storage and retry.';
+    if (harmonizeButtonText) harmonizeButtonText.textContent = HARMONIZE_BUTTON_LABEL;
+    if (mappingHint) mappingHint.textContent = 'Unable to prepare harmonization request. Please enable browser storage and retry.';
     return;
   }
 
@@ -308,7 +310,7 @@ const _submitHarmonize = async () => {
     console.error('Invalid stage three URL');
     state.isSubmitting = false;
     harmonizeButton.disabled = false;
-    harmonizeButton.textContent = 'Harmonize';
+    if (harmonizeButtonText) harmonizeButtonText.textContent = HARMONIZE_BUTTON_LABEL;
     return;
   }
 
@@ -340,7 +342,7 @@ const init = async () => {
       payload = await _fetchPayload(fileId, schema);
     } catch (error) {
       console.error(error);
-      mappingHint.textContent = error.message;
+      if (mappingHint) mappingHint.textContent = error.message;
     }
   }
 

@@ -11,7 +11,7 @@ import {
   createValueCard,
   renderProgressPills,
   calculateProgressSummary,
-} from './shared_review_utils.js?v=20251216';
+} from './shared_review_utils.js';
 
 /**
  * Build row summaries with only rows that have changes.
