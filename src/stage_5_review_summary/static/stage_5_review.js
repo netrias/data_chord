@@ -2,16 +2,14 @@
  * Stage 5 Download - Final step to download harmonized data with manual overrides applied.
  */
 
-import { initStepInstruction } from '/assets/shared/step-instruction-ui.js';
+import { initStepInstruction, setActiveStage, initNavigationEvents } from '/assets/shared/step-instruction-ui.js';
+import { STAGE_3_PAYLOAD_KEY, isValidFileId, isSafeFilename, readFromSession } from '/assets/shared/storage-keys.js';
 
-const _DEFAULT_STAGE_THREE_KEY = 'stage3HarmonizePayload';
 const _DEFAULT_SUMMARY_ENDPOINT = '/stage-5/summary';
 const _DEFAULT_DOWNLOAD_ENDPOINT = '/stage-5/download';
 const _DEFAULT_ZIP_FILENAME = 'harmonized_data.zip';
-const _STAGE_ORDER = ['upload', 'mapping', 'harmonize', 'review', 'export'];
 
 const _config = window.stageFiveConfig ?? {};
-const _stageThreePayloadKey = _config.stageThreePayloadKey ?? _DEFAULT_STAGE_THREE_KEY;
 const _summaryEndpoint = _config.summaryEndpoint ?? _DEFAULT_SUMMARY_ENDPOINT;
 const _downloadEndpoint = _config.downloadEndpoint ?? _DEFAULT_DOWNLOAD_ENDPOINT;
 
@@ -29,14 +27,28 @@ const _safeNumber = (value) => {
 };
 
 const _extractFilename = (disposition) => {
+  let filename = null;
+
   const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/);
   if (utf8Match) {
-    return decodeURIComponent(utf8Match[1]);
+    try {
+      filename = decodeURIComponent(utf8Match[1]);
+    } catch {
+      filename = null;
+    }
   }
-  const basicMatch = disposition.match(/filename="([^"]+)"/);
-  if (basicMatch) {
-    return basicMatch[1];
+
+  if (!filename) {
+    const basicMatch = disposition.match(/filename="([^"]+)"/);
+    if (basicMatch) {
+      filename = basicMatch[1];
+    }
   }
+
+  if (filename && isSafeFilename(filename)) {
+    return filename;
+  }
+
   return _DEFAULT_ZIP_FILENAME;
 };
 
@@ -70,26 +82,12 @@ const _hideError = () => {
   }
 };
 
-const _setActiveStage = (stage) => {
-  const targetIndex = _STAGE_ORDER.indexOf(stage);
-  document.querySelectorAll('.progress-tracker [data-stage]').forEach((step) => {
-    const stepIndex = _STAGE_ORDER.indexOf(step.dataset.stage);
-    step.classList.toggle('active', step.dataset.stage === stage);
-    step.classList.toggle('complete', stepIndex >= 0 && stepIndex < targetIndex);
-  });
-};
-
 const _loadSourceContext = () => {
-  try {
-    const raw = sessionStorage.getItem(_stageThreePayloadKey);
-    const stored = raw ? JSON.parse(raw) : null;
-    const id = stored?.request?.file_id;
-    if (!id) return null;
-    return { fileId: id };
-  } catch (error) {
-    console.warn('Failed to load source context:', error);
-    return null;
-  }
+  const stored = readFromSession(STAGE_3_PAYLOAD_KEY);
+  if (!stored) return null;
+  const id = stored?.request?.file_id;
+  if (!id || !isValidFileId(id)) return null;
+  return { fileId: id };
 };
 
 const _handleDownload = async () => {
@@ -216,28 +214,10 @@ const _fetchSummary = async () => {
   }
 };
 
-const _attachNavigationEvents = () => {
-  document.querySelectorAll('.progress-tracker .step[data-url]').forEach((el) => {
-    el.addEventListener('click', () => {
-      if (el.dataset.url) {
-        window.location.assign(el.dataset.url);
-      }
-    });
-  });
-
-  document.querySelectorAll('[data-nav-target]').forEach((el) => {
-    el.addEventListener('click', () => {
-      if (el.dataset.navTarget) {
-        window.location.assign(el.dataset.navTarget);
-      }
-    });
-  });
-};
-
 const _init = () => {
-  _setActiveStage('export');
-  initStepInstruction('export');
-  _attachNavigationEvents();
+  setActiveStage('review');
+  initStepInstruction('review');
+  initNavigationEvents();
 
   if (_downloadBtn) {
     _downloadBtn.addEventListener('click', _handleDownload);

@@ -2,12 +2,64 @@
  * Initializes step instruction UI for the progress tracker.
  * Shows short instruction text for active step, with hover tooltip for longer description.
  */
-import { STEP_INSTRUCTIONS } from './step-instructions.js';
+import { STEP_INSTRUCTIONS, STAGE_ORDER } from './step-instructions.js';
+
+/**
+ * Update progress tracker UI to reflect the active stage.
+ * Marks earlier stages as complete, current stage as active.
+ * @param {string} stage - The currently active stage identifier
+ */
+export function setActiveStage(stage) {
+  const targetIndex = STAGE_ORDER.indexOf(stage);
+  if (targetIndex === -1) {
+    console.warn(`[step-instruction-ui] Unknown stage: ${stage}. Valid stages: ${STAGE_ORDER.join(', ')}`);
+    return;
+  }
+  const progressSteps = document.querySelectorAll('.progress-tracker [data-stage]');
+  progressSteps.forEach((step) => {
+    const stepStage = step.dataset.stage;
+    const stepIndex = STAGE_ORDER.indexOf(stepStage);
+    const isActive = stepStage === stage;
+    const isComplete = stepIndex >= 0 && stepIndex < targetIndex;
+    step.classList.toggle('active', isActive);
+    step.classList.toggle('complete', isComplete);
+  });
+}
+
+/** Validate URL is a safe relative path (prevents open redirect). */
+export function isSafeRelativeUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  return url.startsWith('/') && !url.startsWith('//');
+}
+
+/**
+ * Attach click handlers for progress tracker step navigation.
+ * Enables clicking on steps to navigate to their URLs.
+ */
+export function initNavigationEvents() {
+  document.querySelectorAll('.progress-tracker .step[data-url]').forEach((step) => {
+    step.addEventListener('click', () => {
+      const url = step.dataset.url;
+      if (isSafeRelativeUrl(url)) {
+        window.location.href = url;
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-nav-target]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const target = button.dataset.navTarget;
+      if (isSafeRelativeUrl(target)) {
+        window.location.assign(target);
+      }
+    });
+  });
+}
 
 /**
  * Populates the step instruction element with content for the given stage.
  * Also adds tooltips to all step elements for hover context.
- * @param {string} activeStage - The currently active stage identifier (upload, mapping, harmonize, review, export)
+ * @param {string} activeStage - The currently active stage identifier (upload, mapping, harmonize, verify, review)
  */
 export function initStepInstruction(activeStage) {
   _populateInstructionBanner(activeStage);

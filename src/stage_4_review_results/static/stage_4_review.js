@@ -3,9 +3,24 @@
  * Delegates to review mode modules (column or row) based on user selection.
  * Manages state persistence, navigation, and user interactions.
  */
-import { initStepInstruction } from '/assets/shared/step-instruction-ui.js';
-import * as columnMode from './review_mode_column.js?v=20251216';
-import * as rowMode from './review_mode_row.js?v=20251216';
+import { initStepInstruction, setActiveStage, initNavigationEvents } from '/assets/shared/step-instruction-ui.js';
+import { isValidFileId } from '/assets/shared/storage-keys.js';
+import {
+  getTotalUnits as getColumnTotalUnits,
+  getCurrentEntries as getColumnCurrentEntries,
+  getProgressSummary as getColumnProgressSummary,
+  getCurrentUnitLabel as getColumnCurrentUnitLabel,
+  renderEntries as renderColumnEntries,
+  renderBatchProgress as renderColumnBatchProgress,
+} from './review_mode_column.js?v=20251216';
+import {
+  getTotalUnits as getRowTotalUnits,
+  getCurrentEntries as getRowCurrentEntries,
+  getProgressSummary as getRowProgressSummary,
+  getCurrentUnitLabel as getRowCurrentUnitLabel,
+  renderEntries as renderRowEntries,
+  renderBatchProgress as renderRowBatchProgress,
+} from './review_mode_row.js?v=20251216';
 
 /** @type {Object} */
 const config = window.stageFourConfig ?? {};
@@ -32,9 +47,6 @@ const stageFiveButton = document.getElementById('stageFiveButton');
 const batchProgressList = document.getElementById('batchProgressList');
 const batchProgressHint = document.getElementById('batchProgressHint');
 const currentBatchIndicator = document.getElementById('currentBatchIndicator');
-
-/** @type {string[]} */
-const STAGE_ORDER = ['upload', 'mapping', 'harmonize', 'review', 'export'];
 
 /**
  * Debounce delay for auto-save in milliseconds.
@@ -80,7 +92,6 @@ const state = {
   rows: [],
   sortMode: 'original',
   reviewMode: 'column',
-  alertTimer: null,
   hasLoadedRows: false,
   pendingOverrides: {},
   saveDebounceTimer: null,
@@ -144,6 +155,11 @@ const fetchRows = async () => {
     return;
   }
 
+  if (!isValidFileId(fileId)) {
+    console.warn('Invalid file ID format.');
+    return;
+  }
+
   try {
     const response = await fetch(resultsEndpoint, {
       method: 'POST',
@@ -154,8 +170,7 @@ const fetchRows = async () => {
       }),
     });
     if (!response.ok) {
-      const detail = await response.text();
-      throw new Error(detail || 'Unable to load harmonized results.');
+      throw new Error('Unable to load harmonized results.');
     }
     const body = await response.json();
     state.rows = (body.rows || []).map((row) => ({
@@ -169,30 +184,18 @@ const fetchRows = async () => {
 };
 
 /**
- * Update progress tracker to show the active stage.
- * @param {string} stage - Stage identifier
- */
-const setActiveStage = (stage) => {
-  const targetIndex = STAGE_ORDER.indexOf(stage);
-  const progressSteps = document.querySelectorAll('.progress-tracker [data-stage]');
-  progressSteps.forEach((step) => {
-    const stepStage = step.dataset.stage;
-    const stepIndex = STAGE_ORDER.indexOf(stepStage);
-    const isActive = stepStage === stage;
-    const isComplete = stepIndex >= 0 && stepIndex < targetIndex;
-    step.classList.toggle('active', isActive);
-    step.classList.toggle('complete', isComplete);
-  });
-};
-
-/**
  * Fetch saved overrides from server.
  * @param {string} fileId
  * @returns {Promise<Object|null>}
  */
 const fetchOverrides = async (fileId) => {
+  if (!isValidFileId(fileId)) {
+    console.warn('Invalid file ID format for fetching overrides.');
+    return null;
+  }
+
   try {
-    const response = await fetch(`/stage-4/overrides/${fileId}`);
+    const response = await fetch(`/stage-4/overrides/${encodeURIComponent(fileId)}`);
     if (response.ok) {
       return await response.json();
     }
@@ -317,9 +320,9 @@ const getCurrentBatchMeta = () => {
   const modeState = getModeState();
   const batchSize = getCurrentBatchSize();
   if (state.reviewMode === 'column') {
-    return columnMode.getCurrentEntries(state.rows, modeState.currentUnit, batchSize);
+    return getColumnCurrentEntries(state.rows, modeState.currentUnit, batchSize);
   }
-  return rowMode.getCurrentEntries(state.rows, modeState.currentUnit, batchSize);
+  return getRowCurrentEntries(state.rows, modeState.currentUnit, batchSize);
 };
 
 /**
@@ -330,9 +333,9 @@ const getProgressSummary = () => {
   const modeState = getModeState();
   const batchSize = getCurrentBatchSize();
   if (state.reviewMode === 'column') {
-    return columnMode.getProgressSummary(state.rows, modeState.completedUnits, modeState.flaggedUnits, batchSize);
+    return getColumnProgressSummary(state.rows, modeState.completedUnits, modeState.flaggedUnits, batchSize);
   }
-  return rowMode.getProgressSummary(state.rows, batchSize, modeState.completedUnits, modeState.flaggedUnits);
+  return getRowProgressSummary(state.rows, batchSize, modeState.completedUnits, modeState.flaggedUnits);
 };
 
 /**
@@ -342,9 +345,9 @@ const getProgressSummary = () => {
 const getTotalUnits = () => {
   const batchSize = getCurrentBatchSize();
   if (state.reviewMode === 'column') {
-    return columnMode.getTotalUnits(state.rows, batchSize);
+    return getColumnTotalUnits(state.rows, batchSize);
   }
-  return rowMode.getTotalUnits(state.rows, batchSize);
+  return getRowTotalUnits(state.rows, batchSize);
 };
 
 /**
@@ -383,9 +386,9 @@ const updateCurrentBatchIndicator = (batchMeta) => {
   }
 
   if (state.reviewMode === 'column') {
-    currentBatchIndicator.textContent = columnMode.getCurrentUnitLabel(state.rows, modeState.currentUnit, batchSize);
+    currentBatchIndicator.textContent = getColumnCurrentUnitLabel(state.rows, modeState.currentUnit, batchSize);
   } else {
-    currentBatchIndicator.textContent = rowMode.getCurrentUnitLabel(state.rows, modeState.currentUnit, batchSize);
+    currentBatchIndicator.textContent = getRowCurrentUnitLabel(state.rows, modeState.currentUnit, batchSize);
   }
 };
 
@@ -434,7 +437,7 @@ const renderProgressPillsUI = (batchMeta) => {
   };
 
   if (state.reviewMode === 'column') {
-    columnMode.renderBatchProgress(
+    renderColumnBatchProgress(
       batchProgressList,
       batchMeta,
       modeState.currentUnit,
@@ -443,7 +446,7 @@ const renderProgressPillsUI = (batchMeta) => {
       onUnitClick,
     );
   } else {
-    rowMode.renderBatchProgress(
+    renderRowBatchProgress(
       batchProgressList,
       batchMeta,
       modeState.currentUnit,
@@ -463,9 +466,9 @@ const renderEntries = (batchMeta) => {
 
   if (state.reviewMode === 'column') {
     const gridSize = state.columnMode.batchSize;
-    columnMode.renderEntries(reviewTable, batchMeta, state.pendingOverrides, recordOverrideForRows, gridSize);
+    renderColumnEntries(reviewTable, batchMeta, state.pendingOverrides, recordOverrideForRows, gridSize);
   } else {
-    rowMode.renderEntries(reviewTable, batchMeta, state.pendingOverrides, recordOverrideForRows);
+    renderRowEntries(reviewTable, batchMeta, state.pendingOverrides, recordOverrideForRows);
   }
 };
 
@@ -568,6 +571,7 @@ const populateBatchSizeOptions = () => {
 
 /**
  * Handle review mode toggle (column vs row).
+ * Clamps currentUnit to valid range after mode switch to prevent out-of-bounds navigation.
  */
 const handleReviewModeChange = () => {
   const newMode = reviewModeSelect.value;
@@ -575,6 +579,16 @@ const handleReviewModeChange = () => {
 
   state.reviewMode = newMode;
   populateBatchSizeOptions();
+
+  /* Clamp currentUnit to valid range - different modes may have different unit counts. */
+  const modeState = getModeState();
+  const totalUnits = getTotalUnits();
+  if (totalUnits > 0 && modeState.currentUnit > totalUnits) {
+    modeState.currentUnit = totalUnits;
+  } else if (totalUnits === 0) {
+    modeState.currentUnit = 1;
+  }
+
   saveOverridesImmediate();
   render();
 };
@@ -600,13 +614,15 @@ const handleBatchSizeChange = () => {
  * Attach all event listeners.
  */
 const attachEventListeners = () => {
-  sortModeSelect.addEventListener('change', () => {
-    state.sortMode = sortModeSelect.value;
-    /* Note: Sorting is persisted but not yet implemented in data processing.
-       Progress is preserved since changing sort order doesn't invalidate reviews. */
-    saveOverridesImmediate();
-    render();
-  });
+  if (sortModeSelect) {
+    sortModeSelect.addEventListener('change', () => {
+      state.sortMode = sortModeSelect.value;
+      /* Note: Sorting is persisted but not yet implemented in data processing.
+         Progress is preserved since changing sort order doesn't invalidate reviews. */
+      saveOverridesImmediate();
+      render();
+    });
+  }
 
   if (batchSizeSelect) {
     batchSizeSelect.addEventListener('change', handleBatchSizeChange);
@@ -642,25 +658,7 @@ const attachEventListeners = () => {
     });
   }
 
-  /* Navigation via progress tracker steps */
-  document.querySelectorAll('.step[data-url]').forEach((step) => {
-    step.addEventListener('click', () => {
-      const target = step.dataset.url;
-      if (target) {
-        window.location.assign(target);
-      }
-    });
-  });
-
-  /* Navigation via data-nav-target buttons */
-  document.querySelectorAll('[data-nav-target]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const target = button.dataset.navTarget;
-      if (target) {
-        window.location.assign(target);
-      }
-    });
-  });
+  initNavigationEvents();
 };
 
 /**
@@ -698,12 +696,14 @@ const loadStateFromDisk = async () => {
  * @returns {Promise<void>}
  */
 const init = async () => {
-  setActiveStage('review');
-  initStepInstruction('review');
+  setActiveStage('verify');
+  initStepInstruction('verify');
 
   await loadStateFromDisk();
 
-  sortModeSelect.value = state.sortMode;
+  if (sortModeSelect) {
+    sortModeSelect.value = state.sortMode;
+  }
   if (reviewModeSelect) {
     reviewModeSelect.value = state.reviewMode;
   }

@@ -3,6 +3,10 @@
  * Each step has a short description (shown when active) and a
  * long description (shown on hover).
  */
+
+/** Canonical stage order for progress tracker navigation. */
+export const STAGE_ORDER = ['upload', 'mapping', 'harmonize', 'verify', 'review'];
+
 export const STEP_INSTRUCTIONS = {
   upload: {
     short: "Upload your CSV dataset to begin the harmonization workflow.",
@@ -20,11 +24,11 @@ export const STEP_INSTRUCTIONS = {
     short: "Your data has been transformed to match the target ontology.",
     long: "The harmonization engine has processed your data, converting values to match the selected ontologies. Review the results to see how your data was transformed."
   },
-  review: {
+  verify: {
     short: "Inspect harmonized values and override any AI suggestions as needed.",
     long: "Review the AI-generated harmonizations row by row. Cells are color-coded by confidence level. Click any cell to enter a manual override if the suggested value is incorrect. Mark batches complete as you verify them."
   },
-  export: {
+  review: {
     short: "Download your harmonized dataset and review the change summary.",
     long: "Your harmonization is complete. Review the summary statistics showing AI changes vs manual overrides per column. Download the final harmonized dataset in CSV format. You can also start a new harmonization workflow from here."
   }

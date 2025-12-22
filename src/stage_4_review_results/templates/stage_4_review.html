@@ -27,21 +27,21 @@
             <span class="step-label">Harmonize</span>
           </li>
           <li class="connector complete"></li>
-          <li class="step active" data-stage="review" data-url="{{ request.url_for('stage_four_review_page') }}">
+          <li class="step active" data-stage="verify" data-url="{{ request.url_for('stage_four_review_page') }}">
             <span class="step-index">4</span>
-            <span class="step-label">Review</span>
+            <span class="step-label">Verify</span>
           </li>
           <li class="connector"></li>
-          <li class="step" data-stage="export" data-url="{{ request.url_for('stage_five_review_page') }}">
+          <li class="step" data-stage="review" data-url="{{ request.url_for('stage_five_review_page') }}">
             <span class="step-index">5</span>
-            <span class="step-label">Download</span>
+            <span class="step-label">Review</span>
           </li>
         </ol>
         <div class="progress-tracker-action">
           <button id="stageFiveButton" class="btn-3d" type="button">
             <span class="btn-3d-shadow" aria-hidden="true"></span>
             <span class="btn-3d-edge" aria-hidden="true"></span>
-            <span class="btn-3d-front">Download →</span>
+            <span class="btn-3d-front">Review →</span>
           </button>
         </div>
       </div>

@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Data Chord · Download</title>
+    <title>Data Chord · Review</title>
     <link rel="stylesheet" href="/assets/shared/tokens.css" />
     <link rel="stylesheet" href="{{ request.url_for('stage_one_static', path='stage_1_upload.css') }}" />
     <link rel="stylesheet" href="{{ request.url_for('stage_five_static', path='stage_5_review.css') }}" />
@@ -27,14 +27,14 @@
             <span class="step-label">Harmonize</span>
           </li>
           <li class="connector complete"></li>
-          <li class="step complete" data-stage="review" data-url="{{ stage_four_url }}">
+          <li class="step complete" data-stage="verify" data-url="{{ stage_four_url }}">
             <span class="step-index">4</span>
-            <span class="step-label">Review</span>
+            <span class="step-label">Verify</span>
           </li>
           <li class="connector complete"></li>
-          <li class="step active" data-stage="export" data-url="{{ request.url_for('stage_five_review_page') }}">
+          <li class="step active" data-stage="review" data-url="{{ request.url_for('stage_five_review_page') }}">
             <span class="step-index">5</span>
-            <span class="step-label">Download</span>
+            <span class="step-label">Review</span>
           </li>
         </ol>
         <div class="progress-tracker-action">
