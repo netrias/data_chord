@@ -27,14 +27,14 @@
             <span class="step-label">Harmonize</span>
           </li>
           <li class="connector"></li>
-          <li class="step" data-stage="review" data-url="{{ request.url_for('stage_four_review_page') }}">
+          <li class="step" data-stage="verify" data-url="{{ request.url_for('stage_four_review_page') }}">
             <span class="step-index">4</span>
-            <span class="step-label">Review</span>
+            <span class="step-label">Verify</span>
           </li>
           <li class="connector"></li>
-          <li class="step" data-stage="export" data-url="{{ request.url_for('stage_five_review_page') }}">
+          <li class="step" data-stage="review" data-url="{{ request.url_for('stage_five_review_page') }}">
             <span class="step-index">5</span>
-            <span class="step-label">Download</span>
+            <span class="step-label">Review</span>
           </li>
         </ol>
         <div class="progress-tracker-action">
@@ -63,9 +63,13 @@
               <span class="legend-icon" aria-hidden="true">✎</span>
               <span class="legend-label">Manual override</span>
             </div>
+            <div class="legend-item legend-item--no-mapping">
+              <span class="legend-icon" aria-hidden="true">—</span>
+              <span class="legend-label">No mapping</span>
+            </div>
             <div class="legend-item legend-item--no-recommendation">
               <span class="legend-icon" aria-hidden="true">○</span>
-              <span class="legend-label">No AI Recommendation</span>
+              <span class="legend-label">No AI recommendation</span>
             </div>
           </div>
           <div class="mapping-table-header">
@@ -90,26 +94,7 @@
         stageThreeUrl: "{{ request.url_for('stage_three_entry') }}",
         stageThreePayloadKey: 'stage3HarmonizePayload',
         stageThreeJobKey: 'stage3HarmonizeJob',
-        noAIRecommendationLabel: "{{ no_ai_recommendation_label }}",
-        selectMappingLabel: "{{ select_mapping_label }}",
       };
-
-      document.addEventListener('DOMContentLoaded', () => {
-        document.querySelectorAll('.step[data-url]').forEach(step => {
-          step.addEventListener('click', () => {
-            const url = step.dataset.url;
-            if (url) window.location.href = url;
-          });
-        });
-        document.querySelectorAll('[data-nav-target]').forEach(button => {
-          button.addEventListener('click', () => {
-            const target = button.dataset.navTarget;
-            if (target) {
-              window.location.assign(target);
-            }
-          });
-        });
-      });
     </script>
     <script type="module" src="{{ request.url_for('stage_two_static', path='stage_2_mappings.js') }}?v=20250216"></script>
   </body>

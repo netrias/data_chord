@@ -1,9 +1,7 @@
-import { initStepInstruction } from '/assets/shared/step-instruction-ui.js';
+import { initStepInstruction, setActiveStage, initNavigationEvents } from '/assets/shared/step-instruction-ui.js';
+import { STAGE_2_PAYLOAD_KEY, STAGE_3_PAYLOAD_KEY, STAGE_3_JOB_KEY, removeFromSession, writeToSession } from '/assets/shared/storage-keys.js';
 
 const config = window.stageOneUploadConfig ?? {};
-const STORAGE_KEY = 'stage2Payload';
-const STAGE_THREE_PAYLOAD_KEY = 'stage3HarmonizePayload';
-const STAGE_THREE_JOB_KEY = 'stage3HarmonizeJob';
 
 const dropzone = document.getElementById('dropzone');
 const fileInput = document.getElementById('fileInput');
@@ -15,10 +13,7 @@ const dropzoneFileName = document.getElementById('dropzoneFileName');
 const dropzoneFileSize = document.getElementById('dropzoneFileSize');
 const dropzoneFileStatus = document.getElementById('dropzoneFileStatus');
 const changeFileButton = document.getElementById('changeFileButton');
-const progressSteps = document.querySelectorAll('.progress-tracker [data-stage]');
 const analyzeOverlay = document.getElementById('analyzeOverlay');
-
-const stageOrder = ['upload', 'mapping', 'harmonize', 'review', 'export'];
 
 const state = {
   file: null,
@@ -27,20 +22,11 @@ const state = {
   isAnalyzing: false,
 };
 
-const setActiveStage = (stage) => {
-  const targetIndex = stageOrder.indexOf(stage);
-  progressSteps.forEach((step) => {
-    const stepStage = step.dataset.stage;
-    const stepIndex = stageOrder.indexOf(stepStage);
-    const isActive = stepStage === stage;
-    const isComplete = stepIndex >= 0 && stepIndex < targetIndex;
-    step.classList.toggle('active', isActive);
-    step.classList.toggle('complete', isComplete);
-  });
-};
-
-const formatBytes = (bytes) => {
+const _formatBytes = (bytes) => {
   if (!bytes && bytes !== 0) {
+    return '—';
+  }
+  if (bytes < 0) {
     return '—';
   }
   const units = ['B', 'KB', 'MB', 'GB'];
@@ -53,7 +39,8 @@ const formatBytes = (bytes) => {
   return `${value.toFixed(1)} ${units[idx]}`;
 };
 
-const setStatus = (message = '', tone = '') => {
+const _setStatus = (message = '', tone = '') => {
+  if (!statusMessage) return;
   statusMessage.textContent = message;
   statusMessage.classList.remove('error', 'success');
   if (tone) {
@@ -62,42 +49,44 @@ const setStatus = (message = '', tone = '') => {
 };
 
 const _setAnalyzeButtonVisible = (visible) => {
+  if (!analyzeButton) return;
   analyzeButton.classList.toggle('reserve-space', !visible);
   analyzeButton.disabled = !visible;
 };
 
-const showDropzoneCopy = () => {
-  dropzoneCopy.classList.remove('hidden');
-  dropzoneFile.classList.add('hidden');
+const _showDropzoneCopy = () => {
+  if (dropzoneCopy) dropzoneCopy.classList.remove('hidden');
+  if (dropzoneFile) dropzoneFile.classList.add('hidden');
 };
 
-const showDropzoneSummary = (file, statusText) => {
-  dropzoneCopy.classList.add('hidden');
-  dropzoneFile.classList.remove('hidden');
-  dropzoneFileName.textContent = file.name;
-  dropzoneFileSize.textContent = formatBytes(file.size);
-  dropzoneFileStatus.textContent = statusText;
+const _showDropzoneSummary = (file, statusText) => {
+  if (dropzoneCopy) dropzoneCopy.classList.add('hidden');
+  if (dropzoneFile) dropzoneFile.classList.remove('hidden');
+  if (dropzoneFileName) dropzoneFileName.textContent = file.name;
+  if (dropzoneFileSize) dropzoneFileSize.textContent = _formatBytes(file.size);
+  if (dropzoneFileStatus) dropzoneFileStatus.textContent = statusText;
 };
 
-const openFilePicker = () => {
+const _openFilePicker = () => {
+  if (!fileInput) return;
   fileInput.value = '';
   fileInput.click();
 };
 
-const resetUploadState = () => {
+const _resetUploadState = () => {
   state.file = null;
   state.uploaded = null;
   state.isUploading = false;
   state.isAnalyzing = false;
-  fileInput.value = '';
+  if (fileInput) fileInput.value = '';
   _setAnalyzeButtonVisible(false);
-  dropzone.classList.remove('has-file');
-  showDropzoneCopy();
-  setStatus('');
+  if (dropzone) dropzone.classList.remove('has-file');
+  _showDropzoneCopy();
+  _setStatus('');
   setActiveStage('upload');
 };
 
-const validateFile = (file) => {
+const _validateFile = (file) => {
   const errors = [];
   if (!file) {
     errors.push('No file detected.');
@@ -106,33 +95,37 @@ const validateFile = (file) => {
     errors.push('Only CSV files are supported right now.');
   }
   if (file && config.maxBytes && file.size > Number(config.maxBytes)) {
-    errors.push(`File exceeds the ${formatBytes(Number(config.maxBytes))} limit.`);
+    errors.push(`File exceeds the ${_formatBytes(Number(config.maxBytes))} limit.`);
   }
   return errors;
 };
 
-const handleFileSelection = (file) => {
-  const issues = validateFile(file);
-  if (issues.length) {
-    showDropzoneCopy();
-    setStatus(issues.join(' '), 'error');
+const _handleFileSelection = (file) => {
+  /* Prevent race condition - ignore if already uploading. */
+  if (state.isUploading) {
     return;
   }
-  clearStaleSessionData();
+  const issues = _validateFile(file);
+  if (issues.length) {
+    _showDropzoneCopy();
+    _setStatus(issues.join(' '), 'error');
+    return;
+  }
+  _clearStaleSessionData();
   state.file = file;
   state.uploaded = null;
-  showDropzoneSummary(file, 'Ready to upload');
-  setStatus('');
-  uploadDataset();
+  _showDropzoneSummary(file, 'Ready to upload');
+  _setStatus('');
+  _uploadDataset();
 };
 
-const uploadDataset = async () => {
+const _uploadDataset = async () => {
   if (!state.file || state.isUploading) {
     return;
   }
   state.isUploading = true;
   _setAnalyzeButtonVisible(false);
-  showDropzoneSummary(state.file, 'Uploading…');
+  _showDropzoneSummary(state.file, 'Uploading…');
 
   const formData = new FormData();
   formData.append('file', state.file);
@@ -147,52 +140,44 @@ const uploadDataset = async () => {
       throw new Error(payload.detail || 'Upload failed.');
     }
     state.uploaded = payload;
-    dropzone.classList.add('has-file');
-    showDropzoneSummary(state.file, 'Uploaded');
+    if (dropzone) dropzone.classList.add('has-file');
+    _showDropzoneSummary(state.file, 'Uploaded');
     _setAnalyzeButtonVisible(true);
   } catch (error) {
     console.error(error);
-    showDropzoneSummary(state.file, 'Upload failed');
-    setStatus(error.message, 'error');
+    _showDropzoneSummary(state.file, 'Upload failed');
+    _setStatus(error.message, 'error');
   } finally {
     state.isUploading = false;
   }
 };
 
-const clearStaleSessionData = () => {
-  try {
-    sessionStorage.removeItem(STORAGE_KEY);
-    sessionStorage.removeItem(STAGE_THREE_PAYLOAD_KEY);
-    sessionStorage.removeItem(STAGE_THREE_JOB_KEY);
-  } catch (error) {
-    console.warn('Unable to clear stale session data', error);
-  }
+const _clearStaleSessionData = () => {
+  removeFromSession(STAGE_2_PAYLOAD_KEY);
+  removeFromSession(STAGE_3_PAYLOAD_KEY);
+  removeFromSession(STAGE_3_JOB_KEY);
 };
 
-const persistStageTwoPayload = (payload) => {
-  try {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-  } catch (error) {
-    console.warn('Unable to persist stage 2 payload', error);
-  }
+const _persistStageTwoPayload = (payload) => {
+  writeToSession(STAGE_2_PAYLOAD_KEY, payload);
 };
 
-const navigateToStageTwo = (fileId, targetSchema, payload) => {
-  persistStageTwoPayload(payload);
+const _navigateToStageTwo = (fileId, targetSchema, payload) => {
+  _persistStageTwoPayload(payload);
   const search = new URLSearchParams({ file_id: fileId, schema: targetSchema });
   window.location.assign(`/stage-2?${search.toString()}`);
 };
 
-const analyzeDataset = async () => {
+const _analyzeDataset = async () => {
   if (!state.uploaded || state.isAnalyzing) {
-    setStatus('Upload a file before analyzing.', 'error');
+    _setStatus('Upload a file before analyzing.', 'error');
     return;
   }
 
   state.isAnalyzing = true;
-  analyzeButton.disabled = true;
-  showDropzoneSummary(state.file, 'Analyzing columns…');
-  analyzeOverlay.classList.remove('hidden');
+  if (analyzeButton) analyzeButton.disabled = true;
+  _showDropzoneSummary(state.file, 'Analyzing columns…');
+  if (analyzeOverlay) analyzeOverlay.classList.remove('hidden');
 
   try {
     const response = await fetch(config.analyzeEndpoint, {
@@ -209,20 +194,22 @@ const analyzeDataset = async () => {
     if (!response.ok) {
       throw new Error(payload.detail || 'Analysis failed.');
     }
-    setStatus('Columns analyzed. Redirecting…', 'success');
-    navigateToStageTwo(state.uploaded.file_id, config.targetSchema, payload);
+    _setStatus('Columns analyzed. Redirecting…', 'success');
+    _navigateToStageTwo(state.uploaded.file_id, config.targetSchema, payload);
   } catch (error) {
     console.error(error);
-    setStatus(error.message, 'error');
+    _setStatus(error.message, 'error');
     _setAnalyzeButtonVisible(true);
-    showDropzoneSummary(state.file, 'Uploaded');
+    _showDropzoneSummary(state.file, 'Uploaded');
   } finally {
     state.isAnalyzing = false;
-    analyzeOverlay.classList.add('hidden');
+    if (analyzeOverlay) analyzeOverlay.classList.add('hidden');
   }
 };
 
-const wireDragEvents = () => {
+const _wireDragEvents = () => {
+  if (!dropzone) return;
+
   let dragCounter = 0;
 
   const preventDefaults = (event) => {
@@ -251,42 +238,49 @@ const wireDragEvents = () => {
     dropzone.classList.remove('dragging');
     const file = event.dataTransfer?.files?.[0];
     if (file) {
-      handleFileSelection(file);
+      _handleFileSelection(file);
     }
   });
 };
 
-const init = () => {
-  resetUploadState();
-  wireDragEvents();
+const _init = () => {
+  _resetUploadState();
+  _wireDragEvents();
   initStepInstruction('upload');
+  initNavigationEvents();
 
-  dropzone.addEventListener('click', () => openFilePicker());
-  dropzone.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      openFilePicker();
-    }
-  });
+  if (dropzone) {
+    dropzone.addEventListener('click', () => _openFilePicker());
+    dropzone.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        _openFilePicker();
+      }
+    });
+  }
 
   if (changeFileButton) {
     changeFileButton.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      resetUploadState();
-      openFilePicker();
+      _resetUploadState();
+      _openFilePicker();
     });
   }
 
-  fileInput.addEventListener('change', (event) => {
-    const files = event.target.files || [];
-    const file = files[0];
-    if (file) {
-      handleFileSelection(file);
-    }
-  });
+  if (fileInput) {
+    fileInput.addEventListener('change', (event) => {
+      const files = event.target.files || [];
+      const file = files[0];
+      if (file) {
+        _handleFileSelection(file);
+      }
+    });
+  }
 
-  analyzeButton.addEventListener('click', analyzeDataset);
+  if (analyzeButton) {
+    analyzeButton.addEventListener('click', _analyzeDataset);
+  }
 };
 
-init();
+_init();

@@ -12,6 +12,9 @@ import {
   calculateProgressSummary,
 } from './shared_review_utils.js?v=20251216';
 
+/** Default number of entries per batch when not specified. */
+const DEFAULT_ENTRIES_PER_BATCH = 25;
+
 /**
  * Determine which column indices have at least one non-empty value across all rows.
  * @param {Array} rows - Array of row objects
@@ -83,6 +86,8 @@ const _processRowCellForColumn = (row, colIdx, columnKey, entriesByOriginal) => 
  * @returns {Object|null} Column object with entries, or null if no entries
  */
 const _buildColumnEntries = (changedRows, colIdx, columnCell) => {
+  if (!columnCell) return null;
+
   const columnLabel = columnCell.columnLabel;
   const columnKey = columnCell.columnKey;
   const entriesByOriginal = new Map();
@@ -133,32 +138,35 @@ const _buildCompactedColumns = (rows) => {
 
 /**
  * Get total number of navigable units (columns with batches).
+ * Returns 0 when no data exists to signal empty state to UI.
  * @param {Array} rows - Array of row objects
  * @param {number} entriesPerBatch - Number of entries per batch
  * @returns {number}
  */
 export const getTotalUnits = (rows, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH) => {
+  const safeBatchSize = Math.max(1, entriesPerBatch);
   const columns = _buildCompactedColumns(rows);
   let total = 0;
   for (const col of columns) {
-    total += Math.ceil(col.entries.length / entriesPerBatch);
+    total += Math.ceil(col.entries.length / safeBatchSize);
   }
-  return Math.max(1, total);
+  return total;
 };
 
 /**
  * Get all columns with their batch counts for progress display.
  * @param {Array} rows - Array of row objects
  * @param {number} entriesPerBatch - Number of entries per batch
- * @returns {Array} Array of summary objects for each unit
+ * @returns {Array} Array of summary objects for each unit (empty array if no data)
  */
 export const getColumnSummaries = (rows, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH) => {
+  const safeBatchSize = Math.max(1, entriesPerBatch);
   const columns = _buildCompactedColumns(rows);
   const summaries = [];
   let unitIndex = 0;
 
   for (const col of columns) {
-    const batchCount = Math.ceil(col.entries.length / entriesPerBatch);
+    const batchCount = Math.ceil(col.entries.length / safeBatchSize);
     for (let batch = 0; batch < batchCount; batch++) {
       summaries.push({
         unitIndex: unitIndex + 1,
@@ -168,25 +176,11 @@ export const getColumnSummaries = (rows, entriesPerBatch = DEFAULT_ENTRIES_PER_B
         batchWithinColumn: batch + 1,
         totalBatchesInColumn: batchCount,
         entryCount: col.entries.length,
-        startEntry: batch * entriesPerBatch,
-        endEntry: Math.min((batch + 1) * entriesPerBatch, col.entries.length),
+        startEntry: batch * safeBatchSize,
+        endEntry: Math.min((batch + 1) * safeBatchSize, col.entries.length),
       });
       unitIndex++;
     }
-  }
-
-  if (summaries.length === 0) {
-    return [{
-      unitIndex: 1,
-      columnLabel: '',
-      columnKey: '',
-      columnIndex: 0,
-      batchWithinColumn: 1,
-      totalBatchesInColumn: 1,
-      entryCount: 0,
-      startEntry: 0,
-      endEntry: 0,
-    }];
   }
 
   return summaries;
@@ -201,8 +195,10 @@ export const getColumnSummaries = (rows, entriesPerBatch = DEFAULT_ENTRIES_PER_B
  */
 export const getCurrentEntries = (rows, currentUnit, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH) => {
   const summaries = getColumnSummaries(rows, entriesPerBatch);
-  const totalUnits = summaries.length;
-  const safeUnit = Math.min(Math.max(currentUnit, 1), totalUnits);
+  const totalUnits = Math.max(1, summaries.length);
+  const safeUnit = summaries.length > 0
+    ? Math.min(Math.max(currentUnit, 1), summaries.length)
+    : 1;
   const summary = summaries[safeUnit - 1];
 
   const emptyResult = {

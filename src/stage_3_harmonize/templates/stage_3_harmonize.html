@@ -27,21 +27,21 @@
             <span class="step-label">Harmonize</span>
           </li>
           <li class="connector"></li>
-          <li class="step" data-stage="review" data-url="{{ request.url_for('stage_four_review_page') }}">
+          <li class="step" data-stage="verify" data-url="{{ request.url_for('stage_four_review_page') }}">
             <span class="step-index">4</span>
-            <span class="step-label">Review</span>
+            <span class="step-label">Verify</span>
           </li>
           <li class="connector"></li>
-          <li class="step" data-stage="export" data-url="{{ request.url_for('stage_five_review_page') }}">
+          <li class="step" data-stage="review" data-url="{{ request.url_for('stage_five_review_page') }}">
             <span class="step-index">5</span>
-            <span class="step-label">Download</span>
+            <span class="step-label">Review</span>
           </li>
         </ol>
         <div class="progress-tracker-action">
           <button id="reviewButton" class="btn-3d" type="button" disabled>
             <span class="btn-3d-shadow" aria-hidden="true"></span>
             <span class="btn-3d-edge" aria-hidden="true"></span>
-            <span class="btn-3d-front">Review →</span>
+            <span class="btn-3d-front">Verify →</span>
           </button>
         </div>
       </div>
@@ -114,23 +114,6 @@
         nextStageUrl: "{{ next_stage_url }}",
         stageTwoUrl: "{{ request.url_for('stage_two_mapping_page') }}",
       };
-
-      document.addEventListener('DOMContentLoaded', () => {
-        document.querySelectorAll('.step[data-url]').forEach(step => {
-          step.addEventListener('click', () => {
-            const url = step.dataset.url;
-            if (url) window.location.href = url;
-          });
-        });
-        document.querySelectorAll('[data-nav-target]').forEach(button => {
-          button.addEventListener('click', () => {
-            const target = button.dataset.navTarget;
-            if (target) {
-              window.location.assign(target);
-            }
-          });
-        });
-      });
     </script>
     <script type="module" src="{{ request.url_for('stage_three_static', path='stage_3_harmonize.js') }}?v=20250216"></script>
   </body>

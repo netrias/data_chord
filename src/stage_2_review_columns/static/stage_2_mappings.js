@@ -2,50 +2,29 @@
  * Handle column mapping review and user overrides before harmonization.
  * Reads analysis payload from storage, renders mapping UI, and persists user selections.
  */
-import { initStepInstruction } from '/assets/shared/step-instruction-ui.js';
-
+import { initStepInstruction, setActiveStage, initNavigationEvents, isSafeRelativeUrl } from '/assets/shared/step-instruction-ui.js';
+import { STAGE_2_PAYLOAD_KEY, STAGE_3_PAYLOAD_KEY, STAGE_3_JOB_KEY, isValidFileId, removeFromSession } from '/assets/shared/storage-keys.js';
 import { createCombobox } from '/assets/shared/combobox.js';
 
 const config = window.stageTwoConfig ?? {};
-const STORAGE_KEY = config.storageKey ?? 'stage2Payload';
-const NO_AI_RECOMMENDATION_OPTION = config.noAIRecommendationLabel ?? 'No AI Recommendation';
-const SELECT_MAPPING_PLACEHOLDER = config.selectMappingLabel ?? 'Select mapping';
-const manualOptions = [NO_AI_RECOMMENDATION_OPTION, ...(config.manualOptions ?? [])];
+const NO_MAPPING_OPTION = 'No mapping';
+const manualOptions = [NO_MAPPING_OPTION, ...(config.manualOptions ?? [])];
 const stageThreeUrl = config.stageThreeUrl ?? '/stage-3';
-const stageThreePayloadKey = config.stageThreePayloadKey ?? 'stage3HarmonizePayload';
-const stageThreeJobKey = config.stageThreeJobKey ?? 'stage3HarmonizeJob';
 
 const mappingResults = document.getElementById('mappingResults');
 const mappingHint = document.getElementById('mappingHint');
 const emptyState = document.getElementById('mappingEmptyState');
 const harmonizeButton = document.getElementById('harmonizeButton');
-const progressSteps = document.querySelectorAll('.progress-tracker [data-stage]');
-
 const state = {
   payload: null,
   manualSelections: new Map(),
   isSubmitting: false,
 };
 
-const STAGE_ORDER = ['upload', 'mapping', 'harmonize', 'review', 'export'];
-
-/** Update progress tracker UI to reflect current stage. */
-const setActiveStage = (stage) => {
-  const targetIndex = STAGE_ORDER.indexOf(stage);
-  progressSteps.forEach((step) => {
-    const stepStage = step.dataset.stage;
-    const stepIndex = STAGE_ORDER.indexOf(stepStage);
-    const isActive = stepStage === stage;
-    const isComplete = stepIndex >= 0 && stepIndex < targetIndex;
-    step.classList.toggle('active', isActive);
-    step.classList.toggle('complete', isComplete);
-  });
-};
-
 /** Persist payload to session storage for cross-page state. */
 const _savePayloadToStorage = (payload) => {
   try {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    sessionStorage.setItem(STAGE_2_PAYLOAD_KEY, JSON.stringify(payload));
   } catch (error) {
     console.warn('Unable to persist stage 2 payload', error);
   }
@@ -54,7 +33,7 @@ const _savePayloadToStorage = (payload) => {
 /** Read payload from session storage. */
 const _readPayloadFromStorage = () => {
   try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
+    const raw = sessionStorage.getItem(STAGE_2_PAYLOAD_KEY);
     return raw ? JSON.parse(raw) : null;
   } catch (error) {
     console.warn('Unable to read stage 2 payload', error);
@@ -64,11 +43,14 @@ const _readPayloadFromStorage = () => {
 
 /** Look up CDE target suggestions for a column, checking case variants. */
 const _getColumnSuggestions = (column) => {
+  if (!column?.column_name) {
+    return [];
+  }
   const targets = state.payload?.cde_targets ?? {};
   return (
     targets[column.column_name] ||
-    targets[column.column_name?.toLowerCase()] ||
-    targets[column.column_name?.toUpperCase()] ||
+    targets[column.column_name.toLowerCase()] ||
+    targets[column.column_name.toUpperCase()] ||
     []
   );
 };
@@ -96,7 +78,7 @@ const _persistStageThreePayload = (body) => {
     manifest: state.payload?.manifest || null,
   };
   try {
-    sessionStorage.setItem(stageThreePayloadKey, JSON.stringify(payloadForStageThree));
+    sessionStorage.setItem(STAGE_3_PAYLOAD_KEY, JSON.stringify(payloadForStageThree));
     return true;
   } catch (error) {
     console.error('Unable to persist stage three payload', error);
@@ -106,14 +88,14 @@ const _persistStageThreePayload = (body) => {
 
 /** Determine row state and icon based on AI recommendation and user selection. */
 const _determineRowState = (hasRecommendation, aiRecommendation, manualSelection) => {
-  const isNoAIRecommendation = manualSelection === NO_AI_RECOMMENDATION_OPTION;
+  const isNoMapping = manualSelection === NO_MAPPING_OPTION;
   const isOverrideDifferentFromAI =
     manualSelection &&
-    !isNoAIRecommendation &&
+    !isNoMapping &&
     manualSelection.toLowerCase() !== (aiRecommendation ?? '').toLowerCase();
 
-  if (isNoAIRecommendation) {
-    return { state: 'no-recommendation', icon: '○' };
+  if (isNoMapping) {
+    return { state: 'no-mapping', icon: '—' };
   }
   if (isOverrideDifferentFromAI) {
     return { state: 'override', icon: '✎' };
@@ -124,14 +106,15 @@ const _determineRowState = (hasRecommendation, aiRecommendation, manualSelection
   return { state: 'no-recommendation', icon: '○' };
 };
 
+/** Normalize column name for consistent Map key lookups. */
+const _normalizeColumnKey = (columnName) => (columnName ?? '').toLowerCase();
+
 /** Build and render a single mapping row for a column. */
 const _buildMappingRow = (column) => {
   const suggestions = _getColumnSuggestions(column);
   const topTarget = suggestions[0];
-  const manualSelection =
-    state.manualSelections.get(column.column_name) ||
-    state.manualSelections.get(column.column_name.toLowerCase()) ||
-    null;
+  const normalizedKey = _normalizeColumnKey(column.column_name);
+  const manualSelection = state.manualSelections.get(normalizedKey) ?? null;
 
   const row = document.createElement('div');
   const hasRecommendation = Boolean(topTarget);
@@ -172,14 +155,14 @@ const _buildMappingRow = (column) => {
   const combobox = createCombobox({
     options: manualOptions,
     initialValue: manualSelection,
-    placeholder: topTarget ? 'Keep AI suggestion' : SELECT_MAPPING_PLACEHOLDER,
+    placeholder: topTarget ? 'Keep AI suggestion' : NO_MAPPING_OPTION,
     separatorAfterIndex: 0,
     mutedIndices: [0],
     onChange: (newValue) => {
       if (newValue) {
-        state.manualSelections.set(column.column_name, newValue);
+        state.manualSelections.set(normalizedKey, newValue);
       } else {
-        state.manualSelections.delete(column.column_name);
+        state.manualSelections.delete(normalizedKey);
       }
       _persistManualOverrides();
       _renderMappingRows();
@@ -290,18 +273,26 @@ const _submitHarmonize = async () => {
     mappingHint.textContent = 'Manifest missing. Please rerun analysis before harmonizing.';
     return;
   }
+  const fileId = state.payload.file_id;
+
+  /* Validate file_id before constructing URL to prevent malformed requests. */
+  if (!isValidFileId(fileId)) {
+    console.error('Invalid file ID format');
+    state.isSubmitting = false;
+    harmonizeButton.disabled = false;
+    harmonizeButton.textContent = 'Harmonize';
+    mappingHint.textContent = 'Invalid file reference. Please restart the upload process.';
+    return;
+  }
+
   const body = {
-    file_id: state.payload.file_id,
+    file_id: fileId,
     target_schema: config.targetSchema,
     manual_overrides: overrides,
     manifest,
   };
 
-  try {
-    sessionStorage.removeItem(stageThreeJobKey);
-  } catch (error) {
-    console.warn('Unable to reset previous harmonize job', error);
-  }
+  removeFromSession(STAGE_3_JOB_KEY);
 
   const payloadSaved = _persistStageThreePayload({ ...body });
   if (!payloadSaved) {
@@ -312,20 +303,28 @@ const _submitHarmonize = async () => {
     return;
   }
 
+  /* Validate stageThreeUrl before navigation to prevent open redirect. */
+  if (!isSafeRelativeUrl(stageThreeUrl)) {
+    console.error('Invalid stage three URL');
+    state.isSubmitting = false;
+    harmonizeButton.disabled = false;
+    harmonizeButton.textContent = 'Harmonize';
+    return;
+  }
+
   const url = new URL(stageThreeUrl, window.location.origin);
-  url.searchParams.set('file_id', state.payload.file_id);
+  url.searchParams.set('file_id', fileId);
   url.searchParams.set('target_schema', config.targetSchema);
 
-  window.requestAnimationFrame(() => {
-    state.isSubmitting = false;
-    window.location.assign(url.toString());
-  });
+  /* Navigate immediately - isSubmitting stays true to prevent duplicate clicks. */
+  window.location.assign(url.toString());
 };
 
 /** Bootstrap page state from storage or backend. */
-const _initialize = async () => {
+const init = async () => {
   setActiveStage('mapping');
   initStepInstruction('mapping');
+  initNavigationEvents();
 
   if (harmonizeButton) {
     harmonizeButton.addEventListener('click', _submitHarmonize);
@@ -352,8 +351,8 @@ const _initialize = async () => {
 
   state.payload = payload;
   const overrides = payload.manual_overrides ? Object.entries(payload.manual_overrides) : [];
-  state.manualSelections = new Map(overrides);
+  state.manualSelections = new Map(overrides.map(([key, value]) => [_normalizeColumnKey(key), value]));
   _hydrateView();
 };
 
-_initialize();
+init();

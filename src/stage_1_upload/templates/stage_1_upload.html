@@ -26,14 +26,14 @@
             <span class="step-label">Harmonize</span>
           </li>
           <li class="connector"></li>
-          <li class="step" data-stage="review" data-url="{{ request.url_for('stage_four_review_page') }}">
+          <li class="step" data-stage="verify" data-url="{{ request.url_for('stage_four_review_page') }}">
             <span class="step-index">4</span>
-            <span class="step-label">Review</span>
+            <span class="step-label">Verify</span>
           </li>
           <li class="connector"></li>
-          <li class="step" data-stage="export" data-url="{{ request.url_for('stage_five_review_page') }}">
+          <li class="step" data-stage="review" data-url="{{ request.url_for('stage_five_review_page') }}">
             <span class="step-index">5</span>
-            <span class="step-label">Download</span>
+            <span class="step-label">Review</span>
           </li>
         </ol>
         <div class="progress-tracker-action">
@@ -101,15 +101,6 @@
         maxBytes: {{ ui_constraints.max_bytes }},
         targetSchema: "{{ default_schema }}",
       };
-
-      document.addEventListener('DOMContentLoaded', () => {
-        document.querySelectorAll('.step[data-url]').forEach(step => {
-          step.addEventListener('click', () => {
-            const url = step.dataset.url;
-            if (url) window.location.href = url;
-          });
-        });
-      });
     </script>
     <script type="module" src="{{ request.url_for('stage_one_static', path='stage_1_upload.js') }}"></script>
   </body>
