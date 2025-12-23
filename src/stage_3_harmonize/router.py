@@ -36,6 +36,7 @@ from src.domain.manifest import (
 MODULE_DIR = Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"
 STAGE_THREE_STATIC_PATH = MODULE_DIR / "static"
+NEXT_STAGE_PATH = "/stage-4"
 
 _templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 _storage = get_upload_storage()
@@ -51,7 +52,7 @@ async def render_stage_three(request: Request) -> HTMLResponse:
     context = {
         "request": request,
         "default_schema": DEFAULT_TARGET_SCHEMA,
-        "next_stage_url": "/stage-4",
+        "next_stage_url": NEXT_STAGE_PATH,
     }
     return _templates.TemplateResponse("stage_3_harmonize.html", context)
 
@@ -92,7 +93,7 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
         "status": result.status,
         "detail": result.detail or "",
     })
-    next_stage_url = f"/stage-4?{query_params}"
+    next_stage_url = f"{NEXT_STAGE_PATH}?{query_params}"
     return HarmonizeResponse(
         job_id=result.job_id,
         status=result.status,
@@ -134,7 +135,7 @@ def _build_column_breakdowns(rows: list[ManifestRow]) -> list[ColumnBreakdownSch
         total_rows = 0
         changed_rows = 0
         unique_terms_changed = 0
-        confidence_counts: dict[ConfidenceBucket, int] = {
+        confidence_counts_changed: dict[ConfidenceBucket, int] = {
             ConfidenceBucket.HIGH: 0,
             ConfidenceBucket.MEDIUM: 0,
             ConfidenceBucket.LOW: 0,
@@ -143,26 +144,28 @@ def _build_column_breakdowns(rows: list[ManifestRow]) -> list[ColumnBreakdownSch
         for row in col_rows:
             row_count = len(row.row_indices) if row.row_indices else 1
             total_rows += row_count
-            bucket = confidence_bucket(row.confidence_score)
-            confidence_counts[bucket] += 1
 
             if is_value_changed(row.to_harmonize, row.top_harmonization):
                 changed_rows += row_count
                 unique_terms_changed += 1
+                bucket = confidence_bucket(row.confidence_score)
+                confidence_counts_changed[bucket] += 1
 
+        unique_terms = len(col_rows)
         breakdowns.append(ColumnBreakdownSchema(
             column_name=column_name,
             label=_format_column_label(column_name),
             total_rows=total_rows,
             changed_rows=changed_rows,
             unchanged_rows=total_rows - changed_rows,
-            unique_terms=len(col_rows),
+            unique_terms=unique_terms,
             unique_terms_changed=unique_terms_changed,
-            confidence_buckets=[
+            unique_terms_unchanged=unique_terms - unique_terms_changed,
+            confidence_buckets_changed=[
                 ConfidenceBucketSchema(
                     id=bucket.value,
                     label=bucket.label,
-                    term_count=confidence_counts[bucket],
+                    term_count=confidence_counts_changed[bucket],
                 )
                 for bucket in ConfidenceBucket
             ],

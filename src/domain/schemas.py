@@ -39,7 +39,8 @@ class ColumnBreakdownSchema(BaseModel):
     unchanged_rows: int
     unique_terms: int
     unique_terms_changed: int
-    confidence_buckets: list[ConfidenceBucketSchema]
+    unique_terms_unchanged: int
+    confidence_buckets_changed: list[ConfidenceBucketSchema]
 
 
 class ManifestSummarySchema(BaseModel):

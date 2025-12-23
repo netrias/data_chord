@@ -1,5 +1,28 @@
 // """Render per-column breakdown with raw change counts and bar chart confidence."""
 
+const CONFIDENCE_TOOLTIP = 'Confidence estimates the likelihood that the change is correct. The higher the confidence, the more likely it is that the transformation is correct. A high confidence score is not a guarantee, and all changed data should be verified for correctness on the next page.';
+
+const _createInfoIcon = (tooltipText) => {
+  // "why: create info icon with hover tooltip for additional context."
+  const wrapper = document.createElement('span');
+  wrapper.className = 'info-icon-wrapper';
+
+  const icon = document.createElement('span');
+  icon.className = 'info-icon';
+  icon.textContent = 'ⓘ';
+  icon.setAttribute('aria-label', 'More information');
+  icon.setAttribute('role', 'button');
+  icon.setAttribute('tabindex', '0');
+  wrapper.appendChild(icon);
+
+  const tooltip = document.createElement('span');
+  tooltip.className = 'info-tooltip';
+  tooltip.textContent = tooltipText;
+  wrapper.appendChild(tooltip);
+
+  return wrapper;
+};
+
 const _createTermsDisplay = (changedRows, totalRows) => {
   // "why: show term counts as 'X / Y terms changed (Z%)' with progress bar."
   const container = document.createElement('div');
@@ -28,25 +51,31 @@ const _createTermsDisplay = (changedRows, totalRows) => {
   return container;
 };
 
-const _createConfidenceDisplay = (confidenceBuckets, uniqueTerms) => {
-  // "why: show total confidence breakdown for all terms in the column."
-  if (uniqueTerms === 0) {
+const _createConfidenceDisplay = (confidenceBucketsChanged, uniqueTermsChanged) => {
+  // "why: show confidence breakdown for changed terms only."
+  if (uniqueTermsChanged === 0) {
     return null;
   }
 
   const container = document.createElement('div');
   container.className = 'column-confidence-display';
 
-  const header = document.createElement('div');
+  const headerRow = document.createElement('div');
+  headerRow.className = 'column-confidence-header-row';
+
+  const header = document.createElement('span');
   header.className = 'column-confidence-header';
-  header.textContent = `Confidence · ${uniqueTerms} terms`;
-  container.appendChild(header);
+  header.textContent = 'Confidence';
+  headerRow.appendChild(header);
+
+  headerRow.appendChild(_createInfoIcon(CONFIDENCE_TOOLTIP));
+  container.appendChild(headerRow);
 
   const columns = document.createElement('div');
   columns.className = 'column-confidence-columns';
 
   // "why: show Low → Medium → High order."
-  const orderedBuckets = [...confidenceBuckets].reverse();
+  const orderedBuckets = [...confidenceBucketsChanged].reverse();
 
   orderedBuckets.forEach((bucket) => {
     const count = bucket.termCount || 0;
@@ -67,6 +96,25 @@ const _createConfidenceDisplay = (confidenceBuckets, uniqueTerms) => {
   });
 
   container.appendChild(columns);
+  return container;
+};
+
+const _createUniqueTermsDisplay = (column) => {
+  // "why: show 'X / Y unique terms changed' with info tooltip for unchanged terms."
+  const container = document.createElement('div');
+  container.className = 'column-metric-card__unique-terms-row';
+
+  const text = document.createElement('span');
+  text.className = 'column-metric-card__unique-terms';
+  text.textContent = `${column.uniqueTermsChanged} / ${column.uniqueTerms} unique terms changed`;
+  container.appendChild(text);
+
+  if (column.uniqueTermsUnchanged > 0) {
+    const unchangedCount = column.uniqueTermsUnchanged;
+    const tooltipText = `${unchangedCount} ${unchangedCount === 1 ? 'term was' : 'terms were'} unchanged as ${unchangedCount === 1 ? 'it' : 'they'} matched existing values in the target ontology.`;
+    container.appendChild(_createInfoIcon(tooltipText));
+  }
+
   return container;
 };
 
@@ -92,15 +140,13 @@ const _createColumnCard = (column) => {
     return card;
   }
 
-  const uniqueTerms = document.createElement('div');
-  uniqueTerms.className = 'column-metric-card__unique-terms';
-  uniqueTerms.textContent = `${column.uniqueTermsChanged} unique terms changed`;
-  card.appendChild(uniqueTerms);
+  const uniqueTermsDisplay = _createUniqueTermsDisplay(column);
+  card.appendChild(uniqueTermsDisplay);
 
   const termsDisplay = _createTermsDisplay(column.changedRows, column.totalRows);
   card.appendChild(termsDisplay);
 
-  const confidenceDisplay = _createConfidenceDisplay(column.confidenceBuckets, column.uniqueTerms);
+  const confidenceDisplay = _createConfidenceDisplay(column.confidenceBucketsChanged, column.uniqueTermsChanged);
   if (confidenceDisplay) {
     card.appendChild(confidenceDisplay);
   }
