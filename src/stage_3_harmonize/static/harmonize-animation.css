@@ -1,0 +1,187 @@
+/* Harmonize Animation - isolated visual effects for loading state */
+/* If this file loads successfully, hide the fallback spinner */
+
+.loading-spinner--fallback {
+  display: none !important;
+}
+
+/* Animation container */
+.harmonize-animation {
+  position: relative;
+  width: min(680px, 100%);
+  height: 320px;
+}
+
+/* Vertical transformation line */
+.transform-line {
+  position: absolute;
+  left: 50%;
+  top: 50px;
+  bottom: 50px;
+  width: 120px;
+  transform: translateX(-50%);
+}
+
+.transform-line__glow {
+  position: absolute;
+  inset: -20px -30px;
+  background: var(--netrias-500);
+  opacity: 0.12;
+  filter: blur(30px);
+  border-radius: 50%;
+}
+
+/* Plasma tube effect */
+.plasma-tube {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 24px;
+  height: 100%;
+  z-index: 2;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.plasma-tube__outer {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to right,
+    var(--netrias-glow-light) 0%,
+    var(--netrias-glow-medium) 50%,
+    var(--netrias-glow-light) 100%
+  );
+  opacity: 0.5;
+  border-radius: 12px;
+}
+
+.plasma-tube__inner {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  right: 4px;
+  background: linear-gradient(to right,
+    transparent 0%,
+    var(--netrias-glow-medium) 50%,
+    transparent 100%
+  );
+  opacity: 0.6;
+  border-radius: 8px;
+}
+
+/* Ripple effect - horizontal rings emanating from the line */
+.ripple {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 12px;
+  height: 70%;
+  transform: translate(-50%, -50%);
+  border-left: 2px solid var(--netrias-500);
+  border-right: 2px solid var(--netrias-500);
+  border-radius: 50%;
+  opacity: 0;
+  animation: ripple-expand 2.5s ease-out infinite;
+}
+
+.ripple--1 { animation-delay: 0s; }
+.ripple--2 { animation-delay: 0.83s; }
+.ripple--3 { animation-delay: 1.66s; }
+
+@keyframes ripple-expand {
+  0% {
+    width: 12px;
+    opacity: 0.5;
+  }
+  100% {
+    width: 320px;
+    opacity: 0;
+  }
+}
+
+/* Blocks that travel through the line */
+.block {
+  position: absolute;
+  width: 17px;
+  height: 17px;
+  border-radius: var(--radius-sm);
+  opacity: 0;
+  z-index: 3;
+  animation: block-travel 3.2s ease-in-out infinite;
+}
+
+/* Block colors are intentionally decorative - representing diverse input data
+   that gets harmonized to brand green. Not part of the design token system. */
+.block--1 {
+  --block-color: #e74c3c;
+  top: 30%;
+  animation-delay: 0s;
+}
+
+.block--2 {
+  --block-color: #3498db;
+  top: 40%;
+  animation-delay: 0.65s;
+}
+
+.block--3 {
+  --block-color: #f39c12;
+  top: 50%;
+  animation-delay: 1.3s;
+}
+
+.block--4 {
+  --block-color: #9b59b6;
+  top: 60%;
+  animation-delay: 1.95s;
+}
+
+.block--5 {
+  --block-color: #1abc9c;
+  top: 70%;
+  animation-delay: 2.6s;
+}
+
+@keyframes block-travel {
+  0% {
+    left: 0;
+    opacity: 0;
+    background-color: var(--block-color);
+    transform: translateY(-50%) rotate(0deg);
+  }
+  8% {
+    opacity: 1;
+  }
+  48% {
+    background-color: var(--block-color);
+    transform: translateY(-50%) rotate(180deg);
+  }
+  50% {
+    left: calc(50% - 8.5px);
+    background-color: var(--netrias-500);
+    transform: translateY(-50%) rotate(180deg) scale(1.3);
+    box-shadow: 0 0 18px var(--netrias-glow-strong);
+  }
+  52% {
+    background-color: var(--netrias-500);
+    transform: translateY(-50%) rotate(200deg);
+    box-shadow: none;
+  }
+  70% {
+    left: calc(100% - 17px);
+    opacity: 1;
+    background-color: var(--netrias-500);
+    transform: translateY(-50%) rotate(360deg);
+  }
+  71% {
+    opacity: 0;
+  }
+  100% {
+    left: calc(100% - 17px);
+    opacity: 0;
+    background-color: var(--netrias-500);
+    transform: translateY(-50%) rotate(360deg);
+  }
+}
