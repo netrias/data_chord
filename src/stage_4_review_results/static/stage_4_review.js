@@ -144,11 +144,10 @@ const getFileIdFromUrl = () => {
 
 /**
  * Fetch harmonized rows from the server.
+ * Always fetches fresh data to support back-navigation without stale caching.
  * @returns {Promise<void>}
  */
 const fetchRows = async () => {
-  if (state.hasLoadedRows) return;
-
   const fileId = getFileIdFromUrl();
   if (!fileId) {
     console.warn('Unable to locate harmonized data. Please rerun Stage 3.');
@@ -243,7 +242,7 @@ const _buildSavePayload = () => ({
  */
 const saveOverrides = async () => {
   const fileId = getFileIdFromUrl();
-  if (!fileId) return;
+  if (!fileId || !isValidFileId(fileId)) return;
 
   try {
     const response = await fetch('/stage-4/overrides', {
@@ -259,20 +258,16 @@ const saveOverrides = async () => {
   }
 };
 
-/**
- * Schedule a debounced save operation.
- */
-const debouncedSave = () => {
+/* why: debounce saves to avoid excessive server requests during rapid edits. */
+const __debouncedSave = () => {
   if (state.saveDebounceTimer) {
     clearTimeout(state.saveDebounceTimer);
   }
   state.saveDebounceTimer = setTimeout(saveOverrides, SAVE_DEBOUNCE_MS);
 };
 
-/**
- * Save overrides immediately, cancelling any pending debounced save.
- */
-const saveOverridesImmediate = () => {
+/* why: flush pending saves immediately on navigation or explicit save triggers. */
+const __saveOverridesImmediate = () => {
   if (state.saveDebounceTimer) {
     clearTimeout(state.saveDebounceTimer);
     state.saveDebounceTimer = null;
@@ -307,7 +302,7 @@ const recordOverrideForRows = (rowIndices, columnKey, aiValue, humanValue, origi
       }
     }
   }
-  debouncedSave();
+  _debouncedSave();
 };
 
 /* Notification toasts removed - visual clutter reduction */
@@ -504,7 +499,7 @@ const markComplete = () => {
     modeState.currentUnit = modeState.currentUnit + 1;
   }
 
-  saveOverridesImmediate();
+  _saveOverridesImmediate();
   render();
 };
 
@@ -526,7 +521,7 @@ const flagCurrent = () => {
   modeState.completedUnits.delete(modeState.currentUnit);
   modeState.flaggedUnits.add(modeState.currentUnit);
 
-  saveOverridesImmediate();
+  _saveOverridesImmediate();
   render();
 };
 
@@ -589,7 +584,7 @@ const handleReviewModeChange = () => {
     modeState.currentUnit = 1;
   }
 
-  saveOverridesImmediate();
+  _saveOverridesImmediate();
   render();
 };
 
@@ -606,7 +601,7 @@ const handleBatchSizeChange = () => {
   modeState.currentUnit = 1;
   modeState.completedUnits.clear();
   modeState.flaggedUnits.clear();
-  saveOverridesImmediate();
+  _saveOverridesImmediate();
   render();
 };
 
@@ -619,7 +614,7 @@ const attachEventListeners = () => {
       state.sortMode = sortModeSelect.value;
       /* Note: Sorting is persisted but not yet implemented in data processing.
          Progress is preserved since changing sort order doesn't invalidate reviews. */
-      saveOverridesImmediate();
+      _saveOverridesImmediate();
       render();
     });
   }
@@ -655,7 +650,9 @@ const attachEventListeners = () => {
   if (stageFiveButton) {
     stageFiveButton.addEventListener('click', () => {
       advanceMaxReachedStage('review');
-      window.location.assign(stageFiveUrl);
+      const fileId = getFileIdFromUrl();
+      const url = fileId ? `${stageFiveUrl}?file_id=${encodeURIComponent(fileId)}` : stageFiveUrl;
+      window.location.assign(url);
     });
   }
 
@@ -727,5 +724,13 @@ const init = async () => {
   await fetchRows();
   render();
 };
+
+/* why: re-fetch data when page is restored from browser back-forward cache. */
+window.addEventListener('pageshow', async (event) => {
+  if (event.persisted) {
+    await fetchRows();
+    render();
+  }
+});
 
 init();

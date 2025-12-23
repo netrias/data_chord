@@ -3,6 +3,7 @@
  * Shows short instruction text for active step, with hover tooltip for longer description.
  */
 import { STEP_INSTRUCTIONS, STAGE_ORDER } from './step-instructions.js';
+import { CURRENT_FILE_SESSION_KEY, MAX_REACHED_STAGE_KEY } from './storage-keys.js';
 
 /**
  * Update progress tracker UI to reflect the active stage.
@@ -43,6 +44,34 @@ export function isSafeRelativeUrl(url) {
   }
 }
 
+/* why: preserve file_id when navigating between stages to maintain session context. */
+function _getFileIdForNavigation() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const fromUrl = urlParams.get('file_id');
+  if (fromUrl) return fromUrl;
+
+  try {
+    const session = sessionStorage.getItem(CURRENT_FILE_SESSION_KEY);
+    if (session) {
+      const parsed = JSON.parse(session);
+      return parsed.file_id || null;
+    }
+  } catch {
+    /* ignore parse errors */
+  }
+  return null;
+}
+
+/* why: append file_id to navigation URLs so stages can access the active session. */
+function _buildNavUrl(baseUrl) {
+  const fileId = _getFileIdForNavigation();
+  if (!fileId) return baseUrl;
+
+  const url = new URL(baseUrl, window.location.origin);
+  url.searchParams.set('file_id', fileId);
+  return url.pathname + url.search;
+}
+
 /**
  * Attach click handlers for progress tracker step navigation.
  * Enables clicking on steps to navigate to their URLs.
@@ -56,7 +85,7 @@ export function initNavigationEvents() {
       }
       const url = step.dataset.url;
       if (isSafeRelativeUrl(url)) {
-        window.location.href = url;
+        window.location.href = _buildNavUrl(url);
       }
     });
   });
@@ -66,13 +95,24 @@ export function initNavigationEvents() {
       const target = button.dataset.navTarget;
       if (isSafeRelativeUrl(target)) {
         /* Reset progress when navigating to stage 1 (starting new workflow). */
-        if (target.includes('/stage-1') || target === '/') {
+        if (_isStageOneUrl(target)) {
           resetMaxReachedStage();
         }
         window.location.assign(target);
       }
     });
   });
+}
+
+/* why: detect stage-1 URL using pathname parsing rather than fragile substring match. */
+function _isStageOneUrl(url) {
+  if (url === '/' || url === '/stage-1') return true;
+  try {
+    const parsed = new URL(url, window.location.origin);
+    return parsed.pathname === '/' || parsed.pathname === '/stage-1';
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -102,7 +142,7 @@ export function updateStepInstruction(instructionKey, targetStage) {
   }
 }
 
-/** Populate the main instruction banner below the progress tracker. */
+/* why: update the instruction banner to guide users through the current stage. */
 function _populateInstructionBanner(instructionKey) {
   const instructionContainer = document.getElementById('stepInstruction');
   if (!instructionContainer) {
@@ -137,7 +177,7 @@ function _populateInstructionBanner(instructionKey) {
   }
 }
 
-/** Add data-tooltip attributes to each step for hover tooltips (using long description). */
+/* why: add tooltips to progress tracker steps for context on hover. */
 function _populateStepTooltips() {
   const steps = document.querySelectorAll('.progress-tracker .step[data-stage]');
   steps.forEach((step) => {
@@ -149,9 +189,7 @@ function _populateStepTooltips() {
   });
 }
 
-const MAX_REACHED_STAGE_KEY = 'maxReachedStage';
-
-/** Get the index of the max reached stage from session storage. */
+/* why: track highest stage reached to block skipping forward in progress tracker. */
 function _getMaxReachedStageIndex() {
   try {
     const stored = sessionStorage.getItem(MAX_REACHED_STAGE_KEY);
