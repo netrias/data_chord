@@ -46,7 +46,7 @@ export const getTotalUnits = (rows, batchSize) => {
  * @param {number} batchSize - Number of rows per batch
  * @returns {Array} Array of summary objects for each batch
  */
-export const getBatchSummaries = (rows, batchSize) => {
+const getBatchSummaries = (rows, batchSize) => {
   const changedRows = _buildRowsWithChanges(rows);
   const summaries = [];
 

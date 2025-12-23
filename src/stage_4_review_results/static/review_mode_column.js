@@ -160,7 +160,7 @@ export const getTotalUnits = (rows, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH)
  * @param {number} entriesPerBatch - Number of entries per batch
  * @returns {Array} Array of summary objects for each unit (empty array if no data)
  */
-export const getColumnSummaries = (rows, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH) => {
+const getColumnSummaries = (rows, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH) => {
   const safeBatchSize = Math.max(1, entriesPerBatch);
   const columns = _buildCompactedColumns(rows);
   const summaries = [];

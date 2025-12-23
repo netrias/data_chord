@@ -31,15 +31,27 @@ const stageFiveUrl = config.stageFiveUrl ?? '/stage-5';
 /** @type {string} */
 const resultsEndpoint = config.resultsEndpoint ?? '/stage-4/rows';
 
-/* DOM element references */
+/**
+ * Get a required DOM element by ID, throwing if not found.
+ * @param {string} id - Element ID
+ * @returns {HTMLElement}
+ */
+const _requireElement = (id) => {
+  const el = document.getElementById(id);
+  if (!el) {
+    throw new Error(`Required element #${id} not found in DOM`);
+  }
+  return el;
+};
+
+/* DOM element references - required elements use _requireElement, optional use getElementById */
 const sortModeSelect = document.getElementById('sortModeSelect');
 const batchSizeSelect = document.getElementById('batchSizeSelect');
 const batchSizeLabel = batchSizeSelect?.previousElementSibling;
 const reviewModeSelect = document.getElementById('reviewModeSelect');
-/* reviewAlerts element removed - notifications disabled */
-const previousBatchButton = document.getElementById('previousBatchButton');
-const nextBatchButton = document.getElementById('nextBatchButton');
-const completeBatchButton = document.getElementById('completeBatchButton');
+const previousBatchButton = _requireElement('previousBatchButton');
+const nextBatchButton = _requireElement('nextBatchButton');
+const completeBatchButton = _requireElement('completeBatchButton');
 const reviewTable = document.getElementById('reviewTable');
 const helpMenuToggle = document.getElementById('helpMenuToggle');
 const stageHelp = document.getElementById('stageFourHelp');
@@ -172,10 +184,7 @@ const fetchRows = async () => {
       throw new Error('Unable to load harmonized results.');
     }
     const body = await response.json();
-    state.rows = (body.rows || []).map((row) => ({
-      ...row,
-      originalIndex: Math.max(0, (row.sourceRowNumber ?? row.rowNumber) - 1),
-    }));
+    state.rows = body.rows || [];
     state.hasLoadedRows = true;
   } catch (error) {
     console.error('Unable to load harmonized results:', error);
@@ -259,7 +268,7 @@ const saveOverrides = async () => {
 };
 
 /* why: debounce saves to avoid excessive server requests during rapid edits. */
-const __debouncedSave = () => {
+const _debouncedSave = () => {
   if (state.saveDebounceTimer) {
     clearTimeout(state.saveDebounceTimer);
   }
@@ -267,7 +276,7 @@ const __debouncedSave = () => {
 };
 
 /* why: flush pending saves immediately on navigation or explicit save triggers. */
-const __saveOverridesImmediate = () => {
+const _saveOverridesImmediate = () => {
   if (state.saveDebounceTimer) {
     clearTimeout(state.saveDebounceTimer);
     state.saveDebounceTimer = null;
@@ -722,7 +731,30 @@ const init = async () => {
   });
 
   await fetchRows();
+  _clampCurrentUnitsToValidRange();
   render();
+};
+
+/**
+ * Clamp currentUnit values to valid range based on loaded data.
+ * Prevents out-of-bounds navigation when data changed between sessions.
+ */
+const _clampCurrentUnitsToValidRange = () => {
+  for (const mode of ['column', 'row']) {
+    const modeState = mode === 'column' ? state.columnMode : state.rowMode;
+    const batchSize = mode === 'column'
+      ? modeState.batchSize * modeState.batchSize
+      : modeState.batchSize;
+    const totalUnits = mode === 'column'
+      ? getColumnTotalUnits(state.rows, batchSize)
+      : getRowTotalUnits(state.rows, batchSize);
+
+    if (totalUnits > 0 && modeState.currentUnit > totalUnits) {
+      modeState.currentUnit = totalUnits;
+    } else if (totalUnits === 0) {
+      modeState.currentUnit = 1;
+    }
+  }
 };
 
 /* why: re-fetch data when page is restored from browser back-forward cache. */
