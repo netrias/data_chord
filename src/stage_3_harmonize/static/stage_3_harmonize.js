@@ -16,7 +16,7 @@ const emptyState = document.getElementById('stageThreeEmptyState');
 const errorBanner = document.getElementById('stageThreeError');
 const stageThreeTitle = document.getElementById('stageThreeTitle');
 const returnToStageTwo = document.getElementById('returnToStageTwo');
-const loadingSpinner = document.querySelector('#loadingState .loading-spinner');
+const harmonizeAnimation = document.querySelector('#loadingState .harmonize-animation');
 
 const metricsDashboard = StageThreeMetricsDashboard.initFromDom();
 
@@ -62,9 +62,14 @@ const _toggleEmptyState = (show) => {
   emptyState.classList.toggle('hidden', !show);
 };
 
-const _toggleSpinner = (show) => {
-  if (loadingSpinner) {
-    loadingSpinner.classList.toggle('hidden', !show);
+/* why: animation is purely decorative - failures should not break page functionality. */
+const _toggleAnimation = (show) => {
+  try {
+    if (harmonizeAnimation) {
+      harmonizeAnimation.classList.toggle('hidden', !show);
+    }
+  } catch {
+    /* Animation toggle failed - page continues to work without it. */
   }
 };
 
@@ -113,9 +118,10 @@ const _persistJobMeta = (job) => {
   }
 };
 
+/* why: update page title to reflect current job status. */
 const _updateTitleForStatus = (status) => {
   const normalized = _normalizeStatus(status);
-  if (normalized === 'failed') {
+  if (_isFailedStatus(normalized)) {
     if (stageThreeTitle) stageThreeTitle.textContent = 'Harmonization failed';
     return;
   }
@@ -156,7 +162,7 @@ const _renderJob = (job) => {
 
   if (_isFailedStatus(normalized)) {
     _toggleLoadingState(true);
-    _toggleSpinner(false);
+    _toggleAnimation(false);
     _hideMetricsDashboard();
     _showError(job.detail || 'Harmonization failed. Please retry.');
     reviewButton.disabled = true;
@@ -169,7 +175,7 @@ const _renderJob = (job) => {
     updateStepInstruction('harmonize_complete');
   } else {
     _toggleLoadingState(true);
-    _toggleSpinner(true);
+    _toggleAnimation(true);
     _hideMetricsDashboard();
     reviewButton.disabled = true;
     retryButton.classList.add('hidden');
@@ -199,7 +205,7 @@ const _extractRequestPayload = () => {
   return harmonizePayload;
 };
 
-/** Get the current file_id from URL parameters. */
+/* why: extract file_id from URL for job validation. */
 const _getFileIdFromUrl = () => {
   const params = new URLSearchParams(window.location.search);
   return params.get('file_id');
@@ -295,8 +301,8 @@ const _init = () => {
     });
   }
 
+  /* why: _renderJob handles visibility states, so no explicit toggle needed here. */
   if (_hydrateFromStoredJob()) {
-    _toggleLoadingState(false);
     return;
   }
 

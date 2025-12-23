@@ -5,8 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Data Chord · Harmonize</title>
     <link rel="stylesheet" href="/assets/shared/tokens.css" />
-    <link rel="stylesheet" href="{{ request.url_for('stage_one_static', path='stage_1_upload.css') }}" />
     <link rel="stylesheet" href="{{ request.url_for('stage_three_static', path='stage_3_harmonize.css') }}" />
+    <!-- Animation CSS loaded separately - page works without it -->
+    <link rel="stylesheet" href="{{ request.url_for('stage_three_static', path='harmonize-animation.css') }}" />
   </head>
   <body>
     <nav class="progress-tracker">
@@ -67,8 +68,28 @@
         </div>
 
         <div id="loadingState" class="loading-state" aria-live="assertive">
-          <div class="loading-spinner" role="presentation"></div>
-          <p class="loading-message">Netrias is harmonizing your dataset and will report back shortly.</p>
+          <!-- Fallback spinner - hidden when animation loads successfully -->
+          <div class="loading-spinner loading-spinner--fallback" aria-hidden="true"></div>
+          <!-- Main animation - purely decorative, page works without it -->
+          <div class="harmonize-animation" role="presentation" aria-hidden="true">
+            <div class="transform-line">
+              <div class="transform-line__glow"></div>
+              <div class="plasma-tube">
+                <div class="plasma-tube__outer"></div>
+                <div class="plasma-tube__inner"></div>
+              </div>
+              <div class="ripple ripple--1"></div>
+              <div class="ripple ripple--2"></div>
+              <div class="ripple ripple--3"></div>
+            </div>
+            <div class="block block--1"></div>
+            <div class="block block--2"></div>
+            <div class="block block--3"></div>
+            <div class="block block--4"></div>
+            <div class="block block--5"></div>
+          </div>
+          <p class="loading-message loading-message--primary">Netrias is harmonizing your dataset</p>
+          <p class="loading-message loading-message--secondary">This usually takes 1-2 minutes.</p>
         </div>
 
         <div class="metrics-grid hidden" data-metrics-grid aria-live="polite"></div>

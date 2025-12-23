@@ -3,10 +3,11 @@
 /* Stage header */
 .stage-section-header {
   text-align: center;
+  margin-bottom: var(--space-8);
 }
 
 .stage-title {
-  font-size: 1.5rem;
+  font-size: 1.75rem;
   font-weight: 700;
   color: var(--gray-900);
   margin: 0;
@@ -25,12 +26,13 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-4);
-  padding: var(--space-8);
+  gap: var(--space-6);
+  padding: var(--space-12) var(--space-8);
   border: 1px solid var(--gray-200);
   border-radius: var(--radius-2xl);
   background-color: var(--white);
   box-shadow: var(--shadow-sm);
+  min-height: 360px;
 }
 
 .loading-message {
@@ -40,6 +42,21 @@
   text-align: center;
 }
 
+.loading-message--primary {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--gray-800);
+}
+
+.loading-message--secondary {
+  font-size: 0.95rem;
+  color: var(--gray-500);
+  margin-top: calc(-1 * var(--space-4));
+}
+
+/* Animation styles are in harmonize-animation.css */
+
+/* Fallback spinner - shown if animation CSS fails to load */
 .loading-spinner {
   width: 64px;
   height: 64px;
@@ -49,39 +66,13 @@
   animation: spin 1s linear infinite;
 }
 
-.loading-primary {
-  font-size: 1.125rem;
-  font-weight: 600;
-  color: var(--gray-900);
-  text-align: center;
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
-.loading-secondary {
-  color: var(--gray-600);
-  text-align: center;
-  max-width: 34rem;
-}
-
-.loading-pips {
-  display: flex;
-  gap: var(--space-2);
-  justify-content: center;
-}
-
-.loading-pips .pip {
-  width: 10px;
-  height: 10px;
-  border-radius: var(--radius-full);
-  background-color: var(--info-200);
-  animation: stage3-pulse 1.5s ease-in-out infinite;
-}
-
-.loading-pips .pip:nth-child(2) {
-  animation-delay: 0.2s;
-}
-
-.loading-pips .pip:nth-child(3) {
-  animation-delay: 0.4s;
+/* Fallback spinner shown by default - animation CSS will hide it */
+.loading-spinner--fallback {
+  display: block;
 }
 
 /* Empty state */
@@ -102,24 +93,6 @@
 .stage-empty-copy {
   color: var(--gray-600);
   margin-bottom: var(--space-4);
-}
-
-.loading-meta {
-  margin-top: var(--space-2);
-  color: var(--gray-700);
-  font-weight: 500;
-}
-
-@keyframes stage3-pulse {
-  0%,
-  100% {
-    opacity: 0.2;
-    transform: scale(0.85);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1);
-  }
 }
 
 /* Metrics grid */
