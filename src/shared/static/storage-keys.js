@@ -6,6 +6,8 @@
 export const STAGE_2_PAYLOAD_KEY = 'stage2Payload';
 export const STAGE_3_PAYLOAD_KEY = 'stage3HarmonizePayload';
 export const STAGE_3_JOB_KEY = 'stage3HarmonizeJob';
+export const CURRENT_FILE_SESSION_KEY = 'currentFileSession';
+export const MAX_REACHED_STAGE_KEY = 'maxReachedStage';
 
 /** Regex pattern for valid file IDs - alphanumeric with underscores and hyphens only. */
 const FILE_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;

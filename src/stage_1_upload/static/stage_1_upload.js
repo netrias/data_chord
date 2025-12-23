@@ -1,5 +1,5 @@
 import { initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
-import { STAGE_2_PAYLOAD_KEY, STAGE_3_PAYLOAD_KEY, STAGE_3_JOB_KEY, removeFromSession, writeToSession } from '/assets/shared/storage-keys.js';
+import { STAGE_2_PAYLOAD_KEY, STAGE_3_PAYLOAD_KEY, STAGE_3_JOB_KEY, CURRENT_FILE_SESSION_KEY, removeFromSession, writeToSession, readFromSession } from '/assets/shared/storage-keys.js';
 
 const config = window.stageOneUploadConfig ?? {};
 
@@ -143,6 +143,7 @@ const _uploadDataset = async () => {
       throw new Error(payload.detail || 'Upload failed.');
     }
     state.uploaded = payload;
+    _persistFileSession(payload, state.file.name);
     if (dropzone) dropzone.classList.add('has-file');
     _showDropzoneSummary(state.file, 'Uploaded');
     _setAnalyzeButtonVisible(true);
@@ -159,6 +160,33 @@ const _clearStaleSessionData = () => {
   removeFromSession(STAGE_2_PAYLOAD_KEY);
   removeFromSession(STAGE_3_PAYLOAD_KEY);
   removeFromSession(STAGE_3_JOB_KEY);
+  removeFromSession(CURRENT_FILE_SESSION_KEY);
+};
+
+/* why: persist file session to enable navigation back to Stage 1 with file context. */
+const _persistFileSession = (uploadResponse, fileName) => {
+  writeToSession(CURRENT_FILE_SESSION_KEY, {
+    file_id: uploadResponse.file_id,
+    original_name: fileName,
+    uploaded_at: new Date().toISOString(),
+    size_bytes: uploadResponse.size_bytes,
+  });
+};
+
+/* why: restore file display from session when returning to Stage 1. */
+const _hydrateFromSession = () => {
+  const session = readFromSession(CURRENT_FILE_SESSION_KEY);
+  if (!session || !session.file_id || !session.original_name) {
+    return false;
+  }
+
+  state.uploaded = { file_id: session.file_id, size_bytes: session.size_bytes };
+  state.file = { name: session.original_name, size: session.size_bytes };
+
+  if (dropzone) dropzone.classList.add('has-file');
+  _showDropzoneSummary(state.file, 'Uploaded');
+  _setAnalyzeButtonVisible(true);
+  return true;
 };
 
 const _persistStageTwoPayload = (payload) => {
@@ -254,10 +282,15 @@ const _wireDragEvents = () => {
 };
 
 const _init = () => {
-  _resetUploadState();
-  _wireDragEvents();
+  setActiveStage('upload');
   initStepInstruction('upload');
   initNavigationEvents();
+
+  if (!_hydrateFromSession()) {
+    _resetUploadState();
+  }
+
+  _wireDragEvents();
 
   if (dropzone) {
     dropzone.addEventListener('click', () => _openFilePicker());
