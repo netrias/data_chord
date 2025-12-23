@@ -37,6 +37,8 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 pythonpath = ["."]
+# Exclude E2E tests by default - they require Playwright browsers and run separately in CI
+addopts = "--ignore=tests/e2e"
 markers = [
     "e2e: end-to-end browser tests requiring Playwright",
 ]
