@@ -10,6 +10,7 @@ import {
   createValueCard,
   renderProgressPills,
   calculateProgressSummary,
+  toExcelRowNumber,
 } from './shared_review_utils.js';
 
 /** Default number of entries per batch when not specified. */
@@ -291,8 +292,9 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
 
   for (const entry of batchMeta.entries) {
     const rowCount = entry.rowIndices.length;
-    const rowLabel = rowCount === 1 ? `Row ${entry.rowIndices[0]}` : `${rowCount} rows`;
-    const tooltipText = rowCount > 1 ? `Rows: ${entry.rowIndices.join(', ')}` : null;
+    const excelRows = entry.rowIndices.map(toExcelRowNumber);
+    const rowLabel = rowCount === 1 ? `Row ${excelRows[0]}` : `${rowCount} rows`;
+    const tooltipText = rowCount > 1 ? `Rows: ${excelRows.join(', ')}` : null;
 
     const card = createValueCard({
       entry,

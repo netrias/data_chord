@@ -18,6 +18,14 @@ export const UNIT_STATUS = {
 };
 
 /**
+ * Convert data row number to Excel row number.
+ * Excel row 1 is the header, so data row N appears as Excel row N+1.
+ * @param {number} dataRowNumber - 1-based data row number
+ * @returns {number} Excel row number
+ */
+export const toExcelRowNumber = (dataRowNumber) => dataRowNumber + 1;
+
+/**
  * Escape HTML special characters to prevent XSS.
  * @param {string} str
  * @returns {string}

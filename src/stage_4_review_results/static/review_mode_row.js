@@ -11,6 +11,7 @@ import {
   createValueCard,
   renderProgressPills,
   calculateProgressSummary,
+  toExcelRowNumber,
 } from './shared_review_utils.js';
 
 /**
@@ -158,7 +159,7 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
 
     const headerEl = document.createElement('div');
     headerEl.className = 'row-mode-header';
-    headerEl.textContent = `Row ${row.rowIndex}`;
+    headerEl.textContent = `Row ${toExcelRowNumber(row.rowIndex)}`;
     rowEl.append(headerEl);
 
     const cellsEl = document.createElement('div');
