@@ -23,6 +23,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from src.domain import ChangeType, SessionKey
+from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
 from src.domain.dependencies import get_file_store, get_upload_storage
 from src.domain.manifest import (
     ManifestRow,
@@ -52,7 +53,7 @@ stage_five_router = APIRouter(prefix="/stage-5", tags=["Stage 5 Download"])
 class StageFiveRequest(BaseModel):
     """why: unified request payload for summary and download operations."""
 
-    file_id: str = Field(..., min_length=8, pattern=r"^[a-f0-9]+$")
+    file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_PATTERN)
 
 
 class ColumnSummary(BaseModel):
@@ -62,26 +63,35 @@ class ColumnSummary(BaseModel):
     distinct_terms: int
     ai_changes: int
     manual_changes: int
+    unchanged: int
+
+
+class TermMapping(BaseModel):
+    """why: represents a single original→final value transformation."""
+
+    column: str
+    original_value: str
+    final_value: str
 
 
 class StageFiveSummaryResponse(BaseModel):
     """why: response shape for the summary endpoint consumed by frontend."""
 
     column_summaries: list[ColumnSummary]
+    term_mappings: list[TermMapping]
 
 
 @stage_five_router.get("", response_class=HTMLResponse, name="stage_five_review_page")
 async def render_stage_five(request: Request) -> HTMLResponse:
     """why: serve the download page with all navigation URLs pre-resolved."""
-    context = {
+    context: dict[str, Any] = {
         "request": request,
         "stage_one_url": request.url_for("stage_one_upload_page"),
         "stage_two_url": request.url_for("stage_two_mapping_page"),
         "stage_three_url": request.url_for("stage_three_entry"),
         "stage_four_url": request.url_for("stage_four_review_page"),
-        "stage_three_payload_key": SessionKey.STAGE_THREE_PAYLOAD.value,
-        "summary_endpoint": request.url_for("stage_five_summary"),
-        "download_endpoint": request.url_for("stage_five_download"),
+        "summary_endpoint": str(request.url_for("stage_five_summary")),
+        "download_endpoint": str(request.url_for("stage_five_download")),
     }
     return _templates.TemplateResponse("stage_5_review.html", context)
 
@@ -236,6 +246,12 @@ def _classify_change(row: ManifestRow) -> ChangeType:
     return ChangeType.AI_HARMONIZED
 
 
+def _get_final_value(row: ManifestRow) -> str:
+    """why: determine the final harmonized value considering manual overrides."""
+    latest_override = get_latest_override_value(row.manual_overrides)
+    return latest_override if latest_override is not None else row.top_harmonization
+
+
 def _build_summary_from_manifest(summary: ManifestSummary) -> StageFiveSummaryResponse:
     """why: aggregate change counts per column from manifest rows.
 
@@ -243,8 +259,10 @@ def _build_summary_from_manifest(summary: ManifestSummary) -> StageFiveSummaryRe
     """
     ai_counts: dict[int, int] = defaultdict(int)
     manual_counts: dict[int, int] = defaultdict(int)
+    unchanged_counts: dict[int, int] = defaultdict(int)
     distinct_terms: dict[int, int] = defaultdict(int)
     column_names: dict[int, str] = {}
+    unique_mappings: set[tuple[str, str, str]] = set()
 
     for row in summary.rows:
         col_id = row.column_id
@@ -255,12 +273,21 @@ def _build_summary_from_manifest(summary: ManifestSummary) -> StageFiveSummaryRe
         match change_type:
             case ChangeType.AI_HARMONIZED:
                 ai_counts[col_id] += 1
+                final_value = _get_final_value(row)
+                unique_mappings.add((row.column_name, row.to_harmonize, final_value))
             case ChangeType.MANUAL_OVERRIDE:
                 manual_counts[col_id] += 1
+                final_value = _get_final_value(row)
+                unique_mappings.add((row.column_name, row.to_harmonize, final_value))
             case ChangeType.UNCHANGED:
-                pass
+                unchanged_counts[col_id] += 1
 
     column_ids = sorted(distinct_terms.keys())
+    term_mappings = [
+        TermMapping(column=col, original_value=orig, final_value=final)
+        for col, orig, final in sorted(unique_mappings)
+    ]
+
     return StageFiveSummaryResponse(
         column_summaries=[
             ColumnSummary(
@@ -268,7 +295,9 @@ def _build_summary_from_manifest(summary: ManifestSummary) -> StageFiveSummaryRe
                 distinct_terms=distinct_terms[col_id],
                 ai_changes=ai_counts[col_id],
                 manual_changes=manual_counts[col_id],
+                unchanged=unchanged_counts[col_id],
             )
             for col_id in column_ids
-        ]
+        ],
+        term_mappings=term_mappings,
     )

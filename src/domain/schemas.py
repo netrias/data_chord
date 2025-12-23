@@ -11,11 +11,14 @@ from pydantic import BaseModel, Field
 
 from src.domain.manifest import ManifestPayload
 
+FILE_ID_PATTERN = r"^[a-f0-9]+$"
+FILE_ID_MIN_LENGTH = 8
+
 
 class HarmonizeRequest(BaseModel):
     """why: capture data required to kick off harmonization."""
 
-    file_id: str = Field(..., min_length=8, pattern=r"^[a-f0-9]+$")
+    file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_PATTERN)
     target_schema: str
     manual_overrides: dict[str, str] = Field(default_factory=dict)
     manifest: ManifestPayload | None = None
