@@ -248,3 +248,75 @@
   font-weight: 600;
   color: var(--gray-700);
 }
+
+/* Unique terms row with info icon */
+.column-metric-card__unique-terms-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Confidence header row with info icon */
+.column-confidence-header-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Info icon and tooltip */
+.info-icon-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.info-icon {
+  font-size: 0.85rem;
+  color: var(--gray-400);
+  cursor: help;
+  transition: color 0.15s ease;
+}
+
+.info-icon:hover,
+.info-icon:focus {
+  color: var(--azure-500);
+}
+
+.info-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: var(--space-2) var(--space-3);
+  background: var(--gray-900);
+  color: var(--white);
+  font-size: 0.8rem;
+  font-weight: 400;
+  line-height: 1.4;
+  border-radius: var(--radius-md);
+  white-space: normal;
+  width: max-content;
+  max-width: 240px;
+  text-align: center;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s ease, visibility 0.15s ease;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.info-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: var(--gray-900);
+}
+
+.info-icon-wrapper:hover .info-tooltip,
+.info-icon-wrapper:focus-within .info-tooltip {
+  opacity: 1;
+  visibility: visible;
+}

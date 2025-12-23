@@ -32,7 +32,8 @@ const _normalizeColumnBreakdown = (serverColumn) => {
     unchangedRows: _toSafeNumber(serverColumn.unchanged_rows),
     uniqueTerms: _toSafeNumber(serverColumn.unique_terms),
     uniqueTermsChanged: _toSafeNumber(serverColumn.unique_terms_changed),
-    confidenceBuckets: _normalizeConfidenceBuckets(serverColumn.confidence_buckets),
+    uniqueTermsUnchanged: _toSafeNumber(serverColumn.unique_terms_unchanged),
+    confidenceBucketsChanged: _normalizeConfidenceBuckets(serverColumn.confidence_buckets_changed),
   };
 };
 
