@@ -12,7 +12,15 @@ repos:
       - id: no-cross-stage-imports
         name: no cross-stage imports
         description: "Stages must depend on domain, not on each other"
-        entry: bash -c 'set -euo pipefail; while IFS= read -r -d "" file; do source_stage=$(echo "$file" | grep -oE "stage_[0-9]" | head -1 || true); [ -n "$source_stage" ] || continue; while IFS= read -r line; do import_stage=$(echo "$line" | grep -oE "stage_[0-9]" | tail -1 || true); if [ "$source_stage" != "$import_stage" ]; then echo "ERROR: $file imports from different stage: $line"; exit 1; fi; done < <(grep -n "from src\\.stage_" "$file" 2>/dev/null || true); done < <(find src -type f -name "*.py" -path "src/stage_*/*" -print0)'
+        entry: ./scripts/check-cross-stage-imports.sh
         language: system
         pass_filenames: false
         types: [python]
+
+      - id: typecheck-js
+        name: typecheck javascript
+        description: "Check JavaScript files for undefined references"
+        entry: bash -c 'output=$(npx tsc --noEmit 2>&1); if echo "$output" | grep -qE "TS2552|TS6133|TS2304"; then echo "$output" | grep -E "TS2552|TS6133|TS2304"; echo ""; echo "TypeScript found undefined references - please fix!"; exit 1; fi; exit 0'
+        language: system
+        pass_filenames: false
+        types: [javascript]

@@ -1,0 +1,19 @@
+{
+  "name": "seattle",
+  "version": "1.0.0",
+  "description": "Data harmonization workflow application. Upload tabular data, review AI-suggested column mappings, run harmonization, and approve results before export.",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
