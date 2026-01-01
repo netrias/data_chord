@@ -59,6 +59,29 @@ uv run ruff check .
 uv run basedpyright
 ```
 
+### Task Management
+
+This project uses [Beads](https://github.com/steveyegge/beads) for persistent task tracking across AI agent sessions.
+
+```bash
+# View ready tasks (no blockers)
+bd ready
+
+# List all open tasks
+bd list
+
+# Create a new task
+bd create "Task description" -p 1
+
+# Show task details
+bd show <task-id>
+
+# Close completed task
+bd close <task-id> --reason "Description of completion"
+```
+
+**Note:** Beads runs in stealth mode - all task data is local-only (.beads/ directory) and NOT committed to git.
+
 ## Workflow Stages
 
 1. **Upload** - Upload CSV file and analyze columns
