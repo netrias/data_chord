@@ -22,8 +22,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from src.domain import ChangeType, SessionKey
-from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
+from src.domain import ChangeType
 from src.domain.dependencies import get_file_store, get_upload_storage
 from src.domain.manifest import (
     ManifestRow,
@@ -32,6 +31,7 @@ from src.domain.manifest import (
     is_value_changed,
     read_manifest_parquet,
 )
+from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
 from src.domain.storage import FileType, UploadStorage, load_csv, resolve_harmonized_path_or_404
 
 _logger = logging.getLogger(__name__)
