@@ -8,6 +8,10 @@ import { STAGE_3_PAYLOAD_KEY, isValidFileId, isSafeFilename, readFromSession } f
 const _DEFAULT_SUMMARY_ENDPOINT = '/stage-5/summary';
 const _DEFAULT_DOWNLOAD_ENDPOINT = '/stage-5/download';
 const _DEFAULT_ZIP_FILENAME = 'harmonized_data.zip';
+/** Delay before revoking blob URL to allow browser to initiate download. */
+const _REVOKE_DELAY_MS = 100;
+/** Allowed segment types for bar visualization and labels. */
+const _VALID_SEGMENT_TYPES = ['ai', 'manual', 'unchanged'];
 
 const _config = window.stageFiveConfig ?? {};
 const _summaryEndpoint = _config.summaryEndpoint ?? _DEFAULT_SUMMARY_ENDPOINT;
@@ -16,9 +20,16 @@ const _downloadEndpoint = _config.downloadEndpoint ?? _DEFAULT_DOWNLOAD_ENDPOINT
 const _downloadBtn = document.getElementById('downloadResults');
 const _downloadError = document.getElementById('downloadError');
 const _summaryGrid = document.getElementById('summaryGrid');
+const _uploadNavAction = document.getElementById('uploadNavAction');
+const _changesTableSection = document.getElementById('changesTableSection');
+const _changesTableBody = document.getElementById('changesTableBody');
+const _changesTable = document.getElementById('changesTable');
 
 const _state = {
   fileId: null,
+  termMappings: [],
+  sortColumn: null,
+  sortDirection: 'asc',
 };
 
 const _safeNumber = (value) => {
@@ -66,8 +77,7 @@ const _triggerBrowserDownload = (blob, filename) => {
   link.href = url;
   link.download = filename;
   link.click();
-  /* Delay revocation to allow browser to start download before URL is invalidated. */
-  setTimeout(() => URL.revokeObjectURL(url), 100);
+  setTimeout(() => URL.revokeObjectURL(url), _REVOKE_DELAY_MS);
 };
 
 const _showError = (message) => {
@@ -90,6 +100,12 @@ const _loadSourceContext = () => {
   return { fileId: id };
 };
 
+const _showUploadNav = () => {
+  if (_uploadNavAction) {
+    _uploadNavAction.classList.remove('hidden');
+  }
+};
+
 const _handleDownload = async () => {
   if (!_state.fileId) {
     _showError('Unable to locate file. Please restart the harmonization process.');
@@ -98,6 +114,7 @@ const _handleDownload = async () => {
 
   _hideError();
   _setDownloadButtonState(true);
+  _showUploadNav();
 
   try {
     const response = await fetch(_downloadEndpoint, {
@@ -123,36 +140,98 @@ const _handleDownload = async () => {
   }
 };
 
-const _createStatElement = (label, value) => {
-  const stat = document.createElement('div');
-  stat.className = 'summary-stat';
+const _createBarSegment = (type, percent) => {
+  const safeType = _VALID_SEGMENT_TYPES.includes(type) ? type : 'unchanged';
+  const segment = document.createElement('div');
+  segment.className = `summary-bar__segment summary-bar__segment--${safeType}`;
+  segment.style.width = `${percent}%`;
+  return segment;
+};
 
-  const dt = document.createElement('dt');
-  dt.textContent = label;
+const _createLabel = (type, text, count) => {
+  const safeType = _VALID_SEGMENT_TYPES.includes(type) ? type : 'unchanged';
+  const label = document.createElement('div');
+  label.className = 'summary-label';
 
-  const dd = document.createElement('dd');
-  dd.textContent = value;
+  const indicator = document.createElement('span');
+  indicator.className = `summary-label__indicator summary-label__indicator--${safeType}`;
+  label.appendChild(indicator);
 
-  stat.appendChild(dt);
-  stat.appendChild(dd);
-  return stat;
+  const textSpan = document.createElement('span');
+  textSpan.className = 'summary-label__text';
+  textSpan.textContent = text;
+  label.appendChild(textSpan);
+
+  const countSpan = document.createElement('span');
+  countSpan.className = 'summary-label__count';
+  countSpan.textContent = _safeNumber(count).toLocaleString();
+  label.appendChild(countSpan);
+
+  return label;
 };
 
 const _createColumnCard = (col) => {
   const article = document.createElement('article');
-  article.className = 'card card--inset card--pad-sm summary-column-card';
+  article.className = 'summary-column-card';
+
+  const aiCount = _safeNumber(col.ai_changes);
+  const manualCount = _safeNumber(col.manual_changes);
+  const unchangedCount = _safeNumber(col.unchanged);
+  const total = _safeNumber(col.distinct_terms);
+
+  const aiPercent = total > 0 ? (aiCount / total) * 100 : 0;
+  const manualPercent = total > 0 ? (manualCount / total) * 100 : 0;
+  /* Calculate unchanged as remainder to ensure percentages sum to 100% and avoid floating-point gaps in the bar. */
+  const unchangedPercent = total > 0 ? 100 - aiPercent - manualPercent : 0;
+
+  const header = document.createElement('div');
+  header.className = 'summary-column-header';
 
   const h4 = document.createElement('h4');
   h4.className = 'summary-column-name';
   h4.textContent = col.column;
-  article.appendChild(h4);
+  header.appendChild(h4);
 
-  const dl = document.createElement('dl');
-  dl.className = 'summary-stats';
-  dl.appendChild(_createStatElement('Distinct terms', _safeNumber(col.distinct_terms).toLocaleString()));
-  dl.appendChild(_createStatElement('AI harmonized', _safeNumber(col.ai_changes).toLocaleString()));
-  dl.appendChild(_createStatElement('Manual overrides', _safeNumber(col.manual_changes).toLocaleString()));
-  article.appendChild(dl);
+  const termsSpan = document.createElement('span');
+  termsSpan.className = 'summary-column-terms';
+  termsSpan.textContent = `${total.toLocaleString()} terms`;
+  header.appendChild(termsSpan);
+
+  article.appendChild(header);
+
+  const barContainer = document.createElement('div');
+  barContainer.className = 'summary-bar-container';
+
+  const bar = document.createElement('div');
+  bar.className = 'summary-bar';
+
+  if (aiPercent > 0) {
+    bar.appendChild(_createBarSegment('ai', aiPercent));
+  }
+  if (manualPercent > 0) {
+    bar.appendChild(_createBarSegment('manual', manualPercent));
+  }
+  if (unchangedPercent > 0) {
+    bar.appendChild(_createBarSegment('unchanged', unchangedPercent));
+  }
+
+  barContainer.appendChild(bar);
+  article.appendChild(barContainer);
+
+  const labels = document.createElement('div');
+  labels.className = 'summary-labels';
+
+  if (aiCount > 0) {
+    labels.appendChild(_createLabel('ai', 'AI Harmonized:', aiCount));
+  }
+  if (manualCount > 0) {
+    labels.appendChild(_createLabel('manual', 'Manual Override:', manualCount));
+  }
+  if (unchangedCount > 0) {
+    labels.appendChild(_createLabel('unchanged', 'Unchanged:', unchangedCount));
+  }
+
+  article.appendChild(labels);
 
   return article;
 };
@@ -160,9 +239,9 @@ const _createColumnCard = (col) => {
 const _renderSummary = (columnSummaries) => {
   if (!_summaryGrid) return;
 
-  const changed = columnSummaries.filter((col) => col.ai_changes > 0 || col.manual_changes > 0);
-
   _summaryGrid.replaceChildren();
+
+  const changed = columnSummaries.filter((col) => col.ai_changes > 0 || col.manual_changes > 0);
 
   if (changed.length === 0) {
     const emptyMsg = document.createElement('p');
@@ -184,6 +263,104 @@ const _showEmptyMessage = (message) => {
   emptyMsg.className = 'summary-empty';
   emptyMsg.textContent = message;
   _summaryGrid.appendChild(emptyMsg);
+};
+
+const _SORT_KEYS = ['column', 'original_value', 'final_value'];
+
+const _sortMappings = (mappings, column, direction) => {
+  const sorted = [...mappings];
+  sorted.sort((a, b) => {
+    const aVal = (a[column] ?? '').toLowerCase();
+    const bVal = (b[column] ?? '').toLowerCase();
+    const cmp = aVal.localeCompare(bVal);
+    return direction === 'asc' ? cmp : -cmp;
+  });
+  return sorted;
+};
+
+const _renderTableRows = (mappings) => {
+  if (!_changesTableBody) return;
+
+  _changesTableBody.replaceChildren();
+
+  for (const mapping of mappings) {
+    const row = document.createElement('tr');
+
+    const colCell = document.createElement('td');
+    colCell.textContent = mapping.column;
+    row.appendChild(colCell);
+
+    const origCell = document.createElement('td');
+    origCell.textContent = mapping.original_value;
+    row.appendChild(origCell);
+
+    const finalCell = document.createElement('td');
+    finalCell.textContent = mapping.final_value;
+    row.appendChild(finalCell);
+
+    _changesTableBody.appendChild(row);
+  }
+};
+
+const _updateSortIndicators = () => {
+  if (!_changesTable) return;
+
+  const headers = _changesTable.querySelectorAll('th');
+  headers.forEach((th, index) => {
+    const key = _SORT_KEYS[index];
+    th.classList.remove('sorted', 'sorted-asc', 'sorted-desc');
+
+    if (_state.sortColumn === key) {
+      th.classList.add('sorted', `sorted-${_state.sortDirection}`);
+    }
+  });
+};
+
+const _handleSort = (columnIndex) => {
+  const key = _SORT_KEYS[columnIndex];
+
+  if (_state.sortColumn === key) {
+    _state.sortDirection = _state.sortDirection === 'asc' ? 'desc' : 'asc';
+  } else {
+    _state.sortColumn = key;
+    _state.sortDirection = 'asc';
+  }
+
+  const sorted = _sortMappings(_state.termMappings, _state.sortColumn, _state.sortDirection);
+  _renderTableRows(sorted);
+  _updateSortIndicators();
+};
+
+const _setupSortableHeaders = () => {
+  if (!_changesTable) return;
+
+  const headers = _changesTable.querySelectorAll('th');
+  headers.forEach((th, index) => {
+    /* Guard against duplicate indicators if _setupSortableHeaders is called multiple times. */
+    if (!th.querySelector('.sort-indicator')) {
+      const indicator = document.createElement('span');
+      indicator.className = 'sort-indicator';
+      th.appendChild(indicator);
+    }
+
+    th.addEventListener('click', () => _handleSort(index));
+  });
+};
+
+const _renderChangesTable = (termMappings) => {
+  if (!_changesTableSection || !_changesTableBody) return;
+
+  if (!termMappings || termMappings.length === 0) {
+    return;
+  }
+
+  _state.termMappings = termMappings;
+  _state.sortColumn = null;
+  _state.sortDirection = 'asc';
+
+  _renderTableRows(termMappings);
+  _setupSortableHeaders();
+  _changesTableSection.classList.remove('hidden');
 };
 
 const _fetchSummary = async () => {
@@ -208,6 +385,7 @@ const _fetchSummary = async () => {
 
     const data = await response.json();
     _renderSummary(data.column_summaries ?? []);
+    _renderChangesTable(data.term_mappings ?? []);
   } catch (error) {
     console.error('Failed to fetch summary:', error);
     _showEmptyMessage('Unable to load harmonization summary.');

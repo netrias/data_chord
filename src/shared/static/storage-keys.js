@@ -9,22 +9,15 @@ export const STAGE_3_JOB_KEY = 'stage3HarmonizeJob';
 export const CURRENT_FILE_SESSION_KEY = 'currentFileSession';
 export const MAX_REACHED_STAGE_KEY = 'maxReachedStage';
 
-/** Regex pattern for valid file IDs - alphanumeric with underscores and hyphens only. */
-const FILE_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
-
 /** Regex pattern for safe filenames - alphanumeric with underscore, hyphen, and dot. */
 const SAFE_FILENAME_PATTERN = /^[a-zA-Z0-9_.-]+$/;
 
 /**
- * Validate file_id to prevent path traversal attacks.
- * Rejects IDs containing path separators, dots, or other unsafe characters.
- * @param {string|null|undefined} id - The file ID to validate
- * @returns {boolean} True if ID is safe to use in URL paths
+ * Check file_id exists. Backend Pydantic validates format.
+ * @param {string|null|undefined} id - The file ID to check
+ * @returns {boolean} True if ID exists and is a non-empty string
  */
-export const isValidFileId = (id) => {
-  if (!id || typeof id !== 'string') return false;
-  return FILE_ID_PATTERN.test(id);
-};
+export const isValidFileId = (id) => typeof id === 'string' && id.length > 0;
 
 /**
  * Validate filename is safe - no path traversal or unsafe characters.

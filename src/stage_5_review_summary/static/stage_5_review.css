@@ -1,7 +1,7 @@
 /* Stage 5 Download - stage-specific styles */
 
 .stage-five-shell {
-  max-width: min(900px, 96vw);
+  max-width: min(1400px, 96vw);
   padding: var(--space-12) var(--space-8) 4rem;
 }
 
@@ -21,62 +21,250 @@
   margin-top: var(--space-6);
 }
 
-.summary-card .stage-section-header {
-  margin-bottom: var(--space-4);
+/* Summary header - large centered title */
+.summary-header {
+  text-align: center;
+  margin-bottom: var(--space-8);
+  padding-bottom: var(--space-4);
+  border-bottom: 2px solid var(--gray-200);
 }
 
-.summary-card h3 {
+.summary-title {
   margin: 0;
-  font-size: 1.1rem;
-  color: var(--gray-700);
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--gray-900);
+  letter-spacing: -0.01em;
 }
 
+/* Summary grid - single column for full-width cards */
 .summary-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
 }
 
 .summary-loading,
 .summary-empty {
   color: var(--gray-500);
   font-style: italic;
-  grid-column: 1 / -1;
+  text-align: center;
+  padding: var(--space-8);
 }
 
-/* Column summary card - extends .card from tokens.css */
+/* Column summary card - full width with segmented bar */
 .summary-column-card {
-  /* Layout handled by .card .card--inset .card--pad-sm */
+  padding: var(--space-5);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-lg);
+  background-color: var(--white);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.summary-column-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: var(--space-4);
 }
 
 .summary-column-name {
-  margin: 0 0 var(--space-3);
-  font-size: 1rem;
+  margin: 0;
+  font-size: 1.1rem;
   font-weight: 600;
   color: var(--gray-900);
 }
 
-.summary-stats {
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.summary-stat {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-}
-
-.summary-stat dt {
-  font-size: 0.85rem;
+.summary-column-terms {
+  font-size: 0.9rem;
   color: var(--gray-500);
+  font-weight: 500;
 }
 
-.summary-stat dd {
-  margin: 0;
-  font-size: 0.95rem;
+/* Segmented bar visualization */
+.summary-bar-container {
+  margin-bottom: var(--space-4);
+}
+
+.summary-bar {
+  height: 20px;
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  display: flex;
+  background-color: var(--gray-100);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.summary-bar__segment {
+  height: 100%;
+  transition: width 0.3s ease;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 1px 0 0 rgba(0, 0, 0, 0.1);
+}
+
+.summary-bar__segment:last-child {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+/* AI Harmonized: solid fill */
+.summary-bar__segment--ai {
+  background-color: var(--azure-500);
+}
+
+/* Manual Override: diagonal stripes pattern */
+.summary-bar__segment--manual {
+  background-color: var(--warning-400);
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 4px,
+    rgba(255, 255, 255, 0.3) 4px,
+    rgba(255, 255, 255, 0.3) 8px
+  );
+}
+
+/* Unchanged: dotted pattern */
+.summary-bar__segment--unchanged {
+  background-color: var(--gray-300);
+  background-image: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 0.4) 1px,
+    transparent 1px
+  );
+  background-size: 6px 6px;
+}
+
+/* Labels below bar */
+.summary-labels {
+  display: flex;
+  gap: var(--space-6);
+  margin-top: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.summary-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.9rem;
+  color: var(--gray-700);
+}
+
+.summary-label__indicator {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.summary-label__indicator--ai {
+  background-color: var(--azure-500);
+}
+
+.summary-label__indicator--manual {
+  background-color: var(--warning-400);
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 2px,
+    rgba(255, 255, 255, 0.3) 2px,
+    rgba(255, 255, 255, 0.3) 4px
+  );
+}
+
+.summary-label__indicator--unchanged {
+  background-color: var(--gray-300);
+  background-image: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 0.4) 0.5px,
+    transparent 0.5px
+  );
+  background-size: 3px 3px;
+}
+
+.summary-label__text {
+  font-weight: 500;
+}
+
+.summary-label__count {
   font-weight: 600;
+  color: var(--gray-900);
+}
+
+/* Changes table card */
+.changes-table-card {
+  margin-top: var(--space-6);
+}
+
+.changes-table-container {
+  overflow-x: auto;
+}
+
+.changes-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.changes-table th,
+.changes-table td {
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.changes-table th {
+  font-weight: 600;
+  color: var(--gray-600);
+  background-color: var(--gray-50);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.15s ease;
+}
+
+.changes-table th:hover {
+  background-color: var(--gray-100);
+}
+
+.changes-table th .sort-indicator {
+  display: inline-block;
+  margin-left: var(--space-1);
+  opacity: 0.4;
+  transition: opacity 0.15s ease;
+}
+
+.changes-table th.sorted .sort-indicator {
+  opacity: 1;
+}
+
+.changes-table th.sorted-asc .sort-indicator::after {
+  content: '▲';
+}
+
+.changes-table th.sorted-desc .sort-indicator::after {
+  content: '▼';
+}
+
+.changes-table th:not(.sorted) .sort-indicator::after {
+  content: '⇅';
+}
+
+.changes-table tbody tr:hover {
+  background-color: var(--gray-50);
+}
+
+.changes-table td {
   color: var(--gray-800);
+}
+
+.changes-table td:first-child {
+  font-weight: 500;
+  color: var(--gray-700);
+}
+
+.changes-table__arrow {
+  color: var(--gray-400);
+  padding: 0 var(--space-2);
 }

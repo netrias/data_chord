@@ -37,7 +37,7 @@
             <span class="step-label">Review</span>
           </li>
         </ol>
-        <div class="progress-tracker-action">
+        <div id="uploadNavAction" class="progress-tracker-action hidden">
           <button class="btn-3d" type="button" data-nav-target="{{ stage_one_url }}">
             <span class="btn-3d-shadow" aria-hidden="true"></span>
             <span class="btn-3d-edge" aria-hidden="true"></span>
@@ -64,22 +64,37 @@
       </section>
 
       <section class="stage-card summary-card">
-        <header class="stage-section-header">
-          <h3>Harmonization summary</h3>
+        <header class="summary-header">
+          <h2 class="summary-title">Harmonization Summary</h2>
         </header>
         <div id="summaryGrid" class="summary-grid">
           <p class="summary-loading">Loading summary...</p>
+        </div>
+      </section>
+
+      <section id="changesTableSection" class="stage-card changes-table-card hidden">
+        <header class="summary-header">
+          <h2 class="summary-title">Term Mappings</h2>
+        </header>
+        <div class="changes-table-container">
+          <table id="changesTable" class="changes-table">
+            <thead>
+              <tr>
+                <th>Column</th>
+                <th>Original Value</th>
+                <th>Final Value</th>
+              </tr>
+            </thead>
+            <tbody id="changesTableBody"></tbody>
+          </table>
         </div>
       </section>
     </main>
 
     <script>
       window.stageFiveConfig = {
-        stageOneUrl: "{{ stage_one_url }}",
-        stageFourUrl: "{{ stage_four_url }}",
-        stageThreePayloadKey: "{{ stage_three_payload_key }}",
-        summaryEndpoint: "{{ summary_endpoint }}",
-        downloadEndpoint: "{{ download_endpoint }}",
+        summaryEndpoint: {{ summary_endpoint|tojson }},
+        downloadEndpoint: {{ download_endpoint|tojson }},
       };
     </script>
     <script type="module" src="{{ request.url_for('stage_five_static', path='stage_5_review.js') }}"></script>
