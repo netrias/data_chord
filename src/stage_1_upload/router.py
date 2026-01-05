@@ -19,6 +19,8 @@ from .schemas import (
     AnalyzeRequest,
     AnalyzeResponse,
     ColumnPreview,
+    PreviewRequest,
+    PreviewResponse,
     UploadResponse,
 )
 from .services import (
@@ -72,6 +74,27 @@ async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadRespon
         human_size=meta.human_size,
         content_type=meta.content_type,
         uploaded_at=meta.uploaded_at,
+    )
+
+
+@stage_one_router.post(
+    "/preview",
+    response_model=PreviewResponse,
+    name="stage_one_upload_preview",
+)
+async def preview_columns(payload: PreviewRequest) -> PreviewResponse:
+    """why: return lightweight column metadata for Stage 2 animation without AI mapping."""
+    meta = _storage.load(payload.file_id)
+    if not meta:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please upload again.")
+
+    total_rows, columns = _analyze_columns_safe(meta.saved_path, payload.file_id)
+
+    return PreviewResponse(
+        file_id=meta.file_id,
+        file_name=meta.original_name,
+        total_rows=total_rows,
+        columns=columns,
     )
 
 

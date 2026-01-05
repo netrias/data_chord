@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="/assets/shared/tokens.css" />
     <link rel="stylesheet" href="{{ request.url_for('stage_one_static', path='stage_1_upload.css') }}" />
     <link rel="stylesheet" href="{{ request.url_for('stage_two_static', path='stage_2_mappings.css') }}" />
+    <link rel="stylesheet" href="{{ request.url_for('stage_two_static', path='stage-2-transform.css') }}" />
   </head>
   <body>
     <nav class="progress-tracker">
@@ -74,11 +75,22 @@
             <div class="mapping-th">AI Recommended Ontology</div>
             <div class="mapping-th">Override</div>
           </div>
+          <!-- Animation container - inside table body area so chips slide within same visual space -->
+          <div id="transformContainer" class="transform-container hidden"></div>
           <div id="mappingResults" class="mapping-table-body"></div>
         </div>
         <div id="mappingEmptyState" class="mapping-empty hidden"></div>
       </section>
     </main>
+
+    <!-- Analyze overlay - shown while mapping API runs -->
+    <div id="analyzeOverlay" class="analyze-overlay hidden" role="alert" aria-live="assertive">
+      <div class="overlay-card">
+        <p class="overlay-title">Finding mappings</p>
+        <p class="overlay-subtitle">AI is analyzing your columns...</p>
+        <div class="overlay-spinner"></div>
+      </div>
+    </div>
 
     <script>
       window.stageTwoConfig = {

@@ -1,0 +1,146 @@
+/**
+ * Stage 2 transformation animation - column chips sliding down into row positions.
+ * Columns start as horizontal chips (like CSV headers), then slide down into their table rows.
+ */
+
+/* Transform container - sits inside the mapping table body */
+.transform-container {
+  position: relative;
+  z-index: 50;
+  pointer-events: none;
+}
+
+.transform-container.hidden {
+  display: none;
+}
+
+/* Horizontal bar of column names - positioned at top of table body */
+.column-bar {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-4);
+  /* Align with the Column column: 32px status + 16px gap + 16px padding */
+  padding: var(--space-3) var(--space-4);
+  padding-left: calc(32px + var(--space-4) + var(--space-4));
+  min-height: 40px;
+}
+
+/* Individual column name - plain text style */
+.column-chip {
+  color: var(--gray-700);
+  font-weight: 500;
+  font-size: 0.875rem;
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  position: relative;
+  transition: none;
+}
+
+/* Animation: chips slide to their target row positions (set via JS) */
+.column-bar--transforming .column-chip {
+  animation: chip-slide-to-target 3000ms ease-out forwards;
+  animation-delay: calc(var(--chip-index, 0) * 400ms);
+}
+
+@keyframes chip-slide-to-target {
+  0% {
+    transform: translate(0, 0);
+    opacity: 1;
+  }
+  /* Drop down first - stay at original X */
+  40% {
+    transform: translate(0, calc(var(--target-y, 100px) * 0.8));
+    opacity: 1;
+  }
+  /* Slide horizontally to target X, start fading for overlap with row */
+  60% {
+    transform: translate(var(--target-x, 0), var(--target-y, 100px));
+    opacity: 0.7;
+  }
+  /* Fade out while row fades in - overlap creates smooth merge */
+  80% {
+    transform: translate(var(--target-x, 0), var(--target-y, 100px));
+    opacity: 0;
+  }
+  100% {
+    transform: translate(var(--target-x, 0), var(--target-y, 100px));
+    opacity: 0;
+  }
+}
+
+/* Mapping rows - initially hidden, fade in after chips fade out */
+.mapping-row--slide-target {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+.mapping-row--slide-active {
+  animation: row-fade-in 600ms ease-out forwards;
+  /* Start earlier to overlap with chip fade (60-80% = 1800-2400ms) for smooth merge */
+  animation-delay: calc(1400ms + var(--row-index, 0) * 400ms);
+}
+
+@keyframes row-fade-in {
+  0% {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* AI columns fade-in after mapping completes */
+.mapping-td-suggestion--loading,
+.mapping-td-override--loading {
+  opacity: 0.3;
+}
+
+.mapping-td-suggestion--ready,
+.mapping-td-override--ready {
+  animation: column-fade-in 300ms ease-out forwards;
+}
+
+@keyframes column-fade-in {
+  from {
+    opacity: 0.3;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Respect reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  .column-bar--transforming .column-chip {
+    animation: none;
+    opacity: 0;
+  }
+
+  .mapping-row--slide-target {
+    opacity: 1;
+    transform: none;
+  }
+
+  .mapping-row--slide-active {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .mapping-td-suggestion--ready,
+  .mapping-td-override--ready {
+    animation: none;
+    opacity: 1;
+  }
+
+  .overlay-spinner {
+    animation: none;
+    border-top-color: var(--netrias-500);
+    border-right-color: var(--netrias-500);
+  }
+}

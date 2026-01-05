@@ -1,5 +1,5 @@
 import { initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
-import { STAGE_2_PAYLOAD_KEY, STAGE_3_PAYLOAD_KEY, STAGE_3_JOB_KEY, CURRENT_FILE_SESSION_KEY, removeFromSession, writeToSession, readFromSession } from '/assets/shared/storage-keys.js';
+import { STAGE_2_PAYLOAD_KEY, STAGE_3_PAYLOAD_KEY, STAGE_3_JOB_KEY, CURRENT_FILE_SESSION_KEY, COLUMN_PREVIEW_KEY, removeFromSession, writeToSession, readFromSession } from '/assets/shared/storage-keys.js';
 
 const config = window.stageOneUploadConfig ?? {};
 
@@ -13,13 +13,13 @@ const dropzoneFileName = document.getElementById('dropzoneFileName');
 const dropzoneFileSize = document.getElementById('dropzoneFileSize');
 const dropzoneFileStatus = document.getElementById('dropzoneFileStatus');
 const changeFileButton = document.getElementById('changeFileButton');
-const analyzeOverlay = document.getElementById('analyzeOverlay');
 
 const state = {
   file: null,
   uploaded: null,
+  preview: null,
   isUploading: false,
-  isAnalyzing: false,
+  isPreviewing: false,
 };
 
 const _formatBytes = (bytes) => {
@@ -79,8 +79,9 @@ const _openFilePicker = () => {
 const _resetUploadState = () => {
   state.file = null;
   state.uploaded = null;
+  state.preview = null;
   state.isUploading = false;
-  state.isAnalyzing = false;
+  state.isPreviewing = false;
   if (fileInput) fileInput.value = '';
   _setAnalyzeButtonVisible(false);
   if (dropzone) dropzone.classList.remove('has-file');
@@ -146,7 +147,8 @@ const _uploadDataset = async () => {
     _persistFileSession(payload, state.file.name);
     if (dropzone) dropzone.classList.add('has-file');
     _showDropzoneSummary(state.file, 'Uploaded');
-    _setAnalyzeButtonVisible(true);
+    /* Fetch column preview immediately after upload for Stage 2 animation */
+    await _fetchColumnPreview();
   } catch (error) {
     console.error(error);
     _showDropzoneSummary(state.file, 'Upload failed');
@@ -154,6 +156,42 @@ const _uploadDataset = async () => {
   } finally {
     state.isUploading = false;
   }
+};
+
+const _fetchColumnPreview = async () => {
+  if (!state.uploaded || state.isPreviewing) {
+    return;
+  }
+  state.isPreviewing = true;
+  _showDropzoneSummary(state.file, 'Reading columns…');
+
+  try {
+    const response = await fetch(config.previewEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_id: state.uploaded.file_id }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.detail || 'Preview failed.');
+    }
+    state.preview = payload;
+    _persistColumnPreview(payload);
+    _showDropzoneSummary(state.file, 'Ready to map');
+    _setAnalyzeButtonVisible(true);
+  } catch (error) {
+    console.error(error);
+    _showDropzoneSummary(state.file, 'Uploaded');
+    _setStatus(error.message, 'error');
+    /* Still allow navigation even if preview fails - Stage 2 will fetch it */
+    _setAnalyzeButtonVisible(true);
+  } finally {
+    state.isPreviewing = false;
+  }
+};
+
+const _persistColumnPreview = (preview) => {
+  writeToSession(COLUMN_PREVIEW_KEY, preview);
 };
 
 const _clearStaleSessionData = () => {
@@ -189,60 +227,18 @@ const _hydrateFromSession = () => {
   return true;
 };
 
-const _persistStageTwoPayload = (payload) => {
-  writeToSession(STAGE_2_PAYLOAD_KEY, payload);
-};
-
-const _navigateToStageTwo = (fileId, targetSchema, payload) => {
-  _persistStageTwoPayload(payload);
-  advanceMaxReachedStage('mapping');
-  const search = new URLSearchParams({ file_id: fileId, schema: targetSchema });
-  window.location.assign(`/stage-2?${search.toString()}`);
-};
-
-const CREDENTIAL_ERROR_MESSAGE =
-  'AI mapping service unavailable. Please configure NETRIAS_API_KEY and restart the server.';
-
-const _analyzeDataset = async () => {
-  if (!state.uploaded || state.isAnalyzing) {
-    _setStatus('Upload a file before analyzing.', 'error');
+/* why: navigate immediately to Stage 2 - analysis happens there with animation */
+const _navigateToStageTwo = () => {
+  if (!state.uploaded) {
+    _setStatus('Upload a file before mapping.', 'error');
     return;
   }
-
-  state.isAnalyzing = true;
-  if (analyzeButton) analyzeButton.disabled = true;
-  _showDropzoneSummary(state.file, 'Analyzing columns…');
-  if (analyzeOverlay) analyzeOverlay.classList.remove('hidden');
-
-  try {
-    const response = await fetch(config.analyzeEndpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        file_id: state.uploaded.file_id,
-        target_schema: config.targetSchema,
-      }),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(payload.detail || 'Analysis failed.');
-    }
-    if (payload.mapping_service_available === false) {
-      throw new Error(CREDENTIAL_ERROR_MESSAGE);
-    }
-    _setStatus('Columns analyzed. Redirecting…', 'success');
-    _navigateToStageTwo(state.uploaded.file_id, config.targetSchema, payload);
-  } catch (error) {
-    console.error(error);
-    _setStatus(error.message, 'error');
-    _setAnalyzeButtonVisible(true);
-    _showDropzoneSummary(state.file, 'Uploaded');
-  } finally {
-    state.isAnalyzing = false;
-    if (analyzeOverlay) analyzeOverlay.classList.add('hidden');
-  }
+  advanceMaxReachedStage('mapping');
+  const search = new URLSearchParams({
+    file_id: state.uploaded.file_id,
+    schema: config.targetSchema,
+  });
+  window.location.assign(`/stage-2?${search.toString()}`);
 };
 
 const _wireDragEvents = () => {
@@ -322,7 +318,7 @@ const _init = () => {
   }
 
   if (analyzeButton) {
-    analyzeButton.addEventListener('click', _analyzeDataset);
+    analyzeButton.addEventListener('click', _navigateToStageTwo);
   }
 };
 

@@ -3,7 +3,7 @@
  * Shows short instruction text for active step, with hover tooltip for longer description.
  */
 import { STEP_INSTRUCTIONS, STAGE_ORDER } from './step-instructions.js';
-import { CURRENT_FILE_SESSION_KEY, MAX_REACHED_STAGE_KEY } from './storage-keys.js';
+import { CURRENT_FILE_SESSION_KEY, MAX_REACHED_STAGE_KEY, readFromSession, writeToSession, removeFromSession } from './storage-keys.js';
 
 /**
  * Update progress tracker UI to reflect the active stage.
@@ -50,16 +50,8 @@ function _getFileIdForNavigation() {
   const fromUrl = urlParams.get('file_id');
   if (fromUrl) return fromUrl;
 
-  try {
-    const session = sessionStorage.getItem(CURRENT_FILE_SESSION_KEY);
-    if (session) {
-      const parsed = JSON.parse(session);
-      return parsed.file_id || null;
-    }
-  } catch {
-    /* ignore parse errors */
-  }
-  return null;
+  const session = readFromSession(CURRENT_FILE_SESSION_KEY);
+  return session?.file_id || null;
 }
 
 /* why: append file_id to navigation URLs so stages can access the active session. */
@@ -156,6 +148,10 @@ function _populateInstructionBanner(instructionKey) {
     return;
   }
 
+  /* Toggle loading class based on instruction key suffix */
+  const isLoading = instructionKey.endsWith('_loading');
+  instructionContainer.classList.toggle('step-instruction--loading', isLoading);
+
   const textEl = instructionContainer.querySelector('.step-instruction-text');
   const tooltipEl = instructionContainer.querySelector('.step-instruction-tooltip');
 
@@ -191,14 +187,10 @@ function _populateStepTooltips() {
 
 /* why: track highest stage reached to block skipping forward in progress tracker. */
 function _getMaxReachedStageIndex() {
-  try {
-    const stored = sessionStorage.getItem(MAX_REACHED_STAGE_KEY);
-    if (stored) {
-      const index = STAGE_ORDER.indexOf(stored);
-      if (index >= 0) return index;
-    }
-  } catch {
-    /* sessionStorage unavailable */
+  const stored = readFromSession(MAX_REACHED_STAGE_KEY);
+  if (stored) {
+    const index = STAGE_ORDER.indexOf(stored);
+    if (index >= 0) return index;
   }
   return 0;
 }
@@ -214,11 +206,7 @@ export function advanceMaxReachedStage(stage) {
 
   const currentMax = _getMaxReachedStageIndex();
   if (newIndex > currentMax) {
-    try {
-      sessionStorage.setItem(MAX_REACHED_STAGE_KEY, stage);
-    } catch {
-      /* sessionStorage unavailable */
-    }
+    writeToSession(MAX_REACHED_STAGE_KEY, stage);
   }
 }
 
@@ -227,9 +215,5 @@ export function advanceMaxReachedStage(stage) {
  * Call this when starting a new workflow.
  */
 export function resetMaxReachedStage() {
-  try {
-    sessionStorage.removeItem(MAX_REACHED_STAGE_KEY);
-  } catch {
-    /* sessionStorage unavailable */
-  }
+  removeFromSession(MAX_REACHED_STAGE_KEY);
 }

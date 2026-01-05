@@ -86,18 +86,10 @@
       </section>
     </main>
 
-    <div id="analyzeOverlay" class="analyze-overlay hidden" role="alert" aria-live="assertive">
-      <div class="overlay-card">
-        <p class="overlay-title">Analyzing columns</p>
-        <p class="overlay-subtitle">Finding the best mappings for your data.</p>
-        <div class="overlay-spinner"></div>
-      </div>
-    </div>
-
     <script>
       window.stageOneUploadConfig = {
         uploadEndpoint: "{{ request.url_for('stage_one_upload_upload') }}",
-        analyzeEndpoint: "{{ request.url_for('stage_one_upload_analyze') }}",
+        previewEndpoint: "{{ request.url_for('stage_one_upload_preview') }}",
         maxBytes: {{ ui_constraints.max_bytes }},
         targetSchema: "{{ default_schema }}",
       };

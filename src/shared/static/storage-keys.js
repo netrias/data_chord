@@ -8,6 +8,7 @@ export const STAGE_3_PAYLOAD_KEY = 'stage3HarmonizePayload';
 export const STAGE_3_JOB_KEY = 'stage3HarmonizeJob';
 export const CURRENT_FILE_SESSION_KEY = 'currentFileSession';
 export const MAX_REACHED_STAGE_KEY = 'maxReachedStage';
+export const COLUMN_PREVIEW_KEY = 'columnPreview';
 
 /** Regex pattern for safe filenames - alphanumeric with underscore, hyphen, and dot. */
 const SAFE_FILENAME_PATTERN = /^[a-zA-Z0-9_.-]+$/;

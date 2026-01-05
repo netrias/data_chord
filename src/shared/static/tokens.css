@@ -697,6 +697,19 @@ button.linklike {
   visibility: visible;
 }
 
+/* Loading state - spinner replaces info icon */
+.step-instruction--loading .step-instruction-text::after {
+  content: "";
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--gray-200);
+  border-top-color: var(--netrias-500);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  vertical-align: middle;
+}
+
 /* Tooltip on step numbers/labels when hovered */
 .step[data-tooltip] {
   position: relative;

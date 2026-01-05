@@ -16,6 +16,10 @@ export const STEP_INSTRUCTIONS = {
     short: "Review and confirm which ontologies your data columns should map to.",
     long: "The AI has suggested mappings for each column in your dataset. Review these recommendations and adjust if needed. Confirm all mappings before proceeding to harmonization."
   },
+  mapping_loading: {
+    short: "Analyzing columns...",
+    long: "The AI is analyzing your columns and generating mapping suggestions. This should only take a moment."
+  },
   harmonize: {
     short: "Your data is being transformed to match the target ontology.",
     long: "The harmonization engine processes each row of your data, converting values to match the selected ontologies. This step may take a few minutes depending on dataset size. Keep this tab open while processing completes."

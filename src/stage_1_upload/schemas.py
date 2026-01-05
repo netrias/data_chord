@@ -37,6 +37,21 @@ class ColumnPreview(BaseModel):
     confidence_score: float = Field(ge=0.0, le=1.0)
 
 
+class PreviewRequest(BaseModel):
+    """why: indicate which file to preview for column metadata."""
+
+    file_id: str = Field(..., min_length=8, max_length=128, pattern=r"^[a-f0-9]+$")
+
+
+class PreviewResponse(BaseModel):
+    """why: return lightweight column preview data for Stage 2 animation."""
+
+    file_id: str
+    file_name: str
+    total_rows: int = Field(ge=0)
+    columns: list[ColumnPreview]
+
+
 class AnalyzeResponse(BaseModel):
     """why: return the information needed to tee up stage two."""
 
