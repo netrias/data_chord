@@ -88,6 +88,33 @@
             <div class="block block--4"></div>
             <div class="block block--5"></div>
           </div>
+          <script>
+            /* Randomize block shapes and colors on page load */
+            (function() {
+              const COLORS = ['#e74c3c', '#3498db', '#f39c12', '#9b59b6', '#1abc9c'];
+              const SHAPES = [
+                { clip: 'polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)' },                    // square
+                { clip: 'polygon(50% 0%, 0% 100%, 100% 100%)' },                            // triangle
+                { clip: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)' },                    // diamond
+                { clip: 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)' },  // hexagon
+                { clip: 'polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%)' }, // octagon
+              ];
+              function shuffle(arr) {
+                const a = arr.slice();
+                for (let i = a.length - 1; i > 0; i--) {
+                  const j = Math.floor(Math.random() * (i + 1));
+                  [a[i], a[j]] = [a[j], a[i]];
+                }
+                return a;
+              }
+              const colors = shuffle(COLORS);
+              const shapes = shuffle(SHAPES);
+              document.querySelectorAll('.block').forEach((el, i) => {
+                el.style.setProperty('--block-color', colors[i % colors.length]);
+                el.style.setProperty('--block-clip', shapes[i % shapes.length].clip);
+              });
+            })();
+          </script>
           <p class="loading-message loading-message--primary">Netrias is harmonizing your dataset</p>
           <p class="loading-message loading-message--secondary">This usually takes 1-2 minutes.</p>
         </div>
