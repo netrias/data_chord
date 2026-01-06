@@ -9,7 +9,6 @@ import {
   createEmptyState,
   createValueCard,
   renderProgressPills,
-  calculateProgressSummary,
   toExcelRowNumber,
 } from './shared_review_utils.js';
 
@@ -239,37 +238,6 @@ export const getCurrentEntries = (rows, currentUnit, entriesPerBatch = DEFAULT_E
 };
 
 /**
- * Get progress summary for all units.
- * @param {Array} rows - Array of row objects
- * @param {Set} completedUnits - Set of completed unit indices
- * @param {Set} flaggedUnits - Set of flagged unit indices
- * @param {number} entriesPerBatch - Number of entries per batch
- * @returns {Object} Progress summary with counts
- */
-export const getProgressSummary = (rows, completedUnits, flaggedUnits, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH) => {
-  const summaries = getColumnSummaries(rows, entriesPerBatch);
-  return calculateProgressSummary(summaries, completedUnits, flaggedUnits, 'entryCount');
-};
-
-/**
- * Get display label for current unit.
- * @param {Array} rows - Array of row objects
- * @param {number} currentUnit - Current unit index (1-based)
- * @param {number} entriesPerBatch - Number of entries per batch
- * @returns {string}
- */
-export const getCurrentUnitLabel = (rows, currentUnit, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH) => {
-  const result = getCurrentEntries(rows, currentUnit, entriesPerBatch);
-  if (!result.entries.length) {
-    return 'No entries ready for review yet.';
-  }
-  if (result.totalBatchesInColumn > 1) {
-    return `Reviewing ${result.columnLabel} · Batch ${result.batchWithinColumn} of ${result.totalBatchesInColumn}`;
-  }
-  return `Reviewing ${result.columnLabel} (${result.entries.length} entries)`;
-};
-
-/**
  * Render entries for the current unit into the container.
  * Uses a grid layout for column mode.
  * @param {HTMLElement} container - Container element
@@ -314,17 +282,13 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
  * @param {HTMLElement} container - Container element
  * @param {Object} batchMeta - Batch metadata with summaries
  * @param {number} currentUnit - Current unit index
- * @param {Set} completedUnits - Set of completed unit indices
- * @param {Set} flaggedUnits - Set of flagged unit indices
  * @param {Function} onUnitClick - Callback when unit is clicked
  */
-export const renderBatchProgress = (container, batchMeta, currentUnit, completedUnits, flaggedUnits, onUnitClick) => {
+export const renderBatchProgress = (container, batchMeta, currentUnit, onUnitClick) => {
   renderProgressPills({
     container,
     summaries: batchMeta.summaries,
     currentUnit,
-    completedUnits,
-    flaggedUnits,
     onUnitClick,
     isColumnMode: true,
     getLabelForSummary: (summary) => {

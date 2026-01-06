@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from src.domain import CONFIDENCE, DEFAULT_TARGET_SCHEMA, SessionKey
+from src.domain import CONFIDENCE
 from src.domain.dependencies import get_file_store, get_upload_storage
 from src.domain.manifest import (
     ConfidenceBucket,
@@ -97,11 +97,6 @@ async def render_stage_four(request: Request) -> HTMLResponse:
     """why: serve the batch review and approval UI."""
     context = {
         "request": request,
-        "default_schema": DEFAULT_TARGET_SCHEMA,
-        "stage_three_payload_key": SessionKey.STAGE_THREE_PAYLOAD.value,
-        "stage_three_job_key": SessionKey.STAGE_THREE_JOB.value,
-        "stage_two_url": request.url_for("stage_two_mapping_page"),
-        "stage_three_url": request.url_for("stage_three_entry"),
         "results_endpoint": request.url_for("stage_four_harmonized_rows"),
     }
     return _templates.TemplateResponse("stage_4_review.html", context)

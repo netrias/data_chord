@@ -26,7 +26,7 @@ export const STEP_INSTRUCTIONS = {
   },
   verify: {
     short: "Inspect harmonized values and override any AI suggestions as needed.",
-    long: "Review the AI-generated harmonizations row by row. Cells are color-coded by confidence level. Click any cell to enter a manual override if the suggested value is incorrect. Mark batches complete as you verify them."
+    long: "Each card shows the original value at top, an arrow, then the AI-suggested harmonization below. Cards are color-coded by confidence level. Use the input field at the bottom of each card to enter a manual override if needed."
   },
   review: {
     short: "Download your harmonized dataset and review the change summary.",
