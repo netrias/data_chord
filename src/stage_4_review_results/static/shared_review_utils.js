@@ -10,12 +10,6 @@ export const CONFIDENCE_SYMBOLS = {
   low: '!',
 };
 
-/** @type {Record<string, string>} */
-export const UNIT_STATUS = {
-  PENDING: 'pending',
-  COMPLETE: 'complete',
-  FLAGGED: 'flagged',
-};
 
 /**
  * Convert data row number to Excel row number.
@@ -37,28 +31,17 @@ const _escapeHtml = (str) => {
 };
 
 /**
- * Determine unit status based on completion and flagged state.
- * @param {boolean} isFlagged
- * @param {boolean} isComplete
- * @returns {string}
- */
-const _determineUnitStatus = (isFlagged, isComplete) => {
-  if (isFlagged) return UNIT_STATUS.FLAGGED;
-  if (isComplete) return UNIT_STATUS.COMPLETE;
-  return UNIT_STATUS.PENDING;
-};
-
-/**
  * Check if a row has any cells where harmonizedValue differs from originalValue.
  * Rows where all recommendations match the original input are considered unchanged.
+ * Note: whitespace is semantically significant in ontological harmonization.
  * @param {Object} row - Row object containing cells array
  * @returns {boolean}
  */
 export const rowHasChanges = (row) => {
   if (!row?.cells) return false;
   for (const cell of row.cells) {
-    const original = (cell.originalValue ?? '').trim();
-    const harmonized = (cell.harmonizedValue ?? '').trim();
+    const original = cell.originalValue ?? '';
+    const harmonized = cell.harmonizedValue ?? '';
     if (original !== harmonized) {
       return true;
     }
@@ -68,6 +51,7 @@ export const rowHasChanges = (row) => {
 
 /**
  * Get cells from a row that have changes (original !== harmonized).
+ * Note: whitespace is semantically significant in ontological harmonization.
  * @param {Object} row - Row object containing cells array
  * @returns {Array} Array of cells with changes
  */
@@ -75,37 +59,13 @@ export const getChangedCells = (row) => {
   if (!row?.cells) return [];
   const changedCells = [];
   for (const cell of row.cells) {
-    const original = (cell.originalValue ?? '').trim();
-    const harmonized = (cell.harmonizedValue ?? '').trim();
+    const original = cell.originalValue ?? '';
+    const harmonized = cell.harmonizedValue ?? '';
     if (original && original !== harmonized) {
       changedCells.push(cell);
     }
   }
   return changedCells;
-};
-
-/**
- * Calculate progress summary from unit summaries.
- * @param {Array} summaries - Array of unit summaries
- * @param {Set} completedUnits - Set of completed unit indices
- * @param {Set} flaggedUnits - Set of flagged unit indices
- * @param {string} countKey - Key to use for filtering meaningful units ('entryCount' or 'rowCount')
- * @returns {Object}
- */
-export const calculateProgressSummary = (summaries, completedUnits, flaggedUnits, countKey = 'entryCount') => {
-  const meaningful = summaries.filter((s) => (s[countKey] ?? 0) > 0);
-  const completedCount = meaningful.filter((s) => completedUnits.has(s.unitIndex)).length;
-  const flaggedCount = meaningful.filter((s) => {
-    if (flaggedUnits.has(s.unitIndex)) return true;
-    return !completedUnits.has(s.unitIndex) && s.flagged;
-  }).length;
-
-  return {
-    units: summaries,
-    completedCount,
-    flaggedCount,
-    totalCount: meaningful.length,
-  };
 };
 
 /**
@@ -168,31 +128,30 @@ const _buildCardHTML = (params) => {
   const safeOriginalValue = _escapeHtml(originalValue);
   const safeInputValue = _escapeHtml(inputValue);
   return `
+    <div class="card-header-row">
+      <span class="confidence-indicator confidence-${bucket}" aria-label="${bucket} confidence">${confidenceSymbol}</span>
+      <div class="entry-row-label">${safeLabelText}</div>
+    </div>
     <div class="value-pair" role="group" aria-label="${safeColumnLabel} comparison">
-      <div class="card-header-row">
-        <span class="confidence-indicator confidence-${bucket}" aria-label="${bucket} confidence">${confidenceSymbol}</span>
-        <div class="entry-row-label">${safeLabelText}</div>
-      </div>
-      <div class="value-group recommended">
-        <p class="value-label">Recommended</p>
-        <p class="value-text recommended-text${recommendedClass}">${safeRecommendedText}</p>
-      </div>
       <div class="value-group original">
-        <p class="value-label">Original input</p>
         <p class="value-text original-text">${safeOriginalValue}</p>
+      </div>
+      <div class="transformation-arrow" aria-hidden="true">↓</div>
+      <div class="value-group recommended">
+        <p class="value-text recommended-text${recommendedClass}">${safeRecommendedText}</p>
       </div>
       <label class="value-group value-override">
         <span class="value-label sr-only">Override ${safeColumnLabel}</span>
         <span class="value-input-wrapper">
+          <svg class="value-input-icon" viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M2 14.5V18h3.5l8.4-8.4-3.5-3.5L2 14.5zm11.8-9.1a1 1 0 0 1 1.4 0l1.4 1.4a1 1 0 0 1 0 1.4l-1.2 1.2-3.5-3.5 1.2-1.2z"/>
+          </svg>
           <input
             class="value-input"
             type="text"
             value="${safeInputValue}"
             aria-label="Manual override for ${safeColumnLabel}"
           />
-          <svg class="value-input-icon" viewBox="0 0 20 20" aria-hidden="true">
-            <path d="M2 14.5V18h3.5l8.4-8.4-3.5-3.5L2 14.5zm11.8-9.1a1 1 0 0 1 1.4 0l1.4 1.4a1 1 0 0 1 0 1.4l-1.2 1.2-3.5-3.5 1.2-1.2z"/>
-          </svg>
         </span>
       </label>
     </div>
@@ -201,13 +160,51 @@ const _buildCardHTML = (params) => {
 
 /**
  * Attach input listener to card for override changes.
+ * Updates the displayed harmonized value when override is entered.
  * @param {HTMLElement} card
  * @param {Object} entry
  * @param {Function} onOverrideChange
  */
 const _attachInputListener = (card, entry, onOverrideChange) => {
   const input = card.querySelector('.value-input');
+  const recommendedEl = card.querySelector('.recommended-text');
+  const aiSuggestedValue = entry.harmonizedValue ?? entry.originalValue ?? '—';
+
+  const updateDisplay = (overrideValue) => {
+    if (overrideValue) {
+      recommendedEl.innerHTML = `${_escapeHtml(overrideValue)} <span class="override-info-icon" data-tooltip="Original suggestion: ${_escapeHtml(aiSuggestedValue)}" data-copy-value="${_escapeHtml(aiSuggestedValue)}">ⓘ</span>`;
+      recommendedEl.classList.add('has-override');
+
+      // Add click-to-copy handler
+      const infoIcon = recommendedEl.querySelector('.override-info-icon');
+      if (infoIcon) {
+        infoIcon.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const valueToCopy = infoIcon.dataset.copyValue;
+          try {
+            await navigator.clipboard.writeText(valueToCopy);
+            // Brief visual feedback
+            const originalText = infoIcon.textContent;
+            infoIcon.textContent = '✓';
+            setTimeout(() => { infoIcon.textContent = originalText; }, 800);
+          } catch {
+            // Fallback: just put it in the input
+            input.value = valueToCopy;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        });
+      }
+    } else {
+      recommendedEl.textContent = aiSuggestedValue;
+      recommendedEl.classList.remove('has-override');
+    }
+  };
+
   input.addEventListener('input', (event) => {
+    const overrideValue = event.target.value.trim();
+    updateDisplay(overrideValue);
+
     onOverrideChange(
       entry.rowIndices,
       entry.columnKey,
@@ -216,6 +213,12 @@ const _attachInputListener = (card, entry, onOverrideChange) => {
       entry.originalValue,
     );
   });
+
+  // Initialize state if there's already an override value
+  const initialOverride = input.value.trim();
+  if (initialOverride) {
+    updateDisplay(initialOverride);
+  }
 };
 
 /**
@@ -326,8 +329,6 @@ const _createPlaceholderPill = () => {
  * @param {HTMLElement} config.container - Container element for pills
  * @param {Array} config.summaries - Array of unit summaries
  * @param {number} config.currentUnit - Currently selected unit index
- * @param {Set} config.completedUnits - Set of completed unit indices
- * @param {Set} config.flaggedUnits - Set of flagged unit indices
  * @param {Function} config.onUnitClick - Callback when a unit is clicked
  * @param {Function} config.getLabelForSummary - Returns display label for a summary
  * @param {Function} config.getAriaLabelForSummary - Returns aria label for a summary
@@ -338,8 +339,6 @@ export const renderProgressPills = (config) => {
     container,
     summaries,
     currentUnit,
-    completedUnits,
-    flaggedUnits,
     onUnitClick,
     getLabelForSummary,
     getAriaLabelForSummary,
@@ -356,14 +355,11 @@ export const renderProgressPills = (config) => {
   }
 
   for (const summary of meaningful) {
-    const isComplete = completedUnits.has(summary.unitIndex);
-    const isFlagged = flaggedUnits.has(summary.unitIndex) || (!isComplete && summary.flagged);
     const isCurrent = summary.unitIndex === currentUnit;
-    const status = _determineUnitStatus(isFlagged, isComplete);
 
     const pill = _createProgressPill({
       summary,
-      status,
+      status: 'pending',
       isCurrent,
       isColumnMode,
       getLabelForSummary,

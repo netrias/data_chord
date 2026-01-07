@@ -10,7 +10,6 @@ import {
   createEmptyState,
   createValueCard,
   renderProgressPills,
-  calculateProgressSummary,
   toExcelRowNumber,
 } from './shared_review_utils.js';
 
@@ -31,13 +30,15 @@ const _buildRowsWithChanges = (rows) => {
 
 /**
  * Get total number of batches based on batch size.
+ * Returns 0 when no changed rows exist to signal empty state to UI.
  * @param {Array} rows - Array of row objects
  * @param {number} batchSize - Number of rows per batch
  * @returns {number}
  */
 export const getTotalUnits = (rows, batchSize) => {
   const changedRows = _buildRowsWithChanges(rows);
-  return Math.max(1, Math.ceil(changedRows.length / batchSize));
+  if (!changedRows.length) return 0;
+  return Math.ceil(changedRows.length / batchSize);
 };
 
 /**
@@ -68,7 +69,6 @@ const getBatchSummaries = (rows, batchSize) => {
       endRow: start + slice.length,
       rowCount: slice.length,
       batchRows: slice,
-      flagged: slice.some((row) => row.changedCells.some((cell) => cell.harmonizedValue === null)),
     });
   }
 
@@ -104,34 +104,6 @@ export const getCurrentEntries = (rows, currentUnit, batchSize) => {
     totalUnits,
     summaries,
   };
-};
-
-/**
- * Get progress summary for all batches.
- * @param {Array} rows - Array of row objects
- * @param {number} batchSize - Number of rows per batch
- * @param {Set} completedUnits - Set of completed batch indices
- * @param {Set} flaggedUnits - Set of flagged batch indices
- * @returns {Object} Progress summary with counts
- */
-export const getProgressSummary = (rows, batchSize, completedUnits, flaggedUnits) => {
-  const summaries = getBatchSummaries(rows, batchSize);
-  return calculateProgressSummary(summaries, completedUnits, flaggedUnits, 'rowCount');
-};
-
-/**
- * Get display label for current batch.
- * @param {Array} rows - Array of row objects
- * @param {number} currentUnit - Current batch index (1-based)
- * @param {number} batchSize - Number of rows per batch
- * @returns {string}
- */
-export const getCurrentUnitLabel = (rows, currentUnit, batchSize) => {
-  const result = getCurrentEntries(rows, currentUnit, batchSize);
-  if (!result.entries.length) {
-    return 'No batches ready for review yet.';
-  }
-  return `Reviewing batch ${result.unitIndex} of ${result.totalUnits}`;
 };
 
 /**
@@ -193,17 +165,13 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
  * @param {HTMLElement} container - Container element
  * @param {Object} batchMeta - Batch metadata with summaries
  * @param {number} currentUnit - Current batch index
- * @param {Set} completedUnits - Set of completed batch indices
- * @param {Set} flaggedUnits - Set of flagged batch indices
  * @param {Function} onUnitClick - Callback when batch is clicked
  */
-export const renderBatchProgress = (container, batchMeta, currentUnit, completedUnits, flaggedUnits, onUnitClick) => {
+export const renderBatchProgress = (container, batchMeta, currentUnit, onUnitClick) => {
   renderProgressPills({
     container,
     summaries: batchMeta.summaries,
     currentUnit,
-    completedUnits,
-    flaggedUnits,
     onUnitClick,
     isColumnMode: false,
     getLabelForSummary: (summary) => String(summary.unitIndex),

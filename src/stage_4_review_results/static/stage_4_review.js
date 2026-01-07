@@ -8,16 +8,12 @@ import { isValidFileId } from '/assets/shared/storage-keys.js';
 import {
   getTotalUnits as getColumnTotalUnits,
   getCurrentEntries as getColumnCurrentEntries,
-  getProgressSummary as getColumnProgressSummary,
-  getCurrentUnitLabel as getColumnCurrentUnitLabel,
   renderEntries as renderColumnEntries,
   renderBatchProgress as renderColumnBatchProgress,
 } from './review_mode_column.js';
 import {
   getTotalUnits as getRowTotalUnits,
   getCurrentEntries as getRowCurrentEntries,
-  getProgressSummary as getRowProgressSummary,
-  getCurrentUnitLabel as getRowCurrentUnitLabel,
   renderEntries as renderRowEntries,
   renderBatchProgress as renderRowBatchProgress,
 } from './review_mode_row.js';
@@ -51,14 +47,12 @@ const batchSizeLabel = batchSizeSelect?.previousElementSibling;
 const reviewModeSelect = document.getElementById('reviewModeSelect');
 const previousBatchButton = _requireElement('previousBatchButton');
 const nextBatchButton = _requireElement('nextBatchButton');
-const completeBatchButton = _requireElement('completeBatchButton');
 const reviewTable = document.getElementById('reviewTable');
-const helpMenuToggle = document.getElementById('helpMenuToggle');
-const stageHelp = document.getElementById('stageFourHelp');
 const stageFiveButton = document.getElementById('stageFiveButton');
 const batchProgressList = document.getElementById('batchProgressList');
-const batchProgressHint = document.getElementById('batchProgressHint');
-const currentBatchIndicator = document.getElementById('currentBatchIndicator');
+const settingsButton = document.getElementById('settingsButton');
+const settingsModal = document.getElementById('settingsModal');
+const settingsCloseButton = document.getElementById('settingsCloseButton');
 
 /**
  * Debounce delay for auto-save in milliseconds.
@@ -91,7 +85,7 @@ const ROW_MODE_BATCH_OPTIONS = [
 ];
 
 /** @type {number} Default grid dimension for column mode */
-const DEFAULT_COLUMN_BATCH_SIZE = 5;
+const DEFAULT_COLUMN_BATCH_SIZE = 4;
 
 /** @type {number} Default rows per batch for row mode */
 const DEFAULT_ROW_BATCH_SIZE = 5;
@@ -102,23 +96,19 @@ const DEFAULT_ROW_BATCH_SIZE = 5;
  */
 const state = {
   rows: [],
+  /* why: sortMode UI exists and value persists, but sorting logic not yet implemented. */
   sortMode: 'original',
   reviewMode: 'column',
-  hasLoadedRows: false,
   pendingOverrides: {},
   saveDebounceTimer: null,
 
   columnMode: {
     currentUnit: 1,
-    completedUnits: new Set(),
-    flaggedUnits: new Set(),
     batchSize: DEFAULT_COLUMN_BATCH_SIZE,
   },
 
   rowMode: {
     currentUnit: 1,
-    completedUnits: new Set(),
-    flaggedUnits: new Set(),
     batchSize: DEFAULT_ROW_BATCH_SIZE,
   },
 };
@@ -185,7 +175,6 @@ const fetchRows = async () => {
     }
     const body = await response.json();
     state.rows = body.rows || [];
-    state.hasLoadedRows = true;
   } catch (error) {
     console.error('Unable to load harmonized results:', error);
   }
@@ -220,13 +209,11 @@ const fetchOverrides = async (fileId) => {
 
 /**
  * Serialize a mode state object for persistence.
- * @param {Object} modeState - Mode state with currentUnit, completedUnits, flaggedUnits, batchSize
+ * @param {Object} modeState - Mode state with currentUnit, batchSize
  * @returns {Object}
  */
 const _serializeModeState = (modeState) => ({
   current_unit: modeState.currentUnit,
-  completed_units: Array.from(modeState.completedUnits),
-  flagged_units: Array.from(modeState.flaggedUnits),
   batch_size: modeState.batchSize,
 });
 
@@ -329,18 +316,6 @@ const getCurrentBatchMeta = () => {
   return getRowCurrentEntries(state.rows, modeState.currentUnit, batchSize);
 };
 
-/**
- * Get progress summary from the active mode module.
- * @returns {Object}
- */
-const getProgressSummary = () => {
-  const modeState = getModeState();
-  const batchSize = getCurrentBatchSize();
-  if (state.reviewMode === 'column') {
-    return getColumnProgressSummary(state.rows, modeState.completedUnits, modeState.flaggedUnits, batchSize);
-  }
-  return getRowProgressSummary(state.rows, batchSize, modeState.completedUnits, modeState.flaggedUnits);
-};
 
 /**
  * Get total unit count from the active mode module.
@@ -360,71 +335,10 @@ const getTotalUnits = () => {
  */
 const updateNavigationButtons = (batchMeta) => {
   const modeState = getModeState();
-  const totalUnits = batchMeta.totalUnits;
   const hasEntries = batchMeta.entries.length > 0;
 
   previousBatchButton.disabled = modeState.currentUnit <= 1 || !hasEntries;
-  nextBatchButton.disabled = modeState.currentUnit >= totalUnits || !hasEntries;
-  completeBatchButton.disabled = !hasEntries;
-
-  const actionMode = hasEntries && modeState.completedUnits.has(modeState.currentUnit) ? 'flag' : 'complete';
-  completeBatchButton.dataset.mode = actionMode;
-  completeBatchButton.textContent = actionMode === 'flag' ? 'Flag for review' : 'Mark complete';
-  completeBatchButton.classList.toggle('netrias-btn', actionMode === 'complete');
-  completeBatchButton.classList.toggle('warning-btn', actionMode === 'flag');
-};
-
-/**
- * Update the current batch indicator text.
- * @param {Object} batchMeta
- */
-const updateCurrentBatchIndicator = (batchMeta) => {
-  if (!currentBatchIndicator) return;
-
-  const modeState = getModeState();
-  const batchSize = getCurrentBatchSize();
-
-  if (!batchMeta.entries.length) {
-    currentBatchIndicator.textContent = 'Batch progress';
-    return;
-  }
-
-  if (state.reviewMode === 'column') {
-    currentBatchIndicator.textContent = getColumnCurrentUnitLabel(state.rows, modeState.currentUnit, batchSize);
-  } else {
-    currentBatchIndicator.textContent = getRowCurrentUnitLabel(state.rows, modeState.currentUnit, batchSize);
-  }
-};
-
-/**
- * Update the progress hint text.
- * @param {Object} progressSummary
- */
-const updateProgressHint = (progressSummary) => {
-  if (!batchProgressHint) return;
-
-  const total = progressSummary.totalCount;
-  const completed = progressSummary.completedCount;
-  const flagged = progressSummary.flaggedCount;
-
-  if (!total) {
-    batchProgressHint.textContent = 'Awaiting harmonized entries.';
-    return;
-  }
-
-  if (completed === total) {
-    batchProgressHint.textContent = state.reviewMode === 'column'
-      ? 'All columns reviewed.'
-      : 'All batches reviewed.';
-    return;
-  }
-
-  const unitLabel = state.reviewMode === 'column' ? 'columns' : 'batches';
-  let copy = `${completed}/${total} ${unitLabel} complete`;
-  if (flagged > 0) {
-    copy += ` · ${flagged} flagged`;
-  }
-  batchProgressHint.textContent = copy;
+  nextBatchButton.disabled = !hasEntries;
 };
 
 /**
@@ -441,23 +355,9 @@ const renderProgressPillsUI = (batchMeta) => {
   };
 
   if (state.reviewMode === 'column') {
-    renderColumnBatchProgress(
-      batchProgressList,
-      batchMeta,
-      modeState.currentUnit,
-      modeState.completedUnits,
-      modeState.flaggedUnits,
-      onUnitClick,
-    );
+    renderColumnBatchProgress(batchProgressList, batchMeta, modeState.currentUnit, onUnitClick);
   } else {
-    renderRowBatchProgress(
-      batchProgressList,
-      batchMeta,
-      modeState.currentUnit,
-      modeState.completedUnits,
-      modeState.flaggedUnits,
-      onUnitClick,
-    );
+    renderRowBatchProgress(batchProgressList, batchMeta, modeState.currentUnit, onUnitClick);
   }
 };
 
@@ -481,57 +381,26 @@ const renderEntries = (batchMeta) => {
  */
 const render = () => {
   const batchMeta = getCurrentBatchMeta();
-  const progressSummary = getProgressSummary();
 
   updateNavigationButtons(batchMeta);
-  updateCurrentBatchIndicator(batchMeta);
-  updateProgressHint(progressSummary);
   renderProgressPillsUI(batchMeta);
   renderEntries(batchMeta);
 };
 
 /**
- * Mark current unit as complete and advance to next.
+ * Flash the Stage 5 button to draw attention when user tries to advance past last batch.
  */
-const markComplete = () => {
-  const modeState = getModeState();
-  const batchMeta = getCurrentBatchMeta();
+const flashStageFiveButton = () => {
+  if (!stageFiveButton) return;
+  /* Guard: skip if animation already in progress to prevent restart on rapid clicks. */
+  if (stageFiveButton.classList.contains('attention-pulse')) return;
 
-  if (!batchMeta.entries.length) {
-    return;
-  }
-
-  modeState.completedUnits.add(modeState.currentUnit);
-  modeState.flaggedUnits.delete(modeState.currentUnit);
-
-  if (modeState.currentUnit < batchMeta.totalUnits) {
-    modeState.currentUnit = modeState.currentUnit + 1;
-  }
-
-  _saveOverridesImmediate();
-  render();
-};
-
-/**
- * Flag current unit for review.
- */
-const flagCurrent = () => {
-  const modeState = getModeState();
-  const batchMeta = getCurrentBatchMeta();
-
-  if (!batchMeta.entries.length) {
-    return;
-  }
-
-  if (!modeState.completedUnits.has(modeState.currentUnit)) {
-    return;
-  }
-
-  modeState.completedUnits.delete(modeState.currentUnit);
-  modeState.flaggedUnits.add(modeState.currentUnit);
-
-  _saveOverridesImmediate();
-  render();
+  stageFiveButton.classList.add('attention-pulse');
+  stageFiveButton.addEventListener(
+    'animationend',
+    () => stageFiveButton.classList.remove('attention-pulse'),
+    { once: true },
+  );
 };
 
 /**
@@ -541,6 +410,13 @@ const flagCurrent = () => {
 const changeUnit = (delta) => {
   const modeState = getModeState();
   const totalUnits = getTotalUnits();
+
+  /* Flash Stage 5 button when trying to go past last batch. */
+  if (delta > 0 && modeState.currentUnit >= totalUnits) {
+    flashStageFiveButton();
+    return;
+  }
+
   const next = Math.min(Math.max(modeState.currentUnit + delta, 1), totalUnits);
 
   if (next === modeState.currentUnit) return;
@@ -608,8 +484,6 @@ const handleBatchSizeChange = () => {
 
   modeState.batchSize = newSize;
   modeState.currentUnit = 1;
-  modeState.completedUnits.clear();
-  modeState.flaggedUnits.clear();
   _saveOverridesImmediate();
   render();
 };
@@ -639,29 +513,28 @@ const attachEventListeners = () => {
   previousBatchButton.addEventListener('click', () => changeUnit(-1));
   nextBatchButton.addEventListener('click', () => changeUnit(1));
 
-  completeBatchButton.addEventListener('click', () => {
-    const mode = completeBatchButton.dataset.mode || 'complete';
-    if (mode === 'flag') {
-      flagCurrent();
-    } else {
-      markComplete();
-    }
-  });
-
-  if (helpMenuToggle && stageHelp) {
-    helpMenuToggle.addEventListener('click', () => {
-      const expanded = helpMenuToggle.getAttribute('aria-expanded') === 'true';
-      helpMenuToggle.setAttribute('aria-expanded', String(!expanded));
-      stageHelp.classList.toggle('hidden', expanded);
-    });
-  }
-
   if (stageFiveButton) {
     stageFiveButton.addEventListener('click', () => {
       advanceMaxReachedStage('review');
       const fileId = getFileIdFromUrl();
       const url = fileId ? `${stageFiveUrl}?file_id=${encodeURIComponent(fileId)}` : stageFiveUrl;
       window.location.assign(url);
+    });
+  }
+
+  if (settingsButton && settingsModal) {
+    settingsButton.addEventListener('click', () => {
+      settingsModal.showModal();
+    });
+
+    settingsCloseButton?.addEventListener('click', () => {
+      settingsModal.close();
+    });
+
+    settingsModal.addEventListener('click', (event) => {
+      if (event.target === settingsModal) {
+        settingsModal.close();
+      }
     });
   }
 
@@ -687,14 +560,10 @@ const loadStateFromDisk = async () => {
 
   const columnModeState = reviewState.column_mode || {};
   state.columnMode.currentUnit = columnModeState.current_unit || 1;
-  state.columnMode.completedUnits = new Set(columnModeState.completed_units || []);
-  state.columnMode.flaggedUnits = new Set(columnModeState.flagged_units || []);
   state.columnMode.batchSize = columnModeState.batch_size || DEFAULT_COLUMN_BATCH_SIZE;
 
   const rowModeState = reviewState.row_mode || {};
   state.rowMode.currentUnit = rowModeState.current_unit || 1;
-  state.rowMode.completedUnits = new Set(rowModeState.completed_units || []);
-  state.rowMode.flaggedUnits = new Set(rowModeState.flagged_units || []);
   state.rowMode.batchSize = rowModeState.batch_size || DEFAULT_ROW_BATCH_SIZE;
 };
 

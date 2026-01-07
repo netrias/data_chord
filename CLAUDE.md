@@ -45,3 +45,9 @@ grep -rn "from src\.stage_[0-9]" src/stage_* --include="*.py" | grep -v "from sr
 ```
 
 This should return no results.
+
+## Domain Rules
+
+### Whitespace is Semantically Significant
+
+In ontological data harmonization, whitespace differences matter. Values like `"Lung Cancer"` vs `"Lung Cancer "` (trailing space) or `"Lung  Cancer"` (double space) may map to different ontology terms or indicate data quality issues. Do not trim or normalize whitespace when comparing original vs harmonized values.

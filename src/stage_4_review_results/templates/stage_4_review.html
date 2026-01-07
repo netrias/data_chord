@@ -53,36 +53,49 @@
 
     <main class="stage-shell stage-four-shell">
       <section class="batch-progress-panel">
-        <div class="batch-progress-heading">
-          <div>
-            <p id="currentBatchIndicator" class="batch-progress-title">Batch progress</p>
-            <p id="batchProgressHint" class="batch-progress-hint">Awaiting harmonized rows.</p>
-          </div>
-          <div class="batch-controls">
-            <div class="control-group">
-              <label for="reviewModeSelect">Review by</label>
-              <select id="reviewModeSelect">
-                <option value="column">Column</option>
-                <option value="row">Row</option>
-              </select>
-            </div>
-            <div class="control-group">
-              <label for="sortModeSelect">Sort by</label>
-              <select id="sortModeSelect">
-                <option value="confidence-asc">Confidence · Lowest first</option>
-                <option value="confidence-desc">Confidence · Highest first</option>
-                <option value="original">Original order</option>
-              </select>
-            </div>
-            <div class="control-group">
-              <label for="batchSizeSelect">Grid size</label>
-              <select id="batchSizeSelect">
-                <!-- Options populated dynamically based on review mode -->
-              </select>
-            </div>
-          </div>
-        </div>
         <div id="batchProgressList" class="batch-progress-list" role="list" aria-live="polite"></div>
+        <button id="settingsButton" class="settings-btn" type="button" aria-label="Open settings">
+          <svg class="settings-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          <span>Settings</span>
+        </button>
+
+        <!-- Settings Modal -->
+        <dialog id="settingsModal" class="settings-modal">
+          <div class="settings-modal-content">
+            <div class="settings-modal-header">
+              <h2 class="settings-modal-title">Review Settings</h2>
+            </div>
+            <div class="settings-modal-body">
+              <div class="control-group">
+                <label for="reviewModeSelect">Review by</label>
+                <select id="reviewModeSelect">
+                  <option value="column">Column</option>
+                  <option value="row">Row</option>
+                </select>
+              </div>
+              <div class="control-group">
+                <label for="sortModeSelect">Sort by</label>
+                <select id="sortModeSelect">
+                  <option value="confidence-asc">Confidence · Lowest first</option>
+                  <option value="confidence-desc">Confidence · Highest first</option>
+                  <option value="original">Original order</option>
+                </select>
+              </div>
+              <div class="control-group">
+                <label for="batchSizeSelect">Grid size</label>
+                <select id="batchSizeSelect">
+                  <!-- Options populated dynamically based on review mode -->
+                </select>
+              </div>
+            </div>
+            <div class="settings-modal-footer">
+              <button id="settingsCloseButton" class="netrias-btn" type="button">Close</button>
+            </div>
+          </div>
+        </dialog>
       </section>
 
       <section class="stage-card review-grid">
@@ -102,9 +115,8 @@
             </div>
           </div>
           <div class="batch-actions">
-            <button id="previousBatchButton" class="ghost-btn" type="button">← Previous</button>
-            <button id="nextBatchButton" class="ghost-btn" type="button">Next →</button>
-            <button id="completeBatchButton" class="netrias-btn" type="button">Mark batch complete</button>
+            <button id="previousBatchButton" class="ghost-btn" type="button">← Previous batch</button>
+            <button id="nextBatchButton" class="ghost-btn" type="button">Next batch →</button>
           </div>
         </div>
         <div id="reviewTable" class="review-table" role="table" aria-live="polite"></div>
@@ -113,11 +125,6 @@
 
     <script>
       window.stageFourConfig = {
-        defaultSchema: "{{ default_schema }}",
-        stageThreePayloadKey: "{{ stage_three_payload_key }}",
-        stageThreeJobKey: "{{ stage_three_job_key }}",
-        stageTwoUrl: "{{ stage_two_url }}",
-        stageThreeUrl: "{{ stage_three_url }}",
         stageFiveUrl: "{{ request.url_for('stage_five_review_page') }}",
         resultsEndpoint: "{{ results_endpoint }}",
       };
