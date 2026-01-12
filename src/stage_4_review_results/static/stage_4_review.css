@@ -376,6 +376,12 @@
   position: relative;  /* z-index needs positioning context */
 }
 
+/* Elevate card when warning icon is hovered so tooltip appears above adjacent cards */
+.row-cell:has(.pv-warning-icon:hover) {
+  z-index: 101;
+  position: relative;
+}
+
 /* Confidence states - neutral cards, color only on indicator badges */
 /* All confidence levels use the same neutral card styling */
 
@@ -502,7 +508,24 @@
 
 /* Override state - when user has entered a manual override */
 .value-text.has-override {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* AI suggestion with strikethrough when overridden */
+.ai-suggestion-struck {
+  text-decoration: line-through;
+  color: var(--gray-400);
+  font-size: 0.85rem;
+  font-weight: 400;
+}
+
+/* Manual override value */
+.override-value {
   color: var(--magenta-600);
+  font-weight: 600;
 }
 
 .override-info-icon {
@@ -551,13 +574,14 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.35rem;
-  color: var(--azure-500);
-  font-size: 2.25rem;
-  font-weight: 900;
-  text-align: center;
-  line-height: 1;
-  margin: 0.5rem 0;
+  position: relative;
+  color: var(--gray-300);
+  margin: 0.25rem 0;
+}
+
+.transformation-arrow .arrow-icon {
+  width: 1.5rem;
+  height: 1.5rem;
 }
 
 /* Value override input */
@@ -718,20 +742,20 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
-  font-size: 1.1rem;
+  width: 2rem;
+  height: 2rem;
+  font-size: 1.5rem;
   color: var(--warning-600);
   cursor: help;
-  position: relative;
+  position: absolute;
+  left: calc(50% + 1.25rem);
+  top: 50%;
+  transform: translateY(-50%);
 }
 
-.pv-warning-icon:hover::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  left: 50%;
-  top: calc(100% + 6px);
-  transform: translateX(-50%);
+/* JS-based tooltip for warning icon - fixed positioning to escape stacking contexts */
+.pv-warning-tooltip {
+  position: fixed;
   background: var(--gray-800);
   color: var(--white);
   padding: 0.625rem 0.875rem;
@@ -742,19 +766,19 @@
   width: 240px;
   white-space: normal;
   text-align: center;
-  z-index: 200;
-  box-shadow: var(--shadow-md);
+  z-index: 100000;
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
 }
 
-.pv-warning-icon:hover::before {
+.pv-warning-tooltip::before {
   content: "";
   position: absolute;
   left: 50%;
-  top: calc(100% + 2px);
+  top: -5px;
   transform: translateX(-50%);
   border: 5px solid transparent;
   border-bottom-color: var(--gray-800);
-  z-index: 200;
 }
 
 /* PV warning dialog */
@@ -934,28 +958,52 @@
 }
 
 .pv-combobox-dropdown {
-  position: absolute;
-  top: calc(100% + 10px);
-  left: -2rem;
-  right: -2rem;
+  position: fixed;
   min-width: 380px;
-  max-height: 480px;
+  max-height: 400px;
   overflow-y: auto;
-  background: #ffffff;  /* Solid white, not var for guaranteed opacity */
-  border: 1px solid var(--gray-200);
+  background: #ffffff;
+  border: 2px solid var(--gray-400);
   border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-xl);
+  box-shadow:
+    0 4px 6px rgba(0, 0, 0, 0.1),
+    0 10px 20px rgba(0, 0, 0, 0.15),
+    0 20px 40px rgba(0, 0, 0, 0.1);
   list-style: none;
   margin: 0;
   padding: var(--space-4) 0;
-  z-index: 1000;
+  z-index: 10000;
   display: none;
-  isolation: isolate;  /* Create stacking context */
-  backface-visibility: hidden;  /* Force GPU layer */
+  isolation: isolate;
+  backface-visibility: hidden;
+}
+
+/* Custom scrollbar for dropdown */
+.pv-combobox-dropdown::-webkit-scrollbar {
+  width: 8px;
+}
+
+.pv-combobox-dropdown::-webkit-scrollbar-track {
+  background: transparent;
+  margin: var(--space-2) 0;
+}
+
+.pv-combobox-dropdown::-webkit-scrollbar-thumb {
+  background: var(--gray-300);
+  border-radius: 4px;
+}
+
+.pv-combobox-dropdown::-webkit-scrollbar-thumb:hover {
+  background: var(--gray-400);
 }
 
 .pv-combobox-dropdown--open {
   display: block;
+}
+
+/* Flip-up class is now just a marker, positioning handled by JS */
+.pv-combobox-dropdown--flip-up {
+  /* Positioning set dynamically via JS */
 }
 
 .pv-combobox-option {

@@ -94,6 +94,20 @@ export const getChangedCells = (row) => {
 };
 
 /**
+ * Clean up all value cards in a container before removing them.
+ * Calls destroy() on each card to prevent memory leaks from event listeners.
+ * @param {HTMLElement} container - Container with value cards
+ */
+export const cleanupCards = (container) => {
+  const cards = container.querySelectorAll('.row-cell');
+  for (const card of cards) {
+    if (typeof card.destroy === 'function') {
+      card.destroy();
+    }
+  }
+};
+
+/**
  * Create the empty state element shown when no entries are available.
  * @returns {HTMLElement}
  */
@@ -172,7 +186,13 @@ const _buildCardHTML = (params) => {
       <div class="value-group original">
         <p class="value-text original-text">${safeOriginalValue}</p>
       </div>
-      <div class="transformation-arrow" aria-hidden="true">↓${pvWarningIcon}</div>
+      <div class="transformation-arrow" aria-hidden="true">
+        <svg class="arrow-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <polyline points="6 13 12 19 18 13"></polyline>
+        </svg>
+        ${pvWarningIcon}
+      </div>
       <div class="value-group recommended">
         <p class="value-text recommended-text${recommendedClass}">${safeRecommendedText}</p>
       </div>
@@ -195,73 +215,66 @@ const _buildCardHTML = (params) => {
 };
 
 /**
+ * Update the override display for a value card.
+ * Shows strikethrough AI suggestion with override value, or restores AI suggestion.
+ * @param {HTMLElement} recommendedEl - Element displaying the harmonized value
+ * @param {string} aiSuggestedValue - The AI's suggested value
+ * @param {string} overrideValue - User's override value (empty string means no override)
+ */
+const _updateOverrideDisplay = (recommendedEl, aiSuggestedValue, overrideValue) => {
+  const isMatchingAI = overrideValue === aiSuggestedValue;
+  const hasOverride = overrideValue && !isMatchingAI;
+
+  if (hasOverride) {
+    recommendedEl.innerHTML = `<span class="ai-suggestion-struck">${escapeHtml(aiSuggestedValue)}</span><span class="override-value">${escapeHtml(overrideValue)}</span>`;
+    recommendedEl.classList.add('has-override');
+  } else {
+    recommendedEl.textContent = aiSuggestedValue;
+    recommendedEl.classList.remove('has-override');
+  }
+};
+
+/**
  * Attach input listener to card for override changes.
  * Updates the displayed harmonized value when override is entered.
- * Saves to server on blur (focus loss) rather than on every keystroke.
  * @param {HTMLElement} card
  * @param {Object} entry
- * @param {Function} onOverrideChange - Called on input to update pending state
- * @param {Function} onSave - Called on blur to persist changes
+ * @param {Function} onOverrideChange
  */
-const _attachInputListener = (card, entry, onOverrideChange, onSave) => {
+const _attachInputListener = (card, entry, onOverrideChange) => {
   const input = card.querySelector('.value-input');
   const recommendedEl = card.querySelector('.recommended-text');
+  if (!input || !recommendedEl) return;
+
   const aiSuggestedValue = entry.harmonizedValue ?? entry.originalValue ?? '—';
-
-  const updateDisplay = (overrideValue) => {
-    if (overrideValue) {
-      recommendedEl.innerHTML = `${escapeHtml(overrideValue)} <span class="override-info-icon" data-tooltip="Original suggestion: ${escapeHtml(aiSuggestedValue)}" data-copy-value="${escapeHtml(aiSuggestedValue)}">ⓘ</span>`;
-      recommendedEl.classList.add('has-override');
-
-      // Add click-to-copy handler
-      const infoIcon = recommendedEl.querySelector('.override-info-icon');
-      if (infoIcon) {
-        infoIcon.addEventListener('click', async (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const valueToCopy = infoIcon.dataset.copyValue;
-          try {
-            await navigator.clipboard.writeText(valueToCopy);
-            // Brief visual feedback
-            const originalText = infoIcon.textContent;
-            infoIcon.textContent = '✓';
-            setTimeout(() => { infoIcon.textContent = originalText; }, 800);
-          } catch {
-            // Fallback: just put it in the input
-            input.value = valueToCopy;
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-          }
-        });
-      }
-    } else {
-      recommendedEl.textContent = aiSuggestedValue;
-      recommendedEl.classList.remove('has-override');
-    }
-  };
 
   input.addEventListener('input', (event) => {
     const overrideValue = event.target.value;
-    updateDisplay(overrideValue);
+    _updateOverrideDisplay(recommendedEl, aiSuggestedValue, overrideValue);
 
+    // If matches AI suggestion, notify with empty override to clear it
+    const effectiveOverride = overrideValue === aiSuggestedValue ? '' : overrideValue;
     onOverrideChange(
       entry.rowIndices,
       entry.columnKey,
       entry.harmonizedValue,
-      overrideValue,
+      effectiveOverride,
       entry.originalValue,
     );
   });
 
+  // On blur, if value matches AI suggestion, clear the input
   input.addEventListener('blur', () => {
-    if (onSave) {
-      onSave();
+    if (input.value === aiSuggestedValue) {
+      _updateOverrideDisplay(recommendedEl, aiSuggestedValue, '');
+      input.value = '';
     }
   });
 
   // Initialize state if there's already an override value
   const initialOverride = input.value;
-  if (initialOverride) {
-    updateDisplay(initialOverride);
+  if (initialOverride && initialOverride !== aiSuggestedValue) {
+    _updateOverrideDisplay(recommendedEl, aiSuggestedValue, initialOverride);
   }
 };
 
@@ -281,74 +294,112 @@ const _addTooltip = (card, tooltipText) => {
 };
 
 /**
+ * Attach JS-based tooltip to warning icon for fixed positioning.
+ * Returns cleanup function to remove listeners and orphaned tooltips.
+ * @param {HTMLElement} card
+ * @returns {Function|null} Cleanup function, or null if no warning icon
+ */
+const _attachWarningTooltip = (card) => {
+  const warningIcon = card.querySelector('.pv-warning-icon');
+  if (!warningIcon) return null;
+
+  let tooltip = null;
+
+  const showTooltip = () => {
+    if (tooltip) return;
+
+    tooltip = document.createElement('div');
+    tooltip.className = 'pv-warning-tooltip';
+    tooltip.textContent = warningIcon.dataset.tooltip;
+    document.body.appendChild(tooltip);
+
+    // Position tooltip below the warning icon
+    const iconRect = warningIcon.getBoundingClientRect();
+    const tooltipWidth = 240;
+    let left = iconRect.left + (iconRect.width / 2) - (tooltipWidth / 2);
+    left = Math.max(10, Math.min(left, window.innerWidth - tooltipWidth - 10));
+
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${iconRect.bottom + 8}px`;
+  };
+
+  const hideTooltip = () => {
+    if (tooltip) {
+      tooltip.remove();
+      tooltip = null;
+    }
+  };
+
+  warningIcon.addEventListener('mouseenter', showTooltip);
+  warningIcon.addEventListener('mouseleave', hideTooltip);
+
+  // Return cleanup function
+  return () => {
+    hideTooltip();
+    warningIcon.removeEventListener('mouseenter', showTooltip);
+    warningIcon.removeEventListener('mouseleave', hideTooltip);
+  };
+};
+
+/**
  * Attach PV combobox to card's override area.
+ * Returns cleanup function to destroy combobox.
  * @param {HTMLElement} card - The card element
  * @param {Object} entry - Entry with topSuggestions and columnKey
  * @param {string[]} pvValues - Alphabetized list of valid PVs
  * @param {string} initialValue - Current override value
  * @param {Function} onOverrideChange - Callback for override changes
- * @param {Function} [onSave] - Callback to save changes
+ * @returns {Function|null} Cleanup function, or null if no input wrapper
  */
-const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange, onSave) => {
+const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange) => {
   const inputWrapper = card.querySelector('.value-input-wrapper');
   const recommendedEl = card.querySelector('.recommended-text');
-  const aiSuggestedValue = entry.harmonizedValue ?? entry.originalValue ?? '—';
+  if (!inputWrapper || !recommendedEl) return null;
 
-  if (!inputWrapper) return;
+  const aiSuggestedValue = entry.harmonizedValue ?? entry.originalValue ?? '—';
 
   // Clear the wrapper and add PV combobox
   inputWrapper.innerHTML = '';
+
+  // If initial value matches AI suggestion, don't pass it as override
+  const effectiveInitialValue = initialValue === aiSuggestedValue ? '' : initialValue;
 
   const suggestions = entry.topSuggestions ?? [];
   const combobox = createPVCombobox({
     suggestions,
     pvValues,
-    initialValue,
+    initialValue: effectiveInitialValue,
     onChange: (value) => {
-      // Update display
-      if (value) {
-        recommendedEl.innerHTML = `${escapeHtml(value)} <span class="override-info-icon" data-tooltip="Original suggestion: ${escapeHtml(aiSuggestedValue)}" data-copy-value="${escapeHtml(aiSuggestedValue)}">ⓘ</span>`;
-        recommendedEl.classList.add('has-override');
+      const isMatchingAI = value === aiSuggestedValue;
 
-        // Add click-to-copy handler
-        const infoIcon = recommendedEl.querySelector('.override-info-icon');
-        if (infoIcon) {
-          infoIcon.addEventListener('click', async (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            const valueToCopy = infoIcon.dataset.copyValue;
-            try {
-              await navigator.clipboard.writeText(valueToCopy);
-              const originalText = infoIcon.textContent;
-              infoIcon.textContent = '✓';
-              setTimeout(() => { infoIcon.textContent = originalText; }, 800);
-            } catch {
-              // Silently fail - clipboard API may not be available
-            }
-          });
-        }
-      } else {
-        recommendedEl.textContent = aiSuggestedValue;
-        recommendedEl.classList.remove('has-override');
+      // Update display using shared function
+      _updateOverrideDisplay(recommendedEl, aiSuggestedValue, value);
+
+      // Reset the combobox input if back to AI suggestion
+      if (isMatchingAI && combobox.reset) {
+        combobox.reset();
       }
 
-      // Notify parent
+      // Notify parent - if matches AI, send empty to clear override
+      const effectiveOverride = isMatchingAI ? '' : value;
       onOverrideChange(
         entry.rowIndices,
         entry.columnKey,
         entry.harmonizedValue,
-        value,
+        effectiveOverride,
         entry.originalValue,
       );
-
-      // Combobox selection is an intentional action, so save immediately
-      if (onSave) {
-        onSave();
-      }
     },
   });
 
   inputWrapper.appendChild(combobox);
+
+  // Return cleanup function
+  return () => {
+    if (combobox.destroy) {
+      combobox.destroy();
+    }
+  };
 };
 
 /**
@@ -360,12 +411,11 @@ const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange
  * @param {string|null} config.tooltipText - Optional tooltip for the label
  * @param {Object} config.pendingOverrides - Map of pending overrides by row index
  * @param {Function} config.onOverrideChange - Callback when override value changes
- * @param {Function} [config.onSave] - Callback to save changes (called on blur)
  * @param {Object} [config.columnPVs] - Optional map of column_key -> PV list
  * @returns {HTMLElement}
  */
 export const createValueCard = (config) => {
-  const { entry, labelText, tooltipText, pendingOverrides, onOverrideChange, onSave, columnPVs } = config;
+  const { entry, labelText, tooltipText, pendingOverrides, onOverrideChange, columnPVs } = config;
 
   const card = document.createElement('div');
   card.className = _buildCardClasses(entry);
@@ -398,15 +448,28 @@ export const createValueCard = (config) => {
     isPVNonConformant,
   });
 
+  // Collect cleanup functions for proper resource management
+  const cleanupFns = [];
+
   // Use PV combobox if PVs are available for this column, otherwise use text input
   const pvValues = columnPVs?.[entry.columnKey];
   if (entry.pvSetAvailable && pvValues?.length > 0) {
-    _attachPVCombobox(card, entry, pvValues, inputValue, onOverrideChange, onSave);
+    const comboboxCleanup = _attachPVCombobox(card, entry, pvValues, inputValue, onOverrideChange);
+    if (comboboxCleanup) cleanupFns.push(comboboxCleanup);
   } else {
-    _attachInputListener(card, entry, onOverrideChange, onSave);
+    _attachInputListener(card, entry, onOverrideChange);
   }
 
   _addTooltip(card, tooltipText);
+  const tooltipCleanup = _attachWarningTooltip(card);
+  if (tooltipCleanup) cleanupFns.push(tooltipCleanup);
+
+  // Attach cleanup method to card for resource management when cards are removed
+  card.destroy = () => {
+    for (const cleanup of cleanupFns) {
+      cleanup();
+    }
+  };
 
   return card;
 };

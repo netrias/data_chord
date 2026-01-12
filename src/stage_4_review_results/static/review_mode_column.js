@@ -11,6 +11,7 @@ import {
   createValueCard,
   renderProgressPills,
   toExcelRowNumber,
+  cleanupCards,
 } from './shared_review_utils.js';
 
 /** Default number of entries per batch when not specified. */
@@ -54,10 +55,11 @@ const _getPopulatedColumnIndices = (rows) => {
  */
 const _processRowCellForColumn = (row, colIdx, columnKey, entriesByOriginal) => {
   const cell = row.cells[colIdx];
-  const originalValue = (cell?.originalValue ?? '').trim();
+  // Preserve whitespace - domain rule: whitespace is semantically significant
+  const originalValue = cell?.originalValue ?? '';
 
   // Skip cells without original value (nothing to review)
-  if (!originalValue) return;
+  if (originalValue === '') return;
   // Skip cells that don't need review
   if (!cellNeedsReview(cell)) return;
 
@@ -250,11 +252,11 @@ export const getCurrentEntries = (rows, currentUnit, entriesPerBatch = DEFAULT_E
  * @param {Object} batchMeta - Batch metadata with entries
  * @param {Object} pendingOverrides - Map of pending overrides
  * @param {Function} onOverrideChange - Callback for override changes
- * @param {Function} onSave - Callback to save changes (called on blur)
  * @param {number} gridSize - Grid dimension (3, 4, or 5 for 3x3, 4x4, 5x5)
  * @param {Object} [columnPVs] - Map of column_key -> PV list
  */
-export const renderEntries = (container, batchMeta, pendingOverrides, onOverrideChange, onSave, gridSize = 5, columnPVs = {}) => {
+export const renderEntries = (container, batchMeta, pendingOverrides, onOverrideChange, gridSize = 5, columnPVs = {}) => {
+  cleanupCards(container);
   container.innerHTML = '';
 
   if (!batchMeta.entries.length) {
@@ -278,7 +280,6 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
       tooltipText,
       pendingOverrides,
       onOverrideChange,
-      onSave,
       columnPVs,
     });
     wrapper.append(card);

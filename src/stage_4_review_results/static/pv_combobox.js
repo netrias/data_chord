@@ -191,12 +191,41 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange
     }
   };
 
+  /** Position the dropdown using fixed positioning relative to viewport. */
+  const positionDropdown = () => {
+    if (!wrapper.isConnected) return;
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const dropdownMaxHeight = 400;
+    const viewportHeight = window.innerHeight;
+    const padding = 10;
+
+    // Calculate horizontal position (centered on wrapper, but constrained to viewport)
+    const dropdownWidth = Math.max(380, wrapperRect.width + 64);
+    let left = wrapperRect.left + (wrapperRect.width / 2) - (dropdownWidth / 2);
+    left = Math.max(padding, Math.min(left, window.innerWidth - dropdownWidth - padding));
+
+    // Always position below the input
+    const top = wrapperRect.bottom + padding;
+
+    // Calculate available height below (constrain dropdown height if needed)
+    const availableHeight = viewportHeight - top - padding;
+    const actualHeight = Math.min(dropdownMaxHeight, Math.max(150, availableHeight));
+
+    dropdown.style.left = `${left}px`;
+    dropdown.style.top = `${top}px`;
+    dropdown.style.width = `${dropdownWidth}px`;
+    dropdown.style.maxHeight = `${actualHeight}px`;
+  };
+
   /** Open the dropdown (builds options lazily on first open). */
   const openDropdown = () => {
     if (committedValue) {
       input.placeholder = committedValue;
       input.value = '';
     }
+
+    // Position dropdown in viewport
+    positionDropdown();
 
     // If options already built, open immediately
     if (optionsBuilt) {
@@ -228,6 +257,13 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange
     openDropdown();
   });
 
+  // Click: also open dropdown (handles case where input already has focus)
+  input.addEventListener('click', () => {
+    if (!dropdown.classList.contains('pv-combobox-dropdown--open')) {
+      openDropdown();
+    }
+  });
+
   // Input: filter options
   input.addEventListener('input', () => {
     filterOptions(input.value);
@@ -238,9 +274,14 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange
   input.addEventListener('blur', () => {
     blurTimeoutId = setTimeout(() => {
       blurTimeoutId = null;
+
+      // Guard against operating on orphaned DOM nodes
+      if (!wrapper.isConnected) return;
+
       dropdown.classList.remove('pv-combobox-dropdown--open');
 
-      const typedValue = input.value.trim();
+      // Preserve whitespace - domain rule: whitespace is semantically significant
+      const typedValue = input.value;
       const typedLower = typedValue.toLowerCase();
 
       // Case-insensitive match against PV set
@@ -249,11 +290,11 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange
       if (matchedPV && matchedPV !== committedValue) {
         committedValue = matchedPV;
         input.value = matchedPV;
-        input.placeholder = 'Select or search...';
+        input.placeholder = '';
         onChange(matchedPV);
       } else {
         input.value = committedValue;
-        input.placeholder = 'Select or search...';
+        input.placeholder = '';
       }
     }, BLUR_DELAY_MS);
   });
@@ -272,6 +313,13 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange
   wrapper.appendChild(input);
   wrapper.appendChild(toggleBtn);
   wrapper.appendChild(dropdown);
+
+  /** Reset the combobox to empty state. */
+  wrapper.reset = () => {
+    committedValue = '';
+    input.value = '';
+    input.placeholder = '';
+  };
 
   /** Cleanup function to clear pending timeouts. */
   wrapper.destroy = () => {
