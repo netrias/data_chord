@@ -113,8 +113,9 @@ export const getCurrentEntries = (rows, currentUnit, batchSize) => {
  * @param {Object} batchMeta - Batch metadata with entries (rows)
  * @param {Object} pendingOverrides - Map of pending overrides
  * @param {Function} onOverrideChange - Callback for override changes
+ * @param {Object} [columnPVs] - Map of column_key -> PV list
  */
-export const renderEntries = (container, batchMeta, pendingOverrides, onOverrideChange) => {
+export const renderEntries = (container, batchMeta, pendingOverrides, onOverrideChange, columnPVs = {}) => {
   container.innerHTML = '';
 
   if (!batchMeta.entries.length) {
@@ -140,6 +141,7 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
     for (const cell of row.changedCells) {
       const entry = {
         ...cell,
+        topSuggestions: cell.topSuggestions ?? [],
         rowIndices: [row.rowIndex],
       };
       const card = createValueCard({
@@ -148,6 +150,7 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
         tooltipText: null,
         pendingOverrides,
         onOverrideChange,
+        columnPVs,
       });
       cellsEl.append(card);
     }

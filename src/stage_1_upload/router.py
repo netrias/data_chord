@@ -11,7 +11,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from src.domain import DEFAULT_TARGET_SCHEMA, ModelSuggestion
+from src.domain import ModelSuggestion, get_default_target_schema
 from src.domain.dependencies import get_mapping_service, get_upload_constraints, get_upload_storage
 from src.domain.manifest import ManifestPayload
 
@@ -30,7 +30,6 @@ from .services import (
 
 MODULE_DIR = Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"
-STAGE_ONE_STATIC_PATH = MODULE_DIR / "static"
 
 _upload_constraints = get_upload_constraints()
 _storage = get_upload_storage()
@@ -42,11 +41,10 @@ stage_one_router = APIRouter(prefix="/stage-1", tags=["Stage 1 Upload"])
 
 @stage_one_router.get("", response_class=HTMLResponse, name="stage_one_upload_page")
 async def render_stage_one(request: Request) -> HTMLResponse:
-    """why: serve the upload UI template."""
     context = {
         "request": request,
         "ui_constraints": describe_constraints(_upload_constraints),
-        "default_schema": DEFAULT_TARGET_SCHEMA,
+        "default_schema": get_default_target_schema(),
     }
     return _templates.TemplateResponse("stage_1_upload.html", context)
 
@@ -58,7 +56,6 @@ async def render_stage_one(request: Request) -> HTMLResponse:
     name="stage_one_upload_upload",
 )
 async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadResponse:
-    """why: accept a CSV file and persist it for subsequent analysis."""
     try:
         meta = await _storage.store(file)
     except UnsupportedUploadError as exc:
@@ -81,7 +78,6 @@ async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadRespon
     name="stage_one_upload_analyze",
 )
 async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
-    """why: run lightweight profiling so the UI can preview columns."""
     meta = _storage.load(payload.file_id)
     if not meta:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please upload again.")
@@ -108,7 +104,6 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
 
 
 def _analyze_columns_safe(csv_path: Path, file_id: str) -> tuple[int, list[ColumnPreview]]:
-    """why: wrap column analysis with error handling."""
     try:
         return analyze_columns(csv_path)
     except FileNotFoundError as exc:
@@ -120,7 +115,6 @@ async def _discover_mappings(
     csv_path: Path,
     target_schema: str,
 ) -> tuple[dict[str, list[ModelSuggestion]], dict[str, str], ManifestPayload, bool]:
-    """why: fetch CDE mapping suggestions from the mapping service."""
     mapping_service = get_mapping_service()
     mapping_available = mapping_service.available()
     try:
@@ -145,7 +139,6 @@ def _log_analysis_results(
     cde_targets: dict[str, list[ModelSuggestion]],
     mapping_available: bool,
 ) -> None:
-    """why: log analysis completion with summary metrics."""
     cde_target_keys = {k.lower() for k in cde_targets}
     missing_columns = [
         col.column_name for col in columns if col.column_name.lower() not in cde_target_keys

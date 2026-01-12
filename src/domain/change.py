@@ -1,8 +1,4 @@
-"""
-Define change classification types and confidence thresholds.
-
-Centralize how cell modifications are categorized and scored.
-"""
+"""Change classification types and confidence thresholds for harmonization."""
 
 from __future__ import annotations
 
@@ -11,17 +7,19 @@ from enum import Enum
 
 
 class ChangeType(str, Enum):
-    """why: classify how a cell value was modified during harmonization."""
-
     UNCHANGED = "unchanged"
     AI_HARMONIZED = "ai"
     MANUAL_OVERRIDE = "manual"
 
 
+class RecommendationType(str, Enum):
+    AI_CHANGED = "ai_changed"
+    AI_UNCHANGED = "ai_unchanged"
+    NO_RECOMMENDATION = "no_recommendation"
+
+
 @dataclass(frozen=True)
 class ConfidenceThresholds:
-    """why: centralize confidence scoring constants."""
-
     HIGH: float = 0.9
     LOW: float = 0.3
     MANUAL: float = 0.2

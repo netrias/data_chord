@@ -271,6 +271,7 @@ def create_test_manifest_parquet(
         "error": [row.get("error") for row in rows],
         "row_indices": [row.get("row_indices", []) for row in rows],
         "manual_overrides": [row.get("manual_overrides", []) for row in rows],
+        "pv_adjustment": [row.get("pv_adjustment") for row in rows],
     }
 
     table = pa.table(arrays, schema=schema)

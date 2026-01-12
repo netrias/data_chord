@@ -11,6 +11,7 @@ import {
   renderEntries as renderColumnEntries,
   renderBatchProgress as renderColumnBatchProgress,
 } from './review_mode_column.js';
+import { escapeHtml } from './shared_review_utils.js';
 import {
   getTotalUnits as getRowTotalUnits,
   getCurrentEntries as getRowCurrentEntries,
@@ -96,7 +97,8 @@ const DEFAULT_ROW_BATCH_SIZE = 5;
  */
 const state = {
   rows: [],
-  /* why: sortMode UI exists and value persists, but sorting logic not yet implemented. */
+  columnPVs: {},  // column_key -> sorted PV list (from backend)
+  /* TODO: sortMode UI exists and value persists, but sorting logic not yet implemented. */
   sortMode: 'original',
   reviewMode: 'column',
   pendingOverrides: {},
@@ -175,6 +177,7 @@ const fetchRows = async () => {
     }
     const body = await response.json();
     state.rows = body.rows || [];
+    state.columnPVs = body.columnPVs || {};
   } catch (error) {
     console.error('Unable to load harmonized results:', error);
   }
@@ -370,9 +373,9 @@ const renderEntries = (batchMeta) => {
 
   if (state.reviewMode === 'column') {
     const gridSize = state.columnMode.batchSize;
-    renderColumnEntries(reviewTable, batchMeta, state.pendingOverrides, recordOverrideForRows, gridSize);
+    renderColumnEntries(reviewTable, batchMeta, state.pendingOverrides, recordOverrideForRows, gridSize, state.columnPVs);
   } else {
-    renderRowEntries(reviewTable, batchMeta, state.pendingOverrides, recordOverrideForRows);
+    renderRowEntries(reviewTable, batchMeta, state.pendingOverrides, recordOverrideForRows, state.columnPVs);
   }
 };
 
@@ -514,11 +517,9 @@ const attachEventListeners = () => {
   nextBatchButton.addEventListener('click', () => changeUnit(1));
 
   if (stageFiveButton) {
-    stageFiveButton.addEventListener('click', () => {
-      advanceMaxReachedStage('review');
-      const fileId = getFileIdFromUrl();
-      const url = fileId ? `${stageFiveUrl}?file_id=${encodeURIComponent(fileId)}` : stageFiveUrl;
-      window.location.assign(url);
+    stageFiveButton.addEventListener('click', async (e) => {
+      e.preventDefault();
+      await handleAdvanceToStage5();
     });
   }
 
@@ -565,6 +566,112 @@ const loadStateFromDisk = async () => {
   const rowModeState = reviewState.row_mode || {};
   state.rowMode.currentUnit = rowModeState.current_unit || 1;
   state.rowMode.batchSize = rowModeState.batch_size || DEFAULT_ROW_BATCH_SIZE;
+};
+
+/**
+ * Navigate to Stage 5.
+ */
+const navigateToStage5 = () => {
+  advanceMaxReachedStage('review');
+  const fileId = getFileIdFromUrl();
+  const url = fileId ? `${stageFiveUrl}?file_id=${encodeURIComponent(fileId)}` : stageFiveUrl;
+  window.location.assign(url);
+};
+
+/**
+ * Show the PV warning dialog with non-conformant values.
+ * @param {Object} data - { count: number, items: Array<{column, value, original}> }
+ */
+const showPVWarningDialog = (data) => {
+  const { count, items } = data;
+  const maxDisplay = 10;
+
+  const dialog = document.createElement('dialog');
+  dialog.className = 'pv-warning-dialog';
+
+  let itemsHtml = '';
+  const displayItems = items.slice(0, maxDisplay);
+  for (const item of displayItems) {
+    itemsHtml += `
+      <li>
+        <strong>${escapeHtml(item.column)}</strong>:
+        "${escapeHtml(item.value)}"
+      </li>
+    `;
+  }
+
+  const moreText = count > maxDisplay
+    ? `<p class="more-count">...and ${count - maxDisplay} more</p>`
+    : '';
+
+  dialog.innerHTML = `
+    <div class="pv-warning-dialog-content">
+      <div class="pv-warning-dialog-header">
+        <h3 class="pv-warning-dialog-title">Non-Conforming Values Detected</h3>
+      </div>
+      <div class="pv-warning-dialog-body">
+        <p>
+          <strong>${count}</strong> value${count === 1 ? '' : 's'} do not match the permissible value set
+          for their mapped ontology.
+        </p>
+        <ul class="non-conformant-list">${itemsHtml}</ul>
+        ${moreText}
+      </div>
+      <div class="pv-warning-dialog-footer">
+        <button class="btn-secondary" data-action="return">
+          Return to Review
+        </button>
+        <button class="btn-warning" data-action="proceed">
+          Proceed Anyway
+        </button>
+      </div>
+    </div>
+  `;
+
+  dialog.querySelector('[data-action="return"]').addEventListener('click', () => {
+    dialog.close();
+    dialog.remove();
+  });
+
+  dialog.querySelector('[data-action="proceed"]').addEventListener('click', () => {
+    dialog.close();
+    dialog.remove();
+    navigateToStage5();
+  });
+
+  document.body.appendChild(dialog);
+  dialog.showModal();
+};
+
+/**
+ * Handle advancement to Stage 5 with PV conformance check.
+ * @returns {Promise<void>}
+ */
+const handleAdvanceToStage5 = async () => {
+  const fileId = getFileIdFromUrl();
+  if (!fileId || !isValidFileId(fileId)) {
+    navigateToStage5();
+    return;
+  }
+
+  try {
+    const response = await fetch(`/stage-4/non-conformant/${encodeURIComponent(fileId)}`);
+    if (!response.ok) {
+      console.warn('Failed to check PV conformance, proceeding anyway');
+      navigateToStage5();
+      return;
+    }
+
+    const data = await response.json();
+    if (data.count > 0) {
+      showPVWarningDialog(data);
+      return;
+    }
+  } catch (err) {
+    console.warn('Error checking PV conformance:', err);
+  }
+
+  navigateToStage5();
 };
 
 /**

@@ -5,17 +5,16 @@ Provide lazy-initialized service singletons for the harmonization workflow.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
+from src.domain.data_model_client import DataModelClient
 from src.domain.harmonize import HarmonizeService
 from src.domain.mapping_service import MappingDiscoveryService
+from src.domain.paths import PROJECT_ROOT
 from src.domain.storage import FileStore, LocalStorageBackend, UploadConstraints, UploadStorage
 
 logger = logging.getLogger(__name__)
 
-MODULE_DIR: Path = Path(__file__).parent
-PROJECT_ROOT: Path = MODULE_DIR.parent.parent
-UPLOAD_BASE_DIR: Path = PROJECT_ROOT / "uploads"
+UPLOAD_BASE_DIR = PROJECT_ROOT / "uploads"
 
 MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024
 ALLOWED_SUFFIXES: tuple[str, ...] = (".csv",)
@@ -26,11 +25,10 @@ _storage: UploadStorage | None = None
 _file_store: FileStore | None = None
 _mapping_discovery: MappingDiscoveryService | None = None
 _harmonizer: HarmonizeService | None = None
+_data_model_client: DataModelClient | None = None
 
 
 def get_upload_constraints() -> UploadConstraints:
-    """why: expose the shared upload constraint configuration."""
-
     global _upload_constraints  # noqa: PLW0603 - intentional singleton
     if _upload_constraints is None:
         _upload_constraints = UploadConstraints(
@@ -42,8 +40,6 @@ def get_upload_constraints() -> UploadConstraints:
 
 
 def get_upload_storage() -> UploadStorage:
-    """why: reuse the same storage workspace across stages."""
-
     global _storage  # noqa: PLW0603 - intentional singleton
     if _storage is None:
         logger.info("Initializing upload storage")
@@ -52,8 +48,6 @@ def get_upload_storage() -> UploadStorage:
 
 
 def get_file_store() -> FileStore:
-    """why: provide typed file storage for all stages."""
-
     global _file_store  # noqa: PLW0603 - intentional singleton
     if _file_store is None:
         logger.info("Initializing file store")
@@ -63,8 +57,6 @@ def get_file_store() -> FileStore:
 
 
 def get_mapping_service() -> MappingDiscoveryService:
-    """why: lazily construct the mapping client without coupling routers."""
-
     global _mapping_discovery  # noqa: PLW0603 - intentional singleton
     if _mapping_discovery is None:
         logger.info("Initializing mapping discovery service")
@@ -73,8 +65,6 @@ def get_mapping_service() -> MappingDiscoveryService:
 
 
 def get_harmonize_service() -> HarmonizeService:
-    """why: reuse the harmonization client in every stage."""
-
     global _harmonizer  # noqa: PLW0603 - intentional singleton
     if _harmonizer is None:
         logger.info("Initializing harmonization service")
@@ -82,12 +72,30 @@ def get_harmonize_service() -> HarmonizeService:
     return _harmonizer
 
 
+def get_data_model_client() -> DataModelClient:
+    global _data_model_client  # noqa: PLW0603 - intentional singleton
+    if _data_model_client is None:
+        logger.info("Initializing Data Model Store client")
+        _data_model_client = DataModelClient()
+    return _data_model_client
+
+
+def cleanup_services() -> None:
+    """Clean up resources held by singleton services (call on app shutdown)."""
+    global _data_model_client  # noqa: PLW0603
+    if _data_model_client is not None:
+        logger.info("Closing Data Model Store client")
+        _data_model_client.close()
+        _data_model_client = None
+
+
 __all__ = [
     "ALLOWED_CONTENT_TYPES",
     "ALLOWED_SUFFIXES",
     "MAX_UPLOAD_BYTES",
-    "MODULE_DIR",
     "UPLOAD_BASE_DIR",
+    "cleanup_services",
+    "get_data_model_client",
     "get_file_store",
     "get_harmonize_service",
     "get_mapping_service",

@@ -1,7 +1,4 @@
-"""
-Serve Stage 4 review and approval routes.
-Render the batch review UI and provide harmonized row data for approval.
-"""
+"""Stage 4 review and approval routes for batch harmonization review."""
 
 from __future__ import annotations
 
@@ -16,7 +13,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from src.domain import CONFIDENCE
+from src.domain import CONFIDENCE, RecommendationType, format_column_label
+from src.domain.data_model_cache import get_session_cache
 from src.domain.dependencies import get_file_store, get_upload_storage
 from src.domain.manifest import (
     ConfidenceBucket,
@@ -25,11 +23,16 @@ from src.domain.manifest import (
     add_manual_overrides_batch,
     confidence_bucket,
     get_latest_override_value,
+    is_value_changed,
     read_manifest_parquet,
 )
+from src.domain.pv_validation import check_value_conformance
+from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
 from src.domain.storage import FileType, UploadStorage, load_csv
 from src.stage_4_review_results.schemas import (
     DeleteOverridesResponse,
+    NonConformantItem,
+    NonConformantResponse,
     ReviewOverridesSchema,
     ReviewStateSchema,
     SaveOverridesRequest,
@@ -40,21 +43,24 @@ logger = logging.getLogger(__name__)
 
 _MODULE_DIR = FilePath(__file__).parent
 _TEMPLATE_DIR = _MODULE_DIR / "templates"
-STAGE_FOUR_STATIC_PATH = _MODULE_DIR / "static"
+
+# Max items to return for non-conformant dialog (limits response size)
+NON_CONFORMANT_DISPLAY_LIMIT = 15
 
 _templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 
 
 class StageFourResultsRequest(BaseModel):
-    """why: request payload for fetching harmonized rows."""
-
     file_id: str = Field(..., min_length=8, pattern=r"^[a-f0-9]+$")
     manual_columns: list[str] = []
 
 
-class StageFourCell(BaseModel):
-    """why: represent a single cell comparison in the review UI."""
+class SuggestionInfo(BaseModel):
+    value: str
+    isPVConformant: bool
 
+
+class StageFourCell(BaseModel):
     columnKey: str
     columnLabel: str
     originalValue: str | None
@@ -62,12 +68,14 @@ class StageFourCell(BaseModel):
     bucket: str
     confidence: float
     isChanged: bool
+    recommendationType: str  # ai_changed, ai_unchanged, no_recommendation
     manualOverride: str | None = None
+    isPVConformant: bool = True  # False if current value not in PV set
+    pvSetAvailable: bool = False  # True if we have PVs for this column
+    topSuggestions: list[SuggestionInfo] = []  # AI suggestions with PV conformance flags
 
 
 class StageFourRow(BaseModel):
-    """why: represent a grouped row of cells for review."""
-
     rowNumber: int
     recordId: str
     cells: list[StageFourCell]
@@ -75,15 +83,12 @@ class StageFourRow(BaseModel):
 
 
 class StageFourResultsResponse(BaseModel):
-    """why: response payload containing all harmonized rows."""
-
     rows: list[StageFourRow]
+    columnPVs: dict[str, list[str]] = {}  # column_key -> sorted PV list
 
 
 @dataclass
 class _StageFourRowGroup:
-    """why: capture grouped record metadata before serialization."""
-
     record_ids: list[str]
     cells: list[StageFourCell]
     source_row_number: int
@@ -94,7 +99,6 @@ stage_four_router = APIRouter(prefix="/stage-4", tags=["Stage 4 Review"])
 
 @stage_four_router.get("", response_class=HTMLResponse, name="stage_four_review_page")
 async def render_stage_four(request: Request) -> HTMLResponse:
-    """why: serve the batch review and approval UI."""
     context = {
         "request": request,
         "results_endpoint": request.url_for("stage_four_harmonized_rows"),
@@ -104,7 +108,6 @@ async def render_stage_four(request: Request) -> HTMLResponse:
 
 @stage_four_router.post("/rows", response_model=StageFourResultsResponse, name="stage_four_harmonized_rows")
 async def fetch_stage_four_rows(payload: StageFourResultsRequest) -> StageFourResultsResponse:
-    """why: load manifest-driven harmonization data for review."""
     storage: UploadStorage = get_upload_storage()
     meta = storage.load(payload.file_id)
     if not meta:
@@ -117,22 +120,19 @@ async def fetch_stage_four_rows(payload: StageFourResultsRequest) -> StageFourRe
 
     columns = _extract_columns_from_manifest(manifest)
     row_lookup = _build_row_lookup(manifest)
-    rows = _build_rows_from_manifest(original_rows, columns, row_lookup)
-    return StageFourResultsResponse(rows=rows)
+    rows = _build_rows_from_manifest(original_rows, columns, row_lookup, payload.file_id)
+    column_pvs = _build_column_pvs(columns, payload.file_id)
+    return StageFourResultsResponse(rows=rows, columnPVs=column_pvs)
 
 
 @dataclass
 class _ColumnInfo:
-    """why: metadata for a harmonized column derived from manifest."""
-
     column_name: str
     label: str
 
 
 @dataclass
 class _ManifestEntry:
-    """why: harmonization data for a specific (column, original_value) pair."""
-
     to_harmonize: str
     top_harmonization: str
     top_harmonizations: list[str]
@@ -145,20 +145,17 @@ RowLookup = dict[tuple[str, int], _ManifestEntry]
 
 
 def _extract_columns_from_manifest(manifest: ManifestSummary) -> list[_ColumnInfo]:
-    """why: derive column list and labels from manifest data."""
     seen: set[str] = set()
     columns: list[_ColumnInfo] = []
     for row in manifest.rows:
         col_name = row.column_name
         if col_name and col_name not in seen:
             seen.add(col_name)
-            label = col_name.replace("_", " ").title()
-            columns.append(_ColumnInfo(column_name=col_name, label=label))
+            columns.append(_ColumnInfo(column_name=col_name, label=format_column_label(col_name)))
     return columns
 
 
 def _build_row_lookup(manifest: ManifestSummary) -> RowLookup:
-    """why: create lookup from (column_name, row_index) to manifest entry."""
     lookup: RowLookup = {}
     for row in manifest.rows:
         entry = _ManifestEntry(
@@ -178,15 +175,15 @@ def _build_rows_from_manifest(
     original_rows: list[dict[str, str]],
     columns: list[_ColumnInfo],
     row_lookup: RowLookup,
+    file_id: str,
 ) -> list[StageFourRow]:
-    """why: generate grouped rows for Stage 4 review using manifest data."""
     total_rows = len(original_rows)
     grouped: dict[tuple[tuple[str, str, str], ...], _StageFourRowGroup] = {}
 
     for idx in range(total_rows):
         original_row = original_rows[idx]
         record_id = original_row.get("record_id") or f"Row {idx + 1}"
-        cells = _build_cells_from_manifest(idx, columns, row_lookup)
+        cells = _build_cells_from_manifest(idx, columns, row_lookup, file_id)
         key = tuple((c.columnKey, c.originalValue or "", c.harmonizedValue or "") for c in cells)
 
         if key not in grouped:
@@ -205,13 +202,38 @@ def _build_rows_from_manifest(
     ]
 
 
+def _build_column_pvs(columns: list[_ColumnInfo], file_id: str) -> dict[str, list[str]]:
+    """Build sorted PV lists for each column that has PVs available."""
+    cache = get_session_cache(file_id)
+    column_pvs: dict[str, list[str]] = {}
+    for col_info in columns:
+        pv_set = cache.get_pvs_for_column(col_info.column_name)
+        if pv_set:
+            column_pvs[col_info.column_name] = sorted(pv_set)
+    return column_pvs
+
+
+def _build_suggestions_with_conformance(
+    suggestions: list[str],
+    pv_set: frozenset[str] | None,
+) -> list[SuggestionInfo]:
+    """Build suggestion list with PV conformance flags for each value."""
+    if not suggestions:
+        return []
+    return [
+        SuggestionInfo(value=s, isPVConformant=check_value_conformance(s, pv_set))
+        for s in suggestions
+    ]
+
+
 def _build_cells_from_manifest(
     row_index: int,
     columns: list[_ColumnInfo],
     row_lookup: RowLookup,
+    file_id: str,
 ) -> list[StageFourCell]:
-    """why: create cell comparisons for a single row using manifest data."""
     cells: list[StageFourCell] = []
+    cache = get_session_cache(file_id)
 
     for col_info in columns:
         col_key = col_info.column_name
@@ -221,10 +243,13 @@ def _build_cells_from_manifest(
         if entry is None:
             continue
 
-        original_value = entry.to_harmonize.strip() or None
-        harmonized_value = entry.top_harmonization.strip() or None
+        original_value = entry.to_harmonize or None
+        harmonized_value = entry.top_harmonization or None
         confidence = entry.confidence_score
-        is_changed = (original_value or "") != (harmonized_value or "")
+        is_changed = is_value_changed(original_value, harmonized_value)
+
+        # Determine recommendation type
+        recommendation_type = _compute_recommendation_type(original_value, harmonized_value)
 
         if confidence is not None:
             bucket = confidence_bucket(confidence)
@@ -233,6 +258,17 @@ def _build_cells_from_manifest(
             confidence = CONFIDENCE.HIGH if bucket == ConfidenceBucket.HIGH else CONFIDENCE.LOW
 
         manual_override = get_latest_override_value(entry.manual_overrides)
+
+        # Determine current value for PV conformance check (override > harmonized)
+        current_value = manual_override if manual_override else harmonized_value
+
+        # Check PV conformance
+        pv_set = cache.get_pvs_for_column(col_key)
+        pv_available = pv_set is not None and len(pv_set) > 0
+        is_conformant = check_value_conformance(current_value, pv_set)
+
+        # Build suggestions with conformance flags
+        top_suggestions = _build_suggestions_with_conformance(entry.top_harmonizations, pv_set)
 
         cells.append(
             StageFourCell(
@@ -243,15 +279,34 @@ def _build_cells_from_manifest(
                 bucket=bucket.value,
                 confidence=confidence,
                 isChanged=is_changed,
+                recommendationType=recommendation_type.value,
                 manualOverride=manual_override,
+                isPVConformant=is_conformant,
+                pvSetAvailable=pv_available,
+                topSuggestions=top_suggestions,
             ),
         )
 
     return cells
 
 
+def _compute_recommendation_type(
+    original_value: str | None,
+    harmonized_value: str | None,
+) -> RecommendationType:
+    """Whitespace is semantically significant - no stripping during comparison."""
+    if not harmonized_value or not harmonized_value.strip():
+        return RecommendationType.NO_RECOMMENDATION
+
+    # Compare as-is (whitespace significant)
+    original = original_value or ""
+    if original != harmonized_value:
+        return RecommendationType.AI_CHANGED
+
+    return RecommendationType.AI_UNCHANGED
+
+
 def _summarize_record_ids(record_ids: list[str]) -> str:
-    """why: provide a compact label for grouped rows."""
     filtered = [rid for rid in record_ids if rid]
     if not filtered:
         return "Multiple records"
@@ -261,15 +316,13 @@ def _summarize_record_ids(record_ids: list[str]) -> str:
 
 
 def _load_manifest(storage: UploadStorage, file_id: str) -> ManifestSummary | None:
-    """why: load the harmonization manifest for a file."""
     manifest_path = storage.load_harmonization_manifest_path(file_id)
     if manifest_path is None:
         return None
     return read_manifest_parquet(manifest_path)
 
 
-FILE_ID_PATTERN = r"^[a-f0-9]+$"
-FileIdPath = Annotated[str, Path(min_length=8, pattern=FILE_ID_PATTERN)]
+FileIdPath = Annotated[str, Path(min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_PATTERN)]
 
 
 @stage_four_router.get(
@@ -278,7 +331,6 @@ FileIdPath = Annotated[str, Path(min_length=8, pattern=FILE_ID_PATTERN)]
     name="stage_four_get_overrides",
 )
 async def get_overrides(file_id: FileIdPath) -> ReviewOverridesSchema | None:
-    """why: load existing review overrides for a file."""
     store = get_file_store()
     data = store.load(file_id, FileType.REVIEW_OVERRIDES)
     if data is None:
@@ -294,7 +346,6 @@ async def get_overrides(file_id: FileIdPath) -> ReviewOverridesSchema | None:
 
 @stage_four_router.post("/overrides", response_model=SaveOverridesResponse, name="stage_four_save_overrides")
 async def save_overrides(payload: SaveOverridesRequest) -> SaveOverridesResponse:
-    """why: persist human review overrides to JSON storage and parquet manifest."""
     store = get_file_store()
     storage = get_upload_storage()
     now = datetime.now(UTC)
@@ -320,7 +371,6 @@ async def save_overrides(payload: SaveOverridesRequest) -> SaveOverridesResponse
 
 
 def _sync_overrides_to_manifest(storage: UploadStorage, payload: SaveOverridesRequest) -> None:
-    """why: write manual overrides from UI back to parquet manifest."""
     manifest_path = storage.load_harmonization_manifest_path(payload.file_id)
     if manifest_path is None:
         logger.warning("Cannot sync overrides: manifest path not found", extra={"file_id": payload.file_id})
@@ -340,7 +390,6 @@ def _sync_overrides_to_manifest(storage: UploadStorage, payload: SaveOverridesRe
 def _collect_overrides_for_batch(
     payload: SaveOverridesRequest,
 ) -> list[tuple[str, str, str]]:
-    """why: gather all overrides into a list for batch processing."""
     overrides: list[tuple[str, str, str]] = []
     for _row_key, cols in payload.overrides.items():
         for col_key, override in cols.items():
@@ -356,8 +405,42 @@ def _collect_overrides_for_batch(
     name="stage_four_delete_overrides",
 )
 async def delete_overrides(file_id: FileIdPath) -> DeleteOverridesResponse:
-    """why: remove review overrides for a file."""
     store = get_file_store()
     existed = store.exists(file_id, FileType.REVIEW_OVERRIDES)
     store.delete(file_id, FileType.REVIEW_OVERRIDES)
     return DeleteOverridesResponse(file_id=file_id, deleted=existed)
+
+
+@stage_four_router.get(
+    "/non-conformant/{file_id}",
+    response_model=NonConformantResponse,
+    name="stage_four_non_conformant",
+)
+async def get_non_conformant_values(file_id: FileIdPath) -> NonConformantResponse:
+    storage = get_upload_storage()
+    cache = get_session_cache(file_id)
+    manifest = _load_manifest(storage, file_id)
+
+    if manifest is None:
+        return NonConformantResponse(count=0, items=[])
+
+    non_conformant: list[NonConformantItem] = []
+
+    for row in manifest.rows:
+        # Get the current value (latest override > AI harmonization)
+        latest_override = get_latest_override_value(row.manual_overrides)
+        current_value = latest_override if latest_override else row.top_harmonization
+
+        # Check PV conformance
+        pv_set = cache.get_pvs_for_column(row.column_name)
+        if pv_set and current_value and current_value not in pv_set:
+            non_conformant.append(NonConformantItem(
+                column=row.column_name,
+                value=current_value,
+                original=row.to_harmonize,
+            ))
+
+    return NonConformantResponse(
+        count=len(non_conformant),
+        items=non_conformant[:NON_CONFORMANT_DISPLAY_LIMIT],
+    )

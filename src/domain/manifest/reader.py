@@ -18,6 +18,7 @@ from src.domain.manifest.models import (
     ManifestRow,
     ManifestSummary,
     ManualOverride,
+    PVAdjustment,
     confidence_bucket,
     is_value_changed,
 )
@@ -51,7 +52,6 @@ def _parse_manifest_rows(table: pa.Table) -> list[ManifestRow]:
 
 
 def _extract_row(batch: pa.RecordBatch, index: int) -> ManifestRow:
-    """why: extract a single row from a record batch into ManifestRow."""
     return ManifestRow(
         job_id=_get_string(batch, "job_id", index, ""),
         column_id=_get_int(batch, "column_id", index, 0),
@@ -64,6 +64,7 @@ def _extract_row(batch: pa.RecordBatch, index: int) -> ManifestRow:
         error=_get_string_nullable(batch, "error", index),
         row_indices=_get_int_list(batch, "row_indices", index),
         manual_overrides=_get_manual_overrides(batch, "manual_overrides", index),
+        pv_adjustment=_get_pv_adjustment(batch, "pv_adjustment", index),
     )
 
 
@@ -166,6 +167,25 @@ def _get_manual_overrides(batch: pa.RecordBatch, column: str, index: int) -> lis
                 )
             )
     return overrides
+
+
+def _get_pv_adjustment(batch: pa.RecordBatch, column: str, index: int) -> PVAdjustment | None:
+    """Safely extract PVAdjustment struct from batch column."""
+    if column not in batch.schema.names:
+        return None
+    value = batch.column(column)[index].as_py()
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        user_id = value.get("user_id")
+        return PVAdjustment(
+            timestamp=str(value.get("timestamp", "")),
+            original_harmonization=str(value.get("original_harmonization", "")),
+            adjusted_value=str(value.get("adjusted_value", "")),
+            source=str(value.get("source", "")),
+            user_id=str(user_id) if user_id is not None else "pv_adjustment",
+        )
+    return None
 
 
 __all__ = [

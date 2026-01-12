@@ -11,30 +11,20 @@ import logging
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from src.domain.manifest.models import ManifestRow, ManualOverride, get_manifest_schema
+from src.domain.manifest.models import ManifestRow, ManualOverride, PVAdjustment, get_manifest_schema
 from src.domain.manifest.reader import read_manifest_parquet
 
 logger = logging.getLogger(__name__)
 
 
-def add_manual_override(
-    manifest_path: Path,
-    column_name: str,
-    to_harmonize: str,
-    override_value: str,
-    user_id: str | None = None,
-) -> bool:
-    """why: append a manual override to a manifest entry and persist to parquet."""
-    return add_manual_overrides_batch(
-        manifest_path=manifest_path,
-        overrides=[(column_name, to_harmonize, override_value)],
-        user_id=user_id,
-    )
+class AdjustmentResult(NamedTuple):
+    rows: list[ManifestRow]
+    adjustment_count: int
 
 
 def add_manual_overrides_batch(
@@ -42,7 +32,7 @@ def add_manual_overrides_batch(
     overrides: list[tuple[str, str, str]],
     user_id: str | None = None,
 ) -> bool:
-    """why: batch apply multiple overrides with single read/write for performance."""
+    """Single read/write avoids N parquet rewrites when applying N overrides."""
     if not overrides:
         return True
 
@@ -67,7 +57,6 @@ def _apply_single_override(
     to_harmonize: str,
     new_override: ManualOverride,
 ) -> list[ManifestRow]:
-    """why: find matching row and append override to its manual_overrides list."""
     updated: list[ManifestRow] = []
     for row in rows:
         if row.column_name == column_name and row.to_harmonize == to_harmonize:
@@ -78,8 +67,77 @@ def _apply_single_override(
     return updated
 
 
+def _build_adjustment_map(
+    adjustments: list[tuple[str, str, str, str]],
+) -> dict[tuple[str, str], tuple[str, str]]:
+    """Dict lookup avoids O(n²) scan when matching rows to adjustments."""
+    return {(col, to_harm): (adjusted, source) for col, to_harm, adjusted, source in adjustments}
+
+
+def _apply_pv_adjustment(
+    row: ManifestRow,
+    adjusted_value: str,
+    source: str,
+    timestamp: str,
+    user_id: str,
+) -> ManifestRow:
+    pv_adj = PVAdjustment(
+        timestamp=timestamp,
+        original_harmonization=row.top_harmonization,
+        adjusted_value=adjusted_value,
+        source=source,
+        user_id=user_id,
+    )
+    return replace(row, top_harmonization=adjusted_value, pv_adjustment=pv_adj)
+
+
+def _apply_adjustments_to_rows(
+    rows: list[ManifestRow],
+    adjustment_map: dict[tuple[str, str], tuple[str, str]],
+    timestamp: str,
+    user_id: str,
+) -> AdjustmentResult:
+    updated: list[ManifestRow] = []
+    adjusted_count = 0
+    for row in rows:
+        key = (row.column_name, row.to_harmonize)
+        if key in adjustment_map:
+            adjusted_value, source = adjustment_map[key]
+            updated.append(_apply_pv_adjustment(row, adjusted_value, source, timestamp, user_id))
+            adjusted_count += 1
+        else:
+            updated.append(row)
+    return AdjustmentResult(updated, adjusted_count)
+
+
+def apply_pv_adjustments_batch(
+    manifest_path: Path,
+    adjustments: list[tuple[str, str, str, str]],
+    user_id: str = "pv_adjustment",
+) -> int:
+    if not adjustments:
+        return 0
+
+    summary = read_manifest_parquet(manifest_path)
+    if summary is None:
+        logger.warning("Cannot apply PV adjustments: manifest not found", extra={"path": str(manifest_path)})
+        return 0
+
+    adjustment_map = _build_adjustment_map(adjustments)
+    timestamp = datetime.now(UTC).isoformat()
+    result = _apply_adjustments_to_rows(summary.rows, adjustment_map, timestamp, user_id)
+
+    if result.adjustment_count > 0 and not _write_manifest_parquet(manifest_path, result.rows):
+        return 0
+
+    logger.info(
+        "Applied PV adjustments to manifest",
+        extra={"path": str(manifest_path), "adjustment_count": result.adjustment_count},
+    )
+    return result.adjustment_count
+
+
 def _write_manifest_parquet(manifest_path: Path, rows: list[ManifestRow]) -> bool:
-    """why: serialize ManifestRow list to parquet with manual_overrides schema."""
     try:
         table = _rows_to_table(rows)
         pq.write_table(table, manifest_path)
@@ -90,46 +148,41 @@ def _write_manifest_parquet(manifest_path: Path, rows: list[ManifestRow]) -> boo
         return False
 
 
+_MANIFEST_FIELDS = (
+    "job_id",
+    "column_id",
+    "column_name",
+    "to_harmonize",
+    "top_harmonization",
+    "ontology_id",
+    "top_harmonizations",
+    "confidence_score",
+    "error",
+    "row_indices",
+)
+
+
+def _serialize_pv_adjustment(pv_adj: PVAdjustment | None) -> dict[str, str] | None:
+    if pv_adj is None:
+        return None
+    return asdict(pv_adj)
+
+
 def _rows_to_table(rows: list[ManifestRow]) -> pa.Table:
-    """why: convert ManifestRow list to pyarrow Table with proper schema."""
-    data = _build_column_arrays(rows)
-    schema = get_manifest_schema()
-    return pa.Table.from_pydict(data, schema=schema)
-
-
-def _build_column_arrays(rows: list[ManifestRow]) -> dict[str, list[Any]]:
-    """why: extract row data into column arrays for pyarrow."""
-    data: dict[str, list[Any]] = {
-        "job_id": [],
-        "column_id": [],
-        "column_name": [],
-        "to_harmonize": [],
-        "top_harmonization": [],
-        "ontology_id": [],
-        "top_harmonizations": [],
-        "confidence_score": [],
-        "error": [],
-        "row_indices": [],
-        "manual_overrides": [],
-    }
+    data: dict[str, list[Any]] = {field: [] for field in _MANIFEST_FIELDS}
+    data["manual_overrides"] = []
+    data["pv_adjustment"] = []
 
     for row in rows:
-        data["job_id"].append(row.job_id)
-        data["column_id"].append(row.column_id)
-        data["column_name"].append(row.column_name)
-        data["to_harmonize"].append(row.to_harmonize)
-        data["top_harmonization"].append(row.top_harmonization)
-        data["ontology_id"].append(row.ontology_id)
-        data["top_harmonizations"].append(row.top_harmonizations)
-        data["confidence_score"].append(row.confidence_score)
-        data["error"].append(row.error)
-        data["row_indices"].append(row.row_indices)
+        for field in _MANIFEST_FIELDS:
+            data[field].append(getattr(row, field))
         data["manual_overrides"].append([asdict(o) for o in row.manual_overrides])
+        data["pv_adjustment"].append(_serialize_pv_adjustment(row.pv_adjustment))
 
-    return data
+    return pa.Table.from_pydict(data, schema=get_manifest_schema())
 
 
 __all__ = [
-    "add_manual_override",
     "add_manual_overrides_batch",
+    "apply_pv_adjustments_batch",
 ]

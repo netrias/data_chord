@@ -15,7 +15,14 @@ const stageThreeUrl = config.stageThreeUrl ?? '/stage-3';
 
 /* why: index 0 is the 'No Mapping' option, visually separated from CDE options. */
 const NO_MAPPING_INDEX = 0;
-const manualOptions = [NO_MAPPING_OPTION, ...(config.manualOptions ?? [])];
+
+/* Build options from dynamic CDE data or fall back to legacy format */
+const cdeOptions = config.cdeOptions ?? [];
+const cdeLabels = cdeOptions.map((cde) => cde.cde_key ?? cde.label ?? cde);
+const manualOptions = [NO_MAPPING_OPTION, ...cdeLabels];
+
+/* Build lookup for CDE metadata (for tooltips/descriptions) */
+const cdeByKey = new Map(cdeOptions.map((cde) => [cde.cde_key ?? cde.label ?? cde, cde]));
 
 /* CSS class constants */
 const CSS_MAPPING_ROW = 'mapping-row';

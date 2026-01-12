@@ -55,7 +55,11 @@ select = [
     "I",      # isort
     "B",      # flake8-bugbear
     "UP",     # pyupgrade
+    "C901",   # mccabe complexity
 ]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 4
 
 [tool.basedpyright]
 pythonVersion = "3.13"

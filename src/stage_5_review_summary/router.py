@@ -23,6 +23,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from src.domain import ChangeType
+from src.domain.data_model_cache import SessionCache, clear_session_cache, get_session_cache
 from src.domain.dependencies import get_file_store, get_upload_storage
 from src.domain.manifest import (
     ManifestRow,
@@ -31,6 +32,7 @@ from src.domain.manifest import (
     is_value_changed,
     read_manifest_parquet,
 )
+from src.domain.pv_validation import check_value_conformance
 from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
 from src.domain.storage import FileType, UploadStorage, load_csv, resolve_harmonized_path_or_404
 
@@ -38,7 +40,6 @@ _logger = logging.getLogger(__name__)
 
 _MODULE_DIR = Path(__file__).parent
 _TEMPLATE_DIR = _MODULE_DIR / "templates"
-STAGE_FIVE_STATIC_PATH = _MODULE_DIR / "static"
 
 _ERROR_UPLOAD_NOT_FOUND = "Upload not found. Please restart the harmonization process."
 _ERROR_DATASET_UNREADABLE = "Unable to read harmonized dataset."
@@ -51,14 +52,10 @@ stage_five_router = APIRouter(prefix="/stage-5", tags=["Stage 5 Download"])
 
 
 class StageFiveRequest(BaseModel):
-    """why: unified request payload for summary and download operations."""
-
     file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_PATTERN)
 
 
 class ColumnSummary(BaseModel):
-    """why: per-column metrics for the harmonization summary UI."""
-
     column: str
     distinct_terms: int
     ai_changes: int
@@ -67,23 +64,20 @@ class ColumnSummary(BaseModel):
 
 
 class TermMapping(BaseModel):
-    """why: represents a single original→final value transformation."""
-
     column: str
     original_value: str
     final_value: str
+    is_pv_conformant: bool = True
 
 
 class StageFiveSummaryResponse(BaseModel):
-    """why: response shape for the summary endpoint consumed by frontend."""
-
     column_summaries: list[ColumnSummary]
     term_mappings: list[TermMapping]
+    non_conformant_count: int = 0
 
 
 @stage_five_router.get("", response_class=HTMLResponse, name="stage_five_review_page")
 async def render_stage_five(request: Request) -> HTMLResponse:
-    """why: serve the download page with all navigation URLs pre-resolved."""
     context: dict[str, Any] = {
         "request": request,
         "stage_one_url": request.url_for("stage_one_upload_page"),
@@ -98,7 +92,6 @@ async def render_stage_five(request: Request) -> HTMLResponse:
 
 @stage_five_router.post("/summary", response_model=StageFiveSummaryResponse, name="stage_five_summary")
 async def summarize_harmonized_results(payload: StageFiveRequest) -> StageFiveSummaryResponse:
-    """why: compute change statistics from the harmonization manifest parquet."""
     storage: UploadStorage = get_upload_storage()
     manifest_path = storage.load_harmonization_manifest_path(payload.file_id)
     if manifest_path is None:
@@ -108,12 +101,11 @@ async def summarize_harmonized_results(payload: StageFiveRequest) -> StageFiveSu
     if manifest_summary is None:
         raise HTTPException(status_code=400, detail=_ERROR_MANIFEST_UNREADABLE)
 
-    return _build_summary_from_manifest(manifest_summary)
+    return _build_summary_from_manifest(manifest_summary, payload.file_id)
 
 
 @stage_five_router.post("/download", name="stage_five_download")
 async def download_harmonized_data(payload: StageFiveRequest) -> StreamingResponse:
-    """why: bundle final CSV (with manual overrides applied) and manifest into a zip."""
     storage: UploadStorage = get_upload_storage()
     meta = storage.load(payload.file_id)
     if not meta:
@@ -134,11 +126,15 @@ async def download_harmonized_data(payload: StageFiveRequest) -> StreamingRespon
     base_name = f"{original_stem}_{payload.file_id}_{timestamp}"
 
     zip_buffer = _create_zip_buffer(base_name, headers, final_rows, manifest_path)
+
+    # Clear session cache after successful download (session complete)
+    clear_session_cache(payload.file_id)
+    _logger.info("Cleared session cache after download", extra={"file_id": payload.file_id})
+
     return _create_streaming_response(base_name, zip_buffer)
 
 
 def _load_review_overrides(file_id: str) -> dict[str, dict[str, str]]:
-    """why: retrieve manual corrections made during Stage 4 review."""
     store = get_file_store()
     data = store.load(file_id, FileType.REVIEW_OVERRIDES)
     if data is None:
@@ -155,36 +151,33 @@ def _load_review_overrides(file_id: str) -> dict[str, dict[str, str]]:
     return result
 
 
+def _apply_row_overrides(row: dict[str, str], row_key: str, row_overrides: dict[str, str]) -> dict[str, str]:
+    invalid_columns = {k for k in row_overrides if k not in row}
+    if invalid_columns:
+        _logger.warning("Row %s has overrides for non-existent columns: %s", row_key, invalid_columns)
+    valid_overrides = {k: v for k, v in row_overrides.items() if k in row}
+    return {**row, **valid_overrides}
+
+
 def _apply_overrides(
     rows: list[dict[str, str]],
     overrides: dict[str, dict[str, str]],
 ) -> list[dict[str, str]]:
-    """why: layer manual corrections on top of AI harmonization results.
-
-    Row keys are 1-indexed to match the Stage 4 review UI row numbering.
-    """
+    """Row keys are 1-indexed to match Stage 4 UI numbering."""
     if not overrides:
         return rows
 
     result: list[dict[str, str]] = []
     for idx, row in enumerate(rows):
         row_key = str(idx + 1)
-        if row_key not in overrides:
+        if row_key in overrides:
+            result.append(_apply_row_overrides(row, row_key, overrides[row_key]))
+        else:
             result.append(row)
-            continue
-
-        row_overrides = overrides[row_key]
-        invalid_columns = {k for k in row_overrides if k not in row}
-        if invalid_columns:
-            _logger.warning("Row %s has overrides for non-existent columns: %s", row_key, invalid_columns)
-
-        valid_overrides = {k: v for k, v in row_overrides.items() if k in row}
-        result.append({**row, **valid_overrides})
     return result
 
 
 def _rows_to_csv_string(headers: list[str], rows: list[dict[str, str]]) -> str:
-    """why: serialize rows to CSV string for inclusion in zip archive."""
     csv_output = io.StringIO()
     writer = csv.DictWriter(csv_output, fieldnames=headers, lineterminator="\n")
     writer.writeheader()
@@ -198,7 +191,6 @@ def _create_zip_buffer(
     rows: list[dict[str, str]],
     manifest_path: Path | None,
 ) -> io.BytesIO:
-    """why: package CSV and parquet into a zip archive."""
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
         csv_content = _rows_to_csv_string(headers, rows)
@@ -212,7 +204,6 @@ def _create_zip_buffer(
 
 
 def _create_streaming_response(base_name: str, zip_buffer: io.BytesIO) -> StreamingResponse:
-    """why: wrap zip buffer in HTTP streaming response with proper headers."""
     safe_filename = quote(f"{base_name}.zip", safe="")
     return StreamingResponse(
         zip_buffer,
@@ -222,14 +213,11 @@ def _create_streaming_response(base_name: str, zip_buffer: io.BytesIO) -> Stream
 
 
 def _classify_change(row: ManifestRow) -> ChangeType:
-    """why: classify a manifest row's change type based on override presence and value.
-
+    """
     Classification logic:
     - UNCHANGED: The final value equals the original (using canonical change detection)
     - AI_HARMONIZED: AI changed the value, or user accepted AI suggestion via override
     - MANUAL_OVERRIDE: User provided an override that differs from AI suggestion
-
-    Uses is_value_changed for consistent comparison across all stages.
     """
     original = row.to_harmonize
     ai_value = row.top_harmonization
@@ -247,45 +235,51 @@ def _classify_change(row: ManifestRow) -> ChangeType:
 
 
 def _get_final_value(row: ManifestRow) -> str:
-    """why: determine the final harmonized value considering manual overrides."""
     latest_override = get_latest_override_value(row.manual_overrides)
     return latest_override if latest_override is not None else row.top_harmonization
 
 
-def _build_summary_from_manifest(summary: ManifestSummary) -> StageFiveSummaryResponse:
-    """why: aggregate change counts per column from manifest rows.
+def _process_manifest_row(
+    row: ManifestRow,
+    ai_counts: dict[int, int],
+    manual_counts: dict[int, int],
+    unchanged_counts: dict[int, int],
+    unique_mappings: dict[tuple[str, str, str], bool],
+    cache: SessionCache,
+) -> None:
+    col_id = row.column_id
+    change_type = _classify_change(row)
 
-    Uses column_id as the key for aggregation since column names may not be unique.
-    """
+    match change_type:
+        case ChangeType.AI_HARMONIZED:
+            ai_counts[col_id] += 1
+            _track_mapping(unique_mappings, row.column_name, row.to_harmonize, _get_final_value(row), cache)
+        case ChangeType.MANUAL_OVERRIDE:
+            manual_counts[col_id] += 1
+            _track_mapping(unique_mappings, row.column_name, row.to_harmonize, _get_final_value(row), cache)
+        case ChangeType.UNCHANGED:
+            unchanged_counts[col_id] += 1
+
+
+def _build_summary_from_manifest(summary: ManifestSummary, file_id: str) -> StageFiveSummaryResponse:
+    cache = get_session_cache(file_id)
     ai_counts: dict[int, int] = defaultdict(int)
     manual_counts: dict[int, int] = defaultdict(int)
     unchanged_counts: dict[int, int] = defaultdict(int)
     distinct_terms: dict[int, int] = defaultdict(int)
     column_names: dict[int, str] = {}
-    unique_mappings: set[tuple[str, str, str]] = set()
+    unique_mappings: dict[tuple[str, str, str], bool] = {}
 
     for row in summary.rows:
-        col_id = row.column_id
-        distinct_terms[col_id] += 1
-        column_names[col_id] = row.column_name
-
-        change_type = _classify_change(row)
-        match change_type:
-            case ChangeType.AI_HARMONIZED:
-                ai_counts[col_id] += 1
-                final_value = _get_final_value(row)
-                unique_mappings.add((row.column_name, row.to_harmonize, final_value))
-            case ChangeType.MANUAL_OVERRIDE:
-                manual_counts[col_id] += 1
-                final_value = _get_final_value(row)
-                unique_mappings.add((row.column_name, row.to_harmonize, final_value))
-            case ChangeType.UNCHANGED:
-                unchanged_counts[col_id] += 1
+        distinct_terms[row.column_id] += 1
+        column_names[row.column_id] = row.column_name
+        _process_manifest_row(row, ai_counts, manual_counts, unchanged_counts, unique_mappings, cache)
 
     column_ids = sorted(distinct_terms.keys())
+    sorted_mappings = sorted(unique_mappings.items(), key=lambda x: x[0])
     term_mappings = [
-        TermMapping(column=col, original_value=orig, final_value=final)
-        for col, orig, final in sorted(unique_mappings)
+        TermMapping(column=col, original_value=orig, final_value=final, is_pv_conformant=is_conformant)
+        for (col, orig, final), is_conformant in sorted_mappings
     ]
 
     return StageFiveSummaryResponse(
@@ -300,4 +294,21 @@ def _build_summary_from_manifest(summary: ManifestSummary) -> StageFiveSummaryRe
             for col_id in column_ids
         ],
         term_mappings=term_mappings,
+        non_conformant_count=sum(1 for v in unique_mappings.values() if not v),
     )
+
+
+def _track_mapping(
+    mappings: dict[tuple[str, str, str], bool],
+    column: str,
+    original: str,
+    final: str,
+    cache: SessionCache,
+) -> None:
+    """Deduplicates by (column, original, final) so we check conformance once per unique mapping."""
+    key = (column, original, final)
+    if key in mappings:
+        return
+    pv_set = cache.get_pvs_for_column(column)
+    is_conformant = check_value_conformance(final, pv_set)
+    mappings[key] = is_conformant
