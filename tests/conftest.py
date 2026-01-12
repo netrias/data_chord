@@ -117,7 +117,7 @@ def mock_netrias_client() -> Generator[MagicMock]:
     )
 
     with (
-        patch.dict(os.environ, {"NETRIAS_API_KEY": "test-api-key"}),
+        patch.dict(os.environ, {"NETRIAS_API_KEY": "test-api-key", "DATA_MODEL_KEY": "test-data-model"}),
         patch("src.domain.mapping_service.NetriasClient", return_value=mock_client),
         patch("src.domain.harmonize.NetriasClient", return_value=mock_client),
     ):
@@ -279,6 +279,38 @@ def create_test_manifest_parquet(
     return output_path
 
 
+def _get_columns_with_changes(changes: dict[int, dict[str, str]], headers: list[str]) -> set[str]:
+    """Extract column names that have changes, or default to first two columns."""
+    columns = {col for col_changes in changes.values() for col in col_changes}
+    if not columns:
+        columns = set(headers[:2]) if len(headers) >= 2 else set(headers)
+    return columns
+
+
+def _build_manifest_row(
+    file_id: str,
+    col_name: str,
+    row_idx: int,
+    original_value: str,
+    harmonized_value: str,
+    headers: list[str],
+) -> dict[str, Any]:
+    """Build a single manifest row dict."""
+    return {
+        "job_id": f"test-job-{file_id}",
+        "column_id": headers.index(col_name) if col_name in headers else 0,
+        "column_name": col_name,
+        "to_harmonize": original_value,
+        "top_harmonization": harmonized_value,
+        "ontology_id": None,
+        "top_harmonizations": [harmonized_value] if harmonized_value else [],
+        "confidence_score": 0.95 if original_value != harmonized_value else 0.99,
+        "error": None,
+        "row_indices": [row_idx],
+        "manual_overrides": [],
+    }
+
+
 def create_manifest_for_file(
     storage: UploadStorage,
     file_id: str,
@@ -291,32 +323,16 @@ def create_manifest_for_file(
         original_rows = list(reader)
         headers = list(reader.fieldnames or [])
 
+    columns_with_changes = _get_columns_with_changes(changes, headers)
     manifest_rows: list[dict[str, Any]] = []
-    columns_with_changes = set()
-    for _row_idx, col_changes in changes.items():
-        columns_with_changes.update(col_changes.keys())
-
-    if not columns_with_changes:
-        columns_with_changes = set(headers[:2]) if len(headers) >= 2 else set(headers)
 
     for col_name in columns_with_changes:
         for row_idx, original_row in enumerate(original_rows):
             original_value = original_row.get(col_name, "")
             harmonized_value = changes.get(row_idx, {}).get(col_name, original_value)
-
-            manifest_rows.append({
-                "job_id": f"test-job-{file_id}",
-                "column_id": headers.index(col_name) if col_name in headers else 0,
-                "column_name": col_name,
-                "to_harmonize": original_value,
-                "top_harmonization": harmonized_value,
-                "ontology_id": None,
-                "top_harmonizations": [harmonized_value] if harmonized_value else [],
-                "confidence_score": 0.95 if original_value != harmonized_value else 0.99,
-                "error": None,
-                "row_indices": [row_idx],
-                "manual_overrides": [],
-            })
+            manifest_rows.append(
+                _build_manifest_row(file_id, col_name, row_idx, original_value, harmonized_value, headers)
+            )
 
     manifest_dir = storage.manifest_dir
     manifest_dir.mkdir(parents=True, exist_ok=True)

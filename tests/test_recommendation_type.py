@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from httpx import AsyncClient
 
 from src.domain.change import RecommendationType
+from src.domain.storage import UploadStorage
 from src.stage_4_review_results.router import _compute_recommendation_type
 from tests.conftest import (
     create_manifest_for_file,
@@ -150,18 +150,25 @@ class TestRecommendationTypeEnum:
         assert isinstance(RecommendationType.NO_RECOMMENDATION, str)
 
 
+def _find_changed_cell(rows: list[dict], column_key: str) -> dict | None:
+    """Find first cell where original != harmonized for given column."""
+    for row in rows:
+        for cell in row["cells"]:
+            if cell["columnKey"] == column_key and cell["originalValue"] != cell["harmonizedValue"]:
+                return cell
+    return None
+
+
 class TestStage4RecommendationTypeContract:
     """Contract tests for recommendationType in Stage 4 API responses."""
 
     async def test_rows_response_includes_recommendation_type(
         self,
         app_client: AsyncClient,
-        temp_storage: "UploadStorage",
+        temp_storage: UploadStorage,
         sample_csv_path: Path,
     ) -> None:
         """Stage 4 /rows response includes recommendationType field in cells."""
-        from src.domain.storage import UploadStorage
-
         # Given: uploaded file with manifest containing harmonization data
         file_id = await upload_file(app_client, sample_csv_path)
         changes = {0: {"primary_diagnosis": "Harmonized Value"}}
@@ -194,12 +201,10 @@ class TestStage4RecommendationTypeContract:
     async def test_recommendation_type_reflects_ai_changed(
         self,
         app_client: AsyncClient,
-        temp_storage: "UploadStorage",
+        temp_storage: UploadStorage,
         sample_csv_path: Path,
     ) -> None:
         """recommendationType is ai_changed when harmonized differs from original."""
-        from src.domain.storage import UploadStorage
-
         # Given: uploaded file with manifest where AI changed a value
         file_id = await upload_file(app_client, sample_csv_path)
         # Change original value to something different
@@ -216,25 +221,17 @@ class TestStage4RecommendationTypeContract:
         assert response.status_code == 200
         data = response.json()
 
-        # Find the primary_diagnosis cell
-        for row in data["rows"]:
-            for cell in row["cells"]:
-                if cell["columnKey"] == "primary_diagnosis":
-                    if cell["originalValue"] != cell["harmonizedValue"]:
-                        assert cell["recommendationType"] == "ai_changed"
-                        return
-
-        pytest.fail("No ai_changed cell found")
+        cell = _find_changed_cell(data["rows"], "primary_diagnosis")
+        assert cell is not None, "No ai_changed cell found"
+        assert cell["recommendationType"] == "ai_changed"
 
     async def test_recommendation_type_reflects_ai_unchanged(
         self,
         app_client: AsyncClient,
-        temp_storage: "UploadStorage",
+        temp_storage: UploadStorage,
         sample_csv_path: Path,
     ) -> None:
         """recommendationType is ai_unchanged when AI kept original value."""
-        from src.domain.storage import UploadStorage
-
         # Given: uploaded file with manifest where AI kept original value
         file_id = await upload_file(app_client, sample_csv_path)
         # No changes - AI keeps original values
