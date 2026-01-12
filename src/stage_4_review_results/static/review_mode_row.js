@@ -113,9 +113,10 @@ export const getCurrentEntries = (rows, currentUnit, batchSize) => {
  * @param {Object} batchMeta - Batch metadata with entries (rows)
  * @param {Object} pendingOverrides - Map of pending overrides
  * @param {Function} onOverrideChange - Callback for override changes
+ * @param {Function} onSave - Callback to save changes (called on blur)
  * @param {Object} [columnPVs] - Map of column_key -> PV list
  */
-export const renderEntries = (container, batchMeta, pendingOverrides, onOverrideChange, columnPVs = {}) => {
+export const renderEntries = (container, batchMeta, pendingOverrides, onOverrideChange, onSave, columnPVs = {}) => {
   container.innerHTML = '';
 
   if (!batchMeta.entries.length) {
@@ -150,6 +151,7 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
         tooltipText: null,
         pendingOverrides,
         onOverrideChange,
+        onSave,
         columnPVs,
       });
       cellsEl.append(card);

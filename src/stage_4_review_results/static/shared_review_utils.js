@@ -197,11 +197,13 @@ const _buildCardHTML = (params) => {
 /**
  * Attach input listener to card for override changes.
  * Updates the displayed harmonized value when override is entered.
+ * Saves to server on blur (focus loss) rather than on every keystroke.
  * @param {HTMLElement} card
  * @param {Object} entry
- * @param {Function} onOverrideChange
+ * @param {Function} onOverrideChange - Called on input to update pending state
+ * @param {Function} onSave - Called on blur to persist changes
  */
-const _attachInputListener = (card, entry, onOverrideChange) => {
+const _attachInputListener = (card, entry, onOverrideChange, onSave) => {
   const input = card.querySelector('.value-input');
   const recommendedEl = card.querySelector('.recommended-text');
   const aiSuggestedValue = entry.harmonizedValue ?? entry.originalValue ?? '—';
@@ -250,6 +252,12 @@ const _attachInputListener = (card, entry, onOverrideChange) => {
     );
   });
 
+  input.addEventListener('blur', () => {
+    if (onSave) {
+      onSave();
+    }
+  });
+
   // Initialize state if there's already an override value
   const initialOverride = input.value;
   if (initialOverride) {
@@ -279,8 +287,9 @@ const _addTooltip = (card, tooltipText) => {
  * @param {string[]} pvValues - Alphabetized list of valid PVs
  * @param {string} initialValue - Current override value
  * @param {Function} onOverrideChange - Callback for override changes
+ * @param {Function} [onSave] - Callback to save changes
  */
-const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange) => {
+const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange, onSave) => {
   const inputWrapper = card.querySelector('.value-input-wrapper');
   const recommendedEl = card.querySelector('.recommended-text');
   const aiSuggestedValue = entry.harmonizedValue ?? entry.originalValue ?? '—';
@@ -331,6 +340,11 @@ const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange
         value,
         entry.originalValue,
       );
+
+      // Combobox selection is an intentional action, so save immediately
+      if (onSave) {
+        onSave();
+      }
     },
   });
 
@@ -346,11 +360,12 @@ const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange
  * @param {string|null} config.tooltipText - Optional tooltip for the label
  * @param {Object} config.pendingOverrides - Map of pending overrides by row index
  * @param {Function} config.onOverrideChange - Callback when override value changes
+ * @param {Function} [config.onSave] - Callback to save changes (called on blur)
  * @param {Object} [config.columnPVs] - Optional map of column_key -> PV list
  * @returns {HTMLElement}
  */
 export const createValueCard = (config) => {
-  const { entry, labelText, tooltipText, pendingOverrides, onOverrideChange, columnPVs } = config;
+  const { entry, labelText, tooltipText, pendingOverrides, onOverrideChange, onSave, columnPVs } = config;
 
   const card = document.createElement('div');
   card.className = _buildCardClasses(entry);
@@ -386,9 +401,9 @@ export const createValueCard = (config) => {
   // Use PV combobox if PVs are available for this column, otherwise use text input
   const pvValues = columnPVs?.[entry.columnKey];
   if (entry.pvSetAvailable && pvValues?.length > 0) {
-    _attachPVCombobox(card, entry, pvValues, inputValue, onOverrideChange);
+    _attachPVCombobox(card, entry, pvValues, inputValue, onOverrideChange, onSave);
   } else {
-    _attachInputListener(card, entry, onOverrideChange);
+    _attachInputListener(card, entry, onOverrideChange, onSave);
   }
 
   _addTooltip(card, tooltipText);
