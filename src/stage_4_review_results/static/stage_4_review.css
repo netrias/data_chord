@@ -356,7 +356,7 @@
   word-break: normal;
   overflow-wrap: normal;
   white-space: normal;
-  overflow: hidden;
+  overflow: visible;  /* Allow dropdown to extend beyond card */
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 
@@ -369,10 +369,17 @@
     0 8px 16px rgba(0, 0, 0, 0.04);
 }
 
+/* When dropdown is open: disable hover transform, elevate card above siblings */
+.row-cell:has(.pv-combobox-dropdown--open) {
+  transform: none;
+  z-index: 100;  /* Elevate card above siblings so dropdown isn't behind other cards */
+  position: relative;  /* z-index needs positioning context */
+}
+
 /* Confidence states - neutral cards, color only on indicator badges */
 /* All confidence levels use the same neutral card styling */
 
-/* Card header row - spans full width, clipped by card's overflow:hidden */
+/* Card header row - needs border-radius to match card corners since overflow is visible */
 .card-header-row {
   display: flex;
   align-items: center;
@@ -380,6 +387,7 @@
   padding: var(--space-3) var(--space-4);
   background: var(--gray-50);
   border-bottom: 1px solid var(--gray-100);
+  border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
 }
 
 .confidence-indicator {
@@ -540,12 +548,16 @@
 
 /* Transformation arrow between original and harmonized */
 .transformation-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
   color: var(--azure-500);
-  font-size: 1.5rem;
+  font-size: 2.25rem;
   font-weight: 900;
   text-align: center;
   line-height: 1;
-  margin: 0.25rem 0;
+  margin: 0.5rem 0;
 }
 
 /* Value override input */
@@ -666,9 +678,375 @@
   gap: var(--space-4);
 }
 
+/* No AI recommendation styling - distinct card appearance */
+.row-cell.no-recommendation {
+  border: 2px dashed var(--gray-400);
+  background: linear-gradient(
+    135deg,
+    var(--gray-100) 0%,
+    var(--white) 100%
+  );
+  position: relative;
+}
+
+.row-cell.no-recommendation::after {
+  content: "?";
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--white);
+  background: var(--gray-500);
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+
+.no-recommendation-text {
+  color: var(--gray-500);
+  font-style: italic;
+  font-weight: 500;
+}
+
+/* PV non-conformant warning icon (next to transformation arrow) */
+.pv-warning-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  font-size: 1.1rem;
+  color: var(--warning-600);
+  cursor: help;
+  position: relative;
+}
+
+.pv-warning-icon:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 6px);
+  transform: translateX(-50%);
+  background: var(--gray-800);
+  color: var(--white);
+  padding: 0.625rem 0.875rem;
+  border-radius: var(--radius-md);
+  font-size: 0.8rem;
+  font-weight: 500;
+  line-height: 1.4;
+  width: 240px;
+  white-space: normal;
+  text-align: center;
+  z-index: 200;
+  box-shadow: var(--shadow-md);
+}
+
+.pv-warning-icon:hover::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 2px);
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-bottom-color: var(--gray-800);
+  z-index: 200;
+}
+
+/* PV warning dialog */
+.pv-warning-dialog {
+  border: none;
+  border-radius: var(--radius-2xl);
+  padding: 0;
+  background: var(--white);
+  box-shadow:
+    0 4px 6px rgba(0, 0, 0, 0.05),
+    0 10px 20px rgba(0, 0, 0, 0.1),
+    0 20px 40px rgba(0, 0, 0, 0.1);
+  max-width: 500px;
+  width: 90vw;
+  margin: auto;
+}
+
+.pv-warning-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(2px);
+}
+
+.pv-warning-dialog-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.pv-warning-dialog-header {
+  padding: var(--space-5) var(--space-6);
+  border-bottom: 1px solid var(--gray-100);
+}
+
+.pv-warning-dialog-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--warning-700);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.pv-warning-dialog-title::before {
+  content: "⚠";
+  font-size: 1.25rem;
+}
+
+.pv-warning-dialog-body {
+  padding: var(--space-5) var(--space-6);
+}
+
+.pv-warning-dialog-body p {
+  margin: 0 0 var(--space-4);
+  color: var(--gray-700);
+  line-height: 1.5;
+}
+
+.non-conformant-list {
+  max-height: 200px;
+  overflow-y: auto;
+  margin: 0;
+  padding-left: var(--space-5);
+  list-style: disc;
+}
+
+.non-conformant-list li {
+  margin: var(--space-2) 0;
+  font-size: 0.9rem;
+  color: var(--gray-700);
+}
+
+.non-conformant-list li strong {
+  color: var(--gray-900);
+}
+
+.more-count {
+  color: var(--gray-500);
+  font-style: italic;
+  margin-top: var(--space-3);
+  font-size: 0.85rem;
+}
+
+.pv-warning-dialog-footer {
+  padding: var(--space-4) var(--space-6);
+  border-top: 1px solid var(--gray-100);
+  display: flex;
+  gap: var(--space-3);
+  justify-content: flex-end;
+}
+
+.pv-warning-dialog .btn-secondary {
+  padding: 0.6rem 1.25rem;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius-lg);
+  background: var(--white);
+  color: var(--gray-700);
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.pv-warning-dialog .btn-secondary:hover {
+  background: var(--gray-50);
+  border-color: var(--gray-400);
+}
+
+.pv-warning-dialog .btn-warning {
+  padding: 0.6rem 1.25rem;
+  border: 1px solid var(--warning-600);
+  border-radius: var(--radius-lg);
+  background: var(--warning-500);
+  color: var(--white);
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.pv-warning-dialog .btn-warning:hover {
+  background: var(--warning-600);
+}
+
 /* Responsive */
 @media (max-width: 720px) {
   .value-pair {
     grid-template-columns: 1fr;
   }
+}
+
+/* ==========================================================================
+   PV Combobox - dropdown for selecting permissible values
+   ========================================================================== */
+
+.pv-combobox {
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.pv-combobox-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  padding: 0;
+  background: transparent;
+  color: var(--gray-600);
+  font-size: 0.85rem;
+  cursor: text;
+}
+
+.pv-combobox-input:focus {
+  outline: none;
+  color: var(--gray-800);
+}
+
+.pv-combobox-input::placeholder {
+  color: var(--gray-400);
+}
+
+.pv-combobox-toggle {
+  background: none;
+  border: none;
+  padding: 0 4px;
+  cursor: pointer;
+  color: var(--gray-400);
+  font-size: 0.75rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+}
+
+.pv-combobox-toggle:hover {
+  color: var(--gray-600);
+}
+
+.pv-combobox-dropdown {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: -2rem;
+  right: -2rem;
+  min-width: 380px;
+  max-height: 480px;
+  overflow-y: auto;
+  background: #ffffff;  /* Solid white, not var for guaranteed opacity */
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xl);
+  list-style: none;
+  margin: 0;
+  padding: var(--space-4) 0;
+  z-index: 1000;
+  display: none;
+  isolation: isolate;  /* Create stacking context */
+  backface-visibility: hidden;  /* Force GPU layer */
+}
+
+.pv-combobox-dropdown--open {
+  display: block;
+}
+
+.pv-combobox-option {
+  padding: 0.85rem 1.25rem;
+  cursor: pointer;
+  font-size: 1.05rem;
+  color: var(--gray-700);
+  transition: background var(--transition-fast);
+}
+
+.pv-combobox-option:hover {
+  background: var(--gray-100);
+}
+
+/* Disabled/non-conformant suggestion styling */
+.pv-combobox-option--disabled {
+  color: var(--gray-400);
+  text-decoration: line-through;
+  cursor: not-allowed;
+  font-style: italic;
+}
+
+.pv-combobox-option--disabled:hover {
+  background: transparent;
+}
+
+/* Section header for suggestions vs PV values */
+.pv-combobox-section-header {
+  padding: 0.5rem 1rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--gray-400);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--gray-50);
+  border-top: 1px solid var(--gray-100);
+  border-bottom: 1px solid var(--gray-100);
+}
+
+.pv-combobox-section-header:first-child {
+  border-top: none;
+}
+
+/* Separator between suggestions and PV list */
+.pv-combobox-separator {
+  height: 1px;
+  background: var(--gray-200);
+  margin: var(--space-3) 0;
+}
+
+/* Empty state for filtered results */
+.pv-combobox-option--empty {
+  color: var(--gray-400);
+  font-style: italic;
+  cursor: default;
+}
+
+.pv-combobox-option--empty:hover {
+  background: transparent;
+}
+
+/* Feedback message for clicking non-conformant suggestion */
+.pv-feedback-message {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--warning-700);
+  color: var(--white);
+  padding: 0.4rem 0.75rem;
+  border-radius: var(--radius-md);
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+  z-index: 200;
+  box-shadow: var(--shadow-md);
+  animation: pv-feedback-fade 2s ease-out forwards;
+}
+
+.pv-feedback-message::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: var(--warning-700);
+}
+
+@keyframes pv-feedback-fade {
+  0% { opacity: 1; }
+  70% { opacity: 1; }
+  100% { opacity: 0; }
 }

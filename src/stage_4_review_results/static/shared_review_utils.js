@@ -3,11 +3,20 @@
  * Contains common constants, helper functions, and rendering logic used by both column and row modes.
  */
 
+import { createPVCombobox } from './pv_combobox.js';
+
 /** @type {Record<string, string>} */
 export const CONFIDENCE_SYMBOLS = {
   high: '✓',
   medium: '~',
   low: '!',
+};
+
+/** @type {Record<string, string>} */
+export const RECOMMENDATION_TYPE = {
+  AI_CHANGED: 'ai_changed',
+  AI_UNCHANGED: 'ai_unchanged',
+  NO_RECOMMENDATION: 'no_recommendation',
 };
 
 
@@ -24,15 +33,30 @@ export const toExcelRowNumber = (dataRowNumber) => dataRowNumber + 1;
  * @param {string} str
  * @returns {string}
  */
-const _escapeHtml = (str) => {
-  if (typeof str !== 'string') return str;
+export const escapeHtml = (str) => {
+  if (typeof str !== 'string') return String(str);
   const escapeMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
   return str.replace(/[&<>"']/g, (c) => escapeMap[c]);
 };
 
 /**
- * Check if a row has any cells where harmonizedValue differs from originalValue.
- * Rows where all recommendations match the original input are considered unchanged.
+ * Check if a cell needs review (has changes or no AI recommendation).
+ * @param {Object} cell - Cell object
+ * @returns {boolean}
+ */
+export const cellNeedsReview = (cell) => {
+  // Include cells with no AI recommendation
+  if (cell.recommendationType === RECOMMENDATION_TYPE.NO_RECOMMENDATION) {
+    return true;
+  }
+  const original = cell.originalValue ?? '';
+  const harmonized = cell.harmonizedValue ?? '';
+  return original !== harmonized;
+};
+
+/**
+ * Check if a row has any cells that need review.
+ * Includes cells where AI changed the value OR where no AI recommendation was provided.
  * Note: whitespace is semantically significant in ontological harmonization.
  * @param {Object} row - Row object containing cells array
  * @returns {boolean}
@@ -40,9 +64,7 @@ const _escapeHtml = (str) => {
 export const rowHasChanges = (row) => {
   if (!row?.cells) return false;
   for (const cell of row.cells) {
-    const original = cell.originalValue ?? '';
-    const harmonized = cell.harmonizedValue ?? '';
-    if (original !== harmonized) {
+    if (cellNeedsReview(cell)) {
       return true;
     }
   }
@@ -50,22 +72,25 @@ export const rowHasChanges = (row) => {
 };
 
 /**
- * Get cells from a row that have changes (original !== harmonized).
+ * Get cells from a row that need review.
+ * Includes cells where AI changed value OR no AI recommendation was provided.
  * Note: whitespace is semantically significant in ontological harmonization.
  * @param {Object} row - Row object containing cells array
- * @returns {Array} Array of cells with changes
+ * @returns {Array} Array of cells needing review
  */
 export const getChangedCells = (row) => {
   if (!row?.cells) return [];
-  const changedCells = [];
+  const reviewCells = [];
   for (const cell of row.cells) {
+    // Skip cells with no original value (nothing to review)
     const original = cell.originalValue ?? '';
-    const harmonized = cell.harmonizedValue ?? '';
-    if (original && original !== harmonized) {
-      changedCells.push(cell);
+    if (!original) continue;
+
+    if (cellNeedsReview(cell)) {
+      reviewCells.push(cell);
     }
   }
-  return changedCells;
+  return reviewCells;
 };
 
 /**
@@ -94,9 +119,14 @@ export const createEmptyState = () => {
  */
 const _buildCardClasses = (entry) => {
   const classes = ['row-cell', `confidence-${entry.bucket}`];
-  if (entry.harmonizedValue === null) {
+
+  // Add recommendation type class for special states
+  if (entry.recommendationType === RECOMMENDATION_TYPE.NO_RECOMMENDATION) {
+    classes.push('no-recommendation');
+  } else if (entry.harmonizedValue === null) {
     classes.push('needs-review');
   }
+
   return classes.join(' ');
 };
 
@@ -121,12 +151,18 @@ const _getInputValue = (entry, pendingOverrides) => {
  * @returns {string}
  */
 const _buildCardHTML = (params) => {
-  const { columnLabel, labelText, confidenceSymbol, bucket, recommendedText, recommendedClass, originalValue, inputValue } = params;
-  const safeColumnLabel = _escapeHtml(columnLabel);
-  const safeLabelText = _escapeHtml(labelText);
-  const safeRecommendedText = _escapeHtml(recommendedText);
-  const safeOriginalValue = _escapeHtml(originalValue);
-  const safeInputValue = _escapeHtml(inputValue);
+  const { columnLabel, labelText, confidenceSymbol, bucket, recommendedText, recommendedClass, originalValue, inputValue, isPVNonConformant } = params;
+  const safeColumnLabel = escapeHtml(columnLabel);
+  const safeLabelText = escapeHtml(labelText);
+  const safeRecommendedText = escapeHtml(recommendedText);
+  const safeOriginalValue = escapeHtml(originalValue);
+  const safeInputValue = escapeHtml(inputValue);
+
+  // Warning icon shown next to arrow when value doesn't conform to permissible values
+  const pvWarningIcon = isPVNonConformant
+    ? '<span class="pv-warning-icon" data-tooltip="The AI suggestion is not in the permissible values list, but may help guide you to an appropriate value." aria-label="Warning: value not in permissible values">⚠</span>'
+    : '';
+
   return `
     <div class="card-header-row">
       <span class="confidence-indicator confidence-${bucket}" aria-label="${bucket} confidence">${confidenceSymbol}</span>
@@ -136,7 +172,7 @@ const _buildCardHTML = (params) => {
       <div class="value-group original">
         <p class="value-text original-text">${safeOriginalValue}</p>
       </div>
-      <div class="transformation-arrow" aria-hidden="true">↓</div>
+      <div class="transformation-arrow" aria-hidden="true">↓${pvWarningIcon}</div>
       <div class="value-group recommended">
         <p class="value-text recommended-text${recommendedClass}">${safeRecommendedText}</p>
       </div>
@@ -172,7 +208,7 @@ const _attachInputListener = (card, entry, onOverrideChange) => {
 
   const updateDisplay = (overrideValue) => {
     if (overrideValue) {
-      recommendedEl.innerHTML = `${_escapeHtml(overrideValue)} <span class="override-info-icon" data-tooltip="Original suggestion: ${_escapeHtml(aiSuggestedValue)}" data-copy-value="${_escapeHtml(aiSuggestedValue)}">ⓘ</span>`;
+      recommendedEl.innerHTML = `${escapeHtml(overrideValue)} <span class="override-info-icon" data-tooltip="Original suggestion: ${escapeHtml(aiSuggestedValue)}" data-copy-value="${escapeHtml(aiSuggestedValue)}">ⓘ</span>`;
       recommendedEl.classList.add('has-override');
 
       // Add click-to-copy handler
@@ -202,20 +238,20 @@ const _attachInputListener = (card, entry, onOverrideChange) => {
   };
 
   input.addEventListener('input', (event) => {
-    const overrideValue = event.target.value.trim();
+    const overrideValue = event.target.value;
     updateDisplay(overrideValue);
 
     onOverrideChange(
       entry.rowIndices,
       entry.columnKey,
       entry.harmonizedValue,
-      event.target.value,
+      overrideValue,
       entry.originalValue,
     );
   });
 
   // Initialize state if there's already an override value
-  const initialOverride = input.value.trim();
+  const initialOverride = input.value;
   if (initialOverride) {
     updateDisplay(initialOverride);
   }
@@ -232,8 +268,73 @@ const _addTooltip = (card, tooltipText) => {
   const rowLabelEl = card.querySelector('.entry-row-label');
   if (rowLabelEl) {
     rowLabelEl.classList.add('has-tooltip');
-    rowLabelEl.dataset.tooltip = _escapeHtml(tooltipText);
+    rowLabelEl.dataset.tooltip = escapeHtml(tooltipText);
   }
+};
+
+/**
+ * Attach PV combobox to card's override area.
+ * @param {HTMLElement} card - The card element
+ * @param {Object} entry - Entry with topSuggestions and columnKey
+ * @param {string[]} pvValues - Alphabetized list of valid PVs
+ * @param {string} initialValue - Current override value
+ * @param {Function} onOverrideChange - Callback for override changes
+ */
+const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange) => {
+  const inputWrapper = card.querySelector('.value-input-wrapper');
+  const recommendedEl = card.querySelector('.recommended-text');
+  const aiSuggestedValue = entry.harmonizedValue ?? entry.originalValue ?? '—';
+
+  if (!inputWrapper) return;
+
+  // Clear the wrapper and add PV combobox
+  inputWrapper.innerHTML = '';
+
+  const suggestions = entry.topSuggestions ?? [];
+  const combobox = createPVCombobox({
+    suggestions,
+    pvValues,
+    initialValue,
+    onChange: (value) => {
+      // Update display
+      if (value) {
+        recommendedEl.innerHTML = `${escapeHtml(value)} <span class="override-info-icon" data-tooltip="Original suggestion: ${escapeHtml(aiSuggestedValue)}" data-copy-value="${escapeHtml(aiSuggestedValue)}">ⓘ</span>`;
+        recommendedEl.classList.add('has-override');
+
+        // Add click-to-copy handler
+        const infoIcon = recommendedEl.querySelector('.override-info-icon');
+        if (infoIcon) {
+          infoIcon.addEventListener('click', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const valueToCopy = infoIcon.dataset.copyValue;
+            try {
+              await navigator.clipboard.writeText(valueToCopy);
+              const originalText = infoIcon.textContent;
+              infoIcon.textContent = '✓';
+              setTimeout(() => { infoIcon.textContent = originalText; }, 800);
+            } catch {
+              // Silently fail - clipboard API may not be available
+            }
+          });
+        }
+      } else {
+        recommendedEl.textContent = aiSuggestedValue;
+        recommendedEl.classList.remove('has-override');
+      }
+
+      // Notify parent
+      onOverrideChange(
+        entry.rowIndices,
+        entry.columnKey,
+        entry.harmonizedValue,
+        value,
+        entry.originalValue,
+      );
+    },
+  });
+
+  inputWrapper.appendChild(combobox);
 };
 
 /**
@@ -245,19 +346,30 @@ const _addTooltip = (card, tooltipText) => {
  * @param {string|null} config.tooltipText - Optional tooltip for the label
  * @param {Object} config.pendingOverrides - Map of pending overrides by row index
  * @param {Function} config.onOverrideChange - Callback when override value changes
+ * @param {Object} [config.columnPVs] - Optional map of column_key -> PV list
  * @returns {HTMLElement}
  */
 export const createValueCard = (config) => {
-  const { entry, labelText, tooltipText, pendingOverrides, onOverrideChange } = config;
+  const { entry, labelText, tooltipText, pendingOverrides, onOverrideChange, columnPVs } = config;
 
   const card = document.createElement('div');
   card.className = _buildCardClasses(entry);
 
   const columnLabel = entry.columnLabel ?? entry.columnKey ?? '';
   const inputValue = _getInputValue(entry, pendingOverrides);
-  const recommendedText = entry.harmonizedValue ?? entry.originalValue ?? '—';
-  const recommendedClass = entry.harmonizedValue === null ? ' missing' : '';
+
+  // Determine display text based on recommendation type
+  const isNoRecommendation = entry.recommendationType === RECOMMENDATION_TYPE.NO_RECOMMENDATION;
+  const recommendedText = isNoRecommendation
+    ? 'No AI recommendation'
+    : (entry.harmonizedValue ?? entry.originalValue ?? '—');
+  const recommendedClass = isNoRecommendation
+    ? ' no-recommendation-text'
+    : (entry.harmonizedValue === null ? ' missing' : '');
   const confidenceSymbol = CONFIDENCE_SYMBOLS[entry.bucket] ?? '?';
+
+  // Check if value is non-conformant (PVs available but value doesn't match)
+  const isPVNonConformant = entry.pvSetAvailable && !entry.isPVConformant;
 
   card.innerHTML = _buildCardHTML({
     columnLabel,
@@ -268,9 +380,17 @@ export const createValueCard = (config) => {
     recommendedClass,
     originalValue: entry.originalValue ?? '—',
     inputValue,
+    isPVNonConformant,
   });
 
-  _attachInputListener(card, entry, onOverrideChange);
+  // Use PV combobox if PVs are available for this column, otherwise use text input
+  const pvValues = columnPVs?.[entry.columnKey];
+  if (entry.pvSetAvailable && pvValues?.length > 0) {
+    _attachPVCombobox(card, entry, pvValues, inputValue, onOverrideChange);
+  } else {
+    _attachInputListener(card, entry, onOverrideChange);
+  }
+
   _addTooltip(card, tooltipText);
 
   return card;

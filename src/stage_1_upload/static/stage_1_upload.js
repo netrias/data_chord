@@ -232,14 +232,14 @@ const _analyzeDataset = async () => {
     if (payload.mapping_service_available === false) {
       throw new Error(CREDENTIAL_ERROR_MESSAGE);
     }
-    _setStatus('Columns analyzed. Redirecting…', 'success');
+    // Keep overlay visible during navigation - browser will replace the page
     _navigateToStageTwo(state.uploaded.file_id, config.targetSchema, payload);
   } catch (error) {
     console.error(error);
     _setStatus(error.message, 'error');
     _setAnalyzeButtonVisible(true);
     _showDropzoneSummary(state.file, 'Uploaded');
-  } finally {
+    // Only hide overlay and reset state on error
     state.isAnalyzing = false;
     if (analyzeOverlay) analyzeOverlay.classList.add('hidden');
   }

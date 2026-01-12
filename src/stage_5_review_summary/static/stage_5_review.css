@@ -268,3 +268,55 @@
   color: var(--gray-400);
   padding: 0 var(--space-2);
 }
+
+/* Non-conformant warning banner */
+.non-conformant-banner {
+  margin-bottom: var(--space-6);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--warning-300);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, var(--warning-50) 0%, var(--white) 100%);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.non-conformant-banner__icon {
+  font-size: 1.25rem;
+  color: var(--warning-600);
+  flex-shrink: 0;
+}
+
+.non-conformant-banner__text {
+  margin: 0;
+  color: var(--gray-700);
+  line-height: 1.5;
+}
+
+.non-conformant-banner__count {
+  font-weight: 700;
+  color: var(--warning-700);
+}
+
+/* Non-conformant row styling in table */
+.changes-table tbody tr.non-conformant {
+  background-color: var(--warning-50);
+}
+
+.changes-table tbody tr.non-conformant:hover {
+  background-color: var(--warning-100);
+}
+
+.changes-table tbody tr.non-conformant td:last-child {
+  position: relative;
+}
+
+.changes-table tbody tr.non-conformant td:last-child::after {
+  content: "⚠";
+  position: absolute;
+  right: var(--space-3);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--warning-500);
+  font-size: 0.9rem;
+}

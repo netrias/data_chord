@@ -6,6 +6,7 @@
 
 import {
   rowHasChanges,
+  cellNeedsReview,
   createEmptyState,
   createValueCard,
   renderProgressPills,
@@ -54,10 +55,11 @@ const _getPopulatedColumnIndices = (rows) => {
 const _processRowCellForColumn = (row, colIdx, columnKey, entriesByOriginal) => {
   const cell = row.cells[colIdx];
   const originalValue = (cell?.originalValue ?? '').trim();
-  const harmonizedValue = (cell?.harmonizedValue ?? '').trim();
 
+  // Skip cells without original value (nothing to review)
   if (!originalValue) return;
-  if (originalValue === harmonizedValue) return;
+  // Skip cells that don't need review
+  if (!cellNeedsReview(cell)) return;
 
   const rowIndex = row.sourceRowNumber ?? row.rowNumber;
 
@@ -72,7 +74,11 @@ const _processRowCellForColumn = (row, colIdx, columnKey, entriesByOriginal) => 
     confidence: cell.confidence,
     bucket: cell.bucket,
     isChanged: cell.isChanged,
+    recommendationType: cell.recommendationType,
     manualOverride: cell.manualOverride,
+    isPVConformant: cell.isPVConformant,
+    pvSetAvailable: cell.pvSetAvailable,
+    topSuggestions: cell.topSuggestions ?? [],
     rowIndices: [rowIndex],
     columnKey,
   });
@@ -245,8 +251,9 @@ export const getCurrentEntries = (rows, currentUnit, entriesPerBatch = DEFAULT_E
  * @param {Object} pendingOverrides - Map of pending overrides
  * @param {Function} onOverrideChange - Callback for override changes
  * @param {number} gridSize - Grid dimension (3, 4, or 5 for 3x3, 4x4, 5x5)
+ * @param {Object} [columnPVs] - Map of column_key -> PV list
  */
-export const renderEntries = (container, batchMeta, pendingOverrides, onOverrideChange, gridSize = 5) => {
+export const renderEntries = (container, batchMeta, pendingOverrides, onOverrideChange, gridSize = 5, columnPVs = {}) => {
   container.innerHTML = '';
 
   if (!batchMeta.entries.length) {
@@ -270,6 +277,7 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
       tooltipText,
       pendingOverrides,
       onOverrideChange,
+      columnPVs,
     });
     wrapper.append(card);
   }

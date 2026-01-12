@@ -16,6 +16,7 @@ from src.domain.manifest.models import (
     ManifestRow,
     ManifestSummary,
     ManualOverride,
+    PVAdjustment,
     completeness_bucket,
     confidence_bucket,
     get_latest_override_value,
@@ -23,10 +24,7 @@ from src.domain.manifest.models import (
     is_value_changed,
 )
 from src.domain.manifest.reader import read_manifest_parquet
-from src.domain.manifest.writer import (
-    add_manual_override,
-    add_manual_overrides_batch,
-)
+from src.domain.manifest.writer import add_manual_overrides_batch
 
 __all__ = [
     "COMPLETENESS_HIGH_THRESHOLD",
@@ -39,7 +37,7 @@ __all__ = [
     "ManifestRow",
     "ManifestSummary",
     "ManualOverride",
-    "add_manual_override",
+    "PVAdjustment",
     "add_manual_overrides_batch",
     "completeness_bucket",
     "confidence_bucket",

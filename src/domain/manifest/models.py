@@ -1,9 +1,4 @@
-"""
-Define harmonization manifest data models.
-
-Core dataclasses representing the harmonization manifest parquet schema,
-including manual override tracking with audit trail.
-"""
+"""Harmonization manifest data models and parquet schema."""
 
 from __future__ import annotations
 
@@ -15,15 +10,12 @@ import pyarrow as pa
 
 
 class ConfidenceBucket(str, Enum):
-    """why: classify confidence scores into discrete UI-friendly buckets."""
-
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
 
     @property
     def label(self) -> str:
-        """why: provide human-readable label for UI display."""
         return self.value.title()
 
 
@@ -32,42 +24,35 @@ MEDIUM_CONFIDENCE_THRESHOLD: float = 0.45
 
 
 class ColumnMappingEntry(TypedDict, total=False):
-    """why: describe a single column's CDE mapping configuration.
-
-    Fields:
-        route: The routing endpoint for harmonization (e.g., "sagemaker:primary")
-        targetField: The canonical CDE field name
-        cde_id: The numeric CDE identifier
-    """
-
     route: str
     targetField: str
     cde_id: int
 
 
 class ManifestPayload(TypedDict, total=False):
-    """why: structure for CDE mapping payloads passed to harmonization.
-
-    The column_mappings dict maps source column names to their CDE configurations.
-    Uses total=False to allow flexible construction of the dict.
-    """
-
     column_mappings: dict[str, dict[str, object]]
 
 
 @dataclass(frozen=True)
 class ManualOverride:
-    """why: track user edits to harmonization values with audit trail."""
-
     user_id: str | None
     timestamp: str
     value: str
 
 
 @dataclass(frozen=True)
-class ManifestRow:
-    """why: represent a single row from the harmonization manifest parquet."""
+class PVAdjustment:
+    """Recorded when harmonized value is adjusted to conform to PV set."""
 
+    timestamp: str
+    original_harmonization: str
+    adjusted_value: str
+    source: str
+    user_id: str = "pv_adjustment"
+
+
+@dataclass(frozen=True)
+class ManifestRow:
     job_id: str
     column_id: int
     column_name: str
@@ -79,12 +64,11 @@ class ManifestRow:
     error: str | None
     row_indices: list[int]
     manual_overrides: list[ManualOverride]
+    pv_adjustment: PVAdjustment | None = None
 
 
 @dataclass(frozen=True)
 class ManifestSummary:
-    """why: aggregate manifest data for frontend consumption."""
-
     total_terms: int
     changed_terms: int
     high_confidence_count: int
@@ -94,7 +78,6 @@ class ManifestSummary:
 
 
 def confidence_bucket(score: float | None) -> ConfidenceBucket:
-    """why: classify confidence scores into UI-friendly buckets."""
     if score is None:
         return ConfidenceBucket.LOW
     if score >= HIGH_CONFIDENCE_THRESHOLD:
@@ -109,7 +92,6 @@ COMPLETENESS_MEDIUM_THRESHOLD: float = 0.5
 
 
 def completeness_bucket(non_empty: int, sample_size: int) -> ConfidenceBucket:
-    """why: classify data completeness ratio into UI-friendly buckets."""
     if sample_size == 0:
         return ConfidenceBucket.LOW
     ratio = non_empty / sample_size
@@ -121,32 +103,33 @@ def completeness_bucket(non_empty: int, sample_size: int) -> ConfidenceBucket:
 
 
 def is_value_changed(original: str | None, harmonized: str | None) -> bool:
-    """why: determine if harmonization produced a meaningfully different value.
-
-    Canonical change detection used across all stages. Returns False if:
-    - harmonized is empty/None (no recommendation made)
-    - normalized values are identical (case-insensitive, trimmed)
-    """
-    original_normalized = (original or "").strip().lower()
-    harmonized_normalized = (harmonized or "").strip().lower()
-    if not harmonized_normalized:
+    """Whitespace is semantically significant in ontological data."""
+    harmonized_str = harmonized or ""
+    if not harmonized_str.strip():
         return False
-    return original_normalized != harmonized_normalized
+    original_str = original or ""
+    return original_str != harmonized_str
 
 
 def get_latest_override_value(overrides: list[ManualOverride]) -> str | None:
-    """why: extract the most recent manual override value, if any."""
     if not overrides:
         return None
     return overrides[-1].value
 
 
 def get_manifest_schema() -> pa.Schema:
-    """why: define the canonical parquet schema for manifest files."""
     override_struct = pa.struct([
         ("user_id", pa.string()),
         ("timestamp", pa.string()),
         ("value", pa.string()),
+    ])
+
+    pv_adjustment_struct = pa.struct([
+        ("timestamp", pa.string()),
+        ("original_harmonization", pa.string()),
+        ("adjusted_value", pa.string()),
+        ("source", pa.string()),
+        ("user_id", pa.string()),
     ])
 
     return pa.schema([
@@ -161,6 +144,7 @@ def get_manifest_schema() -> pa.Schema:
         ("error", pa.string()),
         ("row_indices", pa.list_(pa.int64())),
         ("manual_overrides", pa.list_(override_struct)),
+        ("pv_adjustment", pv_adjustment_struct),
     ])
 
 
@@ -175,6 +159,7 @@ __all__ = [
     "ManifestRow",
     "ManifestSummary",
     "ManualOverride",
+    "PVAdjustment",
     "completeness_bucket",
     "confidence_bucket",
     "get_latest_override_value",

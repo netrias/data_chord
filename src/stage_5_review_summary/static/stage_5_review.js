@@ -30,6 +30,7 @@ const _state = {
   termMappings: [],
   sortColumn: null,
   sortDirection: 'asc',
+  nonConformantCount: 0,
 };
 
 const _safeNumber = (value) => {
@@ -236,10 +237,38 @@ const _createColumnCard = (col) => {
   return article;
 };
 
-const _renderSummary = (columnSummaries) => {
+const _createNonConformantBanner = (count) => {
+  const banner = document.createElement('div');
+  banner.className = 'non-conformant-banner';
+
+  const icon = document.createElement('span');
+  icon.className = 'non-conformant-banner__icon';
+  icon.textContent = '⚠';
+  icon.setAttribute('aria-hidden', 'true');
+  banner.appendChild(icon);
+
+  const text = document.createElement('p');
+  text.className = 'non-conformant-banner__text';
+  const countSpan = document.createElement('span');
+  countSpan.className = 'non-conformant-banner__count';
+  countSpan.textContent = count.toLocaleString();
+  text.appendChild(countSpan);
+  text.appendChild(document.createTextNode(
+    ` value${count === 1 ? '' : 's'} do not match permissible values for the target ontology.`
+  ));
+  banner.appendChild(text);
+
+  return banner;
+};
+
+const _renderSummary = (columnSummaries, nonConformantCount) => {
   if (!_summaryGrid) return;
 
   _summaryGrid.replaceChildren();
+
+  if (nonConformantCount > 0) {
+    _summaryGrid.appendChild(_createNonConformantBanner(nonConformantCount));
+  }
 
   const changed = columnSummaries.filter((col) => col.ai_changes > 0 || col.manual_changes > 0);
 
@@ -285,6 +314,10 @@ const _renderTableRows = (mappings) => {
 
   for (const mapping of mappings) {
     const row = document.createElement('tr');
+
+    if (mapping.is_pv_conformant === false) {
+      row.classList.add('non-conformant');
+    }
 
     const colCell = document.createElement('td');
     colCell.textContent = mapping.column;
@@ -384,7 +417,8 @@ const _fetchSummary = async () => {
     }
 
     const data = await response.json();
-    _renderSummary(data.column_summaries ?? []);
+    _state.nonConformantCount = data.non_conformant_count ?? 0;
+    _renderSummary(data.column_summaries ?? [], _state.nonConformantCount);
     _renderChangesTable(data.term_mappings ?? []);
   } catch (error) {
     console.error('Failed to fetch summary:', error);
