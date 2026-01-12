@@ -11,6 +11,7 @@ import {
   createValueCard,
   renderProgressPills,
   toExcelRowNumber,
+  cleanupCards,
 } from './shared_review_utils.js';
 
 /**
@@ -116,6 +117,7 @@ export const getCurrentEntries = (rows, currentUnit, batchSize) => {
  * @param {Object} [columnPVs] - Map of column_key -> PV list
  */
 export const renderEntries = (container, batchMeta, pendingOverrides, onOverrideChange, columnPVs = {}) => {
+  cleanupCards(container);
   container.innerHTML = '';
 
   if (!batchMeta.entries.length) {
