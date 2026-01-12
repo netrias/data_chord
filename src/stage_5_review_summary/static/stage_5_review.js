@@ -296,6 +296,107 @@ const _showEmptyMessage = (message) => {
 
 const _SORT_KEYS = ['column', 'original_value', 'final_value'];
 
+const _SOURCE_LABELS = {
+  original: 'Original Value',
+  ai: 'AI Suggestion',
+  user: 'User Override',
+  system: 'System Adjustment',
+};
+
+const _escapeHtml = (text) => {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+};
+
+const _formatTimestamp = (isoString) => {
+  if (!isoString) return null;
+  try {
+    const date = new Date(isoString);
+    if (isNaN(date.getTime())) return null;
+    return date.toLocaleString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  } catch {
+    return null;
+  }
+};
+
+const _showHistoryDialog = (mapping) => {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'history-dialog';
+
+  const history = mapping.history ?? [];
+
+  let stepsHtml = '';
+  if (history.length === 0) {
+    stepsHtml = '<p class="history-empty">No transformation history available.</p>';
+  } else {
+    for (const step of history) {
+      const safeSource = _escapeHtml(step.source);
+      const label = _SOURCE_LABELS[step.source] ?? safeSource;
+      const value = _escapeHtml(step.value);
+      const timestamp = _formatTimestamp(step.timestamp);
+      const userId = step.user_id;
+
+      const timestampHtml = timestamp
+        ? `<span class="history-step__timestamp">${timestamp}</span>`
+        : '';
+
+      const userHtml = userId
+        ? `<div class="history-step__user">${_escapeHtml(userId)}</div>`
+        : '';
+
+      stepsHtml += `
+        <div class="history-step" data-source="${safeSource}">
+          <div class="history-step__header">
+            <span class="history-step__source">${label}</span>
+            ${timestampHtml}
+          </div>
+          <div class="history-step__value">"${value}"</div>
+          ${userHtml}
+        </div>
+      `;
+    }
+  }
+
+  dialog.innerHTML = `
+    <div class="history-dialog-content">
+      <div class="history-dialog-header">
+        <h3 class="history-dialog-title">Transformation History</h3>
+        <div class="history-dialog-subtitle">${_escapeHtml(mapping.column)}</div>
+      </div>
+      <div class="history-dialog-body">
+        <div class="history-timeline">
+          ${stepsHtml}
+        </div>
+      </div>
+      <div class="history-dialog-footer">
+        <button class="btn-secondary" data-action="close">Close</button>
+      </div>
+    </div>
+  `;
+
+  dialog.querySelector('[data-action="close"]').addEventListener('click', () => {
+    dialog.close();
+    dialog.remove();
+  });
+
+  dialog.addEventListener('click', (event) => {
+    if (event.target === dialog) {
+      dialog.close();
+      dialog.remove();
+    }
+  });
+
+  document.body.appendChild(dialog);
+  dialog.showModal();
+};
+
 const _sortMappings = (mappings, column, direction) => {
   const sorted = [...mappings];
   sorted.sort((a, b) => {
@@ -314,6 +415,15 @@ const _renderTableRows = (mappings) => {
 
   for (const mapping of mappings) {
     const row = document.createElement('tr');
+    row.classList.add('clickable-row');
+    row.setAttribute('tabindex', '0');
+    row.addEventListener('click', () => _showHistoryDialog(mapping));
+    row.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        _showHistoryDialog(mapping);
+      }
+    });
 
     if (mapping.is_pv_conformant === false) {
       row.classList.add('non-conformant');
@@ -328,7 +438,19 @@ const _renderTableRows = (mappings) => {
     row.appendChild(origCell);
 
     const finalCell = document.createElement('td');
-    finalCell.textContent = mapping.final_value;
+
+    if (mapping.is_pv_conformant === false) {
+      const warningIcon = document.createElement('span');
+      warningIcon.className = 'pv-warning-icon';
+      warningIcon.textContent = '⚠';
+      warningIcon.dataset.tooltip = 'This value is not in the permissible values list for this field.';
+      warningIcon.setAttribute('aria-label', 'Warning: value not in permissible values');
+      finalCell.appendChild(warningIcon);
+    }
+
+    const textNode = document.createTextNode(mapping.final_value);
+    finalCell.appendChild(textNode);
+
     row.appendChild(finalCell);
 
     _changesTableBody.appendChild(row);

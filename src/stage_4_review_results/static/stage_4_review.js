@@ -56,14 +56,6 @@ const settingsModal = document.getElementById('settingsModal');
 const settingsCloseButton = document.getElementById('settingsCloseButton');
 
 /**
- * Debounce delay for auto-save in milliseconds.
- * 500ms balances responsive feel (user sees saves happen quickly) with
- * avoiding excessive server requests during rapid typing.
- * @type {number}
- */
-const SAVE_DEBOUNCE_MS = 500;
-
-/**
  * Batch size options for column mode.
  * Values represent grid dimension (e.g., 3 = 3x3 = 9 entries per batch).
  * @type {Array<{value: number, label: string}>}
@@ -102,7 +94,6 @@ const state = {
   sortMode: 'original',
   reviewMode: 'column',
   pendingOverrides: {},
-  saveDebounceTimer: null,
 
   columnMode: {
     currentUnit: 1,
@@ -257,23 +248,6 @@ const saveOverrides = async () => {
   }
 };
 
-/* why: debounce saves to avoid excessive server requests during rapid edits. */
-const _debouncedSave = () => {
-  if (state.saveDebounceTimer) {
-    clearTimeout(state.saveDebounceTimer);
-  }
-  state.saveDebounceTimer = setTimeout(saveOverrides, SAVE_DEBOUNCE_MS);
-};
-
-/* why: flush pending saves immediately on navigation or explicit save triggers. */
-const _saveOverridesImmediate = () => {
-  if (state.saveDebounceTimer) {
-    clearTimeout(state.saveDebounceTimer);
-    state.saveDebounceTimer = null;
-  }
-  saveOverrides();
-};
-
 /**
  * Record an override for multiple row indices sharing the same original value.
  * @param {number[]} rowIndices - Array of row indices
@@ -301,7 +275,6 @@ const recordOverrideForRows = (rowIndices, columnKey, aiValue, humanValue, origi
       }
     }
   }
-  _debouncedSave();
 };
 
 /* Notification toasts removed - visual clutter reduction */
@@ -373,9 +346,9 @@ const renderEntries = (batchMeta) => {
 
   if (state.reviewMode === 'column') {
     const gridSize = state.columnMode.batchSize;
-    renderColumnEntries(reviewTable, batchMeta, state.pendingOverrides, recordOverrideForRows, gridSize, state.columnPVs);
+    renderColumnEntries(reviewTable, batchMeta, state.pendingOverrides, recordOverrideForRows, saveOverrides, gridSize, state.columnPVs);
   } else {
-    renderRowEntries(reviewTable, batchMeta, state.pendingOverrides, recordOverrideForRows, state.columnPVs);
+    renderRowEntries(reviewTable, batchMeta, state.pendingOverrides, recordOverrideForRows, saveOverrides, state.columnPVs);
   }
 };
 
@@ -472,7 +445,7 @@ const handleReviewModeChange = () => {
     modeState.currentUnit = 1;
   }
 
-  _saveOverridesImmediate();
+  saveOverrides();
   render();
 };
 
@@ -487,7 +460,7 @@ const handleBatchSizeChange = () => {
 
   modeState.batchSize = newSize;
   modeState.currentUnit = 1;
-  _saveOverridesImmediate();
+  saveOverrides();
   render();
 };
 
@@ -500,7 +473,7 @@ const attachEventListeners = () => {
       state.sortMode = sortModeSelect.value;
       /* Note: Sorting is persisted but not yet implemented in data processing.
          Progress is preserved since changing sort order doesn't invalidate reviews. */
-      _saveOverridesImmediate();
+      saveOverrides();
       render();
     });
   }
@@ -694,11 +667,9 @@ const init = async () => {
 
   attachEventListeners();
 
-  /* Flush pending saves on page unload */
+  /* Save any pending overrides on page unload */
   window.addEventListener('beforeunload', () => {
-    if (state.saveDebounceTimer) {
-      clearTimeout(state.saveDebounceTimer);
-      state.saveDebounceTimer = null;
+    if (Object.keys(state.pendingOverrides).length > 0) {
       navigator.sendBeacon(
         '/stage-4/overrides',
         new Blob([JSON.stringify(_buildSavePayload())], { type: 'application/json' }),

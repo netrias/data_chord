@@ -63,11 +63,19 @@ class ColumnSummary(BaseModel):
     unchanged: int
 
 
+class TransformationStep(BaseModel):
+    value: str
+    source: str  # "original", "ai", "user", "system"
+    timestamp: str | None = None
+    user_id: str | None = None
+
+
 class TermMapping(BaseModel):
     column: str
     original_value: str
     final_value: str
     is_pv_conformant: bool = True
+    history: list[TransformationStep] = []
 
 
 class StageFiveSummaryResponse(BaseModel):
@@ -239,12 +247,62 @@ def _get_final_value(row: ManifestRow) -> str:
     return latest_override if latest_override is not None else row.top_harmonization
 
 
+def _build_history(row: ManifestRow) -> list[TransformationStep]:
+    """Build chronological transformation history from manifest row.
+
+    Consecutive overrides with the same value are collapsed to show
+    only unique transformation steps.
+    """
+    steps: list[TransformationStep] = []
+
+    steps.append(TransformationStep(value=row.to_harmonize, source="original"))
+
+    if row.top_harmonization != row.to_harmonize:
+        steps.append(TransformationStep(value=row.top_harmonization, source="ai"))
+
+    last_override_value: str | None = None
+    for override in row.manual_overrides:
+        if override.value == last_override_value:
+            continue
+        last_override_value = override.value
+        steps.append(
+            TransformationStep(
+                value=override.value,
+                source="user",
+                timestamp=override.timestamp,
+                user_id=override.user_id,
+            )
+        )
+
+    if row.pv_adjustment is not None:
+        steps.append(
+            TransformationStep(
+                value=row.pv_adjustment.adjusted_value,
+                source="system",
+                timestamp=row.pv_adjustment.timestamp,
+                user_id=row.pv_adjustment.user_id,
+            )
+        )
+
+    return steps
+
+
+class _MappingInfo:
+    """Internal container for tracking unique mappings with history."""
+
+    __slots__ = ("is_conformant", "history")
+
+    def __init__(self, is_conformant: bool, history: list[TransformationStep]) -> None:
+        self.is_conformant = is_conformant
+        self.history = history
+
+
 def _process_manifest_row(
     row: ManifestRow,
     ai_counts: dict[int, int],
     manual_counts: dict[int, int],
     unchanged_counts: dict[int, int],
-    unique_mappings: dict[tuple[str, str, str], bool],
+    unique_mappings: dict[tuple[str, str, str], _MappingInfo],
     cache: SessionCache,
 ) -> None:
     col_id = row.column_id
@@ -253,10 +311,10 @@ def _process_manifest_row(
     match change_type:
         case ChangeType.AI_HARMONIZED:
             ai_counts[col_id] += 1
-            _track_mapping(unique_mappings, row.column_name, row.to_harmonize, _get_final_value(row), cache)
+            _track_mapping(unique_mappings, row, cache)
         case ChangeType.MANUAL_OVERRIDE:
             manual_counts[col_id] += 1
-            _track_mapping(unique_mappings, row.column_name, row.to_harmonize, _get_final_value(row), cache)
+            _track_mapping(unique_mappings, row, cache)
         case ChangeType.UNCHANGED:
             unchanged_counts[col_id] += 1
 
@@ -268,7 +326,7 @@ def _build_summary_from_manifest(summary: ManifestSummary, file_id: str) -> Stag
     unchanged_counts: dict[int, int] = defaultdict(int)
     distinct_terms: dict[int, int] = defaultdict(int)
     column_names: dict[int, str] = {}
-    unique_mappings: dict[tuple[str, str, str], bool] = {}
+    unique_mappings: dict[tuple[str, str, str], _MappingInfo] = {}
 
     for row in summary.rows:
         distinct_terms[row.column_id] += 1
@@ -278,8 +336,14 @@ def _build_summary_from_manifest(summary: ManifestSummary, file_id: str) -> Stag
     column_ids = sorted(distinct_terms.keys())
     sorted_mappings = sorted(unique_mappings.items(), key=lambda x: x[0])
     term_mappings = [
-        TermMapping(column=col, original_value=orig, final_value=final, is_pv_conformant=is_conformant)
-        for (col, orig, final), is_conformant in sorted_mappings
+        TermMapping(
+            column=col,
+            original_value=orig,
+            final_value=final,
+            is_pv_conformant=info.is_conformant,
+            history=info.history,
+        )
+        for (col, orig, final), info in sorted_mappings
     ]
 
     return StageFiveSummaryResponse(
@@ -294,21 +358,21 @@ def _build_summary_from_manifest(summary: ManifestSummary, file_id: str) -> Stag
             for col_id in column_ids
         ],
         term_mappings=term_mappings,
-        non_conformant_count=sum(1 for v in unique_mappings.values() if not v),
+        non_conformant_count=sum(1 for info in unique_mappings.values() if not info.is_conformant),
     )
 
 
 def _track_mapping(
-    mappings: dict[tuple[str, str, str], bool],
-    column: str,
-    original: str,
-    final: str,
+    mappings: dict[tuple[str, str, str], _MappingInfo],
+    row: ManifestRow,
     cache: SessionCache,
 ) -> None:
     """Deduplicates by (column, original, final) so we check conformance once per unique mapping."""
-    key = (column, original, final)
+    final = _get_final_value(row)
+    key = (row.column_name, row.to_harmonize, final)
     if key in mappings:
         return
-    pv_set = cache.get_pvs_for_column(column)
+    pv_set = cache.get_pvs_for_column(row.column_name)
     is_conformant = check_value_conformance(final, pv_set)
-    mappings[key] = is_conformant
+    history = _build_history(row)
+    mappings[key] = _MappingInfo(is_conformant, history)
