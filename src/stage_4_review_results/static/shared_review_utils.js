@@ -19,6 +19,62 @@ export const RECOMMENDATION_TYPE = {
   NO_RECOMMENDATION: 'no_recommendation',
 };
 
+/** @type {Record<string, string>} */
+export const SORT_MODE = {
+  ORIGINAL: 'original',
+  CONFIDENCE_ASC: 'confidence-asc',
+  CONFIDENCE_DESC: 'confidence-desc',
+};
+
+/**
+ * Numeric sort key for confidence buckets.
+ * Lower values = lower confidence (sorted first in ascending order).
+ * @type {Record<string, number>}
+ */
+const CONFIDENCE_SORT_KEY = {
+  low: 1,
+  medium: 2,
+  high: 3,
+};
+
+/**
+ * Sort entries by confidence level.
+ * @param {Array} entries - Array of entry objects with `confidence` (number) or `bucket` (string)
+ * @param {string} sortMode - One of 'original', 'confidence-asc', 'confidence-desc'
+ * @returns {Array} Sorted array (new array, original not mutated)
+ */
+export const sortEntriesByConfidence = (entries, sortMode) => {
+  if (sortMode === SORT_MODE.ORIGINAL || !sortMode) {
+    return entries;
+  }
+
+  const sorted = [...entries];
+  const ascending = sortMode === SORT_MODE.CONFIDENCE_ASC;
+
+  sorted.sort((a, b) => {
+    const aKey = CONFIDENCE_SORT_KEY[a.bucket] ?? a.confidence ?? 0;
+    const bKey = CONFIDENCE_SORT_KEY[b.bucket] ?? b.confidence ?? 0;
+    return ascending ? aKey - bKey : bKey - aKey;
+  });
+
+  return sorted;
+};
+
+/**
+ * Get the minimum confidence value from an array of cells.
+ * Used for sorting rows by their lowest-confidence cell.
+ * @param {Array} cells - Array of cell objects
+ * @returns {number} Minimum confidence sort key
+ */
+export const getMinConfidence = (cells) => {
+  if (!cells?.length) return Infinity;
+  let min = Infinity;
+  for (const cell of cells) {
+    const key = CONFIDENCE_SORT_KEY[cell.bucket] ?? cell.confidence ?? 0;
+    if (key < min) min = key;
+  }
+  return min;
+};
 
 /**
  * Convert data row number to Excel row number.

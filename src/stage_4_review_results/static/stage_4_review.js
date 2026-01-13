@@ -90,7 +90,6 @@ const DEFAULT_ROW_BATCH_SIZE = 5;
 const state = {
   rows: [],
   columnPVs: {},  // column_key -> sorted PV list (from backend)
-  /* TODO: sortMode UI exists and value persists, but sorting logic not yet implemented. */
   sortMode: 'original',
   reviewMode: 'column',
   pendingOverrides: {},
@@ -287,9 +286,9 @@ const getCurrentBatchMeta = () => {
   const modeState = getModeState();
   const batchSize = getCurrentBatchSize();
   if (state.reviewMode === 'column') {
-    return getColumnCurrentEntries(state.rows, modeState.currentUnit, batchSize);
+    return getColumnCurrentEntries(state.rows, modeState.currentUnit, batchSize, state.sortMode);
   }
-  return getRowCurrentEntries(state.rows, modeState.currentUnit, batchSize);
+  return getRowCurrentEntries(state.rows, modeState.currentUnit, batchSize, state.sortMode);
 };
 
 
@@ -471,8 +470,9 @@ const attachEventListeners = () => {
   if (sortModeSelect) {
     sortModeSelect.addEventListener('change', () => {
       state.sortMode = sortModeSelect.value;
-      /* Note: Sorting is persisted but not yet implemented in data processing.
-         Progress is preserved since changing sort order doesn't invalidate reviews. */
+      // Reset both modes to first unit since sorting affects entry order in all modes
+      state.columnMode.currentUnit = 1;
+      state.rowMode.currentUnit = 1;
       saveOverrides();
       render();
     });

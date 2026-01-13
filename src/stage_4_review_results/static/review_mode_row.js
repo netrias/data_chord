@@ -12,26 +12,41 @@ import {
   renderProgressPills,
   toExcelRowNumber,
   cleanupCards,
+  getMinConfidence,
+  SORT_MODE,
 } from './shared_review_utils.js';
 
 /**
  * Build row summaries with only rows that have changes.
  * @param {Array} rows - Array of row objects
+ * @param {string} [sortMode] - Sort mode: 'original', 'confidence-asc', 'confidence-desc'
  * @returns {Array} Array of row objects with changedCells and rowIndex added
  */
-const _buildRowsWithChanges = (rows) => {
-  return rows
+const _buildRowsWithChanges = (rows, sortMode = SORT_MODE.ORIGINAL) => {
+  const changedRows = rows
     .filter(rowHasChanges)
     .map((row) => ({
       ...row,
       changedCells: getChangedCells(row),
       rowIndex: row.sourceRowNumber ?? row.rowNumber,
     }));
+
+  if (sortMode === SORT_MODE.ORIGINAL || !sortMode) {
+    return changedRows;
+  }
+
+  const ascending = sortMode === SORT_MODE.CONFIDENCE_ASC;
+  return changedRows.sort((a, b) => {
+    const aMin = getMinConfidence(a.changedCells);
+    const bMin = getMinConfidence(b.changedCells);
+    return ascending ? aMin - bMin : bMin - aMin;
+  });
 };
 
 /**
  * Get total number of batches based on batch size.
  * Returns 0 when no changed rows exist to signal empty state to UI.
+ * Sorting doesn't affect total count, only order within batches.
  * @param {Array} rows - Array of row objects
  * @param {number} batchSize - Number of rows per batch
  * @returns {number}
@@ -46,10 +61,11 @@ export const getTotalUnits = (rows, batchSize) => {
  * Get batch summaries for progress display.
  * @param {Array} rows - Array of row objects
  * @param {number} batchSize - Number of rows per batch
+ * @param {string} [sortMode] - Sort mode: 'original', 'confidence-asc', 'confidence-desc'
  * @returns {Array} Array of summary objects for each batch
  */
-const getBatchSummaries = (rows, batchSize) => {
-  const changedRows = _buildRowsWithChanges(rows);
+const getBatchSummaries = (rows, batchSize, sortMode = SORT_MODE.ORIGINAL) => {
+  const changedRows = _buildRowsWithChanges(rows, sortMode);
   const summaries = [];
 
   if (!changedRows.length) {
@@ -82,10 +98,11 @@ const getBatchSummaries = (rows, batchSize) => {
  * @param {Array} rows - Array of row objects
  * @param {number} currentUnit - Current batch index (1-based)
  * @param {number} batchSize - Number of rows per batch
+ * @param {string} [sortMode] - Sort mode: 'original', 'confidence-asc', 'confidence-desc'
  * @returns {Object} Batch metadata with entries array
  */
-export const getCurrentEntries = (rows, currentUnit, batchSize) => {
-  const summaries = getBatchSummaries(rows, batchSize);
+export const getCurrentEntries = (rows, currentUnit, batchSize, sortMode = SORT_MODE.ORIGINAL) => {
+  const summaries = getBatchSummaries(rows, batchSize, sortMode);
   const totalUnits = summaries.length;
   const safeUnit = Math.min(Math.max(currentUnit, 1), totalUnits);
   const summary = summaries[safeUnit - 1];
