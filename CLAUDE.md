@@ -72,6 +72,21 @@ See user CLAUDE.md for full function comment guidelines. Project-specific exampl
 
 ## Domain Rules
 
-### Whitespace is Semantically Significant
+### All Character Differences Are Semantically Significant
 
-In ontological data harmonization, whitespace differences matter. Values like `"Lung Cancer"` vs `"Lung Cancer "` (trailing space) or `"Lung  Cancer"` (double space) may map to different ontology terms or indicate data quality issues. Do not trim or normalize whitespace when comparing original vs harmonized values.
+**This is the core value proposition of the application.** In ontological data harmonization, the exact character sequence matters for mapping to ontology terms. Never normalize, trim, or perform case-insensitive comparisons when checking value conformance.
+
+**Semantically significant differences include:**
+- **Case**: `"Lung Cancer"` vs `"lung cancer"` are different values
+- **Whitespace**: `"Lung Cancer"` vs `"Lung Cancer "` (trailing space) vs `"Lung  Cancer"` (double space)
+- **Punctuation**: `"Lung-Cancer"` vs `"Lung Cancer"` vs `"Lung, Cancer"`
+- **Diacritics**: `"café"` vs `"cafe"`
+
+**Implementation requirements:**
+- Use strict equality (`===` in JS, `==` in Python) for value comparisons
+- Use `Set.has()` (JS) or `in frozenset` (Python) for PV conformance checks - both are case-sensitive
+- Never use `.toLowerCase()`, `.upper()`, `.strip()`, or similar normalization when checking conformance
+- The only exception is UI search/filtering within dropdowns, where case-insensitive matching improves UX
+
+**Why this matters:**
+A value like `"Lobular and ductal carcinoma"` is NOT the same as the PV `"Lobular And Ductal Carcinoma"`. If the user reverts to the original (lowercase) value, it MUST show as non-conformant with a warning icon, because the ontology requires the exact canonical form.

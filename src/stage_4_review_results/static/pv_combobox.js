@@ -40,12 +40,12 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'pv-combobox-input';
-  input.value = initialValue || '';
+  // Input stays empty - card display shows the current value, input is just for searching/selecting
 
   const toggleBtn = document.createElement('button');
   toggleBtn.type = 'button';
   toggleBtn.className = 'pv-combobox-toggle';
-  toggleBtn.innerHTML = '&#9662;';
+  toggleBtn.textContent = '\u25BE';
   toggleBtn.tabIndex = -1;
 
   const dropdown = document.createElement('ul');
@@ -84,7 +84,9 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange
 
   /** Helper to select a value. */
   const selectValue = (value) => {
-    input.value = value;
+    // Clear input after selection - card display shows the override value
+    input.value = '';
+    input.placeholder = '';
     committedValue = value;
     dropdown.classList.remove('pv-combobox-dropdown--open');
     onChange(value);
@@ -219,10 +221,9 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange
 
   /** Open the dropdown (builds options lazily on first open). */
   const openDropdown = () => {
-    if (committedValue) {
-      input.placeholder = committedValue;
-      input.value = '';
-    }
+    // Input stays empty - card display shows the current override value
+    input.value = '';
+    input.placeholder = '';
 
     // Position dropdown in viewport
     positionDropdown();
@@ -241,6 +242,8 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange
     // Use double-rAF to ensure dropdown background is painted before building options
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
+        // Guard against operating on orphaned DOM nodes
+        if (!wrapper.isConnected) return;
         buildOptions();
         dropdown.style.minHeight = '';
         filterOptions('');
@@ -284,18 +287,18 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange
       const typedValue = input.value;
       const typedLower = typedValue.toLowerCase();
 
-      // Case-insensitive match against PV set
+      // Case-insensitive match for UX (per CLAUDE.md exception for dropdown search/filtering).
+      // This helps users who type "lung cancer" find "Lung Cancer" without exact case.
+      // The matched canonical PV is committed, preserving domain conformance.
       const matchedPV = pvValues.find((pv) => pv.toLowerCase() === typedLower);
 
       if (matchedPV && matchedPV !== committedValue) {
         committedValue = matchedPV;
-        input.value = matchedPV;
-        input.placeholder = '';
         onChange(matchedPV);
-      } else {
-        input.value = committedValue;
-        input.placeholder = '';
       }
+      // Always clear input after blur - card display shows the override value
+      input.value = '';
+      input.placeholder = '';
     }, BLUR_DELAY_MS);
   });
 

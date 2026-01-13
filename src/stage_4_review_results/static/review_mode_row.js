@@ -20,14 +20,15 @@ import {
  * Build row summaries with only rows that have changes.
  * @param {Array} rows - Array of row objects
  * @param {string} [sortMode] - Sort mode: 'original', 'confidence-asc', 'confidence-desc'
+ * @param {Object} [filterOptions] - Filter options passed to rowHasChanges/getChangedCells
  * @returns {Array} Array of row objects with changedCells and rowIndex added
  */
-const _buildRowsWithChanges = (rows, sortMode = SORT_MODE.ORIGINAL) => {
+const _buildRowsWithChanges = (rows, sortMode = SORT_MODE.ORIGINAL, filterOptions = {}) => {
   const changedRows = rows
-    .filter(rowHasChanges)
+    .filter((row) => rowHasChanges(row, filterOptions))
     .map((row) => ({
       ...row,
-      changedCells: getChangedCells(row),
+      changedCells: getChangedCells(row, filterOptions),
       rowIndex: row.sourceRowNumber ?? row.rowNumber,
     }));
 
@@ -49,10 +50,11 @@ const _buildRowsWithChanges = (rows, sortMode = SORT_MODE.ORIGINAL) => {
  * Sorting doesn't affect total count, only order within batches.
  * @param {Array} rows - Array of row objects
  * @param {number} batchSize - Number of rows per batch
+ * @param {Object} [filterOptions] - Filter options passed to _buildRowsWithChanges
  * @returns {number}
  */
-export const getTotalUnits = (rows, batchSize) => {
-  const changedRows = _buildRowsWithChanges(rows);
+export const getTotalUnits = (rows, batchSize, filterOptions = {}) => {
+  const changedRows = _buildRowsWithChanges(rows, SORT_MODE.ORIGINAL, filterOptions);
   if (!changedRows.length) return 0;
   return Math.ceil(changedRows.length / batchSize);
 };
@@ -62,10 +64,11 @@ export const getTotalUnits = (rows, batchSize) => {
  * @param {Array} rows - Array of row objects
  * @param {number} batchSize - Number of rows per batch
  * @param {string} [sortMode] - Sort mode: 'original', 'confidence-asc', 'confidence-desc'
+ * @param {Object} [filterOptions] - Filter options passed to _buildRowsWithChanges
  * @returns {Array} Array of summary objects for each batch
  */
-const getBatchSummaries = (rows, batchSize, sortMode = SORT_MODE.ORIGINAL) => {
-  const changedRows = _buildRowsWithChanges(rows, sortMode);
+const getBatchSummaries = (rows, batchSize, sortMode = SORT_MODE.ORIGINAL, filterOptions = {}) => {
+  const changedRows = _buildRowsWithChanges(rows, sortMode, filterOptions);
   const summaries = [];
 
   if (!changedRows.length) {
@@ -99,10 +102,11 @@ const getBatchSummaries = (rows, batchSize, sortMode = SORT_MODE.ORIGINAL) => {
  * @param {number} currentUnit - Current batch index (1-based)
  * @param {number} batchSize - Number of rows per batch
  * @param {string} [sortMode] - Sort mode: 'original', 'confidence-asc', 'confidence-desc'
+ * @param {Object} [filterOptions] - Filter options passed to getBatchSummaries
  * @returns {Object} Batch metadata with entries array
  */
-export const getCurrentEntries = (rows, currentUnit, batchSize, sortMode = SORT_MODE.ORIGINAL) => {
-  const summaries = getBatchSummaries(rows, batchSize, sortMode);
+export const getCurrentEntries = (rows, currentUnit, batchSize, sortMode = SORT_MODE.ORIGINAL, filterOptions = {}) => {
+  const summaries = getBatchSummaries(rows, batchSize, sortMode, filterOptions);
   const totalUnits = summaries.length;
   const safeUnit = Math.min(Math.max(currentUnit, 1), totalUnits);
   const summary = summaries[safeUnit - 1];
