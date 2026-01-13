@@ -54,6 +54,7 @@ const batchProgressList = document.getElementById('batchProgressList');
 const settingsButton = document.getElementById('settingsButton');
 const settingsModal = document.getElementById('settingsModal');
 const settingsCloseButton = document.getElementById('settingsCloseButton');
+const hideCaseOnlyChangesCheckbox = document.getElementById('hideCaseOnlyChanges');
 
 /**
  * Batch size options for column mode.
@@ -93,6 +94,7 @@ const state = {
   sortMode: 'original',
   reviewMode: 'column',
   pendingOverrides: {},
+  hideCaseOnlyChanges: true,  // Filter: hide entries where only casing differs
 
   columnMode: {
     currentUnit: 1,
@@ -220,6 +222,7 @@ const _buildSavePayload = () => ({
   review_state: {
     review_mode: state.reviewMode,
     sort_mode: state.sortMode,
+    hide_case_only_changes: state.hideCaseOnlyChanges,
     column_mode: _serializeModeState(state.columnMode),
     row_mode: _serializeModeState(state.rowMode),
   },
@@ -261,10 +264,10 @@ const recordOverrideForRows = (rowIndices, columnKey, aiValue, humanValue, origi
     if (!state.pendingOverrides[rowKey]) {
       state.pendingOverrides[rowKey] = {};
     }
-    if (humanValue && humanValue.trim()) {
+    if (humanValue) {
       state.pendingOverrides[rowKey][columnKey] = {
         ai_value: aiValue,
-        human_value: humanValue.trim(),
+        human_value: humanValue,
         original_value: originalValue,
       };
     } else {
@@ -279,16 +282,25 @@ const recordOverrideForRows = (rowIndices, columnKey, aiValue, humanValue, origi
 /* Notification toasts removed - visual clutter reduction */
 
 /**
+ * Build filter options object from current state.
+ * @returns {Object}
+ */
+const _buildFilterOptions = () => ({
+  hideCaseOnlyChanges: state.hideCaseOnlyChanges,
+});
+
+/**
  * Get batch metadata from the active mode module.
  * @returns {Object}
  */
 const getCurrentBatchMeta = () => {
   const modeState = getModeState();
   const batchSize = getCurrentBatchSize();
+  const filterOptions = _buildFilterOptions();
   if (state.reviewMode === 'column') {
-    return getColumnCurrentEntries(state.rows, modeState.currentUnit, batchSize, state.sortMode);
+    return getColumnCurrentEntries(state.rows, modeState.currentUnit, batchSize, state.sortMode, filterOptions);
   }
-  return getRowCurrentEntries(state.rows, modeState.currentUnit, batchSize, state.sortMode);
+  return getRowCurrentEntries(state.rows, modeState.currentUnit, batchSize, state.sortMode, filterOptions);
 };
 
 
@@ -298,10 +310,11 @@ const getCurrentBatchMeta = () => {
  */
 const getTotalUnits = () => {
   const batchSize = getCurrentBatchSize();
+  const filterOptions = _buildFilterOptions();
   if (state.reviewMode === 'column') {
-    return getColumnTotalUnits(state.rows, batchSize);
+    return getColumnTotalUnits(state.rows, batchSize, filterOptions);
   }
-  return getRowTotalUnits(state.rows, batchSize);
+  return getRowTotalUnits(state.rows, batchSize, filterOptions);
 };
 
 /**
@@ -345,9 +358,9 @@ const renderEntries = (batchMeta) => {
 
   if (state.reviewMode === 'column') {
     const gridSize = state.columnMode.batchSize;
-    renderColumnEntries(reviewTable, batchMeta, state.pendingOverrides, recordOverrideForRows, saveOverrides, gridSize, state.columnPVs);
+    renderColumnEntries(reviewTable, batchMeta, state.pendingOverrides, recordOverrideForRows, gridSize, state.columnPVs);
   } else {
-    renderRowEntries(reviewTable, batchMeta, state.pendingOverrides, recordOverrideForRows, saveOverrides, state.columnPVs);
+    renderRowEntries(reviewTable, batchMeta, state.pendingOverrides, recordOverrideForRows, state.columnPVs);
   }
 };
 
@@ -512,6 +525,17 @@ const attachEventListeners = () => {
     });
   }
 
+  if (hideCaseOnlyChangesCheckbox) {
+    hideCaseOnlyChangesCheckbox.addEventListener('change', () => {
+      state.hideCaseOnlyChanges = hideCaseOnlyChangesCheckbox.checked;
+      // Reset to first unit since filtered entry count may change
+      state.columnMode.currentUnit = 1;
+      state.rowMode.currentUnit = 1;
+      saveOverrides();
+      render();
+    });
+  }
+
   initNavigationEvents();
 };
 
@@ -531,6 +555,8 @@ const loadStateFromDisk = async () => {
 
   state.reviewMode = reviewState.review_mode || 'column';
   state.sortMode = reviewState.sort_mode || 'original';
+  // Default to true if not specified (checked by default)
+  state.hideCaseOnlyChanges = reviewState.hide_case_only_changes ?? true;
 
   const columnModeState = reviewState.column_mode || {};
   state.columnMode.currentUnit = columnModeState.current_unit || 1;
@@ -663,6 +689,9 @@ const init = async () => {
   if (reviewModeSelect) {
     reviewModeSelect.value = state.reviewMode;
   }
+  if (hideCaseOnlyChangesCheckbox) {
+    hideCaseOnlyChangesCheckbox.checked = state.hideCaseOnlyChanges;
+  }
   populateBatchSizeOptions();
 
   attachEventListeners();
@@ -687,14 +716,15 @@ const init = async () => {
  * Prevents out-of-bounds navigation when data changed between sessions.
  */
 const _clampCurrentUnitsToValidRange = () => {
+  const filterOptions = _buildFilterOptions();
   for (const mode of ['column', 'row']) {
     const modeState = mode === 'column' ? state.columnMode : state.rowMode;
     const batchSize = mode === 'column'
       ? modeState.batchSize * modeState.batchSize
       : modeState.batchSize;
     const totalUnits = mode === 'column'
-      ? getColumnTotalUnits(state.rows, batchSize)
-      : getRowTotalUnits(state.rows, batchSize);
+      ? getColumnTotalUnits(state.rows, batchSize, filterOptions)
+      : getRowTotalUnits(state.rows, batchSize, filterOptions);
 
     if (totalUnits > 0 && modeState.currentUnit > totalUnits) {
       modeState.currentUnit = totalUnits;
@@ -708,6 +738,7 @@ const _clampCurrentUnitsToValidRange = () => {
 window.addEventListener('pageshow', async (event) => {
   if (event.persisted) {
     await fetchRows();
+    _clampCurrentUnitsToValidRange();
     render();
   }
 });

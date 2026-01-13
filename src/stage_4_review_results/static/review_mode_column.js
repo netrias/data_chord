@@ -54,8 +54,9 @@ const _getPopulatedColumnIndices = (rows) => {
  * @param {number} colIdx - Column index
  * @param {string} columnKey - Column key identifier
  * @param {Map} entriesByOriginal - Map to accumulate entries by original value
+ * @param {Object} [filterOptions] - Filter options passed to cellNeedsReview
  */
-const _processRowCellForColumn = (row, colIdx, columnKey, entriesByOriginal) => {
+const _processRowCellForColumn = (row, colIdx, columnKey, entriesByOriginal, filterOptions = {}) => {
   const cell = row.cells[colIdx];
   // Preserve whitespace - domain rule: whitespace is semantically significant
   const originalValue = cell?.originalValue ?? '';
@@ -63,7 +64,7 @@ const _processRowCellForColumn = (row, colIdx, columnKey, entriesByOriginal) => 
   // Skip cells without original value (nothing to review)
   if (originalValue === '') return;
   // Skip cells that don't need review
-  if (!cellNeedsReview(cell)) return;
+  if (!cellNeedsReview(cell, filterOptions)) return;
 
   const rowIndex = row.sourceRowNumber ?? row.rowNumber;
 
@@ -93,9 +94,10 @@ const _processRowCellForColumn = (row, colIdx, columnKey, entriesByOriginal) => 
  * @param {Array} changedRows - Rows that have changes
  * @param {number} colIdx - Column index
  * @param {Object} columnCell - Cell object containing column metadata
+ * @param {Object} [filterOptions] - Filter options passed to _processRowCellForColumn
  * @returns {Object|null} Column object with entries, or null if no entries
  */
-const _buildColumnEntries = (changedRows, colIdx, columnCell) => {
+const _buildColumnEntries = (changedRows, colIdx, columnCell, filterOptions = {}) => {
   if (!columnCell) return null;
 
   const columnLabel = columnCell.columnLabel;
@@ -103,7 +105,7 @@ const _buildColumnEntries = (changedRows, colIdx, columnCell) => {
   const entriesByOriginal = new Map();
 
   for (const row of changedRows) {
-    _processRowCellForColumn(row, colIdx, columnKey, entriesByOriginal);
+    _processRowCellForColumn(row, colIdx, columnKey, entriesByOriginal, filterOptions);
   }
 
   const entries = Array.from(entriesByOriginal.values());
@@ -121,10 +123,11 @@ const _buildColumnEntries = (changedRows, colIdx, columnCell) => {
  * Build column-centric data structure that groups cells by unique original value.
  * Returns columns with only entries that have changes (original !== harmonized).
  * @param {Array} rows - Array of row objects
+ * @param {Object} [filterOptions] - Filter options passed to rowHasChanges/cellNeedsReview
  * @returns {Array} Array of column objects with entries
  */
-const _buildCompactedColumns = (rows) => {
-  const changedRows = rows.filter(rowHasChanges);
+const _buildCompactedColumns = (rows, filterOptions = {}) => {
+  const changedRows = rows.filter((row) => rowHasChanges(row, filterOptions));
   if (!changedRows.length) return [];
 
   const firstRow = changedRows[0];
@@ -137,7 +140,7 @@ const _buildCompactedColumns = (rows) => {
   for (let colIdx = 0; colIdx < allColumns.length; colIdx++) {
     if (!populatedIndices.has(colIdx)) continue;
 
-    const column = _buildColumnEntries(changedRows, colIdx, allColumns[colIdx]);
+    const column = _buildColumnEntries(changedRows, colIdx, allColumns[colIdx], filterOptions);
     if (column) {
       columns.push(column);
     }
@@ -152,11 +155,12 @@ const _buildCompactedColumns = (rows) => {
  * Sorting doesn't affect total count, only order within batches.
  * @param {Array} rows - Array of row objects
  * @param {number} entriesPerBatch - Number of entries per batch
+ * @param {Object} [filterOptions] - Filter options passed to _buildCompactedColumns
  * @returns {number}
  */
-export const getTotalUnits = (rows, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH) => {
+export const getTotalUnits = (rows, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH, filterOptions = {}) => {
   const safeBatchSize = Math.max(1, entriesPerBatch);
-  const columns = _buildCompactedColumns(rows);
+  const columns = _buildCompactedColumns(rows, filterOptions);
   let total = 0;
   for (const col of columns) {
     total += Math.ceil(col.entries.length / safeBatchSize);
@@ -170,11 +174,12 @@ export const getTotalUnits = (rows, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH)
  * @param {Array} rows - Array of row objects
  * @param {number} entriesPerBatch - Number of entries per batch
  * @param {string} [sortMode] - Sort mode: 'original', 'confidence-asc', 'confidence-desc'
+ * @param {Object} [filterOptions] - Filter options passed to _buildCompactedColumns
  * @returns {Array} Array of summary objects for each unit (empty array if no data)
  */
-const getColumnSummaries = (rows, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH, sortMode = SORT_MODE.ORIGINAL) => {
+const getColumnSummaries = (rows, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH, sortMode = SORT_MODE.ORIGINAL, filterOptions = {}) => {
   const safeBatchSize = Math.max(1, entriesPerBatch);
-  const columns = _buildCompactedColumns(rows);
+  const columns = _buildCompactedColumns(rows, filterOptions);
   const summaries = [];
   let unitIndex = 0;
 
@@ -208,10 +213,11 @@ const getColumnSummaries = (rows, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH, s
  * @param {number} currentUnit - Current unit index (1-based)
  * @param {number} entriesPerBatch - Number of entries per batch
  * @param {string} [sortMode] - Sort mode: 'original', 'confidence-asc', 'confidence-desc'
+ * @param {Object} [filterOptions] - Filter options passed to getColumnSummaries
  * @returns {Object} Batch metadata with entries array
  */
-export const getCurrentEntries = (rows, currentUnit, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH, sortMode = SORT_MODE.ORIGINAL) => {
-  const summaries = getColumnSummaries(rows, entriesPerBatch, sortMode);
+export const getCurrentEntries = (rows, currentUnit, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH, sortMode = SORT_MODE.ORIGINAL, filterOptions = {}) => {
+  const summaries = getColumnSummaries(rows, entriesPerBatch, sortMode, filterOptions);
   const totalUnits = Math.max(1, summaries.length);
   const safeUnit = summaries.length > 0
     ? Math.min(Math.max(currentUnit, 1), summaries.length)

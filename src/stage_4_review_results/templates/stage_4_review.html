@@ -79,9 +79,9 @@
               <div class="control-group">
                 <label for="sortModeSelect">Sort by</label>
                 <select id="sortModeSelect">
+                  <option value="original" selected>Original order</option>
                   <option value="confidence-asc">Confidence · Lowest first</option>
                   <option value="confidence-desc">Confidence · Highest first</option>
-                  <option value="original">Original order</option>
                 </select>
               </div>
               <div class="control-group">
@@ -89,6 +89,12 @@
                 <select id="batchSizeSelect">
                   <!-- Options populated dynamically based on review mode -->
                 </select>
+              </div>
+              <div class="control-group control-group--checkbox">
+                <label class="checkbox-label">
+                  <input type="checkbox" id="hideCaseOnlyChanges" checked />
+                  <span class="checkbox-text">Hide case-only changes</span>
+                </label>
               </div>
             </div>
             <div class="settings-modal-footer">
