@@ -1,8 +1,7 @@
 """
-Read harmonization manifest parquet files.
+Parse harmonization manifests into typed structures for use across stages.
 
-Parse the parquet output from harmonization into typed structures for use
-across workflow stages.
+Encapsulates parquet deserialization and row extraction logic.
 """
 
 from __future__ import annotations
@@ -27,7 +26,6 @@ logger = logging.getLogger(__name__)
 
 
 def read_manifest_parquet(manifest_path: Path) -> ManifestSummary | None:
-    """why: load and parse the harmonization manifest into typed structures."""
     if not manifest_path.exists():
         logger.warning("Manifest file not found", extra={"path": str(manifest_path)})
         return None
@@ -42,7 +40,6 @@ def read_manifest_parquet(manifest_path: Path) -> ManifestSummary | None:
 
 
 def _parse_manifest_rows(table: pa.Table) -> list[ManifestRow]:
-    """why: convert pyarrow table rows into typed ManifestRow objects."""
     rows: list[ManifestRow] = []
     for batch in table.to_batches():
         for i in range(batch.num_rows):
@@ -69,7 +66,6 @@ def _extract_row(batch: pa.RecordBatch, index: int) -> ManifestRow:
 
 
 def _summarize_manifest(rows: list[ManifestRow]) -> ManifestSummary:
-    """why: compute aggregate metrics from manifest rows."""
     changed_count = 0
     high_count = 0
     medium_count = 0
@@ -98,7 +94,6 @@ def _summarize_manifest(rows: list[ManifestRow]) -> ManifestSummary:
 
 
 def _get_string(batch: pa.RecordBatch, column: str, index: int, default: str) -> str:
-    """why: safely extract string value from batch column."""
     if column not in batch.schema.names:
         return default
     value = batch.column(column)[index].as_py()
@@ -106,7 +101,6 @@ def _get_string(batch: pa.RecordBatch, column: str, index: int, default: str) ->
 
 
 def _get_string_nullable(batch: pa.RecordBatch, column: str, index: int) -> str | None:
-    """why: safely extract nullable string value from batch column."""
     if column not in batch.schema.names:
         return None
     value = batch.column(column)[index].as_py()
@@ -114,7 +108,6 @@ def _get_string_nullable(batch: pa.RecordBatch, column: str, index: int) -> str 
 
 
 def _get_int(batch: pa.RecordBatch, column: str, index: int, default: int) -> int:
-    """why: safely extract integer value from batch column."""
     if column not in batch.schema.names:
         return default
     value = batch.column(column)[index].as_py()
@@ -122,7 +115,6 @@ def _get_int(batch: pa.RecordBatch, column: str, index: int, default: int) -> in
 
 
 def _get_float_nullable(batch: pa.RecordBatch, column: str, index: int) -> float | None:
-    """why: safely extract nullable float value from batch column."""
     if column not in batch.schema.names:
         return None
     value = batch.column(column)[index].as_py()
@@ -130,7 +122,6 @@ def _get_float_nullable(batch: pa.RecordBatch, column: str, index: int) -> float
 
 
 def _get_string_list(batch: pa.RecordBatch, column: str, index: int) -> list[str]:
-    """why: safely extract list of strings from batch column."""
     if column not in batch.schema.names:
         return []
     value = batch.column(column)[index].as_py()
@@ -140,7 +131,6 @@ def _get_string_list(batch: pa.RecordBatch, column: str, index: int) -> list[str
 
 
 def _get_int_list(batch: pa.RecordBatch, column: str, index: int) -> list[int]:
-    """why: safely extract list of integers from batch column."""
     if column not in batch.schema.names:
         return []
     value = batch.column(column)[index].as_py()
@@ -150,7 +140,6 @@ def _get_int_list(batch: pa.RecordBatch, column: str, index: int) -> list[int]:
 
 
 def _get_manual_overrides(batch: pa.RecordBatch, column: str, index: int) -> list[ManualOverride]:
-    """why: safely extract list of ManualOverride structs from batch column."""
     if column not in batch.schema.names:
         return []
     value = batch.column(column)[index].as_py()
@@ -170,7 +159,6 @@ def _get_manual_overrides(batch: pa.RecordBatch, column: str, index: int) -> lis
 
 
 def _get_pv_adjustment(batch: pa.RecordBatch, column: str, index: int) -> PVAdjustment | None:
-    """Safely extract PVAdjustment struct from batch column."""
     if column not in batch.schema.names:
         return None
     value = batch.column(column)[index].as_py()

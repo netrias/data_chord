@@ -1,9 +1,8 @@
 """
-CDE data types for data model integration.
+Common Data Element definitions and column-to-CDE mapping types.
 
-Supports both legacy hardcoded CDEs and dynamic CDEs fetched from API.
-The legacy types (CDEField, CDE_REGISTRY, etc.) are deprecated and will be removed
-once all usages are migrated to dynamic CDEInfo-based types.
+Legacy hardcoded CDEs (CDEField, CDE_REGISTRY) coexist with dynamic CDEInfo
+until migration to API-fetched CDEs is complete.
 """
 
 from __future__ import annotations

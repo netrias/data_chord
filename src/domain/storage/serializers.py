@@ -1,4 +1,8 @@
-"""Serialization strategies for different file types."""
+"""
+Format-specific serializers for converting artifacts to/from disk storage.
+
+Decouples file format (JSON, Parquet, CSV) from storage backend logic.
+"""
 
 from __future__ import annotations
 
@@ -72,8 +76,5 @@ def get_serializer(file_type: FileType) -> Serializer:
 
 __all__ = [
     "Serializer",
-    "JSONSerializer",
-    "ParquetSerializer",
-    "RawBytesSerializer",
     "get_serializer",
 ]

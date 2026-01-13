@@ -1,5 +1,5 @@
 """
-Provide lightweight CSV profiling for the upload stage.
+Analyze CSV structure and infer column types for upload preview.
 
 Re-exports storage classes from domain for backward compatibility.
 """
@@ -43,7 +43,6 @@ __all__ = [
 
 
 def analyze_columns(csv_path: Path, max_preview_rows: int = 5) -> tuple[int, list[ColumnPreview]]:
-    """why: produce basic column summaries without heavy dependencies."""
     if not csv_path.exists():
         raise FileNotFoundError(csv_path)
 
@@ -53,7 +52,6 @@ def analyze_columns(csv_path: Path, max_preview_rows: int = 5) -> tuple[int, lis
 
 
 def _read_csv_sample(csv_path: Path, max_rows: int) -> tuple[int, list[str], list[dict[str, str]]]:
-    """why: extract headers and sample rows from CSV."""
     with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         headers = list(reader.fieldnames or [])
@@ -67,7 +65,6 @@ def _read_csv_sample(csv_path: Path, max_rows: int) -> tuple[int, list[str], lis
 
 
 def _analyze_single_column(header: str, sample_rows: list[dict[str, str]]) -> ColumnPreview:
-    """why: compute preview metrics for a single column."""
     samples = [_normalize_sample(row.get(header, "")) for row in sample_rows]
     non_empty_values = [value for value in samples if value]
     non_empty_count = len(non_empty_values)
@@ -83,7 +80,7 @@ def _analyze_single_column(header: str, sample_rows: list[dict[str, str]]) -> Co
 
 
 def _normalize_sample(value: str | None) -> str:
-    """why: make sure preview values are printable."""
+    """Truncate to 80 chars to prevent oversized UI tooltips."""
     if value is None:
         return ""
     sanitized = value.strip()
@@ -91,7 +88,6 @@ def _normalize_sample(value: str | None) -> str:
 
 
 def _infer_type(values: Iterable[str]) -> str:
-    """why: guess a helpful label for the column's dominant type."""
     cleaned = [value.replace(",", "") for value in values if value]
     if cleaned and _looks_numeric(cleaned):
         return "numeric"
@@ -103,7 +99,6 @@ def _infer_type(values: Iterable[str]) -> str:
 
 
 def _looks_numeric(values: list[str]) -> bool:
-    """why: check if every value parses as a float."""
     try:
         for value in values:
             float(value)
@@ -113,7 +108,6 @@ def _looks_numeric(values: list[str]) -> bool:
 
 
 def _looks_date(values: list[str]) -> bool:
-    """why: approximate detection for short, common date formats."""
     if not values:
         return False
     formats = ["%Y-%m-%d", "%m/%d/%Y", "%Y/%m/%d"]
@@ -121,7 +115,6 @@ def _looks_date(values: list[str]) -> bool:
 
 
 def _matches_any_date_format(value: str, formats: list[str]) -> bool:
-    """why: check if a value matches any of the given date formats."""
     for fmt in formats:
         try:
             datetime.strptime(value, fmt)
@@ -136,7 +129,6 @@ def build_cde_payload(
     headers: list[str],
     limit: int = DEFAULT_CDE_SAMPLE_LIMIT,
 ) -> dict[str, list[str]]:
-    """why: produce the JSON structure expected by the CDE API."""
     if not headers:
         return {}
 

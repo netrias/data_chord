@@ -1,4 +1,4 @@
-"""Deliver the Stage 3 harmonization experience."""
+"""HTTP routes for triggering harmonization and fetching results."""
 
 from .router import stage_three_router
 

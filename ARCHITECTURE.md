@@ -1,63 +1,114 @@
-# Riga Architecture
+# Data Chord Architecture
+
+## Overview
+
+Data Chord follows a **stage-based architecture** where each workflow stage is an independent module that communicates only through a shared domain layer. This ensures stages remain independently testable while sharing common data models and services.
 
 ## Directory Structure
 
 ```
 src/
-├── domain/                    # Core domain models and utilities (no stage dependencies)
-│   ├── __init__.py
-│   ├── manifest/              # Harmonization manifest data models and I/O
-│   │   ├── models.py          # ManifestRow, ManualOverride, ManifestSummary
-│   │   ├── reader.py          # read_manifest_parquet
-│   │   └── writer.py          # add_manual_override
-│   ├── storage.py             # Generic file storage abstraction
-│   └── ...
-├── stage_1_upload/            # File upload and metadata
-├── stage_2_mapping/           # Column mapping to CDEs
-├── stage_3_harmonize/         # Harmonization execution
-├── stage_4_review_results/    # Manual review and override UI
+├── domain/                    # Shared business logic, models, services
+│   ├── manifest/              # Harmonization manifest I/O (Parquet)
+│   ├── storage/               # File storage abstractions
+│   ├── data_model_client.py   # HTTP client for Data Model Store API
+│   ├── data_model_cache.py    # Session-scoped CDE/PV caching
+│   ├── harmonize.py           # Netrias harmonization client wrapper
+│   ├── mapping_service.py     # Column-to-CDE recommendations
+│   ├── pv_validation.py       # Permissible value validation
+│   └── change.py              # Change type enums
+├── stage_1_upload/            # File upload and column analysis
+├── stage_2_review_columns/    # Column-to-CDE mapping review
+├── stage_3_harmonize/         # Harmonization pipeline execution
+├── stage_4_review_results/    # Human review of transformations
 ├── stage_5_review_summary/    # Final summary and export
-└── assets/                    # Shared static assets
+└── shared/                    # Cross-stage templates and utilities
 ```
 
-## Dependency Rules
+## Stage Independence Rule
 
-**Stages depend on domain, never on each other.**
+**Stages depend only on `domain/`, never on each other.**
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                        domain/                          │
-│  (models, manifest, storage, constants, utilities)      │
-└─────────────────────────────────────────────────────────┘
-        ▲           ▲           ▲           ▲
-        │           │           │           │
-   stage_1     stage_2     stage_3     stage_4/5
+                    ┌─────────────────┐
+                    │     DOMAIN      │
+                    │                 │
+                    │  - models       │
+                    │  - schemas      │
+                    │  - services     │
+                    │  - storage      │
+                    └────────┬────────┘
+                             │
+         ┌───────┬───────┬───┴───┬───────┬───────┐
+         │       │       │       │       │       │
+      Stage 1  Stage 2  Stage 3  Stage 4  Stage 5
 ```
 
-This ensures:
-- **No circular dependencies** between stages
-- **Clear contracts** - shared types live in domain
-- **Testability** - domain code has no web framework dependencies
-- **Reusability** - domain logic can be used outside the web app
+This constraint is enforced by a pre-commit hook (`no-cross-stage-imports`).
 
-## Adding New Shared Code
+Benefits:
+- No circular dependencies between stages
+- Clear contracts via shared types in domain
+- Domain code has no web framework dependencies
+- Domain logic reusable outside the web app
 
-When code is used by multiple stages:
+## Data Flow
 
-1. **Ask**: Is this domain logic or stage-specific?
-2. **If domain**: Add to `src/domain/` (possibly a new submodule)
-3. **If stage-specific**: Keep in the relevant stage module
+1. **Upload** (Stage 1): CSV → `UploadStorage` → file_id
+2. **Mapping** (Stage 2): file_id → `MappingService` → column mappings (JSON)
+3. **Harmonize** (Stage 3): mappings → `HarmonizeService` → manifest (Parquet)
+4. **Review** (Stage 4): manifest + manual overrides → reviewed manifest
+5. **Export** (Stage 5): manifest → harmonized CSV + audit bundle
 
-Examples:
-- `ManifestRow` dataclass → `domain/manifest/models.py` (used by stages 3, 4, 5)
-- `StageFourCell` → `stage_4_review_results/router.py` (stage-specific response model)
-- `UploadStorage` → Could argue either way; currently in `stage_1_upload/services.py`
+## Storage Architecture
+
+Storage uses a layered abstraction:
+
+```
+UploadStorage (high-level typed API)
+       │
+       ▼
+StorageBackend + Serializer (format conversion)
+       │
+       ▼
+LocalStorageBackend (filesystem)
+```
+
+**File Types:**
+- `ORIGINAL_CSV` - User's uploaded file
+- `UPLOAD_META` - Column metadata (JSON)
+- `COLUMN_MAPPING` - Stage 2 mapping decisions (JSON)
+- `HARMONIZATION_MANIFEST` - All transformation data (Parquet)
+- `HARMONIZED_CSV` - Final export
+
+## Manifest Structure
+
+The harmonization manifest captures every transformation decision:
+
+| Field | Description |
+|-------|-------------|
+| `column_key` | Target CDE column |
+| `to_harmonize` | Original value |
+| `top_harmonization` | AI's best suggestion |
+| `confidence_score` | Model confidence (0-1) |
+| `alternatives` | Other suggestions |
+| `manual_overrides` | User corrections with timestamps |
+| `row_indices` | Source rows containing this value |
+
+## Key Design Decisions
+
+See `adr/` for architectural decision records. Summary:
+
+- **Server-side rendering** with HTMX for interactivity
+- **Parquet for manifest** - efficient columnar storage, schema evolution
+- **Graceful degradation** - missing PV data doesn't block validation
+- **Whitespace-sensitive** - whitespace differences are semantically meaningful
 
 ## Module Patterns
 
 ### Domain Submodules
 
-For complex domain concepts, use a submodule pattern:
+For complex domain concepts:
 
 ```
 domain/manifest/
@@ -67,19 +118,23 @@ domain/manifest/
 └── writer.py      # Write operations
 ```
 
-The `__init__.py` re-exports public symbols for clean imports:
-```python
-from src.domain.manifest import ManifestRow, read_manifest_parquet
-```
-
 ### Stage Modules
 
-Each stage follows a similar structure:
+Each stage follows:
 ```
 stage_N_name/
 ├── __init__.py
 ├── router.py          # FastAPI routes
-├── schemas.py         # Request/response models (if stage-specific)
 ├── templates/         # Jinja2 HTML templates
-└── static/            # CSS, JS, images
+└── static/            # CSS, JS
 ```
+
+## Technology Stack
+
+| Layer | Technology |
+|-------|------------|
+| Backend | FastAPI (Python 3.13+) |
+| Templates | Jinja2 |
+| Interactivity | HTMX |
+| Data Processing | Pandas, PyArrow |
+| Package Management | uv |

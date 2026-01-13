@@ -1,4 +1,8 @@
-"""Storage backend implementations."""
+"""
+Abstract storage interface and local filesystem implementation.
+
+Enables swapping backends (local, S3) without changing caller code.
+"""
 
 from __future__ import annotations
 
@@ -39,9 +43,12 @@ class LocalStorageBackend(StorageBackend):
         self._base_dir.mkdir(parents=True, exist_ok=True)
 
     def _path_for(self, file_id: str, file_type: FileType) -> Path:
-        """Construct path using centralized naming."""
+        """Construct path with traversal protection."""
         name = build_file_name(file_id, file_type)
-        return self._base_dir / name
+        path = (self._base_dir / name).resolve()
+        if not path.is_relative_to(self._base_dir.resolve()):
+            raise ValueError(f"Path traversal attempt detected: {file_id}")
+        return path
 
     def write(self, file_id: str, file_type: FileType, data: bytes) -> None:
         """Write raw bytes to local file."""

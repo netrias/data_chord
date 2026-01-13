@@ -1,4 +1,4 @@
-"""Provide Stage 4 review experience exports."""
+"""HTTP routes for manual override review and PV conformance checking."""
 
 from .router import stage_four_router
 

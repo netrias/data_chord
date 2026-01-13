@@ -1,8 +1,7 @@
 """
-Shared HTTP request/response schemas for cross-stage API contracts.
+Shared request/response schemas for cross-stage API contracts.
 
-These schemas define the API boundary between stages and are used by multiple
-stages for harmonization workflows.
+Used by multiple stages; stage-specific schemas belong in their respective packages.
 """
 
 from __future__ import annotations
@@ -16,8 +15,6 @@ FILE_ID_MIN_LENGTH = 8
 
 
 class HarmonizeRequest(BaseModel):
-    """why: capture data required to kick off harmonization."""
-
     file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_PATTERN)
     target_schema: str
     manual_overrides: dict[str, str] = Field(default_factory=dict)
@@ -25,16 +22,12 @@ class HarmonizeRequest(BaseModel):
 
 
 class ConfidenceBucketSchema(BaseModel):
-    """why: confidence breakdown for a column's changed terms."""
-
     id: str
     label: str
     term_count: int
 
 
 class ColumnBreakdownSchema(BaseModel):
-    """why: per-column harmonization metrics for dashboard display."""
-
     column_name: str
     label: str
     total_rows: int
@@ -47,8 +40,6 @@ class ColumnBreakdownSchema(BaseModel):
 
 
 class ManifestSummarySchema(BaseModel):
-    """why: aggregate manifest metrics for dashboard widgets."""
-
     total_terms: int
     changed_terms: int
     high_confidence_count: int
@@ -58,8 +49,6 @@ class ManifestSummarySchema(BaseModel):
 
 
 class HarmonizeResponse(BaseModel):
-    """why: provide the job metadata to the UI."""
-
     job_id: str
     status: str
     detail: str

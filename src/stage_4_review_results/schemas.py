@@ -1,8 +1,4 @@
-"""
-Data models for Stage 4 review overrides.
-
-Define schemas for persisting human review edits and batch progress state.
-"""
+"""Pydantic models for review overrides and batch progress persistence."""
 
 from __future__ import annotations
 
@@ -22,8 +18,8 @@ class CellOverrideSchema(BaseModel):
 class ReviewStateSchema(BaseModel):
     """Batch review progress state."""
 
-    completed_batches: list[int] = Field(default_factory=list)  # why: avoid shared mutable defaults across instances
-    flagged_batches: list[int] = Field(default_factory=list)  # why: avoid shared mutable defaults across instances
+    completed_batches: list[int] = Field(default_factory=list)
+    flagged_batches: list[int] = Field(default_factory=list)
     current_batch: int = 1
     sort_mode: str = "original"
     batch_size: int = 5

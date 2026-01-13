@@ -1,8 +1,7 @@
 """
-Write manual overrides back to harmonization manifest parquet files.
+Apply manual overrides and PV adjustments to harmonization manifests.
 
-Update existing parquet manifests with user-provided override values while
-preserving all original harmonization data.
+Preserves original harmonization data while appending override audit trail.
 """
 
 from __future__ import annotations
