@@ -12,6 +12,8 @@ import {
   renderProgressPills,
   toExcelRowNumber,
   cleanupCards,
+  sortEntriesByConfidence,
+  SORT_MODE,
 } from './shared_review_utils.js';
 
 /** Default number of entries per batch when not specified. */
@@ -147,6 +149,7 @@ const _buildCompactedColumns = (rows) => {
 /**
  * Get total number of navigable units (columns with batches).
  * Returns 0 when no data exists to signal empty state to UI.
+ * Sorting doesn't affect total count, only order within batches.
  * @param {Array} rows - Array of row objects
  * @param {number} entriesPerBatch - Number of entries per batch
  * @returns {number}
@@ -163,18 +166,22 @@ export const getTotalUnits = (rows, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH)
 
 /**
  * Get all columns with their batch counts for progress display.
+ * Sorting is applied before calculating batch boundaries so slicing is consistent.
  * @param {Array} rows - Array of row objects
  * @param {number} entriesPerBatch - Number of entries per batch
+ * @param {string} [sortMode] - Sort mode: 'original', 'confidence-asc', 'confidence-desc'
  * @returns {Array} Array of summary objects for each unit (empty array if no data)
  */
-const getColumnSummaries = (rows, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH) => {
+const getColumnSummaries = (rows, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH, sortMode = SORT_MODE.ORIGINAL) => {
   const safeBatchSize = Math.max(1, entriesPerBatch);
   const columns = _buildCompactedColumns(rows);
   const summaries = [];
   let unitIndex = 0;
 
   for (const col of columns) {
-    const batchCount = Math.ceil(col.entries.length / safeBatchSize);
+    // Sort entries before calculating batch boundaries
+    const sortedEntries = sortEntriesByConfidence(col.entries, sortMode);
+    const batchCount = Math.ceil(sortedEntries.length / safeBatchSize);
     for (let batch = 0; batch < batchCount; batch++) {
       summaries.push({
         unitIndex: unitIndex + 1,
@@ -183,9 +190,10 @@ const getColumnSummaries = (rows, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH) =
         columnIndex: col.columnIndex,
         batchWithinColumn: batch + 1,
         totalBatchesInColumn: batchCount,
-        entryCount: col.entries.length,
+        entryCount: sortedEntries.length,
         startEntry: batch * safeBatchSize,
-        endEntry: Math.min((batch + 1) * safeBatchSize, col.entries.length),
+        endEntry: Math.min((batch + 1) * safeBatchSize, sortedEntries.length),
+        sortedEntries, // Include sorted entries for direct access
       });
       unitIndex++;
     }
@@ -199,10 +207,11 @@ const getColumnSummaries = (rows, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH) =
  * @param {Array} rows - Array of row objects
  * @param {number} currentUnit - Current unit index (1-based)
  * @param {number} entriesPerBatch - Number of entries per batch
+ * @param {string} [sortMode] - Sort mode: 'original', 'confidence-asc', 'confidence-desc'
  * @returns {Object} Batch metadata with entries array
  */
-export const getCurrentEntries = (rows, currentUnit, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH) => {
-  const summaries = getColumnSummaries(rows, entriesPerBatch);
+export const getCurrentEntries = (rows, currentUnit, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH, sortMode = SORT_MODE.ORIGINAL) => {
+  const summaries = getColumnSummaries(rows, entriesPerBatch, sortMode);
   const totalUnits = Math.max(1, summaries.length);
   const safeUnit = summaries.length > 0
     ? Math.min(Math.max(currentUnit, 1), summaries.length)
@@ -223,15 +232,10 @@ export const getCurrentEntries = (rows, currentUnit, entriesPerBatch = DEFAULT_E
     return emptyResult;
   }
 
-  const columns = _buildCompactedColumns(rows);
-  const column = columns.find((c) => c.columnKey === summary.columnKey);
-  if (!column) {
-    return emptyResult;
-  }
-
-  const entries = column.entries.slice(summary.startEntry, summary.endEntry).map((entry) => ({
+  // Use pre-sorted entries from summary (sorted in getColumnSummaries)
+  const entries = summary.sortedEntries.slice(summary.startEntry, summary.endEntry).map((entry) => ({
     ...entry,
-    columnLabel: column.columnLabel,
+    columnLabel: summary.columnLabel,
   }));
 
   return {
