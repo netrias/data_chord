@@ -1,4 +1,8 @@
-"""File type definitions and naming utilities."""
+"""
+Semantic file types and naming conventions for stage-specific artifacts.
+
+Centralizes file naming logic and enumerates valid artifact types.
+"""
 
 from __future__ import annotations
 

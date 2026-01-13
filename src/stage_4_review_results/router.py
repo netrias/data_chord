@@ -1,4 +1,8 @@
-"""Stage 4 review and approval routes for batch harmonization review."""
+"""
+HTTP routes for reviewing harmonized results and applying manual overrides.
+
+Manages review state and coordinates manifest updates with PV validation.
+"""
 
 from __future__ import annotations
 
@@ -203,7 +207,7 @@ def _build_rows_from_manifest(
 
 
 def _build_column_pvs(columns: list[_ColumnInfo], file_id: str) -> dict[str, list[str]]:
-    """Build sorted PV lists for each column that has PVs available."""
+    """Sort PVs alphabetically for consistent UI dropdown display."""
     cache = get_session_cache(file_id)
     column_pvs: dict[str, list[str]] = {}
     for col_info in columns:
@@ -217,7 +221,7 @@ def _build_suggestions_with_conformance(
     suggestions: list[str],
     pv_set: frozenset[str] | None,
 ) -> list[SuggestionInfo]:
-    """Build suggestion list with PV conformance flags for each value."""
+    """Flag each suggestion's PV conformance for UI indicator display."""
     if not suggestions:
         return []
     return [
@@ -294,11 +298,11 @@ def _compute_recommendation_type(
     original_value: str | None,
     harmonized_value: str | None,
 ) -> RecommendationType:
-    """Whitespace is semantically significant - no stripping during comparison."""
+    """Whitespace-only values mean no useful recommendation; comparisons preserve whitespace."""
     if not harmonized_value or not harmonized_value.strip():
         return RecommendationType.NO_RECOMMENDATION
 
-    # Compare as-is (whitespace significant)
+    # Compare as-is (whitespace significant per domain rules)
     original = original_value or ""
     if original != harmonized_value:
         return RecommendationType.AI_CHANGED

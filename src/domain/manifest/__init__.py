@@ -1,8 +1,7 @@
 """
-Harmonization manifest domain module.
+Harmonization results including AI suggestions, confidence scores, and manual overrides.
 
-Provides typed data models and I/O for harmonization manifest parquet files,
-including manual override tracking with audit trail.
+Encapsulates manifest structure, reading, and writing; tracks override audit trail.
 """
 
 from src.domain.manifest.models import (

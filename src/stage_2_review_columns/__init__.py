@@ -1,4 +1,4 @@
-"""Deliver the Stage 2 column review experience."""
+"""HTTP routes for column-to-CDE mapping review."""
 
 from .router import stage_two_router
 

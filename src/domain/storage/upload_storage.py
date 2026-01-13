@@ -1,8 +1,7 @@
 """
-Persist uploaded files and expose their metadata.
+Manage uploaded file storage, metadata persistence, and manifest inventory.
 
-Handle file storage, metadata tracking, and manifest management for the
-harmonization workflow.
+Orchestrates file I/O, metadata tracking, and directory organization.
 """
 
 from __future__ import annotations
@@ -26,8 +25,6 @@ HARMONIZED_SUFFIX = ".harmonized.csv"
 
 
 class StoredMeta(TypedDict):
-    """why: describe the JSON payload that mirrors uploads on disk."""
-
     file_id: str
     original_name: str
     content_type: str
@@ -38,8 +35,6 @@ class StoredMeta(TypedDict):
 
 @dataclass(frozen=True)
 class UploadConstraints:
-    """why: capture allowed file characteristics for uploads."""
-
     allowed_suffixes: tuple[str, ...]
     allowed_content_types: tuple[str, ...]
     max_bytes: int
@@ -48,8 +43,6 @@ class UploadConstraints:
 
 @dataclass(frozen=True)
 class UploadedFileMeta:
-    """why: describe where an uploaded file lives on disk."""
-
     file_id: str
     original_name: str
     content_type: str
@@ -59,7 +52,7 @@ class UploadedFileMeta:
 
     @property
     def human_size(self) -> str:
-        """why: convert byte counts into a UI-friendly message."""
+        """Format for UI display with progressive unit scaling."""
         size = float(self.size_bytes)
         units = ["B", "KB", "MB", "GB"]
         for unit in units:
@@ -70,20 +63,18 @@ class UploadedFileMeta:
 
 
 class UploadError(RuntimeError):
-    """why: represent upload-specific failures."""
+    pass
 
 
 class UnsupportedUploadError(UploadError):
-    """why: signal when the file type is not allowed."""
+    pass
 
 
 class UploadTooLargeError(UploadError):
-    """why: indicate the payload exceeded configured limits."""
+    pass
 
 
 class UploadStorage:
-    """why: persist uploaded files and expose their metadata."""
-
     def __init__(self, base_dir: Path, constraints: UploadConstraints) -> None:
         self._base_dir: Path = base_dir
         self._data_dir: Path = base_dir / "files"
@@ -93,13 +84,11 @@ class UploadStorage:
         self._ensure_workspace()
 
     def _ensure_workspace(self) -> None:
-        """why: make sure upload directories are ready."""
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._meta_dir.mkdir(parents=True, exist_ok=True)
         self._manifest_dir.mkdir(parents=True, exist_ok=True)
 
     async def store(self, upload: UploadFile) -> UploadedFileMeta:
-        """why: validate and persist the upload stream."""
         filename, suffix, content_type = self._extract_upload_info(upload)
         self._validate_upload(suffix, content_type)
 
@@ -114,14 +103,13 @@ class UploadStorage:
         return self._create_and_save_metadata(file_id, filename, content_type, total_bytes, destination)
 
     def _extract_upload_info(self, upload: UploadFile) -> tuple[str, str, str]:
-        """why: normalize upload metadata with sensible defaults."""
         filename = upload.filename or "dataset.csv"
         suffix = Path(filename).suffix.lower() or ".csv"
         content_type = (upload.content_type or "text/csv").lower()
         return filename, suffix, content_type
 
     async def _write_upload_chunks(self, upload: UploadFile, destination: Path) -> int:
-        """why: stream upload to disk with size validation."""
+        """Stream in chunks to avoid loading entire file into memory."""
         total_bytes = 0
         try:
             with destination.open("wb") as target:
@@ -144,7 +132,6 @@ class UploadStorage:
         total_bytes: int,
         destination: Path,
     ) -> UploadedFileMeta:
-        """why: build metadata object and persist to disk."""
         meta = UploadedFileMeta(
             file_id=file_id,
             original_name=filename,
@@ -158,7 +145,6 @@ class UploadStorage:
         return meta
 
     def load(self, file_id: str) -> UploadedFileMeta | None:
-        """why: reconstruct metadata for a previously stored upload."""
         meta_path = self._meta_dir / f"{file_id}.json"
         if not meta_path.exists():
             return None
@@ -174,7 +160,6 @@ class UploadStorage:
         )
 
     def _write_metadata(self, meta: UploadedFileMeta) -> None:
-        """why: persist metadata alongside the file."""
         meta_payload = {
             "file_id": meta.file_id,
             "original_name": meta.original_name,
@@ -187,14 +172,12 @@ class UploadStorage:
         meta_path.write_text(json.dumps(meta_payload, indent=2))
 
     def save_manifest(self, file_id: str, manifest: Mapping[str, object]) -> Path:
-        """why: persist the harmonization manifest for reuse across stages."""
         path = self._manifest_dir / f"{file_id}.json"
         path.write_text(json.dumps(manifest, indent=2))
         logger.info("Stored manifest", extra={"file_id": file_id, "manifest_path": str(path)})
         return path
 
     def load_manifest(self, file_id: str) -> Mapping[str, object] | None:
-        """why: retrieve a previously stored manifest."""
         path = self._manifest_dir / f"{file_id}.json"
         if not path.exists():
             return None
@@ -205,24 +188,20 @@ class UploadStorage:
             return None
 
     def save_harmonization_manifest(self, file_id: str, manifest_path: Path) -> Path:
-        """why: copy the parquet manifest to storage for cross-stage access."""
         destination = self._manifest_dir / f"{file_id}_harmonization.parquet"
         shutil.copy2(manifest_path, destination)
         logger.info("Stored harmonization manifest", extra={"file_id": file_id, "path": str(destination)})
         return destination
 
     def load_harmonization_manifest_path(self, file_id: str) -> Path | None:
-        """why: retrieve the stored harmonization manifest path."""
         path = self._manifest_dir / f"{file_id}_harmonization.parquet"
         return path if path.exists() else None
 
     @property
     def manifest_dir(self) -> Path:
-        """why: expose manifest directory for tests and direct access scenarios."""
         return self._manifest_dir
 
     def _validate_upload(self, suffix: str, content_type: str) -> None:
-        """why: guard against unsupported file types."""
         if suffix not in self._constraints.allowed_suffixes:
             raise UnsupportedUploadError(f"Unsupported file extension: {suffix}")
         if content_type not in self._constraints.allowed_content_types:
@@ -230,7 +209,6 @@ class UploadStorage:
 
 
 def describe_constraints(constraints: UploadConstraints) -> dict[str, str | int]:
-    """why: present constraint information to the UI layer."""
     max_mb = constraints.max_bytes / (1024 * 1024)
     return {
         "max_mb": f"{max_mb:.0f}",
@@ -240,7 +218,7 @@ def describe_constraints(constraints: UploadConstraints) -> dict[str, str | int]
 
 
 def resolve_harmonized_path(original_path: Path, file_id: str) -> Path | None:
-    """why: locate harmonized CSV using multiple naming conventions."""
+    """Legacy jobs wrote output with varying naming conventions."""
     candidates = [
         original_path.with_name(f"{original_path.stem}{HARMONIZED_SUFFIX}"),
         original_path.with_suffix(original_path.suffix + HARMONIZED_SUFFIX),
@@ -257,7 +235,6 @@ _ERROR_DATASET_NOT_FOUND = "Required dataset file not found."
 
 
 def resolve_harmonized_path_or_404(original_path: Path, file_id: str) -> Path:
-    """why: locate harmonized CSV or raise HTTP 404."""
     path = resolve_harmonized_path(original_path, file_id)
     if path is None:
         raise HTTPException(status_code=404, detail=_ERROR_HARMONIZED_NOT_FOUND)
@@ -265,10 +242,6 @@ def resolve_harmonized_path_or_404(original_path: Path, file_id: str) -> Path:
 
 
 def load_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
-    """why: read CSV into headers and row dictionaries.
-
-    Raises HTTPException 404 if file does not exist.
-    """
     if not path.exists():
         raise HTTPException(status_code=404, detail=_ERROR_DATASET_NOT_FOUND)
     with path.open(encoding="utf-8", newline="") as handle:

@@ -1,4 +1,8 @@
-"""HTTP routes for reviewing and confirming column mappings."""
+"""
+HTTP routes for displaying and confirming column-to-CDE mappings.
+
+Coordinates CDE discovery API calls and browser state for Stage 2.
+"""
 
 from __future__ import annotations
 

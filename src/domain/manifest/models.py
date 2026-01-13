@@ -1,4 +1,8 @@
-"""Harmonization manifest data models and parquet schema."""
+"""
+Data structures for harmonization results and confidence classification.
+
+Centralizes manifest row/summary structure and confidence threshold logic.
+"""
 
 from __future__ import annotations
 

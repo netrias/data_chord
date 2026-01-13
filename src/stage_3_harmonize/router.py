@@ -1,4 +1,8 @@
-"""Serve Stage 3 harmonization routes and assets."""
+"""
+HTTP routes for triggering harmonization and building result summaries.
+
+Orchestrates parallel harmonization and PV fetch tasks.
+"""
 
 from __future__ import annotations
 
@@ -335,6 +339,8 @@ def _compute_column_stats(col_rows: list[ManifestRow]) -> ColumnStats:
     confidence_counts: dict[ConfidenceBucket, int] = {b: 0 for b in ConfidenceBucket}
 
     for row in col_rows:
+        # Each ManifestRow is one unique term; row_indices lists source rows with that term.
+        # Empty list means row tracking unavailable (treat as 1 occurrence).
         row_count = len(row.row_indices) if row.row_indices else 1
         total_rows += row_count
         if is_value_changed(row.to_harmonize, row.top_harmonization):

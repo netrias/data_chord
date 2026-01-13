@@ -1,4 +1,4 @@
-"""Expose HTTP routes for the Stage 1 upload experience."""
+"""HTTP routes for dataset upload and column analysis."""
 
 from __future__ import annotations
 

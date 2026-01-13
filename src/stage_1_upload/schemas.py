@@ -1,4 +1,4 @@
-"""Request and response models for the upload stage."""
+"""Pydantic models for upload metadata and column preview responses."""
 
 from __future__ import annotations
 

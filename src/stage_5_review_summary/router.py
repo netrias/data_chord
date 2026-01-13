@@ -1,8 +1,7 @@
 """
-Provide the final download step for harmonized data.
+HTTP routes for summarizing harmonization results and generating downloads.
 
-Generate downloadable zip files containing harmonized CSV and parquet manifest,
-and compute summary statistics from the harmonization manifest.
+Computes change statistics and packages final CSV with manifest for export.
 """
 
 from __future__ import annotations
@@ -221,12 +220,6 @@ def _create_streaming_response(base_name: str, zip_buffer: io.BytesIO) -> Stream
 
 
 def _classify_change(row: ManifestRow) -> ChangeType:
-    """
-    Classification logic:
-    - UNCHANGED: The final value equals the original (using canonical change detection)
-    - AI_HARMONIZED: AI changed the value, or user accepted AI suggestion via override
-    - MANUAL_OVERRIDE: User provided an override that differs from AI suggestion
-    """
     original = row.to_harmonize
     ai_value = row.top_harmonization
     latest_override = get_latest_override_value(row.manual_overrides)
@@ -243,16 +236,11 @@ def _classify_change(row: ManifestRow) -> ChangeType:
 
 
 def _get_final_value(row: ManifestRow) -> str:
-    latest_override = get_latest_override_value(row.manual_overrides)
-    return latest_override if latest_override is not None else row.top_harmonization
+    return get_latest_override_value(row.manual_overrides) or row.top_harmonization
 
 
 def _build_history(row: ManifestRow) -> list[TransformationStep]:
-    """Build chronological transformation history from manifest row.
-
-    Consecutive overrides with the same value are collapsed to show
-    only unique transformation steps.
-    """
+    """Collapse consecutive overrides with the same value to show only unique steps."""
     steps: list[TransformationStep] = []
 
     steps.append(TransformationStep(value=row.to_harmonize, source="original"))

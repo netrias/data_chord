@@ -1,4 +1,8 @@
-"""Trigger harmonization jobs via the Netrias client SDK."""
+"""
+Trigger harmonization jobs via the Netrias client SDK.
+
+Abstracts SDK initialization and provides graceful fallback when API key is missing.
+"""
 
 from __future__ import annotations
 
@@ -19,8 +23,6 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class HarmonizeResult:
-    """why: capture essential metadata about a harmonization run."""
-
     job_id: str
     status: str
     detail: str
@@ -29,8 +31,6 @@ class HarmonizeResult:
 
 
 class HarmonizeService:
-    """why: abstract the Netrias client and allow graceful fallbacks."""
-
     def __init__(self) -> None:
         self._api_key: str | None = os.getenv("NETRIAS_API_KEY")
         self._client: NetriasClient | None = self._build_client()
@@ -53,7 +53,6 @@ class HarmonizeService:
         column_mappings: ColumnMappingSet,
         manifest: ManifestPayload | None = None,
     ) -> HarmonizeResult:
-        """why: execute harmonization with typed column mappings."""
         job_id = uuid4().hex
         if not self._client:
             detail = "Netrias client unavailable; returning a stubbed job."
@@ -74,7 +73,6 @@ class HarmonizeService:
         target_schema: str,
         manifest: ManifestPayload | None,
     ) -> ManifestPayload:
-        """why: get or discover the CDE mapping to use."""
         if manifest is not None:
             return _normalize_manifest(manifest)
         return self._discover_cde_map(file_path=file_path, target_schema=target_schema)
@@ -96,7 +94,6 @@ class HarmonizeService:
         cde_map: ManifestPayload,
         fallback_job_id: str,
     ) -> HarmonizeResult:
-        """why: call Netrias client and extract result."""
         if not self._client:
             raise RuntimeError("Netrias client unavailable")
 
@@ -125,7 +122,6 @@ class HarmonizeService:
 
 
 def _apply_column_mappings(manifest: ManifestPayload, mappings: ColumnMappingSet) -> None:
-    """why: apply typed column mappings to manifest."""
     if not mappings.mappings:
         return
 
@@ -148,7 +144,6 @@ def _apply_column_mappings(manifest: ManifestPayload, mappings: ColumnMappingSet
 
 
 def _build_mapping_entry(existing: Mapping[str, object] | None, cde_field: CDEField) -> dict[str, object]:
-    """why: build a column entry dict with the target and its metadata from CDE registry."""
     entry = dict(existing or {})
     cde_def = get_cde(cde_field)
     entry["route"] = cde_def.route
@@ -158,7 +153,6 @@ def _build_mapping_entry(existing: Mapping[str, object] | None, cde_field: CDEFi
 
 
 def _log_mapping_results(applied: list[ColumnMapping], skipped: list[str]) -> None:
-    """why: log applied and skipped mappings for debugging."""
     if applied:
         logger.info(
             "Applied column mappings",
@@ -169,7 +163,6 @@ def _log_mapping_results(applied: list[ColumnMapping], skipped: list[str]) -> No
 
 
 def _normalize_manifest(manifest: Mapping[str, object] | object) -> ManifestPayload:
-    """why: ensure manifest has expected structure."""
     if not isinstance(manifest, Mapping):
         return {"column_mappings": {}}
 
@@ -181,7 +174,6 @@ def _normalize_manifest(manifest: Mapping[str, object] | object) -> ManifestPayl
 
 
 def _filter_valid_columns(entries: Mapping[object, object]) -> dict[str, dict[str, object]]:
-    """why: extract only valid string-keyed column entries."""
     normalized: dict[str, dict[str, object]] = {}
     for column, entry in entries.items():
         if isinstance(column, str) and isinstance(entry, Mapping):
@@ -190,7 +182,6 @@ def _filter_valid_columns(entries: Mapping[object, object]) -> dict[str, dict[st
 
 
 def _extract_manifest_path(netrias_result: object) -> Path | None:
-    """why: safely extract manifest_path from netrias client result."""
     raw_path = getattr(netrias_result, "manifest_path", None)
     if raw_path is None:
         return None

@@ -1,4 +1,9 @@
-"""Fetch column recommendations via the Netrias client SDK."""
+"""
+Discover column-to-CDE mappings and suggestions via the Netrias client.
+
+Encapsulates integration with the external mapping discovery API and normalizes
+varying response shapes into typed ModelSuggestion records.
+"""
 
 from __future__ import annotations
 
@@ -21,7 +26,7 @@ CDE_ID_TO_LABEL: dict[int, str] = {defn.cde_id: defn.label for defn in CDE_REGIS
 
 
 class MappingClientProtocol(Protocol):
-    """why: describe just the methods we consume from NetriasClient."""
+    """Minimal interface for testing without full NetriasClient dependency."""
 
     def discover_mapping_from_csv(
         self,
@@ -43,8 +48,6 @@ class MappingClientProtocol(Protocol):
 
 
 class MappingDiscoveryService:
-    """why: wrap Netrias mapping discovery with safe fallbacks."""
-
     def __init__(self) -> None:
         self._api_key: str | None = os.getenv("NETRIAS_API_KEY")
         self._client: MappingClientProtocol | None = None
@@ -54,7 +57,6 @@ class MappingDiscoveryService:
             logger.warning("NETRIAS_API_KEY not set; mapping discovery disabled")
 
     def available(self) -> bool:
-        """why: expose whether the underlying mapping client was initialized."""
         return self._client is not None
 
     def discover(
@@ -64,7 +66,6 @@ class MappingDiscoveryService:
         target_schema: str,
         sample_limit: int = DEFAULT_SAMPLE_LIMIT,
     ) -> tuple[dict[str, list[ModelSuggestion]], dict[str, str], ManifestPayload]:
-        """why: orchestrate CDE mapping discovery from Netrias API."""
         raw_result = self._fetch_cde_mapping(csv_path, target_schema, sample_limit)
         if raw_result is None:
             return {}, {}, {"column_mappings": {}}
@@ -90,7 +91,6 @@ class MappingDiscoveryService:
         target_schema: str,
         sample_limit: int,
     ) -> object | None:
-        """why: call Netrias API with error handling."""
         if self._client is None:
             return None
         try:
@@ -105,7 +105,6 @@ class MappingDiscoveryService:
 
 
 def _parse_suggestions(raw_result: object) -> dict[str, list[ModelSuggestion]]:
-    """why: extract column suggestions from Netrias response."""
     suggestions = cast(Sequence[object], getattr(raw_result, "suggestions", ()))
     column_suggestions: dict[str, list[ModelSuggestion]] = {}
 
@@ -126,7 +125,6 @@ def _extract_recognized_mappings(
     raw_payload: dict[str, object],
     column_entries: dict[str, dict[str, object]],
 ) -> dict[str, int]:
-    """why: extract CDE ID mappings from recognized_mappings or column entries."""
     recognized_payload = raw_payload.get("recognized_mappings") or raw_payload.get("recognizedMappings")
     recognized: dict[str, int] = {}
 
@@ -149,7 +147,6 @@ def _filter_by_recognized(
     recognized: dict[str, int],
     column_suggestions: dict[str, list[ModelSuggestion]],
 ) -> tuple[dict[str, list[ModelSuggestion]], dict[str, str]]:
-    """why: filter suggestions to only recognized CDE mappings."""
     filtered_mapping: dict[str, list[ModelSuggestion]] = {}
     manual_overrides: dict[str, str] = {}
 
@@ -179,7 +176,6 @@ def _log_discovery_results(
     target_schema: str,
     manual_overrides: dict[str, str],
 ) -> None:
-    """why: log discovery results for debugging."""
     logger.info(
         "Recognized manual mappings",
         extra={"recognized": recognized, "manual_overrides": manual_overrides},
@@ -204,7 +200,7 @@ def _log_discovery_results(
 
 
 def _raw_payload_from_result(result: object) -> dict[str, object]:
-    """why: normalize the varying shapes netrias_client may return."""
+    """netrias_client may return payloads nested in .raw or at top level."""
     candidate = getattr(result, "raw", None)
     mapping = _dict_with_string_keys(candidate)
     if mapping is not None:
@@ -214,8 +210,7 @@ def _raw_payload_from_result(result: object) -> dict[str, object]:
 
 
 def _dict_with_string_keys(value: object) -> dict[str, object] | None:
-    """why: defensive helper that copies mappings while dropping non-str keys."""
-
+    """Copies mapping while dropping non-str keys for type safety."""
     if not isinstance(value, Mapping):
         return None
     typed: dict[str, object] = {}
@@ -226,8 +221,7 @@ def _dict_with_string_keys(value: object) -> dict[str, object] | None:
 
 
 def _extract_column_entries(payload: Mapping[str, object]) -> dict[str, dict[str, object]]:
-    """why: collect column entry dicts from any supported payload key."""
-
+    """API may use snake_case or camelCase keys depending on version."""
     keys = ("column_entries", "columnEntries", "column_mappings", "columnMappings")
     for key in keys:
         entries = _normalize_column_entries(payload.get(key))
@@ -237,8 +231,7 @@ def _extract_column_entries(payload: Mapping[str, object]) -> dict[str, dict[str
 
 
 def _normalize_column_entries(value: object) -> dict[str, dict[str, object]]:
-    """why: coerce list/dict column entry containers into a uniform mapping."""
-
+    """API may return entries as {column: {...}} or [{column: ...}, ...]."""
     if isinstance(value, dict):
         entries: dict[str, dict[str, object]] = {}
         for key, entry in value.items():
@@ -264,8 +257,6 @@ def _manifest_payload_from_raw(
     payload: Mapping[str, object],
     fallback_entries: Mapping[str, dict[str, object]],
 ) -> ManifestPayload:
-    """why: coerce discovery output into the manifest format harmonize expects."""
-
     column_mappings = payload.get("column_mappings") or payload.get("columnMappings")
     normalized = _normalize_column_entries(column_mappings)
     if not normalized:
@@ -274,8 +265,7 @@ def _manifest_payload_from_raw(
 
 
 def _column_name_from_entry(entry: Mapping[str, object]) -> str | None:
-    """why: determine the source column name for a raw entry."""
-
+    """API uses varying key names for the source column identifier."""
     for key in ("sourceColumn", "source_column", "column", "field", "name"):
         value = entry.get(key)
         if isinstance(value, str):
@@ -289,8 +279,6 @@ def _merge_column_entry_suggestions(
     mapping: dict[str, list[ModelSuggestion]],
     column_entries: Mapping[str, Mapping[str, object]],
 ) -> None:
-    """why: extend mapping entries with options provided in raw column data."""
-
     for column, entry in column_entries.items():
         options = _options_from_entry(entry)
         if not options:
@@ -300,8 +288,6 @@ def _merge_column_entry_suggestions(
 
 
 def _options_from_entry(entry: Mapping[str, object]) -> list[ModelSuggestion]:
-    """why: parse known option containers on a column entry."""
-
     for key in ("suggestions", "options", "targets"):
         parsed = _options_from_sequence(entry.get(key))
         if parsed:
@@ -313,8 +299,6 @@ def _options_from_entry(entry: Mapping[str, object]) -> list[ModelSuggestion]:
 
 
 def _options_from_sequence(raw: object) -> list[ModelSuggestion]:
-    """why: convert array-like option containers into ModelSuggestion records."""
-
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
         return []
     suggestions: list[ModelSuggestion] = []
@@ -326,8 +310,6 @@ def _options_from_sequence(raw: object) -> list[ModelSuggestion]:
 
 
 def _model_suggestion_from_sequence_item(option: object) -> ModelSuggestion | None:
-    """why: convert MappingSuggestion.option objects (or mappings) to ModelSuggestion."""
-
     target = cast(str | None, getattr(option, "target", None))
     confidence = getattr(option, "confidence", None)
     score = float(confidence) if isinstance(confidence, (int, float)) else None
@@ -337,8 +319,6 @@ def _model_suggestion_from_sequence_item(option: object) -> ModelSuggestion | No
 
 
 def _model_suggestion_from_mapping(option: object) -> ModelSuggestion | None:
-    """why: best-effort coercion for raw mapping objects describing a suggestion."""
-
     mapping = _dict_with_string_keys(option)
     if mapping is None:
         return None
@@ -350,8 +330,7 @@ def _model_suggestion_from_mapping(option: object) -> ModelSuggestion | None:
 
 
 def _extract_target_value(container: Mapping[str, object]) -> str | None:
-    """why: resolve the textual CDE target field from a mapping container."""
-
+    """API uses varying key names for the target CDE field."""
     for key in (
         "target",
         "targetField",
@@ -371,8 +350,6 @@ def _extract_target_value(container: Mapping[str, object]) -> str | None:
 
 
 def _extract_similarity(container: Mapping[str, object]) -> float | None:
-    """why: pull a numeric similarity/confidence score if one exists."""
-
     for key in ("similarity", "confidence", "score", "probability"):
         value = container.get(key)
         maybe = _coerce_float(value)
@@ -382,8 +359,6 @@ def _extract_similarity(container: Mapping[str, object]) -> float | None:
 
 
 def _coerce_float(value: object) -> float | None:
-    """why: convert common numeric representations into floats."""
-
     if isinstance(value, bool):
         return float(value)
     if isinstance(value, (int, float)):
@@ -400,8 +375,7 @@ def _coerce_float(value: object) -> float | None:
 
 
 def _append_unique(target: list[ModelSuggestion], additions: Sequence[ModelSuggestion]) -> None:
-    """why: extend suggestion lists without duplicating targets."""
-
+    """Set-based dedup avoids O(n²) scan when merging suggestion lists."""
     existing_targets = {option.target for option in target}
     for option in additions:
         if option.target in existing_targets:
