@@ -50,8 +50,6 @@ logger = logging.getLogger(__name__)
 _MODULE_DIR = FilePath(__file__).parent
 _TEMPLATE_DIR = _MODULE_DIR / "templates"
 
-# Max items to return for non-conformant dialog (limits response size)
-NON_CONFORMANT_DISPLAY_LIMIT = 15
 
 _templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 
@@ -91,6 +89,7 @@ class StageFourRow(BaseModel):
 class StageFourResultsResponse(BaseModel):
     rows: list[StageFourRow]
     columnPVs: dict[str, list[str]] = {}  # column_key -> sorted PV list
+    totalOriginalRows: int = 0  # Original spreadsheet row count (before grouping)
 
 
 @dataclass
@@ -128,7 +127,11 @@ async def fetch_stage_four_rows(payload: StageFourResultsRequest) -> StageFourRe
     row_lookup = _build_row_lookup(manifest)
     rows = _build_rows_from_manifest(original_rows, columns, row_lookup, payload.file_id)
     column_pvs = _build_column_pvs(columns, payload.file_id)
-    return StageFourResultsResponse(rows=rows, columnPVs=column_pvs)
+    return StageFourResultsResponse(
+        rows=rows,
+        columnPVs=column_pvs,
+        totalOriginalRows=len(original_rows),
+    )
 
 
 @dataclass
@@ -423,6 +426,7 @@ async def delete_overrides(file_id: FileIdPath) -> DeleteOverridesResponse:
     name="stage_four_non_conformant",
 )
 async def get_non_conformant_values(file_id: FileIdPath) -> NonConformantResponse:
+    """Deduplicate by (column, original, final) to match Stage 5's unique mapping logic."""
     storage = get_upload_storage()
     cache = get_session_cache(file_id)
     manifest = _load_manifest(storage, file_id)
@@ -430,6 +434,8 @@ async def get_non_conformant_values(file_id: FileIdPath) -> NonConformantRespons
     if manifest is None:
         return NonConformantResponse(count=0, items=[])
 
+    # Track unique (column, original, final) tuples to avoid counting duplicates
+    seen: set[tuple[str, str, str]] = set()
     non_conformant: list[NonConformantItem] = []
 
     for row in manifest.rows:
@@ -437,9 +443,15 @@ async def get_non_conformant_values(file_id: FileIdPath) -> NonConformantRespons
         latest_override = get_latest_override_value(row.manual_overrides)
         current_value = latest_override if latest_override else row.top_harmonization
 
-        # Check PV conformance
+        # Skip if we've already processed this exact mapping
+        key = (row.column_name, row.to_harmonize, current_value or "")
+        if key in seen:
+            continue
+        seen.add(key)
+
+        # Check PV conformance using shared function for consistent behavior
         pv_set = cache.get_pvs_for_column(row.column_name)
-        if pv_set and current_value and current_value not in pv_set:
+        if pv_set and current_value and not check_value_conformance(current_value, pv_set):
             non_conformant.append(NonConformantItem(
                 column=row.column_name,
                 value=current_value,
@@ -448,7 +460,7 @@ async def get_non_conformant_values(file_id: FileIdPath) -> NonConformantRespons
 
     return NonConformantResponse(
         count=len(non_conformant),
-        items=non_conformant[:NON_CONFORMANT_DISPLAY_LIMIT],
+        items=non_conformant,
     )
 
 

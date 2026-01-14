@@ -1,11 +1,13 @@
 /**
  * Row context popup module.
  * Shows original spreadsheet context when users click row indicators in Column Mode.
+ * Uses Clusterize.js for virtualized rendering of large datasets.
  */
 
 import { escapeHtml, toExcelRowNumber } from './shared_review_utils.js';
 
-const INITIAL_ROW_LIMIT = 20;
+/** Max rows per API request (backend limit). */
+const MAX_ROWS_PER_REQUEST = 10000;
 
 /**
  * Fetch row context from the backend.
@@ -28,8 +30,44 @@ async function _fetchRowContext(fileId, rowIndices) {
 }
 
 /**
- * Strip BOM (Byte Order Mark) and whitespace from string for comparison.
- * CSV files often have BOM on the first header which breaks exact string matching.
+ * Fetch all rows in chunks to handle large datasets.
+ * @param {string} fileId
+ * @param {number[]} rowIndices
+ * @param {Function} onProgress - Called with (loadedCount, totalCount) during loading
+ * @returns {Promise<{headers: string[], rows: string[][]}>}
+ */
+async function _fetchAllRowsChunked(fileId, rowIndices, onProgress) {
+  const totalRows = rowIndices.length;
+
+  if (totalRows <= MAX_ROWS_PER_REQUEST) {
+    return _fetchRowContext(fileId, rowIndices);
+  }
+
+  // Fetch in chunks
+  let allRows = [];
+  let headers = [];
+
+  for (let i = 0; i < totalRows; i += MAX_ROWS_PER_REQUEST) {
+    const chunkIndices = rowIndices.slice(i, i + MAX_ROWS_PER_REQUEST);
+    const data = await _fetchRowContext(fileId, chunkIndices);
+
+    if (i === 0) {
+      headers = data.headers;
+    }
+    allRows.push(...data.rows);
+
+    if (onProgress) {
+      onProgress(Math.min(i + MAX_ROWS_PER_REQUEST, totalRows), totalRows);
+    }
+  }
+
+  return { headers, rows: allRows };
+}
+
+/**
+ * Strip BOM and whitespace for header matching.
+ * CSV headers often have invisible BOM characters from Excel exports that would
+ * otherwise cause column highlighting to fail silently.
  */
 function _normalizeForComparison(str) {
   return str.replace(/^\uFEFF/, '').trim();
@@ -37,9 +75,6 @@ function _normalizeForComparison(str) {
 
 /**
  * Build the table header row HTML.
- * @param {string[]} headers
- * @param {string} columnKey - Column to highlight
- * @returns {string}
  */
 function _buildTableHeader(headers, columnKey) {
   const normalizedColumnKey = _normalizeForComparison(columnKey);
@@ -54,65 +89,105 @@ function _buildTableHeader(headers, columnKey) {
 }
 
 /**
- * Build table body rows HTML.
- * @param {string[][]} rows - Row data
- * @param {number[]} rowIndices - Original row indices (0-based)
- * @param {string[]} headers
- * @param {string} columnKey - Column to highlight
- * @returns {string}
+ * Build table body rows as an array of HTML strings for Clusterize.
+ * @returns {string[]} Array of <tr>...</tr> strings
  */
-function _buildTableRows(rows, rowIndices, headers, columnKey) {
+function _buildTableRowsArray(rows, rowIndices, headers, columnKey) {
   const normalizedColumnKey = _normalizeForComparison(columnKey);
+  const highlightColIdx = headers.findIndex((h) => _normalizeForComparison(h) === normalizedColumnKey);
+
   return rows.map((row, i) => {
-    // rowIndices are 0-based (array index), convert to 1-based then to Excel row number
     const excelRowNum = toExcelRowNumber(rowIndices[i] + 1);
     const cells = row.map((value, colIdx) => {
-      const isHighlight = _normalizeForComparison(headers[colIdx]) === normalizedColumnKey;
-      const highlightClass = isHighlight ? ' class="row-context-highlight"' : '';
+      const highlightClass = colIdx === highlightColIdx ? ' class="row-context-highlight"' : '';
       return `<td${highlightClass}>${escapeHtml(value)}</td>`;
     });
     return `<tr><td>${excelRowNum}</td>${cells.join('')}</tr>`;
-  }).join('');
+  });
 }
 
 /**
- * Build the dialog HTML content.
- * Uses raw column name (columnKey) to match spreadsheet headers.
- * @param {Object} params
- * @returns {string}
+ * Build toggle HTML for filtered/all rows.
  */
-function _buildDialogHTML(params) {
-  const { term, totalRows, headers, rows, rowIndices, columnKey, hasMore } = params;
-  const safeTerm = escapeHtml(term);
-  const safeColumnKey = escapeHtml(columnKey);
-
-  const loadAllButton = hasMore
-    ? `<button class="row-context-load-all" type="button">Load all ${totalRows} rows</button>`
-    : '';
+function _buildToggleHTML(filteredCount, totalCount, currentMode) {
+  const filteredActive = currentMode === 'filtered' ? ' data-active="true"' : '';
+  const allActive = currentMode === 'all' ? ' data-active="true"' : '';
 
   return `
-    <div class="row-context-dialog-content">
-      <div class="row-context-dialog-header">
-        <h2 class="row-context-dialog-title">
-          Context for "${safeTerm}" in <span class="row-context-column-link" data-action="scroll-to-column">${safeColumnKey}</span> (${totalRows} row${totalRows === 1 ? '' : 's'})
-        </h2>
-        <button class="row-context-close-btn" type="button" aria-label="Close">×</button>
-      </div>
-      <div class="row-context-table-wrapper">
-        <table class="row-context-table">
-          <thead>${_buildTableHeader(headers, columnKey)}</thead>
-          <tbody>${_buildTableRows(rows, rowIndices, headers, columnKey)}</tbody>
-        </table>
-      </div>
-      ${loadAllButton ? `<div class="row-context-dialog-footer">${loadAllButton}</div>` : ''}
+    <div class="row-context-toggle">
+      <button class="row-context-toggle-btn" data-mode="filtered"${filteredActive}>
+        Filtered (${filteredCount})
+      </button>
+      <button class="row-context-toggle-btn" data-mode="all"${allActive}>
+        All rows (${totalCount})
+      </button>
     </div>
   `;
 }
 
 /**
- * Scroll the table wrapper to bring the target column into view and flash it.
- * Uses manual scroll calculation for reliable behavior in nested dialog containers.
- * @param {HTMLDialogElement} dialog
+ * Build title HTML.
+ */
+function _buildTitleHTML(params) {
+  const { term, columnKey, displayedRowCount, mode } = params;
+  const safeTerm = escapeHtml(term);
+  const safeColumnKey = escapeHtml(columnKey);
+  const rowText = displayedRowCount === 1 ? 'row' : 'rows';
+
+  const mainTitle = mode === 'all' ? 'All Rows' : `"${safeTerm}"`;
+  const subtitle = `<span class="row-context-column-link" data-action="scroll-to-column">${safeColumnKey}</span> · ${displayedRowCount} ${rowText}`;
+
+  return `
+    <span class="row-context-title-main">${mainTitle}</span>
+    <span class="row-context-title-meta">${subtitle}</span>
+  `;
+}
+
+/**
+ * Build the dialog HTML with Clusterize-compatible structure.
+ */
+function _buildDialogHTML(params) {
+  const {
+    term,
+    columnKey,
+    headers,
+    displayedRowCount,
+    mode,
+    filteredCount,
+    totalOriginalRows,
+    showToggle,
+  } = params;
+
+  const toggleHTML = showToggle ? _buildToggleHTML(filteredCount, totalOriginalRows, mode) : '';
+  const titleHTML = _buildTitleHTML({ term, columnKey, displayedRowCount, mode });
+
+  // Single scrollable table with sticky header
+  // Clusterize manages tbody content for virtualization
+  return `
+    <div class="row-context-dialog-content">
+      <div class="row-context-dialog-header">
+        <h2 class="row-context-dialog-title">${titleHTML}</h2>
+        ${toggleHTML}
+        <button class="row-context-close-btn" type="button" aria-label="Close">×</button>
+      </div>
+      <div id="rowContextScrollArea" class="row-context-table-wrapper clusterize-scroll">
+        <table class="row-context-table">
+          <thead class="row-context-thead">${_buildTableHeader(headers, columnKey)}</thead>
+          <tbody id="rowContextContentArea" class="clusterize-content">
+            <tr class="clusterize-no-data">
+              <td>Loading...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Center the target column and flash it to help users find it quickly.
+ * Wide spreadsheets may have the target column off-screen; auto-scrolling
+ * prevents users from manually searching dozens of columns.
  */
 function _scrollToTargetColumn(dialog) {
   const wrapper = dialog.querySelector('.row-context-table-wrapper');
@@ -121,26 +196,20 @@ function _scrollToTargetColumn(dialog) {
     return;
   }
 
-  // Calculate scroll position to center the target column in the visible area
-  // targetHeader.offsetLeft is relative to the table (its offsetParent)
   const targetLeft = targetHeader.offsetLeft;
   const targetWidth = targetHeader.offsetWidth;
   const wrapperWidth = wrapper.clientWidth;
 
-  // Center the target column in the wrapper
   const scrollTarget = targetLeft - (wrapperWidth / 2) + (targetWidth / 2);
   wrapper.scrollTo({ left: Math.max(0, scrollTarget), behavior: 'smooth' });
 
-  // Add visual flash feedback to all highlighted cells (header and body cells)
   const highlightedCells = dialog.querySelectorAll('.row-context-highlight');
   highlightedCells.forEach((cell) => {
     cell.classList.remove('flash');
-    // Force reflow to restart animation
     void cell.offsetWidth;
     cell.classList.add('flash');
   });
 
-  // Remove flash class after animation completes
   setTimeout(() => {
     highlightedCells.forEach((cell) => cell.classList.remove('flash'));
   }, 800);
@@ -148,8 +217,6 @@ function _scrollToTargetColumn(dialog) {
 
 /**
  * Attach handler for clicking the column name to scroll to it.
- * Uses event delegation on dialog for robustness.
- * @param {HTMLDialogElement} dialog
  */
 function _attachColumnLinkHandler(dialog) {
   dialog.addEventListener('click', (event) => {
@@ -162,94 +229,94 @@ function _attachColumnLinkHandler(dialog) {
 }
 
 /**
- * Enable horizontal scrolling with mouse wheel when no vertical scroll is needed.
- * @param {HTMLDialogElement} dialog
- */
-function _attachHorizontalWheelHandler(dialog) {
-  const wrapper = dialog.querySelector('.row-context-table-wrapper');
-  if (!wrapper) return;
-
-  wrapper.addEventListener('wheel', (event) => {
-    // Only convert vertical wheel to horizontal if there's no vertical overflow
-    const hasVerticalScroll = wrapper.scrollHeight > wrapper.clientHeight;
-    if (!hasVerticalScroll && event.deltaY !== 0) {
-      event.preventDefault();
-      wrapper.scrollLeft += event.deltaY;
-    }
-  }, { passive: false });
-}
-
-/**
  * Attach close handlers to the dialog.
+ * Uses a flag to prevent double cleanup when both closeDialog() and 'close' event fire.
  * @param {HTMLDialogElement} dialog
+ * @param {Function} [onClose] - Cleanup callback
  */
-function _attachCloseHandlers(dialog) {
-  // Close button
+function _attachCloseHandlers(dialog, onClose) {
+  let cleanupCalled = false;
+
+  /**
+   * Close dialog first for instant visual feedback, then defer cleanup.
+   * Clusterize.destroy() can be slow so deferring keeps the UI responsive.
+   */
+  const runCleanup = () => {
+    if (cleanupCalled) return;
+    cleanupCalled = true;
+    dialog.remove();
+    if (onClose) {
+      setTimeout(onClose, 0);
+    }
+  };
+
+  const closeDialog = () => {
+    dialog.close();
+    runCleanup();
+  };
+
   const closeBtn = dialog.querySelector('.row-context-close-btn');
   if (closeBtn) {
-    closeBtn.addEventListener('click', () => {
-      dialog.close();
-      dialog.remove();
-    });
+    closeBtn.addEventListener('click', closeDialog);
   }
 
-  // Click outside (on backdrop)
   dialog.addEventListener('click', (event) => {
     if (event.target === dialog) {
-      dialog.close();
-      dialog.remove();
+      closeDialog();
     }
   });
 
-  // ESC key (native dialog behavior, but ensure cleanup)
-  dialog.addEventListener('close', () => {
-    dialog.remove();
-  });
+  // Handle native dialog close (e.g., Escape key)
+  dialog.addEventListener('close', runCleanup);
 }
 
 /**
- * Attach handler for "Load all" button.
- * @param {HTMLDialogElement} dialog
- * @param {string} fileId
- * @param {number[]} allRowIndices
- * @param {string[]} headers
- * @param {string} columnKey
+ * Attach toggle handler for filtered/all rows.
+ * Provides immediate visual feedback before async data loading.
+ * Uses loading flag to prevent rapid clicks from queueing multiple fetches.
  */
-function _attachLoadAllHandler(dialog, fileId, allRowIndices, headers, columnKey) {
-  const loadAllBtn = dialog.querySelector('.row-context-load-all');
-  if (!loadAllBtn) return;
+function _attachToggleHandler(dialog, onModeChange) {
+  let isLoading = false;
 
-  loadAllBtn.addEventListener('click', async () => {
-    loadAllBtn.disabled = true;
-    loadAllBtn.textContent = 'Loading...';
+  const toggleBtns = dialog.querySelectorAll('.row-context-toggle-btn');
+  toggleBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const newMode = btn.dataset.mode;
+      const currentActive = dialog.querySelector('.row-context-toggle-btn[data-active="true"]');
 
-    try {
-      const data = await _fetchRowContext(fileId, allRowIndices);
-      const tbody = dialog.querySelector('.row-context-table tbody');
+      // Ignore clicks on already-active button or during loading
+      if (currentActive === btn || isLoading) return;
+
+      isLoading = true;
+
+      // Immediate visual feedback: switch active button state
+      if (currentActive) {
+        currentActive.removeAttribute('data-active');
+      }
+      btn.setAttribute('data-active', 'true');
+
+      // Show loading state in table area
+      const tbody = dialog.querySelector('#rowContextContentArea');
       if (tbody) {
-        tbody.innerHTML = _buildTableRows(data.rows, allRowIndices, headers, columnKey);
+        tbody.innerHTML = '<tr class="clusterize-no-data"><td>Loading...</td></tr>';
       }
-      // Remove the footer with load all button
-      const footer = dialog.querySelector('.row-context-dialog-footer');
-      if (footer) {
-        footer.remove();
-      }
-    } catch (error) {
-      loadAllBtn.disabled = false;
-      loadAllBtn.textContent = 'Load failed - retry';
-    }
+
+      // Reset loading flag after mode change completes (re-renders the toggle handler)
+      onModeChange(newMode);
+    });
   });
 }
 
 /**
- * Show the row context popup.
+ * Show the row context popup with virtualized rendering.
  * @param {Object} params
  * @param {string} params.term - The original value being reviewed
- * @param {string} params.columnKey - Raw column name from spreadsheet (for highlighting and display)
+ * @param {string} params.columnKey - Raw column name from spreadsheet
  * @param {number[]} params.rowIndices - 0-based row indices where term appears
  * @param {string} params.fileId - File ID for fetching context
+ * @param {number} [params.totalOriginalRows] - Total rows in original spreadsheet
  */
-export async function showRowContextPopup({ term, columnKey, rowIndices, fileId }) {
+export async function showRowContextPopup({ term, columnKey, rowIndices, fileId, totalOriginalRows = 0 }) {
   const dialog = document.createElement('dialog');
   dialog.className = 'row-context-dialog';
 
@@ -266,50 +333,112 @@ export async function showRowContextPopup({ term, columnKey, rowIndices, fileId 
 
   document.body.appendChild(dialog);
   dialog.showModal();
-  _attachCloseHandlers(dialog);
 
-  try {
-    // Fetch initial rows (first 20)
-    const initialIndices = rowIndices.slice(0, INITIAL_ROW_LIMIT);
-    const data = await _fetchRowContext(fileId, initialIndices);
+  // Track Clusterize instance for cleanup
+  let clusterizeInstance = null;
 
-    const hasMore = rowIndices.length > INITIAL_ROW_LIMIT;
+  const cleanup = () => {
+    if (clusterizeInstance) {
+      clusterizeInstance.destroy();
+      clusterizeInstance = null;
+    }
+  };
 
-    dialog.innerHTML = _buildDialogHTML({
-      term,
-      totalRows: rowIndices.length,
-      headers: data.headers,
-      rows: data.rows,
-      rowIndices: initialIndices,
-      columnKey,
-      hasMore,
-    });
+  _attachCloseHandlers(dialog, cleanup);
 
-    // Re-attach handlers after innerHTML replacement
-    _attachCloseHandlers(dialog);
-    _attachColumnLinkHandler(dialog);
+  const showToggle = totalOriginalRows > 0 && totalOriginalRows !== rowIndices.length;
 
-    if (hasMore) {
-      _attachLoadAllHandler(dialog, fileId, rowIndices, data.headers, columnKey);
+  /**
+   * Render content for the given mode.
+   */
+  async function renderContent(mode) {
+    const currentIndices = mode === 'all'
+      ? Array.from({ length: totalOriginalRows }, (_, i) => i)
+      : rowIndices;
+    const displayedRowCount = currentIndices.length;
+
+    // Show loading in table area if dialog already has content
+    const existingWrapper = dialog.querySelector('.row-context-table-wrapper');
+    if (existingWrapper) {
+      existingWrapper.innerHTML = '<div class="row-context-loading">Loading row data...</div>';
     }
 
-    // Enable horizontal wheel scrolling when no vertical scroll is present
-    _attachHorizontalWheelHandler(dialog);
+    // Destroy previous Clusterize instance
+    if (clusterizeInstance) {
+      clusterizeInstance.destroy();
+      clusterizeInstance = null;
+    }
 
-    // Auto-scroll to target column after a brief delay (let DOM settle)
-    requestAnimationFrame(() => {
-      _scrollToTargetColumn(dialog);
-    });
-  } catch (error) {
-    dialog.innerHTML = `
-      <div class="row-context-dialog-content">
-        <div class="row-context-dialog-header">
-          <h2 class="row-context-dialog-title">Error</h2>
-          <button class="row-context-close-btn" type="button" aria-label="Close">×</button>
+    try {
+      // Update loading message for large datasets
+      const updateLoadingMessage = (loaded, total) => {
+        const loadingEl = dialog.querySelector('.row-context-loading');
+        if (loadingEl) {
+          loadingEl.textContent = `Loading rows ${loaded} of ${total}...`;
+        }
+      };
+
+      const data = await _fetchAllRowsChunked(fileId, currentIndices, updateLoadingMessage);
+
+      // Build dialog structure
+      dialog.innerHTML = _buildDialogHTML({
+        term,
+        columnKey,
+        headers: data.headers,
+        displayedRowCount,
+        mode,
+        filteredCount: rowIndices.length,
+        totalOriginalRows,
+        showToggle,
+      });
+
+      // Re-attach handlers
+      _attachCloseHandlers(dialog, cleanup);
+      _attachColumnLinkHandler(dialog);
+      _attachToggleHandler(dialog, renderContent);
+
+      // Build row data for Clusterize
+      const rowsHTML = _buildTableRowsArray(data.rows, currentIndices, data.headers, columnKey);
+
+      // Initialize Clusterize for virtualized rendering
+      // Clusterize is loaded globally via CDN
+      if (typeof Clusterize !== 'undefined') {
+        // rows_in_block × blocks_in_cluster = 200 rows rendered in DOM at once.
+        // Tuned for smooth scrolling on 10k+ row datasets without excessive DOM nodes.
+        clusterizeInstance = new Clusterize({
+          rows: rowsHTML,
+          scrollId: 'rowContextScrollArea',
+          contentId: 'rowContextContentArea',
+          rows_in_block: 50,
+          blocks_in_cluster: 4,
+          tag: 'tr',
+        });
+      } else {
+        // Fallback: render all rows directly (no virtualization)
+        const tbody = dialog.querySelector('#rowContextContentArea');
+        if (tbody) {
+          tbody.innerHTML = rowsHTML.join('');
+        }
+      }
+
+      // Auto-scroll to target column
+      requestAnimationFrame(() => {
+        _scrollToTargetColumn(dialog);
+      });
+    } catch (error) {
+      dialog.innerHTML = `
+        <div class="row-context-dialog-content">
+          <div class="row-context-dialog-header">
+            <h2 class="row-context-dialog-title">Error</h2>
+            <button class="row-context-close-btn" type="button" aria-label="Close">×</button>
+          </div>
+          <div class="row-context-error">Failed to load row context. Please try again.</div>
         </div>
-        <div class="row-context-error">Failed to load row context. Please try again.</div>
-      </div>
-    `;
-    _attachCloseHandlers(dialog);
+      `;
+      _attachCloseHandlers(dialog, cleanup);
+    }
   }
+
+  // Initial render in filtered mode
+  await renderContent('filtered');
 }

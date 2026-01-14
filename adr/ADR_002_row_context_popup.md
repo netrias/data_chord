@@ -80,13 +80,47 @@ Spreadsheets often have many columns. To improve navigation:
 - **DoS**: Row indices validated (non-negative integers only); out-of-bounds indices filtered
 - **Memory**: Progressive loading limits initial payload size
 
+### 5. Row Filter Toggle (Filtered vs All Rows)
+
+Users reviewing a specific value's context may want to see the full spreadsheet for comparison. We added a toggle to switch between:
+- **Filtered view** (default): Only rows containing the specific value
+- **All rows view**: Complete spreadsheet for broader context
+
+**API Change**: The `/stage-4/rows` endpoint now returns `totalOriginalRows` alongside the grouped rows:
+
+```json
+{
+  "rows": [...],
+  "columnPVs": {...},
+  "totalOriginalRows": 5000
+}
+```
+
+**Toggle Behavior**:
+- Immediate visual feedback: button state changes before async fetch
+- Debouncing prevents rapid clicks from queueing multiple fetches
+- Loading state shown in table area during fetch
+
+### 6. Virtual Scrolling with Clusterize.js
+
+For datasets with thousands of rows, DOM rendering becomes a bottleneck. We integrated Clusterize.js for virtual scrolling:
+
+- Only ~200 rows rendered in DOM at any time (`rows_in_block: 50 × blocks_in_cluster: 4`)
+- Smooth scrolling maintained on 10k+ row datasets
+- Chunked data fetching (10k rows per request) with progress updates
+- Graceful fallback to full render if Clusterize unavailable
+
+**Deferred cleanup**: Clusterize.destroy() is deferred via setTimeout to prevent blocking the UI when closing the popup.
+
 ## Files Changed
 
 **Backend**:
-- `src/stage_4_review_results/router.py` - New `/row-context` endpoint
+- `src/stage_4_review_results/router.py` - `/row-context` endpoint, `totalOriginalRows` field
 - `src/stage_4_review_results/schemas.py` - `RowContextRequest`, `RowContextResponse`
 
 **Frontend**:
-- `src/stage_4_review_results/static/row_context_popup.js` - New module for popup dialog
-- `src/stage_4_review_results/static/review_mode_column.js` - Click handler on row labels
-- `src/stage_4_review_results/static/stage_4_review.css` - Dialog and table styles
+- `src/stage_4_review_results/static/row_context_popup.js` - Popup dialog with Clusterize, toggle, chunked fetch
+- `src/stage_4_review_results/static/review_mode_column.js` - Click handler, passes totalOriginalRows
+- `src/stage_4_review_results/static/stage_4_review.js` - Stores and passes totalOriginalRows
+- `src/stage_4_review_results/static/stage_4_review.css` - Dialog, toggle, and table styles
+- `src/stage_4_review_results/templates/stage_4_review.html` - Clusterize.js CDN script

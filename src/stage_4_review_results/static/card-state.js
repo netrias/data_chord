@@ -96,14 +96,3 @@ export const determineCardState = (input) => {
     aiIsClickable: hasOverride,
   };
 };
-
-/**
- * Check if override value should be treated as "no override".
- * Override equals AI suggestion or is empty = effectively no override.
- * @param {string} overrideValue
- * @param {string} aiSuggestedValue
- * @returns {boolean}
- */
-export const isEffectiveOverride = (overrideValue, aiSuggestedValue) => {
-  return overrideValue !== '' && overrideValue !== aiSuggestedValue;
-};
