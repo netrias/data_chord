@@ -299,12 +299,13 @@ def _process_manifest_row(
     match change_type:
         case ChangeType.AI_HARMONIZED:
             ai_counts[col_id] += 1
-            _track_mapping(unique_mappings, row, cache)
         case ChangeType.MANUAL_OVERRIDE:
             manual_counts[col_id] += 1
-            _track_mapping(unique_mappings, row, cache)
         case ChangeType.UNCHANGED:
             unchanged_counts[col_id] += 1
+
+    # Track all rows for conformance checking, not just changed ones
+    _track_mapping(unique_mappings, row, cache)
 
 
 def _build_summary_from_manifest(summary: ManifestSummary, file_id: str) -> StageFiveSummaryResponse:

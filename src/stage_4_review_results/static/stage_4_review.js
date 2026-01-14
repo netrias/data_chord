@@ -11,7 +11,7 @@ import {
   renderEntries as renderColumnEntries,
   renderBatchProgress as renderColumnBatchProgress,
 } from './review_mode_column.js';
-import { escapeHtml } from './shared_review_utils.js';
+import { escapeHtml, getFileIdFromUrl } from './shared_review_utils.js';
 import {
   getTotalUnits as getRowTotalUnits,
   getCurrentEntries as getRowCurrentEntries,
@@ -91,6 +91,7 @@ const DEFAULT_ROW_BATCH_SIZE = 5;
 const state = {
   rows: [],
   columnPVs: {},  // column_key -> sorted PV list (from backend)
+  totalOriginalRows: 0,  // Original spreadsheet row count (before grouping)
   sortMode: 'original',
   reviewMode: 'column',
   pendingOverrides: {},
@@ -130,15 +131,6 @@ const getCurrentBatchSize = () => {
 };
 
 /**
- * Extract file_id from URL query parameters.
- * @returns {string|null}
- */
-const getFileIdFromUrl = () => {
-  const params = new URLSearchParams(window.location.search);
-  return params.get('file_id');
-};
-
-/**
  * Fetch harmonized rows from the server.
  * Always fetches fresh data to support back-navigation without stale caching.
  * @returns {Promise<void>}
@@ -170,6 +162,7 @@ const fetchRows = async () => {
     const body = await response.json();
     state.rows = body.rows || [];
     state.columnPVs = body.columnPVs || {};
+    state.totalOriginalRows = body.totalOriginalRows || 0;
   } catch (error) {
     console.error('Unable to load harmonized results:', error);
   }
@@ -279,8 +272,6 @@ const recordOverrideForRows = (rowIndices, columnKey, aiValue, humanValue, origi
   }
 };
 
-/* Notification toasts removed - visual clutter reduction */
-
 /**
  * Build filter options object from current state.
  * @returns {Object}
@@ -358,7 +349,7 @@ const renderEntries = (batchMeta) => {
 
   if (state.reviewMode === 'column') {
     const gridSize = state.columnMode.batchSize;
-    renderColumnEntries(reviewTable, batchMeta, state.pendingOverrides, recordOverrideForRows, gridSize, state.columnPVs);
+    renderColumnEntries(reviewTable, batchMeta, state.pendingOverrides, recordOverrideForRows, gridSize, state.columnPVs, state.totalOriginalRows);
   } else {
     renderRowEntries(reviewTable, batchMeta, state.pendingOverrides, recordOverrideForRows, state.columnPVs);
   }
@@ -578,30 +569,45 @@ const navigateToStage5 = () => {
 };
 
 /**
+ * Group items by column for cleaner display.
+ */
+const _groupByColumn = (items) => {
+  const grouped = new Map();
+  for (const item of items) {
+    if (!grouped.has(item.column)) {
+      grouped.set(item.column, []);
+    }
+    grouped.get(item.column).push(item.value);
+  }
+  return grouped;
+};
+
+/**
  * Show the PV warning dialog with non-conformant values.
+ * Groups values by column for cleaner presentation.
  * @param {Object} data - { count: number, items: Array<{column, value, original}> }
  */
 const showPVWarningDialog = (data) => {
   const { count, items } = data;
-  const maxDisplay = 10;
 
   const dialog = document.createElement('dialog');
   dialog.className = 'pv-warning-dialog';
 
-  let itemsHtml = '';
-  const displayItems = items.slice(0, maxDisplay);
-  for (const item of displayItems) {
-    itemsHtml += `
-      <li>
-        <strong>${escapeHtml(item.column)}</strong>:
-        "${escapeHtml(item.value)}"
-      </li>
+  const grouped = _groupByColumn(items);
+  let groupsHtml = '';
+
+  for (const [column, values] of grouped) {
+    const valuesHtml = values
+      .map((v) => `<div class="non-conformant-value">"${escapeHtml(v)}"</div>`)
+      .join('');
+
+    groupsHtml += `
+      <div class="non-conformant-group">
+        <h4 class="non-conformant-column">${escapeHtml(column)} <span class="value-count">(${values.length})</span></h4>
+        <div class="non-conformant-values">${valuesHtml}</div>
+      </div>
     `;
   }
-
-  const moreText = count > maxDisplay
-    ? `<p class="more-count">...and ${count - maxDisplay} more</p>`
-    : '';
 
   dialog.innerHTML = `
     <div class="pv-warning-dialog-content">
@@ -611,10 +617,9 @@ const showPVWarningDialog = (data) => {
       <div class="pv-warning-dialog-body">
         <p>
           <strong>${count}</strong> value${count === 1 ? '' : 's'} do not match the permissible value set
-          for their mapped ontology.
+          for ${count === 1 ? 'its' : 'their'} mapped ontology.
         </p>
-        <ul class="non-conformant-list">${itemsHtml}</ul>
-        ${moreText}
+        <div class="non-conformant-groups">${groupsHtml}</div>
       </div>
       <div class="pv-warning-dialog-footer">
         <button class="btn-secondary" data-action="return">

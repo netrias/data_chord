@@ -135,6 +135,8 @@
         resultsEndpoint: "{{ results_endpoint }}",
       };
     </script>
+    <!-- Clusterize.js for virtualized table rendering in row context popup -->
+    <script src="https://cdn.jsdelivr.net/npm/clusterize.js@0.19.0/clusterize.min.js"></script>
     <script type="module" src="{{ request.url_for('stage_four_static', path='stage_4_review.js') }}"></script>
   </body>
 </html>

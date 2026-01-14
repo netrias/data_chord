@@ -13,18 +13,10 @@ import {
   toExcelRowNumber,
   cleanupCards,
   sortEntriesByConfidence,
+  getFileIdFromUrl,
   SORT_MODE,
 } from './shared_review_utils.js';
 import { showRowContextPopup } from './row_context_popup.js';
-
-/**
- * Extract file_id from URL query parameters.
- * @returns {string|null}
- */
-const _getFileIdFromUrl = () => {
-  const params = new URLSearchParams(window.location.search);
-  return params.get('file_id');
-};
 
 /** Default number of entries per batch when not specified. */
 const DEFAULT_ENTRIES_PER_BATCH = 25;
@@ -274,8 +266,9 @@ export const getCurrentEntries = (rows, currentUnit, entriesPerBatch = DEFAULT_E
  * @param {Function} onOverrideChange - Callback for override changes
  * @param {number} gridSize - Grid dimension (3, 4, or 5 for 3x3, 4x4, 5x5)
  * @param {Object} [columnPVs] - Map of column_key -> PV list
+ * @param {number} [totalOriginalRows] - Total rows in original spreadsheet (for row context popup)
  */
-export const renderEntries = (container, batchMeta, pendingOverrides, onOverrideChange, gridSize = 5, columnPVs = {}) => {
+export const renderEntries = (container, batchMeta, pendingOverrides, onOverrideChange, gridSize = 5, columnPVs = {}, totalOriginalRows = 0) => {
   cleanupCards(container);
   container.innerHTML = '';
 
@@ -288,7 +281,7 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
   wrapper.className = 'column-mode-grid';
   wrapper.style.setProperty('--grid-columns', gridSize);
 
-  const fileId = _getFileIdFromUrl();
+  const fileId = getFileIdFromUrl();
 
   for (const entry of batchMeta.entries) {
     const rowCount = entry.rowIndices.length;
@@ -318,6 +311,7 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
             columnKey: entry.columnKey,
             rowIndices: zeroBasedIndices,
             fileId,
+            totalOriginalRows,
           });
         });
       }

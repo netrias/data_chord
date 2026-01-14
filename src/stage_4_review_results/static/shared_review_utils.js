@@ -86,6 +86,15 @@ export const getMinConfidence = (cells) => {
 export const toExcelRowNumber = (dataRowNumber) => dataRowNumber + 1;
 
 /**
+ * Extract file_id from URL query parameters.
+ * @returns {string|null}
+ */
+export const getFileIdFromUrl = () => {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('file_id');
+};
+
+/**
  * Escape HTML special characters to prevent XSS.
  * @param {string} str
  * @returns {string}
@@ -120,12 +129,16 @@ export const isCaseChangeOnly = (cell) => {
 export const cellNeedsReview = (cell, options = {}) => {
   const { hideCaseOnlyChanges = false } = options;
 
-  // Include cells with no AI recommendation
+  const original = cell.originalValue ?? '';
+  const harmonized = cell.harmonizedValue ?? '';
+
+  // Nothing to review if no original value
+  if (!original) return false;
+
+  // Include cells with no AI recommendation (but only if there's an original value)
   if (cell.recommendationType === RECOMMENDATION_TYPE.NO_RECOMMENDATION) {
     return true;
   }
-  const original = cell.originalValue ?? '';
-  const harmonized = cell.harmonizedValue ?? '';
 
   // No change means no review needed
   if (original === harmonized) return false;
@@ -168,10 +181,6 @@ export const getChangedCells = (row, options = {}) => {
   if (!row?.cells) return [];
   const reviewCells = [];
   for (const cell of row.cells) {
-    // Skip cells with no original value (nothing to review)
-    const original = cell.originalValue ?? '';
-    if (!original) continue;
-
     if (cellNeedsReview(cell, options)) {
       reviewCells.push(cell);
     }
@@ -246,7 +255,8 @@ const _getInputValue = (entry, pendingOverrides) => {
 };
 
 /**
- * Build the HTML template for a value card.
+ * Pre-render both warning and conformant icons, toggling visibility dynamically.
+ * Creating icons upfront avoids DOM thrashing when users type overrides.
  * @param {Object} params
  * @returns {string}
  */
@@ -365,8 +375,10 @@ const _applyCardState = (params) => {
   const warningIcon = card.querySelector('.pv-warning-icon');
   const conformantIcon = card.querySelector('.pv-conformant-icon');
 
+  // Use data-hidden attribute for CSS selector reliability (avoids fragile style matching)
   if (warningIcon) {
     warningIcon.style.display = state.showWarningIcon ? '' : 'none';
+    warningIcon.dataset.hidden = state.showWarningIcon ? 'false' : 'true';
   }
 
   if (conformantIcon) {

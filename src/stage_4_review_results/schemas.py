@@ -19,9 +19,6 @@ class CellOverrideSchema(BaseModel):
 class ReviewStateSchema(BaseModel):
     """Batch review progress state."""
 
-    completed_batches: list[int] = Field(default_factory=list)
-    flagged_batches: list[int] = Field(default_factory=list)
-    current_batch: int = 1
     sort_mode: str = "original"
     batch_size: int = 5
 
@@ -77,7 +74,7 @@ class RowContextRequest(BaseModel):
     """Request payload for fetching original row context."""
 
     file_id: str = Field(..., min_length=8, pattern=r"^[a-f0-9]+$")
-    row_indices: list[Annotated[int, Field(ge=0)]]
+    row_indices: list[Annotated[int, Field(ge=0)]] = Field(max_length=10000)
 
 
 class RowContextResponse(BaseModel):

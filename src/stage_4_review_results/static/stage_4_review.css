@@ -807,9 +807,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.75rem;
-  height: 1.75rem;
-  font-size: 1.25rem;
+  width: 3rem;
+  height: 3rem;
+  font-size: 2.125rem;
   flex-shrink: 0;
 }
 
@@ -821,7 +821,7 @@
 }
 
 /* When warning is hidden, conformant icon gets the margin instead */
-.pv-warning-icon[style*="display: none"] + .pv-conformant-icon {
+.pv-warning-icon[data-hidden="true"] + .pv-conformant-icon {
   margin-left: auto;
 }
 
@@ -866,8 +866,10 @@
     0 4px 6px rgba(0, 0, 0, 0.05),
     0 10px 20px rgba(0, 0, 0, 0.1),
     0 20px 40px rgba(0, 0, 0, 0.1);
-  max-width: 500px;
-  width: 90vw;
+  width: fit-content;
+  min-width: 500px;
+  max-width: 90vw;
+  max-height: 85vh;
   margin: auto;
 }
 
@@ -888,52 +890,75 @@
 
 .pv-warning-dialog-title {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 1.6rem;
   font-weight: 700;
   color: var(--warning-700);
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: var(--space-2);
 }
 
 .pv-warning-dialog-title::before {
   content: "⚠";
-  font-size: 1.25rem;
+  font-size: 1.75rem;
 }
 
 .pv-warning-dialog-body {
-  padding: var(--space-5) var(--space-6);
+  padding: var(--space-6) var(--space-10);
+  text-align: center;
 }
 
 .pv-warning-dialog-body p {
-  margin: 0 0 var(--space-4);
+  margin: 0 0 var(--space-5);
   color: var(--gray-700);
+  font-size: 1.2rem;
   line-height: 1.5;
 }
 
-.non-conformant-list {
-  max-height: 200px;
+/* Grouped non-conformant values by column */
+.non-conformant-groups {
+  max-height: 65vh;
   overflow-y: auto;
-  margin: 0;
-  padding-left: var(--space-5);
-  list-style: disc;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
 }
 
-.non-conformant-list li {
-  margin: var(--space-2) 0;
-  font-size: 0.9rem;
-  color: var(--gray-700);
+.non-conformant-group {
+  padding: var(--space-4) var(--space-5);
+  background: var(--gray-50);
+  border-radius: var(--radius-lg);
 }
 
-.non-conformant-list li strong {
-  color: var(--gray-900);
+.non-conformant-column {
+  margin: 0 0 var(--space-3);
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--gray-800);
 }
 
-.more-count {
+.non-conformant-column .value-count {
+  font-weight: 400;
   color: var(--gray-500);
-  font-style: italic;
-  margin-top: var(--space-3);
-  font-size: 0.85rem;
+}
+
+.non-conformant-values {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.non-conformant-value {
+  font-size: 1.05rem;
+  color: var(--gray-700);
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--gray-100);
+}
+
+.non-conformant-value:last-child {
+  border-bottom: none;
 }
 
 .pv-warning-dialog-footer {
@@ -1214,17 +1239,44 @@
 .row-context-dialog-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: var(--space-3);
   padding: var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--gray-200);
   flex-shrink: 0;
+  position: relative;
+}
+
+/* Position close button absolutely so title stays centered */
+.row-context-dialog-header .row-context-close-btn {
+  position: absolute;
+  right: var(--space-4);
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .row-context-dialog-title {
   margin: 0;
-  font-size: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  flex: 1;
+  /* Ensure title doesn't overlap absolutely positioned toggle/close buttons */
+  padding: 0 140px;
+}
+
+.row-context-title-main {
+  font-size: 1.125rem;
   font-weight: 600;
   color: var(--gray-800);
+  line-height: 1.3;
+}
+
+.row-context-title-meta {
+  font-size: 0.8125rem;
+  font-weight: 400;
+  color: var(--gray-500);
+  margin-top: var(--space-1);
 }
 
 .row-context-column-link {
@@ -1242,20 +1294,109 @@
 }
 
 .row-context-close-btn {
-  background: none;
+  background: var(--gray-100);
   border: none;
-  font-size: 1.5rem;
+  font-size: 1.25rem;
   line-height: 1;
-  color: var(--gray-400);
+  color: var(--gray-500);
   cursor: pointer;
-  padding: 0.25rem;
-  border-radius: var(--radius-sm);
-  transition: color var(--transition-fast), background var(--transition-fast);
+  width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  box-shadow:
+    0 2px 0 var(--gray-200),
+    0 2px 4px rgba(0, 0, 0, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
+  flex-shrink: 0;
 }
 
 .row-context-close-btn:hover {
   color: var(--gray-700);
-  background: var(--gray-100);
+  background: var(--gray-150, var(--gray-100));
+  /* Preserve centering transform while adding hover lift */
+  transform: translateY(calc(-50% - 2px));
+  box-shadow:
+    0 4px 0 var(--gray-200),
+    0 4px 8px rgba(0, 0, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.row-context-close-btn:active {
+  /* Preserve centering transform while adding press effect */
+  transform: translateY(calc(-50% + 1px));
+  box-shadow:
+    0 1px 0 var(--gray-200),
+    0 1px 2px rgba(0, 0, 0, 0.05),
+    inset 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+/* Toggle buttons for filtered/all rows - matches ghost-btn style */
+/* Positioned absolutely on left to balance close button, keeping title centered */
+.row-context-toggle {
+  display: flex;
+  gap: 0;
+  position: absolute;
+  left: var(--space-4);
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.row-context-toggle-btn {
+  padding: 0.5rem 1rem;
+  border: none;
+  background: linear-gradient(180deg, var(--white) 0%, var(--gray-100) 100%);
+  color: var(--gray-700);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow:
+    0 3px 0 var(--gray-300),
+    0 4px 8px rgba(0, 0, 0, 0.1),
+    inset 0 2px 0 rgba(255, 255, 255, 1),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.03);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), filter var(--transition-fast);
+}
+
+.row-context-toggle-btn:first-child {
+  border-radius: var(--radius-full) 0 0 var(--radius-full);
+}
+
+.row-context-toggle-btn:last-child {
+  border-radius: 0 var(--radius-full) var(--radius-full) 0;
+}
+
+.row-context-toggle-btn:hover:not([data-active="true"]) {
+  transform: translateY(-3px);
+  filter: brightness(102%);
+  box-shadow:
+    0 5px 0 var(--gray-300),
+    0 8px 16px rgba(0, 0, 0, 0.12),
+    inset 0 2px 0 rgba(255, 255, 255, 1),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.03);
+  color: var(--gray-900);
+}
+
+.row-context-toggle-btn:active:not([data-active="true"]) {
+  transform: translateY(1px);
+  box-shadow:
+    0 1px 0 var(--gray-300),
+    0 2px 4px rgba(0, 0, 0, 0.1),
+    inset 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.row-context-toggle-btn[data-active="true"] {
+  background: linear-gradient(180deg, var(--azure-400) 0%, var(--azure-500) 50%, var(--azure-600) 100%);
+  color: white;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  box-shadow:
+    0 3px 0 var(--azure-700),
+    0 4px 12px rgba(6, 115, 179, 0.3),
+    inset 0 2px 0 rgba(255, 255, 255, 0.2),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.1);
 }
 
 .row-context-table-wrapper {
@@ -1263,6 +1404,26 @@
   overflow: auto;
   padding: var(--space-4);
   box-sizing: border-box;
+}
+
+/* Sticky header for virtualized table */
+.row-context-thead {
+  position: sticky;
+  /* Offset by wrapper padding so header sticks at visual top */
+  top: calc(-1 * var(--space-4));
+  z-index: 10;
+}
+
+.row-context-thead th {
+  background: var(--white);
+  /* Extra top padding to compensate for negative top positioning */
+  padding-top: calc(var(--space-2) + var(--space-4));
+  /* Bottom shadow to separate from scrolling content */
+  box-shadow: 0 1px 0 var(--gray-200);
+}
+
+.row-context-thead tr {
+  background: var(--white);
 }
 
 /* Shorten scrollbar tracks so they don't extend into rounded corners */
@@ -1280,11 +1441,7 @@
   font-size: 0.875rem;
 }
 
-.row-context-table thead {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-}
+/* Note: sticky positioning is handled by .row-context-thead for proper padding offset */
 
 .row-context-table th {
   background: var(--gray-100);
@@ -1325,24 +1482,43 @@
 }
 
 .row-context-load-all {
-  padding: 0.5rem 1.5rem;
-  border: 1px solid var(--azure-400);
-  border-radius: var(--radius-lg);
-  background: var(--azure-50);
-  color: var(--azure-700);
+  padding: 0.6rem 1.4rem;
+  border: none;
+  border-radius: var(--radius-full);
+  background: linear-gradient(180deg, var(--white) 0%, var(--gray-100) 100%);
+  color: var(--gray-700);
   font-weight: 600;
   font-size: 0.875rem;
   cursor: pointer;
-  transition: all var(--transition-fast);
+  box-shadow:
+    0 3px 0 var(--gray-300),
+    0 4px 8px rgba(0, 0, 0, 0.1),
+    inset 0 2px 0 rgba(255, 255, 255, 1),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.03);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), filter var(--transition-fast);
 }
 
-.row-context-load-all:hover {
-  background: var(--azure-100);
-  border-color: var(--azure-500);
+.row-context-load-all:hover:not(:disabled) {
+  transform: translateY(-3px);
+  filter: brightness(102%);
+  box-shadow:
+    0 5px 0 var(--gray-300),
+    0 8px 16px rgba(0, 0, 0, 0.12),
+    inset 0 2px 0 rgba(255, 255, 255, 1),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.03);
+  color: var(--gray-900);
+}
+
+.row-context-load-all:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow:
+    0 1px 0 var(--gray-300),
+    0 2px 4px rgba(0, 0, 0, 0.1),
+    inset 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
 .row-context-load-all:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
@@ -1382,3 +1558,17 @@
   animation: row-context-column-flash 0.4s ease-out 2;
 }
 
+/* Clusterize.js virtual scrolling styles */
+.clusterize-content {
+  outline: 0;
+}
+
+.clusterize-no-data td {
+  text-align: center;
+  padding: var(--space-8);
+  color: var(--gray-500);
+}
+
+.clusterize-extra-row {
+  /* Spacer rows for scroll position - must be empty */
+}
