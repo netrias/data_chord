@@ -371,6 +371,120 @@ class TestRowsContract:
             assert "isChanged" in cell
 
 
+class TestRowContextContract:
+    """POST /stage-4/row-context returns original spreadsheet rows for context."""
+
+    async def test_response_contains_required_fields(
+        self,
+        app_client: AsyncClient,
+        sample_csv_path: Path,
+    ) -> None:
+        """Row context response includes headers and rows arrays."""
+
+        # Given: An uploaded CSV file
+        file_id = await upload_file(app_client, sample_csv_path)
+
+        # Negative assertion: no rows have been fetched yet
+        # (this is the first request for row context)
+
+        # When: Row context is requested for specific rows
+        response = await app_client.post(
+            "/stage-4/row-context",
+            json={"file_id": file_id, "row_indices": [0, 1, 2]},
+        )
+
+        # Then: Response contains headers and rows arrays
+        assert response.status_code == 200
+        data = response.json()
+        assert "headers" in data
+        assert "rows" in data
+        assert isinstance(data["headers"], list)
+        assert isinstance(data["rows"], list)
+        assert len(data["headers"]) > 0
+        assert len(data["rows"]) == 3
+
+    async def test_row_values_match_headers(
+        self,
+        app_client: AsyncClient,
+        sample_csv_path: Path,
+    ) -> None:
+        """Each row has same number of values as headers."""
+
+        # Given: An uploaded CSV file
+        file_id = await upload_file(app_client, sample_csv_path)
+
+        # When: Row context is requested
+        response = await app_client.post(
+            "/stage-4/row-context",
+            json={"file_id": file_id, "row_indices": [0]},
+        )
+
+        # Then: Row value count matches header count
+        data = response.json()
+        headers = data["headers"]
+        rows = data["rows"]
+        assert len(rows) == 1
+        assert len(rows[0]) == len(headers)
+
+    async def test_invalid_file_id_returns_404(
+        self,
+        app_client: AsyncClient,
+    ) -> None:
+        """Non-existent file_id returns 404."""
+
+        # Given: A file_id that doesn't exist
+        fake_file_id = "deadbeef12345678"
+
+        # When: Row context is requested with invalid file_id
+        response = await app_client.post(
+            "/stage-4/row-context",
+            json={"file_id": fake_file_id, "row_indices": [0]},
+        )
+
+        # Then: Server returns 404
+        assert response.status_code == 404
+
+    async def test_negative_row_index_rejected(
+        self,
+        app_client: AsyncClient,
+        sample_csv_path: Path,
+    ) -> None:
+        """Negative row indices are rejected by validation."""
+
+        # Given: An uploaded CSV file
+        file_id = await upload_file(app_client, sample_csv_path)
+
+        # When: Row context is requested with negative index
+        response = await app_client.post(
+            "/stage-4/row-context",
+            json={"file_id": file_id, "row_indices": [-1]},
+        )
+
+        # Then: Server returns 422 validation error
+        assert response.status_code == 422
+
+    async def test_out_of_bounds_indices_filtered(
+        self,
+        app_client: AsyncClient,
+        sample_csv_path: Path,
+    ) -> None:
+        """Out-of-bounds indices are silently filtered, returning available rows."""
+
+        # Given: An uploaded CSV file (sample.csv has 10 rows)
+        file_id = await upload_file(app_client, sample_csv_path)
+
+        # When: Row context is requested with mix of valid and out-of-bounds indices
+        response = await app_client.post(
+            "/stage-4/row-context",
+            json={"file_id": file_id, "row_indices": [0, 5, 1000]},
+        )
+
+        # Then: Only valid rows are returned (indices 0 and 5)
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["rows"]) == 2
+
+
 class TestSummaryContract:
     """POST /stage-5/summary returns change statistics."""
 

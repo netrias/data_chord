@@ -1174,3 +1174,211 @@
   100% { opacity: 0; }
 }
 
+/* ==========================================================================
+   Row Context Popup - shows original spreadsheet context
+   ========================================================================== */
+
+.row-context-dialog {
+  border: none;
+  border-radius: var(--radius-2xl);
+  padding: 0;
+  background: var(--white);
+  box-shadow:
+    0 4px 6px rgba(0, 0, 0, 0.05),
+    0 10px 20px rgba(0, 0, 0, 0.1),
+    0 20px 40px rgba(0, 0, 0, 0.1);
+  /* Override dialog defaults to ensure full size */
+  width: 95vw;
+  height: 90vh;
+  max-width: none;
+  max-height: none;
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+.row-context-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(2px);
+}
+
+.row-context-dialog-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  border-radius: var(--radius-2xl);
+}
+
+.row-context-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--gray-200);
+  flex-shrink: 0;
+}
+
+.row-context-dialog-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--gray-800);
+}
+
+.row-context-column-link {
+  color: var(--azure-600);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
+
+.row-context-column-link:hover {
+  color: var(--azure-700);
+  text-decoration-style: solid;
+}
+
+.row-context-close-btn {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  line-height: 1;
+  color: var(--gray-400);
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.row-context-close-btn:hover {
+  color: var(--gray-700);
+  background: var(--gray-100);
+}
+
+.row-context-table-wrapper {
+  flex: 1;
+  overflow: auto;
+  padding: var(--space-4);
+  box-sizing: border-box;
+}
+
+/* Shorten scrollbar tracks so they don't extend into rounded corners */
+.row-context-table-wrapper::-webkit-scrollbar-track:horizontal {
+  margin-right: var(--radius-2xl);
+}
+
+.row-context-table-wrapper::-webkit-scrollbar-track:vertical {
+  margin-bottom: var(--radius-2xl);
+}
+
+.row-context-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.row-context-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.row-context-table th {
+  background: var(--gray-100);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.75rem 1rem;
+  border-bottom: 2px solid var(--gray-300);
+  white-space: nowrap;
+  color: var(--gray-700);
+}
+
+.row-context-table td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--gray-200);
+  vertical-align: top;
+  color: var(--gray-700);
+}
+
+.row-context-table tbody tr:hover {
+  background: var(--gray-50);
+}
+
+/* Highlighted source column */
+.row-context-highlight {
+  background: var(--azure-50);
+}
+
+.row-context-table thead .row-context-highlight {
+  background: var(--azure-100);
+}
+
+.row-context-dialog-footer {
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--gray-200);
+  display: flex;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.row-context-load-all {
+  padding: 0.5rem 1.5rem;
+  border: 1px solid var(--azure-400);
+  border-radius: var(--radius-lg);
+  background: var(--azure-50);
+  color: var(--azure-700);
+  font-weight: 600;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.row-context-load-all:hover {
+  background: var(--azure-100);
+  border-color: var(--azure-500);
+}
+
+.row-context-load-all:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.row-context-loading,
+.row-context-error {
+  padding: var(--space-8);
+  text-align: center;
+  color: var(--gray-500);
+}
+
+.row-context-error {
+  color: var(--danger-600);
+}
+
+/* Clickable row label in column mode */
+.entry-row-label.row-context-link {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  transition: color var(--transition-fast);
+}
+
+.entry-row-label.row-context-link:hover {
+  color: var(--azure-600);
+  text-decoration-style: solid;
+}
+
+/* Flash animation for scroll-to-column feedback */
+@keyframes row-context-column-flash {
+  0% { background: var(--azure-100); }
+  50% { background: var(--azure-300); }
+  100% { background: var(--azure-100); }
+}
+
+.row-context-highlight.flash {
+  animation: row-context-column-flash 0.4s ease-out 2;
+}
+

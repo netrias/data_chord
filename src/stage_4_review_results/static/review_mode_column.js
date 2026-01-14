@@ -15,6 +15,16 @@ import {
   sortEntriesByConfidence,
   SORT_MODE,
 } from './shared_review_utils.js';
+import { showRowContextPopup } from './row_context_popup.js';
+
+/**
+ * Extract file_id from URL query parameters.
+ * @returns {string|null}
+ */
+const _getFileIdFromUrl = () => {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('file_id');
+};
 
 /** Default number of entries per batch when not specified. */
 const DEFAULT_ENTRIES_PER_BATCH = 25;
@@ -278,6 +288,8 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
   wrapper.className = 'column-mode-grid';
   wrapper.style.setProperty('--grid-columns', gridSize);
 
+  const fileId = _getFileIdFromUrl();
+
   for (const entry of batchMeta.entries) {
     const rowCount = entry.rowIndices.length;
     const excelRows = entry.rowIndices.map(toExcelRowNumber);
@@ -292,6 +304,25 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
       onOverrideChange,
       columnPVs,
     });
+
+    // Make row label clickable to show context popup
+    if (fileId && entry.rowIndices?.length) {
+      const rowLabelEl = card.querySelector('.entry-row-label');
+      if (rowLabelEl) {
+        rowLabelEl.classList.add('row-context-link');
+        rowLabelEl.addEventListener('click', () => {
+          // Convert 1-based sourceRowNumber indices to 0-based for API
+          const zeroBasedIndices = entry.rowIndices.map((idx) => idx - 1);
+          showRowContextPopup({
+            term: entry.originalValue,
+            columnKey: entry.columnKey,
+            rowIndices: zeroBasedIndices,
+            fileId,
+          });
+        });
+      }
+    }
+
     wrapper.append(card);
   }
 
