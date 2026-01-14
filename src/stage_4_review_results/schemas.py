@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Annotated
 
 from pydantic import BaseModel, Field
 
@@ -72,6 +73,20 @@ class NonConformantResponse(BaseModel):
     items: list[NonConformantItem]
 
 
+class RowContextRequest(BaseModel):
+    """Request payload for fetching original row context."""
+
+    file_id: str = Field(..., min_length=8, pattern=r"^[a-f0-9]+$")
+    row_indices: list[Annotated[int, Field(ge=0)]]
+
+
+class RowContextResponse(BaseModel):
+    """Original spreadsheet rows with all columns for context display."""
+
+    headers: list[str]
+    rows: list[list[str]]
+
+
 __all__ = [
     "CellOverrideSchema",
     "DeleteOverridesResponse",
@@ -79,6 +94,8 @@ __all__ = [
     "NonConformantResponse",
     "ReviewOverridesSchema",
     "ReviewStateSchema",
+    "RowContextRequest",
+    "RowContextResponse",
     "SaveOverridesRequest",
     "SaveOverridesResponse",
 ]

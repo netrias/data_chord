@@ -39,6 +39,8 @@ from src.stage_4_review_results.schemas import (
     NonConformantResponse,
     ReviewOverridesSchema,
     ReviewStateSchema,
+    RowContextRequest,
+    RowContextResponse,
     SaveOverridesRequest,
     SaveOverridesResponse,
 )
@@ -448,3 +450,27 @@ async def get_non_conformant_values(file_id: FileIdPath) -> NonConformantRespons
         count=len(non_conformant),
         items=non_conformant[:NON_CONFORMANT_DISPLAY_LIMIT],
     )
+
+
+@stage_four_router.post(
+    "/row-context",
+    response_model=RowContextResponse,
+    name="stage_four_row_context",
+)
+async def get_row_context(payload: RowContextRequest) -> RowContextResponse:
+    """On-demand fetch avoids loading full spreadsheet into review state."""
+    storage = get_upload_storage()
+    meta = storage.load(payload.file_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail="Upload not found")
+
+    headers, original_rows = load_csv(meta.saved_path)
+
+    selected_rows: list[list[str]] = []
+    for idx in payload.row_indices:
+        if 0 <= idx < len(original_rows):
+            row_dict = original_rows[idx]
+            row_values = [row_dict.get(h, "") for h in headers]
+            selected_rows.append(row_values)
+
+    return RowContextResponse(headers=headers, rows=selected_rows)
