@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.responses import Response
+from starlette.responses import FileResponse, Response
 from starlette.types import Scope
 
 from src.domain.paths import PROJECT_ROOT, SHARED_STATIC_DIR, get_stage_static_dir
@@ -123,9 +123,14 @@ def create_app() -> FastAPI:
             name=f"stage_{stage_name_map[stage]}_static",
         )
 
+    app.add_api_route("/favicon.ico", _serve_favicon, include_in_schema=False)
     app.add_api_route("/", _redirect_to_stage_one, include_in_schema=False)
 
     return app
+
+
+async def _serve_favicon() -> FileResponse:
+    return FileResponse(SHARED_STATIC_DIR / "favicon.ico", media_type="image/x-icon")
 
 
 async def _redirect_to_stage_one() -> RedirectResponse:
