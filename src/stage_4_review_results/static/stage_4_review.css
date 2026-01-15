@@ -1558,6 +1558,27 @@
   animation: row-context-column-flash 0.4s ease-out 2;
 }
 
+/* ==========================================================================
+   Scroll Mode
+   ========================================================================== */
+
+/* Column title shown inline in card header for scroll mode */
+.scroll-mode-column-title {
+  flex: 1;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--gray-700);
+  text-align: center;
+}
+
+/* Disabled state for batch size selector in scroll mode */
+.control-group select:disabled {
+  background-color: var(--gray-100);
+  color: var(--gray-400);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 /* Clusterize.js virtual scrolling styles */
 .clusterize-content {
   outline: 0;

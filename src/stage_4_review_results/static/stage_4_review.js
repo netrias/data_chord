@@ -10,13 +10,16 @@ import {
   getCurrentEntries as getColumnCurrentEntries,
   renderEntries as renderColumnEntries,
   renderBatchProgress as renderColumnBatchProgress,
+  getAllEntries as getColumnAllEntries,
 } from './review_mode_column.js';
-import { escapeHtml, getFileIdFromUrl } from './shared_review_utils.js';
+import { escapeHtml, getFileIdFromUrl, createValueCard, toExcelRowNumber, cleanupCards } from './shared_review_utils.js';
+import { showRowContextPopup } from './row_context_popup.js';
 import {
   getTotalUnits as getRowTotalUnits,
   getCurrentEntries as getRowCurrentEntries,
   renderEntries as renderRowEntries,
   renderBatchProgress as renderRowBatchProgress,
+  getAllEntries as getRowAllEntries,
 } from './review_mode_row.js';
 
 /** @type {Object} */
@@ -55,6 +58,7 @@ const settingsButton = document.getElementById('settingsButton');
 const settingsModal = document.getElementById('settingsModal');
 const settingsCloseButton = document.getElementById('settingsCloseButton');
 const hideCaseOnlyChangesCheckbox = document.getElementById('hideCaseOnlyChanges');
+const scrollModeCheckbox = document.getElementById('scrollModeCheckbox');
 
 /**
  * Batch size options for column mode.
@@ -94,6 +98,7 @@ const state = {
   totalOriginalRows: 0,  // Original spreadsheet row count (before grouping)
   sortMode: 'original',
   reviewMode: 'column',
+  scrollMode: false,  // Continuous scrolling vs batch navigation
   pendingOverrides: {},
   hideCaseOnlyChanges: true,  // Filter: hide entries where only casing differs
 
@@ -215,6 +220,7 @@ const _buildSavePayload = () => ({
   review_state: {
     review_mode: state.reviewMode,
     sort_mode: state.sortMode,
+    scroll_mode: state.scrollMode,
     hide_case_only_changes: state.hideCaseOnlyChanges,
     column_mode: _serializeModeState(state.columnMode),
     row_mode: _serializeModeState(state.rowMode),
@@ -359,11 +365,162 @@ const renderEntries = (batchMeta) => {
  * Main render function - updates all UI components.
  */
 const render = () => {
+  if (state.scrollMode) {
+    renderScrollMode();
+    return;
+  }
+
   const batchMeta = getCurrentBatchMeta();
 
   updateNavigationButtons(batchMeta);
   renderProgressPillsUI(batchMeta);
   renderEntries(batchMeta);
+};
+
+/**
+ * Render all entries in scroll mode.
+ * Gets all entries and renders them in a scrollable container.
+ */
+const renderScrollMode = () => {
+  if (!reviewTable) return;
+
+  const filterOptions = _buildFilterOptions();
+  const allEntries = state.reviewMode === 'column'
+    ? getColumnAllEntries(state.rows, state.sortMode, filterOptions)
+    : getRowAllEntries(state.rows, state.sortMode, filterOptions);
+
+  if (!allEntries.length) {
+    reviewTable.innerHTML = '';
+    const emptyEl = document.createElement('div');
+    emptyEl.className = 'review-empty';
+    emptyEl.textContent = 'No changes to review';
+    reviewTable.append(emptyEl);
+    return;
+  }
+
+  if (state.reviewMode === 'column') {
+    renderColumnScrollMode(allEntries);
+  } else {
+    renderRowScrollMode(allEntries);
+  }
+};
+
+/**
+ * Render column mode entries in scroll mode.
+ * Renders all entries directly, letting the page scroll naturally.
+ * Adds column title to each card since entries from all columns are mixed.
+ * @param {Array} entries - All column entries
+ */
+const renderColumnScrollMode = (entries) => {
+  cleanupCards(reviewTable);
+  reviewTable.innerHTML = '';
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'column-mode-grid';
+  wrapper.style.setProperty('--grid-columns', state.columnMode.batchSize);
+
+  const fileId = getFileIdFromUrl();
+
+  for (const entry of entries) {
+    const rowCount = entry.rowIndices.length;
+    const excelRows = entry.rowIndices.map(toExcelRowNumber);
+    const rowLabel = rowCount === 1 ? `Row ${excelRows[0]}` : `${rowCount} rows`;
+    const tooltipText = rowCount > 1 ? `Rows: ${excelRows.join(', ')}` : null;
+
+    const card = createValueCard({
+      entry,
+      labelText: rowLabel,
+      tooltipText,
+      pendingOverrides: state.pendingOverrides,
+      onOverrideChange: recordOverrideForRows,
+      columnPVs: state.columnPVs,
+    });
+
+    // Add column title to header row for scroll mode
+    const headerRow = card.querySelector('.card-header-row');
+    if (headerRow) {
+      const titleEl = document.createElement('span');
+      titleEl.className = 'scroll-mode-column-title';
+      titleEl.textContent = entry.columnLabel;
+      // Insert after row label so layout is: [confidence] [row] [column title] [pv icons]
+      const rowLabelEl = headerRow.querySelector('.entry-row-label');
+      if (rowLabelEl) {
+        rowLabelEl.after(titleEl);
+      } else {
+        headerRow.append(titleEl);
+      }
+    }
+
+    // Make row label clickable to show context popup
+    if (fileId && entry.rowIndices?.length) {
+      const rowLabelEl = card.querySelector('.entry-row-label');
+      if (rowLabelEl) {
+        rowLabelEl.classList.add('row-context-link');
+        rowLabelEl.addEventListener('click', () => {
+          const zeroBasedIndices = entry.rowIndices.map((idx) => idx - 1);
+          showRowContextPopup({
+            term: entry.originalValue,
+            columnKey: entry.columnKey,
+            rowIndices: zeroBasedIndices,
+            fileId,
+            totalOriginalRows: state.totalOriginalRows,
+          });
+        });
+      }
+    }
+
+    wrapper.append(card);
+  }
+
+  reviewTable.append(wrapper);
+};
+
+/**
+ * Render row mode entries in scroll mode.
+ * Renders all rows directly, letting the page scroll naturally.
+ * @param {Array} rows - All rows with changes
+ */
+const renderRowScrollMode = (rows) => {
+  cleanupCards(reviewTable);
+  reviewTable.innerHTML = '';
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'row-mode-wrapper';
+
+  for (const row of rows) {
+    const rowEl = document.createElement('div');
+    rowEl.className = 'row-mode-row';
+
+    const headerEl = document.createElement('div');
+    headerEl.className = 'row-mode-header';
+    headerEl.textContent = `Row ${toExcelRowNumber(row.rowIndex)}`;
+    rowEl.append(headerEl);
+
+    const cellsEl = document.createElement('div');
+    cellsEl.className = 'row-mode-cells';
+
+    for (const cell of row.changedCells) {
+      const entry = {
+        ...cell,
+        topSuggestions: cell.topSuggestions ?? [],
+        rowIndices: [row.rowIndex],
+      };
+      const card = createValueCard({
+        entry,
+        labelText: cell.columnLabel,
+        tooltipText: null,
+        pendingOverrides: state.pendingOverrides,
+        onOverrideChange: recordOverrideForRows,
+        columnPVs: state.columnPVs,
+      });
+      cellsEl.append(card);
+    }
+
+    rowEl.append(cellsEl);
+    wrapper.append(rowEl);
+  }
+
+  reviewTable.append(wrapper);
 };
 
 /**
@@ -468,6 +625,39 @@ const handleBatchSizeChange = () => {
 };
 
 /**
+ * Handle scroll mode toggle.
+ * When enabled, renders all entries in a scrollable container; when disabled, returns to batch mode.
+ */
+const handleScrollModeChange = () => {
+  state.scrollMode = scrollModeCheckbox.checked;
+  updateUIForScrollMode();
+  saveOverrides();
+  render();
+};
+
+/**
+ * Update UI elements based on scroll mode state.
+ * Disables batch size selector and hides navigation controls when scroll mode is active.
+ */
+const updateUIForScrollMode = () => {
+  if (batchSizeSelect) {
+    batchSizeSelect.disabled = state.scrollMode;
+    batchSizeSelect.title = state.scrollMode
+      ? 'Batch size is disabled in scroll mode'
+      : '';
+  }
+
+  // Toggle visibility of batch navigation elements
+  const batchActions = document.querySelector('.batch-actions');
+  if (batchActions) {
+    batchActions.style.display = state.scrollMode ? 'none' : '';
+  }
+  if (batchProgressList) {
+    batchProgressList.style.display = state.scrollMode ? 'none' : '';
+  }
+};
+
+/**
  * Attach all event listeners.
  */
 const attachEventListeners = () => {
@@ -527,6 +717,10 @@ const attachEventListeners = () => {
     });
   }
 
+  if (scrollModeCheckbox) {
+    scrollModeCheckbox.addEventListener('change', handleScrollModeChange);
+  }
+
   initNavigationEvents();
 };
 
@@ -546,6 +740,7 @@ const loadStateFromDisk = async () => {
 
   state.reviewMode = reviewState.review_mode || 'column';
   state.sortMode = reviewState.sort_mode || 'original';
+  state.scrollMode = reviewState.scroll_mode ?? false;
   // Default to true if not specified (checked by default)
   state.hideCaseOnlyChanges = reviewState.hide_case_only_changes ?? true;
 
@@ -697,7 +892,11 @@ const init = async () => {
   if (hideCaseOnlyChangesCheckbox) {
     hideCaseOnlyChangesCheckbox.checked = state.hideCaseOnlyChanges;
   }
+  if (scrollModeCheckbox) {
+    scrollModeCheckbox.checked = state.scrollMode;
+  }
   populateBatchSizeOptions();
+  updateUIForScrollMode();
 
   attachEventListeners();
 

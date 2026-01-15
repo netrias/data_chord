@@ -45,6 +45,17 @@ const _buildRowsWithChanges = (rows, sortMode = SORT_MODE.ORIGINAL, filterOption
 };
 
 /**
+ * Get all rows with changes for scroll mode.
+ * @param {Array} rows - Array of row objects
+ * @param {string} [sortMode] - Sort mode
+ * @param {Object} [filterOptions] - Filter options
+ * @returns {Array} Array of row objects with changedCells and rowIndex added
+ */
+export const getAllEntries = (rows, sortMode = SORT_MODE.ORIGINAL, filterOptions = {}) => {
+  return _buildRowsWithChanges(rows, sortMode, filterOptions);
+};
+
+/**
  * Get total number of batches based on batch size.
  * Returns 0 when no changed rows exist to signal empty state to UI.
  * Sorting doesn't affect total count, only order within batches.

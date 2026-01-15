@@ -152,6 +152,31 @@ const _buildCompactedColumns = (rows, filterOptions = {}) => {
 };
 
 /**
+ * Get all entries across all columns for scroll mode.
+ * Returns a flat array of all entries, sorted by column then by confidence within column.
+ * @param {Array} rows - Array of row objects
+ * @param {string} [sortMode] - Sort mode for entries within each column
+ * @param {Object} [filterOptions] - Filter options
+ * @returns {Array} Flat array of all entries with columnLabel attached
+ */
+export const getAllEntries = (rows, sortMode = SORT_MODE.ORIGINAL, filterOptions = {}) => {
+  const columns = _buildCompactedColumns(rows, filterOptions);
+  const allEntries = [];
+
+  for (const col of columns) {
+    const sortedEntries = sortEntriesByConfidence(col.entries, sortMode);
+    for (const entry of sortedEntries) {
+      allEntries.push({
+        ...entry,
+        columnLabel: col.columnLabel,
+      });
+    }
+  }
+
+  return allEntries;
+};
+
+/**
  * Get total number of navigable units (columns with batches).
  * Returns 0 when no data exists to signal empty state to UI.
  * Sorting doesn't affect total count, only order within batches.
