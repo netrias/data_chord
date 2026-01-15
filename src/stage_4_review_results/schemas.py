@@ -21,6 +21,7 @@ class ReviewStateSchema(BaseModel):
 
     sort_mode: str = "original"
     batch_size: int = 5
+    scroll_mode: bool = False
 
 
 class ReviewOverridesSchema(BaseModel):
