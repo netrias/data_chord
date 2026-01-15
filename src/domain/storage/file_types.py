@@ -25,6 +25,9 @@ class FileType(Enum):
     # Stage 4 - Review
     REVIEW_OVERRIDES = ("overrides", "json")
 
+    # PV Manifest - persists column-to-CDE mappings and PV sets
+    PV_MANIFEST = ("pv_manifest", "json")
+
     # Data files
     ORIGINAL_CSV = ("original", "csv")
     HARMONIZED_CSV = ("harmonized", "csv")

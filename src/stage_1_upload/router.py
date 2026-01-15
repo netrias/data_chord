@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from src.domain import ModelSuggestion, get_default_target_schema
+from src.domain.data_model_cache import clear_all_session_caches
 from src.domain.dependencies import get_mapping_service, get_upload_constraints, get_upload_storage
 from src.domain.manifest import ManifestPayload
 
@@ -56,6 +57,9 @@ async def render_stage_one(request: Request) -> HTMLResponse:
     name="stage_one_upload_upload",
 )
 async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadResponse:
+    # Clear all session caches when starting a new workflow
+    clear_all_session_caches()
+
     try:
         meta = await _storage.store(file)
     except UnsupportedUploadError as exc:

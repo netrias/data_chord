@@ -19,9 +19,11 @@ Running document of implemented and planned behaviors for the Stage 4 verificati
 - Conformance is checked against the *active* value (override if present, else AI suggestion)
 
 ### Confidence Indicators
-- High: Green checkmark (✓)
-- Medium: Blue tilde (~)
-- Low: Magenta exclamation (!)
+- High: Up caret (▲) - AI is confident in this transformation
+- Medium: Dash (–) - Reasonable match, review suggested
+- Low: Down caret (▼) - AI is uncertain, manual review recommended
+
+Confidence indicators show a tooltip on hover explaining the confidence level.
 
 ---
 

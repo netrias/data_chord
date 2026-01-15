@@ -8,9 +8,16 @@ import { determineCardState } from './card-state.js';
 
 /** @type {Record<string, string>} */
 export const CONFIDENCE_SYMBOLS = {
-  high: '✓',
-  medium: '~',
-  low: '!',
+  high: '▲',
+  medium: '–',
+  low: '▼',
+};
+
+/** @type {Record<string, string>} */
+export const CONFIDENCE_TOOLTIPS = {
+  high: 'High confidence – The AI estimates this transformation is likely correct, but verification is still recommended.',
+  medium: 'Medium confidence – The AI found a reasonable match. Review suggested.',
+  low: 'Low confidence – The AI is uncertain. Manual review recommended.',
 };
 
 /** @type {Record<string, string>} */
@@ -261,7 +268,7 @@ const _getInputValue = (entry, pendingOverrides) => {
  * @returns {string}
  */
 const _buildCardHTML = (params) => {
-  const { columnLabel, labelText, confidenceSymbol, bucket, recommendedText, recommendedClass, originalValue, inputValue, isPVConformant, hasPVs } = params;
+  const { columnLabel, labelText, confidenceSymbol, confidenceTooltip, bucket, recommendedText, recommendedClass, originalValue, inputValue, isPVConformant, hasPVs } = params;
   const safeColumnLabel = escapeHtml(columnLabel);
   const safeLabelText = escapeHtml(labelText);
   const safeRecommendedText = escapeHtml(recommendedText);
@@ -284,7 +291,7 @@ const _buildCardHTML = (params) => {
 
   return `
     <div class="${headerClasses.join(' ')}">
-      <span class="confidence-indicator confidence-${bucket}" aria-label="${bucket} confidence">${confidenceSymbol}</span>
+      <span class="confidence-indicator confidence-${bucket}" data-tooltip="${confidenceTooltip}" aria-label="${bucket} confidence">${confidenceSymbol}</span>
       <div class="entry-row-label">${safeLabelText}</div>
       ${pvStatusIcons}
     </div>
@@ -733,6 +740,7 @@ export const createValueCard = (config) => {
     ? ' no-recommendation-text'
     : (entry.harmonizedValue === null ? ' missing' : '');
   const confidenceSymbol = CONFIDENCE_SYMBOLS[entry.bucket] ?? '?';
+  const confidenceTooltip = CONFIDENCE_TOOLTIPS[entry.bucket] ?? '';
 
   // Check if value is conformant (PVs available AND value matches)
   const isPVConformant = entry.pvSetAvailable && entry.isPVConformant;
@@ -741,6 +749,7 @@ export const createValueCard = (config) => {
     columnLabel,
     labelText,
     confidenceSymbol,
+    confidenceTooltip,
     bucket: entry.bucket,
     recommendedText,
     recommendedClass,

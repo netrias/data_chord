@@ -79,6 +79,8 @@ LocalStorageBackend (filesystem)
 - `UPLOAD_META` - Column metadata (JSON)
 - `COLUMN_MAPPING` - Stage 2 mapping decisions (JSON)
 - `HARMONIZATION_MANIFEST` - All transformation data (Parquet)
+- `PV_MANIFEST` - Permissible values and column-CDE mappings (JSON)
+- `REVIEW_OVERRIDES` - Manual overrides from Stage 4 review (JSON)
 - `HARMONIZED_CSV` - Final export
 
 ## Manifest Structure
