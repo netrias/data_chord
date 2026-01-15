@@ -29,8 +29,7 @@ from src.domain import (
     get_default_target_schema,
 )
 from src.domain.data_model_cache import SessionCache, get_session_cache, save_pv_manifest_to_disk
-from src.domain.dependencies import get_data_model_client, get_file_store, get_harmonize_service, get_upload_storage
-from src.domain.storage import FileType
+from src.domain.dependencies import get_data_model_client, get_harmonize_service, get_upload_storage
 from src.domain.harmonize import HarmonizeResult
 from src.domain.manifest import (
     ConfidenceBucket,
