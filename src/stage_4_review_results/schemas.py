@@ -7,6 +7,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field
 
+from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
+
 
 class CellOverrideSchema(BaseModel):
     """Single cell override from human review."""
@@ -36,7 +38,7 @@ class ReviewOverridesSchema(BaseModel):
 class SaveOverridesRequest(BaseModel):
     """Request payload for saving review overrides."""
 
-    file_id: str = Field(..., min_length=8, pattern=r"^[a-f0-9]+$")
+    file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_PATTERN)
     overrides: dict[str, dict[str, CellOverrideSchema]]
     review_state: ReviewStateSchema
 
@@ -73,7 +75,7 @@ class NonConformantResponse(BaseModel):
 class RowContextRequest(BaseModel):
     """Request payload for fetching original row context."""
 
-    file_id: str = Field(..., min_length=8, pattern=r"^[a-f0-9]+$")
+    file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_PATTERN)
     row_indices: list[Annotated[int, Field(ge=0)]] = Field(max_length=10000)
 
 

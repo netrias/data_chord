@@ -63,6 +63,7 @@ _SERIALIZERS: dict[FileType, Serializer] = {
     FileType.UPLOAD_META: JSONSerializer(),
     FileType.COLUMN_MAPPING: JSONSerializer(),
     FileType.REVIEW_OVERRIDES: JSONSerializer(),
+    FileType.PV_MANIFEST: JSONSerializer(),
     FileType.HARMONIZATION_MANIFEST: ParquetSerializer(),
     FileType.ORIGINAL_CSV: RawBytesSerializer(),
     FileType.HARMONIZED_CSV: RawBytesSerializer(),

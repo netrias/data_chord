@@ -13,7 +13,7 @@ import zipfile
 from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
@@ -22,7 +22,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from src.domain import ChangeType
-from src.domain.data_model_cache import SessionCache, clear_session_cache, get_session_cache
+from src.domain.data_model_cache import SessionCache, ensure_pvs_loaded
 from src.domain.dependencies import get_file_store, get_upload_storage
 from src.domain.manifest import (
     ManifestRow,
@@ -133,10 +133,6 @@ async def download_harmonized_data(payload: StageFiveRequest) -> StreamingRespon
     base_name = f"{original_stem}_{payload.file_id}_{timestamp}"
 
     zip_buffer = _create_zip_buffer(base_name, headers, final_rows, manifest_path)
-
-    # Clear session cache after successful download (session complete)
-    clear_session_cache(payload.file_id)
-    _logger.info("Cleared session cache after download", extra={"file_id": payload.file_id})
 
     return _create_streaming_response(base_name, zip_buffer)
 
@@ -275,14 +271,11 @@ def _build_history(row: ManifestRow) -> list[TransformationStep]:
     return steps
 
 
-class _MappingInfo:
-    """Internal container for tracking unique mappings with history."""
+class _MappingInfo(NamedTuple):
+    """Immutable container for conformance result and transformation history."""
 
-    __slots__ = ("is_conformant", "history")
-
-    def __init__(self, is_conformant: bool, history: list[TransformationStep]) -> None:
-        self.is_conformant = is_conformant
-        self.history = history
+    is_conformant: bool
+    history: list[TransformationStep]
 
 
 def _process_manifest_row(
@@ -309,7 +302,7 @@ def _process_manifest_row(
 
 
 def _build_summary_from_manifest(summary: ManifestSummary, file_id: str) -> StageFiveSummaryResponse:
-    cache = get_session_cache(file_id)
+    cache = ensure_pvs_loaded(file_id)
     ai_counts: dict[int, int] = defaultdict(int)
     manual_counts: dict[int, int] = defaultdict(int)
     unchanged_counts: dict[int, int] = defaultdict(int)
@@ -357,6 +350,9 @@ def _track_mapping(
     cache: SessionCache,
 ) -> None:
     """Deduplicates by (column, original, final) so we check conformance once per unique mapping."""
+    # Empty string means no data; whitespace-only values pass through as semantically significant
+    if not row.to_harmonize:
+        return
     final = _get_final_value(row)
     key = (row.column_name, row.to_harmonize, final)
     if key in mappings:

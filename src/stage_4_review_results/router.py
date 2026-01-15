@@ -18,7 +18,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from src.domain import CONFIDENCE, RecommendationType, format_column_label
-from src.domain.data_model_cache import get_session_cache
+from src.domain.data_model_cache import ensure_pvs_loaded, get_session_cache
 from src.domain.dependencies import get_file_store, get_upload_storage
 from src.domain.manifest import (
     ConfidenceBucket,
@@ -55,7 +55,7 @@ _templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 
 
 class StageFourResultsRequest(BaseModel):
-    file_id: str = Field(..., min_length=8, pattern=r"^[a-f0-9]+$")
+    file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_PATTERN)
     manual_columns: list[str] = []
 
 
@@ -212,8 +212,8 @@ def _build_rows_from_manifest(
 
 
 def _build_column_pvs(columns: list[_ColumnInfo], file_id: str) -> dict[str, list[str]]:
-    """Sort PVs alphabetically for consistent UI dropdown display."""
-    cache = get_session_cache(file_id)
+    """Alphabetical sort ensures predictable dropdown ordering across page loads."""
+    cache = ensure_pvs_loaded(file_id)
     column_pvs: dict[str, list[str]] = {}
     for col_info in columns:
         pv_set = cache.get_pvs_for_column(col_info.column_name)
@@ -428,7 +428,7 @@ async def delete_overrides(file_id: FileIdPath) -> DeleteOverridesResponse:
 async def get_non_conformant_values(file_id: FileIdPath) -> NonConformantResponse:
     """Deduplicate by (column, original, final) to match Stage 5's unique mapping logic."""
     storage = get_upload_storage()
-    cache = get_session_cache(file_id)
+    cache = ensure_pvs_loaded(file_id)
     manifest = _load_manifest(storage, file_id)
 
     if manifest is None:

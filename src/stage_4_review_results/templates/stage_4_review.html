@@ -106,23 +106,19 @@
 
       <section class="stage-card review-grid">
         <div class="review-toolbar">
-          <div class="confidence-legend">
-            <div class="legend-item legend-item--high">
+          <div class="conformance-legend">
+            <div class="legend-item legend-item--conformant">
               <span class="legend-icon" aria-hidden="true">✓</span>
-              <span class="legend-label">High confidence</span>
+              <span class="legend-label">Value matches approved term</span>
             </div>
-            <div class="legend-item legend-item--medium">
-              <span class="legend-icon" aria-hidden="true">~</span>
-              <span class="legend-label">Medium confidence</span>
-            </div>
-            <div class="legend-item legend-item--low">
-              <span class="legend-icon" aria-hidden="true">!</span>
-              <span class="legend-label">Low confidence</span>
+            <div class="legend-item legend-item--non-conformant">
+              <span class="legend-icon" aria-hidden="true">⚠</span>
+              <span class="legend-label">Value not in approved terms</span>
             </div>
           </div>
           <div class="batch-actions">
-            <button id="previousBatchButton" class="ghost-btn" type="button">← Previous batch</button>
-            <button id="nextBatchButton" class="ghost-btn" type="button">Next batch →</button>
+            <button id="previousBatchButton" class="ghost-btn" type="button">← Previous</button>
+            <button id="nextBatchButton" class="ghost-btn" type="button">Next →</button>
           </div>
         </div>
         <div id="reviewTable" class="review-table" role="table" aria-live="polite"></div>

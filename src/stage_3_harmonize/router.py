@@ -28,8 +28,9 @@ from src.domain import (
     format_column_label,
     get_default_target_schema,
 )
-from src.domain.data_model_cache import SessionCache, get_session_cache
-from src.domain.dependencies import get_data_model_client, get_harmonize_service, get_upload_storage
+from src.domain.data_model_cache import SessionCache, get_session_cache, save_pv_manifest_to_disk
+from src.domain.dependencies import get_data_model_client, get_file_store, get_harmonize_service, get_upload_storage
+from src.domain.storage import FileType
 from src.domain.harmonize import HarmonizeResult
 from src.domain.manifest import (
     ConfidenceBucket,
@@ -206,6 +207,9 @@ async def _fetch_and_cache_pvs(
         "Fetched PVs for session",
         extra={"file_id": file_id, "cde_count": len(pv_map), "pv_counts": pv_counts},
     )
+
+    # Persist PV manifest to disk for recovery after server restart
+    save_pv_manifest_to_disk(file_id, cache, pv_map)
 
 
 async def _fetch_pvs_for_session(file_id: str, manifest: ManifestPayload | None) -> None:

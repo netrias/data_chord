@@ -1,5 +1,10 @@
 /* Stage 2 Map - column mapping table styles */
 
+/* Override stage-shell width for wider table layout */
+.stage-shell {
+  max-width: 1800px;
+}
+
 /* Override stage-card padding for edge-to-edge table */
 .stage-card {
   padding: 0;
@@ -44,7 +49,7 @@
 /* Fixed table header */
 .mapping-table-header {
   display: grid;
-  grid-template-columns: 32px 1fr 1fr 1fr;
+  grid-template-columns: 32px 1fr 1fr 1.5fr;
   gap: var(--space-4);
   padding: var(--space-3) var(--space-4);
   background: var(--gray-50);
@@ -71,7 +76,7 @@
 /* Individual mapping row */
 .mapping-row {
   display: grid;
-  grid-template-columns: 32px 1fr 1fr 1fr;
+  grid-template-columns: 32px 1fr 1fr 1.5fr;
   gap: var(--space-4);
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--gray-100);
@@ -160,7 +165,6 @@
 .combobox {
   position: relative;
   width: 100%;
-  max-width: 220px;
 }
 
 .combobox-input {
@@ -222,12 +226,12 @@
   right: 0;
   margin: 4px 0 0;
   padding: 4px 0;
-  background: var(--white);
-  border: 1px solid var(--gray-200);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-md);
+  background: var(--gray-50);
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12), 0 2px 4px rgba(0, 0, 0, 0.08);
   list-style: none;
-  max-height: 200px;
+  max-height: 500px;
   overflow-y: auto;
   z-index: 100;
 }
@@ -244,7 +248,7 @@
 }
 
 .combobox-option:hover {
-  background: var(--gray-50);
+  background: var(--gray-200);
 }
 
 .combobox-option--empty {
