@@ -13,6 +13,7 @@ from enum import Enum
 class AdjustmentSource(str, Enum):
     TOP_SUGGESTIONS = "top_suggestions"
     ORIGINAL = "original"
+    PV_OVERRIDE = "pv_override"
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,28 @@ def compute_pv_adjustment(
     top_suggestions: list[str],
     pv_set: frozenset[str],
 ) -> PVValidationResult:
+    """Never convert a valid original value to something else.
+
+    If the user's original value is already in the PV set, we keep it regardless
+    of what the AI suggested. This prevents "correcting" valid data.
+    """
+    if validate_against_pvs(original_value, pv_set):
+        if original_value != top_harmonization:
+            return PVValidationResult(
+                is_conformant=True,
+                original_value=original_value,
+                attempted_value=top_harmonization,
+                adjusted_value=original_value,
+                adjustment_source=AdjustmentSource.PV_OVERRIDE,
+            )
+        return PVValidationResult(
+            is_conformant=True,
+            original_value=original_value,
+            attempted_value=top_harmonization,
+            adjusted_value=None,
+            adjustment_source=None,
+        )
+
     if validate_against_pvs(top_harmonization, pv_set):
         return PVValidationResult(
             is_conformant=True,
@@ -64,8 +87,6 @@ def compute_pv_adjustment(
             adjustment_source=AdjustmentSource.TOP_SUGGESTIONS,
         )
 
-    # No conformant option found -> keep AI suggestion, mark as non-conformant
-    # Don't auto-adjust; let user see the AI suggestion and decide via override
     return PVValidationResult(
         is_conformant=False,
         original_value=original_value,
