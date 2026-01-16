@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import logging
 import zipfile
 from collections import defaultdict
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -188,6 +190,14 @@ def _rows_to_csv_string(headers: list[str], rows: list[dict[str, str]]) -> str:
     return csv_output.getvalue()
 
 
+def _manifest_to_json(manifest_path: Path) -> str | None:
+    """JSON enables human inspection of transformation history in the download."""
+    summary = read_manifest_parquet(manifest_path)
+    if summary is None:
+        return None
+    return json.dumps([asdict(row) for row in summary.rows], indent=2)
+
+
 def _create_zip_buffer(
     base_name: str,
     headers: list[str],
@@ -199,8 +209,10 @@ def _create_zip_buffer(
         csv_content = _rows_to_csv_string(headers, rows)
         zf.writestr(f"{base_name}.csv", csv_content)
 
-        if manifest_path and manifest_path.exists():
-            zf.write(manifest_path, f"{base_name}.parquet")
+        if manifest_path:
+            json_content = _manifest_to_json(manifest_path)
+            if json_content:
+                zf.writestr(f"{base_name}_manifest.json", json_content)
 
     zip_buffer.seek(0)
     return zip_buffer

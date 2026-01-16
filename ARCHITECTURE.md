@@ -58,7 +58,7 @@ Benefits:
 2. **Mapping** (Stage 2): file_id → `MappingService` → column mappings (JSON)
 3. **Harmonize** (Stage 3): mappings → `HarmonizeService` → manifest (Parquet)
 4. **Review** (Stage 4): manifest + manual overrides → reviewed manifest
-5. **Export** (Stage 5): manifest → harmonized CSV + audit bundle
+5. **Export** (Stage 5): manifest → harmonized CSV + JSON manifest (human-readable audit trail)
 
 ## Storage Architecture
 
