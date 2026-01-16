@@ -40,7 +40,7 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'pv-combobox-input';
-  // Input stays empty - card display shows the current value, input is just for searching/selecting
+  // In compact design, input displays the current value when not focused
 
   const toggleBtn = document.createElement('button');
   toggleBtn.type = 'button';
@@ -84,10 +84,10 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange
 
   /** Helper to select a value. */
   const selectValue = (value) => {
-    // Clear input after selection - card display shows the override value
-    input.value = '';
-    input.placeholder = '';
     committedValue = value;
+    // Show value in input (compact design: input IS the display)
+    input.value = value;
+    input.placeholder = '';
     dropdown.classList.remove('pv-combobox-dropdown--open');
     onChange(value);
   };
@@ -221,9 +221,9 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange
 
   /** Open the dropdown (builds options lazily on first open). */
   const openDropdown = () => {
-    // Input stays empty - card display shows the current override value
+    // Clear input for searching, show current value as placeholder hint
     input.value = '';
-    input.placeholder = '';
+    input.placeholder = committedValue || 'Type to search...';
 
     // Position dropdown in viewport
     positionDropdown();
@@ -296,8 +296,8 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange
         committedValue = matchedPV;
         onChange(matchedPV);
       }
-      // Always clear input after blur - card display shows the override value
-      input.value = '';
+      // Restore committed value to input (compact design: input IS the display)
+      input.value = committedValue;
       input.placeholder = '';
     }, BLUR_DELAY_MS);
   });
@@ -317,11 +317,24 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange
   wrapper.appendChild(toggleBtn);
   wrapper.appendChild(dropdown);
 
+  // Initialize input with committed value (compact design: input IS the display)
+  input.value = committedValue;
+
   /** Reset the combobox to empty state. */
   wrapper.reset = () => {
     committedValue = '';
     input.value = '';
     input.placeholder = '';
+  };
+
+  /** Set the combobox to a specific value. */
+  wrapper.setValue = (value) => {
+    committedValue = value;
+    // Show value in input (compact design: input IS the display)
+    input.value = value;
+    input.placeholder = '';
+    // Close dropdown if open (ensures UI consistency when called programmatically)
+    dropdown.classList.remove('pv-combobox-dropdown--open');
   };
 
   /** Cleanup function to clear pending timeouts. */

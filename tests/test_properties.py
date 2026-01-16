@@ -161,9 +161,14 @@ def test_find_conformant_with_matching_first(pv_list: list[str]) -> None:
     st.lists(st.text(), min_size=1),
 )
 def test_compute_adjustment_conformant_when_top_in_pvs(original: str, pv_list: list[str]) -> None:
-    """If top_harmonization is in PV set, result is conformant with no adjustment."""
+    """If top_harmonization is in PV set, result is conformant with no adjustment.
+
+    Note: Excludes cases where original is also in PV set (but differs from top),
+    because those trigger PV_OVERRIDE per ADR 004.
+    """
     pv_set = frozenset(pv_list)
     top = pv_list[0]  # Use a known member
+    assume(original not in pv_set or original == top)
 
     result = compute_pv_adjustment(original, top, [], pv_set)
 
@@ -181,9 +186,14 @@ def test_compute_adjustment_conformant_when_top_in_pvs(original: str, pv_list: l
 def test_compute_adjustment_falls_back_to_suggestions(
     original: str, non_conformant_top: str, suggestion_pvs: list[str]
 ) -> None:
-    """If top is non-conformant but a suggestion is, adjustment is made."""
+    """If top is non-conformant but a suggestion is, adjustment is made.
+
+    Note: Excludes cases where original is in PV set, because those trigger
+    PV_OVERRIDE per ADR 004 (original-first validation).
+    """
     pv_set = frozenset(suggestion_pvs)
     assume(non_conformant_top not in pv_set)
+    assume(original not in pv_set)
     suggestions = [non_conformant_top, suggestion_pvs[0]]  # Second one is conformant
 
     result = compute_pv_adjustment(original, non_conformant_top, suggestions, pv_set)

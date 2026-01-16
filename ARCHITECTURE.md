@@ -105,6 +105,7 @@ See `adr/` for architectural decision records. Summary:
 - **Parquet for manifest** - efficient columnar storage, schema evolution
 - **Graceful degradation** - missing PV data doesn't block validation
 - **Whitespace-sensitive** - whitespace differences are semantically meaningful
+- **PV Override Protection** - valid original values are never replaced by AI (ADR 004)
 
 ## Module Patterns
 

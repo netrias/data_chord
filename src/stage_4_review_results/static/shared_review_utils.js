@@ -131,10 +131,11 @@ export const isCaseChangeOnly = (cell) => {
  * @param {Object} cell - Cell object
  * @param {Object} [options] - Filter options
  * @param {boolean} [options.hideCaseOnlyChanges=false] - If true, excludes case-only changes
+ * @param {boolean} [options.showUnchangedValues=false] - If true, includes unchanged values
  * @returns {boolean}
  */
 export const cellNeedsReview = (cell, options = {}) => {
-  const { hideCaseOnlyChanges = false } = options;
+  const { hideCaseOnlyChanges = false, showUnchangedValues = false } = options;
 
   const original = cell.originalValue ?? '';
   const harmonized = cell.harmonizedValue ?? '';
@@ -147,8 +148,10 @@ export const cellNeedsReview = (cell, options = {}) => {
     return true;
   }
 
-  // No change means no review needed
-  if (original === harmonized) return false;
+  // Handle unchanged values based on toggle
+  if (original === harmonized) {
+    return showUnchangedValues;
+  }
 
   // If filtering case-only changes and this is one, skip it
   if (hideCaseOnlyChanges && isCaseChangeOnly(cell)) {
@@ -262,21 +265,19 @@ const _getInputValue = (entry, pendingOverrides) => {
 };
 
 /**
- * Pre-render both warning and conformant icons, toggling visibility dynamically.
- * Creating icons upfront avoids DOM thrashing when users type overrides.
+ * Build compact card HTML with original context and target value input.
+ * The input IS the primary display - it shows the current effective value.
  * @param {Object} params
  * @returns {string}
  */
 const _buildCardHTML = (params) => {
-  const { columnLabel, labelText, confidenceSymbol, confidenceTooltip, bucket, recommendedText, recommendedClass, originalValue, inputValue, isPVConformant, hasPVs } = params;
+  const { columnLabel, labelText, confidenceSymbol, confidenceTooltip, bucket, effectiveValue, originalValue, isPVConformant, hasPVs } = params;
   const safeColumnLabel = escapeHtml(columnLabel);
   const safeLabelText = escapeHtml(labelText);
-  const safeRecommendedText = escapeHtml(recommendedText);
+  const safeEffectiveValue = escapeHtml(effectiveValue);
   const safeOriginalValue = escapeHtml(originalValue);
-  const safeInputValue = escapeHtml(inputValue);
 
   // Both icons always present when PVs exist - toggle visibility based on conformance
-  // This allows dynamic show/hide when user changes override values
   const warningHidden = isPVConformant ? ' style="display: none;"' : '';
   const checkHidden = isPVConformant ? '' : ' style="display: none;"';
   const pvStatusIcons = hasPVs
@@ -295,33 +296,28 @@ const _buildCardHTML = (params) => {
       <div class="entry-row-label">${safeLabelText}</div>
       ${pvStatusIcons}
     </div>
-    <div class="value-pair" role="group" aria-label="${safeColumnLabel} comparison">
-      <div class="value-group original">
-        <p class="value-text original-text">${safeOriginalValue}</p>
+    <div class="card-body" role="group" aria-label="${safeColumnLabel} transformation">
+      <div class="original-context">
+        <span class="original-context-label">was:</span>
+        <span class="original-context-value">${safeOriginalValue}</span>
       </div>
-      <div class="transformation-arrow" aria-hidden="true">
-        <svg class="arrow-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="12" y1="5" x2="12" y2="19"></line>
-          <polyline points="6 13 12 19 18 13"></polyline>
-        </svg>
+      <div class="target-value-wrapper">
+        <span class="target-value-label">now:</span>
+        <label class="target-value">
+          <span class="sr-only">Target value for ${safeColumnLabel}</span>
+          <span class="target-value-input-wrapper">
+            <svg class="target-value-icon" viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M2 14.5V18h3.5l8.4-8.4-3.5-3.5L2 14.5zm11.8-9.1a1 1 0 0 1 1.4 0l1.4 1.4a1 1 0 0 1 0 1.4l-1.2 1.2-3.5-3.5 1.2-1.2z"/>
+            </svg>
+            <input
+              class="target-value-input"
+              type="text"
+              value="${safeEffectiveValue}"
+              aria-label="Target value for ${safeColumnLabel}"
+            />
+          </span>
+        </label>
       </div>
-      <div class="value-group recommended">
-        <p class="value-text recommended-text${recommendedClass}">${safeRecommendedText}</p>
-      </div>
-      <label class="value-group value-override">
-        <span class="value-label sr-only">Override ${safeColumnLabel}</span>
-        <span class="value-input-wrapper">
-          <svg class="value-input-icon" viewBox="0 0 20 20" aria-hidden="true">
-            <path d="M2 14.5V18h3.5l8.4-8.4-3.5-3.5L2 14.5zm11.8-9.1a1 1 0 0 1 1.4 0l1.4 1.4a1 1 0 0 1 0 1.4l-1.2 1.2-3.5-3.5 1.2-1.2z"/>
-          </svg>
-          <input
-            class="value-input"
-            type="text"
-            value="${safeInputValue}"
-            aria-label="Manual override for ${safeColumnLabel}"
-          />
-        </span>
-      </label>
     </div>
   `;
 };
@@ -329,10 +325,11 @@ const _buildCardHTML = (params) => {
 /**
  * Apply card display state to DOM elements.
  * Uses determineCardState for all state logic, then applies visual updates.
+ * In the compact design, the input shows the effective value directly.
  * @param {Object} params
  * @param {HTMLElement} params.card - The card element
- * @param {HTMLElement} params.recommendedEl - Element displaying the harmonized value
- * @param {HTMLElement|null} params.originalEl - Element displaying the original value
+ * @param {HTMLElement} params.inputEl - The target value input element
+ * @param {HTMLElement|null} params.originalContextEl - Element displaying "was: X"
  * @param {string} params.originalValue - Original value from source data
  * @param {string} params.aiSuggestedValue - AI harmonized value
  * @param {string} params.overrideValue - User's override (empty string = no override)
@@ -343,8 +340,8 @@ const _buildCardHTML = (params) => {
 const _applyCardState = (params) => {
   const {
     card,
-    recommendedEl,
-    originalEl,
+    inputEl,
+    originalContextEl,
     originalValue,
     aiSuggestedValue,
     overrideValue,
@@ -363,18 +360,15 @@ const _applyCardState = (params) => {
     aiIsConformant,
   });
 
-  // Apply override display
-  if (state.hasOverride) {
-    recommendedEl.innerHTML = `<span class="ai-suggestion-struck revert-link">${escapeHtml(aiSuggestedValue)}</span><span class="override-value">${escapeHtml(overrideValue)}</span>`;
-    recommendedEl.classList.add('has-override');
-  } else {
-    recommendedEl.textContent = aiSuggestedValue;
-    recommendedEl.classList.remove('has-override');
+  // Input shows the current effective value (AI suggestion or override)
+  if (inputEl) {
+    inputEl.value = state.activeValue;
   }
 
-  // Apply original value clickable state
-  if (originalEl) {
-    originalEl.classList.toggle('revert-link', state.originalIsClickable);
+  // Original context is clickable when it differs from current effective value
+  if (originalContextEl) {
+    const canRevertToOriginal = originalValue !== state.activeValue;
+    originalContextEl.classList.toggle('revert-link', canRevertToOriginal);
   }
 
   // Apply PV conformance styling (only when PVs exist)
@@ -382,7 +376,6 @@ const _applyCardState = (params) => {
   const warningIcon = card.querySelector('.pv-warning-icon');
   const conformantIcon = card.querySelector('.pv-conformant-icon');
 
-  // Use data-hidden attribute for CSS selector reliability (avoids fragile style matching)
   if (warningIcon) {
     warningIcon.style.display = state.showWarningIcon ? '' : 'none';
     warningIcon.dataset.hidden = state.showWarningIcon ? 'false' : 'true';
@@ -402,17 +395,16 @@ const _applyCardState = (params) => {
 /**
  * Attach input listener to card for override changes.
  * Used for cards without PVs (plain text input).
- * Also attaches revert click handlers for original and AI suggestion values.
+ * Input now shows the effective value directly - it's both display and edit.
  * @param {HTMLElement} card
  * @param {Object} entry
  * @param {Function} onOverrideChange
  * @returns {Function} Cleanup function to remove event listeners
  */
 const _attachInputListener = (card, entry, onOverrideChange) => {
-  const input = card.querySelector('.value-input');
-  const recommendedEl = card.querySelector('.recommended-text');
-  const originalEl = card.querySelector('.original-text');
-  if (!input || !recommendedEl) return () => {};
+  const input = card.querySelector('.target-value-input');
+  const originalContextEl = card.querySelector('.original-context-value');
+  if (!input) return () => {};
 
   const originalValue = entry.originalValue ?? '';
   const aiSuggestedValue = entry.harmonizedValue ?? entry.originalValue ?? '—';
@@ -421,77 +413,58 @@ const _attachInputListener = (card, entry, onOverrideChange) => {
   const pvSet = null;
   const aiIsConformant = false;
 
-  // Helper to apply state changes
-  const applyState = (overrideValue) => {
-    _applyCardState({
-      card,
-      recommendedEl,
-      originalEl,
-      originalValue,
-      aiSuggestedValue,
-      overrideValue,
-      hasPVs,
-      pvSet,
-      aiIsConformant,
-    });
-  };
-
-  // Shared function to apply a value change (from input or revert click)
-  const applyValueChange = (value) => {
-    const effectiveOverride = value === aiSuggestedValue ? '' : value;
-    applyState(effectiveOverride);
-
-    // Clear input after revert clicks - card display shows the value, input is just for entering
-    input.value = '';
-
-    onOverrideChange(
-      entry.rowIndices,
-      entry.columnKey,
-      entry.harmonizedValue,
-      effectiveOverride,
-      entry.originalValue,
-    );
-  };
-
-  input.addEventListener('input', (event) => {
-    const overrideValue = event.target.value;
-    const effectiveOverride = overrideValue === aiSuggestedValue ? '' : overrideValue;
-    applyState(effectiveOverride);
-
-    onOverrideChange(
-      entry.rowIndices,
-      entry.columnKey,
-      entry.harmonizedValue,
-      effectiveOverride,
-      entry.originalValue,
-    );
-  });
-
-  // On blur, clear the input - the card display shows the override value
-  // Input is just for entering new values, not displaying current state
-  input.addEventListener('blur', () => {
-    const currentValue = input.value;
-    if (currentValue === aiSuggestedValue) {
-      // Typing AI suggestion = no override
-      applyState('');
+  // Helper to update revert-link state based on current effective value
+  const updateRevertLink = (currentValue) => {
+    if (originalContextEl) {
+      const canRevertToOriginal = originalValue !== currentValue;
+      originalContextEl.classList.toggle('revert-link', canRevertToOriginal);
     }
-    // Always clear input after blur - card shows the effective value
-    input.value = '';
-  });
+  };
 
-  // Initialize state if there's already an override value
-  const initialOverride = input.value;
-  if (initialOverride && initialOverride !== aiSuggestedValue) {
-    applyState(initialOverride);
+  // Handle input changes - determine override from current input value
+  const handleInput = () => {
+    const currentValue = input.value;
+    const effectiveOverride = currentValue === aiSuggestedValue ? '' : currentValue;
+
+    updateRevertLink(currentValue);
+
+    onOverrideChange(
+      entry.rowIndices,
+      entry.columnKey,
+      entry.harmonizedValue,
+      effectiveOverride,
+      entry.originalValue,
+    );
+  };
+
+  input.addEventListener('input', handleInput);
+
+  // Click on original context value -> revert to original
+  const handleOriginalClick = () => {
+    if (!originalContextEl?.classList.contains('revert-link')) return;
+    input.value = originalValue;
+    const effectiveOverride = originalValue === aiSuggestedValue ? '' : originalValue;
+    updateRevertLink(originalValue);
+    onOverrideChange(
+      entry.rowIndices,
+      entry.columnKey,
+      entry.harmonizedValue,
+      effectiveOverride,
+      entry.originalValue,
+    );
+  };
+
+  if (originalContextEl) {
+    originalContextEl.addEventListener('click', handleOriginalClick);
   }
 
-  // Attach revert click handlers
-  // Pass resetInput to clear text input after clicking revert links
-  const revertCleanup = _attachRevertClickHandlers(card, entry, aiSuggestedValue, applyValueChange, {
-    resetInput: () => { input.value = ''; },
-  });
-
-  return revertCleanup;
+  // Return cleanup function
+  return () => {
+    input.removeEventListener('input', handleInput);
+    if (originalContextEl) {
+      originalContextEl.removeEventListener('click', handleOriginalClick);
+    }
+  };
 };
 
 /**
@@ -558,61 +531,38 @@ const _attachWarningTooltip = (card) => {
 };
 
 /**
- * Attach revert click handlers to original and AI suggestion elements.
- * Allows users to click to revert to original value or clear override (revert to AI).
+ * Attach revert click handler to original context value.
+ * In the compact design, clicking "was: X" reverts to original.
+ * Revert to AI is handled via the dropdown (AI suggestion is top option).
  * @param {HTMLElement} card - The card element
  * @param {Object} entry - Entry with values
- * @param {string} aiSuggestedValue - The AI's suggested value
  * @param {Function} triggerChange - Function to call when revert is clicked
- * @param {Object} [options] - Additional options
- * @param {Function} [options.resetInput] - Function to clear the input/combobox after revert
  * @returns {Function} Cleanup function to remove event listeners
  */
-const _attachRevertClickHandlers = (card, entry, aiSuggestedValue, triggerChange, options = {}) => {
-  const { resetInput } = options;
-  const recommendedEl = card.querySelector('.recommended-text');
-  const originalEl = card.querySelector('.original-text');
+const _attachRevertClickHandlers = (card, entry, triggerChange) => {
+  const originalContextEl = card.querySelector('.original-context-value');
   const originalValue = entry.originalValue ?? '';
 
-  // Click on AI suggestion (struck through) -> revert to AI (clear override)
-  const handleAIClick = (event) => {
-    // Only respond to clicks on the AI suggestion span
-    if (!event.target.classList.contains('ai-suggestion-struck')) return;
-    if (!event.target.classList.contains('revert-link')) return;
-    triggerChange('');  // Empty string clears override
-    if (resetInput) resetInput();
-  };
-
-  // Click on original value -> set override to original value
+  // Click on original context value -> set value to original
   const handleOriginalClick = () => {
-    if (!originalEl?.classList.contains('revert-link')) return;
-    // Only trigger if original differs from current AI suggestion
-    if (originalValue !== aiSuggestedValue) {
-      triggerChange(originalValue);
-      if (resetInput) resetInput();
-    }
+    if (!originalContextEl?.classList.contains('revert-link')) return;
+    triggerChange(originalValue);
   };
 
-  if (recommendedEl) {
-    recommendedEl.addEventListener('click', handleAIClick);
-  }
-  if (originalEl) {
-    originalEl.addEventListener('click', handleOriginalClick);
+  if (originalContextEl) {
+    originalContextEl.addEventListener('click', handleOriginalClick);
   }
 
   // Return cleanup function
   return () => {
-    if (recommendedEl) {
-      recommendedEl.removeEventListener('click', handleAIClick);
-    }
-    if (originalEl) {
-      originalEl.removeEventListener('click', handleOriginalClick);
+    if (originalContextEl) {
+      originalContextEl.removeEventListener('click', handleOriginalClick);
     }
   };
 };
 
 /**
- * Attach PV combobox to card's override area.
+ * Attach PV combobox to card's target value area.
  * Returns cleanup function to destroy combobox.
  * @param {HTMLElement} card - The card element
  * @param {Object} entry - Entry with topSuggestions and columnKey
@@ -622,10 +572,9 @@ const _attachRevertClickHandlers = (card, entry, aiSuggestedValue, triggerChange
  * @returns {Function|null} Cleanup function, or null if no input wrapper
  */
 const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange) => {
-  const inputWrapper = card.querySelector('.value-input-wrapper');
-  const recommendedEl = card.querySelector('.recommended-text');
-  const originalEl = card.querySelector('.original-text');
-  if (!inputWrapper || !recommendedEl) return null;
+  const inputWrapper = card.querySelector('.target-value-input-wrapper');
+  const originalContextEl = card.querySelector('.original-context-value');
+  if (!inputWrapper) return null;
 
   const originalValue = entry.originalValue ?? '';
   const aiSuggestedValue = entry.harmonizedValue ?? entry.originalValue ?? '—';
@@ -637,31 +586,25 @@ const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange
   // Clear the wrapper and add PV combobox
   inputWrapper.innerHTML = '';
 
-  // If initial value matches AI suggestion, don't pass it as override
-  const effectiveInitialValue = initialValue === aiSuggestedValue ? '' : initialValue;
-
-  // Apply initial card state using centralized state logic
-  _applyCardState({
-    card,
-    recommendedEl,
-    originalEl,
-    originalValue,
-    aiSuggestedValue,
-    overrideValue: effectiveInitialValue,
-    hasPVs,
-    pvSet,
-    aiIsConformant,
-  });
+  // Display value is override if present, otherwise AI suggestion
+  // (In compact design, input IS the display so we must show something)
+  const displayValue = initialValue || aiSuggestedValue;
 
   // Shared function to apply a value change (from combobox or revert click)
   const applyValueChange = (value) => {
     const effectiveOverride = value === aiSuggestedValue ? '' : value;
 
-    // Apply all state updates through centralized function
+    // Update original context clickable state
+    if (originalContextEl) {
+      const canRevertToOriginal = originalValue !== value;
+      originalContextEl.classList.toggle('revert-link', canRevertToOriginal);
+    }
+
+    // Apply PV conformance styling
     _applyCardState({
       card,
-      recommendedEl,
-      originalEl,
+      inputEl: null,  // Combobox manages its own input
+      originalContextEl,
       originalValue,
       aiSuggestedValue,
       overrideValue: effectiveOverride,
@@ -669,11 +612,6 @@ const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange
       pvSet,
       aiIsConformant,
     });
-
-    // Reset the combobox input if back to AI suggestion
-    if (effectiveOverride === '' && combobox.reset) {
-      combobox.reset();
-    }
 
     // Notify parent
     onOverrideChange(
@@ -689,16 +627,33 @@ const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange
   const combobox = createPVCombobox({
     suggestions,
     pvValues,
-    initialValue: effectiveInitialValue,
+    initialValue: displayValue,
     onChange: applyValueChange,
   });
 
   inputWrapper.appendChild(combobox);
 
-  // Attach revert click handlers for original and AI suggestion
-  // Pass resetInput to clear combobox after clicking revert links
-  const revertCleanup = _attachRevertClickHandlers(card, entry, aiSuggestedValue, applyValueChange, {
-    resetInput: () => combobox.reset?.(),
+  // Apply initial state (including revert-link class)
+  const initialOverride = initialValue === aiSuggestedValue ? '' : initialValue;
+  _applyCardState({
+    card,
+    inputEl: null,
+    originalContextEl,
+    originalValue,
+    aiSuggestedValue,
+    overrideValue: initialOverride,
+    hasPVs,
+    pvSet,
+    aiIsConformant,
+  });
+
+  // Attach revert click handler for original context
+  const revertCleanup = _attachRevertClickHandlers(card, entry, (value) => {
+    // When reverting to original, update combobox and trigger change
+    if (combobox.setValue) {
+      combobox.setValue(value);
+    }
+    applyValueChange(value);
   });
 
   // Return cleanup function
@@ -711,8 +666,8 @@ const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange
 };
 
 /**
- * Create a value card for displaying an entry's original, recommended, and override values.
- * Used by both column and row modes.
+ * Create a value card for displaying an entry's transformation.
+ * Compact design: original shown as context, input IS the target value display.
  * @param {Object} config
  * @param {Object} config.entry - Entry object with rowIndices (always an array), columnKey, values, etc.
  * @param {string} config.labelText - Text to display in the card header
@@ -729,21 +684,25 @@ export const createValueCard = (config) => {
   card.className = _buildCardClasses(entry);
 
   const columnLabel = entry.columnLabel ?? entry.columnKey ?? '';
-  const inputValue = _getInputValue(entry, pendingOverrides);
+  const overrideValue = _getInputValue(entry, pendingOverrides);
 
-  // Determine display text based on recommendation type
+  // Determine the AI suggestion
   const isNoRecommendation = entry.recommendationType === RECOMMENDATION_TYPE.NO_RECOMMENDATION;
-  const recommendedText = isNoRecommendation
-    ? 'No AI recommendation'
-    : (entry.harmonizedValue ?? entry.originalValue ?? '—');
-  const recommendedClass = isNoRecommendation
-    ? ' no-recommendation-text'
-    : (entry.harmonizedValue === null ? ' missing' : '');
+  const aiSuggestedValue = isNoRecommendation
+    ? ''
+    : (entry.harmonizedValue ?? entry.originalValue ?? '');
+
+  // Effective value is override if present, otherwise AI suggestion
+  const effectiveValue = overrideValue || aiSuggestedValue || entry.originalValue || '—';
+
   const confidenceSymbol = CONFIDENCE_SYMBOLS[entry.bucket] ?? '?';
   const confidenceTooltip = CONFIDENCE_TOOLTIPS[entry.bucket] ?? '';
 
-  // Check if value is conformant (PVs available AND value matches)
-  const isPVConformant = entry.pvSetAvailable && entry.isPVConformant;
+  // Check if effective value is conformant (PVs available AND value matches)
+  // Need to check the actual effective value, not just the AI suggestion
+  const pvValues = columnPVs?.[entry.columnKey];
+  const pvSet = pvValues ? new Set(pvValues) : null;
+  const isPVConformant = entry.pvSetAvailable && pvSet && pvSet.has(effectiveValue);
 
   card.innerHTML = _buildCardHTML({
     columnLabel,
@@ -751,10 +710,8 @@ export const createValueCard = (config) => {
     confidenceSymbol,
     confidenceTooltip,
     bucket: entry.bucket,
-    recommendedText,
-    recommendedClass,
+    effectiveValue,
     originalValue: entry.originalValue ?? '—',
-    inputValue: '',  // Input stays empty - card display shows the value, input is just for entering
     isPVConformant,
     hasPVs: entry.pvSetAvailable,
   });
@@ -763,9 +720,8 @@ export const createValueCard = (config) => {
   const cleanupFns = [];
 
   // Use PV combobox if PVs are available for this column, otherwise use text input
-  const pvValues = columnPVs?.[entry.columnKey];
   if (entry.pvSetAvailable && pvValues?.length > 0) {
-    const comboboxCleanup = _attachPVCombobox(card, entry, pvValues, inputValue, onOverrideChange);
+    const comboboxCleanup = _attachPVCombobox(card, entry, pvValues, overrideValue, onOverrideChange);
     if (comboboxCleanup) cleanupFns.push(comboboxCleanup);
   } else {
     const inputCleanup = _attachInputListener(card, entry, onOverrideChange);

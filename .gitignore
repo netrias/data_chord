@@ -29,6 +29,5 @@ outputs/
 *.harmonized.csv
 *.harmonized.v*.csv
 *_manifest.parquet
-
 # Hypothesis test database
 .hypothesis/
