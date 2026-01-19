@@ -19,7 +19,7 @@ from src.domain.cde import CDE_REGISTRY, ModelSuggestion
 from src.domain.manifest import ManifestPayload
 
 logger = logging.getLogger(__name__)
-DEFAULT_SAMPLE_LIMIT = 50
+DEFAULT_SAMPLE_LIMIT = 25
 
 # Derive ID-to-label mapping from the canonical CDE_REGISTRY
 CDE_ID_TO_LABEL: dict[int, str] = {defn.cde_id: defn.label for defn in CDE_REGISTRY.values()}
@@ -30,21 +30,23 @@ class MappingClientProtocol(Protocol):
 
     def discover_mapping_from_csv(
         self,
-        *,
         source_csv: Path,
         target_schema: str,
-        sample_limit: int = DEFAULT_SAMPLE_LIMIT,
+        target_version: str,
+        sample_limit: int = 25,
+        top_k: int | None = None,
     ) -> object:
-        pass
+        """Discover column mappings from a CSV file."""
 
     def discover_cde_mapping(
         self,
-        *,
         source_csv: Path,
         target_schema: str,
-        sample_limit: int = DEFAULT_SAMPLE_LIMIT,
+        target_version: str,
+        sample_limit: int = 25,
+        top_k: int | None = None,
     ) -> object:
-        pass
+        """Discover CDE mappings for harmonization."""
 
 
 class MappingDiscoveryService:
@@ -52,7 +54,9 @@ class MappingDiscoveryService:
         self._api_key: str | None = os.getenv("NETRIAS_API_KEY")
         self._client: MappingClientProtocol | None = None
         if self._api_key:
-            self._client = NetriasClient(api_key=self._api_key, confidence_threshold=0.0)
+            client = NetriasClient()
+            client.configure(api_key=self._api_key, confidence_threshold=0.0)
+            self._client = client
         else:
             logger.warning("NETRIAS_API_KEY not set; mapping discovery disabled")
 
@@ -89,14 +93,16 @@ class MappingDiscoveryService:
         self,
         csv_path: Path,
         target_schema: str,
-        sample_limit: int,
+        sample_limit: int = DEFAULT_SAMPLE_LIMIT,
     ) -> object | None:
+        """Fetch CDE mapping with sensible defaults (target_version='latest')."""
         if self._client is None:
             return None
         try:
             return self._client.discover_cde_mapping(
                 source_csv=csv_path,
                 target_schema=target_schema,
+                target_version="latest",
                 sample_limit=sample_limit,
             )
         except Exception as exc:  # pragma: no cover - defensive

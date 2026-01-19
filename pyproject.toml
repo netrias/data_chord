@@ -9,7 +9,7 @@ dependencies = [
     "jinja2>=3.1.4",
     "python-multipart>=0.0.9",
     "uvicorn[standard]>=0.30.0",
-    "netrias-client==0.0.8",
+    "netrias-client==0.1.0",  # Pinned: uses new CDE Lambda API
     "python-dotenv",
     "pyarrow>=15.0.0",
     # transitive dep pins for security (CVE remediation)

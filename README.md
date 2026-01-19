@@ -66,3 +66,7 @@ uv run basedpyright
 3. **Harmonize** - Execute harmonization pipeline
 4. **Review Results** - Inspect and approve harmonized values
 5. **Export** - Download harmonized dataset and audit artifacts
+
+## CDE Endpoint Configuration
+
+Data Chord uses `netrias-client==0.1.0` for CDE discovery and harmonization. See [ADR 004](adr/ADR_004_cde_lambda_migration.md) for migration details and rollback procedure.

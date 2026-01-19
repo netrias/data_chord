@@ -40,7 +40,9 @@ class HarmonizeService:
             logger.warning("NETRIAS_API_KEY missing; harmonize calls will be stubbed.")
             return None
         try:
-            return NetriasClient(api_key=self._api_key)
+            client = NetriasClient()
+            client.configure(api_key=self._api_key)
+            return client
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception("Failed to initialize NetriasClient", exc_info=exc)
             return None
@@ -80,7 +82,11 @@ class HarmonizeService:
     def _discover_cde_map(self, *, file_path: Path, target_schema: str) -> ManifestPayload:
         if not self._client:
             raise RuntimeError("Netrias client unavailable")
-        raw_cde_map = self._client.discover_cde_mapping(source_csv=file_path, target_schema=target_schema)
+        raw_cde_map = self._client.discover_cde_mapping(
+            source_csv=file_path,
+            target_schema=target_schema,
+            target_version="latest",
+        )
         cde_map = _normalize_manifest(raw_cde_map)
         logger.info(
             "Discovered CDE map for harmonization",
@@ -97,7 +103,8 @@ class HarmonizeService:
         if not self._client:
             raise RuntimeError("Netrias client unavailable")
 
-        netrias_result = self._client.harmonize(source_path=file_path, cde_map=cde_map)
+        # Note: netrias-client 0.1.0 renamed the parameter to 'manifest'; we pass our cde_map
+        netrias_result = self._client.harmonize(source_path=file_path, manifest=cde_map)
         detail = str(getattr(netrias_result, "description", "Harmonization completed."))
         status = str(getattr(netrias_result, "status", "succeeded"))
         raw_job_id = getattr(netrias_result, "job_id", None)
