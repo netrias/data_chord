@@ -32,6 +32,14 @@ class ColumnPreview(BaseModel):
     confidence_score: float = Field(ge=0.0, le=1.0)
 
 
+class DataModelSchema(BaseModel):
+    """Response model for /data-models endpoint — documents the API contract for frontend."""
+
+    key: str
+    label: str
+    versions: list[str]
+
+
 class AnalyzeResponse(BaseModel):
     file_id: str
     file_name: str

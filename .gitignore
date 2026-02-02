@@ -28,6 +28,6 @@ uploads/
 outputs/
 *.harmonized.csv
 *.harmonized.v*.csv
-*_manifest.parquet
+*.parquet
 # Hypothesis test database
 .hypothesis/

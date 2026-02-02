@@ -27,11 +27,11 @@ Open http://localhost:8000 in your browser.
 
 ## Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `NETRIAS_API_KEY` | API key for Netrias harmonization service |
-| `CDE_API_KEY` | API key for CDE recommendation endpoint |
-| `CDE_API_BASE_URL` | Base URL for CDE API |
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `NETRIAS_API_KEY` | Yes | API key for Netrias harmonization and Data Model Store |
+| `DATA_MODEL_KEY` | Yes | Target data model identifier (e.g., `CCDI`) |
+| `DATA_MODEL_STORE_API_KEY` | No | Separate API key for Data Model Store (falls back to `NETRIAS_API_KEY`) |
 
 ## Docker
 
@@ -69,4 +69,4 @@ uv run basedpyright
 
 ## CDE Endpoint Configuration
 
-Data Chord uses `netrias-client==0.1.0` for CDE discovery and harmonization. See [ADR 004](adr/ADR_004_cde_lambda_migration.md) for migration details and rollback procedure.
+Data Chord uses `netrias-client==0.1.0` for CDE discovery and harmonization. See [ADR 005](adr/ADR_005_cde_lambda_migration.md) for migration details and rollback procedure.

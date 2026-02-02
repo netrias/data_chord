@@ -1,0 +1,134 @@
+/**
+ * Data Model Selection Popup styles.
+ * Modal dialog for selecting data model and version before mapping.
+ */
+
+.data-model-dialog {
+  border: none;
+  border-radius: var(--radius-2xl);
+  padding: 0;
+  background: var(--white);
+  box-shadow:
+    0 4px 6px rgba(0, 0, 0, 0.05),
+    0 10px 20px rgba(0, 0, 0, 0.1),
+    0 20px 40px rgba(0, 0, 0, 0.1);
+  width: 440px;
+  max-width: 95vw;
+  max-height: 90vh;
+  margin: auto;
+}
+
+.data-model-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.5);
+  backdrop-filter: blur(2px);
+}
+
+.data-model-dialog-content {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header */
+.data-model-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.data-model-dialog-title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--gray-800);
+}
+
+.data-model-close-btn {
+  background: var(--gray-100);
+  border: none;
+  font-size: 1.25rem;
+  line-height: 1;
+  color: var(--gray-500);
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.data-model-close-btn:hover {
+  background: var(--gray-200);
+  color: var(--gray-700);
+}
+
+/* Body */
+.data-model-dialog-body {
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.data-model-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.data-model-field label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--gray-700);
+}
+
+.data-model-field select {
+  appearance: none;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-md);
+  padding: 0.625rem 2.5rem 0.625rem 0.875rem;
+  font-size: 0.9375rem;
+  color: var(--gray-800);
+  background: var(--white) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2364748b' d='M2.5 4.5L6 8l3.5-3.5'/%3E%3C/svg%3E") no-repeat right 0.75rem center;
+  background-size: 12px;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.data-model-field select:hover {
+  border-color: var(--gray-300);
+}
+
+.data-model-field select:focus {
+  outline: none;
+  border-color: var(--netrias-500);
+  box-shadow: 0 0 0 2px var(--netrias-glow-light);
+}
+
+.data-model-field select:disabled {
+  background-color: var(--gray-50);
+  color: var(--gray-400);
+  cursor: not-allowed;
+}
+
+/* Footer */
+.data-model-dialog-footer {
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--gray-200);
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Confirm button uses btn-3d from tokens.css */
+.data-model-confirm-btn {
+  min-width: 140px;
+}
+
+.data-model-confirm-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

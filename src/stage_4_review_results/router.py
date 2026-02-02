@@ -18,7 +18,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from src.domain import CONFIDENCE, RecommendationType, format_column_label
-from src.domain.data_model_cache import ensure_pvs_loaded, get_session_cache
+from src.domain.data_model_cache import get_session_cache
 from src.domain.dependencies import get_file_store, get_upload_storage
 from src.domain.manifest import (
     ConfidenceBucket,
@@ -30,6 +30,7 @@ from src.domain.manifest import (
     is_value_changed,
     read_manifest_parquet,
 )
+from src.domain.pv_persistence import ensure_pvs_loaded
 from src.domain.pv_validation import check_value_conformance
 from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
 from src.domain.storage import FileType, UploadStorage, load_csv

@@ -13,13 +13,20 @@ from fastapi.templating import Jinja2Templates
 
 from src.domain import ModelSuggestion, get_default_target_schema
 from src.domain.data_model_cache import clear_all_session_caches
-from src.domain.dependencies import get_mapping_service, get_upload_constraints, get_upload_storage
+from src.domain.data_model_client import DataModelClientError
+from src.domain.dependencies import (
+    get_data_model_client,
+    get_mapping_service,
+    get_upload_constraints,
+    get_upload_storage,
+)
 from src.domain.manifest import ManifestPayload
 
 from .schemas import (
     AnalyzeRequest,
     AnalyzeResponse,
     ColumnPreview,
+    DataModelSchema,
     UploadResponse,
 )
 from .services import (
@@ -50,6 +57,25 @@ async def render_stage_one(request: Request) -> HTMLResponse:
     return _templates.TemplateResponse("stage_1_upload.html", context)
 
 
+@stage_one_router.get(
+    "/data-models",
+    response_model=list[DataModelSchema],
+    name="stage_one_data_models",
+)
+async def list_data_models() -> list[DataModelSchema]:
+    """Frontend popup fetches available data models from here instead of hardcoding."""
+    client = get_data_model_client()
+    try:
+        models = await run_in_threadpool(client.list_data_models)
+    except DataModelClientError:
+        _router_logger.warning("Data Model Store API unavailable; falling back to configured default")
+        return [_fallback_data_model()]
+    return [
+        DataModelSchema(key=m.key, label=m.label, versions=m.versions)
+        for m in models
+    ]
+
+
 @stage_one_router.post(
     "/upload",
     response_model=UploadResponse,
@@ -57,7 +83,8 @@ async def render_stage_one(request: Request) -> HTMLResponse:
     name="stage_one_upload_upload",
 )
 async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadResponse:
-    # Clear all session caches when starting a new workflow
+    # Clear stale PV/CDE caches from previous single-user sessions
+    # TODO: scope to specific file_id when multi-user support is added
     clear_all_session_caches()
 
     try:
@@ -120,14 +147,13 @@ async def _discover_mappings(
     target_schema: str,
 ) -> tuple[dict[str, list[ModelSuggestion]], dict[str, str], ManifestPayload, bool]:
     mapping_service = get_mapping_service()
-    mapping_available = mapping_service.available()
     try:
         cde_targets, manual_overrides, manifest = await run_in_threadpool(
             mapping_service.discover,
             csv_path=csv_path,
             target_schema=target_schema,
         )
-        return cde_targets, manual_overrides, manifest, mapping_available
+        return cde_targets, manual_overrides, manifest, True
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except Exception as exc:  # pragma: no cover - defensive
@@ -137,15 +163,21 @@ async def _discover_mappings(
         ) from exc
 
 
+def _fallback_data_model() -> DataModelSchema:
+    """Ensures the popup renders when the Data Model Store API is unreachable."""
+    default = get_default_target_schema()
+    return DataModelSchema(key=default, label=default, versions=["v1"])
+
+
 def _log_analysis_results(
     total_rows: int,
     columns: list[ColumnPreview],
     cde_targets: dict[str, list[ModelSuggestion]],
     mapping_available: bool,
 ) -> None:
-    cde_target_keys = {k.lower() for k in cde_targets}
+    cde_target_keys = set(cde_targets)
     missing_columns = [
-        col.column_name for col in columns if col.column_name.lower() not in cde_target_keys
+        col.column_name for col in columns if col.column_name not in cde_target_keys
     ]
     _router_logger.info(
         "Analyze completed",

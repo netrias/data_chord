@@ -57,18 +57,15 @@ const _readPayloadFromStorage = () => {
   return readFromSession(STAGE_2_PAYLOAD_KEY);
 };
 
-/** Look up CDE target suggestions for a column, checking case variants. */
+/** Look up CDE target suggestions for a column, filtering to valid CDEs only. */
 const _getColumnSuggestions = (column) => {
   if (!column?.column_name) {
     return [];
   }
   const targets = state.payload?.cde_targets ?? {};
-  return (
-    targets[column.column_name] ||
-    targets[column.column_name.toLowerCase()] ||
-    targets[column.column_name.toUpperCase()] ||
-    []
-  );
+  const rawSuggestions = targets[column.column_name] || [];
+  /* Filter to only suggestions that match our allowable CDE options. */
+  return rawSuggestions.filter((s) => cdeByKey.has(s.target));
 };
 
 /** Save user overrides to payload and persist to storage. */
@@ -96,15 +93,12 @@ const _persistStageThreePayload = (body) => {
   return writeToSession(STAGE_3_PAYLOAD_KEY, payloadForStageThree);
 };
 
-/** Normalize column name for consistent Map key lookups. */
-const _normalizeColumnKey = (columnName) => (columnName ?? '').toLowerCase();
-
 /** Build and render a single mapping row for a column. */
 const _buildMappingRow = (column) => {
   const suggestions = _getColumnSuggestions(column);
   const topTarget = suggestions[0];
-  const normalizedKey = _normalizeColumnKey(column.column_name);
-  const manualSelection = state.manualSelections.get(normalizedKey) ?? null;
+  const columnKey = column.column_name;
+  const manualSelection = state.manualSelections.get(columnKey) ?? null;
 
   const row = document.createElement('div');
   const aiRecommendation = topTarget?.target ?? null;
@@ -148,11 +142,11 @@ const _buildMappingRow = (column) => {
     separatorAfterIndex: NO_MAPPING_INDEX,
     mutedIndices: [NO_MAPPING_INDEX],
     onChange: (newValue) => {
-      const isNoMappingSelection = newValue?.toLowerCase() === NO_MAPPING_OPTION.toLowerCase();
+      const isNoMappingSelection = newValue === NO_MAPPING_OPTION;
       if (newValue && !isNoMappingSelection) {
-        state.manualSelections.set(normalizedKey, newValue);
+        state.manualSelections.set(columnKey, newValue);
       } else {
-        state.manualSelections.delete(normalizedKey);
+        state.manualSelections.delete(columnKey);
       }
       _persistManualOverrides();
       _renderMappingRows();
@@ -342,7 +336,7 @@ const _init = async () => {
 
   state.payload = payload;
   const overrides = payload.manual_overrides ? Object.entries(payload.manual_overrides) : [];
-  state.manualSelections = new Map(overrides.map(([key, value]) => [_normalizeColumnKey(key), value]));
+  state.manualSelections = new Map(overrides);
   _hydrateView();
 };
 

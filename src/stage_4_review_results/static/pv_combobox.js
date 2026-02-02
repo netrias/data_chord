@@ -15,6 +15,12 @@ const BLUR_DELAY_MS = 150;
 /** Duration to show feedback message before auto-dismiss. */
 const FEEDBACK_DURATION_MS = 2000;
 
+/** Tooltip text for AI suggestion options. */
+const SUGGESTION_TOOLTIPS = {
+  conformant: 'AI Suggested Option',
+  nonConformant: 'This AI suggestion is not a permissible value, but it may be a helpful starting point.',
+};
+
 /**
  * Create a PV-restricted combobox for Stage 4 edit fields.
  * @param {Object} config
@@ -60,6 +66,49 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange
   let allOptionEls = [];
   let separatorEl = null;
   let emptyStateEl = null;
+
+  // Suggestion tooltip state
+  let suggestionTooltip = null;
+
+  /** Show tooltip for a suggestion option. */
+  const showSuggestionTooltip = (li) => {
+    if (suggestionTooltip) return;
+
+    const isConformant = !li.classList.contains('pv-combobox-option--disabled');
+    const tooltipText = isConformant ? SUGGESTION_TOOLTIPS.conformant : SUGGESTION_TOOLTIPS.nonConformant;
+
+    suggestionTooltip = document.createElement('div');
+    suggestionTooltip.className = 'pv-suggestion-tooltip';
+    suggestionTooltip.textContent = tooltipText;
+    document.body.appendChild(suggestionTooltip);
+
+    // Position tooltip to the right of the option
+    const optionRect = li.getBoundingClientRect();
+    const tooltipRect = suggestionTooltip.getBoundingClientRect();
+    const padding = 8;
+
+    let left = optionRect.right + padding;
+    let top = optionRect.top + (optionRect.height / 2) - (tooltipRect.height / 2);
+
+    // Constrain to viewport bounds
+    if (left + tooltipRect.width > window.innerWidth - 10) {
+      // Position to the left if not enough space on the right
+      left = optionRect.left - tooltipRect.width - padding;
+      suggestionTooltip.classList.add('pv-suggestion-tooltip--left');
+    }
+    top = Math.max(10, Math.min(top, window.innerHeight - tooltipRect.height - 10));
+
+    suggestionTooltip.style.left = `${left}px`;
+    suggestionTooltip.style.top = `${top}px`;
+  };
+
+  /** Hide suggestion tooltip. */
+  const hideSuggestionTooltip = () => {
+    if (suggestionTooltip) {
+      suggestionTooltip.remove();
+      suggestionTooltip = null;
+    }
+  };
 
   /** Show "Not in permissible values" feedback message. */
   const showFeedback = () => {
@@ -121,6 +170,10 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange
         }
         selectValue(suggestion.value);
       });
+
+      // Attach tooltip handlers for suggestions
+      li.addEventListener('mouseenter', () => showSuggestionTooltip(li));
+      li.addEventListener('mouseleave', hideSuggestionTooltip);
 
       allOptionEls.push(li);
       dropdown.appendChild(li);
@@ -282,6 +335,7 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange
       if (!wrapper.isConnected) return;
 
       dropdown.classList.remove('pv-combobox-dropdown--open');
+      hideSuggestionTooltip();
 
       // Preserve whitespace - domain rule: whitespace is semantically significant
       const typedValue = input.value;
@@ -306,6 +360,7 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange
   toggleBtn.addEventListener('click', () => {
     if (dropdown.classList.contains('pv-combobox-dropdown--open')) {
       dropdown.classList.remove('pv-combobox-dropdown--open');
+      hideSuggestionTooltip();
     } else {
       openDropdown();
       input.focus();
@@ -337,7 +392,7 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange
     dropdown.classList.remove('pv-combobox-dropdown--open');
   };
 
-  /** Cleanup function to clear pending timeouts. */
+  /** Cleanup function to clear pending timeouts and tooltips. */
   wrapper.destroy = () => {
     if (blurTimeoutId !== null) {
       clearTimeout(blurTimeoutId);
@@ -347,6 +402,7 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange
       clearTimeout(feedbackTimeoutId);
       feedbackTimeoutId = null;
     }
+    hideSuggestionTooltip();
   };
 
   return wrapper;

@@ -1,4 +1,4 @@
-# ADR 004: CDE Lambda Migration (netrias-client 0.1.0)
+# ADR 005: CDE Lambda Migration (netrias-client 0.1.0)
 
 ## Status
 Accepted
@@ -129,7 +129,11 @@ Upgrade to netrias-client 0.1.0 and update all call sites to use the new API pat
 
 ### Affected Files
 - `src/domain/harmonize.py`: Client initialization and API calls
-- `src/domain/mapping_service.py`: Client initialization, API calls, and protocol definition
+- `src/domain/mapping_service.py`: Client initialization, protocol definition, dead production code removed (see git 6039810 for original)
+
+### Temporary Demo Bypass
+
+The 0.1.0 discovery API returns unstable CDE IDs that break downstream PV lookup. Until stabilized, `MappingDiscoveryService.discover()` delegates to `demo_bypass.discover_bypass()` which uses hardcoded CDE mappings. See `src/domain/demo_bypass.py` for the registry. Remove the bypass when CDE IDs are stable.
 
 ### Rollback Procedure
 

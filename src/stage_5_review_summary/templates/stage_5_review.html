@@ -57,7 +57,7 @@
           <button id="downloadResults" class="btn-3d" type="button">
             <span class="btn-3d-shadow" aria-hidden="true"></span>
             <span class="btn-3d-edge" aria-hidden="true"></span>
-            <span class="btn-3d-front">Download harmonized data</span>
+            <span class="btn-3d-front">Download Harmonized Data</span>
           </button>
         </div>
         <p id="downloadError" class="stage-error hidden"></p>
@@ -73,8 +73,12 @@
       </section>
 
       <section id="changesTableSection" class="stage-card changes-table-card hidden">
-        <header class="summary-header">
+        <header class="summary-header summary-header--with-control">
           <h2 class="summary-title">Term Mappings</h2>
+          <div id="mappingsFilter" class="segmented-control hidden">
+            <button type="button" class="segmented-control__option active" data-filter="changed">Changed</button>
+            <button type="button" class="segmented-control__option" data-filter="all">All</button>
+          </div>
         </header>
         <div class="changes-table-container">
           <table id="changesTable" class="changes-table">

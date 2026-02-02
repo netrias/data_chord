@@ -1,5 +1,6 @@
 import { initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
 import { STAGE_2_PAYLOAD_KEY, STAGE_3_PAYLOAD_KEY, STAGE_3_JOB_KEY, CURRENT_FILE_SESSION_KEY, removeFromSession, writeToSession, readFromSession } from '/assets/shared/storage-keys.js';
+import { showDataModelPopup } from './data_model_popup.js';
 
 const config = window.stageOneUploadConfig ?? {};
 
@@ -209,6 +210,15 @@ const _analyzeDataset = async () => {
     return;
   }
 
+  /* Show data model selection popup before starting analysis. */
+  const selection = await showDataModelPopup();
+  if (!selection) {
+    /* User cancelled - stay on Stage 1. */
+    return;
+  }
+  /* TEMP DEMO: versionLabel is captured but not yet sent to the backend.
+     Will be included in the analyze request once the API supports versioned discovery. */
+
   state.isAnalyzing = true;
   if (analyzeButton) analyzeButton.disabled = true;
   _showDropzoneSummary(state.file, 'Analyzing columns…');
@@ -222,7 +232,7 @@ const _analyzeDataset = async () => {
       },
       body: JSON.stringify({
         file_id: state.uploaded.file_id,
-        target_schema: config.targetSchema,
+        target_schema: selection.dataModelKey,
       }),
     });
     const payload = await response.json().catch(() => ({}));
@@ -233,7 +243,7 @@ const _analyzeDataset = async () => {
       throw new Error(CREDENTIAL_ERROR_MESSAGE);
     }
     // Keep overlay visible during navigation - browser will replace the page
-    _navigateToStageTwo(state.uploaded.file_id, config.targetSchema, payload);
+    _navigateToStageTwo(state.uploaded.file_id, selection.dataModelKey, payload);
   } catch (error) {
     console.error(error);
     _setStatus(error.message, 'error');
