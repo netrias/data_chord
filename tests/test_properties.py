@@ -9,11 +9,11 @@ from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from src.domain.cde import (
-    TARGET_ALIAS_MAP,
-    CDEField,
     ColumnMappingSet,
-    normalize_target_name,
+    normalize_cde_key,
 )
+from src.domain.demo_bypass import DEMO_CDE_REGISTRY
+from src.domain.harmonize import _normalize_manifest
 from src.domain.manifest.models import is_value_changed
 from src.domain.pv_validation import (
     AdjustmentSource,
@@ -222,39 +222,31 @@ def test_compute_adjustment_non_conformant_when_no_match(
 
 
 # =============================================================================
-# CDE Normalization Properties
+# CDE Key Normalization Properties
 # =============================================================================
 
 
-@given(st.sampled_from(list(TARGET_ALIAS_MAP.keys())))
-def test_normalize_known_aliases_resolve(alias: str) -> None:
-    """Known aliases in TARGET_ALIAS_MAP always resolve."""
-    result = normalize_target_name(alias)
+@given(st.text(min_size=1, max_size=100).filter(lambda s: s.strip()))
+def test_normalize_cde_key_preserves_non_whitespace(text: str) -> None:
+    """Non-empty, non-whitespace strings are returned stripped."""
+    result = normalize_cde_key(text)
     assert result is not None
-    assert isinstance(result, CDEField)
+    assert result == text.strip()
 
 
-@given(st.text().filter(lambda s: s.strip()))
-def test_normalize_is_idempotent_for_resolved_values(text: str) -> None:
-    """If normalization resolves, re-normalizing the value produces same result."""
-    first = normalize_target_name(text)
-    if first is not None:
-        # The enum value should also resolve to itself
-        second = normalize_target_name(first.value)
-        assert second == first
+@given(st.text(min_size=1, max_size=100).filter(lambda s: s.strip()))
+def test_normalize_cde_key_is_idempotent(text: str) -> None:
+    """Normalizing twice produces the same result."""
+    first = normalize_cde_key(text)
+    assert first is not None
+    second = normalize_cde_key(first)
+    assert second == first
 
 
 @given(st.sampled_from([None, "", "   ", "\t\n"]))
-def test_normalize_empty_returns_none(empty: str | None) -> None:
+def test_normalize_cde_key_empty_returns_none(empty: str | None) -> None:
     """Empty or whitespace-only input returns None."""
-    assert normalize_target_name(empty) is None
-
-
-@given(st.text().filter(lambda s: "_".join(s.strip().lower().replace("-", " ").split()) not in TARGET_ALIAS_MAP))
-def test_normalize_unknown_returns_none(unknown: str) -> None:
-    """Values not in alias map return None."""
-    assume(unknown.strip())
-    assert normalize_target_name(unknown) is None
+    assert normalize_cde_key(empty) is None
 
 
 # =============================================================================
@@ -264,7 +256,7 @@ def test_normalize_unknown_returns_none(unknown: str) -> None:
 
 @given(st.dictionaries(
     keys=st.text(min_size=1, max_size=50).filter(lambda s: s.strip()),
-    values=st.sampled_from(list(TARGET_ALIAS_MAP.keys())),
+    values=st.text(min_size=1, max_size=50).filter(lambda s: s.strip()),
     min_size=1,
     max_size=10,
 ))
@@ -279,33 +271,33 @@ def test_column_mapping_roundtrip_preserves_columns(overrides: dict[str, str]) -
 
 @given(st.dictionaries(
     keys=st.text(min_size=1, max_size=50).filter(lambda s: s.strip()),
-    values=st.sampled_from(list(TARGET_ALIAS_MAP.keys())),
+    values=st.text(min_size=1, max_size=50).filter(lambda s: s.strip()),
     min_size=1,
     max_size=10,
 ))
-def test_column_mapping_values_are_normalized(overrides: dict[str, str]) -> None:
-    """All values are normalized to CDEField enum values."""
+def test_column_mapping_values_are_cleaned(overrides: dict[str, str]) -> None:
+    """All values are cleaned (stripped) strings."""
     mapping_set = ColumnMappingSet.from_dict(overrides)
     result = mapping_set.to_dict()
 
-    for value in result.values():
+    for key, value in result.items():
         if value is not None:
-            # Should be a valid CDEField value
-            assert value in [f.value for f in CDEField]
+            # Value should be the stripped version of the input
+            assert value == overrides[key].strip()
 
 
 @given(st.dictionaries(
     keys=st.text(min_size=1, max_size=50).filter(lambda s: s.strip()),
-    values=st.sampled_from(["invalid_cde", "not_a_real_field", "xyz"]),
+    values=st.sampled_from(["", "   ", "\t\n"]),
     min_size=1,
     max_size=5,
 ))
-def test_column_mapping_invalid_values_become_none(overrides: dict[str, str]) -> None:
-    """Invalid CDE selections normalize to None (skipped columns)."""
+def test_column_mapping_empty_values_become_none(overrides: dict[str, str]) -> None:
+    """Empty or whitespace-only CDE selections normalize to None (skipped columns)."""
     mapping_set = ColumnMappingSet.from_dict(overrides)
     result = mapping_set.to_dict()
 
-    # All invalid values should become None
+    # All empty/whitespace values should become None
     for value in result.values():
         assert value is None
 
@@ -313,7 +305,10 @@ def test_column_mapping_invalid_values_become_none(overrides: dict[str, str]) ->
 @settings(max_examples=50)
 @given(st.dictionaries(
     keys=st.text(min_size=1, max_size=30).filter(lambda s: s.strip()),
-    values=st.sampled_from(list(TARGET_ALIAS_MAP.keys()) + ["invalid"]),
+    values=st.one_of(
+        st.text(min_size=1, max_size=30).filter(lambda s: s.strip()),
+        st.just(""),
+    ),
     min_size=0,
     max_size=10,
 ))
@@ -331,3 +326,66 @@ def test_column_mapping_applied_plus_skipped_equals_total(overrides: dict[str, s
 
     # Together they cover all input columns
     assert applied_cols | skipped_cols == set(overrides.keys())
+
+
+# =============================================================================
+# Demo Bypass CDE Lookup Properties
+# =============================================================================
+
+
+@given(st.sampled_from(list(DEMO_CDE_REGISTRY.keys())))
+def test_demo_cde_lookup_is_exact_match(key: str) -> None:
+    """Registry lookup uses exact string matching — no normalization."""
+    _ = DEMO_CDE_REGISTRY[key]  # Confirm key exists
+    # Altering case must miss
+    altered = key.swapcase()
+    if altered != key:
+        assert altered not in DEMO_CDE_REGISTRY, (
+            f"Registry matched case-altered key '{altered}' — violates exact-match domain rule"
+        )
+
+
+@given(st.text(min_size=1, max_size=50))
+def test_demo_cde_lookup_rejects_unknown_keys(key: str) -> None:
+    """Keys not in the registry return None (no fuzzy matching)."""
+    assume(key not in DEMO_CDE_REGISTRY)
+    assert DEMO_CDE_REGISTRY.get(key) is None
+
+
+# =============================================================================
+# Manifest Normalization Properties
+# =============================================================================
+
+
+@given(st.dictionaries(
+    keys=st.text(min_size=1, max_size=30),
+    values=st.dictionaries(
+        keys=st.text(min_size=1, max_size=20),
+        values=st.text(max_size=30),
+        min_size=1,
+        max_size=3,
+    ),
+    min_size=0,
+    max_size=5,
+))
+def test_normalize_manifest_preserves_valid_entries(column_mappings: dict[str, dict[str, str]]) -> None:
+    """Valid Mapping entries with string keys survive normalization."""
+    manifest = {"column_mappings": column_mappings}
+    result = _normalize_manifest(manifest)
+    result_mappings = result.get("column_mappings", {})
+
+    # All string-keyed Mapping entries should survive
+    for key in column_mappings:
+        assert key in result_mappings, f"Valid entry '{key}' was dropped"
+
+
+@given(st.one_of(
+    st.just(42),
+    st.just("not a mapping"),
+    st.just(None),
+    st.just([1, 2, 3]),
+))
+def test_normalize_manifest_rejects_non_mapping(bad_input: object) -> None:
+    """Non-Mapping inputs produce empty column_mappings."""
+    result = _normalize_manifest(bad_input)
+    assert result.get("column_mappings", {}) == {}

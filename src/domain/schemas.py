@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from src.domain.harmonize import HarmonizeStatus
 from src.domain.manifest import ManifestPayload
 
 FILE_ID_PATTERN = r"^[a-f0-9]+$"
@@ -50,7 +51,7 @@ class ManifestSummarySchema(BaseModel):
 
 class HarmonizeResponse(BaseModel):
     job_id: str
-    status: str
+    status: HarmonizeStatus
     detail: str
     next_stage_url: str
     job_id_available: bool = False

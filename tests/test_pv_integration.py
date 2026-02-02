@@ -2,8 +2,15 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 from src.domain.manifest import ManifestPayload
 from src.stage_3_harmonize.router import _extract_column_cde_mappings
+
+
+def _sdk_manifest(column_mappings: dict[str, dict[str, Any]]) -> ManifestPayload:
+    """Test helper: simulate SDK manifests that may have extra keys beyond ColumnMappingEntry."""
+    return cast(ManifestPayload, {"column_mappings": column_mappings})
 
 
 class TestExtractColumnCDEMappings:
@@ -12,13 +19,11 @@ class TestExtractColumnCDEMappings:
     def test_extracts_target_field_from_column_mappings(self) -> None:
         """Column->CDE mappings are correctly extracted from manifest's column_mappings."""
 
-        # Given: A manifest with AI-recommended column mappings
-        manifest: ManifestPayload = {
-            "column_mappings": {
-                "patient_diagnosis": {"targetField": "primary_diagnosis", "confidence": 0.92},
-                "drug_name": {"targetField": "therapeutic_agents", "confidence": 0.87},
-            }
-        }
+        # Given: A manifest with AI-recommended column mappings (extra keys simulate SDK output)
+        manifest = _sdk_manifest({
+            "patient_diagnosis": {"targetField": "primary_diagnosis", "confidence": 0.92},
+            "drug_name": {"targetField": "therapeutic_agents", "confidence": 0.87},
+        })
 
         # When: CDE mappings are extracted from the manifest
         result = _extract_column_cde_mappings(manifest)
@@ -32,14 +37,12 @@ class TestExtractColumnCDEMappings:
     def test_skips_entries_without_target_field(self) -> None:
         """Columns without targetField are excluded from mappings."""
 
-        # Given: A manifest where some columns lack targetField
-        manifest: ManifestPayload = {
-            "column_mappings": {
-                "mapped_col": {"targetField": "primary_diagnosis", "confidence": 0.9},
-                "unmapped_col": {},
-                "partial_col": {"confidence": 0.5},
-            }
-        }
+        # Given: A manifest where some columns lack targetField (extra keys simulate SDK output)
+        manifest = _sdk_manifest({
+            "mapped_col": {"targetField": "primary_diagnosis", "confidence": 0.9},
+            "unmapped_col": {},
+            "partial_col": {"confidence": 0.5},
+        })
 
         # When: CDE mappings are extracted
         result = _extract_column_cde_mappings(manifest)
@@ -75,7 +78,7 @@ class TestExtractColumnCDEMappings:
         """Returns empty dict when column_mappings key is missing."""
 
         # Given: A manifest without column_mappings key
-        manifest: ManifestPayload = {}  # type: ignore[typeddict-item]
+        manifest = cast(ManifestPayload, {})
 
         # When: CDE mappings are extracted
         result = _extract_column_cde_mappings(manifest)
@@ -87,13 +90,11 @@ class TestExtractColumnCDEMappings:
         """Multiple columns can map to the same CDE (dedupe happens at fetch time)."""
 
         # Given: Multiple columns mapping to the same CDE
-        manifest: ManifestPayload = {
-            "column_mappings": {
-                "diagnosis_1": {"targetField": "primary_diagnosis", "confidence": 0.9},
-                "diagnosis_2": {"targetField": "primary_diagnosis", "confidence": 0.85},
-                "treatment": {"targetField": "therapeutic_agents", "confidence": 0.88},
-            }
-        }
+        manifest = _sdk_manifest({
+            "diagnosis_1": {"targetField": "primary_diagnosis", "confidence": 0.9},
+            "diagnosis_2": {"targetField": "primary_diagnosis", "confidence": 0.85},
+            "treatment": {"targetField": "therapeutic_agents", "confidence": 0.88},
+        })
 
         # When: CDE mappings are extracted
         result = _extract_column_cde_mappings(manifest)

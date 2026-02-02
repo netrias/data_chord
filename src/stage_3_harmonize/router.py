@@ -28,7 +28,7 @@ from src.domain import (
     format_column_label,
     get_default_target_schema,
 )
-from src.domain.data_model_cache import SessionCache, get_session_cache, save_pv_manifest_to_disk
+from src.domain.data_model_cache import SessionCache, get_session_cache
 from src.domain.dependencies import get_data_model_client, get_harmonize_service, get_upload_storage
 from src.domain.harmonize import HarmonizeResult
 from src.domain.manifest import (
@@ -41,6 +41,7 @@ from src.domain.manifest import (
     read_manifest_parquet,
 )
 from src.domain.manifest.writer import apply_pv_adjustments_batch
+from src.domain.pv_persistence import save_pv_manifest_to_disk
 from src.domain.pv_validation import compute_pv_adjustment
 
 MODULE_DIR = Path(__file__).parent
@@ -103,7 +104,7 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
 
     # Launch harmonization and PV fetch in parallel
     harmonize_task = asyncio.create_task(
-        _run_harmonization(meta.saved_path, payload.target_schema, column_mappings, manifest_payload)
+        _run_harmonization(cache, meta.saved_path, payload.target_schema, column_mappings, manifest_payload)
     )
     pv_fetch_task = asyncio.create_task(
         _fetch_pvs_for_session(payload.file_id, manifest_payload)
@@ -140,7 +141,7 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
 
 
 def _get_target_field(entry: object) -> str | None:
-    """Extract targetField from a column mapping entry if valid."""
+    """targetField may be absent or non-string in externally produced manifests."""
     if not isinstance(entry, dict):
         return None
     target = entry.get("targetField")
@@ -148,7 +149,7 @@ def _get_target_field(entry: object) -> str | None:
 
 
 def _extract_column_cde_mappings(manifest: ManifestPayload | None) -> dict[str, str]:
-    """Extract column→CDE key mappings from manifest's column_mappings."""
+    """PV validation and cache storage both need column→CDE key lookups."""
     if manifest is None:
         return {}
     column_mappings = manifest.get("column_mappings", {})
@@ -163,6 +164,7 @@ def _store_column_mappings_in_cache(cache: SessionCache, manifest: ManifestPaylo
 
 
 async def _run_harmonization(
+    cache: SessionCache,
     file_path: Path,
     target_schema: str,
     column_mappings: ColumnMappingSet,
@@ -175,6 +177,7 @@ async def _run_harmonization(
         file_path=file_path,
         target_schema=target_schema,
         column_mappings=column_mappings,
+        cache=cache,
         manifest=manifest,
     )
 
@@ -280,7 +283,7 @@ def _compute_row_adjustment(
 def _process_row_for_adjustment(
     row: ManifestRow, cache: SessionCache
 ) -> PVAdjustmentRecord | None:
-    """Check if row needs PV adjustment; returns adjustment or None."""
+    """Skips columns without PVs — those don't need conformance adjustment."""
     pv_set = cache.get_pvs_for_column(row.column_name)
     if not pv_set:
         return None
@@ -294,7 +297,7 @@ def _collect_pv_adjustments(rows: list[ManifestRow], cache: SessionCache) -> lis
 
 
 def _log_non_conformant_samples(rows: list[ManifestRow], cache: SessionCache) -> None:
-    """Log samples of non-conformant values that couldn't be auto-adjusted."""
+    """Capped at 5 samples from first 50 rows to avoid log spam while providing debugging signal."""
     samples = [
         {"column": row.column_name, "value": row.top_harmonization}
         for row in rows[:50]  # Limit scan to first 50 rows
@@ -308,7 +311,7 @@ def _log_non_conformant_samples(rows: list[ManifestRow], cache: SessionCache) ->
 
 
 def _is_top_harmonization_non_conformant(row: ManifestRow, cache: SessionCache) -> bool:
-    """Check if row's top harmonization is outside PV set (for logging only)."""
+    """Logging-only check; the adjustment path in _compute_row_adjustment handles the actual fix."""
     pv_set = cache.get_pvs_for_column(row.column_name)
     return pv_set is not None and row.top_harmonization not in pv_set
 

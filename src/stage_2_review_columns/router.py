@@ -16,8 +16,9 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from src.domain import UILabel, get_default_target_schema
-from src.domain.config import get_data_model_key
 from src.domain.data_model_cache import get_session_cache
+from src.domain.data_model_client import DataModelClientError
+from src.domain.demo_bypass import inject_demo_cdes_into_cache
 from src.domain.dependencies import get_data_model_client
 
 MODULE_DIR = Path(__file__).parent
@@ -32,7 +33,7 @@ stage_two_router = APIRouter(tags=["Stage 2 Mapping"])
 @stage_two_router.get("/stage-2", response_class=HTMLResponse, name="stage_two_mapping_page")
 async def render_stage_two(
     request: Request,
-    file_id: Annotated[str | None, Query()] = None,
+    file_id: Annotated[str | None, Query(min_length=8, pattern=r"^[a-f0-9]+$")] = None,
 ) -> HTMLResponse:
     cde_options: list[dict[str, object]] = []
 
@@ -53,21 +54,14 @@ async def _get_cde_options_for_session(file_id: str) -> list[dict[str, object]]:
     cache = get_session_cache(file_id)
 
     if not cache.has_cdes():
+        # TEMPORARY DEMO BYPASS: Injects hardcoded CDEs instead of fetching from
+        # Data Model Store API. Remove when CDE ID API is stable. See demo_bypass.py.
+        # Production code: see git 6039810 for the real fetch_cdes path.
+        client = get_data_model_client()
         try:
-            client = get_data_model_client()
-            data_model_key = get_data_model_key()
-
-            version_label = await run_in_threadpool(client.get_latest_version, data_model_key)
-            cdes = await run_in_threadpool(client.fetch_cdes, data_model_key, version_label)
-
-            cache.set_cdes(cdes, data_model_key, version_label)
-            logger.info(
-                "Fetched CDEs for session",
-                extra={"file_id": file_id, "cde_count": len(cdes), "version": version_label},
-            )
-        except Exception:
-            logger.exception("Failed to fetch CDEs from Data Model Store", extra={"file_id": file_id})
-            return []
+            await run_in_threadpool(inject_demo_cdes_into_cache, file_id, client)
+        except DataModelClientError:
+            logger.warning("Data Model Store API unavailable; CDE options will be empty", extra={"file_id": file_id})
 
     return [
         {

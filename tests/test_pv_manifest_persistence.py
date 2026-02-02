@@ -12,10 +12,9 @@ from unittest.mock import MagicMock, patch
 from src.domain.data_model_cache import (
     SessionCache,
     clear_all_session_caches,
-    ensure_pvs_loaded,
     get_session_cache,
-    load_pv_manifest_into_cache,
 )
+from src.domain.pv_persistence import ensure_pvs_loaded, load_pv_manifest_from_disk
 
 
 class TestPVManifestPersistenceFeature:
@@ -49,12 +48,12 @@ class TestPVManifestPersistenceFeature:
         assert not cache.has_any_pvs(), "Cache should be empty after clear"
 
         # When: Stage 4/5 lazy-loads PVs from disk
-        with patch("src.domain.dependencies.get_file_store") as mock_get_store:
+        with patch("src.domain.pv_persistence.get_file_store") as mock_get_store:
             mock_store = MagicMock()
             mock_store.load.return_value = pv_manifest_data
             mock_get_store.return_value = mock_store
 
-            load_pv_manifest_into_cache(file_id, cache)
+            load_pv_manifest_from_disk(file_id, cache)
 
         # Then: PVs are available for validation and dropdowns
         assert cache.has_any_pvs(), "Cache should have PVs after loading"
@@ -85,13 +84,13 @@ class TestPVManifestPersistenceFeature:
         cache = get_session_cache(file_id)
 
         # When: Attempting to load from non-existent manifest
-        with patch("src.domain.dependencies.get_file_store") as mock_get_store:
+        with patch("src.domain.pv_persistence.get_file_store") as mock_get_store:
             mock_store = MagicMock()
             mock_store.load.return_value = None  # No manifest found
             mock_get_store.return_value = mock_store
 
             # Then: No exception raised, cache remains empty
-            load_pv_manifest_into_cache(file_id, cache)
+            load_pv_manifest_from_disk(file_id, cache)
 
         assert not cache.has_any_pvs(), "Cache should remain empty"
         assert cache.get_pvs_for_column("any_column") is None
@@ -131,7 +130,7 @@ class TestPVManifestPersistenceFeature:
         clear_all_session_caches()
 
         # When: ensure_pvs_loaded is called
-        with patch("src.domain.dependencies.get_file_store") as mock_get_store:
+        with patch("src.domain.pv_persistence.get_file_store") as mock_get_store:
             mock_store = MagicMock()
             mock_store.load.return_value = pv_manifest_data
             mock_get_store.return_value = mock_store

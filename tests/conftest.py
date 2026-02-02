@@ -118,7 +118,6 @@ def mock_netrias_client() -> Generator[MagicMock]:
 
     with (
         patch.dict(os.environ, {"NETRIAS_API_KEY": "test-api-key", "DATA_MODEL_KEY": "test-data-model"}),
-        patch("src.domain.mapping_service.NetriasClient", return_value=mock_client),
         patch("src.domain.harmonize.NetriasClient", return_value=mock_client),
     ):
         yield mock_client

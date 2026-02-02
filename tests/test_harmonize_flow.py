@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 
 from httpx import AsyncClient
 
-from src.domain import CDEField, normalize_target_name
 from tests.conftest import TEST_TARGET_SCHEMA, upload_and_analyze
 
 
@@ -132,82 +131,6 @@ async def test_harmonize_returns_next_stage_url(
     assert "/stage-4" in data["next_stage_url"]
 
 
-def test_target_alias_resolution_primary_diagnosis() -> None:
-    """Target alias 'Primary Diagnosis' normalizes to CDEField.PRIMARY_DIAGNOSIS."""
-
-    # Given: A human-readable target name with spaces and title case
-    input_value = "Primary Diagnosis"
-
-    # When: The target name is normalized
-    result = normalize_target_name(input_value)
-
-    # Then: Returns the corresponding CDEField enum
-    assert result == CDEField.PRIMARY_DIAGNOSIS
-
-
-def test_target_alias_resolution_therapeutic_agents() -> None:
-    """Target alias 'Therapeutic Agents' normalizes to CDEField.THERAPEUTIC_AGENTS."""
-
-    # Given: A human-readable target name with spaces and title case
-    input_value = "Therapeutic Agents"
-
-    # When: The target name is normalized
-    result = normalize_target_name(input_value)
-
-    # Then: Returns the corresponding CDEField enum
-    assert result == CDEField.THERAPEUTIC_AGENTS
-
-
-def test_target_alias_resolution_sample_anatomic_site() -> None:
-    """Target alias 'Sample Anatomic Site' normalizes to CDEField.SAMPLE_ANATOMIC_SITE."""
-
-    # Given: A human-readable target name with spaces and title case
-    input_value = "Sample Anatomic Site"
-
-    # When: The target name is normalized
-    result = normalize_target_name(input_value)
-
-    # Then: Returns the corresponding CDEField enum
-    assert result == CDEField.SAMPLE_ANATOMIC_SITE
-
-
-def test_target_alias_resolution_tissue_or_organ_of_origin() -> None:
-    """Target alias 'Tissue or Organ of Origin' normalizes to CDEField.TISSUE_OR_ORGAN_OF_ORIGIN."""
-
-    # Given: A human-readable target name with spaces and title case
-    input_value = "Tissue or Organ of Origin"
-
-    # When: The target name is normalized
-    result = normalize_target_name(input_value)
-
-    # Then: Returns the corresponding CDEField enum
-    assert result == CDEField.TISSUE_OR_ORGAN_OF_ORIGIN
-
-
-def test_target_alias_resolution_already_normalized() -> None:
-    """Already normalized target names return the CDEField enum."""
-
-    # Given: A snake_case target name (already normalized)
-    input_value = "morphology"
-
-    # When: The target name is normalized
-    result = normalize_target_name(input_value)
-
-    # Then: Returns the corresponding CDEField enum
-    assert result == CDEField.MORPHOLOGY
-
-
-def test_target_alias_resolution_empty_returns_none() -> None:
-    """Empty or None input returns None."""
-
-    # Given: Empty, None, or whitespace-only input
-    # When: The target name is normalized
-    # Then: Returns None for invalid inputs
-    assert normalize_target_name("") is None
-    assert normalize_target_name(None) is None
-    assert normalize_target_name("   ") is None
-
-
 async def test_harmonize_without_client_returns_stubbed_job(
     app_client: AsyncClient,
     sample_csv_path: Path,
@@ -219,19 +142,22 @@ async def test_harmonize_without_client_returns_stubbed_job(
 
     with patch("src.domain.harmonize.HarmonizeService._build_client", return_value=None):
         from src.domain import ColumnMappingSet
-        from src.domain.harmonize import HarmonizeService
+        from src.domain.harmonize import HarmonizeService, HarmonizeStatus
 
         service = HarmonizeService()
         service._client = None
 
         # When: Harmonization is attempted without the client
+        from src.domain.data_model_cache import SessionCache
+
         result = service.run(
             file_path=Path("/tmp/test.csv"),
             target_schema=TEST_TARGET_SCHEMA,
             column_mappings=ColumnMappingSet.from_dict({}),
+            cache=SessionCache(),
             manifest=None,
         )
 
         # Then: Returns a stubbed/queued job indicating service unavailability
-        assert result.status == "queued"
+        assert result.status == HarmonizeStatus.QUEUED
         assert "stubbed" in result.detail.lower() or "unavailable" in result.detail.lower()

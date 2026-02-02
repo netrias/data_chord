@@ -74,6 +74,16 @@ class UploadTooLargeError(UploadError):
     pass
 
 
+def _remove_temp_manifest(source: Path, destination: Path) -> None:
+    """NetriasClient drops parquet files in CWD; clean up after copying to storage."""
+    if source.resolve() == destination.resolve():
+        return
+    try:
+        source.unlink()
+    except OSError:
+        logger.debug("Could not remove temp manifest", extra={"path": str(source)})
+
+
 class UploadStorage:
     def __init__(self, base_dir: Path, constraints: UploadConstraints) -> None:
         self._base_dir: Path = base_dir
@@ -188,8 +198,10 @@ class UploadStorage:
             return None
 
     def save_harmonization_manifest(self, file_id: str, manifest_path: Path) -> Path:
+        """Move (not copy) to avoid leaving temp parquet files in CWD."""
         destination = self._manifest_dir / f"{file_id}_harmonization.parquet"
         shutil.copy2(manifest_path, destination)
+        _remove_temp_manifest(manifest_path, destination)
         logger.info("Stored harmonization manifest", extra={"file_id": file_id, "path": str(destination)})
         return destination
 

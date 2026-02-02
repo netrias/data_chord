@@ -99,13 +99,22 @@ The harmonization manifest captures every transformation decision:
 
 ## Key Design Decisions
 
-See `adr/` for architectural decision records. Summary:
+See `adr/` for architectural decision records:
+
+- [ADR 001](adr/ADR_001_transformation_history.md) — Transformation history
+- [ADR 002](adr/ADR_002_row_context_popup.md) — Row context popup
+- [ADR 003](adr/ADR_003_pv_manifest_persistence.md) — PV manifest persistence
+- [ADR 004](adr/ADR_004_pv_override_protection.md) — PV override protection
+- [ADR 005](adr/ADR_005_cde_lambda_migration.md) — CDE Lambda migration (netrias-client 0.1.0)
+
+Summary:
 
 - **Server-side rendering** with HTMX for interactivity
-- **Parquet for manifest** - efficient columnar storage, schema evolution
-- **Graceful degradation** - missing PV data doesn't block validation
-- **Whitespace-sensitive** - whitespace differences are semantically meaningful
-- **PV Override Protection** - valid original values are never replaced by AI (ADR 004)
+- **Parquet for manifest** — efficient columnar storage, schema evolution
+- **Graceful degradation** — missing PV data doesn't block validation
+- **Character significance** — all character differences (case, whitespace, punctuation) are semantically meaningful
+- **PV Override Protection** — valid original values are never replaced by AI (ADR 004)
+- **Demo bypass** — temporary hardcoded CDE mappings until discovery API CDE IDs stabilize (ADR 005)
 
 ## Module Patterns
 
@@ -132,6 +141,13 @@ stage_N_name/
 └── static/            # CSS, JS
 ```
 
+## External Dependencies
+
+| Dependency | Purpose |
+|------------|---------|
+| `netrias-client==0.1.0` | CDE discovery and harmonization via Netrias Lambda API |
+| Data Model Store API | Versioned data models, CDEs, and permissible values (direct HTTP via `data_model_client.py`) |
+
 ## Technology Stack
 
 | Layer | Technology |
@@ -139,5 +155,5 @@ stage_N_name/
 | Backend | FastAPI (Python 3.13+) |
 | Templates | Jinja2 |
 | Interactivity | HTMX |
-| Data Processing | Pandas, PyArrow |
+| Data Processing | PyArrow |
 | Package Management | uv |

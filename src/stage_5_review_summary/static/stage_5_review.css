@@ -29,12 +29,52 @@
   border-bottom: 2px solid var(--gray-200);
 }
 
+.summary-header--with-control {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  text-align: left;
+}
+
 .summary-title {
   margin: 0;
   font-size: 1.75rem;
   font-weight: 700;
   color: var(--gray-900);
   letter-spacing: -0.01em;
+}
+
+/* Segmented control - iOS-style toggle */
+.segmented-control {
+  display: inline-flex;
+  background: var(--gray-100);
+  border-radius: var(--radius-full);
+  padding: 3px;
+  gap: 2px;
+}
+
+.segmented-control__option {
+  padding: 0.4rem 0.9rem;
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--gray-600);
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.segmented-control__option:hover:not(.active) {
+  color: var(--gray-800);
+  background: var(--gray-200);
+}
+
+.segmented-control__option.active {
+  background: var(--white);
+  color: var(--gray-900);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 /* Summary grid - single column for full-width cards */

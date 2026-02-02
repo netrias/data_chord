@@ -24,6 +24,7 @@ const _uploadNavAction = document.getElementById('uploadNavAction');
 const _changesTableSection = document.getElementById('changesTableSection');
 const _changesTableBody = document.getElementById('changesTableBody');
 const _changesTable = document.getElementById('changesTable');
+const _mappingsFilter = document.getElementById('mappingsFilter');
 
 const _state = {
   fileId: null,
@@ -31,6 +32,7 @@ const _state = {
   sortColumn: null,
   sortDirection: 'asc',
   nonConformantCount: 0,
+  filter: 'changed',
 };
 
 const _safeNumber = (value) => {
@@ -69,7 +71,7 @@ const _setDownloadButtonState = (isLoading) => {
   _downloadBtn.disabled = isLoading;
   const frontEl = _downloadBtn.querySelector('.btn-3d-front');
   const textTarget = frontEl ?? _downloadBtn;
-  textTarget.textContent = isLoading ? 'Preparing download...' : 'Download harmonized data';
+  textTarget.textContent = isLoading ? 'Preparing download...' : 'Download Harmonized Data';
 };
 
 const _triggerBrowserDownload = (blob, filename) => {
@@ -303,12 +305,6 @@ const _SOURCE_LABELS = {
   system: 'System Adjustment',
 };
 
-const _escapeHtml = (text) => {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-};
-
 const _formatTimestamp = (isoString) => {
   if (!isoString) return null;
   try {
@@ -326,65 +322,104 @@ const _formatTimestamp = (isoString) => {
   }
 };
 
+const _createHistoryStep = (step) => {
+  const stepEl = document.createElement('div');
+  stepEl.className = 'history-step';
+  stepEl.dataset.source = step.source;
+
+  const header = document.createElement('div');
+  header.className = 'history-step__header';
+
+  const sourceSpan = document.createElement('span');
+  sourceSpan.className = 'history-step__source';
+  sourceSpan.textContent = _SOURCE_LABELS[step.source] ?? step.source;
+  header.appendChild(sourceSpan);
+
+  const timestamp = _formatTimestamp(step.timestamp);
+  if (timestamp) {
+    const tsSpan = document.createElement('span');
+    tsSpan.className = 'history-step__timestamp';
+    tsSpan.textContent = timestamp;
+    header.appendChild(tsSpan);
+  }
+
+  stepEl.appendChild(header);
+
+  const valueEl = document.createElement('div');
+  valueEl.className = 'history-step__value';
+  valueEl.textContent = `"${step.value}"`;
+  stepEl.appendChild(valueEl);
+
+  if (step.user_id) {
+    const userEl = document.createElement('div');
+    userEl.className = 'history-step__user';
+    userEl.textContent = step.user_id;
+    stepEl.appendChild(userEl);
+  }
+
+  return stepEl;
+};
+
 const _showHistoryDialog = (mapping) => {
   const dialog = document.createElement('dialog');
   dialog.className = 'history-dialog';
 
-  const history = mapping.history ?? [];
+  const content = document.createElement('div');
+  content.className = 'history-dialog-content';
 
-  let stepsHtml = '';
+  /* Header */
+  const headerEl = document.createElement('div');
+  headerEl.className = 'history-dialog-header';
+
+  const title = document.createElement('h3');
+  title.className = 'history-dialog-title';
+  title.textContent = 'Transformation History';
+  headerEl.appendChild(title);
+
+  const subtitle = document.createElement('div');
+  subtitle.className = 'history-dialog-subtitle';
+  subtitle.textContent = mapping.column;
+  headerEl.appendChild(subtitle);
+
+  content.appendChild(headerEl);
+
+  /* Body */
+  const body = document.createElement('div');
+  body.className = 'history-dialog-body';
+
+  const timeline = document.createElement('div');
+  timeline.className = 'history-timeline';
+
+  const history = mapping.history ?? [];
   if (history.length === 0) {
-    stepsHtml = '<p class="history-empty">No transformation history available.</p>';
+    const emptyMsg = document.createElement('p');
+    emptyMsg.className = 'history-empty';
+    emptyMsg.textContent = 'No transformation history available.';
+    timeline.appendChild(emptyMsg);
   } else {
     for (const step of history) {
-      const safeSource = _escapeHtml(step.source);
-      const label = _SOURCE_LABELS[step.source] ?? safeSource;
-      const value = _escapeHtml(step.value);
-      const timestamp = _formatTimestamp(step.timestamp);
-      const userId = step.user_id;
-
-      const timestampHtml = timestamp
-        ? `<span class="history-step__timestamp">${timestamp}</span>`
-        : '';
-
-      const userHtml = userId
-        ? `<div class="history-step__user">${_escapeHtml(userId)}</div>`
-        : '';
-
-      stepsHtml += `
-        <div class="history-step" data-source="${safeSource}">
-          <div class="history-step__header">
-            <span class="history-step__source">${label}</span>
-            ${timestampHtml}
-          </div>
-          <div class="history-step__value">"${value}"</div>
-          ${userHtml}
-        </div>
-      `;
+      timeline.appendChild(_createHistoryStep(step));
     }
   }
 
-  dialog.innerHTML = `
-    <div class="history-dialog-content">
-      <div class="history-dialog-header">
-        <h3 class="history-dialog-title">Transformation History</h3>
-        <div class="history-dialog-subtitle">${_escapeHtml(mapping.column)}</div>
-      </div>
-      <div class="history-dialog-body">
-        <div class="history-timeline">
-          ${stepsHtml}
-        </div>
-      </div>
-      <div class="history-dialog-footer">
-        <button class="btn-secondary" data-action="close">Close</button>
-      </div>
-    </div>
-  `;
+  body.appendChild(timeline);
+  content.appendChild(body);
 
-  dialog.querySelector('[data-action="close"]').addEventListener('click', () => {
+  /* Footer */
+  const footer = document.createElement('div');
+  footer.className = 'history-dialog-footer';
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'btn-secondary';
+  closeBtn.textContent = 'Close';
+  closeBtn.addEventListener('click', () => {
     dialog.close();
     dialog.remove();
   });
+  footer.appendChild(closeBtn);
+
+  content.appendChild(footer);
+  dialog.appendChild(content);
 
   dialog.addEventListener('click', (event) => {
     if (event.target === dialog) {
@@ -481,7 +516,7 @@ const _handleSort = (columnIndex) => {
     _state.sortDirection = 'asc';
   }
 
-  const sorted = _sortMappings(_state.termMappings, _state.sortColumn, _state.sortDirection);
+  const sorted = _sortMappings(_getFilteredMappings(), _state.sortColumn, _state.sortDirection);
   _renderTableRows(sorted);
   _updateSortIndicators();
 };
@@ -502,6 +537,44 @@ const _setupSortableHeaders = () => {
   });
 };
 
+/** Returns mappings filtered by current filter state. */
+const _getFilteredMappings = () => {
+  if (_state.filter === 'all') {
+    return _state.termMappings;
+  }
+  return _state.termMappings.filter((m) => m.original_value !== m.final_value);
+};
+
+/** Updates filter state, re-renders table, and updates button active states. */
+const _applyFilter = (filter) => {
+  _state.filter = filter;
+
+  if (_mappingsFilter) {
+    for (const btn of _mappingsFilter.querySelectorAll('.segmented-control__option')) {
+      btn.classList.toggle('active', btn.dataset.filter === filter);
+    }
+  }
+
+  let mappings = _getFilteredMappings();
+  if (_state.sortColumn) {
+    mappings = _sortMappings(mappings, _state.sortColumn, _state.sortDirection);
+  }
+  _renderTableRows(mappings);
+};
+
+const _setupFilterControl = () => {
+  if (!_mappingsFilter) return;
+
+  for (const btn of _mappingsFilter.querySelectorAll('.segmented-control__option')) {
+    btn.addEventListener('click', () => {
+      const filter = btn.dataset.filter;
+      if (filter && filter !== _state.filter) {
+        _applyFilter(filter);
+      }
+    });
+  }
+};
+
 const _renderChangesTable = (termMappings) => {
   if (!_changesTableSection || !_changesTableBody) return;
 
@@ -513,7 +586,12 @@ const _renderChangesTable = (termMappings) => {
   _state.sortColumn = null;
   _state.sortDirection = 'asc';
 
-  _renderTableRows(termMappings);
+  _setupFilterControl();
+  if (_mappingsFilter) {
+    _mappingsFilter.classList.remove('hidden');
+  }
+
+  _renderTableRows(_getFilteredMappings());
   _setupSortableHeaders();
   _changesTableSection.classList.remove('hidden');
 };

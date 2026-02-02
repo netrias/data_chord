@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 import pyarrow as pa
 
@@ -27,14 +27,14 @@ HIGH_CONFIDENCE_THRESHOLD: float = 0.8
 MEDIUM_CONFIDENCE_THRESHOLD: float = 0.45
 
 
-class ColumnMappingEntry(TypedDict, total=False):
-    route: str
+class ColumnMappingEntry(TypedDict):
     targetField: str
     cde_id: int
+    route: NotRequired[str]
 
 
 class ManifestPayload(TypedDict, total=False):
-    column_mappings: dict[str, dict[str, object]]
+    column_mappings: dict[str, ColumnMappingEntry]
 
 
 @dataclass(frozen=True)

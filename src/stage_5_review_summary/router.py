@@ -24,7 +24,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from src.domain import ChangeType
-from src.domain.data_model_cache import SessionCache, ensure_pvs_loaded
+from src.domain.data_model_cache import SessionCache, clear_session_cache
 from src.domain.dependencies import get_file_store, get_upload_storage
 from src.domain.manifest import (
     ManifestRow,
@@ -33,6 +33,7 @@ from src.domain.manifest import (
     is_value_changed,
     read_manifest_parquet,
 )
+from src.domain.pv_persistence import ensure_pvs_loaded
 from src.domain.pv_validation import check_value_conformance
 from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
 from src.domain.storage import FileType, UploadStorage, load_csv, resolve_harmonized_path_or_404
@@ -135,6 +136,9 @@ async def download_harmonized_data(payload: StageFiveRequest) -> StreamingRespon
     base_name = f"{original_stem}_{payload.file_id}_{timestamp}"
 
     zip_buffer = _create_zip_buffer(base_name, headers, final_rows, manifest_path)
+
+    # Session complete: release in-memory cache to prevent unbounded growth
+    clear_session_cache(payload.file_id)
 
     return _create_streaming_response(base_name, zip_buffer)
 

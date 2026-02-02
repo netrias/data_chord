@@ -250,7 +250,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.100" },
     { name = "jinja2", specifier = ">=3.1.4" },
-    { name = "netrias-client", specifier = "==0.0.8" },
+    { name = "netrias-client", specifier = "==0.1.0" },
     { name = "pip-audit", marker = "extra == 'dev'", specifier = ">=2.7" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.8" },
     { name = "pyarrow", specifier = ">=15.0.0" },
@@ -258,7 +258,7 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
     { name = "pytest-playwright", marker = "extra == 'dev'", specifier = ">=0.6.2" },
     { name = "python-dotenv" },
-    { name = "python-multipart", specifier = ">=0.0.9" },
+    { name = "python-multipart", specifier = ">=0.0.22" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.5" },
     { name = "starlette", specifier = ">=0.49.1" },
     { name = "urllib3", specifier = ">=2.6.0" },
@@ -573,16 +573,15 @@ wheels = [
 
 [[package]]
 name = "netrias-client"
-version = "0.0.8"
+version = "0.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "boto3" },
     { name = "httpx" },
-    { name = "pyarrow" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2f/a0/135473545c04223b9861d062812c993a1474b70eacac4174e5fe9b10d856/netrias_client-0.0.8.tar.gz", hash = "sha256:86cf75a180cf095a4adbf3e8fdb98b9abd3391be17f7affbe4352dad331ba60a", size = 27353, upload-time = "2025-12-02T22:04:57.356Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/71/a0/6ccb1bc932b7e6f1d6973f8808ce1df67b713c6bab224880e6c82e7f2397/netrias_client-0.1.0.tar.gz", hash = "sha256:a3c9603d1bf2ee5b6cabad5292872284371106ba480c32f058ed3672926a3ee4", size = 29721, upload-time = "2026-01-16T23:01:52.609Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bc/f5/c83a5badcba3d02909e541b64020f38ea37b8206e021e1328d38914e527c/netrias_client-0.0.8-py3-none-any.whl", hash = "sha256:c1fac7d3970410d1a2126b355fa48325980e99fe518b641e2850bb780db1fa24", size = 33218, upload-time = "2025-12-02T22:04:56.537Z" },
+    { url = "https://files.pythonhosted.org/packages/64/5e/402cd2d3aea4fe626eca0621c29930610e5ce932fa3b86bc2a0ed68cb2d8/netrias_client-0.1.0-py3-none-any.whl", hash = "sha256:2fa268b710506df79ff3930f975b85e5b5f713b9c889a668d5b416ef247110b6", size = 36408, upload-time = "2026-01-16T23:01:50.695Z" },
 ]
 
 [[package]]
@@ -936,11 +935,11 @@ wheels = [
 
 [[package]]
 name = "python-multipart"
-version = "0.0.20"
+version = "0.0.22"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/f3/87/f44d7c9f274c7ee665a29b885ec97089ec5dc034c7f3fafa03da9e39a09e/python_multipart-0.0.20.tar.gz", hash = "sha256:8dd0cab45b8e23064ae09147625994d090fa46f5b0d1e13af944c331a7fa9d13", size = 37158, upload-time = "2024-12-16T19:45:46.972Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/94/01/979e98d542a70714b0cb2b6728ed0b7c46792b695e3eaec3e20711271ca3/python_multipart-0.0.22.tar.gz", hash = "sha256:7340bef99a7e0032613f56dc36027b959fd3b30a787ed62d310e951f7c3a3a58", size = 37612, upload-time = "2026-01-25T10:15:56.219Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/45/58/38b5afbc1a800eeea951b9285d3912613f2603bdf897a4ab0f4bd7f405fc/python_multipart-0.0.20-py3-none-any.whl", hash = "sha256:8a62d3a8335e06589fe01f2a3e178cdcc632f3fbe0d492ad9ee0ec35aab1f104", size = 24546, upload-time = "2024-12-16T19:45:44.423Z" },
+    { url = "https://files.pythonhosted.org/packages/1b/d0/397f9626e711ff749a95d96b7af99b9c566a9bb5129b8e4c10fc4d100304/python_multipart-0.0.22-py3-none-any.whl", hash = "sha256:2b2cd894c83d21bf49d702499531c7bafd057d730c201782048f7945d82de155", size = 24579, upload-time = "2026-01-25T10:15:54.811Z" },
 ]
 
 [[package]]
