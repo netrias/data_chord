@@ -369,6 +369,15 @@ See `adr/` for architectural decision records:
 - [ADR 004](adr/ADR_004_pv_override_protection.md) — PV override protection
 - [ADR 005](adr/ADR_005_cde_lambda_migration.md) — CDE Lambda migration (netrias-client 0.1.0)
 
+**Key principles:**
+
+- **Server-side rendering** with HTMX for interactivity
+- **Parquet for manifest** — efficient columnar storage, schema evolution
+- **Graceful degradation** — missing PV data doesn't block validation
+- **Character significance** — all character differences (case, whitespace, punctuation) are semantically meaningful
+- **PV Override Protection** — valid original values are never replaced by AI (ADR 004)
+- **Demo bypass** — temporary hardcoded CDE mappings until discovery API CDE IDs stabilize (ADR 005)
+
 ---
 
 ## Cross-Cutting Concerns
@@ -436,6 +445,25 @@ stage_N_name/
 Examples:
 - `ManifestRow` dataclass → `domain/manifest/models.py` (used by stages 3, 4, 5)
 - `StageFourCell` → `stage_4_review_results/router.py` (stage-specific response model)
+
+---
+
+## External Dependencies
+
+| Dependency | Purpose |
+|------------|---------|
+| `netrias-client` (0.2.x) | CDE discovery and harmonization via Netrias Lambda API |
+| Data Model Store API | Versioned data models, CDEs, and permissible values (direct HTTP via `data_model_client.py`) |
+
+## Technology Stack
+
+| Layer | Technology |
+|-------|------------|
+| Backend | FastAPI (Python 3.13+) |
+| Templates | Jinja2 |
+| Interactivity | HTMX |
+| Data Processing | PyArrow |
+| Package Management | uv |
 
 ---
 
