@@ -241,6 +241,11 @@ dev = [
     { name = "ruff" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "bandit", marker = "extra == 'dev'", specifier = ">=1.7" },
@@ -265,6 +270,9 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
 ]
 provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.0.2" }]
 
 [[package]]
 name = "defusedxml"

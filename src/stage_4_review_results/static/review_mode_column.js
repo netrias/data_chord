@@ -68,12 +68,18 @@ const _processRowCellForColumn = (row, colIdx, columnKey, entriesByOriginal, fil
   // Skip cells that don't need review
   if (!cellNeedsReview(cell, filterOptions)) return;
 
-  const rowIndex = row.sourceRowNumber ?? row.rowNumber;
-
+  // Skip if we already have this term — manifest provides complete row list
   if (entriesByOriginal.has(originalValue)) {
-    entriesByOriginal.get(originalValue).rowIndices.push(rowIndex);
     return;
   }
+
+  // Use manifest row indices when available (complete list from harmonization);
+  // fall back to group sourceRowNumber for backwards compatibility
+  const rowIndex = row.sourceRowNumber ?? row.rowNumber;
+  const rowIndices =
+    cell.manifestRowIndices?.length > 0 ? cell.manifestRowIndices : [rowIndex];
+  // manifestRowCount is the true count; rowIndices may be truncated for large arrays
+  const rowCount = cell.manifestRowCount ?? rowIndices.length;
 
   entriesByOriginal.set(originalValue, {
     originalValue: cell.originalValue,
@@ -86,7 +92,8 @@ const _processRowCellForColumn = (row, colIdx, columnKey, entriesByOriginal, fil
     isPVConformant: cell.isPVConformant,
     pvSetAvailable: cell.pvSetAvailable,
     topSuggestions: cell.topSuggestions ?? [],
-    rowIndices: [rowIndex],
+    rowIndices,
+    rowCount,
     columnKey,
   });
 };
@@ -129,12 +136,15 @@ const _buildColumnEntries = (changedRows, colIdx, columnCell, filterOptions = {}
  * @returns {Array} Array of column objects with entries
  */
 const _buildCompactedColumns = (rows, filterOptions = {}) => {
+  console.time('_buildCompactedColumns:filter');
   const changedRows = rows.filter((row) => rowHasChanges(row, filterOptions));
+  console.timeEnd('_buildCompactedColumns:filter');
   if (!changedRows.length) return [];
 
   const firstRow = changedRows[0];
   if (!firstRow?.cells) return [];
 
+  console.time('_buildCompactedColumns:buildEntries');
   const populatedIndices = _getPopulatedColumnIndices(changedRows);
   const allColumns = firstRow.cells;
   const columns = [];
@@ -147,6 +157,7 @@ const _buildCompactedColumns = (rows, filterOptions = {}) => {
       columns.push(column);
     }
   }
+  console.timeEnd('_buildCompactedColumns:buildEntries');
 
   return columns;
 };
@@ -308,11 +319,23 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
 
   const fileId = getFileIdFromUrl();
 
+  console.time('renderEntries:cardLoop');
   for (const entry of batchMeta.entries) {
-    const rowCount = entry.rowIndices.length;
+    // rowCount is the true count; rowIndices may be truncated for large arrays
+    const rowCount = entry.rowCount ?? entry.rowIndices.length;
     const excelRows = entry.rowIndices.map(toExcelRowNumber);
     const rowLabel = rowCount === 1 ? `Row ${excelRows[0]}` : `${rowCount} rows`;
-    const tooltipText = rowCount > 1 ? `Rows: ${excelRows.join(', ')}` : null;
+    // Build tooltip: show up to 5 row numbers, then ellipsis if more
+    let tooltipText = null;
+    if (rowCount > 1) {
+      const maxTooltipRows = 5;
+      const displayRows = excelRows.slice(0, maxTooltipRows);
+      if (rowCount > maxTooltipRows) {
+        tooltipText = `Rows: ${displayRows.join(', ')}... (${rowCount} total)`;
+      } else {
+        tooltipText = `Rows: ${displayRows.join(', ')}`;
+      }
+    }
 
     const card = createValueCard({
       entry,
@@ -324,17 +347,17 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
     });
 
     // Make row label clickable to show context popup
-    if (fileId && entry.rowIndices?.length) {
+    if (fileId && rowCount > 0) {
       const rowLabelEl = card.querySelector('.entry-row-label');
       if (rowLabelEl) {
         rowLabelEl.classList.add('row-context-link');
         rowLabelEl.addEventListener('click', () => {
-          // Convert 1-based sourceRowNumber indices to 0-based for API
-          const zeroBasedIndices = entry.rowIndices.map((idx) => idx - 1);
+          // Pass entry info; popup will fetch full indices if needed
           showRowContextPopup({
             term: entry.originalValue,
             columnKey: entry.columnKey,
-            rowIndices: zeroBasedIndices,
+            rowIndices: entry.rowIndices.map((idx) => idx - 1),
+            rowCount,
             fileId,
             totalOriginalRows,
           });
@@ -344,8 +367,11 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
 
     wrapper.append(card);
   }
+  console.timeEnd('renderEntries:cardLoop');
 
+  console.time('renderEntries:domAppend');
   container.append(wrapper);
+  console.timeEnd('renderEntries:domAppend');
 };
 
 /**

@@ -18,12 +18,12 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from src.domain import CONFIDENCE, RecommendationType, format_column_label
-from src.domain.data_model_cache import get_session_cache
+from src.domain.data_model_cache import SessionCache, get_session_cache
 from src.domain.dependencies import get_file_store, get_upload_storage
 from src.domain.manifest import (
     ConfidenceBucket,
+    ManifestRow,
     ManifestSummary,
-    ManualOverride,
     add_manual_overrides_batch,
     confidence_bucket,
     get_latest_override_value,
@@ -78,6 +78,8 @@ class StageFourCell(BaseModel):
     isPVConformant: bool = True  # False if current value not in PV set
     pvSetAvailable: bool = False  # True if we have PVs for this column
     topSuggestions: list[SuggestionInfo] = []  # AI suggestions with PV conformance flags
+    manifestRowIndices: list[int] = []  # 1-based row indices from manifest
+    manifestRowCount: int = 0  # Total count (indices may be truncated for large arrays)
 
 
 class StageFourRow(BaseModel):
@@ -91,13 +93,6 @@ class StageFourResultsResponse(BaseModel):
     rows: list[StageFourRow]
     columnPVs: dict[str, list[str]] = {}  # column_key -> sorted PV list
     totalOriginalRows: int = 0  # Original spreadsheet row count (before grouping)
-
-
-@dataclass
-class _StageFourRowGroup:
-    record_ids: list[str]
-    cells: list[StageFourCell]
-    source_row_number: int
 
 
 stage_four_router = APIRouter(prefix="/stage-4", tags=["Stage 4 Review"])
@@ -114,21 +109,38 @@ async def render_stage_four(request: Request) -> HTMLResponse:
 
 @stage_four_router.post("/rows", response_model=StageFourResultsResponse, name="stage_four_harmonized_rows")
 async def fetch_stage_four_rows(payload: StageFourResultsRequest) -> StageFourResultsResponse:
+    import time
+    t0 = time.perf_counter()
+
     storage: UploadStorage = get_upload_storage()
     meta = storage.load(payload.file_id)
     if not meta:
         raise HTTPException(status_code=404, detail="Upload not found. Please rerun harmonization.")
 
+    t1 = time.perf_counter()
     _, original_rows = load_csv(meta.saved_path)
+    t2 = time.perf_counter()
+    logger.info(f"[PERF] load_csv: {t2 - t1:.3f}s")
+
     manifest = _load_manifest(storage, payload.file_id)
     if manifest is None:
         raise HTTPException(status_code=404, detail="Harmonization manifest not found. Please rerun Stage 3.")
+    t3 = time.perf_counter()
+    logger.info(f"[PERF] load_manifest: {t3 - t2:.3f}s")
 
     columns = _extract_columns_from_manifest(manifest)
-    row_lookup = _build_row_lookup(manifest)
+    t4 = time.perf_counter()
+
     # Load PVs before building cells so pvSetAvailable/isPVConformant are populated
     column_pvs = _build_column_pvs(columns, payload.file_id)
-    rows = _build_rows_from_manifest(original_rows, columns, row_lookup, payload.file_id)
+    t5 = time.perf_counter()
+    logger.info(f"[PERF] build_column_pvs: {t5 - t4:.3f}s")
+
+    rows = _build_rows_from_manifest(manifest, columns, payload.file_id)
+    t6 = time.perf_counter()
+    logger.info(f"[PERF] build_rows_from_manifest: {t6 - t5:.3f}s, rows={len(rows)}")
+    logger.info(f"[PERF] total: {t6 - t0:.3f}s")
+
     return StageFourResultsResponse(
         rows=rows,
         columnPVs=column_pvs,
@@ -142,19 +154,6 @@ class _ColumnInfo:
     label: str
 
 
-@dataclass
-class _ManifestEntry:
-    to_harmonize: str
-    top_harmonization: str
-    top_harmonizations: list[str]
-    confidence_score: float | None
-    row_indices: list[int]
-    manual_overrides: list[ManualOverride]
-
-
-RowLookup = dict[tuple[str, int], _ManifestEntry]
-
-
 def _extract_columns_from_manifest(manifest: ManifestSummary) -> list[_ColumnInfo]:
     seen: set[str] = set()
     columns: list[_ColumnInfo] = []
@@ -166,51 +165,89 @@ def _extract_columns_from_manifest(manifest: ManifestSummary) -> list[_ColumnInf
     return columns
 
 
-def _build_row_lookup(manifest: ManifestSummary) -> RowLookup:
-    lookup: RowLookup = {}
-    for row in manifest.rows:
-        entry = _ManifestEntry(
-            to_harmonize=row.to_harmonize,
-            top_harmonization=row.top_harmonization,
-            top_harmonizations=row.top_harmonizations,
-            confidence_score=row.confidence_score,
-            row_indices=row.row_indices,
-            manual_overrides=row.manual_overrides,
-        )
-        for row_idx in row.row_indices:
-            lookup[(row.column_name, row_idx)] = entry
-    return lookup
-
-
 def _build_rows_from_manifest(
-    original_rows: list[dict[str, str]],
+    manifest: ManifestSummary,
     columns: list[_ColumnInfo],
-    row_lookup: RowLookup,
     file_id: str,
 ) -> list[StageFourRow]:
-    total_rows = len(original_rows)
-    grouped: dict[tuple[tuple[str, str, str], ...], _StageFourRowGroup] = {}
+    """Build Stage 4 rows directly from manifest entries — O(manifest_rows)."""
+    cache = get_session_cache(file_id)
+    col_labels = {c.column_name: c.label for c in columns}
 
-    for idx in range(total_rows):
-        original_row = original_rows[idx]
-        record_id = original_row.get("record_id") or f"Row {idx + 1}"
-        cells = _build_cells_from_manifest(idx, columns, row_lookup, file_id)
-        key = tuple((c.columnKey, c.originalValue or "", c.harmonizedValue or "") for c in cells)
+    result: list[StageFourRow] = []
+    row_num = 1
 
-        if key not in grouped:
-            grouped[key] = _StageFourRowGroup(record_ids=[record_id], cells=cells, source_row_number=idx + 1)
-        else:
-            grouped[key].record_ids.append(record_id)
+    for manifest_row in manifest.rows:
+        col_key = manifest_row.column_name
+        if col_key not in col_labels:
+            continue
 
-    return [
-        StageFourRow(
-            rowNumber=group_index,
-            recordId=_summarize_record_ids(group.record_ids),
-            cells=group.cells,
-            sourceRowNumber=group.source_row_number,
+        cell = _build_cell_from_manifest_row(manifest_row, col_key, col_labels[col_key], cache)
+        source_row = cell.manifestRowIndices[0] if cell.manifestRowIndices else row_num
+
+        result.append(
+            StageFourRow(
+                rowNumber=row_num,
+                recordId=f"Row {source_row}",
+                cells=[cell],
+                sourceRowNumber=source_row,
+            )
         )
-        for group_index, group in enumerate(grouped.values(), start=1)
-    ]
+        row_num += 1
+
+    return result
+
+
+def _build_cell_from_manifest_row(
+    row: ManifestRow,
+    col_key: str,
+    col_label: str,
+    cache: SessionCache,
+) -> StageFourCell:
+    """Build a StageFourCell directly from a manifest row."""
+    original_value = row.to_harmonize or None
+    harmonized_value = row.top_harmonization or None
+    confidence = row.confidence_score
+    is_changed = is_value_changed(original_value, harmonized_value)
+
+    recommendation_type = _compute_recommendation_type(original_value, harmonized_value)
+
+    if confidence is not None:
+        bucket = confidence_bucket(confidence)
+    else:
+        bucket = ConfidenceBucket.LOW if is_changed else ConfidenceBucket.HIGH
+        confidence = CONFIDENCE.HIGH if bucket == ConfidenceBucket.HIGH else CONFIDENCE.LOW
+
+    manual_override = get_latest_override_value(row.manual_overrides)
+    current_value = manual_override if manual_override else harmonized_value
+
+    pv_set = cache.get_pvs_for_column(col_key)
+    pv_available = pv_set is not None and len(pv_set) > 0
+    is_conformant = check_value_conformance(current_value, pv_set)
+
+    top_suggestions = _build_suggestions_with_conformance(row.top_harmonizations, pv_set)
+
+    # Convert 0-based manifest indices to 1-based for frontend
+    manifest_indices_full = [idx + 1 for idx in row.row_indices]
+    row_count = len(manifest_indices_full)
+    manifest_indices = manifest_indices_full if row_count <= 50 else manifest_indices_full[:10]
+
+    return StageFourCell(
+        columnKey=col_key,
+        columnLabel=col_label,
+        originalValue=original_value,
+        harmonizedValue=harmonized_value,
+        bucket=bucket.value,
+        confidence=confidence,
+        isChanged=is_changed,
+        recommendationType=recommendation_type.value,
+        manualOverride=manual_override,
+        isPVConformant=is_conformant,
+        pvSetAvailable=pv_available,
+        topSuggestions=top_suggestions,
+        manifestRowIndices=manifest_indices,
+        manifestRowCount=row_count,
+    )
 
 
 def _build_column_pvs(columns: list[_ColumnInfo], file_id: str) -> dict[str, list[str]]:
@@ -237,70 +274,6 @@ def _build_suggestions_with_conformance(
     ]
 
 
-def _build_cells_from_manifest(
-    row_index: int,
-    columns: list[_ColumnInfo],
-    row_lookup: RowLookup,
-    file_id: str,
-) -> list[StageFourCell]:
-    cells: list[StageFourCell] = []
-    cache = get_session_cache(file_id)
-
-    for col_info in columns:
-        col_key = col_info.column_name
-        lookup_key = (col_key, row_index)
-        entry = row_lookup.get(lookup_key)
-
-        if entry is None:
-            continue
-
-        original_value = entry.to_harmonize or None
-        harmonized_value = entry.top_harmonization or None
-        confidence = entry.confidence_score
-        is_changed = is_value_changed(original_value, harmonized_value)
-
-        # Determine recommendation type
-        recommendation_type = _compute_recommendation_type(original_value, harmonized_value)
-
-        if confidence is not None:
-            bucket = confidence_bucket(confidence)
-        else:
-            bucket = ConfidenceBucket.LOW if is_changed else ConfidenceBucket.HIGH
-            confidence = CONFIDENCE.HIGH if bucket == ConfidenceBucket.HIGH else CONFIDENCE.LOW
-
-        manual_override = get_latest_override_value(entry.manual_overrides)
-
-        # Determine current value for PV conformance check (override > harmonized)
-        current_value = manual_override if manual_override else harmonized_value
-
-        # Check PV conformance
-        pv_set = cache.get_pvs_for_column(col_key)
-        pv_available = pv_set is not None and len(pv_set) > 0
-        is_conformant = check_value_conformance(current_value, pv_set)
-
-        # Build suggestions with conformance flags
-        top_suggestions = _build_suggestions_with_conformance(entry.top_harmonizations, pv_set)
-
-        cells.append(
-            StageFourCell(
-                columnKey=col_key,
-                columnLabel=col_info.label,
-                originalValue=original_value,
-                harmonizedValue=harmonized_value,
-                bucket=bucket.value,
-                confidence=confidence,
-                isChanged=is_changed,
-                recommendationType=recommendation_type.value,
-                manualOverride=manual_override,
-                isPVConformant=is_conformant,
-                pvSetAvailable=pv_available,
-                topSuggestions=top_suggestions,
-            ),
-        )
-
-    return cells
-
-
 def _compute_recommendation_type(
     original_value: str | None,
     harmonized_value: str | None,
@@ -315,15 +288,6 @@ def _compute_recommendation_type(
         return RecommendationType.AI_CHANGED
 
     return RecommendationType.AI_UNCHANGED
-
-
-def _summarize_record_ids(record_ids: list[str]) -> str:
-    filtered = [rid for rid in record_ids if rid]
-    if not filtered:
-        return "Multiple records"
-    if len(filtered) == 1:
-        return filtered[0]
-    return f"{filtered[0]} + {len(filtered) - 1} more"
 
 
 def _load_manifest(storage: UploadStorage, file_id: str) -> ManifestSummary | None:
@@ -401,12 +365,17 @@ def _sync_overrides_to_manifest(storage: UploadStorage, payload: SaveOverridesRe
 def _collect_overrides_for_batch(
     payload: SaveOverridesRequest,
 ) -> list[tuple[str, str, str]]:
+    """Deduplicate by (col, original, value) to avoid duplicate ManualOverride entries."""
+    seen: set[tuple[str, str, str]] = set()
     overrides: list[tuple[str, str, str]] = []
     for _row_key, cols in payload.overrides.items():
         for col_key, override in cols.items():
             if override.original_value is None:
                 continue
-            overrides.append((col_key, override.original_value, override.human_value))
+            key = (col_key, override.original_value, override.human_value)
+            if key not in seen:
+                seen.add(key)
+                overrides.append(key)
     return overrides
 
 
@@ -488,3 +457,32 @@ async def get_row_context(payload: RowContextRequest) -> RowContextResponse:
             selected_rows.append(row_values)
 
     return RowContextResponse(headers=headers, rows=selected_rows)
+
+
+class TermRowIndicesRequest(BaseModel):
+    file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_PATTERN)
+    column_key: str
+    original_value: str
+
+
+class TermRowIndicesResponse(BaseModel):
+    row_indices: list[int]  # 0-based indices for API consistency
+
+
+@stage_four_router.post(
+    "/term-row-indices",
+    response_model=TermRowIndicesResponse,
+    name="stage_four_term_row_indices",
+)
+async def get_term_row_indices(payload: TermRowIndicesRequest) -> TermRowIndicesResponse:
+    """Fetch full row indices for a term when truncated in initial response."""
+    storage = get_upload_storage()
+    manifest = _load_manifest(storage, payload.file_id)
+    if manifest is None:
+        raise HTTPException(status_code=404, detail="Manifest not found")
+
+    for row in manifest.rows:
+        if row.column_name == payload.column_key and row.to_harmonize == payload.original_value:
+            return TermRowIndicesResponse(row_indices=row.row_indices)
+
+    return TermRowIndicesResponse(row_indices=[])
