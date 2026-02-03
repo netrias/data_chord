@@ -172,7 +172,11 @@ const fetchRows = async () => {
     const body = await response.json();
     console.timeEnd('fetchRows:parseJSON');
     console.log('fetchRows: received', body.rows?.length, 'rows');
-    state.rows = body.rows || [];
+    state.rows = (body.rows || []).map((row) => ({
+      ...row,
+      sourceRowNumbers: row.sourceRowNumbers ??
+        (row.sourceRowNumber ? [row.sourceRowNumber] : [row.rowNumber]),
+    }));
     state.columnPVs = body.columnPVs || {};
     state.totalOriginalRows = body.totalOriginalRows || 0;
   } catch (error) {
@@ -271,7 +275,7 @@ const recordOverrideForRows = (rowIndices, columnKey, aiValue, humanValue, origi
     if (!state.pendingOverrides[rowKey]) {
       state.pendingOverrides[rowKey] = {};
     }
-    if (humanValue) {
+    if (humanValue !== '') {
       state.pendingOverrides[rowKey][columnKey] = {
         ai_value: aiValue,
         human_value: humanValue,

@@ -139,6 +139,9 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
 def _analyze_columns_safe(csv_path: Path, file_id: str) -> tuple[int, list[ColumnPreview]]:
     try:
         return analyze_columns(csv_path)
+    except (UnicodeDecodeError, ValueError) as exc:
+        _router_logger.warning("Upload failed validation during analysis", extra={"file_id": file_id})
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         _router_logger.exception("Upload missing on disk", extra={"file_id": file_id})
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="Upload missing. Please upload again.") from exc
@@ -156,6 +159,9 @@ async def _discover_mappings(
             target_schema=target_schema,
         )
         return cde_targets, manual_overrides, manifest
+    except (UnicodeDecodeError, ValueError) as exc:
+        _router_logger.warning("Upload failed validation during analysis", extra={"file_id": csv_path.stem})
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except Exception as exc:  # pragma: no cover - defensive

@@ -231,17 +231,25 @@ def _create_streaming_response(base_name: str, zip_buffer: io.BytesIO) -> Stream
     )
 
 
+def _normalize_for_metrics(value: str | None) -> str:
+    """why: ignore case/whitespace-only differences in summary metrics."""
+    if value is None:
+        return ""
+    return value.strip().lower()
 def _classify_change(row: ManifestRow) -> ChangeType:
     original = row.to_harmonize
     ai_value = row.top_harmonization
     latest_override = get_latest_override_value(row.manual_overrides)
 
-    final_value = latest_override if latest_override is not None else ai_value
+    original_norm = _normalize_for_metrics(original)
+    ai_norm = _normalize_for_metrics(ai_value)
+    override_norm = _normalize_for_metrics(latest_override) if latest_override is not None else None
+    final_norm = override_norm if latest_override is not None else ai_norm
 
-    if not is_value_changed(original, final_value):
+    if original_norm == final_norm:
         return ChangeType.UNCHANGED
 
-    if latest_override is not None and latest_override != ai_value:
+    if latest_override is not None and override_norm != ai_norm:
         return ChangeType.MANUAL_OVERRIDE
 
     return ChangeType.AI_HARMONIZED
