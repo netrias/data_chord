@@ -49,9 +49,7 @@ class HarmonizeService:
             logger.warning("NETRIAS_API_KEY missing; harmonize calls will be stubbed.")
             return None
         try:
-            client = NetriasClient()
-            client.configure(api_key=self._api_key)
-            return client
+            return NetriasClient(api_key=self._api_key)
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception("Failed to initialize NetriasClient", exc_info=exc)
             return None
