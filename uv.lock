@@ -250,7 +250,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.100" },
     { name = "jinja2", specifier = ">=3.1.4" },
-    { name = "netrias-client", specifier = "==0.1.0" },
+    { name = "netrias-client", git = "https://github.com/netrias/netrias_client.git?rev=73e9e50" },
     { name = "pip-audit", marker = "extra == 'dev'", specifier = ">=2.7" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.8" },
     { name = "pyarrow", specifier = ">=15.0.0" },
@@ -573,15 +573,11 @@ wheels = [
 
 [[package]]
 name = "netrias-client"
-version = "0.1.0"
-source = { registry = "https://pypi.org/simple" }
+version = "0.2.3"
+source = { git = "https://github.com/netrias/netrias_client.git?rev=73e9e50#73e9e50500e0306e6fd546e787b90bfcfe7ed4f3" }
 dependencies = [
     { name = "boto3" },
     { name = "httpx" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/71/a0/6ccb1bc932b7e6f1d6973f8808ce1df67b713c6bab224880e6c82e7f2397/netrias_client-0.1.0.tar.gz", hash = "sha256:a3c9603d1bf2ee5b6cabad5292872284371106ba480c32f058ed3672926a3ee4", size = 29721, upload-time = "2026-01-16T23:01:52.609Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/64/5e/402cd2d3aea4fe626eca0621c29930610e5ce932fa3b86bc2a0ed68cb2d8/netrias_client-0.1.0-py3-none-any.whl", hash = "sha256:2fa268b710506df79ff3930f975b85e5b5f713b9c889a668d5b416ef247110b6", size = 36408, upload-time = "2026-01-16T23:01:50.695Z" },
 ]
 
 [[package]]
