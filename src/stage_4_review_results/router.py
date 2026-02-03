@@ -176,6 +176,7 @@ def _extract_columns_from_manifest(manifest: ManifestSummary) -> list[_ColumnInf
     return columns
 
 
+# (column_name, zero-based row_index) -> manifest row
 RowLookup = dict[tuple[str, int], ManifestRow]
 
 

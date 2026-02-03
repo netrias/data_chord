@@ -39,6 +39,8 @@ class ReviewStateSchema(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _upgrade_legacy(cls, values: object) -> object:
+        """why: accept persisted review state from pre-2025 schema versions."""
+        # TODO: remove once all persisted overrides are migrated to the new review_state shape.
         if not isinstance(values, dict):
             return values
         if {"review_mode", "column_mode", "row_mode"} & values.keys():
