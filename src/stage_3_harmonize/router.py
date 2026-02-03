@@ -115,12 +115,22 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
 
     _router_logger.info(
         "Harmonization job dispatched",
-        extra={"file_id": payload.file_id, "job_id": result.job_id, "status": result.status},
+        extra={
+            "file_id": payload.file_id,
+            "job_id": result.job_id,
+            "status": result.status,
+            "manifest_path": str(result.manifest_path),
+            "manifest_path_exists": result.manifest_path.exists() if result.manifest_path else False,
+        },
     )
 
     # Store manifest and apply PV adjustments
     manifest_summary = await _read_store_and_adjust_manifest(
         payload.file_id, result.manifest_path
+    )
+    _router_logger.info(
+        "Manifest summary result",
+        extra={"file_id": payload.file_id, "has_summary": manifest_summary is not None},
     )
 
     query_params = urlencode({

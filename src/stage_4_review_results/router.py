@@ -126,8 +126,9 @@ async def fetch_stage_four_rows(payload: StageFourResultsRequest) -> StageFourRe
 
     columns = _extract_columns_from_manifest(manifest)
     row_lookup = _build_row_lookup(manifest)
-    rows = _build_rows_from_manifest(original_rows, columns, row_lookup, payload.file_id)
+    # Load PVs before building cells so pvSetAvailable/isPVConformant are populated
     column_pvs = _build_column_pvs(columns, payload.file_id)
+    rows = _build_rows_from_manifest(original_rows, columns, row_lookup, payload.file_id)
     return StageFourResultsResponse(
         rows=rows,
         columnPVs=column_pvs,
