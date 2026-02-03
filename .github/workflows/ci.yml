@@ -101,6 +101,9 @@ jobs:
       - name: Run bandit
         run: uv run bandit -r src/ -c pyproject.toml
 
+      - name: Upgrade pip
+        run: uv run pip install --upgrade pip
+
       - name: Run dependency audit
         run: uv run pip-audit
 

@@ -31,3 +31,4 @@ outputs/
 *.parquet
 # Hypothesis test database
 .hypothesis/
+.context/

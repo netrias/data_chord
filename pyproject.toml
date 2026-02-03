@@ -9,7 +9,7 @@ dependencies = [
     "jinja2>=3.1.4",
     "python-multipart>=0.0.22",  # CVE-2026-24486
     "uvicorn[standard]>=0.30.0",
-    "netrias-client==0.1.0",  # Pinned: uses new CDE Lambda API
+    "netrias_client @ git+https://github.com/netrias/netrias_client.git@73e9e50",
     "python-dotenv",
     "pyarrow>=15.0.0",
     # transitive dep pins for security (CVE remediation)
@@ -69,3 +69,8 @@ typeCheckingMode = "standard"
 [tool.bandit]
 exclude_dirs = ["tests"]
 skips = ["B101"]  # skip assert warnings (used in tests)
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

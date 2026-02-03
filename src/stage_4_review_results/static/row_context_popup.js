@@ -30,6 +30,28 @@ async function _fetchRowContext(fileId, rowIndices) {
 }
 
 /**
+ * Fetch full row indices for a term from manifest (when initial response was truncated).
+ * @param {string} fileId
+ * @param {string} columnKey
+ * @param {string} originalValue
+ * @returns {Promise<number[]>} 0-based row indices
+ */
+async function _fetchTermRowIndices(fileId, columnKey, originalValue) {
+  const response = await fetch('/stage-4/term-row-indices', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file_id: fileId, column_key: columnKey, original_value: originalValue }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch term row indices: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.row_indices;
+}
+
+/**
  * Fetch all rows in chunks to handle large datasets.
  * @param {string} fileId
  * @param {number[]} rowIndices
@@ -312,11 +334,12 @@ function _attachToggleHandler(dialog, onModeChange) {
  * @param {Object} params
  * @param {string} params.term - The original value being reviewed
  * @param {string} params.columnKey - Raw column name from spreadsheet
- * @param {number[]} params.rowIndices - 0-based row indices where term appears
+ * @param {number[]} params.rowIndices - 0-based row indices where term appears (may be truncated)
+ * @param {number} [params.rowCount] - True count of rows (indices may be truncated for large arrays)
  * @param {string} params.fileId - File ID for fetching context
  * @param {number} [params.totalOriginalRows] - Total rows in original spreadsheet
  */
-export async function showRowContextPopup({ term, columnKey, rowIndices, fileId, totalOriginalRows = 0 }) {
+export async function showRowContextPopup({ term, columnKey, rowIndices, rowCount, fileId, totalOriginalRows = 0 }) {
   const dialog = document.createElement('dialog');
   dialog.className = 'row-context-dialog';
 
@@ -346,7 +369,18 @@ export async function showRowContextPopup({ term, columnKey, rowIndices, fileId,
 
   _attachCloseHandlers(dialog, cleanup);
 
-  const showToggle = totalOriginalRows > 0 && totalOriginalRows !== rowIndices.length;
+  // Fetch full indices if truncated (rowCount > indices provided)
+  const actualRowCount = rowCount ?? rowIndices.length;
+  let fullRowIndices = rowIndices;
+  if (actualRowCount > rowIndices.length) {
+    try {
+      fullRowIndices = await _fetchTermRowIndices(fileId, columnKey, term);
+    } catch (err) {
+      console.error('Failed to fetch full row indices, using truncated list:', err);
+    }
+  }
+
+  const showToggle = totalOriginalRows > 0 && totalOriginalRows !== fullRowIndices.length;
 
   /**
    * Render content for the given mode.
@@ -354,7 +388,7 @@ export async function showRowContextPopup({ term, columnKey, rowIndices, fileId,
   async function renderContent(mode) {
     const currentIndices = mode === 'all'
       ? Array.from({ length: totalOriginalRows }, (_, i) => i)
-      : rowIndices;
+      : fullRowIndices;
     const displayedRowCount = currentIndices.length;
 
     // Show loading in table area if dialog already has content

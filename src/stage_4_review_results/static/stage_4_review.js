@@ -155,6 +155,7 @@ const fetchRows = async () => {
   }
 
   try {
+    console.time('fetchRows:networkRequest');
     const response = await fetch(resultsEndpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -163,10 +164,14 @@ const fetchRows = async () => {
         manual_columns: [],
       }),
     });
+    console.timeEnd('fetchRows:networkRequest');
     if (!response.ok) {
       throw new Error('Unable to load harmonized results.');
     }
+    console.time('fetchRows:parseJSON');
     const body = await response.json();
+    console.timeEnd('fetchRows:parseJSON');
+    console.log('fetchRows: received', body.rows?.length, 'rows');
     state.rows = body.rows || [];
     state.columnPVs = body.columnPVs || {};
     state.totalOriginalRows = body.totalOriginalRows || 0;
