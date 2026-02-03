@@ -256,7 +256,7 @@ def resolve_harmonized_path_or_404(original_path: Path, file_id: str) -> Path:
 def load_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
     if not path.exists():
         raise HTTPException(status_code=404, detail=_ERROR_DATASET_NOT_FOUND)
-    with path.open(encoding="utf-8", newline="") as handle:
+    with path.open(encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         rows = list(reader)
         headers = list(reader.fieldnames) if reader.fieldnames else []

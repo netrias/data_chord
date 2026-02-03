@@ -87,12 +87,22 @@ class StageFourRow(BaseModel):
     recordId: str
     cells: list[StageFourCell]
     sourceRowNumber: int | None = None
+    sourceRowNumbers: list[int] | None = None
 
 
 class StageFourResultsResponse(BaseModel):
     rows: list[StageFourRow]
     columnPVs: dict[str, list[str]] = {}  # column_key -> sorted PV list
     totalOriginalRows: int = 0  # Original spreadsheet row count (before grouping)
+
+
+@dataclass
+class _StageFourRowGroup:
+    """why: capture grouped record metadata before serialization."""
+
+    record_ids: list[str]
+    cells: list[StageFourCell]
+    source_row_numbers: list[int]
 
 
 stage_four_router = APIRouter(prefix="/stage-4", tags=["Stage 4 Review"])
@@ -136,7 +146,8 @@ async def fetch_stage_four_rows(payload: StageFourResultsRequest) -> StageFourRe
     t5 = time.perf_counter()
     logger.info(f"[PERF] build_column_pvs: {t5 - t4:.3f}s")
 
-    rows = _build_rows_from_manifest(manifest, columns, payload.file_id)
+    row_lookup = _build_row_lookup(manifest)
+    rows = _build_rows_from_manifest(original_rows, columns, row_lookup, payload.file_id)
     t6 = time.perf_counter()
     logger.info(f"[PERF] build_rows_from_manifest: {t6 - t5:.3f}s, rows={len(rows)}")
     logger.info(f"[PERF] total: {t6 - t0:.3f}s")
@@ -165,37 +176,76 @@ def _extract_columns_from_manifest(manifest: ManifestSummary) -> list[_ColumnInf
     return columns
 
 
+# (column_name, zero-based row_index) -> manifest row
+RowLookup = dict[tuple[str, int], ManifestRow]
+
+
+def _build_row_lookup(manifest: ManifestSummary) -> RowLookup:
+    """why: map (column_name, row_index) to manifest rows for fast lookup."""
+    lookup: RowLookup = {}
+    for row in manifest.rows:
+        col_name = row.column_name
+        for row_idx in row.row_indices:
+            lookup[(col_name, row_idx)] = row
+    return lookup
+
+
 def _build_rows_from_manifest(
-    manifest: ManifestSummary,
+    original_rows: list[dict[str, str]],
     columns: list[_ColumnInfo],
+    row_lookup: RowLookup,
     file_id: str,
 ) -> list[StageFourRow]:
-    """Build Stage 4 rows directly from manifest entries — O(manifest_rows)."""
+    """why: generate grouped rows for Stage 4 review using manifest data."""
     cache = get_session_cache(file_id)
-    col_labels = {c.column_name: c.label for c in columns}
+    grouped: dict[tuple[tuple[str, str, str], ...], _StageFourRowGroup] = {}
 
-    result: list[StageFourRow] = []
-    row_num = 1
+    for idx, original_row in enumerate(original_rows):
+        record_id = original_row.get("record_id") or f"Row {idx + 1}"
+        cells = _build_cells_from_manifest(idx, columns, row_lookup, cache)
+        key = tuple((c.columnKey, c.originalValue or "", c.harmonizedValue or "") for c in cells)
 
-    for manifest_row in manifest.rows:
-        col_key = manifest_row.column_name
-        if col_key not in col_labels:
+        if key not in grouped:
+            grouped[key] = _StageFourRowGroup(
+                record_ids=[record_id],
+                cells=cells,
+                source_row_numbers=[idx + 1],
+            )
+        else:
+            grouped[key].record_ids.append(record_id)
+            grouped[key].source_row_numbers.append(idx + 1)
+
+    return [
+        StageFourRow(
+            rowNumber=group_index,
+            recordId=_summarize_record_ids(group.record_ids),
+            cells=group.cells,
+            sourceRowNumber=group.source_row_numbers[0] if group.source_row_numbers else None,
+            sourceRowNumbers=group.source_row_numbers,
+        )
+        for group_index, group in enumerate(grouped.values(), start=1)
+    ]
+
+
+def _build_cells_from_manifest(
+    row_index: int,
+    columns: list[_ColumnInfo],
+    row_lookup: RowLookup,
+    cache: SessionCache,
+) -> list[StageFourCell]:
+    """why: create cell comparisons for a single row using manifest data."""
+    cells: list[StageFourCell] = []
+
+    for col_info in columns:
+        col_key = col_info.column_name
+        entry = row_lookup.get((col_key, row_index))
+        if entry is None:
             continue
 
-        cell = _build_cell_from_manifest_row(manifest_row, col_key, col_labels[col_key], cache)
-        source_row = cell.manifestRowIndices[0] if cell.manifestRowIndices else row_num
+        cell = _build_cell_from_manifest_row(entry, col_key, col_info.label, cache)
+        cells.append(cell)
 
-        result.append(
-            StageFourRow(
-                rowNumber=row_num,
-                recordId=f"Row {source_row}",
-                cells=[cell],
-                sourceRowNumber=source_row,
-            )
-        )
-        row_num += 1
-
-    return result
+    return cells
 
 
 def _build_cell_from_manifest_row(
@@ -290,6 +340,16 @@ def _compute_recommendation_type(
     return RecommendationType.AI_UNCHANGED
 
 
+def _summarize_record_ids(record_ids: list[str]) -> str:
+    """why: provide a compact label for grouped rows."""
+    filtered = [rid for rid in record_ids if rid]
+    if not filtered:
+        return "Multiple records"
+    if len(filtered) == 1:
+        return filtered[0]
+    return f"{filtered[0]} + {len(filtered) - 1} more"
+
+
 def _load_manifest(storage: UploadStorage, file_id: str) -> ManifestSummary | None:
     manifest_path = storage.load_harmonization_manifest_path(file_id)
     if manifest_path is None:
@@ -365,18 +425,17 @@ def _sync_overrides_to_manifest(storage: UploadStorage, payload: SaveOverridesRe
 def _collect_overrides_for_batch(
     payload: SaveOverridesRequest,
 ) -> list[tuple[str, str, str]]:
-    """Deduplicate by (col, original, value) to avoid duplicate ManualOverride entries."""
-    seen: set[tuple[str, str, str]] = set()
-    overrides: list[tuple[str, str, str]] = []
+    """why: gather per-column term overrides into a list for batch processing."""
+    overrides_map: dict[tuple[str, str], str] = {}
     for _row_key, cols in payload.overrides.items():
         for col_key, override in cols.items():
             if override.original_value is None:
                 continue
-            key = (col_key, override.original_value, override.human_value)
-            if key not in seen:
-                seen.add(key)
-                overrides.append(key)
-    return overrides
+            overrides_map[(col_key, override.original_value)] = override.human_value
+    return [
+        (col_key, original_value, human_value)
+        for (col_key, original_value), human_value in overrides_map.items()
+    ]
 
 
 @stage_four_router.delete(

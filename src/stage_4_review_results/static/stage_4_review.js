@@ -115,6 +115,9 @@ const state = {
   },
 };
 
+const OVERRIDE_SAVE_DELAY_MS = 400;
+let overrideSaveTimeout = null;
+
 /**
  * Get the state object for the current review mode.
  * @returns {Object}
@@ -172,7 +175,11 @@ const fetchRows = async () => {
     const body = await response.json();
     console.timeEnd('fetchRows:parseJSON');
     console.log('fetchRows: received', body.rows?.length, 'rows');
-    state.rows = body.rows || [];
+    state.rows = (body.rows || []).map((row) => ({
+      ...row,
+      sourceRowNumbers: row.sourceRowNumbers ??
+        (row.sourceRowNumber ? [row.sourceRowNumber] : [row.rowNumber]),
+    }));
     state.columnPVs = body.columnPVs || {};
     state.totalOriginalRows = body.totalOriginalRows || 0;
   } catch (error) {
@@ -258,6 +265,19 @@ const saveOverrides = async () => {
 };
 
 /**
+ * Debounce override saves to avoid spamming the server on each keystroke.
+ */
+const scheduleOverrideSave = () => {
+  if (overrideSaveTimeout) {
+    clearTimeout(overrideSaveTimeout);
+  }
+  overrideSaveTimeout = window.setTimeout(() => {
+    overrideSaveTimeout = null;
+    saveOverrides();
+  }, OVERRIDE_SAVE_DELAY_MS);
+};
+
+/**
  * Record an override for multiple row indices sharing the same original value.
  * @param {number[]} rowIndices - Array of row indices
  * @param {string} columnKey - Column identifier
@@ -271,7 +291,7 @@ const recordOverrideForRows = (rowIndices, columnKey, aiValue, humanValue, origi
     if (!state.pendingOverrides[rowKey]) {
       state.pendingOverrides[rowKey] = {};
     }
-    if (humanValue) {
+    if (humanValue !== '') {
       state.pendingOverrides[rowKey][columnKey] = {
         ai_value: aiValue,
         human_value: humanValue,
@@ -284,6 +304,7 @@ const recordOverrideForRows = (rowIndices, columnKey, aiValue, humanValue, origi
       }
     }
   }
+  scheduleOverrideSave();
 };
 
 /**
