@@ -17,29 +17,11 @@ from tests.conftest import (
     create_harmonized_csv,
     create_manifest_for_file,
     create_test_manifest_parquet,
+    review_state_payload,
     upload_content,
 )
 
 pytestmark = pytest.mark.asyncio
-
-
-def _review_state_payload() -> dict[str, object]:
-    return {
-        "review_mode": "column",
-        "sort_mode": "original",
-        "column_mode": {
-            "current_unit": 1,
-            "completed_units": [],
-            "flagged_units": [],
-            "batch_size": 5,
-        },
-        "row_mode": {
-            "current_unit": 1,
-            "completed_units": [],
-            "flagged_units": [],
-            "batch_size": 5,
-        },
-    }
 
 
 async def test_stage4_rows_include_grouped_indices(
@@ -87,7 +69,7 @@ async def test_download_applies_override_per_column_term(
             "1": {"col_a": {"ai_value": "Foo", "human_value": "Baz", "original_value": "Foo"}},
             "2": {"col_a": {"ai_value": "Foo", "human_value": "Baz", "original_value": "Foo"}},
         },
-        "review_state": _review_state_payload(),
+        "review_state": review_state_payload(),
     }
     save_response = await app_client.post("/stage-4/overrides", json=overrides_payload)
     assert save_response.status_code == 200
@@ -131,7 +113,7 @@ async def test_stage4_preserves_whitespace_values_in_overrides(
         "overrides": {
             "1": {"col_a": {"ai_value": "  Foo ", "human_value": "Bar", "original_value": "  Foo "}},
         },
-        "review_state": _review_state_payload(),
+        "review_state": review_state_payload(),
     }
     save_response = await app_client.post("/stage-4/overrides", json=overrides_payload)
     assert save_response.status_code == 200

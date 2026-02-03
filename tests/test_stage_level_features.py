@@ -19,29 +19,11 @@ from tests.conftest import (
     create_csv_content,
     create_harmonized_csv,
     create_manifest_for_file,
+    review_state_payload,
     upload_content,
 )
 
 pytestmark = pytest.mark.asyncio
-
-
-def _review_state_payload() -> dict[str, object]:
-    return {
-        "review_mode": "column",
-        "sort_mode": "original",
-        "column_mode": {
-            "current_unit": 1,
-            "completed_units": [],
-            "flagged_units": [],
-            "batch_size": 5,
-        },
-        "row_mode": {
-            "current_unit": 1,
-            "completed_units": [],
-            "flagged_units": [],
-            "batch_size": 5,
-        },
-    }
 
 
 def _read_downloaded_csv(response_bytes: bytes) -> list[dict[str, str]]:
@@ -473,7 +455,7 @@ async def test_stage5_download_ignores_invalid_row_keys(
             "overrides": {
                 "99": {"col_a": {"ai_value": "alpha", "human_value": "gamma", "original_value": "alpha"}},
             },
-            "review_state": _review_state_payload(),
+            "review_state": review_state_payload(),
         },
     )
 

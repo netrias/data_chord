@@ -16,12 +16,15 @@ import {
 } from './utils.mjs';
 
 const waitForReviewRows = async (page) => {
-  const grid = page.locator('.column-mode-grid');
-  const empty = page.locator('.review-empty');
-  await Promise.race([
-    grid.waitFor({ state: 'visible' }),
-    empty.waitFor({ state: 'visible' }),
-  ]);
+  await page.waitForFunction(() => {
+    const selectors = ['.column-mode-grid', '.row-mode-wrapper', '.review-empty'];
+    return selectors.some((selector) => {
+      const el = document.querySelector(selector);
+      if (!el) return false;
+      const style = window.getComputedStyle(el);
+      return style.visibility !== 'hidden' && style.display !== 'none' && el.getClientRects().length > 0;
+    });
+  });
 };
 
 const downloadCsvRows = async (page, fileId) => {

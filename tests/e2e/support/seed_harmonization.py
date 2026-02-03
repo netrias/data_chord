@@ -16,12 +16,19 @@ ROOT_DIR = Path(__file__).resolve().parents[3]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from src.domain.dependencies import UPLOAD_BASE_DIR
 from src.domain.manifest import get_manifest_schema
 
 
-def _find_original_path(file_id: str) -> Path:
-    files_dir = UPLOAD_BASE_DIR / "files"
+def _resolve_upload_base_dir(raw: str | None) -> Path:
+    if raw:
+        return Path(raw).expanduser().resolve()
+    from src.domain.dependencies import UPLOAD_BASE_DIR
+
+    return UPLOAD_BASE_DIR
+
+
+def _find_original_path(file_id: str, upload_base_dir: Path) -> Path:
+    files_dir = upload_base_dir / "files"
     matches = sorted(files_dir.glob(f"{file_id}.*"))
     if not matches:
         raise FileNotFoundError(f"No uploaded file found for {file_id}")
@@ -83,8 +90,8 @@ def _build_manifest_rows(
     return manifest_rows
 
 
-def _write_manifest(file_id: str, manifest_rows: list[dict[str, Any]]) -> Path:
-    manifest_dir = UPLOAD_BASE_DIR / "manifests"
+def _write_manifest(file_id: str, manifest_rows: list[dict[str, Any]], upload_base_dir: Path) -> Path:
+    manifest_dir = upload_base_dir / "manifests"
     manifest_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = manifest_dir / f"{file_id}_harmonization.parquet"
     schema = get_manifest_schema()
@@ -118,9 +125,11 @@ def main() -> None:
     parser.add_argument("--file-id", required=True)
     parser.add_argument("--changes", default=None)
     parser.add_argument("--no-manifest", action="store_true")
+    parser.add_argument("--upload-base-dir", default=None)
     args = parser.parse_args()
 
-    original_path = _find_original_path(args.file_id)
+    upload_base_dir = _resolve_upload_base_dir(args.upload_base_dir)
+    original_path = _find_original_path(args.file_id, upload_base_dir)
     headers, original_rows = _read_csv(original_path)
     harmonized_rows = [row.copy() for row in original_rows]
     changes = _parse_changes(args.changes)
@@ -133,7 +142,7 @@ def main() -> None:
 
     if not args.no_manifest:
         manifest_rows = _build_manifest_rows(headers, original_rows, harmonized_rows, changes, args.file_id)
-        _write_manifest(args.file_id, manifest_rows)
+        _write_manifest(args.file_id, manifest_rows, upload_base_dir)
 
 
 if __name__ == "__main__":

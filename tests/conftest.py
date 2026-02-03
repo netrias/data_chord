@@ -28,6 +28,26 @@ MAX_EXAMPLES_LIMIT = 20
 MANUAL_COLUMN_CONFIDENCE = 0.2
 
 
+def review_state_payload() -> dict[str, object]:
+    """why: reuse a consistent review state payload across tests."""
+    return {
+        "review_mode": "column",
+        "sort_mode": "original",
+        "column_mode": {
+            "current_unit": 1,
+            "completed_units": [],
+            "flagged_units": [],
+            "batch_size": 5,
+        },
+        "row_mode": {
+            "current_unit": 1,
+            "completed_units": [],
+            "flagged_units": [],
+            "batch_size": 5,
+        },
+    }
+
+
 @dataclass
 class MockCDEMappingResult:
     """why: simulate the structure returned by NetriasClient.discover_cde_mapping."""

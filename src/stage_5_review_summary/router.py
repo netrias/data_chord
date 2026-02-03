@@ -236,6 +236,8 @@ def _normalize_for_metrics(value: str | None) -> str:
     if value is None:
         return ""
     return value.strip().lower()
+
+
 def _classify_change(row: ManifestRow) -> ChangeType:
     original = row.to_harmonize
     ai_value = row.top_harmonization

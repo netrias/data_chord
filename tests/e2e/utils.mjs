@@ -108,10 +108,43 @@ export const parseDownloadedCsv = async (response) => {
     throw new Error('No CSV found in download zip.');
   }
   const content = entry.getData().toString('utf-8');
-  const [headerLine, ...lines] = content.trim().split(/\r?\n/);
-  const headers = headerLine.split(',');
+  const lines = content.split(/\r?\n/);
+  if (lines.length > 0 && lines[lines.length - 1] === '') {
+    lines.pop();
+  }
+  const headerLine = lines.shift();
+  if (!headerLine) {
+    return [];
+  }
+  const headers = parseCsvLine(headerLine);
   return lines.map((line) => {
-    const values = line.split(',');
-    return Object.fromEntries(headers.map((header, idx) => [header, values[idx]]));
+    const values = parseCsvLine(line);
+    return Object.fromEntries(headers.map((header, idx) => [header, values[idx] ?? '']));
   });
+};
+
+const parseCsvLine = (line) => {
+  const values = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      values.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+
+  values.push(current);
+  return values;
 };

@@ -16,6 +16,7 @@ from tests.conftest import (
     create_csv_content,
     create_harmonized_csv,
     create_manifest_for_file,
+    review_state_payload,
     upload_content,
 )
 
@@ -27,25 +28,6 @@ def _read_downloaded_csv(response_bytes: bytes) -> list[dict[str, str]]:
         csv_name = next(name for name in zf.namelist() if name.endswith(".csv"))
         csv_content = zf.read(csv_name).decode("utf-8")
     return list(csv.DictReader(io.StringIO(csv_content)))
-
-
-def _review_state_payload() -> dict[str, object]:
-    return {
-        "review_mode": "column",
-        "sort_mode": "original",
-        "column_mode": {
-            "current_unit": 1,
-            "completed_units": [],
-            "flagged_units": [],
-            "batch_size": 5,
-        },
-        "row_mode": {
-            "current_unit": 1,
-            "completed_units": [],
-            "flagged_units": [],
-            "batch_size": 5,
-        },
-    }
 
 
 async def test_full_flow_no_changes_produces_zero_summary(
@@ -132,7 +114,7 @@ async def test_full_flow_overrides_propagate_within_column(
             str(index): {"col_a": {"ai_value": "Foo", "human_value": "Baz", "original_value": "Foo"}}
             for index in row_indices
         },
-        "review_state": _review_state_payload(),
+        "review_state": review_state_payload(),
     }
     save_response = await app_client.post("/stage-4/overrides", json=overrides_payload)
     assert save_response.status_code == 200
@@ -184,7 +166,7 @@ async def test_full_flow_two_files_isolated_overrides(
             "overrides": {
                 "1": {"col_a": {"ai_value": "alpha", "human_value": "gamma", "original_value": "alpha"}},
             },
-            "review_state": _review_state_payload(),
+            "review_state": review_state_payload(),
         },
     )
     assert save_response.status_code == 200
@@ -231,7 +213,7 @@ async def test_full_flow_reharmonize_clears_overrides(
             "overrides": {
                 "1": {"col_a": {"ai_value": "alpha", "human_value": "gamma", "original_value": "alpha"}},
             },
-            "review_state": _review_state_payload(),
+            "review_state": review_state_payload(),
         },
     )
     assert save_response.status_code == 200
@@ -292,7 +274,7 @@ async def test_full_flow_bom_overrides_apply(
                 str(index): {"col_a": {"ai_value": "Foo", "human_value": "Bar", "original_value": "Foo"}}
                 for index in row_indices
             },
-            "review_state": _review_state_payload(),
+            "review_state": review_state_payload(),
         },
     )
     assert save_response.status_code == 200
