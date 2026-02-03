@@ -95,7 +95,7 @@ async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadRespon
     except UnsupportedUploadError as exc:
         raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(exc)) from exc
     except UploadTooLargeError as exc:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(exc)) from exc
 
     return UploadResponse(
         file_id=meta.file_id,
