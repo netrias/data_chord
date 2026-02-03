@@ -24,7 +24,9 @@ const _buildRowsWithChanges = (rows) => {
     .map((row) => ({
       ...row,
       changedCells: getChangedCells(row),
-      rowIndex: row.sourceRowNumber ?? row.rowNumber,
+      rowIndex: row.sourceRowNumbers?.[0] ?? row.sourceRowNumber ?? row.rowNumber,
+      rowIndices: row.sourceRowNumbers ??
+        (row.sourceRowNumber ? [row.sourceRowNumber] : [row.rowNumber]),
     }));
 };
 
@@ -167,7 +169,7 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
     for (const cell of row.changedCells) {
       const entry = {
         ...cell,
-        rowIndices: [row.rowIndex],
+        rowIndices: row.rowIndices,
       };
       const card = createValueCard({
         entry,

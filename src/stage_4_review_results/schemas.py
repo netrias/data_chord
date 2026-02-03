@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 
 class CellOverrideSchema(BaseModel):
@@ -19,14 +19,43 @@ class CellOverrideSchema(BaseModel):
     original_value: str | None
 
 
-class ReviewStateSchema(BaseModel):
-    """Batch review progress state."""
+class ReviewModeStateSchema(BaseModel):
+    """Review progress state for a single mode (column or row)."""
 
-    completed_batches: list[int] = []
-    flagged_batches: list[int] = []
-    current_batch: int = 1
-    sort_mode: str = "original"
+    current_unit: int = 1
+    completed_units: list[int] = Field(default_factory=list)
+    flagged_units: list[int] = Field(default_factory=list)
     batch_size: int = 5
+
+
+class ReviewStateSchema(BaseModel):
+    """Review progress state across column and row modes."""
+
+    review_mode: str = "column"
+    sort_mode: str = "original"
+    column_mode: ReviewModeStateSchema = Field(default_factory=ReviewModeStateSchema)
+    row_mode: ReviewModeStateSchema = Field(default_factory=ReviewModeStateSchema)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _upgrade_legacy(cls, values: object) -> object:
+        if not isinstance(values, dict):
+            return values
+        if {"review_mode", "column_mode", "row_mode"} & values.keys():
+            return values
+        if {"completed_batches", "flagged_batches", "current_batch", "batch_size"} & values.keys():
+            return {
+                "review_mode": "row",
+                "sort_mode": values.get("sort_mode", "original"),
+                "column_mode": {},
+                "row_mode": {
+                    "current_unit": values.get("current_batch", 1),
+                    "completed_units": values.get("completed_batches", []),
+                    "flagged_units": values.get("flagged_batches", []),
+                    "batch_size": values.get("batch_size", 5),
+                },
+            }
+        return values
 
 
 class ReviewOverridesSchema(BaseModel):

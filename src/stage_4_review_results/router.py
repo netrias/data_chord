@@ -70,6 +70,7 @@ class StageFourRow(BaseModel):
     recordId: str
     cells: list[StageFourCell]
     sourceRowNumber: int | None = None
+    sourceRowNumbers: list[int] | None = None
 
 
 class StageFourResultsResponse(BaseModel):
@@ -84,7 +85,7 @@ class _StageFourRowGroup:
 
     record_ids: list[str]
     cells: list[StageFourCell]
-    source_row_number: int
+    source_row_numbers: list[int]
 
 
 stage_four_router = APIRouter(prefix="/stage-4", tags=["Stage 4 Review"])
@@ -143,7 +144,7 @@ def _resolve_harmonized_path(original_path: Path, file_id: str) -> Path:
 
 def _load_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
     """why: read CSV into headers and row dictionaries."""
-    with path.open(newline="", encoding="utf-8") as handle:
+    with path.open(newline="", encoding="utf-8-sig") as handle:
         reader = DictReader(handle)
         rows = list(reader)
         headers = list(reader.fieldnames or [])
@@ -219,16 +220,22 @@ def _build_rows_from_manifest(
         key = tuple((c.columnKey, c.originalValue or "", c.harmonizedValue or "") for c in cells)
 
         if key not in grouped:
-            grouped[key] = _StageFourRowGroup(record_ids=[record_id], cells=cells, source_row_number=idx + 1)
+            grouped[key] = _StageFourRowGroup(
+                record_ids=[record_id],
+                cells=cells,
+                source_row_numbers=[idx + 1],
+            )
         else:
             grouped[key].record_ids.append(record_id)
+            grouped[key].source_row_numbers.append(idx + 1)
 
     return [
         StageFourRow(
             rowNumber=group_index,
             recordId=_summarize_record_ids(group.record_ids),
             cells=group.cells,
-            sourceRowNumber=group.source_row_number,
+            sourceRowNumber=group.source_row_numbers[0] if group.source_row_numbers else None,
+            sourceRowNumbers=group.source_row_numbers,
         )
         for group_index, group in enumerate(grouped.values(), start=1)
     ]
@@ -250,8 +257,8 @@ def _build_cells_from_manifest(
         if entry is None:
             continue
 
-        original_value = entry.to_harmonize.strip() or None
-        harmonized_value = entry.top_harmonization.strip() or None
+        original_value = entry.to_harmonize or None
+        harmonized_value = entry.top_harmonization or None
         confidence = entry.confidence_score
         is_changed = (original_value or "") != (harmonized_value or "")
 
@@ -372,14 +379,17 @@ def _sync_overrides_to_manifest(storage: UploadStorage, payload: SaveOverridesRe
 def _collect_overrides_for_batch(
     payload: SaveOverridesRequest,
 ) -> list[tuple[str, str, str]]:
-    """why: gather all overrides into a list for batch processing."""
-    overrides: list[tuple[str, str, str]] = []
+    """why: gather per-column term overrides into a list for batch processing."""
+    overrides_map: dict[tuple[str, str], str] = {}
     for _row_key, cols in payload.overrides.items():
         for col_key, override in cols.items():
             if override.original_value is None:
                 continue
-            overrides.append((col_key, override.original_value, override.human_value))
-    return overrides
+            overrides_map[(col_key, override.original_value)] = override.human_value
+    return [
+        (col_key, original_value, human_value)
+        for (col_key, original_value), human_value in overrides_map.items()
+    ]
 
 
 @stage_four_router.delete(

@@ -143,7 +143,7 @@ def _load_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
     """why: read CSV into memory for comparison and transformation."""
     if not path.exists():
         raise HTTPException(status_code=404, detail=_ERROR_DATASET_NOT_FOUND)
-    with path.open(encoding="utf-8", newline="") as handle:
+    with path.open(encoding="utf-8-sig", newline="") as handle:
         reader = DictReader(handle)
         rows = list(reader)
         headers = list(reader.fieldnames) if reader.fieldnames else []
@@ -241,6 +241,13 @@ def _get_latest_override_value(overrides: list[ManualOverride]) -> str | None:
     return overrides[-1].value
 
 
+def _normalize_for_metrics(value: str | None) -> str:
+    """why: ignore case/whitespace-only differences in summary metrics."""
+    if value is None:
+        return ""
+    return value.strip().lower()
+
+
 def _classify_change(row: ManifestRow) -> ChangeType:
     """why: classify a manifest row's change type based on override presence and value.
 
@@ -255,12 +262,15 @@ def _classify_change(row: ManifestRow) -> ChangeType:
     ai_value = row.top_harmonization
     latest_override = _get_latest_override_value(row.manual_overrides)
 
-    final_value = latest_override if latest_override is not None else ai_value
+    original_norm = _normalize_for_metrics(original)
+    ai_norm = _normalize_for_metrics(ai_value)
+    override_norm = _normalize_for_metrics(latest_override) if latest_override is not None else None
+    final_norm = override_norm if latest_override is not None else ai_norm
 
-    if original == final_value:
+    if original_norm == final_norm:
         return ChangeType.UNCHANGED
 
-    if latest_override is not None and latest_override != ai_value:
+    if latest_override is not None and override_norm != ai_norm:
         return ChangeType.MANUAL_OVERRIDE
 
     return ChangeType.AI_HARMONIZED

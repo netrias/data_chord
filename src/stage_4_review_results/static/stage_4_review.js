@@ -158,10 +158,16 @@ const fetchRows = async () => {
       throw new Error(detail || 'Unable to load harmonized results.');
     }
     const body = await response.json();
-    state.rows = (body.rows || []).map((row) => ({
-      ...row,
-      originalIndex: Math.max(0, (row.sourceRowNumber ?? row.rowNumber) - 1),
-    }));
+    state.rows = (body.rows || []).map((row) => {
+      const primaryRowNumber = row.sourceRowNumbers?.[0] ?? row.sourceRowNumber ?? row.rowNumber;
+      const sourceRowNumbers = row.sourceRowNumbers ??
+        (row.sourceRowNumber ? [row.sourceRowNumber] : [row.rowNumber]);
+      return {
+        ...row,
+        sourceRowNumbers,
+        originalIndex: Math.max(0, primaryRowNumber - 1),
+      };
+    });
     state.hasLoadedRows = true;
   } catch (error) {
     console.error(error);
@@ -293,10 +299,10 @@ const recordOverrideForRows = (rowIndices, columnKey, aiValue, humanValue, origi
     if (!state.pendingOverrides[rowKey]) {
       state.pendingOverrides[rowKey] = {};
     }
-    if (humanValue && humanValue.trim()) {
+    if (humanValue !== '') {
       state.pendingOverrides[rowKey][columnKey] = {
         ai_value: aiValue,
-        human_value: humanValue.trim(),
+        human_value: humanValue,
         original_value: originalValue,
       };
     } else {

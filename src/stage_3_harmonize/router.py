@@ -20,8 +20,9 @@ from src.domain import (
     ManifestRowSchema,
     ManifestSummarySchema,
 )
-from src.domain.dependencies import get_harmonize_service, get_upload_storage
+from src.domain.dependencies import get_file_store, get_harmonize_service, get_upload_storage
 from src.domain.manifest import ManifestPayload, ManifestSummary, read_manifest_parquet
+from src.domain.storage import FileType
 
 MODULE_DIR = Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"
@@ -57,6 +58,9 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
     meta = _storage.load(payload.file_id)
     if not meta:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please rerun analysis.")
+
+    store = get_file_store()
+    store.delete(payload.file_id, FileType.REVIEW_OVERRIDES)
 
     stored_manifest = _storage.load_manifest(payload.file_id)
     manifest_payload = payload.manifest or cast(ManifestPayload | None, stored_manifest)

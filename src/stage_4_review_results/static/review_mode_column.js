@@ -29,8 +29,8 @@ const _getPopulatedColumnIndices = (rows) => {
   for (let colIdx = 0; colIdx < columnCount; colIdx++) {
     for (const row of rows) {
       const cell = row.cells[colIdx];
-      const hasOriginal = cell?.originalValue && cell.originalValue.trim() !== '';
-      const hasHarmonized = cell?.harmonizedValue && cell.harmonizedValue.trim() !== '';
+      const hasOriginal = cell?.originalValue != null && cell.originalValue !== '';
+      const hasHarmonized = cell?.harmonizedValue != null && cell.harmonizedValue !== '';
       if (hasOriginal || hasHarmonized) {
         populated.add(colIdx);
         break;
@@ -50,16 +50,22 @@ const _getPopulatedColumnIndices = (rows) => {
  */
 const _processRowCellForColumn = (row, colIdx, columnKey, entriesByOriginal) => {
   const cell = row.cells[colIdx];
-  const originalValue = (cell?.originalValue ?? '').trim();
-  const harmonizedValue = (cell?.harmonizedValue ?? '').trim();
+  const originalValue = cell?.originalValue ?? '';
+  const harmonizedValue = cell?.harmonizedValue ?? '';
 
   if (!originalValue) return;
   if (originalValue === harmonizedValue) return;
 
-  const rowIndex = row.sourceRowNumber ?? row.rowNumber;
+  const rowIndices = row.sourceRowNumbers ??
+    (row.sourceRowNumber ? [row.sourceRowNumber] : [row.rowNumber]);
 
   if (entriesByOriginal.has(originalValue)) {
-    entriesByOriginal.get(originalValue).rowIndices.push(rowIndex);
+    const entry = entriesByOriginal.get(originalValue);
+    for (const rowIndex of rowIndices) {
+      if (!entry.rowIndices.includes(rowIndex)) {
+        entry.rowIndices.push(rowIndex);
+      }
+    }
     return;
   }
 
@@ -70,7 +76,7 @@ const _processRowCellForColumn = (row, colIdx, columnKey, entriesByOriginal) => 
     bucket: cell.bucket,
     isChanged: cell.isChanged,
     manualOverride: cell.manualOverride,
-    rowIndices: [rowIndex],
+    rowIndices,
     columnKey,
   });
 };

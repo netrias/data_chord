@@ -1,0 +1,4 @@
+record_id,col_a,col_b
+RID-1,Foo,X
+RID-2,Foo,Y
+RID-3,Bar,Foo

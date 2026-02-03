@@ -37,8 +37,8 @@ const _determineUnitStatus = (isFlagged, isComplete) => {
  */
 export const rowHasChanges = (row) => {
   for (const cell of row.cells) {
-    const original = (cell.originalValue ?? '').trim();
-    const harmonized = (cell.harmonizedValue ?? '').trim();
+    const original = cell.originalValue ?? '';
+    const harmonized = cell.harmonizedValue ?? '';
     if (original !== harmonized) {
       return true;
     }
@@ -54,8 +54,8 @@ export const rowHasChanges = (row) => {
 export const getChangedCells = (row) => {
   const changedCells = [];
   for (const cell of row.cells) {
-    const original = (cell.originalValue ?? '').trim();
-    const harmonized = (cell.harmonizedValue ?? '').trim();
+    const original = cell.originalValue ?? '';
+    const harmonized = cell.harmonizedValue ?? '';
     if (original && original !== harmonized) {
       changedCells.push(cell);
     }

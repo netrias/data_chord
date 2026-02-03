@@ -63,7 +63,7 @@ async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadRespon
     except UnsupportedUploadError as exc:
         raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(exc)) from exc
     except UploadTooLargeError as exc:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(exc)) from exc
 
     return UploadResponse(
         file_id=meta.file_id,
@@ -96,6 +96,9 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
             target_schema=payload.target_schema,
         )
         _ = _storage.save_manifest(meta.file_id, manifest)
+    except (UnicodeDecodeError, ValueError) as exc:
+        _router_logger.warning("Upload failed validation during analysis", extra={"file_id": payload.file_id})
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         _router_logger.exception("Upload missing on disk", extra={"file_id": payload.file_id})
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="Upload missing. Please upload again.") from exc
