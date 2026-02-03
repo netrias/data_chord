@@ -1,6 +1,6 @@
 import { initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
 import { STAGE_2_PAYLOAD_KEY, STAGE_3_PAYLOAD_KEY, STAGE_3_JOB_KEY, CURRENT_FILE_SESSION_KEY, removeFromSession, writeToSession, readFromSession } from '/assets/shared/storage-keys.js';
-import { showDataModelPopup } from './data_model_popup.js';
+import { showDataModelPopup, preloadDataModels } from './data_model_popup.js';
 
 const config = window.stageOneUploadConfig ?? {};
 
@@ -67,7 +67,8 @@ const _showDropzoneSummary = (file, statusText) => {
   if (dropzoneCopy) dropzoneCopy.classList.add('hidden');
   if (dropzoneFile) dropzoneFile.classList.remove('hidden');
   if (dropzoneFileName) dropzoneFileName.textContent = file.name;
-  if (dropzoneFileSize) dropzoneFileSize.textContent = _formatBytes(file.size);
+  /* Hydrated files have humanSize (pre-formatted); real Files have size (bytes). */
+  if (dropzoneFileSize) dropzoneFileSize.textContent = file.humanSize ?? _formatBytes(file.size);
   if (dropzoneFileStatus) dropzoneFileStatus.textContent = statusText;
 };
 
@@ -164,25 +165,25 @@ const _clearStaleSessionData = () => {
   removeFromSession(CURRENT_FILE_SESSION_KEY);
 };
 
-/* why: persist file session to enable navigation back to Stage 1 with file context. */
+/* Enables navigation back to Stage 1 with file context. */
 const _persistFileSession = (uploadResponse, fileName) => {
   writeToSession(CURRENT_FILE_SESSION_KEY, {
     file_id: uploadResponse.file_id,
     original_name: fileName,
     uploaded_at: new Date().toISOString(),
-    size_bytes: uploadResponse.size_bytes,
+    human_size: uploadResponse.human_size,
   });
 };
 
-/* why: restore file display from session when returning to Stage 1. */
+/* Restores file display from session when returning to Stage 1. */
 const _hydrateFromSession = () => {
   const session = readFromSession(CURRENT_FILE_SESSION_KEY);
   if (!session || !session.file_id || !session.original_name) {
     return false;
   }
 
-  state.uploaded = { file_id: session.file_id, size_bytes: session.size_bytes };
-  state.file = { name: session.original_name, size: session.size_bytes };
+  state.uploaded = { file_id: session.file_id, human_size: session.human_size };
+  state.file = { name: session.original_name, humanSize: session.human_size };
 
   if (dropzone) dropzone.classList.add('has-file');
   _showDropzoneSummary(state.file, 'Uploaded');
@@ -201,9 +202,6 @@ const _navigateToStageTwo = (fileId, targetSchema, payload) => {
   window.location.assign(`/stage-2?${search.toString()}`);
 };
 
-const CREDENTIAL_ERROR_MESSAGE =
-  'AI mapping service unavailable. Please configure NETRIAS_API_KEY and restart the server.';
-
 const _analyzeDataset = async () => {
   if (!state.uploaded || state.isAnalyzing) {
     _setStatus('Upload a file before analyzing.', 'error');
@@ -211,7 +209,13 @@ const _analyzeDataset = async () => {
   }
 
   /* Show data model selection popup before starting analysis. */
-  const selection = await showDataModelPopup();
+  let selection;
+  try {
+    selection = await showDataModelPopup();
+  } catch (err) {
+    _setStatus(err.message, 'error');
+    return;
+  }
   if (!selection) {
     /* User cancelled - stay on Stage 1. */
     return;
@@ -238,9 +242,6 @@ const _analyzeDataset = async () => {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       throw new Error(payload.detail || 'Analysis failed.');
-    }
-    if (payload.mapping_service_available === false) {
-      throw new Error(CREDENTIAL_ERROR_MESSAGE);
     }
     // Keep overlay visible during navigation - browser will replace the page
     _navigateToStageTwo(state.uploaded.file_id, selection.dataModelKey, payload);
@@ -334,6 +335,8 @@ const _init = () => {
   if (analyzeButton) {
     analyzeButton.addEventListener('click', _analyzeDataset);
   }
+
+  preloadDataModels();
 };
 
 _init();

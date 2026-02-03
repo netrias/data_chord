@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from httpx import AsyncClient
 
+from src.domain.data_model_client import DataModelClientError
 from tests.conftest import TEST_CSV_CONTENT_TYPE, TEST_TARGET_SCHEMA, upload_file
 
 pytestmark = pytest.mark.asyncio
@@ -58,7 +60,7 @@ class TestMissingFileErrors:
         # When: Rows are requested with the non-existent file_id
         response = await app_client.post(
             "/stage-4/rows",
-            json={"file_id": "deadbeef12345678", "manual_columns": []},
+            json={"file_id": INVALID_FILE_ID, "manual_columns": []},
         )
 
         # Then: 404 response
@@ -72,7 +74,7 @@ class TestMissingFileErrors:
         # When: Summary is requested with the non-existent file_id
         response = await app_client.post(
             "/stage-5/summary",
-            json={"file_id": "deadbeef12345678", "manual_columns": []},
+            json={"file_id": INVALID_FILE_ID, "manual_columns": []},
         )
 
         # Then: 404 response
@@ -120,6 +122,29 @@ class TestMissingHarmonizedFileErrors:
 
         # Then: 404 response
         assert response.status_code == 404
+
+
+class TestDataModelServiceErrors:
+    """Data model endpoint error handling."""
+
+    async def test_list_data_models_returns_503_when_api_unavailable(
+        self, app_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """503 returned when Data Model Store API is unreachable."""
+        # Given: Data Model Store API is unreachable
+        mock_client = MagicMock()
+        mock_client.list_data_models.side_effect = DataModelClientError("Connection failed")
+        monkeypatch.setattr(
+            "src.stage_1_upload.router.get_data_model_client",
+            lambda: mock_client,
+        )
+
+        # When: GET /stage-1/data-models is called
+        response = await app_client.get("/stage-1/data-models")
+
+        # Then: 503 response with user-friendly message
+        assert response.status_code == 503
+        assert "currently unavailable" in response.json()["detail"]
 
 
 class TestUploadValidationErrors:

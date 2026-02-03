@@ -63,13 +63,16 @@ async def render_stage_one(request: Request) -> HTMLResponse:
     name="stage_one_data_models",
 )
 async def list_data_models() -> list[DataModelSchema]:
-    """Frontend popup fetches available data models from here instead of hardcoding."""
+    """Decouples frontend from model list changes; labels may vary by deployment."""
     client = get_data_model_client()
     try:
         models = await run_in_threadpool(client.list_data_models)
     except DataModelClientError:
-        _router_logger.warning("Data Model Store API unavailable; falling back to configured default")
-        return [_fallback_data_model()]
+        _router_logger.warning("Data Model Store API unavailable")
+        raise HTTPException(
+            status_code=503,
+            detail="Data models are currently unavailable. Please try again later.",
+        ) from None
     return [
         DataModelSchema(key=m.key, label=m.label, versions=m.versions)
         for m in models
@@ -113,12 +116,12 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     if not meta:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please upload again.")
 
-    total_rows, columns = _analyze_columns_safe(meta.saved_path, payload.file_id)
-    cde_targets, manual_overrides, manifest, mapping_available = await _discover_mappings(
+    total_rows, columns = await run_in_threadpool(_analyze_columns_safe, meta.saved_path, payload.file_id)
+    cde_targets, manual_overrides, manifest = await _discover_mappings(
         meta.saved_path, payload.target_schema
     )
     _storage.save_manifest(meta.file_id, manifest)
-    _log_analysis_results(total_rows, columns, cde_targets, mapping_available)
+    _log_analysis_results(total_rows, columns, cde_targets)
 
     return AnalyzeResponse(
         file_id=meta.file_id,
@@ -130,7 +133,6 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
         next_step_hint="Review AI-suggested column mappings once ready.",
         manual_overrides=manual_overrides,
         manifest=manifest,
-        mapping_service_available=mapping_available,
     )
 
 
@@ -145,7 +147,7 @@ def _analyze_columns_safe(csv_path: Path, file_id: str) -> tuple[int, list[Colum
 async def _discover_mappings(
     csv_path: Path,
     target_schema: str,
-) -> tuple[dict[str, list[ModelSuggestion]], dict[str, str], ManifestPayload, bool]:
+) -> tuple[dict[str, list[ModelSuggestion]], dict[str, str], ManifestPayload]:
     mapping_service = get_mapping_service()
     try:
         cde_targets, manual_overrides, manifest = await run_in_threadpool(
@@ -153,27 +155,22 @@ async def _discover_mappings(
             csv_path=csv_path,
             target_schema=target_schema,
         )
-        return cde_targets, manual_overrides, manifest, True
+        return cde_targets, manual_overrides, manifest
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except Exception as exc:  # pragma: no cover - defensive
-        _router_logger.exception("Failed discovering mappings", exc_info=exc)
+        _router_logger.exception(
+            "Failed discovering mappings: %s", type(exc).__name__, exc_info=exc
+        )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to fetch mapping suggestions."
         ) from exc
-
-
-def _fallback_data_model() -> DataModelSchema:
-    """Ensures the popup renders when the Data Model Store API is unreachable."""
-    default = get_default_target_schema()
-    return DataModelSchema(key=default, label=default, versions=["v1"])
 
 
 def _log_analysis_results(
     total_rows: int,
     columns: list[ColumnPreview],
     cde_targets: dict[str, list[ModelSuggestion]],
-    mapping_available: bool,
 ) -> None:
     cde_target_keys = set(cde_targets)
     missing_columns = [
@@ -187,6 +184,5 @@ def _log_analysis_results(
             "mapped_columns": len(cde_targets),
             "missing_columns": missing_columns[:10],
             "missing_count": len(missing_columns),
-            "mapping_service_available": mapping_available,
         },
     )

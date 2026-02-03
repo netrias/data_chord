@@ -8,13 +8,97 @@ const DATA_MODELS_ENDPOINT = '/stage-1/data-models';
 /** Server-provided default; falls back to first available model if missing. */
 const DEFAULT_DATA_MODEL = window.stageOneUploadConfig?.defaultDataModel ?? null;
 
+/* Preload state - enables instant popup after page load. */
+let _cachedDataModels = null;
+let _preloadPromise = null;
+let _retryTimeoutId = null;
+/** Single retry after 2s delay. Keeps implementation simple - if server is down, user must refresh anyway. */
+const RETRY_DELAY_MS = 2000;
+let _retryScheduled = false;
+
 /** Backend may return arbitrary labels; fetch avoids hardcoding model list. */
 async function _fetchDataModels() {
-  const resp = await fetch(DATA_MODELS_ENDPOINT);
+  const resp = await fetch(DATA_MODELS_ENDPOINT, { cache: 'no-store' });
   if (!resp.ok) {
     throw new Error(`Failed to fetch data models: ${resp.status}`);
   }
-  return resp.json();
+  const models = await resp.json();
+  /* Filter out models without versions - they cannot be used for mapping. */
+  return models.filter((m) => m.versions && m.versions.length > 0);
+}
+
+/**
+ * Compare version strings using semantic versioning rules.
+ * Handles formats like "1.0", "1.2.3", "v1.0", "2024-01-15".
+ */
+function _compareVersions(a, b) {
+  /* Strip leading 'v' if present. */
+  const cleanA = a.replace(/^v/i, '');
+  const cleanB = b.replace(/^v/i, '');
+
+  const partsA = cleanA.split(/[.\-]/).map((p) => (isNaN(p) ? p : Number(p)));
+  const partsB = cleanB.split(/[.\-]/).map((p) => (isNaN(p) ? p : Number(p)));
+
+  const len = Math.max(partsA.length, partsB.length);
+  for (let i = 0; i < len; i++) {
+    const pA = partsA[i] ?? 0;
+    const pB = partsB[i] ?? 0;
+
+    if (typeof pA === 'number' && typeof pB === 'number') {
+      if (pA !== pB) return pA - pB;
+    } else {
+      /* Fall back to string comparison for non-numeric parts. */
+      const cmp = String(pA).localeCompare(String(pB));
+      if (cmp !== 0) return cmp;
+    }
+  }
+  return 0;
+}
+
+function _getLatestVersion(versions) {
+  if (!versions || versions.length === 0) return '';
+  return [...versions].sort(_compareVersions).pop();
+}
+
+function _scheduleRetry() {
+  if (_retryScheduled) return;
+  _retryScheduled = true;
+  _retryTimeoutId = setTimeout(() => {
+    _retryTimeoutId = null;
+    _retryScheduled = false;
+    _preloadPromise = null;
+    preloadDataModels();
+  }, RETRY_DELAY_MS);
+}
+
+function _clearRetry() {
+  if (_retryTimeoutId) {
+    clearTimeout(_retryTimeoutId);
+    _retryTimeoutId = null;
+  }
+  _retryScheduled = false;
+}
+
+/**
+ * Preload data models on page init. Single retry after 2s on failure.
+ * Call once from _init() in stage_1_upload.js.
+ */
+export function preloadDataModels() {
+  if (_cachedDataModels || _preloadPromise) return;
+  _preloadPromise = _fetchDataModels()
+    .then((data) => {
+      _cachedDataModels = data;
+    })
+    .catch((err) => {
+      console.warn('Preload data models failed:', err);
+      _scheduleRetry();
+    })
+    .finally(() => {
+      /* Keep promise non-null during retry to prevent race with showDataModelPopup. */
+      if (!_retryScheduled) {
+        _preloadPromise = null;
+      }
+    });
 }
 
 function _buildOptionElements(selectEl, items, valueKey, labelKey, selectedValue) {
@@ -86,7 +170,7 @@ function _buildDialogDOM(dataModels) {
 
   const defaultModel = dataModels.find((m) => m.key === DEFAULT_DATA_MODEL) || dataModels[0];
   const versions = defaultModel?.versions ?? [];
-  const defaultVersion = versions.length > 0 ? versions[versions.length - 1] : '';
+  const defaultVersion = _getLatestVersion(versions);
   _buildVersionOptions(versionSelect, versions, defaultVersion);
 
   versionField.appendChild(versionLabel);
@@ -149,11 +233,9 @@ function _setupModelChangeHandler(dialog, dataModels) {
   modelSelect.addEventListener('change', () => {
     const selected = dataModels.find((m) => m.key === modelSelect.value);
     const versions = selected?.versions ?? [];
-    _buildVersionOptions(versionSelect, versions, '');
-    /* Auto-select latest version. */
-    if (versions.length > 0) {
-      versionSelect.value = versions[versions.length - 1];
-    }
+    const latestVersion = _getLatestVersion(versions);
+    _buildVersionOptions(versionSelect, versions, latestVersion);
+    versionSelect.value = latestVersion;
   });
 }
 
@@ -161,20 +243,19 @@ function _setupModelChangeHandler(dialog, dataModels) {
  * Show the data model selection popup.
  * @returns {Promise<{dataModelKey: string, versionLabel: string} | null>}
  *   Resolves with selection on confirm, or null on cancel/close.
+ * @throws {Error} If data models are unavailable (preload failed).
  */
 export async function showDataModelPopup() {
-  let dataModels;
-  try {
-    dataModels = await _fetchDataModels();
-  } catch (err) {
-    console.error('Failed to load data models:', err);
-    return null;
+  /* Wait for in-flight preload if user clicks before it completes. */
+  if (_preloadPromise) {
+    await _preloadPromise;
   }
 
-  if (!dataModels || dataModels.length === 0) {
-    console.error('No data models available');
-    return null;
+  if (!_cachedDataModels || _cachedDataModels.length === 0) {
+    throw new Error('Data models are currently unavailable. Please try again later.');
   }
+
+  const dataModels = _cachedDataModels;
 
   return new Promise((resolve) => {
     const dialog = document.createElement('dialog');

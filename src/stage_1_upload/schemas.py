@@ -50,4 +50,3 @@ class AnalyzeResponse(BaseModel):
     next_step_hint: str
     manual_overrides: dict[str, str] = Field(default_factory=dict)
     manifest: ManifestPayload = Field(default_factory=lambda: {"column_mappings": {}})
-    mapping_service_available: bool = Field(default=True)
