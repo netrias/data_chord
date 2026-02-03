@@ -131,7 +131,7 @@ async def test_stage4_handles_bom_headers(
     app_client: AsyncClient,
     temp_storage: UploadStorage,
 ) -> None:
-    content = "\ufeffrecord_id,col_a\nRID-1,Foo\n".encode("utf-8")
+    content = "\ufeffrecord_id,col_a\nRID-1,Foo\n".encode()
     file_id = await upload_content(app_client, content, "bom.csv")
     meta = temp_storage.load(file_id)
     assert meta is not None

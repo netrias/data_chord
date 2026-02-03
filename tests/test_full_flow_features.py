@@ -238,7 +238,7 @@ async def test_full_flow_bom_overrides_apply(
     """Full flow handles BOM headers and applies overrides."""
 
     # Given: a BOM-prefixed CSV with repeated term
-    content = "\ufeffrecord_id,col_a\nRID-1,Foo\nRID-2,Foo\n".encode("utf-8")
+    content = "\ufeffrecord_id,col_a\nRID-1,Foo\nRID-2,Foo\n".encode()
     file_id = await upload_content(app_client, content, "bom-flow.csv")
     assert temp_storage.load_manifest(file_id) is None
     analyze_response = await app_client.post(

@@ -10,9 +10,9 @@ from io import BytesIO
 import pytest
 from httpx import AsyncClient
 
-from src.domain.harmonize import HarmonizeResult
 from src.domain.cde import CDEInfo
 from src.domain.data_model_cache import get_session_cache
+from src.domain.harmonize import HarmonizeResult
 from src.domain.storage import UploadStorage
 from tests.conftest import (
     TEST_TARGET_SCHEMA,
@@ -194,7 +194,7 @@ async def test_stage1_analyze_bom_and_non_bom_match_headers(
     """BOM and non-BOM files produce identical headers."""
 
     # Given: BOM and non-BOM CSVs with the same headers
-    bom_content = "\ufeffcol_a,col_b\nalpha,beta\n".encode("utf-8")
+    bom_content = "\ufeffcol_a,col_b\nalpha,beta\n".encode()
     non_bom_content = b"col_a,col_b\nalpha,beta\n"
     bom_file_id = await upload_content(app_client, bom_content, "bom.csv")
     non_bom_file_id = await upload_content(app_client, non_bom_content, "plain.csv")
@@ -225,7 +225,7 @@ async def test_stage1_analyze_handles_bom_headers(
     """Analyze strips BOM headers so column names are correct."""
 
     # Given: a BOM-prefixed CSV and no manifest stored yet
-    content = "\ufeffrecord_id,col_a\nRID-1,Foo\n".encode("utf-8")
+    content = "\ufeffrecord_id,col_a\nRID-1,Foo\n".encode()
     file_id = await upload_content(app_client, content, "bom.csv")
     assert temp_storage.load_manifest(file_id) is None
 
@@ -365,7 +365,10 @@ async def test_stage3_harmonize_prefers_payload_manifest(
 
     # Given: an uploaded file with a stored manifest
     file_id = await upload_content(app_client, create_csv_content([["col_a"], ["alpha"]]), "payload.csv")
-    temp_storage.save_manifest(file_id, {"column_mappings": {"col_a": {"targetField": "primary_diagnosis", "cde_id": 2}}})
+    temp_storage.save_manifest(
+        file_id,
+        {"column_mappings": {"col_a": {"targetField": "primary_diagnosis", "cde_id": 2}}},
+    )
     payload_manifest = {"column_mappings": {"col_a": {"targetField": "morphology", "cde_id": 3}}}
     stub = StubHarmonizer()
 

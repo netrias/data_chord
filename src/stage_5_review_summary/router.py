@@ -30,7 +30,6 @@ from src.domain.manifest import (
     ManifestRow,
     ManifestSummary,
     get_latest_override_value,
-    is_value_changed,
     read_manifest_parquet,
 )
 from src.domain.pv_persistence import ensure_pvs_loaded

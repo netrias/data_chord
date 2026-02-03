@@ -16,7 +16,8 @@ ROOT_DIR = Path(__file__).resolve().parents[3]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from src.domain.manifest import get_manifest_schema
+# noqa: E402 - ensure repo root is on sys.path before importing application modules.
+from src.domain.manifest import get_manifest_schema  # noqa: E402
 
 
 def _resolve_upload_base_dir(raw: str | None) -> Path:
