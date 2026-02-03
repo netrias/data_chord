@@ -58,22 +58,28 @@ def _build_manifest_rows(
 
     manifest_rows: list[dict[str, Any]] = []
     for col_name in columns_with_changes:
+        grouped: dict[str, dict[str, Any]] = {}
         for row_idx, original_row in enumerate(original_rows):
             original_value = original_row.get(col_name, "")
             harmonized_value = harmonized_rows[row_idx].get(col_name, original_value)
-            manifest_rows.append({
-                "job_id": f"e2e-job-{file_id}",
-                "column_id": headers.index(col_name) if col_name in headers else 0,
-                "column_name": col_name,
-                "to_harmonize": original_value,
-                "top_harmonization": harmonized_value,
-                "ontology_id": None,
-                "top_harmonizations": [harmonized_value] if harmonized_value else [],
-                "confidence_score": 0.95 if original_value != harmonized_value else 0.99,
-                "error": None,
-                "row_indices": [row_idx],
-                "manual_overrides": [],
-            })
+            if original_value not in grouped:
+                grouped[original_value] = {
+                    "job_id": f"e2e-job-{file_id}",
+                    "column_id": headers.index(col_name) if col_name in headers else 0,
+                    "column_name": col_name,
+                    "to_harmonize": original_value,
+                    "top_harmonization": harmonized_value,
+                    "ontology_id": None,
+                    "top_harmonizations": [harmonized_value] if harmonized_value else [],
+                    "confidence_score": 0.95 if original_value != harmonized_value else 0.99,
+                    "error": None,
+                    "row_indices": [row_idx],
+                    "manual_overrides": [],
+                    "pv_adjustment": None,
+                }
+            else:
+                grouped[original_value]["row_indices"].append(row_idx)
+        manifest_rows.extend(grouped.values())
     return manifest_rows
 
 
@@ -94,6 +100,7 @@ def _write_manifest(file_id: str, manifest_rows: list[dict[str, Any]]) -> Path:
         "error": [row.get("error") for row in manifest_rows],
         "row_indices": [row.get("row_indices", []) for row in manifest_rows],
         "manual_overrides": [row.get("manual_overrides", []) for row in manifest_rows],
+        "pv_adjustment": [row.get("pv_adjustment") for row in manifest_rows],
     }, schema=schema)
     pq.write_table(table, manifest_path)
     return manifest_path

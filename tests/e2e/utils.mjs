@@ -12,12 +12,16 @@ export const getFileIdFromUrl = (page) => {
 };
 
 export const uploadAndAnalyze = async (page, filePath) => {
+  await mockDataModels(page);
   await page.goto('/stage-1');
   await page.setInputFiles('#fileInput', filePath);
   await page.locator('#analyzeButton').waitFor({ state: 'attached' });
   await page.locator('#analyzeButton').waitFor({ state: 'visible' });
   await page.waitForFunction(() => !document.querySelector('#analyzeButton')?.disabled);
   await page.click('#analyzeButton');
+  const confirmButton = page.locator('.data-model-confirm-btn');
+  await confirmButton.waitFor({ state: 'visible' });
+  await confirmButton.click();
   await page.waitForURL(/\/stage-2/);
   return getFileIdFromUrl(page);
 };
@@ -47,6 +51,23 @@ export const mockHarmonizeSuccess = async (page) => {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify(response),
+    });
+  });
+};
+
+export const mockDataModels = async (page) => {
+  await page.route('**/stage-1/data-models', async (route) => {
+    const models = [
+      {
+        key: 'test-data-model',
+        label: 'Test Data Model',
+        versions: ['v1'],
+      },
+    ];
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(models),
     });
   });
 };

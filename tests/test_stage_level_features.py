@@ -11,6 +11,8 @@ import pytest
 from httpx import AsyncClient
 
 from src.domain.harmonize import HarmonizeResult
+from src.domain.cde import CDEInfo
+from src.domain.data_model_cache import get_session_cache
 from src.domain.storage import UploadStorage
 from tests.conftest import (
     TEST_TARGET_SCHEMA,
@@ -286,28 +288,44 @@ async def test_stage1_analyze_is_idempotent(
     assert manifest_one == manifest_two, "Manifest changed between analyses"
 
 
-async def test_stage2_mapping_page_renders_manual_options(app_client: AsyncClient) -> None:
+async def test_stage2_mapping_page_renders_manual_options(
+    app_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Stage 2 mapping page exposes CDE labels for manual mapping."""
 
     # Given: the mapping page has not been loaded yet
+    monkeypatch.setenv("DATA_MODEL_KEY", "test-data-model")
+    file_id = "deadbeef"
+    cache = get_session_cache(file_id)
+    cache.set_cdes(
+        [CDEInfo(cde_id=2, cde_key="primary_diagnosis", description=None, version_label="v1")],
+        data_model_key="test-data-model",
+        version_label="v1",
+    )
+
     # When: the mapping page is requested
-    response = await app_client.get("/stage-2")
+    response = await app_client.get(f"/stage-2?file_id={file_id}")
 
     # Then: the page renders and includes CDE labels
     assert response.status_code == 200
     assert "primary_diagnosis" in response.text
 
 
-async def test_stage2_mapping_page_includes_default_schema(app_client: AsyncClient) -> None:
+async def test_stage2_mapping_page_includes_default_schema(
+    app_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Stage 2 mapping page renders the default schema value."""
 
     # Given: the mapping page has not been loaded yet
+    monkeypatch.setenv("DATA_MODEL_KEY", "test-data-model")
     # When: the mapping page is requested
     response = await app_client.get("/stage-2")
 
     # Then: the default schema is embedded for client-side use
     assert response.status_code == 200
-    assert 'targetSchema: "ccdi"' in response.text
+    assert 'targetSchema: "test-data-model"' in response.text
 
 
 async def test_stage3_harmonize_uses_stored_manifest_when_payload_missing(
@@ -320,13 +338,13 @@ async def test_stage3_harmonize_uses_stored_manifest_when_payload_missing(
         def __init__(self) -> None:
             self.received_manifest = None
 
-        def run(self, *, file_path, target_schema, column_mappings, manifest):  # type: ignore[no-untyped-def]
+        def run(self, *, file_path, target_schema, column_mappings, cache, manifest):  # type: ignore[no-untyped-def]
             self.received_manifest = manifest
             return HarmonizeResult(job_id="job-1", status="succeeded", detail="ok")
 
     # Given: an uploaded file with a stored manifest
     file_id = await upload_content(app_client, create_csv_content([["col_a"], ["alpha"]]), "manifest.csv")
-    stored_manifest = {"column_mappings": {"col_a": {"targetField": "primary_diagnosis"}}}
+    stored_manifest = {"column_mappings": {"col_a": {"targetField": "primary_diagnosis", "cde_id": 2}}}
     temp_storage.save_manifest(file_id, stored_manifest)
     stub = StubHarmonizer()
     assert stub.received_manifest is None
@@ -359,14 +377,14 @@ async def test_stage3_harmonize_prefers_payload_manifest(
         def __init__(self) -> None:
             self.received_manifest = None
 
-        def run(self, *, file_path, target_schema, column_mappings, manifest):  # type: ignore[no-untyped-def]
+        def run(self, *, file_path, target_schema, column_mappings, cache, manifest):  # type: ignore[no-untyped-def]
             self.received_manifest = manifest
             return HarmonizeResult(job_id="job-2", status="succeeded", detail="ok")
 
     # Given: an uploaded file with a stored manifest
     file_id = await upload_content(app_client, create_csv_content([["col_a"], ["alpha"]]), "payload.csv")
-    temp_storage.save_manifest(file_id, {"column_mappings": {"col_a": {"targetField": "primary_diagnosis"}}})
-    payload_manifest = {"column_mappings": {"col_a": {"targetField": "morphology"}}}
+    temp_storage.save_manifest(file_id, {"column_mappings": {"col_a": {"targetField": "primary_diagnosis", "cde_id": 2}}})
+    payload_manifest = {"column_mappings": {"col_a": {"targetField": "morphology", "cde_id": 3}}}
     stub = StubHarmonizer()
 
     # When: harmonize is triggered with a manifest payload

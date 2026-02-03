@@ -8,6 +8,7 @@ import {
   getFileIdFromUrl,
   uploadAndAnalyze,
   clickHarmonize,
+  mockDataModels,
   mockHarmonizeSuccess,
   mockHarmonizeFailure,
   seedHarmonization,
@@ -71,10 +72,10 @@ test('override propagation applies to all instances in a column', async ({ page 
   // When: the user overrides the term once
   await page.goto(`/stage-4?file_id=${fileId}`);
   await waitForReviewRows(page);
-  const card = page.locator('.column-mode-grid .value-pair', {
-    has: page.locator('.original-text', { hasText: 'Foo' }),
+  const card = page.locator('.column-mode-grid .row-cell', {
+    has: page.locator('.original-context-value', { hasText: 'Foo' }),
   }).first();
-  await card.locator('.value-input').fill('Baz');
+  await card.locator('.target-value-input').fill('Baz');
   await page.waitForResponse((response) => response.url().includes('/stage-4/overrides') && response.ok());
 
   // Then: download applies override to all matching rows in that column
@@ -102,9 +103,11 @@ test('whitespace-significant terms remain distinct', async ({ page }) => {
   // When: the user overrides the whitespace-padded term in row mode
   await page.goto(`/stage-4?file_id=${fileId}`);
   await waitForReviewRows(page);
+  await page.click('#settingsButton');
   await page.selectOption('#reviewModeSelect', 'row');
-  const row = page.locator('.row-mode-row', { hasText: 'Row 1' });
-  await row.locator('.value-input').fill('Quux');
+  await page.click('#settingsCloseButton');
+  const row = page.locator('.row-mode-row').first();
+  await row.locator('.target-value-input').fill('Quux');
   await page.waitForResponse((response) => response.url().includes('/stage-4/overrides') && response.ok());
 
   // Then: only the whitespace-padded term is overridden
@@ -128,10 +131,10 @@ test('BOM headers do not break overrides', async ({ page }) => {
   // When: an override is applied
   await page.goto(`/stage-4?file_id=${fileId}`);
   await waitForReviewRows(page);
-  const card = page.locator('.column-mode-grid .value-pair', {
-    has: page.locator('.original-text', { hasText: 'Foo' }),
+  const card = page.locator('.column-mode-grid .row-cell', {
+    has: page.locator('.original-context-value', { hasText: 'Foo' }),
   }).first();
-  await card.locator('.value-input').fill('Bar');
+  await card.locator('.target-value-input').fill('Bar');
   await page.waitForResponse((response) => response.url().includes('/stage-4/overrides') && response.ok());
 
   // Then: download reflects overrides for all rows
@@ -173,10 +176,10 @@ test('autosave persists overrides across reloads', async ({ page }) => {
 
   await page.goto(`/stage-4?file_id=${fileId}`);
   await waitForReviewRows(page);
-  const card = page.locator('.column-mode-grid .value-pair', {
-    has: page.locator('.original-text', { hasText: 'Foo' }),
+  const card = page.locator('.column-mode-grid .row-cell', {
+    has: page.locator('.original-context-value', { hasText: 'Foo' }),
   }).first();
-  await card.locator('.value-input').fill('Persisted');
+  await card.locator('.target-value-input').fill('Persisted');
   await page.waitForResponse((response) => response.url().includes('/stage-4/overrides') && response.ok());
 
   // When: the page is reloaded
@@ -184,10 +187,12 @@ test('autosave persists overrides across reloads', async ({ page }) => {
   await waitForReviewRows(page);
 
   // Then: the override value is restored
-  await expect(card.locator('.value-input')).toHaveValue('Persisted');
+  await expect(card.locator('.target-value-input')).toHaveValue('Persisted');
 });
 
 test('error handling: wrong file type and oversize upload', async ({ page }) => {
+  await mockDataModels(page);
+
   // Given: a non-CSV file is uploaded
   await page.goto('/stage-1');
   await expect(page.locator('#statusMessage')).toBeEmpty();
@@ -227,7 +232,7 @@ test('error handling: harmonize failure and missing manifest', async ({ page }) 
 
   // Then: review shows missing manifest warning
   await page.goto(`/stage-4?file_id=${fileId}`);
-  await expect(page.locator('#reviewAlerts')).toBeVisible();
+  await expect(page.locator('.review-empty')).toBeVisible();
 
   await page.goto(`/stage-5?file_id=${fileId}`);
   await expect(page.locator('#summaryGrid .summary-empty')).toBeVisible();
@@ -252,10 +257,10 @@ test('multi-file isolation: overrides on one file do not affect another', async 
   // When: an override is applied to file A
   await page.goto(`/stage-4?file_id=${fileA}`);
   await waitForReviewRows(page);
-  const card = page.locator('.column-mode-grid .value-pair', {
-    has: page.locator('.original-text', { hasText: 'Foo' }),
+  const card = page.locator('.column-mode-grid .row-cell', {
+    has: page.locator('.original-context-value', { hasText: 'Foo' }),
   }).first();
-  await card.locator('.value-input').fill('OnlyA');
+  await card.locator('.target-value-input').fill('OnlyA');
   await page.waitForResponse((response) => response.url().includes('/stage-4/overrides') && response.ok());
 
   // Then: file B download remains unchanged

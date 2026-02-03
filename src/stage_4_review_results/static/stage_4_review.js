@@ -115,6 +115,9 @@ const state = {
   },
 };
 
+const OVERRIDE_SAVE_DELAY_MS = 400;
+let overrideSaveTimeout = null;
+
 /**
  * Get the state object for the current review mode.
  * @returns {Object}
@@ -262,6 +265,19 @@ const saveOverrides = async () => {
 };
 
 /**
+ * Debounce override saves to avoid spamming the server on each keystroke.
+ */
+const scheduleOverrideSave = () => {
+  if (overrideSaveTimeout) {
+    clearTimeout(overrideSaveTimeout);
+  }
+  overrideSaveTimeout = window.setTimeout(() => {
+    overrideSaveTimeout = null;
+    saveOverrides();
+  }, OVERRIDE_SAVE_DELAY_MS);
+};
+
+/**
  * Record an override for multiple row indices sharing the same original value.
  * @param {number[]} rowIndices - Array of row indices
  * @param {string} columnKey - Column identifier
@@ -288,6 +304,7 @@ const recordOverrideForRows = (rowIndices, columnKey, aiValue, humanValue, origi
       }
     }
   }
+  scheduleOverrideSave();
 };
 
 /**

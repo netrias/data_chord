@@ -14,6 +14,9 @@ export default defineConfig({
   webServer: {
     command: 'uv run uvicorn backend.app.main:app --host 127.0.0.1 --port 8001',
     url: 'http://127.0.0.1:8001',
+    env: {
+      DATA_MODEL_KEY: 'test-data-model',
+    },
     reuseExistingServer: true,
     timeout: 120_000,
   },
