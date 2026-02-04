@@ -280,7 +280,7 @@ class TestHarmonizeContract:
 
 
 class TestRowsContract:
-    """POST /stage-4/rows returns harmonized row comparisons."""
+    """POST /stage-4/rows returns column-centric harmonization data."""
 
     async def test_response_contains_required_fields(
         self,
@@ -288,7 +288,7 @@ class TestRowsContract:
         temp_storage: UploadStorage,
         sample_csv_path: Path,
     ) -> None:
-        """Rows response includes StageFourResultsResponse fields."""
+        """Response includes StageFourResultsResponse fields with columns array."""
 
         # Given: An uploaded file with harmonized output available
         file_id = await upload_file(app_client, sample_csv_path)
@@ -303,19 +303,21 @@ class TestRowsContract:
             json={"file_id": file_id, "manual_columns": []},
         )
 
-        # Then: Response contains rows array
+        # Then: Response contains columns array (not rows)
         assert response.status_code == 200
         data = response.json()
-        assert "rows" in data
-        assert isinstance(data["rows"], list)
+        assert "columns" in data
+        assert isinstance(data["columns"], list)
+        assert "columnPVs" in data
+        assert "totalOriginalRows" in data
 
-    async def test_row_structure(
+    async def test_column_structure(
         self,
         app_client: AsyncClient,
         temp_storage: UploadStorage,
         sample_csv_path: Path,
     ) -> None:
-        """Each row has StageFourRow fields."""
+        """Each column has ColumnReviewData fields."""
 
         # Given: An uploaded file with harmonized output available
         file_id = await upload_file(app_client, sample_csv_path)
@@ -330,21 +332,24 @@ class TestRowsContract:
             json={"file_id": file_id, "manual_columns": []},
         )
 
-        # Then: Each row contains required StageFourRow fields
-        rows = response.json()["rows"]
-        assert len(rows) > 0
-        for row in rows:
-            assert "rowNumber" in row
-            assert "recordId" in row
-            assert "cells" in row
+        # Then: Each column contains required ColumnReviewData fields
+        columns = response.json()["columns"]
+        assert len(columns) > 0
+        for column in columns:
+            assert "columnKey" in column
+            assert "columnLabel" in column
+            assert "sourceColumnIndex" in column
+            assert "termCount" in column
+            assert "termsWithChanges" in column
+            assert "transformations" in column
 
-    async def test_cell_structure(
+    async def test_transformation_structure(
         self,
         app_client: AsyncClient,
         temp_storage: UploadStorage,
         sample_csv_path: Path,
     ) -> None:
-        """Each cell has StageFourCell fields."""
+        """Each transformation has Transformation fields."""
 
         # Given: An uploaded file with harmonized output available
         file_id = await upload_file(app_client, sample_csv_path)
@@ -359,16 +364,20 @@ class TestRowsContract:
             json={"file_id": file_id, "manual_columns": []},
         )
 
-        # Then: Each cell contains required StageFourCell fields
-        cells = response.json()["rows"][0]["cells"]
-        for cell in cells:
-            assert "columnKey" in cell
-            assert "columnLabel" in cell
-            assert "originalValue" in cell
-            assert "harmonizedValue" in cell
-            assert "bucket" in cell
-            assert "confidence" in cell
-            assert "isChanged" in cell
+        # Then: Each transformation contains required Transformation fields
+        columns = response.json()["columns"]
+        assert len(columns) > 0
+        transformations = columns[0]["transformations"]
+        assert len(transformations) > 0
+        for t in transformations:
+            assert "originalValue" in t
+            assert "harmonizedValue" in t
+            assert "bucket" in t
+            assert "confidence" in t
+            assert "isChanged" in t
+            assert "recommendationType" in t
+            assert "rowIndices" in t
+            assert "rowCount" in t
 
 
 class TestRowContextContract:

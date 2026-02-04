@@ -35,6 +35,7 @@ from src.domain.pv_validation import check_value_conformance
 from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
 from src.domain.storage import FileType, UploadStorage, load_csv
 from src.stage_4_review_results.schemas import (
+    ColumnReviewData,
     DeleteOverridesResponse,
     NonConformantItem,
     NonConformantResponse,
@@ -44,6 +45,9 @@ from src.stage_4_review_results.schemas import (
     RowContextResponse,
     SaveOverridesRequest,
     SaveOverridesResponse,
+    StageFourResultsResponse,
+    SuggestionInfo,
+    Transformation,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,42 +62,6 @@ _templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 class StageFourResultsRequest(BaseModel):
     file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_PATTERN)
     manual_columns: list[str] = []
-
-
-class SuggestionInfo(BaseModel):
-    value: str
-    isPVConformant: bool
-
-
-class StageFourCell(BaseModel):
-    columnKey: str
-    columnLabel: str
-    originalValue: str | None
-    harmonizedValue: str | None
-    bucket: str
-    confidence: float
-    isChanged: bool
-    recommendationType: str  # ai_changed, ai_unchanged, no_recommendation
-    manualOverride: str | None = None
-    isPVConformant: bool = True  # False if current value not in PV set
-    pvSetAvailable: bool = False  # True if we have PVs for this column
-    topSuggestions: list[SuggestionInfo] = []  # AI suggestions with PV conformance flags
-    manifestRowIndices: list[int] = []  # 1-based row indices from manifest
-    manifestRowCount: int = 0  # Total count (indices may be truncated for large arrays)
-
-
-class StageFourRow(BaseModel):
-    rowNumber: int
-    recordId: str
-    cells: list[StageFourCell]
-    sourceRowNumber: int | None = None
-    sourceRowNumbers: list[int] | None = None
-
-
-class StageFourResultsResponse(BaseModel):
-    rows: list[StageFourRow]
-    columnPVs: dict[str, list[str]] = {}  # column_key -> sorted PV list
-    totalOriginalRows: int = 0  # Original spreadsheet row count (before grouping)
 
 
 stage_four_router = APIRouter(prefix="/stage-4", tags=["Stage 4 Review"])
@@ -129,21 +97,21 @@ async def fetch_stage_four_rows(payload: StageFourResultsRequest) -> StageFourRe
     t3 = time.perf_counter()
     logger.info(f"[PERF] load_manifest: {t3 - t2:.3f}s")
 
-    columns = _extract_columns_from_manifest(manifest)
+    column_info = _extract_columns_from_manifest(manifest)
     t4 = time.perf_counter()
 
-    # Load PVs before building cells so pvSetAvailable/isPVConformant are populated
-    column_pvs = _build_column_pvs(columns, payload.file_id)
+    # Load PVs before building transformations so pvSetAvailable/isPVConformant are populated
+    column_pvs = _build_column_pvs(column_info, payload.file_id)
     t5 = time.perf_counter()
     logger.info(f"[PERF] build_column_pvs: {t5 - t4:.3f}s")
 
-    rows = _build_rows_from_manifest(manifest, columns, payload.file_id)
+    columns = _build_columns_from_manifest(manifest, payload.file_id)
     t6 = time.perf_counter()
-    logger.info(f"[PERF] build_rows_from_manifest: {t6 - t5:.3f}s, rows={len(rows)}")
+    logger.info(f"[PERF] build_columns_from_manifest: {t6 - t5:.3f}s, columns={len(columns)}")
     logger.info(f"[PERF] total: {t6 - t0:.3f}s")
 
     return StageFourResultsResponse(
-        rows=rows,
+        columns=columns,
         columnPVs=column_pvs,
         totalOriginalRows=len(original_rows),
     )
@@ -153,60 +121,71 @@ async def fetch_stage_four_rows(payload: StageFourResultsRequest) -> StageFourRe
 class _ColumnInfo:
     column_name: str
     label: str
+    source_index: int  # Position in original spreadsheet for ordering
 
 
 def _extract_columns_from_manifest(manifest: ManifestSummary) -> list[_ColumnInfo]:
+    """Extract unique columns with their source index for ordering."""
     seen: set[str] = set()
     columns: list[_ColumnInfo] = []
     for row in manifest.rows:
         col_name = row.column_name
         if col_name and col_name not in seen:
             seen.add(col_name)
-            columns.append(_ColumnInfo(column_name=col_name, label=format_column_label(col_name)))
+            columns.append(_ColumnInfo(
+                column_name=col_name,
+                label=format_column_label(col_name),
+                source_index=row.column_id,
+            ))
     return columns
 
 
-def _build_rows_from_manifest(
-    manifest: ManifestSummary,
-    columns: list[_ColumnInfo],
-    file_id: str,
-) -> list[StageFourRow]:
-    """Build Stage 4 rows directly from manifest entries — O(manifest_rows)."""
+def _build_columns_from_manifest(manifest: ManifestSummary, file_id: str) -> list[ColumnReviewData]:
+    """Build column-centric data structure grouped by column name."""
     cache = get_session_cache(file_id)
-    col_labels = {c.column_name: c.label for c in columns}
 
-    result: list[StageFourRow] = []
-    row_num = 1
+    # Group manifest rows by column, track source index for ordering
+    columns_map: dict[str, list[ManifestRow]] = {}
+    column_indices: dict[str, int] = {}
 
-    for manifest_row in manifest.rows:
-        col_key = manifest_row.column_name
-        if col_key not in col_labels:
+    for row in manifest.rows:
+        col_name = row.column_name
+        if not col_name:
             continue
+        if col_name not in columns_map:
+            columns_map[col_name] = []
+            column_indices[col_name] = row.column_id
+        columns_map[col_name].append(row)
 
-        cell = _build_cell_from_manifest_row(manifest_row, col_key, col_labels[col_key], cache)
-        source_row = cell.manifestRowIndices[0] if cell.manifestRowIndices else row_num
+    # Build columns ordered by source spreadsheet position
+    columns: list[ColumnReviewData] = []
+    for col_name in sorted(columns_map.keys(), key=lambda c: column_indices[c]):
+        manifest_rows = columns_map[col_name]
+        transformations = [
+            _build_transformation(r, col_name, cache) for r in manifest_rows
+        ]
 
-        result.append(
-            StageFourRow(
-                rowNumber=row_num,
-                recordId=f"Row {source_row}",
-                cells=[cell],
-                sourceRowNumber=source_row,
-            )
-        )
-        row_num += 1
+        terms_with_changes = sum(1 for t in transformations if t.isChanged)
 
-    return result
+        columns.append(ColumnReviewData(
+            columnKey=col_name,
+            columnLabel=format_column_label(col_name),
+            sourceColumnIndex=column_indices[col_name],
+            termCount=len(transformations),
+            termsWithChanges=terms_with_changes,
+            transformations=transformations,
+        ))
+
+    return columns
 
 
-def _build_cell_from_manifest_row(
+def _build_transformation(
     row: ManifestRow,
     col_key: str,
-    col_label: str,
     cache: SessionCache,
-) -> StageFourCell:
-    """Build a StageFourCell directly from a manifest row."""
-    original_value = row.to_harmonize or None
+) -> Transformation:
+    """Build a Transformation from a manifest row."""
+    original_value = row.to_harmonize or ""
     harmonized_value = row.top_harmonization or None
     confidence = row.confidence_score
     is_changed = is_value_changed(original_value, harmonized_value)
@@ -233,9 +212,7 @@ def _build_cell_from_manifest_row(
     row_count = len(manifest_indices_full)
     manifest_indices = manifest_indices_full if row_count <= 50 else manifest_indices_full[:10]
 
-    return StageFourCell(
-        columnKey=col_key,
-        columnLabel=col_label,
+    return Transformation(
         originalValue=original_value,
         harmonizedValue=harmonized_value,
         bucket=bucket.value,
@@ -246,8 +223,8 @@ def _build_cell_from_manifest_row(
         isPVConformant=is_conformant,
         pvSetAvailable=pv_available,
         topSuggestions=top_suggestions,
-        manifestRowIndices=manifest_indices,
-        manifestRowCount=row_count,
+        rowIndices=manifest_indices,
+        rowCount=row_count,
     )
 
 

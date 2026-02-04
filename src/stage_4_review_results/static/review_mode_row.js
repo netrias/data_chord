@@ -2,11 +2,12 @@
  * Row-based review mode module.
  * Shows batches of rows, with each row displaying all its changed columns side by side.
  * Uses linear batch numbering (1, 2, 3, ...).
+ *
+ * Reconstructs row view from column-centric data received from backend.
  */
 
 import {
-  rowHasChanges,
-  getChangedCells,
+  cellNeedsReview,
   createEmptyState,
   createValueCard,
   renderProgressPills,
@@ -17,22 +18,56 @@ import {
 } from './shared_review_utils.js';
 
 /**
- * Build row summaries with only rows that have changes.
- * @param {Array} rows - Array of row objects
- * @param {string} [sortMode] - Sort mode: 'original', 'confidence-asc', 'confidence-desc'
- * @param {Object} [filterOptions] - Filter options passed to rowHasChanges/getChangedCells
- * @returns {Array} Array of row objects with changedCells and rowIndex added
+ * Reconstruct row-centric data from column-centric structure.
+ * Groups transformations by their row indices to create a per-row view.
+ * @param {Array} columns - Array of ColumnReviewData objects from backend
+ * @param {Object} [filterOptions] - Filter options passed to cellNeedsReview
+ * @returns {Array} Array of row objects with rowIndex and changedCells
  */
-const _buildRowsWithChanges = (rows, sortMode = SORT_MODE.ORIGINAL, filterOptions = {}) => {
-  const changedRows = rows
-    .filter((row) => rowHasChanges(row, filterOptions))
+const _reconstructRowsFromColumns = (columns, filterOptions = {}) => {
+  const rowMap = new Map();
+
+  for (const col of columns) {
+    for (const t of col.transformations) {
+      if (!cellNeedsReview(t, filterOptions)) continue;
+
+      for (const rowIdx of t.rowIndices) {
+        if (!rowMap.has(rowIdx)) {
+          rowMap.set(rowIdx, {
+            rowIndex: rowIdx,
+            changedCells: [],
+          });
+        }
+        rowMap.get(rowIdx).changedCells.push({
+          ...t,
+          columnKey: col.columnKey,
+          columnLabel: col.columnLabel,
+          sourceColumnIndex: col.sourceColumnIndex,
+        });
+      }
+    }
+  }
+
+  // Sort rows by row number, sort cells within each row by source column position
+  return Array.from(rowMap.values())
+    .sort((a, b) => a.rowIndex - b.rowIndex)
     .map((row) => ({
       ...row,
-      changedCells: getChangedCells(row, filterOptions),
-      rowIndex: row.sourceRowNumbers?.[0] ?? row.sourceRowNumber ?? row.rowNumber,
-      rowIndices: row.sourceRowNumbers ??
-        (row.sourceRowNumber ? [row.sourceRowNumber] : [row.rowNumber]),
+      changedCells: row.changedCells.sort(
+        (a, b) => (a.sourceColumnIndex ?? 0) - (b.sourceColumnIndex ?? 0)
+      ),
     }));
+};
+
+/**
+ * Build row summaries with only rows that have changes.
+ * @param {Array} columns - Array of ColumnReviewData objects from backend
+ * @param {string} [sortMode] - Sort mode: 'original', 'confidence-asc', 'confidence-desc'
+ * @param {Object} [filterOptions] - Filter options passed to _reconstructRowsFromColumns
+ * @returns {Array} Array of row objects with changedCells and rowIndex added
+ */
+const _buildRowsWithChanges = (columns, sortMode = SORT_MODE.ORIGINAL, filterOptions = {}) => {
+  const changedRows = _reconstructRowsFromColumns(columns, filterOptions);
 
   if (sortMode === SORT_MODE.ORIGINAL || !sortMode) {
     return changedRows;
@@ -48,40 +83,40 @@ const _buildRowsWithChanges = (rows, sortMode = SORT_MODE.ORIGINAL, filterOption
 
 /**
  * Get all rows with changes for scroll mode.
- * @param {Array} rows - Array of row objects
+ * @param {Array} columns - Array of ColumnReviewData objects from backend
  * @param {string} [sortMode] - Sort mode
  * @param {Object} [filterOptions] - Filter options
  * @returns {Array} Array of row objects with changedCells and rowIndex added
  */
-export const getAllEntries = (rows, sortMode = SORT_MODE.ORIGINAL, filterOptions = {}) => {
-  return _buildRowsWithChanges(rows, sortMode, filterOptions);
+export const getAllEntries = (columns, sortMode = SORT_MODE.ORIGINAL, filterOptions = {}) => {
+  return _buildRowsWithChanges(columns, sortMode, filterOptions);
 };
 
 /**
  * Get total number of batches based on batch size.
  * Returns 0 when no changed rows exist to signal empty state to UI.
  * Sorting doesn't affect total count, only order within batches.
- * @param {Array} rows - Array of row objects
+ * @param {Array} columns - Array of ColumnReviewData objects from backend
  * @param {number} batchSize - Number of rows per batch
- * @param {Object} [filterOptions] - Filter options passed to _buildRowsWithChanges
+ * @param {Object} [filterOptions] - Filter options
  * @returns {number}
  */
-export const getTotalUnits = (rows, batchSize, filterOptions = {}) => {
-  const changedRows = _buildRowsWithChanges(rows, SORT_MODE.ORIGINAL, filterOptions);
+export const getTotalUnits = (columns, batchSize, filterOptions = {}) => {
+  const changedRows = _buildRowsWithChanges(columns, SORT_MODE.ORIGINAL, filterOptions);
   if (!changedRows.length) return 0;
   return Math.ceil(changedRows.length / batchSize);
 };
 
 /**
  * Get batch summaries for progress display.
- * @param {Array} rows - Array of row objects
+ * @param {Array} columns - Array of ColumnReviewData objects from backend
  * @param {number} batchSize - Number of rows per batch
  * @param {string} [sortMode] - Sort mode: 'original', 'confidence-asc', 'confidence-desc'
- * @param {Object} [filterOptions] - Filter options passed to _buildRowsWithChanges
+ * @param {Object} [filterOptions] - Filter options
  * @returns {Array} Array of summary objects for each batch
  */
-const getBatchSummaries = (rows, batchSize, sortMode = SORT_MODE.ORIGINAL, filterOptions = {}) => {
-  const changedRows = _buildRowsWithChanges(rows, sortMode, filterOptions);
+const getBatchSummaries = (columns, batchSize, sortMode = SORT_MODE.ORIGINAL, filterOptions = {}) => {
+  const changedRows = _buildRowsWithChanges(columns, sortMode, filterOptions);
   const summaries = [];
 
   if (!changedRows.length) {
@@ -111,15 +146,15 @@ const getBatchSummaries = (rows, batchSize, sortMode = SORT_MODE.ORIGINAL, filte
 /**
  * Get entries for the current batch.
  * Returns a consistent interface with `entries` containing the batch's rows.
- * @param {Array} rows - Array of row objects
+ * @param {Array} columns - Array of ColumnReviewData objects from backend
  * @param {number} currentUnit - Current batch index (1-based)
  * @param {number} batchSize - Number of rows per batch
  * @param {string} [sortMode] - Sort mode: 'original', 'confidence-asc', 'confidence-desc'
- * @param {Object} [filterOptions] - Filter options passed to getBatchSummaries
+ * @param {Object} [filterOptions] - Filter options
  * @returns {Object} Batch metadata with entries array
  */
-export const getCurrentEntries = (rows, currentUnit, batchSize, sortMode = SORT_MODE.ORIGINAL, filterOptions = {}) => {
-  const summaries = getBatchSummaries(rows, batchSize, sortMode, filterOptions);
+export const getCurrentEntries = (columns, currentUnit, batchSize, sortMode = SORT_MODE.ORIGINAL, filterOptions = {}) => {
+  const summaries = getBatchSummaries(columns, batchSize, sortMode, filterOptions);
   const totalUnits = summaries.length;
   const safeUnit = Math.min(Math.max(currentUnit, 1), totalUnits);
   const summary = summaries[safeUnit - 1];

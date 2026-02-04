@@ -289,3 +289,99 @@ test('stage navigation links go to correct stages', async ({ page }) => {
   // Then: navigates to Stage 1
   await page.waitForURL(/\/stage-1/);
 });
+
+test('multiple columns with changes show as separate tabs', async ({ page }) => {
+  await mockHarmonizeSuccess(page);
+
+  // Given: a CSV with changes in multiple columns
+  const fileId = await uploadAndAnalyze(page, fileFixture('multi-column.csv'));
+  await clickHarmonize(page);
+  await expect(page.locator('#reviewButton')).toBeEnabled();
+  // Seed changes in col_a and col_b (different columns)
+  seedHarmonization(fileId, {
+    0: { col_a: 'Changed_A', col_b: 'Changed_B' },
+    1: { col_a: 'Changed_A2', col_b: 'Changed_B2' },
+  });
+
+  // When: review page is loaded
+  await page.goto(`/stage-4?file_id=${fileId}`);
+  await waitForReviewRows(page);
+
+  // Then: both column pills are visible
+  const columnPills = page.locator('.batch-progress-item.column-pill');
+  await expect(columnPills).toHaveCount(2);
+
+  // And: each pill shows the column label
+  const pillTexts = await columnPills.allTextContents();
+  expect(pillTexts.some((text) => text.toLowerCase().includes('col_a') || text.toLowerCase().includes('col a'))).toBe(true);
+  expect(pillTexts.some((text) => text.toLowerCase().includes('col_b') || text.toLowerCase().includes('col b'))).toBe(true);
+});
+
+test('clicking different column tabs shows different transformations', async ({ page }) => {
+  await mockHarmonizeSuccess(page);
+
+  // Given: a CSV with changes in multiple columns
+  const fileId = await uploadAndAnalyze(page, fileFixture('multi-column.csv'));
+  await clickHarmonize(page);
+  await expect(page.locator('#reviewButton')).toBeEnabled();
+  seedHarmonization(fileId, {
+    0: { col_a: 'UniqueA', col_b: 'UniqueB' },
+  });
+
+  await page.goto(`/stage-4?file_id=${fileId}`);
+  await waitForReviewRows(page);
+
+  // When: the first column tab is active
+  const columnPills = page.locator('.batch-progress-item.column-pill');
+  const firstPill = columnPills.first();
+  await firstPill.click();
+  await waitForReviewRows(page);
+
+  // Then: transformations for that column are visible
+  const firstColumnOriginalValues = await page.locator('.original-context-value').allTextContents();
+
+  // When: clicking the second column tab
+  const secondPill = columnPills.nth(1);
+  await secondPill.click();
+  await waitForReviewRows(page);
+
+  // Then: transformations update to show different column's values
+  const secondColumnOriginalValues = await page.locator('.original-context-value').allTextContents();
+
+  // Verify the values changed (different column data displayed)
+  expect(firstColumnOriginalValues).not.toEqual(secondColumnOriginalValues);
+});
+
+test('row mode shows all changed cells for each row', async ({ page }) => {
+  await mockHarmonizeSuccess(page);
+
+  // Given: a CSV with changes in multiple columns for the same row
+  const fileId = await uploadAndAnalyze(page, fileFixture('multi-column.csv'));
+  await clickHarmonize(page);
+  await expect(page.locator('#reviewButton')).toBeEnabled();
+  // Row 0 has changes in both col_a and col_b
+  seedHarmonization(fileId, {
+    0: { col_a: 'Changed_A', col_b: 'Changed_B' },
+  });
+
+  await page.goto(`/stage-4?file_id=${fileId}`);
+  await waitForReviewRows(page);
+
+  // When: switching to row mode
+  await page.click('#settingsButton');
+  await page.selectOption('#reviewModeSelect', 'row');
+  await page.click('#settingsCloseButton');
+  await waitForReviewRows(page);
+
+  // Then: row mode shows a row entry
+  const rowEntries = page.locator('.row-mode-row');
+  await expect(rowEntries.first()).toBeVisible();
+
+  // And: the row contains cells for both changed columns
+  const firstRow = rowEntries.first();
+  const cellsInRow = firstRow.locator('.row-cell');
+  const cellCount = await cellsInRow.count();
+
+  // Should have at least 2 cells (one for each changed column)
+  expect(cellCount).toBeGreaterThanOrEqual(2);
+});
