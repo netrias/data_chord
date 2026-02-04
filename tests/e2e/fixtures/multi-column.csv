@@ -1,0 +1,4 @@
+record_id,col_a,col_b,col_c
+RID-1,Foo,Apple,Red
+RID-2,Bar,Banana,Blue
+RID-3,Foo,Cherry,Green

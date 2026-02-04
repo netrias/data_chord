@@ -2,10 +2,11 @@
  * Column-based review mode module.
  * Shows one column at a time with all unique entries displayed in a grid.
  * Batches entries within each column based on configurable grid size.
+ *
+ * Now receives column-centric data directly from backend (no client-side transformation).
  */
 
 import {
-  rowHasChanges,
   cellNeedsReview,
   createEmptyState,
   createValueCard,
@@ -22,163 +23,33 @@ import { showRowContextPopup } from './row_context_popup.js';
 const DEFAULT_ENTRIES_PER_BATCH = 25;
 
 /**
- * Determine which column indices have at least one non-empty value across all rows.
- * @param {Array} rows - Array of row objects
- * @returns {Set<number>} Set of populated column indices
- */
-const _getPopulatedColumnIndices = (rows) => {
-  if (!rows.length) return new Set();
-
-  const firstRow = rows[0];
-  if (!firstRow?.cells?.length) return new Set();
-
-  const columnCount = firstRow.cells.length;
-  const populated = new Set();
-
-  for (let colIdx = 0; colIdx < columnCount; colIdx++) {
-    for (const row of rows) {
-      const cell = row.cells[colIdx];
-      const hasOriginal = cell?.originalValue !== null && cell?.originalValue !== undefined && cell.originalValue !== '';
-      const hasHarmonized = cell?.harmonizedValue !== null && cell?.harmonizedValue !== undefined && cell.harmonizedValue !== '';
-      if (hasOriginal || hasHarmonized) {
-        populated.add(colIdx);
-        break;
-      }
-    }
-  }
-
-  return populated;
-};
-
-/**
- * Process a single row's cell for a given column, updating the entries map.
- * @param {Object} row - Row object
- * @param {number} colIdx - Column index
- * @param {string} columnKey - Column key identifier
- * @param {Map} entriesByOriginal - Map to accumulate entries by original value
+ * Filter transformations based on review options.
+ * @param {Array} transformations - Array of Transformation objects
  * @param {Object} [filterOptions] - Filter options passed to cellNeedsReview
+ * @returns {Array} Filtered transformations
  */
-const _processRowCellForColumn = (row, colIdx, columnKey, entriesByOriginal, filterOptions = {}) => {
-  const cell = row.cells[colIdx];
-  // Preserve whitespace - domain rule: whitespace is semantically significant
-  const originalValue = cell?.originalValue ?? '';
-
-  // Skip cells without original value (nothing to review)
-  if (originalValue === '') return;
-  // Skip cells that don't need review
-  if (!cellNeedsReview(cell, filterOptions)) return;
-
-  // Skip if we already have this term — manifest provides complete row list
-  if (entriesByOriginal.has(originalValue)) {
-    return;
-  }
-
-  // Use manifest row indices when available (complete list from harmonization);
-  // fall back to group sourceRowNumber for backwards compatibility
-  const rowIndex = row.sourceRowNumber ?? row.rowNumber;
-  const rowIndices =
-    cell.manifestRowIndices?.length > 0 ? cell.manifestRowIndices : [rowIndex];
-  // manifestRowCount is the true count; rowIndices may be truncated for large arrays
-  const rowCount = cell.manifestRowCount ?? rowIndices.length;
-
-  entriesByOriginal.set(originalValue, {
-    originalValue: cell.originalValue,
-    harmonizedValue: cell.harmonizedValue,
-    confidence: cell.confidence,
-    bucket: cell.bucket,
-    isChanged: cell.isChanged,
-    recommendationType: cell.recommendationType,
-    manualOverride: cell.manualOverride,
-    isPVConformant: cell.isPVConformant,
-    pvSetAvailable: cell.pvSetAvailable,
-    topSuggestions: cell.topSuggestions ?? [],
-    rowIndices,
-    rowCount,
-    columnKey,
-  });
-};
-
-/**
- * Build entries for a single column from all changed rows.
- * @param {Array} changedRows - Rows that have changes
- * @param {number} colIdx - Column index
- * @param {Object} columnCell - Cell object containing column metadata
- * @param {Object} [filterOptions] - Filter options passed to _processRowCellForColumn
- * @returns {Object|null} Column object with entries, or null if no entries
- */
-const _buildColumnEntries = (changedRows, colIdx, columnCell, filterOptions = {}) => {
-  if (!columnCell) return null;
-
-  const columnLabel = columnCell.columnLabel;
-  const columnKey = columnCell.columnKey;
-  const entriesByOriginal = new Map();
-
-  for (const row of changedRows) {
-    _processRowCellForColumn(row, colIdx, columnKey, entriesByOriginal, filterOptions);
-  }
-
-  const entries = Array.from(entriesByOriginal.values());
-  if (entries.length === 0) return null;
-
-  return {
-    columnLabel,
-    columnKey,
-    columnIndex: colIdx,
-    entries,
-  };
-};
-
-/**
- * Build column-centric data structure that groups cells by unique original value.
- * Returns columns with only entries that have changes (original !== harmonized).
- * @param {Array} rows - Array of row objects
- * @param {Object} [filterOptions] - Filter options passed to rowHasChanges/cellNeedsReview
- * @returns {Array} Array of column objects with entries
- */
-const _buildCompactedColumns = (rows, filterOptions = {}) => {
-  console.time('_buildCompactedColumns:filter');
-  const changedRows = rows.filter((row) => rowHasChanges(row, filterOptions));
-  console.timeEnd('_buildCompactedColumns:filter');
-  if (!changedRows.length) return [];
-
-  const firstRow = changedRows[0];
-  if (!firstRow?.cells) return [];
-
-  console.time('_buildCompactedColumns:buildEntries');
-  const populatedIndices = _getPopulatedColumnIndices(changedRows);
-  const allColumns = firstRow.cells;
-  const columns = [];
-
-  for (let colIdx = 0; colIdx < allColumns.length; colIdx++) {
-    if (!populatedIndices.has(colIdx)) continue;
-
-    const column = _buildColumnEntries(changedRows, colIdx, allColumns[colIdx], filterOptions);
-    if (column) {
-      columns.push(column);
-    }
-  }
-  console.timeEnd('_buildCompactedColumns:buildEntries');
-
-  return columns;
+const _filterTransformations = (transformations, filterOptions = {}) => {
+  return transformations.filter((t) => cellNeedsReview(t, filterOptions));
 };
 
 /**
  * Get all entries across all columns for scroll mode.
  * Returns a flat array of all entries, sorted by column then by confidence within column.
- * @param {Array} rows - Array of row objects
+ * @param {Array} columns - Array of ColumnReviewData objects from backend
  * @param {string} [sortMode] - Sort mode for entries within each column
  * @param {Object} [filterOptions] - Filter options
- * @returns {Array} Flat array of all entries with columnLabel attached
+ * @returns {Array} Flat array of all entries with columnLabel/columnKey attached
  */
-export const getAllEntries = (rows, sortMode = SORT_MODE.ORIGINAL, filterOptions = {}) => {
-  const columns = _buildCompactedColumns(rows, filterOptions);
+export const getAllEntries = (columns, sortMode = SORT_MODE.ORIGINAL, filterOptions = {}) => {
   const allEntries = [];
 
   for (const col of columns) {
-    const sortedEntries = sortEntriesByConfidence(col.entries, sortMode);
+    const filtered = _filterTransformations(col.transformations, filterOptions);
+    const sortedEntries = sortEntriesByConfidence(filtered, sortMode);
     for (const entry of sortedEntries) {
       allEntries.push({
         ...entry,
+        columnKey: col.columnKey,
         columnLabel: col.columnLabel,
       });
     }
@@ -191,17 +62,17 @@ export const getAllEntries = (rows, sortMode = SORT_MODE.ORIGINAL, filterOptions
  * Get total number of navigable units (columns with batches).
  * Returns 0 when no data exists to signal empty state to UI.
  * Sorting doesn't affect total count, only order within batches.
- * @param {Array} rows - Array of row objects
+ * @param {Array} columns - Array of ColumnReviewData objects from backend
  * @param {number} entriesPerBatch - Number of entries per batch
- * @param {Object} [filterOptions] - Filter options passed to _buildCompactedColumns
+ * @param {Object} [filterOptions] - Filter options
  * @returns {number}
  */
-export const getTotalUnits = (rows, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH, filterOptions = {}) => {
+export const getTotalUnits = (columns, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH, filterOptions = {}) => {
   const safeBatchSize = Math.max(1, entriesPerBatch);
-  const columns = _buildCompactedColumns(rows, filterOptions);
   let total = 0;
   for (const col of columns) {
-    total += Math.ceil(col.entries.length / safeBatchSize);
+    const filtered = _filterTransformations(col.transformations, filterOptions);
+    total += Math.ceil(filtered.length / safeBatchSize);
   }
   return total;
 };
@@ -209,28 +80,31 @@ export const getTotalUnits = (rows, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH,
 /**
  * Get all columns with their batch counts for progress display.
  * Sorting is applied before calculating batch boundaries so slicing is consistent.
- * @param {Array} rows - Array of row objects
+ * @param {Array} columns - Array of ColumnReviewData objects from backend
  * @param {number} entriesPerBatch - Number of entries per batch
  * @param {string} [sortMode] - Sort mode: 'original', 'confidence-asc', 'confidence-desc'
- * @param {Object} [filterOptions] - Filter options passed to _buildCompactedColumns
+ * @param {Object} [filterOptions] - Filter options
  * @returns {Array} Array of summary objects for each unit (empty array if no data)
  */
-const getColumnSummaries = (rows, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH, sortMode = SORT_MODE.ORIGINAL, filterOptions = {}) => {
+const getColumnSummaries = (columns, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH, sortMode = SORT_MODE.ORIGINAL, filterOptions = {}) => {
   const safeBatchSize = Math.max(1, entriesPerBatch);
-  const columns = _buildCompactedColumns(rows, filterOptions);
   const summaries = [];
   let unitIndex = 0;
 
   for (const col of columns) {
+    const filtered = _filterTransformations(col.transformations, filterOptions);
+    if (filtered.length === 0) continue;
+
     // Sort entries before calculating batch boundaries
-    const sortedEntries = sortEntriesByConfidence(col.entries, sortMode);
+    const sortedEntries = sortEntriesByConfidence(filtered, sortMode);
     const batchCount = Math.ceil(sortedEntries.length / safeBatchSize);
+
     for (let batch = 0; batch < batchCount; batch++) {
       summaries.push({
         unitIndex: unitIndex + 1,
         columnLabel: col.columnLabel,
         columnKey: col.columnKey,
-        columnIndex: col.columnIndex,
+        columnIndex: col.sourceColumnIndex,
         batchWithinColumn: batch + 1,
         totalBatchesInColumn: batchCount,
         entryCount: sortedEntries.length,
@@ -247,15 +121,15 @@ const getColumnSummaries = (rows, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH, s
 
 /**
  * Get entries for the current unit (column + batch within column).
- * @param {Array} rows - Array of row objects
+ * @param {Array} columns - Array of ColumnReviewData objects from backend
  * @param {number} currentUnit - Current unit index (1-based)
  * @param {number} entriesPerBatch - Number of entries per batch
  * @param {string} [sortMode] - Sort mode: 'original', 'confidence-asc', 'confidence-desc'
- * @param {Object} [filterOptions] - Filter options passed to getColumnSummaries
+ * @param {Object} [filterOptions] - Filter options
  * @returns {Object} Batch metadata with entries array
  */
-export const getCurrentEntries = (rows, currentUnit, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH, sortMode = SORT_MODE.ORIGINAL, filterOptions = {}) => {
-  const summaries = getColumnSummaries(rows, entriesPerBatch, sortMode, filterOptions);
+export const getCurrentEntries = (columns, currentUnit, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH, sortMode = SORT_MODE.ORIGINAL, filterOptions = {}) => {
+  const summaries = getColumnSummaries(columns, entriesPerBatch, sortMode, filterOptions);
   const totalUnits = Math.max(1, summaries.length);
   const safeUnit = summaries.length > 0
     ? Math.min(Math.max(currentUnit, 1), summaries.length)
@@ -279,6 +153,7 @@ export const getCurrentEntries = (rows, currentUnit, entriesPerBatch = DEFAULT_E
   // Use pre-sorted entries from summary (sorted in getColumnSummaries)
   const entries = summary.sortedEntries.slice(summary.startEntry, summary.endEntry).map((entry) => ({
     ...entry,
+    columnKey: summary.columnKey,
     columnLabel: summary.columnLabel,
   }));
 

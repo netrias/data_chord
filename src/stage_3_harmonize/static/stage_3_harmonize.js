@@ -91,7 +91,7 @@ const _persistJob = (job) => {
 const _handleContinue = () => {
   const serverUrl = state.job?.next_stage_url;
   const nextUrl = isSafeRelativeUrl(serverUrl) ? serverUrl : nextStageUrl;
-  advanceMaxReachedStage('verify');
+  advanceMaxReachedStage('review');
   window.location.assign(nextUrl);
 };
 

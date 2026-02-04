@@ -131,8 +131,52 @@ class RowContextResponse(BaseModel):
     rows: list[list[str]]
 
 
+class SuggestionInfo(BaseModel):
+    """AI suggestion with PV conformance flag for dropdown display."""
+
+    value: str
+    isPVConformant: bool
+
+
+class Transformation(BaseModel):
+    """A unique original→harmonized mapping with affected row indices."""
+
+    originalValue: str
+    harmonizedValue: str | None
+    confidence: float
+    bucket: str  # ConfidenceBucket.value for JSON serialization
+    isChanged: bool
+    recommendationType: str  # RecommendationType.value for JSON serialization
+    isPVConformant: bool
+    pvSetAvailable: bool
+    topSuggestions: list[SuggestionInfo]
+    rowIndices: list[int]  # 1-based, truncated to 10 when rowCount > 50
+    rowCount: int
+    manualOverride: str | None = None
+
+
+class ColumnReviewData(BaseModel):
+    """All transformations for a single harmonized column."""
+
+    columnKey: str
+    columnLabel: str
+    sourceColumnIndex: int
+    termCount: int
+    termsWithChanges: int
+    transformations: list[Transformation]
+
+
+class StageFourResultsResponse(BaseModel):
+    """Column-centric response for Stage 4 review UI."""
+
+    columns: list[ColumnReviewData]
+    columnPVs: dict[str, list[str]] = {}
+    totalOriginalRows: int = 0
+
+
 __all__ = [
     "CellOverrideSchema",
+    "ColumnReviewData",
     "DeleteOverridesResponse",
     "NonConformantItem",
     "NonConformantResponse",
@@ -142,4 +186,7 @@ __all__ = [
     "RowContextResponse",
     "SaveOverridesRequest",
     "SaveOverridesResponse",
+    "StageFourResultsResponse",
+    "SuggestionInfo",
+    "Transformation",
 ]

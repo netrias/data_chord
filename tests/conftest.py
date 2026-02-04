@@ -351,13 +351,31 @@ def create_manifest_for_file(
     columns_with_changes = _get_columns_with_changes(changes, headers)
     manifest_rows: list[dict[str, Any]] = []
 
+    # Group by (col_name, original_value) to match production manifest structure
     for col_name in columns_with_changes:
+        grouped: dict[str, dict[str, Any]] = {}
         for row_idx, original_row in enumerate(original_rows):
             original_value = original_row.get(col_name, "")
             harmonized_value = changes.get(row_idx, {}).get(col_name, original_value)
-            manifest_rows.append(
-                _build_manifest_row(file_id, col_name, row_idx, original_value, harmonized_value, headers)
-            )
+
+            if original_value not in grouped:
+                grouped[original_value] = {
+                    "job_id": f"test-job-{file_id}",
+                    "column_id": headers.index(col_name) if col_name in headers else 0,
+                    "column_name": col_name,
+                    "to_harmonize": original_value,
+                    "top_harmonization": harmonized_value,
+                    "ontology_id": None,
+                    "top_harmonizations": [harmonized_value] if harmonized_value else [],
+                    "confidence_score": 0.95 if original_value != harmonized_value else 0.99,
+                    "error": None,
+                    "row_indices": [row_idx],
+                    "manual_overrides": [],
+                }
+            else:
+                grouped[original_value]["row_indices"].append(row_idx)
+
+        manifest_rows.extend(grouped.values())
 
     manifest_dir = storage.manifest_dir
     manifest_dir.mkdir(parents=True, exist_ok=True)

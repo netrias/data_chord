@@ -94,7 +94,7 @@ const DEFAULT_ROW_BATCH_SIZE = 5;
  * @type {Object}
  */
 const state = {
-  rows: [],
+  columns: [],  // Column-centric data from backend
   columnPVs: {},  // column_key -> sorted PV list (from backend)
   totalOriginalRows: 0,  // Original spreadsheet row count (before grouping)
   sortMode: 'original',
@@ -174,12 +174,8 @@ const fetchRows = async () => {
     console.time('fetchRows:parseJSON');
     const body = await response.json();
     console.timeEnd('fetchRows:parseJSON');
-    console.log('fetchRows: received', body.rows?.length, 'rows');
-    state.rows = (body.rows || []).map((row) => ({
-      ...row,
-      sourceRowNumbers: row.sourceRowNumbers ??
-        (row.sourceRowNumber ? [row.sourceRowNumber] : [row.rowNumber]),
-    }));
+    console.log('fetchRows: received', body.columns?.length, 'columns');
+    state.columns = body.columns || [];
     state.columnPVs = body.columnPVs || {};
     state.totalOriginalRows = body.totalOriginalRows || 0;
   } catch (error) {
@@ -265,7 +261,8 @@ const saveOverrides = async () => {
 };
 
 /**
- * Debounce override saves to avoid spamming the server on each keystroke.
+ * Schedule a debounced save of overrides.
+ * Clears any pending save and schedules a new one after OVERRIDE_SAVE_DELAY_MS.
  */
 const scheduleOverrideSave = () => {
   if (overrideSaveTimeout) {
@@ -325,9 +322,9 @@ const getCurrentBatchMeta = () => {
   const batchSize = getCurrentBatchSize();
   const filterOptions = _buildFilterOptions();
   if (state.reviewMode === 'column') {
-    return getColumnCurrentEntries(state.rows, modeState.currentUnit, batchSize, state.sortMode, filterOptions);
+    return getColumnCurrentEntries(state.columns, modeState.currentUnit, batchSize, state.sortMode, filterOptions);
   }
-  return getRowCurrentEntries(state.rows, modeState.currentUnit, batchSize, state.sortMode, filterOptions);
+  return getRowCurrentEntries(state.columns, modeState.currentUnit, batchSize, state.sortMode, filterOptions);
 };
 
 
@@ -339,9 +336,9 @@ const getTotalUnits = () => {
   const batchSize = getCurrentBatchSize();
   const filterOptions = _buildFilterOptions();
   if (state.reviewMode === 'column') {
-    return getColumnTotalUnits(state.rows, batchSize, filterOptions);
+    return getColumnTotalUnits(state.columns, batchSize, filterOptions);
   }
-  return getRowTotalUnits(state.rows, batchSize, filterOptions);
+  return getRowTotalUnits(state.columns, batchSize, filterOptions);
 };
 
 /**
@@ -421,8 +418,8 @@ const renderScrollMode = () => {
 
   const filterOptions = _buildFilterOptions();
   const allEntries = state.reviewMode === 'column'
-    ? getColumnAllEntries(state.rows, state.sortMode, filterOptions)
-    : getRowAllEntries(state.rows, state.sortMode, filterOptions);
+    ? getColumnAllEntries(state.columns, state.sortMode, filterOptions)
+    : getRowAllEntries(state.columns, state.sortMode, filterOptions);
 
   if (!allEntries.length) {
     reviewTable.innerHTML = '';
@@ -978,8 +975,8 @@ const _clampCurrentUnitsToValidRange = () => {
       ? modeState.batchSize * modeState.batchSize
       : modeState.batchSize;
     const totalUnits = mode === 'column'
-      ? getColumnTotalUnits(state.rows, batchSize, filterOptions)
-      : getRowTotalUnits(state.rows, batchSize, filterOptions);
+      ? getColumnTotalUnits(state.columns, batchSize, filterOptions)
+      : getRowTotalUnits(state.columns, batchSize, filterOptions);
 
     if (totalUnits > 0 && modeState.currentUnit > totalUnits) {
       modeState.currentUnit = totalUnits;

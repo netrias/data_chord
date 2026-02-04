@@ -150,12 +150,13 @@ class TestRecommendationTypeEnum:
         assert isinstance(RecommendationType.NO_RECOMMENDATION, str)
 
 
-def _find_changed_cell(rows: list[dict], column_key: str) -> dict | None:
-    """Find first cell where original != harmonized for given column."""
-    for row in rows:
-        for cell in row["cells"]:
-            if cell["columnKey"] == column_key and cell["originalValue"] != cell["harmonizedValue"]:
-                return cell
+def _find_changed_transformation(columns: list[dict], column_key: str) -> dict | None:
+    """Find first transformation where original != harmonized for given column."""
+    for col in columns:
+        if col["columnKey"] == column_key:
+            for t in col["transformations"]:
+                if t["originalValue"] != t["harmonizedValue"]:
+                    return t
     return None
 
 
@@ -180,19 +181,19 @@ class TestStage4RecommendationTypeContract:
             json={"file_id": file_id, "manual_columns": []},
         )
 
-        # Then: response is successful and cells include recommendationType
+        # Then: response is successful and transformations include recommendationType
         assert response.status_code == 200
         data = response.json()
-        assert "rows" in data
-        assert len(data["rows"]) > 0
+        assert "columns" in data
+        assert len(data["columns"]) > 0
 
-        first_row = data["rows"][0]
-        assert "cells" in first_row
-        assert len(first_row["cells"]) > 0
+        first_column = data["columns"][0]
+        assert "transformations" in first_column
+        assert len(first_column["transformations"]) > 0
 
-        first_cell = first_row["cells"][0]
-        assert "recommendationType" in first_cell
-        assert first_cell["recommendationType"] in [
+        first_transformation = first_column["transformations"][0]
+        assert "recommendationType" in first_transformation
+        assert first_transformation["recommendationType"] in [
             "ai_changed",
             "ai_unchanged",
             "no_recommendation",
@@ -217,13 +218,13 @@ class TestStage4RecommendationTypeContract:
             json={"file_id": file_id, "manual_columns": []},
         )
 
-        # Then: the changed cell has recommendationType = ai_changed
+        # Then: the changed transformation has recommendationType = ai_changed
         assert response.status_code == 200
         data = response.json()
 
-        cell = _find_changed_cell(data["rows"], "primary_diagnosis")
-        assert cell is not None, "No ai_changed cell found"
-        assert cell["recommendationType"] == "ai_changed"
+        transformation = _find_changed_transformation(data["columns"], "primary_diagnosis")
+        assert transformation is not None, "No ai_changed transformation found"
+        assert transformation["recommendationType"] == "ai_changed"
 
     async def test_recommendation_type_reflects_ai_unchanged(
         self,
@@ -244,15 +245,15 @@ class TestStage4RecommendationTypeContract:
             json={"file_id": file_id, "manual_columns": []},
         )
 
-        # Then: cells where original == harmonized have recommendationType = ai_unchanged
+        # Then: transformations where original == harmonized have recommendationType = ai_unchanged
         assert response.status_code == 200
         data = response.json()
 
         found_unchanged = False
-        for row in data["rows"]:
-            for cell in row["cells"]:
-                if cell["originalValue"] and cell["originalValue"] == cell["harmonizedValue"]:
-                    assert cell["recommendationType"] == "ai_unchanged"
+        for col in data["columns"]:
+            for t in col["transformations"]:
+                if t["originalValue"] and t["originalValue"] == t["harmonizedValue"]:
+                    assert t["recommendationType"] == "ai_unchanged"
                     found_unchanged = True
 
-        assert found_unchanged, "No ai_unchanged cells found"
+        assert found_unchanged, "No ai_unchanged transformations found"

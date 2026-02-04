@@ -118,15 +118,15 @@ async def test_harmonize_to_review_journey(
         json={"file_id": file_id, "manual_columns": []},
     )
 
-    # Then: Rows are returned with cell comparisons for review
+    # Then: Columns are returned with transformations for review
     assert rows_response.status_code == 200
-    rows_data = rows_response.json()
-    assert len(rows_data["rows"]) > 0
+    columns_data = rows_response.json()
+    assert len(columns_data["columns"]) > 0
 
-    first_row = rows_data["rows"][0]
-    assert "recordId" in first_row
-    assert "cells" in first_row
-    assert len(first_row["cells"]) > 0
+    first_column = columns_data["columns"][0]
+    assert "columnKey" in first_column
+    assert "transformations" in first_column
+    assert len(first_column["transformations"]) > 0
 
 
 async def test_review_to_summary_journey(
@@ -218,15 +218,15 @@ async def test_full_pipeline_journey(
     create_harmonized_csv(meta.saved_path, changes)
     create_manifest_for_file(temp_storage, file_id, meta.saved_path, changes)
 
-    # Stage 4: Review rows
-    # When: User fetches rows for review
+    # Stage 4: Review columns
+    # When: User fetches columns for review
     rows_response = await app_client.post(
         "/stage-4/rows",
         json={"file_id": file_id, "manual_columns": []},
     )
-    # Then: Rows are returned
+    # Then: Columns with transformations are returned
     assert rows_response.status_code == 200
-    assert len(rows_response.json()["rows"]) > 0
+    assert len(rows_response.json()["columns"]) > 0
 
     # Stage 5: Summary
     # When: User requests final summary

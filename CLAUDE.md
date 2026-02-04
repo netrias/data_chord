@@ -1,5 +1,21 @@
 # Data Chord - Project Instructions
 
+## Workspace Setup
+
+### Environment Variables
+
+The `.env` file contains API keys and is gitignored. To avoid manually copying it for each new workspace, symlink from a central location:
+
+```bash
+# One-time setup: copy your .env to a central location
+mkdir -p ~/.config/data_chord
+cp .env ~/.config/data_chord/.env
+
+# In each new workspace: symlink to the central file
+ln -s ~/.config/data_chord/.env .env
+```
+
+
 ## Architecture
 
 ### Stage Independence Rule

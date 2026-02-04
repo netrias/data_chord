@@ -99,14 +99,17 @@ async def test_full_flow_overrides_propagate_within_column(
 
     rows_response = await app_client.post("/stage-4/rows", json={"file_id": file_id, "manual_columns": []})
     assert rows_response.status_code == 200
-    rows_data = rows_response.json()["rows"]
-    assert rows_data, "Expected review rows for override flow"
+    columns_data = rows_response.json()["columns"]
+    assert columns_data, "Expected review columns for override flow"
 
-    foo_rows = [
-        row for row in rows_data
-        if any(cell["columnKey"] == "col_a" and cell["originalValue"] == "Foo" for cell in row["cells"])
-    ]
-    row_indices = sorted({index for row in foo_rows for index in row["sourceRowNumbers"]})
+    # Find transformations for col_a where originalValue is "Foo"
+    row_indices: list[int] = []
+    for col in columns_data:
+        if col["columnKey"] == "col_a":
+            for t in col["transformations"]:
+                if t["originalValue"] == "Foo":
+                    row_indices.extend(t["rowIndices"])
+    row_indices = sorted(set(row_indices))
 
     overrides_payload = {
         "file_id": file_id,
@@ -258,13 +261,17 @@ async def test_full_flow_bom_overrides_apply(
 
     rows_response = await app_client.post("/stage-4/rows", json={"file_id": file_id, "manual_columns": []})
     assert rows_response.status_code == 200
-    rows_data = rows_response.json()["rows"]
-    assert rows_data[0]["recordId"] == "RID-1"
-    foo_rows = [
-        row for row in rows_data
-        if any(cell["columnKey"] == "col_a" and cell["originalValue"] == "Foo" for cell in row["cells"])
-    ]
-    row_indices = sorted({index for row in foo_rows for index in row["sourceRowNumbers"]})
+    columns_data = rows_response.json()["columns"]
+    assert columns_data, "Expected review columns"
+
+    # Find transformations for col_a where originalValue is "Foo"
+    row_indices: list[int] = []
+    for col in columns_data:
+        if col["columnKey"] == "col_a":
+            for t in col["transformations"]:
+                if t["originalValue"] == "Foo":
+                    row_indices.extend(t["rowIndices"])
+    row_indices = sorted(set(row_indices))
 
     save_response = await app_client.post(
         "/stage-4/overrides",
