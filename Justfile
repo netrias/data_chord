@@ -30,3 +30,9 @@ app-reload:
 
 js-test:
 	cd tests/js && npm test
+
+# Syntax-check all frontend JavaScript files (catches duplicate declarations, syntax errors)
+js-check:
+	@echo "Checking JavaScript syntax..."
+	@find src -path '*/static/*.js' -exec node --check {} \;
+	@echo "All JavaScript files pass syntax check"

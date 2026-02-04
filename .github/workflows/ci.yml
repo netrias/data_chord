@@ -7,6 +7,19 @@ on:
     branches: [main]
 
 jobs:
+  js-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Check JavaScript syntax
+        run: find src -path '*/static/*.js' -exec node --check {} \;
+
   test-js:
     runs-on: ubuntu-latest
     steps:
