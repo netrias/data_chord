@@ -120,11 +120,9 @@ jobs:
       - name: Run dependency audit
         run: uv run pip-audit
 
-  # E2E tests run only on main after merge - too slow for PR feedback loop.
-  # Uses Playwright with Chromium for browser automation.
+  # E2E tests using Playwright with Chromium for browser automation.
   e2e:
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
 
