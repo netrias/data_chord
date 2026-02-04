@@ -43,9 +43,11 @@ async def test_stage4_rows_include_grouped_indices(
 
     assert response.status_code == 200
     data = response.json()
-    assert len(data["rows"]) == 1
-    row = data["rows"][0]
-    assert row["sourceRowNumbers"] == [1, 2]
+    # Column-centric: check that transformations include grouped row indices
+    assert len(data["columns"]) >= 1
+    col = data["columns"][0]
+    assert len(col["transformations"]) == 1  # "Foo" appears in both rows, grouped
+    assert col["transformations"][0]["rowIndices"] == [1, 2]
 
 
 async def test_download_applies_override_per_column_term(
@@ -105,8 +107,10 @@ async def test_stage4_preserves_whitespace_values_in_overrides(
 
     rows_response = await app_client.post("/stage-4/rows", json={"file_id": file_id, "manual_columns": []})
     assert rows_response.status_code == 200
-    cell = rows_response.json()["rows"][0]["cells"][0]
-    assert cell["originalValue"] == "  Foo "
+    # Column-centric: get the first transformation from the first column
+    columns = rows_response.json()["columns"]
+    transformation = columns[0]["transformations"][0]
+    assert transformation["originalValue"] == "  Foo "
 
     overrides_payload = {
         "file_id": file_id,
@@ -140,7 +144,13 @@ async def test_stage4_handles_bom_headers(
 
     rows_response = await app_client.post("/stage-4/rows", json={"file_id": file_id, "manual_columns": []})
     assert rows_response.status_code == 200
-    assert rows_response.json()["rows"][0]["recordId"] == "RID-1"
+    # Column-centric: verify columns load correctly with BOM-prefixed headers
+    columns = rows_response.json()["columns"]
+    assert len(columns) >= 1
+    # Verify the col_a column has the expected transformation
+    col_a = next((c for c in columns if c["columnKey"] == "col_a"), None)
+    assert col_a is not None
+    assert col_a["transformations"][0]["originalValue"] == "Foo"
 
 
 async def test_summary_ignores_case_whitespace_changes(
