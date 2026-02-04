@@ -300,6 +300,7 @@ const _buildCardHTML = (params) => {
       <div class="original-context">
         <span class="original-context-label">was:</span>
         <span class="original-context-value">${safeOriginalValue}</span>
+        <button type="button" class="revert-btn" aria-label="Revert to original value" title="Revert to original">↩</button>
       </div>
       <div class="target-value-wrapper">
         <span class="target-value-label">now:</span>
@@ -336,6 +337,7 @@ const _buildCardHTML = (params) => {
  * @param {boolean} params.hasPVs - Whether PVs exist for this column
  * @param {Set<string>|null} params.pvSet - Set of valid PVs
  * @param {boolean} params.aiIsConformant - Whether AI suggestion is PV-conformant
+ * @param {boolean} [params.overrideIsKnownConformant] - If true, skip pvSet check (value from verified dropdown)
  */
 const _applyCardState = (params) => {
   const {
@@ -348,6 +350,7 @@ const _applyCardState = (params) => {
     hasPVs,
     pvSet,
     aiIsConformant,
+    overrideIsKnownConformant,
   } = params;
 
   // Get derived state from pure function
@@ -358,6 +361,7 @@ const _applyCardState = (params) => {
     hasPVs,
     pvSet,
     aiIsConformant,
+    overrideIsKnownConformant,
   });
 
   // Input shows the current effective value (AI suggestion or override)
@@ -365,10 +369,11 @@ const _applyCardState = (params) => {
     inputEl.value = state.activeValue;
   }
 
-  // Original context is clickable when it differs from current effective value
-  if (originalContextEl) {
+  // Show revert button when original differs from current effective value
+  const originalContext = card.querySelector('.original-context');
+  if (originalContext) {
     const canRevertToOriginal = originalValue !== state.activeValue;
-    originalContextEl.classList.toggle('revert-link', canRevertToOriginal);
+    originalContext.classList.toggle('can-revert', canRevertToOriginal);
   }
 
   // Apply PV conformance styling (only when PVs exist)
@@ -403,7 +408,8 @@ const _applyCardState = (params) => {
  */
 const _attachInputListener = (card, entry, onOverrideChange) => {
   const input = card.querySelector('.target-value-input');
-  const originalContextEl = card.querySelector('.original-context-value');
+  const revertBtn = card.querySelector('.revert-btn');
+  const originalContext = card.querySelector('.original-context');
   if (!input) return () => {};
 
   const originalValue = entry.originalValue ?? '';
@@ -413,11 +419,11 @@ const _attachInputListener = (card, entry, onOverrideChange) => {
   const pvSet = null;
   const aiIsConformant = false;
 
-  // Helper to update revert-link state based on current effective value
-  const updateRevertLink = (currentValue) => {
-    if (originalContextEl) {
+  // Helper to update revert button visibility based on current effective value
+  const updateRevertState = (currentValue) => {
+    if (originalContext) {
       const canRevertToOriginal = originalValue !== currentValue;
-      originalContextEl.classList.toggle('revert-link', canRevertToOriginal);
+      originalContext.classList.toggle('can-revert', canRevertToOriginal);
     }
   };
 
@@ -426,7 +432,7 @@ const _attachInputListener = (card, entry, onOverrideChange) => {
     const currentValue = input.value;
     const effectiveOverride = currentValue === aiSuggestedValue ? '' : currentValue;
 
-    updateRevertLink(currentValue);
+    updateRevertState(currentValue);
 
     onOverrideChange(
       entry.rowIndices,
@@ -439,12 +445,11 @@ const _attachInputListener = (card, entry, onOverrideChange) => {
 
   input.addEventListener('input', handleInput);
 
-  // Click on original context value -> revert to original
-  const handleOriginalClick = () => {
-    if (!originalContextEl?.classList.contains('revert-link')) return;
+  // Click on revert button -> revert to original
+  const handleRevertClick = () => {
     input.value = originalValue;
     const effectiveOverride = originalValue === aiSuggestedValue ? '' : originalValue;
-    updateRevertLink(originalValue);
+    updateRevertState(originalValue);
     onOverrideChange(
       entry.rowIndices,
       entry.columnKey,
@@ -454,15 +459,15 @@ const _attachInputListener = (card, entry, onOverrideChange) => {
     );
   };
 
-  if (originalContextEl) {
-    originalContextEl.addEventListener('click', handleOriginalClick);
+  if (revertBtn) {
+    revertBtn.addEventListener('click', handleRevertClick);
   }
 
   // Return cleanup function
   return () => {
     input.removeEventListener('input', handleInput);
-    if (originalContextEl) {
-      originalContextEl.removeEventListener('click', handleOriginalClick);
+    if (revertBtn) {
+      revertBtn.removeEventListener('click', handleRevertClick);
     }
   };
 };
@@ -540,23 +545,22 @@ const _attachWarningTooltip = (card) => {
  * @returns {Function} Cleanup function to remove event listeners
  */
 const _attachRevertClickHandlers = (card, entry, triggerChange) => {
-  const originalContextEl = card.querySelector('.original-context-value');
+  const revertBtn = card.querySelector('.revert-btn');
   const originalValue = entry.originalValue ?? '';
 
-  // Click on original context value -> set value to original
-  const handleOriginalClick = () => {
-    if (!originalContextEl?.classList.contains('revert-link')) return;
+  // Click on revert button -> set value to original
+  const handleRevertClick = () => {
     triggerChange(originalValue);
   };
 
-  if (originalContextEl) {
-    originalContextEl.addEventListener('click', handleOriginalClick);
+  if (revertBtn) {
+    revertBtn.addEventListener('click', handleRevertClick);
   }
 
   // Return cleanup function
   return () => {
-    if (originalContextEl) {
-      originalContextEl.removeEventListener('click', handleOriginalClick);
+    if (revertBtn) {
+      revertBtn.removeEventListener('click', handleRevertClick);
     }
   };
 };
@@ -591,13 +595,15 @@ const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange
   const displayValue = initialValue || aiSuggestedValue;
 
   // Shared function to apply a value change (from combobox or revert click)
-  const applyValueChange = (value) => {
+  // isKnownConformant: true when value comes from dropdown (already verified), undefined when reverting
+  const originalContext = card.querySelector('.original-context');
+  const applyValueChange = (value, isKnownConformant) => {
     const effectiveOverride = value === aiSuggestedValue ? '' : value;
 
-    // Update original context clickable state
-    if (originalContextEl) {
+    // Update revert button visibility
+    if (originalContext) {
       const canRevertToOriginal = originalValue !== value;
-      originalContextEl.classList.toggle('revert-link', canRevertToOriginal);
+      originalContext.classList.toggle('can-revert', canRevertToOriginal);
     }
 
     // Apply PV conformance styling
@@ -611,6 +617,7 @@ const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange
       hasPVs,
       pvSet,
       aiIsConformant,
+      overrideIsKnownConformant: isKnownConformant,
     });
 
     // Notify parent
@@ -633,7 +640,7 @@ const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange
 
   inputWrapper.appendChild(combobox);
 
-  // Apply initial state (including revert-link class)
+  // Apply initial state (including revert button visibility)
   const initialOverride = initialValue === aiSuggestedValue ? '' : initialValue;
   _applyCardState({
     card,

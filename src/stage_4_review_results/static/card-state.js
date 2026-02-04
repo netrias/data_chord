@@ -14,6 +14,7 @@
  * @property {boolean} hasPVs - Whether permissible values exist for this column
  * @property {Set<string>|null} pvSet - Set of valid PVs (null if hasPVs is false)
  * @property {boolean} aiIsConformant - Whether AI suggestion is PV-conformant
+ * @property {boolean} [overrideIsKnownConformant] - If true, skip pvSet check for override (value came from verified dropdown selection)
  */
 
 /**
@@ -46,6 +47,7 @@ export const determineCardState = (input) => {
     hasPVs,
     pvSet,
     aiIsConformant,
+    overrideIsKnownConformant,
   } = input;
 
   // Derive: is there an override that differs from AI?
@@ -62,8 +64,10 @@ export const determineCardState = (input) => {
     // No PVs = conformance doesn't apply
     isConformant = false;
   } else if (hasOverride) {
-    // Check override against PV set
-    isConformant = pvSet !== null && pvSet.has(overrideValue);
+    // Trust the flag when value came from a verified dropdown selection
+    isConformant = overrideIsKnownConformant === true
+      ? true
+      : pvSet !== null && pvSet.has(overrideValue);
   } else {
     // Using AI suggestion - use pre-computed conformance flag
     isConformant = aiIsConformant;

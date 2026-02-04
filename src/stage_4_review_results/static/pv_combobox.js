@@ -27,32 +27,20 @@ const SUGGESTION_TOOLTIPS = {
  * @param {Array<{value: string, isPVConformant: boolean}>} config.suggestions - AI suggestions with conformance flags
  * @param {string[]} config.pvValues - Alphabetized list of valid PVs
  * @param {string} [config.initialValue] - Current value
- * @param {function(string): void} config.onChange - Callback when value changes
+ * @param {function(string, boolean): void} config.onChange - Callback when value changes (value, isKnownConformant)
  * @returns {HTMLElement}
  */
 export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange }) => {
   const wrapper = document.createElement('div');
   wrapper.className = 'pv-combobox';
 
-  // Pencil icon (matches existing value-input-icon)
-  const pencilIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  pencilIcon.setAttribute('class', 'value-input-icon');
-  pencilIcon.setAttribute('viewBox', '0 0 20 20');
-  pencilIcon.setAttribute('aria-hidden', 'true');
-  const pencilPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  pencilPath.setAttribute('d', 'M2 14.5V18h3.5l8.4-8.4-3.5-3.5L2 14.5zm11.8-9.1a1 1 0 0 1 1.4 0l1.4 1.4a1 1 0 0 1 0 1.4l-1.2 1.2-3.5-3.5 1.2-1.2z');
-  pencilIcon.appendChild(pencilPath);
+  // Link element - displays committed value when closed
+  const link = document.createElement('span');
+  link.className = 'pv-combobox-link';
 
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'pv-combobox-input';
-  // In compact design, input displays the current value when not focused
-
-  const toggleBtn = document.createElement('button');
-  toggleBtn.type = 'button';
-  toggleBtn.className = 'pv-combobox-toggle';
-  toggleBtn.textContent = '\u25BE';
-  toggleBtn.tabIndex = -1;
 
   const dropdown = document.createElement('ul');
   dropdown.className = 'pv-combobox-dropdown';
@@ -131,14 +119,13 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange
     }, FEEDBACK_DURATION_MS);
   };
 
-  /** Helper to select a value. */
+  /** Helper to select a value from dropdown (always conformant). */
   const selectValue = (value) => {
     committedValue = value;
-    // Show value in input (compact design: input IS the display)
-    input.value = value;
-    input.placeholder = '';
+    link.textContent = value;
     dropdown.classList.remove('pv-combobox-dropdown--open');
-    onChange(value);
+    wrapper.classList.remove('pv-combobox--open');
+    onChange(value, true);
   };
 
   /** Build all option elements (called once on first open). */
@@ -274,6 +261,9 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange
 
   /** Open the dropdown (builds options lazily on first open). */
   const openDropdown = () => {
+    // Show input, hide link
+    wrapper.classList.add('pv-combobox--open');
+
     // Clear input for searching, show current value as placeholder hint
     input.value = '';
     input.placeholder = committedValue || 'Type to search...';
@@ -335,6 +325,7 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange
       if (!wrapper.isConnected) return;
 
       dropdown.classList.remove('pv-combobox-dropdown--open');
+      wrapper.classList.remove('pv-combobox--open');
       hideSuggestionTooltip();
 
       // Preserve whitespace - domain rule: whitespace is semantically significant
@@ -348,48 +339,38 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, onChange
 
       if (matchedPV && matchedPV !== committedValue) {
         committedValue = matchedPV;
-        onChange(matchedPV);
+        link.textContent = matchedPV;
+        onChange(matchedPV, true);
       }
-      // Restore committed value to input (compact design: input IS the display)
-      input.value = committedValue;
-      input.placeholder = '';
     }, BLUR_DELAY_MS);
   });
 
-  // Toggle button: open/close dropdown
-  toggleBtn.addEventListener('click', () => {
-    if (dropdown.classList.contains('pv-combobox-dropdown--open')) {
-      dropdown.classList.remove('pv-combobox-dropdown--open');
-      hideSuggestionTooltip();
-    } else {
-      openDropdown();
-      input.focus();
-    }
+  // Link click: open dropdown and focus input
+  link.addEventListener('click', () => {
+    openDropdown();
+    input.focus();
   });
 
-  wrapper.appendChild(pencilIcon);
+  wrapper.appendChild(link);
   wrapper.appendChild(input);
-  wrapper.appendChild(toggleBtn);
   wrapper.appendChild(dropdown);
 
-  // Initialize input with committed value (compact design: input IS the display)
-  input.value = committedValue;
+  // Initialize link with committed value
+  link.textContent = committedValue;
 
   /** Reset the combobox to empty state. */
   wrapper.reset = () => {
     committedValue = '';
-    input.value = '';
-    input.placeholder = '';
+    link.textContent = '';
   };
 
   /** Set the combobox to a specific value. */
   wrapper.setValue = (value) => {
     committedValue = value;
-    // Show value in input (compact design: input IS the display)
-    input.value = value;
-    input.placeholder = '';
+    link.textContent = value;
     // Close dropdown if open (ensures UI consistency when called programmatically)
     dropdown.classList.remove('pv-combobox-dropdown--open');
+    wrapper.classList.remove('pv-combobox--open');
   };
 
   /** Cleanup function to clear pending timeouts and tooltips. */

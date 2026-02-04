@@ -507,6 +507,7 @@
 
 /* Original context - label above, value below */
 .original-context {
+  position: relative;
   font-size: 0.85rem;
   line-height: 1.4;
 }
@@ -535,19 +536,29 @@
   font-size: 0.85rem;
 }
 
-/* Clickable state for reverting to original */
-.original-context-value.revert-link {
+/* Revert button - appears on hover when revert is available */
+.revert-btn {
+  display: none;
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: var(--gray-100);
+  border: none;
+  padding: 0.125rem 0.375rem;
+  font-size: 0.75rem;
+  color: var(--gray-500);
   cursor: pointer;
-  text-decoration: underline;
-  text-decoration-style: dashed;
-  text-underline-offset: 2px;
-  transition: color var(--transition-fast), text-decoration-color var(--transition-fast);
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast), background var(--transition-fast);
 }
 
-.original-context-value.revert-link:hover {
+.original-context.can-revert:hover .revert-btn {
+  display: block;
+}
+
+.revert-btn:hover {
   color: var(--azure-600);
-  text-decoration-style: solid;
-  text-decoration-color: var(--azure-500);
+  background: var(--azure-100);
 }
 
 /* Target value wrapper - label above, input below */
@@ -950,53 +961,62 @@
 .pv-combobox {
   position: relative;
   width: 100%;
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
 }
 
-/* Pencil icon inside PV combobox - constrained size */
-.pv-combobox .value-input-icon {
-  width: 0.875rem;
-  height: 0.875rem;
-  flex-shrink: 0;
-  fill: var(--gray-400);
+/* Link trigger - displays value as clickable link (closed state) */
+.pv-combobox-link {
+  color: var(--netrias-600);
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 600;
+  /* 3-line truncation with ellipsis */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.4;
+  transition: color var(--transition-fast);
 }
 
+.pv-combobox-link:hover {
+  color: var(--netrias-700);
+}
+
+/* Remove bounding box when combobox is present */
+.target-value-input-wrapper:has(.pv-combobox) {
+  background: transparent;
+  border: none;
+  padding: 0;
+  box-shadow: none;
+}
+
+/* Input - hidden by default, shown when open */
 .pv-combobox-input {
-  flex: 1;
-  min-width: 0;
+  display: none;
+  width: 100%;
   border: none;
   padding: 0;
   background: transparent;
-  color: var(--gray-600);
+  color: var(--gray-800);
   font-size: 0.85rem;
-  cursor: text;
 }
 
 .pv-combobox-input:focus {
   outline: none;
-  color: var(--gray-800);
 }
 
 .pv-combobox-input::placeholder {
   color: var(--gray-400);
 }
 
-.pv-combobox-toggle {
-  background: none;
-  border: none;
-  padding: 0 4px;
-  cursor: pointer;
-  color: var(--gray-400);
-  font-size: 0.75rem;
-  line-height: 1;
-  display: flex;
-  align-items: center;
+/* Open state: show input, hide link */
+.pv-combobox--open .pv-combobox-input {
+  display: block;
 }
 
-.pv-combobox-toggle:hover {
-  color: var(--gray-600);
+.pv-combobox--open .pv-combobox-link {
+  display: none;
 }
 
 .pv-combobox-dropdown {
