@@ -89,12 +89,6 @@ const DEFAULT_COLUMN_BATCH_SIZE = 4;
 /** @type {number} Default rows per batch for row mode */
 const DEFAULT_ROW_BATCH_SIZE = 5;
 
-/** @type {number} Debounce delay for override autosave (ms) */
-const OVERRIDE_SAVE_DELAY_MS = 500;
-
-/** @type {number|null} Timeout ID for debounced override save */
-let overrideSaveTimeout = null;
-
 /**
  * Application state for Stage 4 review.
  * @type {Object}
