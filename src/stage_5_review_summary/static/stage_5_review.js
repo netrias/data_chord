@@ -185,7 +185,7 @@ const _createColumnCard = (col) => {
   const aiPercent = total > 0 ? (aiCount / total) * 100 : 0;
   const manualPercent = total > 0 ? (manualCount / total) * 100 : 0;
   /* Calculate unchanged as remainder to ensure percentages sum to 100% and avoid floating-point gaps in the bar. */
-  const unchangedPercent = total > 0 ? 100 - aiPercent - manualPercent : 0;
+  const unchangedPercent = total > 0 ? Math.max(0, 100 - aiPercent - manualPercent) : 0;
 
   const header = document.createElement('div');
   header.className = 'summary-column-header';

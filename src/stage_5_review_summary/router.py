@@ -232,7 +232,12 @@ def _create_streaming_response(base_name: str, zip_buffer: io.BytesIO) -> Stream
 
 
 def _normalize_for_metrics(value: str | None) -> str:
-    """why: ignore case/whitespace-only differences in summary metrics."""
+    """Collapse cosmetic variations for summary counts only.
+
+    Unlike PV conformance checks (which are character-exact per domain rules),
+    summary metrics group case/whitespace variants to avoid inflating change
+    counts in the UI. The actual exported data preserves exact values.
+    """
     if value is None:
         return ""
     return value.strip().lower()

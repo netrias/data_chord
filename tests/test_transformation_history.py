@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from httpx import AsyncClient
@@ -407,8 +408,6 @@ class TestTransformationHistoryContract:
         sample_csv_path: Path,
     ) -> None:
         """Value in PV set has is_pv_conformant=True."""
-        from unittest.mock import patch
-
         # Given: A manifest with a value that will be in the PV set
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
@@ -448,8 +447,6 @@ class TestTransformationHistoryContract:
         sample_csv_path: Path,
     ) -> None:
         """Value NOT in PV set has is_pv_conformant=False."""
-        from unittest.mock import patch
-
         # Given: A manifest with values not in the PV set
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
@@ -489,8 +486,6 @@ class TestTransformationHistoryContract:
         sample_csv_path: Path,
     ) -> None:
         """When no PV set exists, all steps default to is_pv_conformant=True."""
-        from unittest.mock import patch
-
         # Given: A manifest with transformation history
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)

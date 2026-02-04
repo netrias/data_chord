@@ -580,7 +580,7 @@
 }
 
 .history-step__pv-icon--conformant {
-  color: var(--success-500, #22c55e);
+  color: var(--netrias-600);
 }
 
 .history-step__pv-icon--warning {

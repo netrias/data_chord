@@ -267,8 +267,6 @@ test('multi-file isolation: overrides on one file do not affect another', async 
   await page.waitForResponse((response) => response.url().includes('/stage-4/overrides') && response.ok());
 
   // Then: file B download remains unchanged
-  const beforeOverride = await downloadCsvRows(pageB, fileB);
-  expect(beforeOverride[0].col_a).toBe('Suggested');
   const rows = await downloadCsvRows(pageB, fileB);
   expect(rows[0].col_a).toBe('Suggested');
 });
