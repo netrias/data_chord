@@ -213,7 +213,7 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
       const entry = {
         ...cell,
         topSuggestions: cell.topSuggestions ?? [],
-        rowIndices: row.rowIndices ?? [row.rowIndex],
+        rowIndices: cell.rowIndices ?? [row.rowIndex],
       };
       const card = createValueCard({
         entry,
