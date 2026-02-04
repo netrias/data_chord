@@ -185,7 +185,7 @@ const _createColumnCard = (col) => {
   const aiPercent = total > 0 ? (aiCount / total) * 100 : 0;
   const manualPercent = total > 0 ? (manualCount / total) * 100 : 0;
   /* Calculate unchanged as remainder to ensure percentages sum to 100% and avoid floating-point gaps in the bar. */
-  const unchangedPercent = total > 0 ? 100 - aiPercent - manualPercent : 0;
+  const unchangedPercent = total > 0 ? Math.max(0, 100 - aiPercent - manualPercent) : 0;
 
   const header = document.createElement('div');
   header.className = 'summary-column-header';
@@ -298,11 +298,18 @@ const _showEmptyMessage = (message) => {
 
 const _SORT_KEYS = ['column', 'original_value', 'final_value'];
 
-const _SOURCE_LABELS = {
-  original: 'Original Value',
-  ai: 'AI Suggestion',
-  user: 'User Override',
-  system: 'System Adjustment',
+const _getAttribution = (step) => {
+  switch (step.source) {
+    case 'original':
+      return 'Original value';
+    case 'ai':
+    case 'system':
+      return 'Changed by Data Chord';
+    case 'user':
+      return step.user_id ? `Changed by ${step.user_id}` : 'Changed by user';
+    default:
+      return step.source;
+  }
 };
 
 const _formatTimestamp = (isoString) => {
@@ -322,40 +329,50 @@ const _formatTimestamp = (isoString) => {
   }
 };
 
-const _createHistoryStep = (step) => {
+const _createHistoryStep = (step, isLast) => {
   const stepEl = document.createElement('div');
   stepEl.className = 'history-step';
+  if (isLast) {
+    stepEl.classList.add('history-step--final');
+  }
   stepEl.dataset.source = step.source;
 
-  const header = document.createElement('div');
-  header.className = 'history-step__header';
+  /* Line 1: Value + PV conformance icon */
+  const valueLine = document.createElement('div');
+  valueLine.className = 'history-step__value-line';
 
-  const sourceSpan = document.createElement('span');
-  sourceSpan.className = 'history-step__source';
-  sourceSpan.textContent = _SOURCE_LABELS[step.source] ?? step.source;
-  header.appendChild(sourceSpan);
-
-  const timestamp = _formatTimestamp(step.timestamp);
-  if (timestamp) {
-    const tsSpan = document.createElement('span');
-    tsSpan.className = 'history-step__timestamp';
-    tsSpan.textContent = timestamp;
-    header.appendChild(tsSpan);
-  }
-
-  stepEl.appendChild(header);
-
-  const valueEl = document.createElement('div');
+  const valueEl = document.createElement('span');
   valueEl.className = 'history-step__value';
   valueEl.textContent = `"${step.value}"`;
-  stepEl.appendChild(valueEl);
+  valueLine.appendChild(valueEl);
 
-  if (step.user_id) {
-    const userEl = document.createElement('div');
-    userEl.className = 'history-step__user';
-    userEl.textContent = step.user_id;
-    stepEl.appendChild(userEl);
+  const pvIcon = document.createElement('span');
+  pvIcon.className = 'history-step__pv-icon';
+  if (step.is_pv_conformant !== false) {
+    pvIcon.classList.add('history-step__pv-icon--conformant');
+    pvIcon.textContent = '\u2713'; /* ✓ */
+    pvIcon.dataset.tooltip = 'Matches permissible values';
+  } else {
+    pvIcon.classList.add('history-step__pv-icon--warning');
+    pvIcon.textContent = '\u26A0'; /* ⚠ */
+    pvIcon.dataset.tooltip = 'Does not match permissible values';
   }
+  valueLine.appendChild(pvIcon);
+
+  stepEl.appendChild(valueLine);
+
+  /* Line 2: Attribution */
+  const attrEl = document.createElement('div');
+  attrEl.className = 'history-step__attribution';
+  attrEl.textContent = _getAttribution(step);
+  stepEl.appendChild(attrEl);
+
+  /* Line 3: Timestamp */
+  const timestamp = _formatTimestamp(step.timestamp);
+  const tsEl = document.createElement('div');
+  tsEl.className = 'history-step__timestamp';
+  tsEl.textContent = timestamp ?? '';
+  stepEl.appendChild(tsEl);
 
   return stepEl;
 };
@@ -383,6 +400,41 @@ const _showHistoryDialog = (mapping) => {
 
   content.appendChild(headerEl);
 
+  /* Transformation summary: original → final */
+  const transformEl = document.createElement('div');
+  transformEl.className = 'history-dialog-transform';
+
+  const origItem = document.createElement('div');
+  origItem.className = 'history-dialog-transform__item';
+  const origLabel = document.createElement('span');
+  origLabel.className = 'history-dialog-transform__label';
+  origLabel.textContent = 'original';
+  origItem.appendChild(origLabel);
+  const origVal = document.createElement('span');
+  origVal.className = 'history-dialog-transform__value';
+  origVal.textContent = `"${mapping.original_value}"`;
+  origItem.appendChild(origVal);
+  transformEl.appendChild(origItem);
+
+  const arrow = document.createElement('span');
+  arrow.className = 'history-dialog-transform__arrow';
+  arrow.textContent = '\u2192'; /* → */
+  transformEl.appendChild(arrow);
+
+  const finalItem = document.createElement('div');
+  finalItem.className = 'history-dialog-transform__item';
+  const finalLabel = document.createElement('span');
+  finalLabel.className = 'history-dialog-transform__label';
+  finalLabel.textContent = 'final';
+  finalItem.appendChild(finalLabel);
+  const finalVal = document.createElement('span');
+  finalVal.className = 'history-dialog-transform__value history-dialog-transform__value--final';
+  finalVal.textContent = `"${mapping.final_value}"`;
+  finalItem.appendChild(finalVal);
+  transformEl.appendChild(finalItem);
+
+  content.appendChild(transformEl);
+
   /* Body */
   const body = document.createElement('div');
   body.className = 'history-dialog-body';
@@ -397,8 +449,9 @@ const _showHistoryDialog = (mapping) => {
     emptyMsg.textContent = 'No transformation history available.';
     timeline.appendChild(emptyMsg);
   } else {
-    for (const step of history) {
-      timeline.appendChild(_createHistoryStep(step));
+    for (let i = 0; i < history.length; i++) {
+      const isLast = i === history.length - 1;
+      timeline.appendChild(_createHistoryStep(history[i], isLast));
     }
   }
 

@@ -426,7 +426,7 @@
   padding: 0;
   background: var(--white);
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05), 0 10px 20px rgba(0, 0, 0, 0.1), 0 20px 40px rgba(0, 0, 0, 0.1);
-  max-width: 500px;
+  max-width: 800px;
   width: 90vw;
   margin: auto;
 }
@@ -457,6 +457,55 @@
   margin-top: var(--space-1);
   font-size: 0.875rem;
   color: var(--gray-500);
+}
+
+/* Transformation summary: original → final */
+.history-dialog-transform {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-6);
+  background: var(--gray-50);
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.history-dialog-transform__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.history-dialog-transform__label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--gray-500);
+  order: 1;
+}
+
+.history-dialog-transform__value {
+  font-size: 0.9rem;
+  color: var(--gray-600);
+  font-family: monospace;
+  background: var(--white);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--gray-200);
+  word-break: break-word;
+}
+
+.history-dialog-transform__value--final {
+  color: var(--gray-900);
+  font-weight: 600;
+}
+
+.history-dialog-transform__arrow {
+  color: var(--gray-400);
+  font-size: 1.25rem;
+  margin-bottom: var(--space-4);
 }
 
 .history-dialog-body {
@@ -504,57 +553,85 @@
   height: 1rem;
   border-radius: 50%;
   background: var(--white);
-  border: 2px solid var(--gray-300);
+  border: 2px solid var(--gray-400);
 }
 
-.history-step[data-source="original"]::before {
-  border-color: var(--gray-400);
-  background: var(--gray-100);
-}
-
-.history-step[data-source="ai"]::before {
-  border-color: var(--azure-500);
-  background: var(--azure-50);
-}
-
-.history-step[data-source="user"]::before {
-  border-color: var(--netrias-500);
-  background: var(--netrias-50);
-}
-
-.history-step[data-source="system"]::before {
-  border-color: var(--warning-500);
-  background: var(--warning-50);
-}
-
-.history-step__header {
+/* Step value line: value + PV icon */
+.history-step__value-line {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-2);
   margin-bottom: var(--space-1);
 }
 
-.history-step__source {
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.025em;
-  color: var(--gray-500);
+.history-step__value {
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--gray-900);
+  word-break: break-word;
 }
 
+/* PV conformance icons */
+.history-step__pv-icon {
+  font-size: 0.8rem;
+  cursor: help;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.history-step__pv-icon--conformant {
+  color: var(--netrias-600);
+}
+
+.history-step__pv-icon--warning {
+  color: var(--warning-500);
+}
+
+.history-step__pv-icon:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: calc(100% + 6px);
+  background: var(--gray-800);
+  color: var(--white);
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius-md);
+  font-size: 0.7rem;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+  text-align: center;
+  z-index: 1000;
+  box-shadow: var(--shadow-md);
+}
+
+.history-step__pv-icon:hover::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: calc(100% + 2px);
+  border: 4px solid transparent;
+  border-bottom-color: var(--gray-800);
+  z-index: 1000;
+}
+
+/* Attribution line */
+.history-step__attribution {
+  font-size: 0.8rem;
+  color: var(--gray-600);
+  margin-bottom: var(--space-1);
+}
+
+/* Timestamp line */
 .history-step__timestamp {
   font-size: 0.75rem;
   color: var(--gray-400);
 }
 
-.history-step__value {
-  font-size: 0.9375rem;
-  color: var(--gray-900);
-  word-break: break-word;
-}
-
-.history-step__user {
-  margin-top: var(--space-1);
-  font-size: 0.75rem;
-  color: var(--gray-400);
+/* Final step styling (filled dot) */
+.history-step--final::before {
+  background: var(--gray-500);
+  border-color: var(--gray-500);
 }

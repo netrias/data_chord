@@ -267,8 +267,6 @@ test('multi-file isolation: overrides on one file do not affect another', async 
   await page.waitForResponse((response) => response.url().includes('/stage-4/overrides') && response.ok());
 
   // Then: file B download remains unchanged
-  const beforeOverride = await downloadCsvRows(pageB, fileB);
-  expect(beforeOverride[0].col_a).toBe('Suggested');
   const rows = await downloadCsvRows(pageB, fileB);
   expect(rows[0].col_a).toBe('Suggested');
 });
@@ -399,4 +397,110 @@ test('changing file clears previous session', async ({ page }) => {
 
   // Then: new file has different ID (fresh session)
   expect(fileId2).not.toBe(fileId1);
+});
+
+test('history dialog shows transformation summary and steps', async ({ page }) => {
+  await mockHarmonizeSuccess(page);
+
+  // Given: a file with harmonization changes
+  const fileId = await uploadAndAnalyze(page, fileFixture('basic.csv'));
+  await clickHarmonize(page);
+  await expect(page.locator('#reviewButton')).toBeEnabled();
+  seedHarmonization(fileId, { 0: { col_a: 'Changed Value' } });
+
+  // Navigate to Stage 5
+  await page.goto(`/stage-5?file_id=${fileId}`);
+  await page.locator('#summaryGrid').waitFor({ state: 'visible' });
+  await page.locator('#changesTableBody tr').first().waitFor({ state: 'visible' });
+
+  // When: User clicks a row in the changes table
+  await page.click('#changesTableBody tr.clickable-row');
+  const dialog = page.locator('.history-dialog');
+  await dialog.waitFor({ state: 'visible' });
+
+  // Then: Dialog shows title and column name
+  await expect(dialog.locator('.history-dialog-title')).toContainText('Transformation History');
+  await expect(dialog.locator('.history-dialog-subtitle')).toBeVisible();
+
+  // And: Dialog shows original→final summary
+  await expect(dialog.locator('.history-dialog-transform')).toBeVisible();
+
+  // And: Each step has value, attribution, and timestamp on separate lines
+  const steps = dialog.locator('.history-step');
+  await expect(steps.first()).toBeVisible();
+  await expect(steps.first().locator('.history-step__value-line')).toBeVisible();
+  await expect(steps.first().locator('.history-step__attribution')).toBeVisible();
+  await expect(steps.first().locator('.history-step__timestamp')).toBeVisible();
+
+  // Close dialog
+  await dialog.locator('button:has-text("Close")').click();
+  await expect(dialog).toBeHidden();
+});
+
+test('history dialog shows PV conformance icons with tooltips', async ({ page }) => {
+  await mockHarmonizeSuccess(page);
+
+  // Given: a file with harmonization changes (some may be non-conformant)
+  const fileId = await uploadAndAnalyze(page, fileFixture('basic.csv'));
+  await clickHarmonize(page);
+  await expect(page.locator('#reviewButton')).toBeEnabled();
+  seedHarmonization(fileId, { 0: { col_a: 'Changed Value' } });
+
+  // Navigate to Stage 5
+  await page.goto(`/stage-5?file_id=${fileId}`);
+  await page.locator('#summaryGrid').waitFor({ state: 'visible' });
+  await page.locator('#changesTableBody tr').first().waitFor({ state: 'visible' });
+
+  // When: User opens history dialog
+  await page.click('#changesTableBody tr.clickable-row');
+  const dialog = page.locator('.history-dialog');
+  await dialog.waitFor({ state: 'visible' });
+
+  // Then: Steps show PV conformance icons
+  const steps = dialog.locator('.history-step');
+  await expect(steps.first()).toBeVisible();
+
+  // Each step value line should have a PV icon (either conformant ✓ or warning ⚠)
+  const pvIcons = dialog.locator('.history-step__pv-icon');
+  await expect(pvIcons.first()).toBeVisible();
+
+  // Icons should have tooltip on hover (data-tooltip attribute)
+  const firstIcon = pvIcons.first();
+  await expect(firstIcon).toHaveAttribute('data-tooltip');
+
+  // Close dialog
+  await dialog.locator('button:has-text("Close")').click();
+});
+
+test('history dialog shows correct attribution labels', async ({ page }) => {
+  await mockHarmonizeSuccess(page);
+
+  // Given: a file with AI changes
+  const fileId = await uploadAndAnalyze(page, fileFixture('basic.csv'));
+  await clickHarmonize(page);
+  await expect(page.locator('#reviewButton')).toBeEnabled();
+  seedHarmonization(fileId, { 0: { col_a: 'AI Changed' } });
+
+  // Navigate to Stage 5
+  await page.goto(`/stage-5?file_id=${fileId}`);
+  await page.locator('#summaryGrid').waitFor({ state: 'visible' });
+  await page.locator('#changesTableBody tr').first().waitFor({ state: 'visible' });
+
+  // When: User opens history dialog
+  await page.click('#changesTableBody tr.clickable-row');
+  const dialog = page.locator('.history-dialog');
+  await dialog.waitFor({ state: 'visible' });
+
+  // Then: Original step shows "Original value"
+  const originalStep = dialog.locator('.history-step[data-source="original"]');
+  await expect(originalStep.locator('.history-step__attribution')).toContainText('Original value');
+
+  // And: AI step shows "Changed by Data Chord"
+  const aiStep = dialog.locator('.history-step[data-source="ai"]');
+  if (await aiStep.count() > 0) {
+    await expect(aiStep.locator('.history-step__attribution')).toContainText('Changed by Data Chord');
+  }
+
+  // Close dialog
+  await dialog.locator('button:has-text("Close")').click();
 });

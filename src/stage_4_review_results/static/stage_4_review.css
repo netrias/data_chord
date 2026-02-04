@@ -412,7 +412,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-1) var(--space-3);
   background: var(--gray-50);
   border-bottom: 1px solid var(--gray-100);
   border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
@@ -505,26 +505,27 @@
   padding: var(--space-3) var(--space-4) var(--space-4);
 }
 
-/* Original context - subordinate "was: X" text */
+/* Original context - label above, value below */
 .original-context {
   font-size: 0.85rem;
   line-height: 1.4;
 }
 
-.original-context-label,
-.original-context-value {
-  display: inline;
-}
-
 .original-context-label {
+  display: block;
   color: var(--gray-400);
   font-weight: 500;
-  margin-right: var(--space-1);
+  margin-bottom: var(--space-1);
 }
 
 .original-context-value {
   color: var(--gray-600);
   font-weight: 500;
+  /* Allow wrapping up to 3 lines, truncate beyond */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 /* Target value label - matches original context styling */
@@ -532,7 +533,6 @@
   color: var(--gray-400);
   font-weight: 500;
   font-size: 0.85rem;
-  flex-shrink: 0;
 }
 
 /* Clickable state for reverting to original */
@@ -550,10 +550,10 @@
   text-decoration-color: var(--azure-500);
 }
 
-/* Target value wrapper */
+/* Target value wrapper - label above, input below */
 .target-value-wrapper {
   display: flex;
-  align-items: baseline;
+  flex-direction: column;
   gap: var(--space-1);
 }
 
@@ -710,9 +710,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 3rem;
-  height: 3rem;
-  font-size: 2.125rem;
+  width: 2rem;
+  height: 2rem;
+  font-size: 1.5rem;
   flex-shrink: 0;
 }
 

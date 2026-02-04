@@ -69,6 +69,7 @@ class TransformationStep(BaseModel):
     source: str  # "original", "ai", "user", "system"
     timestamp: str | None = None
     user_id: str | None = None
+    is_pv_conformant: bool = True
 
 
 class TermMapping(BaseModel):
@@ -231,7 +232,12 @@ def _create_streaming_response(base_name: str, zip_buffer: io.BytesIO) -> Stream
 
 
 def _normalize_for_metrics(value: str | None) -> str:
-    """why: ignore case/whitespace-only differences in summary metrics."""
+    """Collapse cosmetic variations for summary counts only.
+
+    Unlike PV conformance checks (which are character-exact per domain rules),
+    summary metrics group case/whitespace variants to avoid inflating change
+    counts in the UI. The actual exported data preserves exact values.
+    """
     if value is None:
         return ""
     return value.strip().lower()
@@ -260,14 +266,37 @@ def _get_final_value(row: ManifestRow) -> str:
     return get_latest_override_value(row.manual_overrides) or row.top_harmonization
 
 
-def _build_history(row: ManifestRow) -> list[TransformationStep]:
-    """Collapse consecutive overrides with the same value to show only unique steps."""
+def _build_history(
+    row: ManifestRow,
+    upload_timestamp: datetime | None,
+    pv_set: frozenset[str] | None,
+) -> list[TransformationStep]:
+    """Build chronologically-sorted transformation history.
+
+    Shows only the final system change (PV adjustment takes precedence over AI).
+    Users don't see intermediate system states - just the final Data Chord result.
+    """
+    upload_ts_str = upload_timestamp.isoformat() if upload_timestamp else None
     steps: list[TransformationStep] = []
 
-    steps.append(TransformationStep(value=row.to_harmonize, source="original"))
+    steps.append(TransformationStep(
+        value=row.to_harmonize,
+        source="original",
+        timestamp=upload_ts_str,
+        is_pv_conformant=check_value_conformance(row.to_harmonize, pv_set),
+    ))
 
-    if row.top_harmonization != row.to_harmonize:
-        steps.append(TransformationStep(value=row.top_harmonization, source="ai"))
+    # Show only the final system change: PV adjustment if present, otherwise AI
+    system_value = row.pv_adjustment.adjusted_value if row.pv_adjustment else row.top_harmonization
+    system_timestamp = row.pv_adjustment.timestamp if row.pv_adjustment else upload_ts_str
+
+    if system_value != row.to_harmonize:
+        steps.append(TransformationStep(
+            value=system_value,
+            source="ai",
+            timestamp=system_timestamp,
+            is_pv_conformant=check_value_conformance(system_value, pv_set),
+        ))
 
     last_override_value: str | None = None
     for override in row.manual_overrides:
@@ -280,20 +309,33 @@ def _build_history(row: ManifestRow) -> list[TransformationStep]:
                 source="user",
                 timestamp=override.timestamp,
                 user_id=override.user_id,
+                is_pv_conformant=check_value_conformance(override.value, pv_set),
             )
         )
 
-    if row.pv_adjustment is not None:
-        steps.append(
-            TransformationStep(
-                value=row.pv_adjustment.adjusted_value,
-                source="system",
-                timestamp=row.pv_adjustment.timestamp,
-                user_id=row.pv_adjustment.user_id,
-            )
-        )
+    return _sort_steps_chronologically(steps)
 
-    return steps
+
+def _sort_steps_chronologically(steps: list[TransformationStep]) -> list[TransformationStep]:
+    """Sort steps by timestamp, keeping original first and preserving order for ties."""
+    if len(steps) <= 1:
+        return steps
+
+    original = steps[0]
+    rest = steps[1:]
+
+    def sort_key(step: TransformationStep) -> tuple[int, int]:
+        # Parse timestamp for sorting; original stays first via separate handling
+        if step.timestamp is None:
+            return (0, 0)
+        try:
+            dt = datetime.fromisoformat(step.timestamp)
+            return (1, int(dt.timestamp() * 1000))
+        except (ValueError, TypeError):
+            return (0, 0)
+
+    sorted_rest = sorted(rest, key=sort_key)
+    return [original, *sorted_rest]
 
 
 class _MappingInfo(NamedTuple):
@@ -310,6 +352,7 @@ def _process_manifest_row(
     unchanged_counts: dict[int, int],
     unique_mappings: dict[tuple[str, str, str], _MappingInfo],
     cache: SessionCache,
+    upload_timestamp: datetime | None,
 ) -> None:
     col_id = row.column_id
     change_type = _classify_change(row)
@@ -323,11 +366,15 @@ def _process_manifest_row(
             unchanged_counts[col_id] += 1
 
     # Track all rows for conformance checking, not just changed ones
-    _track_mapping(unique_mappings, row, cache)
+    _track_mapping(unique_mappings, row, cache, upload_timestamp)
 
 
 def _build_summary_from_manifest(summary: ManifestSummary, file_id: str) -> StageFiveSummaryResponse:
     cache = ensure_pvs_loaded(file_id)
+    storage = get_upload_storage()
+    meta = storage.load(file_id)
+    upload_timestamp = meta.uploaded_at if meta else None
+
     ai_counts: dict[int, int] = defaultdict(int)
     manual_counts: dict[int, int] = defaultdict(int)
     unchanged_counts: dict[int, int] = defaultdict(int)
@@ -338,7 +385,7 @@ def _build_summary_from_manifest(summary: ManifestSummary, file_id: str) -> Stag
     for row in summary.rows:
         distinct_terms[row.column_id] += 1
         column_names[row.column_id] = row.column_name
-        _process_manifest_row(row, ai_counts, manual_counts, unchanged_counts, unique_mappings, cache)
+        _process_manifest_row(row, ai_counts, manual_counts, unchanged_counts, unique_mappings, cache, upload_timestamp)
 
     column_ids = sorted(distinct_terms.keys())
     sorted_mappings = sorted(unique_mappings.items(), key=lambda x: x[0])
@@ -373,6 +420,7 @@ def _track_mapping(
     mappings: dict[tuple[str, str, str], _MappingInfo],
     row: ManifestRow,
     cache: SessionCache,
+    upload_timestamp: datetime | None,
 ) -> None:
     """Deduplicates by (column, original, final) so we check conformance once per unique mapping."""
     # Empty string means no data; whitespace-only values pass through as semantically significant
@@ -384,5 +432,5 @@ def _track_mapping(
         return
     pv_set = cache.get_pvs_for_column(row.column_name)
     is_conformant = check_value_conformance(final, pv_set)
-    history = _build_history(row)
+    history = _build_history(row, upload_timestamp, pv_set)
     mappings[key] = _MappingInfo(is_conformant, history)

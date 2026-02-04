@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from httpx import AsyncClient
@@ -322,3 +323,197 @@ class TestTransformationHistoryContract:
             history = mappings[0]["history"]
             sources = [step["source"] for step in history]
             assert "ai" not in sources, "AI step should be omitted when value unchanged"
+
+    async def test_original_step_has_upload_timestamp(
+        self,
+        app_client: AsyncClient,
+        temp_storage: UploadStorage,
+        sample_csv_path: Path,
+    ) -> None:
+        """Original step timestamp uses the file upload time."""
+
+        # Given: An uploaded file with a manifest containing history
+        file_id = await upload_file(app_client, sample_csv_path)
+        meta = temp_storage.load(file_id)
+        assert meta is not None
+        create_harmonized_csv(meta.saved_path, {0: {"therapeutic_agents": "Changed Value"}})
+        _create_manifest_with_history(
+            storage=temp_storage,
+            file_id=file_id,
+            original_value="Original Value",
+            ai_value="Changed Value",
+            manual_overrides=[],
+        )
+
+        # When: Summary is requested
+        response = await app_client.post(
+            "/stage-5/summary",
+            json={"file_id": file_id},
+        )
+
+        # Then: Original step has a timestamp from the upload time
+        assert response.status_code == 200
+        mappings = response.json()["term_mappings"]
+        assert len(mappings) > 0
+
+        history = mappings[0]["history"]
+        original_step = next(s for s in history if s["source"] == "original")
+        assert original_step["timestamp"] is not None, "Original step should have upload timestamp"
+
+    async def test_each_step_has_pv_conformance_field(
+        self,
+        app_client: AsyncClient,
+        temp_storage: UploadStorage,
+        sample_csv_path: Path,
+    ) -> None:
+        """Every step in history includes is_pv_conformant boolean."""
+
+        # Given: A manifest with original + AI + user steps
+        file_id = await upload_file(app_client, sample_csv_path)
+        meta = temp_storage.load(file_id)
+        assert meta is not None
+        create_harmonized_csv(meta.saved_path, {0: {"therapeutic_agents": "User Override"}})
+        _create_manifest_with_history(
+            storage=temp_storage,
+            file_id=file_id,
+            original_value="Original Value",
+            ai_value="AI Value",
+            manual_overrides=[{
+                "user_id": "test-user@example.com",
+                "timestamp": "2024-01-15T14:30:00Z",
+                "value": "User Override",
+            }],
+        )
+
+        # When: Summary is requested
+        response = await app_client.post(
+            "/stage-5/summary",
+            json={"file_id": file_id},
+        )
+
+        # Then: Every step has is_pv_conformant field
+        assert response.status_code == 200
+        mappings = response.json()["term_mappings"]
+        assert len(mappings) > 0
+
+        history = mappings[0]["history"]
+        for step in history:
+            assert "is_pv_conformant" in step, f"Step {step['source']} missing is_pv_conformant"
+            assert isinstance(step["is_pv_conformant"], bool)
+
+    async def test_conformant_value_marked_true(
+        self,
+        app_client: AsyncClient,
+        temp_storage: UploadStorage,
+        sample_csv_path: Path,
+    ) -> None:
+        """Value in PV set has is_pv_conformant=True."""
+        # Given: A manifest with a value that will be in the PV set
+        file_id = await upload_file(app_client, sample_csv_path)
+        meta = temp_storage.load(file_id)
+        assert meta is not None
+        create_harmonized_csv(meta.saved_path, {0: {"therapeutic_agents": "Conformant Value"}})
+        _create_manifest_with_history(
+            storage=temp_storage,
+            file_id=file_id,
+            original_value="Original",
+            ai_value="Conformant Value",
+            manual_overrides=[],
+        )
+
+        # When: Summary is requested with a mocked PV set containing the value
+        with patch("src.stage_5_review_summary.router.ensure_pvs_loaded") as mock_ensure:
+            mock_cache = mock_ensure.return_value
+            mock_cache.get_pvs_for_column.return_value = frozenset({"Conformant Value"})
+
+            response = await app_client.post(
+                "/stage-5/summary",
+                json={"file_id": file_id},
+            )
+
+        # Then: AI step (with "Conformant Value") is marked conformant
+        assert response.status_code == 200
+        mappings = response.json()["term_mappings"]
+        assert len(mappings) > 0
+
+        history = mappings[0]["history"]
+        ai_step = next(s for s in history if s["source"] == "ai")
+        assert ai_step["is_pv_conformant"] is True
+
+    async def test_non_conformant_value_marked_false(
+        self,
+        app_client: AsyncClient,
+        temp_storage: UploadStorage,
+        sample_csv_path: Path,
+    ) -> None:
+        """Value NOT in PV set has is_pv_conformant=False."""
+        # Given: A manifest with values not in the PV set
+        file_id = await upload_file(app_client, sample_csv_path)
+        meta = temp_storage.load(file_id)
+        assert meta is not None
+        create_harmonized_csv(meta.saved_path, {0: {"therapeutic_agents": "Non Conformant"}})
+        _create_manifest_with_history(
+            storage=temp_storage,
+            file_id=file_id,
+            original_value="Original",
+            ai_value="Non Conformant",
+            manual_overrides=[],
+        )
+
+        # When: Summary is requested with a mocked PV set NOT containing the values
+        with patch("src.stage_5_review_summary.router.ensure_pvs_loaded") as mock_ensure:
+            mock_cache = mock_ensure.return_value
+            mock_cache.get_pvs_for_column.return_value = frozenset({"Other Value"})
+
+            response = await app_client.post(
+                "/stage-5/summary",
+                json={"file_id": file_id},
+            )
+
+        # Then: Steps with non-conformant values are marked as such
+        assert response.status_code == 200
+        mappings = response.json()["term_mappings"]
+        assert len(mappings) > 0
+
+        history = mappings[0]["history"]
+        ai_step = next(s for s in history if s["source"] == "ai")
+        assert ai_step["is_pv_conformant"] is False
+
+    async def test_no_pv_set_defaults_conformant(
+        self,
+        app_client: AsyncClient,
+        temp_storage: UploadStorage,
+        sample_csv_path: Path,
+    ) -> None:
+        """When no PV set exists, all steps default to is_pv_conformant=True."""
+        # Given: A manifest with transformation history
+        file_id = await upload_file(app_client, sample_csv_path)
+        meta = temp_storage.load(file_id)
+        assert meta is not None
+        create_harmonized_csv(meta.saved_path, {0: {"therapeutic_agents": "Any Value"}})
+        _create_manifest_with_history(
+            storage=temp_storage,
+            file_id=file_id,
+            original_value="Original",
+            ai_value="Any Value",
+            manual_overrides=[],
+        )
+
+        # When: Summary is requested with no PV set (returns None)
+        with patch("src.stage_5_review_summary.router.ensure_pvs_loaded") as mock_ensure:
+            mock_cache = mock_ensure.return_value
+            mock_cache.get_pvs_for_column.return_value = None
+
+            response = await app_client.post(
+                "/stage-5/summary",
+                json={"file_id": file_id},
+            )
+
+        # Then: All steps default to conformant (graceful degradation)
+        assert response.status_code == 200
+        mappings = response.json()["term_mappings"]
+        assert len(mappings) > 0
+
+        history = mappings[0]["history"]
+        for step in history:
+            assert step["is_pv_conformant"] is True, f"Step {step['source']} should default to conformant"
