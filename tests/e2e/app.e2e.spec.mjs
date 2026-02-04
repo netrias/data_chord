@@ -385,3 +385,18 @@ test('row mode shows all changed cells for each row', async ({ page }) => {
   // Should have at least 2 cells (one for each changed column)
   expect(cellCount).toBeGreaterThanOrEqual(2);
 });
+
+test('changing file clears previous session', async ({ page }) => {
+  await mockDataModels(page);
+
+  // Given: a file is uploaded
+  const fileId1 = await uploadAndAnalyze(page, fileFixture('basic.csv'));
+
+  // When: user clicks change file and uploads another
+  await page.goto('/stage-1');
+  await page.click('#changeFileButton');
+  const fileId2 = await uploadAndAnalyze(page, fileFixture('basic.csv'));
+
+  // Then: new file has different ID (fresh session)
+  expect(fileId2).not.toBe(fileId1);
+});
