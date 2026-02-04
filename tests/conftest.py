@@ -28,6 +28,26 @@ MAX_EXAMPLES_LIMIT = 20
 MANUAL_COLUMN_CONFIDENCE = 0.2
 
 
+def review_state_payload() -> dict[str, object]:
+    """why: reuse a consistent review state payload across tests."""
+    return {
+        "review_mode": "column",
+        "sort_mode": "original",
+        "column_mode": {
+            "current_unit": 1,
+            "completed_units": [],
+            "flagged_units": [],
+            "batch_size": 5,
+        },
+        "row_mode": {
+            "current_unit": 1,
+            "completed_units": [],
+            "flagged_units": [],
+            "batch_size": 5,
+        },
+    }
+
+
 @dataclass
 class MockCDEMappingResult:
     """why: simulate the structure returned by NetriasClient.discover_cde_mapping."""
@@ -152,6 +172,7 @@ async def app_client(
     import src.stage_3_harmonize.router as stage3_router
     import src.stage_4_review_results.router as stage4_router
     import src.stage_5_review_summary.router as stage5_router
+    from src.domain.storage import FileStore, LocalStorageBackend
 
     original_storage = deps_module._storage
     original_router_storage = router_module._storage
@@ -160,6 +181,10 @@ async def app_client(
 
     original_get_storage = deps_module.get_upload_storage
     deps_module.get_upload_storage = lambda: temp_storage
+
+    original_get_file_store = deps_module.get_file_store
+    test_store = FileStore(LocalStorageBackend(temp_storage._base_dir / "manifests"))
+    deps_module.get_file_store = lambda: test_store
 
     original_stage3_storage = stage3_router._storage
     stage3_router._storage = temp_storage
@@ -182,6 +207,7 @@ async def app_client(
         deps_module._storage = original_storage
         router_module._storage = original_router_storage
         deps_module.get_upload_storage = original_get_storage
+        deps_module.get_file_store = original_get_file_store
         stage3_router._storage = original_stage3_storage
         stage4_router.get_upload_storage = original_stage4_get_storage
         stage5_router.get_upload_storage = original_stage5_get_storage
@@ -231,7 +257,7 @@ async def upload_and_analyze(client: AsyncClient, csv_path: Path) -> str:
 
 def create_harmonized_csv(original_path: Path, changes: dict[int, dict[str, str]]) -> Path:
     """why: create a .harmonized.csv alongside the original with specified changes."""
-    with original_path.open("r", newline="", encoding="utf-8") as f:
+    with original_path.open("r", newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         rows = list(reader)
         headers = reader.fieldnames or []
@@ -317,7 +343,7 @@ def create_manifest_for_file(
     changes: dict[int, dict[str, str]],
 ) -> Path:
     """why: create a manifest parquet for Stage 4 tests in the correct storage location."""
-    with original_path.open("r", newline="", encoding="utf-8") as f:
+    with original_path.open("r", newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         original_rows = list(reader)
         headers = list(reader.fieldnames or [])
@@ -345,7 +371,7 @@ def create_manifest_with_manual_override(
     original_path: Path,
 ) -> Path:
     """why: create a manifest with a manual override for testing summary categorization."""
-    with original_path.open("r", newline="", encoding="utf-8") as f:
+    with original_path.open("r", newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         original_rows = list(reader)
         headers = list(reader.fieldnames or [])

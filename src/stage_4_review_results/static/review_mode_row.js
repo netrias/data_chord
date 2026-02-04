@@ -29,7 +29,9 @@ const _buildRowsWithChanges = (rows, sortMode = SORT_MODE.ORIGINAL, filterOption
     .map((row) => ({
       ...row,
       changedCells: getChangedCells(row, filterOptions),
-      rowIndex: row.sourceRowNumber ?? row.rowNumber,
+      rowIndex: row.sourceRowNumbers?.[0] ?? row.sourceRowNumber ?? row.rowNumber,
+      rowIndices: row.sourceRowNumbers ??
+        (row.sourceRowNumber ? [row.sourceRowNumber] : [row.rowNumber]),
     }));
 
   if (sortMode === SORT_MODE.ORIGINAL || !sortMode) {
@@ -176,7 +178,7 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
       const entry = {
         ...cell,
         topSuggestions: cell.topSuggestions ?? [],
-        rowIndices: [row.rowIndex],
+        rowIndices: row.rowIndices ?? [row.rowIndex],
       };
       const card = createValueCard({
         entry,

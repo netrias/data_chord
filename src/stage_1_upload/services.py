@@ -55,6 +55,9 @@ def _read_csv_sample(csv_path: Path, max_rows: int) -> tuple[int, list[str], lis
     with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         headers = list(reader.fieldnames or [])
+        duplicates = {name for name in headers if headers.count(name) > 1}
+        if duplicates:
+            raise ValueError(f"Duplicate headers found: {', '.join(sorted(duplicates))}")
         total_rows = 0
         sample_rows: list[dict[str, str]] = []
         for row in reader:

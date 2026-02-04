@@ -29,7 +29,12 @@ from src.domain import (
     get_default_target_schema,
 )
 from src.domain.data_model_cache import SessionCache, get_session_cache
-from src.domain.dependencies import get_data_model_client, get_harmonize_service, get_upload_storage
+from src.domain.dependencies import (
+    get_data_model_client,
+    get_file_store,
+    get_harmonize_service,
+    get_upload_storage,
+)
 from src.domain.harmonize import HarmonizeResult
 from src.domain.manifest import (
     ConfidenceBucket,
@@ -43,6 +48,7 @@ from src.domain.manifest import (
 from src.domain.manifest.writer import apply_pv_adjustments_batch
 from src.domain.pv_persistence import save_pv_manifest_to_disk
 from src.domain.pv_validation import compute_pv_adjustment
+from src.domain.storage import FileType
 
 MODULE_DIR = Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"
@@ -93,6 +99,9 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
     meta = _storage.load(payload.file_id)
     if not meta:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please rerun analysis.")
+
+    store = get_file_store()
+    store.delete(payload.file_id, FileType.REVIEW_OVERRIDES)
 
     stored_manifest = _storage.load_manifest(payload.file_id)
     manifest_payload = payload.manifest or cast(ManifestPayload | None, stored_manifest)

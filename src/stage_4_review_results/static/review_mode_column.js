@@ -38,8 +38,8 @@ const _getPopulatedColumnIndices = (rows) => {
   for (let colIdx = 0; colIdx < columnCount; colIdx++) {
     for (const row of rows) {
       const cell = row.cells[colIdx];
-      const hasOriginal = cell?.originalValue && cell.originalValue.trim() !== '';
-      const hasHarmonized = cell?.harmonizedValue && cell.harmonizedValue.trim() !== '';
+      const hasOriginal = cell?.originalValue !== null && cell?.originalValue !== undefined && cell.originalValue !== '';
+      const hasHarmonized = cell?.harmonizedValue !== null && cell?.harmonizedValue !== undefined && cell.harmonizedValue !== '';
       if (hasOriginal || hasHarmonized) {
         populated.add(colIdx);
         break;

@@ -87,6 +87,7 @@ class StageFourRow(BaseModel):
     recordId: str
     cells: list[StageFourCell]
     sourceRowNumber: int | None = None
+    sourceRowNumbers: list[int] | None = None
 
 
 class StageFourResultsResponse(BaseModel):
