@@ -263,7 +263,8 @@ def _classify_change(row: ManifestRow) -> ChangeType:
 
 
 def _get_final_value(row: ManifestRow) -> str:
-    return get_latest_override_value(row.manual_overrides) or row.top_harmonization
+    override = get_latest_override_value(row.manual_overrides)
+    return override if override is not None else row.top_harmonization
 
 
 def _build_history(

@@ -94,19 +94,49 @@ class DataModelClient:
 
         for model in data.get("items", []):
             if model.get("key") == data_model_key:
-                versions = model.get("versions", [])
-                return [
-                    DataModelVersion(version_label=v.get("version_label", "v1"))
-                    for v in versions
-                ]
+                raw_versions = model.get("versions", [])
+                # Log raw response to help debug version parsing issues
+                logger.info(
+                    "Raw versions response for %s: %s",
+                    data_model_key,
+                    raw_versions[:3] if raw_versions else "(empty)",
+                )
+
+                # Try version_label first, fall back to version_number
+                versions = []
+                for v in raw_versions:
+                    label = v.get("version_label") or v.get("version_number")
+                    if label is not None:
+                        # Convert numeric version to string
+                        versions.append(DataModelVersion(version_label=str(label)))
+                    else:
+                        logger.warning(
+                            "Version entry missing both version_label and version_number: %s",
+                            v,
+                        )
+
+                if not versions and raw_versions:
+                    logger.warning(
+                        "Version parsing returned empty list despite raw data. "
+                        "First entry keys: %s",
+                        list(raw_versions[0].keys()) if raw_versions else [],
+                    )
+                return versions
+        logger.warning(
+            "Data model %s not found in API response. Available models: %s",
+            data_model_key,
+            [m.get("key") for m in data.get("items", [])][:5],
+        )
         return []
 
     def get_latest_version(self, data_model_key: str) -> str:
         versions = self.fetch_versions(data_model_key)
         if not versions:
-            logger.warning("No versions found for %s, defaulting to v1", data_model_key)
-            return "v1"
-        return versions[-1].version_label
+            logger.warning("No versions found for %s, defaulting to 1", data_model_key)
+            return "1"
+        latest = versions[-1].version_label
+        logger.info("Using version %s for data model %s", latest, data_model_key)
+        return latest
 
     def fetch_cdes(
         self,
@@ -135,13 +165,37 @@ class DataModelClient:
         cde_key: str,
     ) -> frozenset[str]:
         """Returns frozenset for O(1) membership testing during validation."""
+        path = f"{_cde_path(data_model_key, version_label, cde_key)}/pvs"
         try:
-            data = self._get(f"{_cde_path(data_model_key, version_label, cde_key)}/pvs")
-            return frozenset(
-                item["value"] for item in data.get("items", [])
-            )
+            data = self._get(path)
+            items = data.get("items", [])
+            pv_count = len(items)
+
+            if pv_count == 0:
+                # Surface empty PV responses to help debug missing PVs
+                logger.warning(
+                    "PV fetch returned 0 items for %s/%s/%s. Response keys: %s",
+                    data_model_key,
+                    version_label,
+                    cde_key,
+                    list(data.keys()),
+                )
+            else:
+                logger.debug(
+                    "Fetched %d PVs for %s/%s/%s",
+                    pv_count,
+                    data_model_key,
+                    version_label,
+                    cde_key,
+                )
+
+            return frozenset(item["value"] for item in items)
         except DataModelClientError:
-            logger.warning("Failed to fetch PVs for %s, skipping validation", cde_key)
+            logger.warning(
+                "Failed to fetch PVs for %s (path: %s), skipping validation",
+                cde_key,
+                path,
+            )
             return frozenset()
 
     def fetch_pvs_batch(

@@ -347,18 +347,12 @@
   background-color: var(--warning-100);
 }
 
-/* Final value cell layout for warning icon positioning */
-.changes-table tbody tr td:last-child {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
 /* Reserve space for warning icon to keep text alignment consistent */
 .changes-table tbody tr td:last-child::before {
   content: "";
+  display: inline-block;
   width: 1rem;
-  flex-shrink: 0;
+  margin-right: var(--space-2);
 }
 
 .changes-table tbody tr.non-conformant td:last-child::before {
@@ -371,9 +365,11 @@
   font-size: 0.9rem;
   cursor: help;
   position: relative;
-  flex-shrink: 0;
+  display: inline-block;
   width: 1rem;
+  margin-right: var(--space-2);
   text-align: center;
+  vertical-align: middle;
 }
 
 .pv-warning-icon:hover::after {

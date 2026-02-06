@@ -30,8 +30,9 @@ Open http://localhost:8000 in your browser.
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `NETRIAS_API_KEY` | Yes | API key for Netrias harmonization and Data Model Store |
-| `DATA_MODEL_KEY` | Yes | Target data model identifier (e.g., `CCDI`) |
+| `DATA_MODEL_KEY` | Yes | Target data model identifier (e.g., `gc`) |
 | `DATA_MODEL_STORE_API_KEY` | No | Separate API key for Data Model Store (falls back to `NETRIAS_API_KEY`) |
+| `DEV_MODE` | No | Set to `true` to disable static file caching |
 
 ## Docker
 
@@ -45,28 +46,33 @@ docker run -p 8000:8000 --env-file .env data-chord
 
 ## Development
 
+If you have [just](https://github.com/casey/just) installed, run `just --list` for available shortcuts:
+
 ```bash
-# Install with dev dependencies
+just sync        # Install with dev dependencies
+just app-reload  # Run with auto-reload
+just test        # Run tests
+just lint        # Lint
+just typecheck   # Type check
+```
+
+Or use the underlying commands directly:
+
+```bash
 uv sync --extra dev
-
-# Run tests
 uv run pytest
-
-# Lint
 uv run ruff check src backend tests
-
-# Type check
 uv run basedpyright
 ```
 
 ## Workflow Stages
 
 1. **Upload** - Upload CSV file and analyze columns
-2. **Review Mappings** - Review/override AI-suggested column-to-model mappings
+2. **Review Columns** - Review/override AI-suggested column-to-model mappings
 3. **Harmonize** - Execute harmonization pipeline
 4. **Review Results** - Inspect and approve harmonized values
-5. **Export** - Download harmonized dataset and audit artifacts
+5. **Review Summary** - Review change statistics and download harmonized dataset
 
 ## CDE Endpoint Configuration
 
-Data Chord uses `netrias-client==0.1.0` for CDE discovery and harmonization. See [ADR 005](adr/ADR_005_cde_lambda_migration.md) for migration details and rollback procedure.
+Data Chord uses [netrias-client](https://github.com/netrias/netrias_client) for CDE discovery and harmonization. See [ADR 005](adr/ADR_005_cde_lambda_migration.md) for migration details and rollback procedure.

@@ -133,6 +133,9 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
         },
     )
 
+    # Relocate harmonized CSV from CWD into managed storage
+    _storage.relocate_harmonized_output(payload.file_id, meta.saved_path)
+
     # Store manifest and apply PV adjustments
     manifest_summary = await _read_store_and_adjust_manifest(
         payload.file_id, result.manifest_path
@@ -221,13 +224,37 @@ async def _fetch_and_cache_pvs(
     cache: SessionCache, data_model_key: str, version_label: str, cde_keys: list[str], file_id: str
 ) -> None:
     client = get_data_model_client()
+    _router_logger.info(
+        "Fetching PVs from Data Model Store",
+        extra={
+            "file_id": file_id,
+            "data_model_key": data_model_key,
+            "version_label": version_label,
+            "cde_keys": cde_keys,
+        },
+    )
     pv_map = await run_in_threadpool(client.fetch_pvs_batch, data_model_key, version_label, cde_keys)
     cache.set_pvs_batch(pv_map)
     pv_counts = {k: len(v) for k, v in pv_map.items()}
+    total_pvs = sum(pv_counts.values())
+
     _router_logger.info(
         "Fetched PVs for session",
-        extra={"file_id": file_id, "cde_count": len(pv_map), "pv_counts": pv_counts},
+        extra={"file_id": file_id, "cde_count": len(pv_map), "pv_counts": pv_counts, "total_pvs": total_pvs},
     )
+
+    # Warn if no PVs were found - likely indicates API issue or version mismatch
+    if total_pvs == 0 and cde_keys:
+        _router_logger.warning(
+            "No PVs found for any CDE. PV combobox will not be available. "
+            "Check Data Model Store API response and version_label.",
+            extra={
+                "file_id": file_id,
+                "data_model_key": data_model_key,
+                "version_label": version_label,
+                "cde_keys": cde_keys,
+            },
+        )
 
     # Persist PV manifest to disk for recovery after server restart
     save_pv_manifest_to_disk(file_id, cache, pv_map)

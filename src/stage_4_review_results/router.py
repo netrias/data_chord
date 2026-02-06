@@ -78,37 +78,23 @@ async def render_stage_four(request: Request) -> HTMLResponse:
 
 @stage_four_router.post("/rows", response_model=StageFourResultsResponse, name="stage_four_harmonized_rows")
 async def fetch_stage_four_rows(payload: StageFourResultsRequest) -> StageFourResultsResponse:
-    import time
-    t0 = time.perf_counter()
-
     storage: UploadStorage = get_upload_storage()
     meta = storage.load(payload.file_id)
     if not meta:
         raise HTTPException(status_code=404, detail="Upload not found. Please rerun harmonization.")
 
-    t1 = time.perf_counter()
     _, original_rows = load_csv(meta.saved_path)
-    t2 = time.perf_counter()
-    logger.info(f"[PERF] load_csv: {t2 - t1:.3f}s")
 
     manifest = _load_manifest(storage, payload.file_id)
     if manifest is None:
         raise HTTPException(status_code=404, detail="Harmonization manifest not found. Please rerun Stage 3.")
-    t3 = time.perf_counter()
-    logger.info(f"[PERF] load_manifest: {t3 - t2:.3f}s")
 
     column_info = _extract_columns_from_manifest(manifest)
-    t4 = time.perf_counter()
 
     # Load PVs before building transformations so pvSetAvailable/isPVConformant are populated
     column_pvs = _build_column_pvs(column_info, payload.file_id)
-    t5 = time.perf_counter()
-    logger.info(f"[PERF] build_column_pvs: {t5 - t4:.3f}s")
 
     columns = _build_columns_from_manifest(manifest, payload.file_id)
-    t6 = time.perf_counter()
-    logger.info(f"[PERF] build_columns_from_manifest: {t6 - t5:.3f}s, columns={len(columns)}")
-    logger.info(f"[PERF] total: {t6 - t0:.3f}s")
 
     return StageFourResultsResponse(
         columns=columns,
@@ -199,7 +185,7 @@ def _build_transformation(
         confidence = CONFIDENCE.HIGH if bucket == ConfidenceBucket.HIGH else CONFIDENCE.LOW
 
     manual_override = get_latest_override_value(row.manual_overrides)
-    current_value = manual_override if manual_override else harmonized_value
+    current_value = manual_override if manual_override is not None else harmonized_value
 
     pv_set = cache.get_pvs_for_column(col_key)
     pv_available = pv_set is not None and len(pv_set) > 0
@@ -232,10 +218,33 @@ def _build_column_pvs(columns: list[_ColumnInfo], file_id: str) -> dict[str, lis
     """Alphabetical sort ensures predictable dropdown ordering across page loads."""
     cache = ensure_pvs_loaded(file_id)
     column_pvs: dict[str, list[str]] = {}
+    columns_without_pvs: list[str] = []
+
     for col_info in columns:
         pv_set = cache.get_pvs_for_column(col_info.column_name)
         if pv_set:
             column_pvs[col_info.column_name] = sorted(pv_set)
+        else:
+            columns_without_pvs.append(col_info.column_name)
+
+    # Surface PV availability for debugging
+    pv_summary = {k: len(v) for k, v in column_pvs.items()}
+    logger.info(
+        "Built column PVs",
+        extra={
+            "file_id": file_id,
+            "columns_with_pvs": len(column_pvs),
+            "columns_without_pvs": columns_without_pvs[:5] if columns_without_pvs else [],
+            "pv_counts": pv_summary,
+        },
+    )
+
+    if not column_pvs and columns:
+        logger.warning(
+            "No PVs available for any column. PV combobox will not appear in Stage 4.",
+            extra={"file_id": file_id, "column_count": len(columns)},
+        )
+
     return column_pvs
 
 
@@ -390,7 +399,7 @@ async def get_non_conformant_values(file_id: FileIdPath) -> NonConformantRespons
     for row in manifest.rows:
         # Get the current value (latest override > AI harmonization)
         latest_override = get_latest_override_value(row.manual_overrides)
-        current_value = latest_override if latest_override else row.top_harmonization
+        current_value = latest_override if latest_override is not None else row.top_harmonization
 
         # Skip if we've already processed this exact mapping
         key = (row.column_name, row.to_harmonize, current_value or "")

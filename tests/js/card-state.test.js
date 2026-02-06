@@ -136,6 +136,20 @@ describe('determineCardState', () => {
       assert.strictEqual(state.originalIsClickable, true);
       assert.strictEqual(state.aiIsClickable, true);
     });
+
+    it('overrideIsKnownConformant=true skips pvSet check → conformant even if value not in pvSet', () => {
+      const input = createInput({
+        overrideValue: 'Value From Dropdown Selection',
+        overrideIsKnownConformant: true,
+      });
+
+      const state = determineCardState(input);
+
+      // Value is NOT in STANDARD_PV_SET, but overrideIsKnownConformant=true trusts it
+      assert.strictEqual(state.isConformant, true);
+      assert.strictEqual(state.showConformantHeader, true);
+      assert.strictEqual(state.showWarningIcon, false);
+    });
   });
 
   describe('Override to non-conformant value', () => {

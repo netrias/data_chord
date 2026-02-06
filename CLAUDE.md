@@ -1,20 +1,30 @@
 # Data Chord - Project Instructions
 
-## Workspace Setup
+## Tech Stack
 
-### Environment Variables
+- **Backend**: FastAPI + Uvicorn (port 8000)
+- **Templates**: Jinja2 (server-rendered HTML)
+- **Frontend**: Vanilla JavaScript + HTMX, TypeScript for type checking
+- **Testing**: pytest, pytest-asyncio, Playwright (E2E), Hypothesis (property-based)
+- **Code quality**: Ruff (linting/formatting), basedpyright (type checking), bandit (security)
+- **Package management**: uv (Python), npm (JS/Playwright)
 
-The `.env` file contains API keys and is gitignored. To avoid manually copying it for each new workspace, symlink from a central location:
+## Running the App
 
 ```bash
-# One-time setup: copy your .env to a central location
-mkdir -p ~/.config/data_chord
-cp .env ~/.config/data_chord/.env
-
-# In each new workspace: symlink to the central file
-ln -s ~/.config/data_chord/.env .env
+just sync              # Install dependencies (uv sync --extra dev)
+just app-reload        # Dev server with auto-reload (port 8000)
+just app               # Production server (port 8000)
+just test              # Python tests (excludes E2E)
+just test-e2e          # E2E tests (Playwright)
+just lint              # Ruff linting
+just typecheck         # basedpyright
+just js-check          # JS syntax check
 ```
 
+## Environment Variables
+
+The `.env` file is gitignored and contains API keys — never commit it. Symlinked from `~/.config/data_chord/.env`.
 
 ## Architecture
 
@@ -53,31 +63,11 @@ ln -s ~/.config/data_chord/.env .env
 
 ### Enforcement
 
-A pre-commit hook (`no-cross-stage-imports`) enforces this rule. It will fail if any `src/stage_X` module imports from another `src/stage_Y` module.
-
-To run manually:
-```bash
-grep -rn "from src\.stage_[0-9]" src/stage_* --include="*.py" | grep -v "from src\.stage_\([0-9]\).*src/stage_\1"
-```
-
-This should return no results.
-
-## Module Docstrings
-
-A module docstring answers: **"Does my new code belong here?"**
-
-Name the **axis of change** (what requirements cause this to change?) and the **constraint** (what property is preserved?). Use specific nouns/adjectives that embed the boundary test. See user CLAUDE.md for detailed examples and boundary test methodology.
-
-| Vague | Bounded |
-|-------|---------|
-| "Storage utilities" | "JSON-serialized typed storage for review state" |
-| "Validation helpers" | "Pure functions for validating against PV sets" |
-
-Don't list what the module doesn't do - the boundary test handles exclusion implicitly.
+A pre-commit hook (`no-cross-stage-imports`) enforces the stage independence rule.
 
 ## Function Comments (Project-Specific Examples)
 
-See user CLAUDE.md for full function comment guidelines. Project-specific examples:
+See global CLAUDE.md for full guidelines. Project-specific examples:
 
 | Good (why) | Bad (what) |
 |------------|------------|
