@@ -4,26 +4,59 @@ Data harmonization workflow application. Upload tabular data, review AI-suggeste
 
 For a comprehensive overview of what Data Chord does and why, see [app.md](app.md).
 
-## Requirements
+## First-Time Setup
 
-- Python 3.13+
-- [uv](https://docs.astral.sh/uv/) (Astral's Python package manager)
-- AWS credentials configured (for harmonization API access)
+### 1. Install uv (Python package manager)
 
-## Quick Start
+Data Chord uses [uv](https://docs.astral.sh/uv/) to manage Python and dependencies. You don't need to install Python separately — uv handles that automatically.
+
+**macOS / Linux:**
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+**Windows (PowerShell):**
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+After installing, **close and reopen your terminal** so the `uv` command is available.
+
+Verify it works:
+```bash
+uv --version
+```
+
+### 2. Clone the repository
 
 ```bash
-# Install dependencies
+git clone https://github.com/netrias/data_chord.git
+cd data_chord
+```
+
+### 3. Install dependencies
+
+```bash
 uv sync
+```
 
-# Create .env file with required keys
-cp .env.example .env  # Then edit with your API keys
+This automatically downloads the correct Python version (3.13+) and installs all project dependencies into an isolated virtual environment. Nothing is installed globally on your system.
 
-# Run the application
+### 4. Configure environment variables
+
+```bash
+cp .env.example .env
+```
+
+Open `.env` in a text editor and replace `your_api_key_here` with your Netrias API key (contact Netrias for access). The other defaults are fine for local development.
+
+### 5. Run the application
+
+```bash
 uv run uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Open http://localhost:8000 in your browser.
+Open http://localhost:8000 in your browser. You should see the Data Chord upload screen.
 
 ## Environment Variables
 
