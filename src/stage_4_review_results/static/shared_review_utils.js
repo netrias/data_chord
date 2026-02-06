@@ -582,10 +582,12 @@ const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange
 
   const originalValue = entry.originalValue ?? '';
   const aiSuggestedValue = entry.harmonizedValue ?? entry.originalValue ?? '—';
-  const aiIsConformant = entry.isPVConformant;
   const hasPVs = entry.pvSetAvailable;
   // Build Set for O(1) conformance checks
   const pvSet = new Set(pvValues);
+  // AI conformance: use first suggestion's flag, or check harmonizedValue directly
+  const aiIsConformant = entry.topSuggestions?.[0]?.isPVConformant
+    ?? (pvSet !== null && pvSet.has(entry.harmonizedValue ?? ''));
 
   // Clear the wrapper and add PV combobox
   inputWrapper.innerHTML = '';

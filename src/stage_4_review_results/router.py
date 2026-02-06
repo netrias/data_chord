@@ -232,10 +232,33 @@ def _build_column_pvs(columns: list[_ColumnInfo], file_id: str) -> dict[str, lis
     """Alphabetical sort ensures predictable dropdown ordering across page loads."""
     cache = ensure_pvs_loaded(file_id)
     column_pvs: dict[str, list[str]] = {}
+    columns_without_pvs: list[str] = []
+
     for col_info in columns:
         pv_set = cache.get_pvs_for_column(col_info.column_name)
         if pv_set:
             column_pvs[col_info.column_name] = sorted(pv_set)
+        else:
+            columns_without_pvs.append(col_info.column_name)
+
+    # Surface PV availability for debugging
+    pv_summary = {k: len(v) for k, v in column_pvs.items()}
+    logger.info(
+        "Built column PVs",
+        extra={
+            "file_id": file_id,
+            "columns_with_pvs": len(column_pvs),
+            "columns_without_pvs": columns_without_pvs[:5] if columns_without_pvs else [],
+            "pv_counts": pv_summary,
+        },
+    )
+
+    if not column_pvs and columns:
+        logger.warning(
+            "No PVs available for any column. PV combobox will not appear in Stage 4.",
+            extra={"file_id": file_id, "column_count": len(columns)},
+        )
+
     return column_pvs
 
 
