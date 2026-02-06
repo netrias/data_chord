@@ -6,16 +6,7 @@
  * values can be selected.
  */
 
-/**
- * Escape HTML special characters to prevent XSS.
- * @param {string} str
- * @returns {string}
- */
-const _escapeHtml = (str) => {
-  if (typeof str !== 'string') return String(str);
-  const escapeMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-  return str.replace(/[&<>"']/g, (c) => escapeMap[c]);
-};
+import { escapeHtml as _escapeHtml } from './shared_review_utils.js';
 
 /**
  * Build the HTML structure for the PV selection modal.

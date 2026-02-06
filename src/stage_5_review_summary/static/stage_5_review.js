@@ -481,6 +481,10 @@ const _showHistoryDialog = (mapping) => {
     }
   });
 
+  dialog.addEventListener('close', () => {
+    dialog.remove();
+  });
+
   document.body.appendChild(dialog);
   dialog.showModal();
 };
