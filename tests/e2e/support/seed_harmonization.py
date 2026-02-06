@@ -83,7 +83,6 @@ def _build_manifest_rows(
                     "error": None,
                     "row_indices": [row_idx],
                     "manual_overrides": [],
-                    "pv_adjustment": None,
                 }
             else:
                 grouped[original_value]["row_indices"].append(row_idx)
@@ -108,7 +107,6 @@ def _write_manifest(file_id: str, manifest_rows: list[dict[str, Any]], upload_ba
         "error": [row.get("error") for row in manifest_rows],
         "row_indices": [row.get("row_indices", []) for row in manifest_rows],
         "manual_overrides": [row.get("manual_overrides", []) for row in manifest_rows],
-        "pv_adjustment": [row.get("pv_adjustment") for row in manifest_rows],
     }, schema=schema)
     pq.write_table(table, manifest_path)
     return manifest_path

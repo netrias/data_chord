@@ -8,7 +8,7 @@ For a comprehensive overview of what Data Chord does and why, see [app.md](app.m
 
 ### 1. Install uv (Python package manager)
 
-Data Chord uses [uv](https://docs.astral.sh/uv/) to manage Python and dependencies. You don't need to install Python separately — uv handles that automatically.
+Data Chord uses [uv](https://docs.astral.sh/uv/) to manage Python and dependencies. You don't need to install Python separately — uv handles that automatically. See the [uv installation docs](https://docs.astral.sh/uv/getting-started/installation/) for other install methods or troubleshooting.
 
 **macOS / Linux:**
 ```bash

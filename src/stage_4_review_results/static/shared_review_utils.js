@@ -148,6 +148,13 @@ export const cellNeedsReview = (cell, options = {}) => {
     return true;
   }
 
+  // Non-conformant values always need review regardless of filter toggles.
+  // Must come after NO_RECOMMENDATION (nothing to review) but before
+  // unchanged/case-only checks (non-conformant overrides both).
+  if (cell.pvSetAvailable && !cell.isPVConformant) {
+    return true;
+  }
+
   // Handle unchanged values based on toggle
   if (original === harmonized) {
     return showUnchangedValues;
@@ -159,43 +166,6 @@ export const cellNeedsReview = (cell, options = {}) => {
   }
 
   return true;
-};
-
-/**
- * Check if a row has any cells that need review.
- * Includes cells where AI changed the value OR where no AI recommendation was provided.
- * Note: whitespace is semantically significant in ontological harmonization.
- * @param {Object} row - Row object containing cells array
- * @param {Object} [options] - Filter options passed to cellNeedsReview
- * @returns {boolean}
- */
-export const rowHasChanges = (row, options = {}) => {
-  if (!row?.cells) return false;
-  for (const cell of row.cells) {
-    if (cellNeedsReview(cell, options)) {
-      return true;
-    }
-  }
-  return false;
-};
-
-/**
- * Get cells from a row that need review.
- * Includes cells where AI changed value OR no AI recommendation was provided.
- * Note: whitespace is semantically significant in ontological harmonization.
- * @param {Object} row - Row object containing cells array
- * @param {Object} [options] - Filter options passed to cellNeedsReview
- * @returns {Array} Array of cells needing review
- */
-export const getChangedCells = (row, options = {}) => {
-  if (!row?.cells) return [];
-  const reviewCells = [];
-  for (const cell of row.cells) {
-    if (cellNeedsReview(cell, options)) {
-      reviewCells.push(cell);
-    }
-  }
-  return reviewCells;
 };
 
 /**
@@ -242,8 +212,6 @@ const _buildCardClasses = (entry) => {
   // Add recommendation type class for special states
   if (entry.recommendationType === RECOMMENDATION_TYPE.NO_RECOMMENDATION) {
     classes.push('no-recommendation');
-  } else if (entry.harmonizedValue === null) {
-    classes.push('needs-review');
   }
 
   return classes.join(' ');
@@ -585,9 +553,8 @@ const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange
   const hasPVs = entry.pvSetAvailable;
   // Build Set for O(1) conformance checks
   const pvSet = new Set(pvValues);
-  // AI conformance: use first suggestion's flag, or check harmonizedValue directly
-  const aiIsConformant = entry.topSuggestions?.[0]?.isPVConformant
-    ?? (pvSet !== null && pvSet.has(entry.harmonizedValue ?? ''));
+  // Backend computes conformance against the PV-adjusted harmonized value
+  const aiIsConformant = entry.isPVConformant;
 
   // Clear the wrapper and add PV combobox
   inputWrapper.innerHTML = '';
@@ -666,13 +633,7 @@ const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange
     applyValueChange(value);
   });
 
-  // Return cleanup function
-  return () => {
-    revertCleanup();
-    if (combobox.destroy) {
-      combobox.destroy();
-    }
-  };
+  return revertCleanup;
 };
 
 /**

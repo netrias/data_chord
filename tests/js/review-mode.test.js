@@ -3,7 +3,6 @@
  *
  * Tests for Stage 4 review mode logic including:
  * - getTotalUnits consistency between column and row modes
- * - rowHasChanges and getChangedCells change detection
  * - getCurrentEntries boundary handling
  */
 
@@ -19,7 +18,7 @@ const sharedUtilsPath = join(__dirname, '../../src/stage_4_review_results/static
 const columnModePath = join(__dirname, '../../src/stage_4_review_results/static/review_mode_column.js');
 const rowModePath = join(__dirname, '../../src/stage_4_review_results/static/review_mode_row.js');
 
-const { rowHasChanges, getChangedCells, sortEntriesByConfidence, getMinConfidence, SORT_MODE } = await import(pathToFileURL(sharedUtilsPath).href);
+const { sortEntriesByConfidence, getMinConfidence, SORT_MODE } = await import(pathToFileURL(sharedUtilsPath).href);
 const { getTotalUnits: getColumnTotalUnits, getCurrentEntries: getColumnCurrentEntries } = await import(pathToFileURL(columnModePath).href);
 const { getTotalUnits: getRowTotalUnits, getCurrentEntries: getRowCurrentEntries } = await import(pathToFileURL(rowModePath).href);
 
@@ -48,92 +47,6 @@ const createChangedRow = (rowNumber = 1) => createRow([
 const createUnchangedRow = (rowNumber = 1) => createRow([
   createCell('same', 'same', 'col1'),
 ], rowNumber);
-
-describe('rowHasChanges', () => {
-  describe('detects changes correctly', () => {
-    it('returns true when originalValue differs from harmonizedValue', () => {
-      const row = createChangedRow();
-      assert.strictEqual(rowHasChanges(row), true);
-    });
-
-    it('returns false when all cells have matching values', () => {
-      const row = createUnchangedRow();
-      assert.strictEqual(rowHasChanges(row), false);
-    });
-
-    it('returns true if any cell has a change', () => {
-      const row = createRow([
-        createCell('same', 'same', 'col1'),
-        createCell('original', 'harmonized', 'col2'),
-      ]);
-      assert.strictEqual(rowHasChanges(row), true);
-    });
-  });
-
-  describe('handles edge cases', () => {
-    it('returns false for null row', () => {
-      assert.strictEqual(rowHasChanges(null), false);
-    });
-
-    it('returns false for undefined row', () => {
-      assert.strictEqual(rowHasChanges(undefined), false);
-    });
-
-    it('returns false for row without cells', () => {
-      assert.strictEqual(rowHasChanges({ rowNumber: 1 }), false);
-    });
-
-    it('returns false for row with empty cells array', () => {
-      assert.strictEqual(rowHasChanges({ cells: [] }), false);
-    });
-
-    it('treats whitespace differences as changes (whitespace is semantically significant)', () => {
-      const row = createRow([createCell('value', 'value ')]);
-      assert.strictEqual(rowHasChanges(row), true);
-    });
-
-    it('treats null harmonizedValue as different from non-null original', () => {
-      const row = createRow([createCell('original', null)]);
-      assert.strictEqual(rowHasChanges(row), true);
-    });
-  });
-});
-
-describe('getChangedCells', () => {
-  it('returns only cells where original differs from harmonized', () => {
-    const row = createRow([
-      createCell('same', 'same', 'col1'),
-      createCell('original', 'harmonized', 'col2'),
-      createCell('also-same', 'also-same', 'col3'),
-    ]);
-
-    const changed = getChangedCells(row);
-    assert.strictEqual(changed.length, 1);
-    assert.strictEqual(changed[0].columnKey, 'col2');
-  });
-
-  it('returns empty array for row with no changes', () => {
-    const row = createUnchangedRow();
-    const changed = getChangedCells(row);
-    assert.strictEqual(changed.length, 0);
-  });
-
-  it('returns empty array for null row', () => {
-    const changed = getChangedCells(null);
-    assert.strictEqual(changed.length, 0);
-  });
-
-  it('excludes cells with empty originalValue', () => {
-    const row = createRow([
-      createCell('', 'harmonized', 'col1'),
-      createCell('original', 'harmonized', 'col2'),
-    ]);
-
-    const changed = getChangedCells(row);
-    assert.strictEqual(changed.length, 1);
-    assert.strictEqual(changed[0].columnKey, 'col2');
-  });
-});
 
 describe('getTotalUnits consistency', () => {
   describe('both modes return 0 for empty data', () => {

@@ -91,7 +91,6 @@ def _make_row(
         error=None,
         row_indices=[0],
         manual_overrides=manual_overrides,
-        pv_adjustment=None,
     )
 
 

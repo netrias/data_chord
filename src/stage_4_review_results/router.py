@@ -61,7 +61,6 @@ _templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 
 class StageFourResultsRequest(BaseModel):
     file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_PATTERN)
-    manual_columns: list[str] = []
 
 
 stage_four_router = APIRouter(prefix="/stage-4", tags=["Stage 4 Review"])
@@ -342,11 +341,13 @@ def _sync_overrides_to_manifest(storage: UploadStorage, payload: SaveOverridesRe
     if not overrides_batch:
         return
 
-    add_manual_overrides_batch(
+    success = add_manual_overrides_batch(
         manifest_path=manifest_path,
         overrides=overrides_batch,
         user_id=None,
     )
+    if not success:
+        logger.error("Failed to sync overrides to manifest parquet", extra={"file_id": payload.file_id})
 
 
 def _collect_overrides_for_batch(

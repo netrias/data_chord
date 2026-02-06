@@ -1,19 +1,11 @@
 /**
  * Card State Tests
  *
- * Tests for Stage 4 value card state determination covering all scenarios:
- *
- * States:
- * - 'ai': Using AI suggestion (no override)
- * - 'original': Override set to original value (revert to original)
- * - 'override_conformant': Override is a valid PV
- * - 'override_non_conformant': Override is not a valid PV
- *
- * Visual outputs:
- * - showWarningIcon: PV warning icon visible
- * - showConformantHeader: Green header styling
- * - originalIsClickable: Original value has revert link
- * - aiIsClickable: AI suggestion has revert link (when struck through)
+ * Tests for Stage 4 value card state determination covering:
+ * - No override, conformant override, non-conformant override, revert to original
+ * - PV conformance styling (showWarningIcon, showConformantHeader)
+ * - overrideIsKnownConformant trust flag
+ * - Whitespace/case sensitivity (domain-critical)
  */
 
 import { describe, it } from 'node:test';
@@ -62,7 +54,6 @@ describe('determineCardState', () => {
 
       const state = determineCardState(input);
 
-      assert.strictEqual(state.activeValueType, 'ai');
       assert.strictEqual(state.activeValue, AI_SUGGESTION);
       assert.strictEqual(state.hasOverride, false);
       assert.strictEqual(state.isConformant, true);
@@ -78,7 +69,6 @@ describe('determineCardState', () => {
 
       const state = determineCardState(input);
 
-      assert.strictEqual(state.activeValueType, 'ai');
       assert.strictEqual(state.hasOverride, false);
       assert.strictEqual(state.isConformant, false);
       assert.strictEqual(state.showConformantHeader, false);
@@ -94,18 +84,8 @@ describe('determineCardState', () => {
 
       const state = determineCardState(input);
 
-      assert.strictEqual(state.activeValueType, 'ai');
       assert.strictEqual(state.showConformantHeader, false);
       assert.strictEqual(state.showWarningIcon, false);
-    });
-
-    it('revert links are NOT clickable when no override', () => {
-      const input = createInput({ overrideValue: '' });
-
-      const state = determineCardState(input);
-
-      assert.strictEqual(state.originalIsClickable, false);
-      assert.strictEqual(state.aiIsClickable, false);
     });
   });
 
@@ -118,7 +98,6 @@ describe('determineCardState', () => {
 
       const state = determineCardState(input);
 
-      assert.strictEqual(state.activeValueType, 'override_conformant');
       assert.strictEqual(state.activeValue, CONFORMANT_OVERRIDE);
       assert.strictEqual(state.hasOverride, true);
       assert.strictEqual(state.isConformant, true);
@@ -126,15 +105,18 @@ describe('determineCardState', () => {
       assert.strictEqual(state.showWarningIcon, false);
     });
 
-    it('original and AI become clickable when override exists', () => {
+    it('overrideIsKnownConformant=true skips pvSet check → conformant even if value not in pvSet', () => {
       const input = createInput({
-        overrideValue: CONFORMANT_OVERRIDE,
+        overrideValue: 'Value From Dropdown Selection',
+        overrideIsKnownConformant: true,
       });
 
       const state = determineCardState(input);
 
-      assert.strictEqual(state.originalIsClickable, true);
-      assert.strictEqual(state.aiIsClickable, true);
+      // Value is NOT in STANDARD_PV_SET, but overrideIsKnownConformant=true trusts it
+      assert.strictEqual(state.isConformant, true);
+      assert.strictEqual(state.showConformantHeader, true);
+      assert.strictEqual(state.showWarningIcon, false);
     });
 
     it('overrideIsKnownConformant=true skips pvSet check → conformant even if value not in pvSet', () => {
@@ -161,23 +143,11 @@ describe('determineCardState', () => {
 
       const state = determineCardState(input);
 
-      assert.strictEqual(state.activeValueType, 'override_non_conformant');
       assert.strictEqual(state.activeValue, NON_CONFORMANT_OVERRIDE);
       assert.strictEqual(state.hasOverride, true);
       assert.strictEqual(state.isConformant, false);
       assert.strictEqual(state.showConformantHeader, false);
       assert.strictEqual(state.showWarningIcon, true);
-    });
-
-    it('original and AI become clickable when non-conformant override exists', () => {
-      const input = createInput({
-        overrideValue: NON_CONFORMANT_OVERRIDE,
-      });
-
-      const state = determineCardState(input);
-
-      assert.strictEqual(state.originalIsClickable, true);
-      assert.strictEqual(state.aiIsClickable, true);
     });
   });
 
@@ -193,7 +163,6 @@ describe('determineCardState', () => {
 
       const state = determineCardState(input);
 
-      assert.strictEqual(state.activeValueType, 'original');
       assert.strictEqual(state.activeValue, conformantOriginal);
       assert.strictEqual(state.isConformant, true);
       assert.strictEqual(state.showConformantHeader, true);
@@ -209,33 +178,10 @@ describe('determineCardState', () => {
 
       const state = determineCardState(input);
 
-      assert.strictEqual(state.activeValueType, 'original');
       assert.strictEqual(state.activeValue, nonConformantOriginal);
       assert.strictEqual(state.isConformant, false);
       assert.strictEqual(state.showConformantHeader, false);
       assert.strictEqual(state.showWarningIcon, true);
-    });
-
-    it('activeValueType is "original" when override equals original', () => {
-      const input = createInput({
-        originalValue: ORIGINAL,
-        overrideValue: ORIGINAL,
-      });
-
-      const state = determineCardState(input);
-
-      assert.strictEqual(state.activeValueType, 'original');
-    });
-
-    it('revert links are clickable when override is original value', () => {
-      const input = createInput({
-        overrideValue: ORIGINAL,
-      });
-
-      const state = determineCardState(input);
-
-      assert.strictEqual(state.originalIsClickable, true);
-      assert.strictEqual(state.aiIsClickable, true);
     });
   });
 
@@ -248,20 +194,8 @@ describe('determineCardState', () => {
 
       const state = determineCardState(input);
 
-      assert.strictEqual(state.activeValueType, 'ai');
       assert.strictEqual(state.activeValue, AI_SUGGESTION);
       assert.strictEqual(state.hasOverride, false);
-    });
-
-    it('clickable links disabled when no override', () => {
-      const input = createInput({
-        overrideValue: '',
-      });
-
-      const state = determineCardState(input);
-
-      assert.strictEqual(state.originalIsClickable, false);
-      assert.strictEqual(state.aiIsClickable, false);
     });
   });
 
@@ -275,9 +209,6 @@ describe('determineCardState', () => {
       const state = determineCardState(input);
 
       assert.strictEqual(state.hasOverride, false);
-      assert.strictEqual(state.activeValueType, 'ai');
-      assert.strictEqual(state.originalIsClickable, false);
-      assert.strictEqual(state.aiIsClickable, false);
     });
 
     it('whitespace differences are preserved (whitespace is semantically significant)', () => {
@@ -310,7 +241,6 @@ describe('determineCardState', () => {
 
       // 'lung cancer' !== 'Lung Cancer' so it's NOT conformant
       assert.strictEqual(state.hasOverride, true);
-      assert.strictEqual(state.activeValueType, 'original');
       assert.strictEqual(state.isConformant, false, 'Case differences should make value non-conformant');
       assert.strictEqual(state.showWarningIcon, true, 'Warning should show for case-mismatched value');
     });
@@ -342,7 +272,7 @@ describe('determineCardState', () => {
       assert.strictEqual(state.showWarningIcon, true);
     });
 
-    it('original equals AI suggestion → original not clickable (would be no-op)', () => {
+    it('original equals AI suggestion with override → still has override', () => {
       const sameValue = 'Lung Cancer';
       const input = createInput({
         originalValue: sameValue,
@@ -352,10 +282,7 @@ describe('determineCardState', () => {
 
       const state = determineCardState(input);
 
-      // hasOverride is true, but original should not be clickable since it equals AI
       assert.strictEqual(state.hasOverride, true);
-      assert.strictEqual(state.originalIsClickable, false);
-      assert.strictEqual(state.aiIsClickable, true);
     });
   });
 
@@ -364,12 +291,10 @@ describe('determineCardState', () => {
     it('user types override → AI conformant to override non-conformant', () => {
       // Initial state: using AI (conformant)
       const initial = determineCardState(createInput({ overrideValue: '' }));
-      assert.strictEqual(initial.activeValueType, 'ai');
       assert.strictEqual(initial.showConformantHeader, true);
 
       // After typing non-conformant override
       const afterOverride = determineCardState(createInput({ overrideValue: NON_CONFORMANT_OVERRIDE }));
-      assert.strictEqual(afterOverride.activeValueType, 'override_non_conformant');
       assert.strictEqual(afterOverride.showWarningIcon, true);
       assert.strictEqual(afterOverride.showConformantHeader, false);
     });
@@ -377,11 +302,10 @@ describe('determineCardState', () => {
     it('user clicks original to revert → override to original (non-conformant)', () => {
       // Has an override
       const withOverride = determineCardState(createInput({ overrideValue: CONFORMANT_OVERRIDE }));
-      assert.strictEqual(withOverride.activeValueType, 'override_conformant');
+      assert.strictEqual(withOverride.isConformant, true);
 
       // User clicks original value to revert
       const afterRevert = determineCardState(createInput({ overrideValue: ORIGINAL }));
-      assert.strictEqual(afterRevert.activeValueType, 'original');
       assert.strictEqual(afterRevert.showWarningIcon, true); // original 'lung cancer' not in PV set
     });
 
@@ -393,7 +317,6 @@ describe('determineCardState', () => {
       // User clicks AI suggestion (clears override)
       const afterRevert = determineCardState(createInput({ overrideValue: '' }));
       assert.strictEqual(afterRevert.hasOverride, false);
-      assert.strictEqual(afterRevert.activeValueType, 'ai');
       assert.strictEqual(afterRevert.showConformantHeader, true);
     });
 
@@ -437,23 +360,23 @@ describe('isEffectiveOverride', () => {
 
 describe('Exhaustive truth table', () => {
   const testCases = [
-    // { hasPVs, aiConformant, override, expectedType, expectedWarning, expectedConformant }
-    { hasPVs: true,  aiConformant: true,  override: '',                    expectedType: 'ai',                       expectedWarning: false, expectedConformant: true },
-    { hasPVs: true,  aiConformant: false, override: '',                    expectedType: 'ai',                       expectedWarning: true,  expectedConformant: false },
-    { hasPVs: true,  aiConformant: true,  override: CONFORMANT_OVERRIDE,   expectedType: 'override_conformant',      expectedWarning: false, expectedConformant: true },
-    { hasPVs: true,  aiConformant: true,  override: NON_CONFORMANT_OVERRIDE, expectedType: 'override_non_conformant', expectedWarning: true,  expectedConformant: false },
-    { hasPVs: true,  aiConformant: true,  override: ORIGINAL,              expectedType: 'original',                 expectedWarning: true,  expectedConformant: false },
-    { hasPVs: true,  aiConformant: true,  override: AI_SUGGESTION,         expectedType: 'ai',                       expectedWarning: false, expectedConformant: true }, // override=AI means no override
-    { hasPVs: false, aiConformant: true,  override: '',                    expectedType: 'ai',                       expectedWarning: false, expectedConformant: false }, // no PVs = neutral
-    { hasPVs: false, aiConformant: false, override: 'anything',            expectedType: 'override_non_conformant',  expectedWarning: false, expectedConformant: false }, // no PVs = no warning
+    // { hasPVs, aiConformant, override, expectedWarning, expectedConformant }
+    { hasPVs: true,  aiConformant: true,  override: '',                      expectedWarning: false, expectedConformant: true },
+    { hasPVs: true,  aiConformant: false, override: '',                      expectedWarning: true,  expectedConformant: false },
+    { hasPVs: true,  aiConformant: true,  override: CONFORMANT_OVERRIDE,     expectedWarning: false, expectedConformant: true },
+    { hasPVs: true,  aiConformant: true,  override: NON_CONFORMANT_OVERRIDE, expectedWarning: true,  expectedConformant: false },
+    { hasPVs: true,  aiConformant: true,  override: ORIGINAL,                expectedWarning: true,  expectedConformant: false },
+    { hasPVs: true,  aiConformant: true,  override: AI_SUGGESTION,           expectedWarning: false, expectedConformant: true }, // override=AI means no override
+    { hasPVs: false, aiConformant: true,  override: '',                      expectedWarning: false, expectedConformant: false }, // no PVs = neutral
+    { hasPVs: false, aiConformant: false, override: 'anything',              expectedWarning: false, expectedConformant: false }, // no PVs = no warning
   ];
 
-  testCases.forEach(({ hasPVs, aiConformant, override, expectedType, expectedWarning, expectedConformant }) => {
+  testCases.forEach(({ hasPVs, aiConformant, override, expectedWarning, expectedConformant }) => {
     const pvDesc = hasPVs ? 'has PVs' : 'no PVs';
     const aiDesc = aiConformant ? 'AI conformant' : 'AI non-conformant';
     const overrideDesc = override === '' ? 'no override' : `override="${override}"`;
 
-    it(`${pvDesc}, ${aiDesc}, ${overrideDesc} → ${expectedType}`, () => {
+    it(`${pvDesc}, ${aiDesc}, ${overrideDesc} → warning=${expectedWarning}, conformant=${expectedConformant}`, () => {
       const input = createInput({
         hasPVs,
         pvSet: hasPVs ? STANDARD_PV_SET : null,
@@ -463,7 +386,6 @@ describe('Exhaustive truth table', () => {
 
       const state = determineCardState(input);
 
-      assert.strictEqual(state.activeValueType, expectedType, `Expected activeValueType=${expectedType}`);
       assert.strictEqual(state.showWarningIcon, expectedWarning, `Expected showWarningIcon=${expectedWarning}`);
       assert.strictEqual(state.isConformant, expectedConformant, `Expected isConformant=${expectedConformant}`);
     });

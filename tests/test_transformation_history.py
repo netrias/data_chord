@@ -24,7 +24,6 @@ def _create_manifest_with_history(
     original_value: str,
     ai_value: str,
     manual_overrides: list[dict[str, str | None]],
-    pv_adjustment: dict[str, str] | None = None,
 ) -> Path:
     """Create a manifest with specific transformation history for testing."""
     manifest_rows = [{
@@ -39,7 +38,6 @@ def _create_manifest_with_history(
         "error": None,
         "row_indices": [0],
         "manual_overrides": manual_overrides,
-        "pv_adjustment": pv_adjustment,
     }]
 
     manifest_dir = storage.manifest_dir
@@ -284,7 +282,7 @@ class TestTransformationHistoryContract:
         for step in history:
             assert "value" in step, "Each step must have a value"
             assert "source" in step, "Each step must have a source"
-            assert step["source"] in ("original", "ai", "user", "system")
+            assert step["source"] in ("original", "ai", "user")
 
     async def test_no_ai_step_when_value_unchanged(
         self,

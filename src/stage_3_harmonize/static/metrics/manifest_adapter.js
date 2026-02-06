@@ -33,6 +33,7 @@ const _normalizeColumnBreakdown = (serverColumn) => {
     uniqueTerms: _toSafeNumber(serverColumn.unique_terms),
     uniqueTermsChanged: _toSafeNumber(serverColumn.unique_terms_changed),
     uniqueTermsUnchanged: _toSafeNumber(serverColumn.unique_terms_unchanged),
+    nonConformantTerms: _toSafeNumber(serverColumn.non_conformant_terms),
     confidenceBucketsChanged: _normalizeConfidenceBuckets(serverColumn.confidence_buckets_changed),
   };
 };

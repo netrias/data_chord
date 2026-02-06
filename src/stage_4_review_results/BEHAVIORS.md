@@ -7,11 +7,10 @@ Running document of implemented and planned behaviors for the Stage 4 verificati
 ## Value Card States
 
 ### Override States
-- **No override**: Card shows original value → AI recommendation normally
+- **No override**: Card shows "was:" (original) → "now:" (AI recommendation)
 - **Has override**:
-  - AI suggestion shows with strikethrough
-  - Override value shows below in magenta
-  - Original value and AI suggestion become clickable revert links
+  - Card shows "was:" (original) → "now:" (override value)
+  - Revert button restores the AI suggestion
 
 ### PV Conformance States
 - **PV-conformant**: Green header (`--netrias-100` background, `--netrias-300` border)
@@ -27,21 +26,9 @@ Confidence indicators show a tooltip on hover explaining the confidence level.
 
 ---
 
-## Clickable Revert Links (Implemented)
+## Revert Button
 
-When a card has an override that differs from the AI suggestion:
-
-1. **Original value** becomes clickable (dashed underline)
-   - Click → sets override to original value
-   - Clears the input/combobox (override was set via click, not typed)
-   - Triggers conformance check (may show warning if non-conformant)
-
-2. **AI suggestion** (strikethrough) becomes clickable
-   - Click → clears override entirely
-   - Clears the input/combobox
-   - Returns card to normal AI-corrected state
-
-Both links only appear when there's an active non-matching override.
+When a card has an override that differs from the AI suggestion, a revert button appears in the "was:" context area. Clicking it restores the original value into the input, triggering a conformance check.
 
 ---
 
@@ -58,7 +45,7 @@ Both links only appear when there's an active non-matching override.
 
 ### Grid Size
 - Column mode: 3×3, 4×4, 5×5 grids
-- Row mode: 2, 4, 6, 8 rows per batch
+- Row mode: 5, 10, 15 rows per batch
 
 ### Filters
 - [x] Hide case-only changes (default: checked)
