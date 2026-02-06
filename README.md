@@ -46,17 +46,22 @@ docker run -p 8000:8000 --env-file .env data-chord
 
 ## Development
 
+If you have [just](https://github.com/casey/just) installed, run `just --list` for available shortcuts:
+
 ```bash
-# Install with dev dependencies
+just sync        # Install with dev dependencies
+just app-reload  # Run with auto-reload
+just test        # Run tests
+just lint        # Lint
+just typecheck   # Type check
+```
+
+Or use the underlying commands directly:
+
+```bash
 uv sync --extra dev
-
-# Run tests
 uv run pytest
-
-# Lint
 uv run ruff check src backend tests
-
-# Type check
 uv run basedpyright
 ```
 
