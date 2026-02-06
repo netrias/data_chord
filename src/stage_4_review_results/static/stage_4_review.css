@@ -1555,3 +1555,227 @@
 .clusterize-extra-row {
   /* Spacer rows for scroll position - must be empty */
 }
+
+/* ==========================================================================
+   PV Selection Modal - modal dialog for selecting permissible values
+   ========================================================================== */
+
+.pv-selection-dialog {
+  border: none;
+  border-radius: var(--radius-2xl);
+  padding: 0;
+  background: var(--white);
+  box-shadow:
+    0 4px 6px rgba(0, 0, 0, 0.05),
+    0 10px 20px rgba(0, 0, 0, 0.1),
+    0 20px 40px rgba(0, 0, 0, 0.1);
+  width: 720px;
+  max-width: 90vw;
+  max-height: 80vh;
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.pv-selection-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(2px);
+}
+
+.pv-selection-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.pv-selection-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--gray-100);
+  flex-shrink: 0;
+}
+
+.pv-selection-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--gray-900);
+}
+
+.pv-selection-close-btn {
+  background: var(--gray-100);
+  border: none;
+  font-size: 1.25rem;
+  line-height: 1;
+  color: var(--gray-500);
+  cursor: pointer;
+  width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.pv-selection-close-btn:hover {
+  background: var(--gray-200);
+  color: var(--gray-700);
+}
+
+.pv-selection-context {
+  padding: var(--space-4) var(--space-5);
+  background: var(--gray-50);
+  border-bottom: 1px solid var(--gray-100);
+  flex-shrink: 0;
+}
+
+.pv-selection-context-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.pv-selection-context-row + .pv-selection-context-row {
+  margin-top: var(--space-1);
+}
+
+.pv-selection-context-label {
+  color: var(--gray-400);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.pv-selection-context-value {
+  color: var(--gray-700);
+  font-weight: 500;
+  word-break: break-word;
+}
+
+.pv-selection-current {
+  color: var(--netrias-700);
+  font-weight: 600;
+}
+
+.pv-selection-search {
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--gray-100);
+  flex-shrink: 0;
+}
+
+.pv-selection-search-input {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-md);
+  font-size: 0.9rem;
+  color: var(--gray-800);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.pv-selection-search-input:focus {
+  outline: none;
+  border-color: var(--azure-400);
+  box-shadow: 0 0 0 2px var(--azure-50);
+}
+
+.pv-selection-search-input::placeholder {
+  color: var(--gray-400);
+}
+
+.pv-selection-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-2) 0;
+}
+
+.pv-selection-section {
+  padding: 0;
+}
+
+.pv-selection-section + .pv-selection-section {
+  margin-top: var(--space-2);
+  border-top: 1px solid var(--gray-100);
+  padding-top: var(--space-2);
+}
+
+.pv-selection-section-title {
+  padding: var(--space-2) var(--space-5);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--gray-400);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.pv-selection-option {
+  padding: var(--space-2) var(--space-5);
+  cursor: pointer;
+  font-size: 0.95rem;
+  color: var(--gray-700);
+  transition: background var(--transition-fast);
+}
+
+.pv-selection-option:hover {
+  background: var(--gray-100);
+}
+
+/* Disabled/non-conformant suggestion styling */
+.pv-selection-option--disabled {
+  color: var(--gray-400);
+  text-decoration: line-through;
+  cursor: not-allowed;
+  font-style: italic;
+}
+
+.pv-selection-option--disabled:hover {
+  background: transparent;
+}
+
+.pv-selection-empty {
+  padding: var(--space-4) var(--space-5);
+  text-align: center;
+  color: var(--gray-400);
+  font-style: italic;
+}
+
+/* Tooltip for non-conformant suggestions */
+.pv-selection-option--disabled[data-tooltip] {
+  position: relative;
+}
+
+.pv-selection-option--disabled[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: var(--space-5);
+  top: 100%;
+  margin-top: 4px;
+  background: var(--gray-800);
+  color: var(--white);
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-md);
+  font-size: 0.8rem;
+  font-weight: 500;
+  font-style: normal;
+  text-decoration: none;
+  line-height: 1.4;
+  white-space: normal;
+  width: max-content;
+  max-width: 300px;
+  z-index: 100;
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity var(--transition-fast), visibility var(--transition-fast);
+}
+
+.pv-selection-option--disabled[data-tooltip]:hover::after {
+  opacity: 1;
+  visibility: visible;
+}

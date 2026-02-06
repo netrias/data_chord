@@ -637,6 +637,7 @@ const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange
     suggestions,
     pvValues,
     initialValue: displayValue,
+    originalValue,
     onChange: applyValueChange,
   });
 
