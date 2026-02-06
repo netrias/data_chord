@@ -37,6 +37,7 @@ class ColumnBreakdownSchema(BaseModel):
     unique_terms: int
     unique_terms_changed: int
     unique_terms_unchanged: int
+    non_conformant_terms: int = 0
     confidence_buckets_changed: list[ConfidenceBucketSchema]
 
 
@@ -46,6 +47,7 @@ class ManifestSummarySchema(BaseModel):
     high_confidence_count: int
     medium_confidence_count: int
     low_confidence_count: int
+    non_conformant_terms: int = 0
     column_breakdowns: list[ColumnBreakdownSchema] = Field(default_factory=list)
 
 

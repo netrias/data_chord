@@ -36,9 +36,8 @@ class TermMapping(BaseModel):
 
 The history is built from the manifest's existing data:
 - `to_harmonize` → "original" step
-- `top_harmonization` → "ai" step (if different from original)
+- `top_harmonization` → "ai" step (if different from original; includes any PV adjustments applied in Stage 3)
 - `manual_overrides` list → "user" steps with timestamps and user IDs
-- `pv_adjustment` → "system" step (if present)
 
 **Deduplication**: Consecutive overrides with the same value are collapsed to avoid cluttering the history with entries created by rapid saves.
 

@@ -1,7 +1,8 @@
 """
 Apply manual overrides and PV adjustments to harmonization manifests.
 
-Preserves original harmonization data while appending override audit trail.
+Handles two write paths: manual overrides (with audit trail) and PV
+adjustments (transparent replacement of top_harmonization).
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from typing import Any, NamedTuple
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from src.domain.manifest.models import ManifestRow, ManualOverride, PVAdjustment, get_manifest_schema
+from src.domain.manifest.models import ManifestRow, ManualOverride, get_manifest_schema
 from src.domain.manifest.reader import read_manifest_parquet
 
 logger = logging.getLogger(__name__)
@@ -73,36 +74,17 @@ def _build_adjustment_map(
     return {(col, to_harm): (adjusted, source) for col, to_harm, adjusted, source in adjustments}
 
 
-def _apply_pv_adjustment(
-    row: ManifestRow,
-    adjusted_value: str,
-    source: str,
-    timestamp: str,
-    user_id: str,
-) -> ManifestRow:
-    pv_adj = PVAdjustment(
-        timestamp=timestamp,
-        original_harmonization=row.top_harmonization,
-        adjusted_value=adjusted_value,
-        source=source,
-        user_id=user_id,
-    )
-    return replace(row, top_harmonization=adjusted_value, pv_adjustment=pv_adj)
-
-
 def _apply_adjustments_to_rows(
     rows: list[ManifestRow],
     adjustment_map: dict[tuple[str, str], tuple[str, str]],
-    timestamp: str,
-    user_id: str,
 ) -> AdjustmentResult:
     updated: list[ManifestRow] = []
     adjusted_count = 0
     for row in rows:
         key = (row.column_name, row.to_harmonize)
         if key in adjustment_map:
-            adjusted_value, source = adjustment_map[key]
-            updated.append(_apply_pv_adjustment(row, adjusted_value, source, timestamp, user_id))
+            adjusted_value, _source = adjustment_map[key]
+            updated.append(replace(row, top_harmonization=adjusted_value))
             adjusted_count += 1
         else:
             updated.append(row)
@@ -112,7 +94,6 @@ def _apply_adjustments_to_rows(
 def apply_pv_adjustments_batch(
     manifest_path: Path,
     adjustments: list[tuple[str, str, str, str]],
-    user_id: str = "pv_adjustment",
 ) -> int:
     if not adjustments:
         return 0
@@ -123,8 +104,7 @@ def apply_pv_adjustments_batch(
         return 0
 
     adjustment_map = _build_adjustment_map(adjustments)
-    timestamp = datetime.now(UTC).isoformat()
-    result = _apply_adjustments_to_rows(summary.rows, adjustment_map, timestamp, user_id)
+    result = _apply_adjustments_to_rows(summary.rows, adjustment_map)
 
     if result.adjustment_count > 0 and not _write_manifest_parquet(manifest_path, result.rows):
         return 0
@@ -161,22 +141,14 @@ _MANIFEST_FIELDS = (
 )
 
 
-def _serialize_pv_adjustment(pv_adj: PVAdjustment | None) -> dict[str, str] | None:
-    if pv_adj is None:
-        return None
-    return asdict(pv_adj)
-
-
 def _rows_to_table(rows: list[ManifestRow]) -> pa.Table:
     data: dict[str, list[Any]] = {field: [] for field in _MANIFEST_FIELDS}
     data["manual_overrides"] = []
-    data["pv_adjustment"] = []
 
     for row in rows:
         for field in _MANIFEST_FIELDS:
             data[field].append(getattr(row, field))
         data["manual_overrides"].append([asdict(o) for o in row.manual_overrides])
-        data["pv_adjustment"].append(_serialize_pv_adjustment(row.pv_adjustment))
 
     return pa.Table.from_pydict(data, schema=get_manifest_schema())
 

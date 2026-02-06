@@ -246,20 +246,11 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, original
   // Initialize link with committed value
   link.textContent = committedValue;
 
-  /** Reset the combobox to empty state. */
-  wrapper.reset = () => {
-    committedValue = '';
-    link.textContent = '';
-  };
-
   /** Set the combobox to a specific value. */
   wrapper.setValue = (value) => {
     committedValue = value;
     link.textContent = value;
   };
-
-  /** Cleanup function (no-op now that dropdown is removed). */
-  wrapper.destroy = () => {};
 
   return wrapper;
 };

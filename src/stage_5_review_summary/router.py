@@ -274,8 +274,7 @@ def _build_history(
 ) -> list[TransformationStep]:
     """Build chronologically-sorted transformation history.
 
-    Shows only the final system change (PV adjustment takes precedence over AI).
-    Users don't see intermediate system states - just the final Data Chord result.
+    top_harmonization already includes any PV adjustments from Stage 3.
     """
     upload_ts_str = upload_timestamp.isoformat() if upload_timestamp else None
     steps: list[TransformationStep] = []
@@ -287,16 +286,12 @@ def _build_history(
         is_pv_conformant=check_value_conformance(row.to_harmonize, pv_set),
     ))
 
-    # Show only the final system change: PV adjustment if present, otherwise AI
-    system_value = row.pv_adjustment.adjusted_value if row.pv_adjustment else row.top_harmonization
-    system_timestamp = row.pv_adjustment.timestamp if row.pv_adjustment else upload_ts_str
-
-    if system_value != row.to_harmonize:
+    if row.top_harmonization != row.to_harmonize:
         steps.append(TransformationStep(
-            value=system_value,
+            value=row.top_harmonization,
             source="ai",
-            timestamp=system_timestamp,
-            is_pv_conformant=check_value_conformance(system_value, pv_set),
+            timestamp=upload_ts_str,
+            is_pv_conformant=check_value_conformance(row.top_harmonization, pv_set),
         ))
 
     last_override_value: str | None = None

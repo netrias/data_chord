@@ -29,6 +29,7 @@ from src.domain import (
     get_default_target_schema,
 )
 from src.domain.data_model_cache import SessionCache, get_session_cache
+from src.domain.demo_bypass import inject_demo_cdes_into_cache
 from src.domain.dependencies import (
     get_data_model_client,
     get_file_store,
@@ -47,7 +48,7 @@ from src.domain.manifest import (
 )
 from src.domain.manifest.writer import apply_pv_adjustments_batch
 from src.domain.pv_persistence import save_pv_manifest_to_disk
-from src.domain.pv_validation import compute_pv_adjustment
+from src.domain.pv_validation import check_value_conformance, compute_pv_adjustment
 from src.domain.storage import FileType
 
 MODULE_DIR = Path(__file__).parent
@@ -77,6 +78,7 @@ class ColumnStats(NamedTuple):
     total_rows: int
     changed_rows: int
     unique_terms_changed: int
+    non_conformant_terms: int
     confidence_counts: dict[ConfidenceBucket, int]
 
 
@@ -266,6 +268,12 @@ async def _fetch_pvs_for_session(file_id: str, manifest: ManifestPayload | None)
     column_cde_map = _extract_column_cde_mappings(manifest)
     cde_keys = list(set(column_cde_map.values()))
 
+    # Server restart between Stage 2 and Stage 3 clears in-memory CDEs; re-inject.
+    if not cache.has_cdes():
+        _router_logger.info("CDEs missing from cache; re-injecting demo CDEs", extra={"file_id": file_id})
+        client = get_data_model_client()
+        await run_in_threadpool(inject_demo_cdes_into_cache, file_id, client)
+
     model_info = _validate_pv_fetch_preconditions(cache, cde_keys, file_id)
     if model_info is None:
         return
@@ -307,7 +315,12 @@ async def _read_store_and_adjust_manifest(
         return None
 
     final_data = await _store_and_adjust_manifest(file_id, manifest_path, manifest_data)
-    return _convert_to_schema(final_data)
+    cache = get_session_cache(file_id)
+    column_pv_map = {
+        name: cache.get_pvs_for_column(name)
+        for name in {r.column_name for r in final_data.rows}
+    }
+    return _convert_to_schema(final_data, column_pv_map)
 
 
 def _compute_row_adjustment(
@@ -384,10 +397,14 @@ async def _apply_pv_adjustments(file_id: str, manifest_path: Path) -> int:
     return await run_in_threadpool(apply_pv_adjustments_batch, manifest_path, _records_to_tuples(adjustments))
 
 
-def _compute_column_stats(col_rows: list[ManifestRow]) -> ColumnStats:
+def _compute_column_stats(
+    col_rows: list[ManifestRow],
+    pv_set: frozenset[str] | None,
+) -> ColumnStats:
     total_rows = 0
     changed_rows = 0
     unique_terms_changed = 0
+    non_conformant_terms = 0
     confidence_counts: dict[ConfidenceBucket, int] = {b: 0 for b in ConfidenceBucket}
 
     for row in col_rows:
@@ -400,11 +417,18 @@ def _compute_column_stats(col_rows: list[ManifestRow]) -> ColumnStats:
             unique_terms_changed += 1
             confidence_counts[confidence_bucket(row.confidence_score)] += 1
 
-    return ColumnStats(total_rows, changed_rows, unique_terms_changed, confidence_counts)
+        if not check_value_conformance(row.top_harmonization, pv_set):
+            non_conformant_terms += 1
+
+    return ColumnStats(total_rows, changed_rows, unique_terms_changed, non_conformant_terms, confidence_counts)
 
 
-def _create_breakdown_schema(column_name: str, col_rows: list[ManifestRow]) -> ColumnBreakdownSchema:
-    stats = _compute_column_stats(col_rows)
+def _create_breakdown_schema(
+    column_name: str,
+    col_rows: list[ManifestRow],
+    pv_set: frozenset[str] | None,
+) -> ColumnBreakdownSchema:
+    stats = _compute_column_stats(col_rows, pv_set)
     unique_terms = len(col_rows)
     return ColumnBreakdownSchema(
         column_name=column_name,
@@ -415,6 +439,7 @@ def _create_breakdown_schema(column_name: str, col_rows: list[ManifestRow]) -> C
         unique_terms=unique_terms,
         unique_terms_changed=stats.unique_terms_changed,
         unique_terms_unchanged=unique_terms - stats.unique_terms_changed,
+        non_conformant_terms=stats.non_conformant_terms,
         confidence_buckets_changed=[
             ConfidenceBucketSchema(id=b.value, label=b.label, term_count=stats.confidence_counts[b])
             for b in ConfidenceBucket
@@ -422,24 +447,36 @@ def _create_breakdown_schema(column_name: str, col_rows: list[ManifestRow]) -> C
     )
 
 
-def _build_column_breakdowns(rows: list[ManifestRow]) -> list[ColumnBreakdownSchema]:
+def _build_column_breakdowns(
+    rows: list[ManifestRow],
+    column_pv_map: dict[str, frozenset[str] | None],
+) -> list[ColumnBreakdownSchema]:
     column_rows: dict[str, list[ManifestRow]] = defaultdict(list)
     for row in rows:
         column_rows[row.column_name].append(row)
 
-    breakdowns = [_create_breakdown_schema(name, col_rows) for name, col_rows in column_rows.items()]
-    breakdowns.sort(key=lambda b: (b.changed_rows == 0, -b.total_rows))
+    breakdowns = [
+        _create_breakdown_schema(name, col_rows, column_pv_map.get(name))
+        for name, col_rows in column_rows.items()
+    ]
+    # Columns needing attention (changes OR non-conformant) sort first
+    breakdowns.sort(key=lambda b: (b.changed_rows == 0 and b.non_conformant_terms == 0, -b.total_rows))
     return breakdowns
 
 
-def _convert_to_schema(manifest: ManifestSummary) -> ManifestSummarySchema:
-    column_breakdowns = _build_column_breakdowns(manifest.rows)
+def _convert_to_schema(
+    manifest: ManifestSummary,
+    column_pv_map: dict[str, frozenset[str] | None],
+) -> ManifestSummarySchema:
+    column_breakdowns = _build_column_breakdowns(manifest.rows, column_pv_map)
+    total_non_conformant = sum(b.non_conformant_terms for b in column_breakdowns)
     return ManifestSummarySchema(
         total_terms=manifest.total_terms,
         changed_terms=manifest.changed_terms,
         high_confidence_count=manifest.high_confidence_count,
         medium_confidence_count=manifest.medium_confidence_count,
         low_confidence_count=manifest.low_confidence_count,
+        non_conformant_terms=total_non_conformant,
         column_breakdowns=column_breakdowns,
     )
 

@@ -158,23 +158,15 @@ const fetchRows = async () => {
   }
 
   try {
-    console.time('fetchRows:networkRequest');
     const response = await fetch(resultsEndpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        file_id: fileId,
-        manual_columns: [],
-      }),
+      body: JSON.stringify({ file_id: fileId }),
     });
-    console.timeEnd('fetchRows:networkRequest');
     if (!response.ok) {
       throw new Error('Unable to load harmonized results.');
     }
-    console.time('fetchRows:parseJSON');
     const body = await response.json();
-    console.timeEnd('fetchRows:parseJSON');
-    console.log('fetchRows: received', body.columns?.length, 'columns');
     state.columns = body.columns || [];
     state.columnPVs = body.columnPVs || {};
     state.totalOriginalRows = body.totalOriginalRows || 0;
@@ -272,6 +264,20 @@ const scheduleOverrideSave = () => {
     overrideSaveTimeout = null;
     saveOverrides();
   }, OVERRIDE_SAVE_DELAY_MS);
+};
+
+/**
+ * Cancel any pending debounce and save immediately.
+ * Must complete before page navigation so the server finishes the manifest write.
+ */
+const flushPendingSaves = async () => {
+  if (overrideSaveTimeout) {
+    clearTimeout(overrideSaveTimeout);
+    overrideSaveTimeout = null;
+  }
+  if (Object.keys(state.pendingOverrides).length > 0) {
+    await saveOverrides();
+  }
 };
 
 /**
@@ -799,9 +805,11 @@ const loadStateFromDisk = async () => {
 };
 
 /**
- * Navigate to Stage 5.
+ * Flush overrides to the server, then navigate to Stage 5.
+ * Awaiting ensures the manifest parquet write completes before the page transitions.
  */
-const navigateToStage5 = () => {
+const navigateToStage5 = async () => {
+  await flushPendingSaves();
   advanceMaxReachedStage('review');
   const fileId = getFileIdFromUrl();
   const url = fileId ? `${stageFiveUrl}?file_id=${encodeURIComponent(fileId)}` : stageFiveUrl;
@@ -877,10 +885,10 @@ const showPVWarningDialog = (data) => {
     dialog.remove();
   });
 
-  dialog.querySelector('[data-action="proceed"]').addEventListener('click', () => {
+  dialog.querySelector('[data-action="proceed"]').addEventListener('click', async () => {
     dialog.close();
     dialog.remove();
-    navigateToStage5();
+    await navigateToStage5();
   });
 
   document.body.appendChild(dialog);

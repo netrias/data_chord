@@ -18,19 +18,12 @@
  */
 
 /**
- * @typedef {'ai'|'override_conformant'|'override_non_conformant'|'original'} ActiveValueType
- */
-
-/**
  * @typedef {Object} CardDisplayState
- * @property {ActiveValueType} activeValueType - Type of value currently active
  * @property {string} activeValue - The currently active value
  * @property {boolean} isConformant - Whether active value is PV-conformant
  * @property {boolean} hasOverride - Whether user has an override that differs from AI
  * @property {boolean} showWarningIcon - Whether to show PV warning icon
  * @property {boolean} showConformantHeader - Whether to show green conformant header
- * @property {boolean} originalIsClickable - Whether original value should be clickable (revert link)
- * @property {boolean} aiIsClickable - Whether AI suggestion should be clickable (revert link)
  */
 
 /**
@@ -73,30 +66,12 @@ export const determineCardState = (input) => {
     isConformant = aiIsConformant;
   }
 
-  // Derive: active value type for debugging/testing
-  /** @type {ActiveValueType} */
-  let activeValueType;
-  if (!hasOverride) {
-    activeValueType = 'ai';
-  } else if (overrideValue === originalValue) {
-    activeValueType = 'original';
-  } else if (isConformant) {
-    activeValueType = 'override_conformant';
-  } else {
-    activeValueType = 'override_non_conformant';
-  }
-
   return {
-    activeValueType,
     activeValue,
     isConformant,
     hasOverride,
     // Only show warning/conformant styling when PVs exist
     showWarningIcon: hasPVs && !isConformant,
     showConformantHeader: hasPVs && isConformant,
-    // Revert links only available when there's an override
-    // Original is only clickable if it differs from AI (clicking when same would be a no-op)
-    originalIsClickable: hasOverride && originalValue !== aiSuggestedValue,
-    aiIsClickable: hasOverride,
   };
 };

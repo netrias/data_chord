@@ -286,8 +286,6 @@
   justify-content: flex-end;
 }
 
-/* review-alert styles removed - notifications disabled */
-
 .batch-actions {
   display: flex;
   gap: var(--space-2);
@@ -700,12 +698,6 @@
   align-items: center;
   justify-content: center;
   z-index: 1;
-}
-
-.no-recommendation-text {
-  color: var(--gray-500);
-  font-style: italic;
-  font-weight: 500;
 }
 
 /* PV status icons (in card header row, right-aligned) */
@@ -1221,55 +1213,6 @@
 
 .row-context-table thead .row-context-highlight {
   background: var(--azure-100);
-}
-
-.row-context-dialog-footer {
-  padding: var(--space-3) var(--space-5);
-  border-top: 1px solid var(--gray-200);
-  display: flex;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.row-context-load-all {
-  padding: 0.6rem 1.4rem;
-  border: none;
-  border-radius: var(--radius-full);
-  background: linear-gradient(180deg, var(--white) 0%, var(--gray-100) 100%);
-  color: var(--gray-700);
-  font-weight: 600;
-  font-size: 0.875rem;
-  cursor: pointer;
-  box-shadow:
-    0 3px 0 var(--gray-300),
-    0 4px 8px rgba(0, 0, 0, 0.1),
-    inset 0 2px 0 rgba(255, 255, 255, 1),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.03);
-  transition: transform var(--transition-fast), box-shadow var(--transition-fast), filter var(--transition-fast);
-}
-
-.row-context-load-all:hover:not(:disabled) {
-  transform: translateY(-3px);
-  filter: brightness(102%);
-  box-shadow:
-    0 5px 0 var(--gray-300),
-    0 8px 16px rgba(0, 0, 0, 0.12),
-    inset 0 2px 0 rgba(255, 255, 255, 1),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.03);
-  color: var(--gray-900);
-}
-
-.row-context-load-all:active:not(:disabled) {
-  transform: translateY(1px);
-  box-shadow:
-    0 1px 0 var(--gray-300),
-    0 2px 4px rgba(0, 0, 0, 0.1),
-    inset 0 1px 2px rgba(0, 0, 0, 0.06);
-}
-
-.row-context-load-all:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .row-context-loading,

@@ -223,6 +223,21 @@
   color: var(--gray-700);
 }
 
+/* Non-conformant terms warning */
+.column-metric-card__non-conformant {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  margin-top: var(--space-2);
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--gray-600);
+  background-color: var(--gray-50);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-md);
+}
+
 /* Unique terms row with info icon */
 .column-metric-card__unique-terms-row {
   display: flex;

@@ -118,12 +118,33 @@ const _createUniqueTermsDisplay = (column) => {
   return container;
 };
 
+const _createNonConformantDisplay = (count) => {
+  /* "why: highlight non-conformant terms so users know manual review is needed." */
+  const container = document.createElement('div');
+  container.className = 'column-metric-card__non-conformant';
+
+  const icon = document.createElement('span');
+  icon.textContent = '\u26A0';
+  icon.setAttribute('aria-hidden', 'true');
+  container.appendChild(icon);
+
+  const text = document.createElement('span');
+  const plural = count === 1 ? 'term' : 'terms';
+  text.textContent = `${count} ${plural} not in approved values`;
+  container.appendChild(text);
+
+  return container;
+};
+
 const _createColumnCard = (column) => {
   // "why: build a card for each column; minimal display if nothing changed."
   const card = document.createElement('article');
   const hasChanges = column.changedRows > 0;
+  const hasNonConformant = (column.nonConformantTerms ?? 0) > 0;
 
-  card.className = hasChanges
+  // Use active styling when non-conformant terms exist, even with no changes
+  const needsAttention = hasChanges || hasNonConformant;
+  card.className = needsAttention
     ? 'card card--pad-md column-metric-card'
     : 'card card--inset card--pad-sm column-metric-card column-metric-card--no-changes';
 
@@ -137,6 +158,10 @@ const _createColumnCard = (column) => {
     noChanges.className = 'column-metric-card__no-changes';
     noChanges.textContent = '0 items changed';
     card.appendChild(noChanges);
+
+    if (hasNonConformant) {
+      card.appendChild(_createNonConformantDisplay(column.nonConformantTerms));
+    }
     return card;
   }
 
@@ -149,6 +174,10 @@ const _createColumnCard = (column) => {
   const confidenceDisplay = _createConfidenceDisplay(column.confidenceBucketsChanged, column.uniqueTermsChanged);
   if (confidenceDisplay) {
     card.appendChild(confidenceDisplay);
+  }
+
+  if (hasNonConformant) {
+    card.appendChild(_createNonConformantDisplay(column.nonConformantTerms));
   }
 
   return card;

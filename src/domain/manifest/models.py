@@ -45,17 +45,6 @@ class ManualOverride:
 
 
 @dataclass(frozen=True)
-class PVAdjustment:
-    """Recorded when harmonized value is adjusted to conform to PV set."""
-
-    timestamp: str
-    original_harmonization: str
-    adjusted_value: str
-    source: str
-    user_id: str = "pv_adjustment"
-
-
-@dataclass(frozen=True)
 class ManifestRow:
     job_id: str
     column_id: int
@@ -68,7 +57,6 @@ class ManifestRow:
     error: str | None
     row_indices: list[int]
     manual_overrides: list[ManualOverride]
-    pv_adjustment: PVAdjustment | None = None
 
 
 @dataclass(frozen=True)
@@ -128,14 +116,6 @@ def get_manifest_schema() -> pa.Schema:
         ("value", pa.string()),
     ])
 
-    pv_adjustment_struct = pa.struct([
-        ("timestamp", pa.string()),
-        ("original_harmonization", pa.string()),
-        ("adjusted_value", pa.string()),
-        ("source", pa.string()),
-        ("user_id", pa.string()),
-    ])
-
     return pa.schema([
         ("job_id", pa.string()),
         ("column_id", pa.int64()),
@@ -148,7 +128,6 @@ def get_manifest_schema() -> pa.Schema:
         ("error", pa.string()),
         ("row_indices", pa.list_(pa.int64())),
         ("manual_overrides", pa.list_(override_struct)),
-        ("pv_adjustment", pv_adjustment_struct),
     ])
 
 
@@ -163,7 +142,6 @@ __all__ = [
     "ManifestRow",
     "ManifestSummary",
     "ManualOverride",
-    "PVAdjustment",
     "completeness_bucket",
     "confidence_bucket",
     "get_latest_override_value",

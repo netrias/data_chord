@@ -194,7 +194,6 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
 
   const fileId = getFileIdFromUrl();
 
-  console.time('renderEntries:cardLoop');
   for (const entry of batchMeta.entries) {
     // rowCount is the true count; rowIndices may be truncated for large arrays
     const rowCount = entry.rowCount ?? entry.rowIndices.length;
@@ -242,11 +241,8 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
 
     wrapper.append(card);
   }
-  console.timeEnd('renderEntries:cardLoop');
 
-  console.time('renderEntries:domAppend');
   container.append(wrapper);
-  console.timeEnd('renderEntries:domAppend');
 };
 
 /**
