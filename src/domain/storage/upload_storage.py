@@ -74,14 +74,26 @@ class UploadTooLargeError(UploadError):
     pass
 
 
-def _remove_temp_manifest(source: Path, destination: Path) -> None:
-    """NetriasClient drops parquet files in CWD; clean up after copying to storage."""
+def _remove_temp_file(source: Path, destination: Path) -> None:
+    """NetriasClient drops files in CWD; clean up after copying to storage."""
     if source.resolve() == destination.resolve():
         return
     try:
         source.unlink()
     except OSError:
-        logger.debug("Could not remove temp manifest", extra={"path": str(source)})
+        logger.debug("Could not remove temp file", extra={"path": str(source)})
+
+
+def _find_harmonized_in_cwd(file_id: str, original_path: Path) -> Path | None:
+    """NetriasClient writes harmonized CSVs to CWD with varying name patterns."""
+    candidates = [
+        Path.cwd() / f"{file_id}{HARMONIZED_SUFFIX}",
+        original_path.with_name(f"{original_path.stem}{HARMONIZED_SUFFIX}"),
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
 
 
 class UploadStorage:
@@ -91,12 +103,14 @@ class UploadStorage:
         self._meta_dir: Path = base_dir / "meta"
         self._constraints: UploadConstraints = constraints
         self._manifest_dir: Path = base_dir / "manifests"
+        self._harmonized_dir: Path = base_dir / "harmonized"
         self._ensure_workspace()
 
     def _ensure_workspace(self) -> None:
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._meta_dir.mkdir(parents=True, exist_ok=True)
         self._manifest_dir.mkdir(parents=True, exist_ok=True)
+        self._harmonized_dir.mkdir(parents=True, exist_ok=True)
 
     async def store(self, upload: UploadFile) -> UploadedFileMeta:
         filename, suffix, content_type = self._extract_upload_info(upload)
@@ -201,13 +215,28 @@ class UploadStorage:
         """Move (not copy) to avoid leaving temp parquet files in CWD."""
         destination = self._manifest_dir / f"{file_id}_harmonization.parquet"
         shutil.copy2(manifest_path, destination)
-        _remove_temp_manifest(manifest_path, destination)
+        _remove_temp_file(manifest_path, destination)
         logger.info("Stored harmonization manifest", extra={"file_id": file_id, "path": str(destination)})
         return destination
 
     def load_harmonization_manifest_path(self, file_id: str) -> Path | None:
         path = self._manifest_dir / f"{file_id}_harmonization.parquet"
         return path if path.exists() else None
+
+    def relocate_harmonized_output(self, file_id: str, original_path: Path) -> Path | None:
+        """NetriasClient drops harmonized CSVs in CWD; move into managed storage."""
+        source = _find_harmonized_in_cwd(file_id, original_path)
+        if source is None:
+            return None
+        destination = self._harmonized_dir / f"{file_id}{HARMONIZED_SUFFIX}"
+        shutil.copy2(source, destination)
+        _remove_temp_file(source, destination)
+        logger.info("Relocated harmonized output", extra={"file_id": file_id, "path": str(destination)})
+        return destination
+
+    @property
+    def harmonized_dir(self) -> Path:
+        return self._harmonized_dir
 
     @property
     def manifest_dir(self) -> Path:
@@ -230,10 +259,11 @@ def describe_constraints(constraints: UploadConstraints) -> dict[str, str | int]
 
 
 def resolve_harmonized_path(original_path: Path, file_id: str) -> Path | None:
-    """Legacy jobs wrote output with varying naming conventions."""
+    """Managed storage is the primary location; CWD fallback covers pre-migration runs."""
+    harmonized_dir = original_path.parent.parent / "harmonized"
     candidates = [
+        harmonized_dir / f"{file_id}{HARMONIZED_SUFFIX}",
         original_path.with_name(f"{original_path.stem}{HARMONIZED_SUFFIX}"),
-        original_path.with_suffix(original_path.suffix + HARMONIZED_SUFFIX),
         Path.cwd() / f"{file_id}{HARMONIZED_SUFFIX}",
     ]
     for candidate in candidates:

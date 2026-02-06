@@ -32,3 +32,7 @@ outputs/
 # Hypothesis test database
 .hypothesis/
 .context/
+
+# Playwright / test artifacts
+.artifacts/
+test-results/

@@ -133,6 +133,9 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
         },
     )
 
+    # Relocate harmonized CSV from CWD into managed storage
+    _storage.relocate_harmonized_output(payload.file_id, meta.saved_path)
+
     # Store manifest and apply PV adjustments
     manifest_summary = await _read_store_and_adjust_manifest(
         payload.file_id, result.manifest_path
