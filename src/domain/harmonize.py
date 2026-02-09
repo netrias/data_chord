@@ -72,7 +72,7 @@ class HarmonizeService:
         try:
             cde_map = self._prepare_cde_map(file_path, target_schema, manifest)
             _apply_column_mappings(cde_map, column_mappings, cache)
-            return self._execute_harmonization(file_path, cde_map, job_id)
+            return self._execute_harmonization(file_path, cde_map, job_id, target_schema)
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception("Harmonize call failed; falling back to stub", exc_info=exc)
             return HarmonizeResult(job_id=job_id, status=HarmonizeStatus.FAILED, detail=str(exc))
@@ -107,12 +107,14 @@ class HarmonizeService:
         file_path: Path,
         cde_map: ManifestPayload,
         fallback_job_id: str,
+        target_schema: str,
     ) -> HarmonizeResult:
         if not self._client:
             raise RuntimeError("Netrias client unavailable")
 
-        # Note: netrias-client 0.1.0 renamed the parameter to 'manifest'; we pass our cde_map
-        netrias_result = self._client.harmonize(source_path=file_path, manifest=cde_map)
+        netrias_result = self._client.harmonize(
+            source_path=file_path, manifest=cde_map, data_commons_key=target_schema
+        )
         detail = str(getattr(netrias_result, "description", "Harmonization completed."))
         raw_status = str(getattr(netrias_result, "status", "succeeded"))
         try:
