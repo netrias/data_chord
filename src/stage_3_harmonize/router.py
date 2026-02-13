@@ -28,8 +28,7 @@ from src.domain import (
     format_column_label,
     get_default_target_schema,
 )
-from src.domain.data_model_cache import SessionCache, get_session_cache
-from src.domain.demo_bypass import inject_demo_cdes_into_cache
+from src.domain.data_model_cache import SessionCache, get_session_cache, populate_cde_cache
 from src.domain.dependencies import (
     get_data_model_client,
     get_file_store,
@@ -268,11 +267,11 @@ async def _fetch_pvs_for_session(file_id: str, manifest: ManifestPayload | None)
     column_cde_map = _extract_column_cde_mappings(manifest)
     cde_keys = list(set(column_cde_map.values()))
 
-    # Server restart between Stage 2 and Stage 3 clears in-memory CDEs; re-inject.
+    # Server restart between Stage 2 and Stage 3 clears in-memory CDEs; re-fetch.
     if not cache.has_cdes():
-        _router_logger.info("CDEs missing from cache; re-injecting demo CDEs", extra={"file_id": file_id})
+        _router_logger.info("CDEs missing from cache; re-fetching from Data Model Store", extra={"file_id": file_id})
         client = get_data_model_client()
-        await run_in_threadpool(inject_demo_cdes_into_cache, file_id, client)
+        await run_in_threadpool(populate_cde_cache, file_id, client)
 
     model_info = _validate_pv_fetch_preconditions(cache, cde_keys, file_id)
     if model_info is None:

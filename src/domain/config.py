@@ -14,6 +14,8 @@ class ConfigurationError(Exception):
 
 
 _DATA_MODEL_KEY_VAR = "DATA_MODEL_KEY"
+_CDE_RECOMMEND_URL_VAR = "CDE_RECOMMEND_URL"
+_CDE_RECOMMEND_URL_DEFAULT = "https://fdzit38sdj.execute-api.us-east-2.amazonaws.com"
 
 
 def get_data_model_key() -> str:
@@ -21,6 +23,15 @@ def get_data_model_key() -> str:
     if not key:
         raise ConfigurationError(f"{_DATA_MODEL_KEY_VAR} environment variable is required")
     return key
+
+
+def get_cde_recommend_url() -> str:
+    """Defaults to prod; set CDE_RECOMMEND_URL to override (e.g. staging)."""
+    return os.getenv(_CDE_RECOMMEND_URL_VAR, _CDE_RECOMMEND_URL_DEFAULT)
+
+
+def get_netrias_api_key() -> str | None:
+    return os.getenv("NETRIAS_API_KEY")
 
 
 def get_data_model_store_api_key() -> str | None:

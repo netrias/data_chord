@@ -84,7 +84,7 @@ class HarmonizeService:
         manifest: ManifestPayload | None,
     ) -> ManifestPayload:
         if manifest is not None:
-            return _normalize_manifest(manifest)
+            return normalize_manifest(manifest)
         return self._discover_cde_map(file_path=file_path, target_schema=target_schema)
 
     def _discover_cde_map(self, *, file_path: Path, target_schema: str) -> ManifestPayload:
@@ -95,7 +95,7 @@ class HarmonizeService:
             target_schema=target_schema,
             target_version="latest",
         )
-        cde_map = _normalize_manifest(raw_cde_map)
+        cde_map = normalize_manifest(raw_cde_map)
         logger.info(
             "Discovered CDE map for harmonization",
             extra={"column_count": len(cde_map.get("column_mappings", {})), "target_schema": target_schema},
@@ -196,7 +196,7 @@ def _log_mapping_results(applied: list[ColumnMapping], skipped: list[str]) -> No
         logger.info("Skipped column mappings via 'No Mapping'", extra={"columns": skipped})
 
 
-def _normalize_manifest(manifest: Mapping[str, object] | object) -> ManifestPayload:
+def normalize_manifest(manifest: Mapping[str, object] | object) -> ManifestPayload:
     if not isinstance(manifest, Mapping):
         return {"column_mappings": {}}
 

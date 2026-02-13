@@ -12,8 +12,7 @@ from src.domain.cde import (
     ColumnMappingSet,
     normalize_cde_key,
 )
-from src.domain.demo_bypass import DEMO_CDE_REGISTRY
-from src.domain.harmonize import _normalize_manifest
+from src.domain.harmonize import normalize_manifest
 from src.domain.manifest.models import is_value_changed
 from src.domain.pv_validation import (
     AdjustmentSource,
@@ -329,30 +328,6 @@ def test_column_mapping_applied_plus_skipped_equals_total(overrides: dict[str, s
 
 
 # =============================================================================
-# Demo Bypass CDE Lookup Properties
-# =============================================================================
-
-
-@given(st.sampled_from(list(DEMO_CDE_REGISTRY.keys())))
-def test_demo_cde_lookup_is_exact_match(key: str) -> None:
-    """Registry lookup uses exact string matching — no normalization."""
-    _ = DEMO_CDE_REGISTRY[key]  # Confirm key exists
-    # Altering case must miss
-    altered = key.swapcase()
-    if altered != key:
-        assert altered not in DEMO_CDE_REGISTRY, (
-            f"Registry matched case-altered key '{altered}' — violates exact-match domain rule"
-        )
-
-
-@given(st.text(min_size=1, max_size=50))
-def test_demo_cde_lookup_rejects_unknown_keys(key: str) -> None:
-    """Keys not in the registry return None (no fuzzy matching)."""
-    assume(key not in DEMO_CDE_REGISTRY)
-    assert DEMO_CDE_REGISTRY.get(key) is None
-
-
-# =============================================================================
 # Manifest Normalization Properties
 # =============================================================================
 
@@ -368,10 +343,10 @@ def test_demo_cde_lookup_rejects_unknown_keys(key: str) -> None:
     min_size=0,
     max_size=5,
 ))
-def test_normalize_manifest_preserves_valid_entries(column_mappings: dict[str, dict[str, str]]) -> None:
+def testnormalize_manifest_preserves_valid_entries(column_mappings: dict[str, dict[str, str]]) -> None:
     """Valid Mapping entries with string keys survive normalization."""
     manifest = {"column_mappings": column_mappings}
-    result = _normalize_manifest(manifest)
+    result = normalize_manifest(manifest)
     result_mappings = result.get("column_mappings", {})
 
     # All string-keyed Mapping entries should survive
@@ -385,7 +360,7 @@ def test_normalize_manifest_preserves_valid_entries(column_mappings: dict[str, d
     st.just(None),
     st.just([1, 2, 3]),
 ))
-def test_normalize_manifest_rejects_non_mapping(bad_input: object) -> None:
+def testnormalize_manifest_rejects_non_mapping(bad_input: object) -> None:
     """Non-Mapping inputs produce empty column_mappings."""
-    result = _normalize_manifest(bad_input)
+    result = normalize_manifest(bad_input)
     assert result.get("column_mappings", {}) == {}
