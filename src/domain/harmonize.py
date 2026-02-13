@@ -208,11 +208,14 @@ def normalize_manifest(manifest: Mapping[str, object] | object) -> ManifestPaylo
 
 
 def _filter_valid_columns(entries: Mapping[object, object]) -> dict[str, ColumnMappingEntry]:
-    """SDK returns untyped dicts; cast to ColumnMappingEntry for downstream type safety."""
+    """SDK returns untyped dicts; only keep entries with required ColumnMappingEntry fields."""
     normalized: dict[str, ColumnMappingEntry] = {}
     for column, entry in entries.items():
-        if isinstance(column, str) and isinstance(entry, Mapping):
-            normalized[column] = cast(ColumnMappingEntry, dict(entry))
+        if not isinstance(column, str) or not isinstance(entry, Mapping):
+            continue
+        if "cde_id" not in entry or "targetField" not in entry:
+            continue
+        normalized[column] = cast(ColumnMappingEntry, dict(entry))
     return normalized
 
 

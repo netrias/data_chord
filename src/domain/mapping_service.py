@@ -47,7 +47,7 @@ class MappingDiscoveryService:
             raw_manifest = self._client.discover_mapping_from_csv(
                 source_csv=csv_path,
                 target_schema=target_schema,
-                confidence_threshold=0.0,
+                confidence_threshold=0.7,
             )
         except Exception as exc:
             raise RuntimeError(f"CDE discovery failed: {exc}") from exc
