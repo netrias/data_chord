@@ -111,7 +111,7 @@ class SessionCache:
 
 
 def populate_cde_cache(file_id: str, client: DataModelClient) -> None:
-    """PV fetching needs real model key + version; replaces hardcoded demo CDEs."""
+    """PV validation in Stage 3+ requires model key and version; must run before PV fetch."""
     data_model_key = get_data_model_key()
     try:
         version_label = client.get_latest_version(data_model_key)

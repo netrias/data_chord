@@ -1,7 +1,4 @@
-"""Tests for populate_cde_cache — real CDE fetching from Data Model Store API.
-
-Tested by: Plan Step 3 (Tests 6-7).
-"""
+"""Tests for populate_cde_cache — real CDE fetching from Data Model Store API."""
 
 from __future__ import annotations
 

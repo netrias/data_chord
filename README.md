@@ -65,6 +65,7 @@ Open http://localhost:8000 in your browser. You should see the Data Chord upload
 | `NETRIAS_API_KEY` | Yes | API key for Netrias harmonization and Data Model Store |
 | `DATA_MODEL_KEY` | Yes | Target data model identifier (e.g., `gc`) |
 | `DATA_MODEL_STORE_API_KEY` | No | Separate API key for Data Model Store (falls back to `NETRIAS_API_KEY`) |
+| `CDE_RECOMMEND_URL` | No | Override CDE recommendation Lambda endpoint (defaults to prod) |
 | `DEV_MODE` | No | Set to `true` to disable static file caching |
 
 ## Docker

@@ -22,11 +22,10 @@ src/
 │   ├── data_model_cache.py    # Session-scoped CDE/PV caching
 │   ├── pv_validation.py       # Permissible value conformance checking
 │   ├── pv_persistence.py      # PV manifest disk persistence
-│   ├── demo_bypass.py         # Temporary hardcoded CDE mappings (ADR 005)
 │   ├── paths.py               # Centralized project path resolution
 │   ├── dependencies.py        # Lazy-initialized service singletons
 │   ├── manifest/              # Harmonization manifest I/O
-│   │   ├── models.py          # ManifestRow, ManualOverride, PVAdjustment
+│   │   ├── models.py          # ManifestRow, ManualOverride
 │   │   ├── reader.py          # read_manifest_parquet
 │   │   └── writer.py          # add_manual_overrides_batch, apply_pv_adjustments_batch
 │   └── storage/               # Typed file storage abstraction
@@ -196,7 +195,7 @@ and download final artifacts.
 
 **Flow:** Summary classifies each row as `UNCHANGED`, `AI_HARMONIZED`, or
 `MANUAL_OVERRIDE`. Displays segmented bar visualization per column. Shows
-transformation history (Original → AI → User → System). Non-conformant banner
+transformation history (Original → AI → User). Non-conformant banner
 warns of values not in target PVs. Download applies review overrides to the
 harmonized CSV, bundles final CSV and JSON manifest into a ZIP, then clears
 session cache.
@@ -273,7 +272,7 @@ Files are named `{file_id}_{suffix}.{extension}` (e.g.,
 | Service | Responsibility |
 |---|---|
 | `HarmonizeService` | Wraps `NetriasClient.harmonize()` with manifest merging and error handling |
-| `MappingDiscoveryService` | Wraps CDE discovery (currently delegates to `demo_bypass` — see ADR 005) |
+| `MappingDiscoveryService` | Wraps CDE discovery via Netrias recommendation Lambda (confidence threshold 0.7) |
 | `DataModelClient` | Fetches CDEs and PVs from Data Model Store API |
 
 Services degrade gracefully: missing API keys or client init failures are
@@ -342,14 +341,15 @@ Vanilla ES6 modules with direct DOM manipulation. No bundler. Key patterns:
 
 ## External Integrations
 
-### Netrias Client SDK (`netrias-client==0.1.0`)
+### Netrias Client SDK (`netrias-client 0.2.x`)
 
 | Method | Used by |
 |---|---|
-| `discover_cde_mapping()` | `MappingDiscoveryService` (currently bypassed — ADR 005) |
+| `discover_mapping_from_csv()` | `MappingDiscoveryService` (CDE recommendations) |
 | `harmonize()` | `HarmonizeService` |
 
 Configuration: `NETRIAS_API_KEY` environment variable (loaded from `.env`).
+`CDE_RECOMMEND_URL` optionally overrides the discovery Lambda endpoint (defaults to prod).
 
 ### Data Model Store API
 
@@ -376,7 +376,7 @@ See `adr/` for architectural decision records:
 - **Graceful degradation** — missing PV data doesn't block validation
 - **Character significance** — all character differences (case, whitespace, punctuation) are semantically meaningful
 - **PV Override Protection** — valid original values are never replaced by AI (ADR 004)
-- **Demo bypass** — temporary hardcoded CDE mappings until discovery API CDE IDs stabilize (ADR 005)
+- **Confidence threshold** — CDE discovery only accepts mappings with confidence ≥ 0.7; incomplete entries (missing `cde_id` or `targetField`) are filtered
 
 ---
 
@@ -465,13 +465,3 @@ Examples:
 | Data Processing | PyArrow |
 | Package Management | uv |
 
----
-
-## Temporary Demo Scaffolding
-
-See [ADR 005](adr/ADR_005_cde_lambda_migration.md) for details. In summary:
-
-- `MappingDiscoveryService.discover()` delegates to `demo_bypass.py` which
-  returns hardcoded column-to-CDE mappings instead of calling the live API
-- This bypass will be removed when the CDE ID API stabilizes
-- Original API-calling code paths are preserved but dormant

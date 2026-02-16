@@ -197,6 +197,7 @@ def _log_mapping_results(applied: list[ColumnMapping], skipped: list[str]) -> No
 
 
 def normalize_manifest(manifest: Mapping[str, object] | object) -> ManifestPayload:
+    """SDK returns varying shapes; normalize to a guaranteed ManifestPayload."""
     if not isinstance(manifest, Mapping):
         return {"column_mappings": {}}
 

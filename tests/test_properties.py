@@ -332,26 +332,48 @@ def test_column_mapping_applied_plus_skipped_equals_total(overrides: dict[str, s
 # =============================================================================
 
 
+def _valid_column_entry() -> st.SearchStrategy[dict[str, str]]:
+    """Entries with required ColumnMappingEntry fields survive _filter_valid_columns."""
+    return st.fixed_dictionaries({
+        "cde_id": st.text(min_size=1, max_size=10),
+        "targetField": st.text(min_size=1, max_size=20),
+    })
+
+
 @given(st.dictionaries(
     keys=st.text(min_size=1, max_size=30),
-    values=st.dictionaries(
-        keys=st.text(min_size=1, max_size=20),
-        values=st.text(max_size=30),
-        min_size=1,
-        max_size=3,
-    ),
-    min_size=0,
+    values=_valid_column_entry(),
+    min_size=1,
     max_size=5,
 ))
-def testnormalize_manifest_preserves_valid_entries(column_mappings: dict[str, dict[str, str]]) -> None:
-    """Valid Mapping entries with string keys survive normalization."""
+def test_normalize_manifest_preserves_valid_entries(column_mappings: dict[str, dict[str, str]]) -> None:
+    """Entries with cde_id and targetField survive normalization."""
     manifest = {"column_mappings": column_mappings}
     result = normalize_manifest(manifest)
     result_mappings = result.get("column_mappings", {})
 
-    # All string-keyed Mapping entries should survive
     for key in column_mappings:
         assert key in result_mappings, f"Valid entry '{key}' was dropped"
+
+
+@given(st.dictionaries(
+    keys=st.text(min_size=1, max_size=30),
+    values=st.dictionaries(
+        keys=st.text(min_size=1, max_size=20).filter(lambda k: k not in ("cde_id", "targetField")),
+        values=st.text(max_size=30),
+        min_size=1,
+        max_size=3,
+    ),
+    min_size=1,
+    max_size=5,
+))
+def test_normalize_manifest_drops_incomplete_entries(column_mappings: dict[str, dict[str, str]]) -> None:
+    """Entries missing cde_id or targetField are filtered out."""
+    manifest = {"column_mappings": column_mappings}
+    result = normalize_manifest(manifest)
+    result_mappings = result.get("column_mappings", {})
+
+    assert result_mappings == {}
 
 
 @given(st.one_of(
@@ -360,7 +382,7 @@ def testnormalize_manifest_preserves_valid_entries(column_mappings: dict[str, di
     st.just(None),
     st.just([1, 2, 3]),
 ))
-def testnormalize_manifest_rejects_non_mapping(bad_input: object) -> None:
+def test_normalize_manifest_rejects_non_mapping(bad_input: object) -> None:
     """Non-Mapping inputs produce empty column_mappings."""
     result = normalize_manifest(bad_input)
     assert result.get("column_mappings", {}) == {}

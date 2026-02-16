@@ -1,7 +1,4 @@
-"""Tests for MappingDiscoveryService — real NetriasClient integration.
-
-Tested by: Plan Steps 2 and 4 (Tests 1-5, 8).
-"""
+"""Tests for MappingDiscoveryService — real NetriasClient integration."""
 
 from __future__ import annotations
 

@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 
 
 class MappingDiscoveryService:
-    """Route column-to-CDE discovery through the Netrias recommendation API."""
 
     def __init__(self) -> None:
         self._api_key = get_netrias_api_key()
@@ -40,6 +39,7 @@ class MappingDiscoveryService:
         csv_path: Path,
         target_schema: str,
     ) -> tuple[dict[str, list[ModelSuggestion]], dict[str, str], ManifestPayload]:
+        """manual_overrides (pos 2) always empty — preserved for caller interface compatibility."""
         if not self._client:
             raise RuntimeError("NetriasClient unavailable (missing NETRIAS_API_KEY)")
 
