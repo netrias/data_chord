@@ -255,7 +255,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.100" },
     { name = "jinja2", specifier = ">=3.1.4" },
-    { name = "netrias-client", git = "https://github.com/netrias/netrias_client.git?rev=4c437d2" },
+    { name = "netrias-client", git = "https://github.com/netrias/netrias_client.git?rev=e351cdb" },
     { name = "pip-audit", marker = "extra == 'dev'", specifier = ">=2.7" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.8" },
     { name = "pyarrow", specifier = ">=15.0.0" },
@@ -582,7 +582,7 @@ wheels = [
 [[package]]
 name = "netrias-client"
 version = "0.2.3"
-source = { git = "https://github.com/netrias/netrias_client.git?rev=4c437d2#4c437d2531ebf3ebf01bc2873c395452a20e2c95" }
+source = { git = "https://github.com/netrias/netrias_client.git?rev=e351cdb#e351cdb41dcfa1b93ae156d7dccb8dbf9a1f6e30" }
 dependencies = [
     { name = "boto3" },
     { name = "httpx" },

@@ -14,8 +14,9 @@ class ConfigurationError(Exception):
 
 
 _DATA_MODEL_KEY_VAR = "DATA_MODEL_KEY"
+_NETRIAS_API_KEY_VAR = "NETRIAS_API_KEY"
 _CDE_RECOMMEND_URL_VAR = "CDE_RECOMMEND_URL"
-_CDE_RECOMMEND_URL_DEFAULT = "https://fdzit38sdj.execute-api.us-east-2.amazonaws.com"
+_CDE_RECOMMEND_URL_DEFAULT = "https://6lvkljeyod.execute-api.us-east-2.amazonaws.com/prod"
 
 
 def get_data_model_key() -> str:
@@ -31,12 +32,13 @@ def get_cde_recommend_url() -> str:
 
 
 def get_netrias_api_key() -> str | None:
-    return os.getenv("NETRIAS_API_KEY")
+    """Raw API key; get_data_model_store_api_key adds fallback chain for DMS."""
+    return os.getenv(_NETRIAS_API_KEY_VAR)
 
 
 def get_data_model_store_api_key() -> str | None:
     """Falls back to NETRIAS_API_KEY if DATA_MODEL_STORE_API_KEY not set."""
-    return os.getenv("DATA_MODEL_STORE_API_KEY") or os.getenv("NETRIAS_API_KEY")
+    return os.getenv("DATA_MODEL_STORE_API_KEY") or os.getenv(_NETRIAS_API_KEY_VAR)
 
 
 def validate_required_config() -> None:
