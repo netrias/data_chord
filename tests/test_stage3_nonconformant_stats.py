@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import cast
 
-from src.domain.manifest import ManifestPayload, ManifestRow, ManifestSummary
 from src.domain.data_model_cache import SessionCache
+from src.domain.manifest import ManifestPayload, ManifestRow, ManifestSummary
 from src.stage_3_harmonize.router import (
     _compute_column_stats,
     _convert_to_schema,
