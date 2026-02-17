@@ -66,7 +66,7 @@ class ColumnSummary(BaseModel):
 
 class TransformationStep(BaseModel):
     value: str
-    source: str  # "original", "ai", "user", "system"
+    source: str  # "original", "ai", "user"
     timestamp: str | None = None
     user_id: str | None = None
     is_pv_conformant: bool = True

@@ -6,8 +6,16 @@ the permissible value set, and that _convert_to_schema aggregates counts.
 
 from __future__ import annotations
 
-from src.domain.manifest import ManifestRow, ManifestSummary
-from src.stage_3_harmonize.router import _compute_column_stats, _convert_to_schema
+from typing import cast
+
+from src.domain.data_model_cache import SessionCache
+from src.domain.manifest import ManifestPayload, ManifestRow, ManifestSummary
+from src.stage_3_harmonize.router import (
+    _compute_column_stats,
+    _convert_to_schema,
+    _extract_column_cde_mappings,
+    _store_column_mappings_in_cache,
+)
 
 
 def _make_row(
@@ -165,3 +173,74 @@ class TestSummaryAggregation:
         schema = _convert_to_schema(manifest, column_pv_map)
 
         assert schema.non_conformant_terms == 1
+
+
+class TestManualOverridePropagation:
+    """Manual overrides must merge into column-CDE mappings for PV lookup."""
+
+    def test_manual_overrides_merge_with_manifest_mappings(self) -> None:
+        """
+        Given: a manifest with column "breed" mapped to "organism_species"
+               and a manual override mapping "diagnosis" to "primary_diagnosis"
+        When: _store_column_mappings_in_cache is called
+        Then: cache contains both the manifest mapping AND the manual override
+        """
+        # Given
+        cache = SessionCache()
+        manifest = cast(ManifestPayload, {
+            "column_mappings": {
+                "breed": {"targetField": "organism_species", "cde_id": 131},
+            }
+        })
+        manual_overrides = {"diagnosis": "primary_diagnosis"}
+        assert cache.get_column_cde_key("diagnosis") is None
+
+        # When
+        _store_column_mappings_in_cache(cache, manifest, manual_overrides)
+
+        # Then: both mappings present
+        assert cache.get_column_cde_key("breed") == "organism_species"
+        assert cache.get_column_cde_key("diagnosis") == "primary_diagnosis"
+
+    def test_manual_override_takes_precedence_over_manifest(self) -> None:
+        """
+        Given: a manifest mapping "col" to "auto_target"
+               and a manual override mapping "col" to "manual_target"
+        When: _store_column_mappings_in_cache is called
+        Then: the manual override wins
+        """
+        # Given
+        cache = SessionCache()
+        manifest = cast(ManifestPayload, {
+            "column_mappings": {
+                "col": {"targetField": "auto_target", "cde_id": 1},
+            }
+        })
+        manual_overrides = {"col": "manual_target"}
+
+        # When
+        _store_column_mappings_in_cache(cache, manifest, manual_overrides)
+
+        # Then: manual override wins
+        assert cache.get_column_cde_key("col") == "manual_target"
+
+    def test_extract_skips_entries_without_target_field(self) -> None:
+        """
+        Given: a manifest with one valid and one missing targetField entry
+        When: _extract_column_cde_mappings is called
+        Then: only the valid entry is returned
+        """
+        # Given
+        manifest = cast(ManifestPayload, {
+            "column_mappings": {
+                "good": {"targetField": "age", "cde_id": 1},
+                "bad": {"cde_id": 2},
+            }
+        })
+
+        # When
+        result = _extract_column_cde_mappings(manifest)
+
+        # Then
+        assert "good" in result
+        assert "bad" not in result

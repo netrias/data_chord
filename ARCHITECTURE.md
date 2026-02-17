@@ -13,20 +13,19 @@ src/
 ├── domain/                    # Shared domain layer (no stage dependencies)
 │   ├── cde.py                 # CDEInfo, column mapping types
 │   ├── change.py              # ChangeType, RecommendationType enums
-│   ├── config.py              # Build-level config validation (DATA_MODEL_KEY)
+│   ├── config.py              # Build-level config validation (NETRIAS_API_KEY)
 │   ├── session.py             # Browser sessionStorage key constants, UILabel
 │   ├── schemas.py             # Cross-stage API request/response models
 │   ├── harmonize.py           # HarmonizeService (Netrias client wrapper)
 │   ├── mapping_service.py     # MappingDiscoveryService (CDE suggestion)
-│   ├── data_model_client.py   # HTTP client for Data Model Store API
+│   ├── data_model_adapter.py  # Adapter: SDK types → domain types (CDEs, PVs, data models)
 │   ├── data_model_cache.py    # Session-scoped CDE/PV caching
 │   ├── pv_validation.py       # Permissible value conformance checking
 │   ├── pv_persistence.py      # PV manifest disk persistence
-│   ├── demo_bypass.py         # Temporary hardcoded CDE mappings (ADR 005)
 │   ├── paths.py               # Centralized project path resolution
 │   ├── dependencies.py        # Lazy-initialized service singletons
 │   ├── manifest/              # Harmonization manifest I/O
-│   │   ├── models.py          # ManifestRow, ManualOverride, PVAdjustment
+│   │   ├── models.py          # ManifestRow, ManualOverride
 │   │   ├── reader.py          # read_manifest_parquet
 │   │   └── writer.py          # add_manual_overrides_batch, apply_pv_adjustments_batch
 │   └── storage/               # Typed file storage abstraction
@@ -88,7 +87,7 @@ any `src/stage_X` module imports from a different `src/stage_Y` module.
 `backend/app/main.py` contains the `create_app()` factory:
 
 1. Loads `.env` for local secrets (shell env vars take precedence)
-2. Validates required config (`DATA_MODEL_KEY`) via `validate_required_config()`
+2. Validates required config (`NETRIAS_API_KEY`) via `validate_required_config()`
 3. Configures logging format
 4. Creates the `FastAPI` instance with lifespan manager for graceful shutdown
 5. Adds `CORSMiddleware` (configurable via `CORS_ALLOW_ORIGINS`)
@@ -99,11 +98,12 @@ any `src/stage_X` module imports from a different `src/stage_Y` module.
 ### Service Initialization
 
 Services are lazily initialized via module-level singletons in
-`domain/dependencies.py`. Routers import getter functions
-(`get_upload_storage()`, `get_file_store()`, `get_mapping_service()`,
-`get_harmonize_service()`, `get_data_model_client()`) which construct and cache
-instances on first call. `cleanup_services()` is called on shutdown to close
-HTTP clients.
+`domain/dependencies.py`. A single `NetriasClient` instance (via
+`get_netrias_client()`) is shared across `HarmonizeService`,
+`MappingDiscoveryService`, and the data model adapter. Routers import getter
+functions (`get_upload_storage()`, `get_file_store()`, `get_mapping_service()`,
+`get_harmonize_service()`) which construct and cache instances on first call.
+`cleanup_services()` is called on shutdown.
 
 ---
 
@@ -196,7 +196,7 @@ and download final artifacts.
 
 **Flow:** Summary classifies each row as `UNCHANGED`, `AI_HARMONIZED`, or
 `MANUAL_OVERRIDE`. Displays segmented bar visualization per column. Shows
-transformation history (Original → AI → User → System). Non-conformant banner
+transformation history (Original → AI → User). Non-conformant banner
 warns of values not in target PVs. Download applies review overrides to the
 harmonized CSV, bundles final CSV and JSON manifest into a ZIP, then clears
 session cache.
@@ -211,13 +211,14 @@ session cache.
 version_label) fetched dynamically from the Data Model Store API.
 `ColumnMappingSet` is the typed container for all column-to-CDE assignments.
 
-### Data Model Integration (`data_model_client.py`, `data_model_cache.py`)
+### Data Model Integration (`data_model_adapter.py`, `data_model_cache.py`)
 
-`DataModelClient` fetches CDEs and permissible values from the Data Model Store
-API with thread-safe lazy initialization and parallel batch PV fetching.
-`SessionCache` provides session-scoped, thread-safe caching of CDEs and PV
-sets (frozenset for O(1) membership testing), with disk persistence via
-`pv_persistence.py` for server restart recovery.
+`data_model_adapter` is a thin adapter that converts `netrias_client` SDK types
+to domain types (`DataModelSummary`, `CDEInfo`, PV frozensets). It uses the
+shared `NetriasClient` singleton from `dependencies.py`. `SessionCache` provides
+session-scoped, thread-safe caching of CDEs and PV sets (frozenset for O(1)
+membership testing), with disk persistence via `pv_persistence.py` for server
+restart recovery.
 
 ### PV Validation (`pv_validation.py`)
 
@@ -273,8 +274,8 @@ Files are named `{file_id}_{suffix}.{extension}` (e.g.,
 | Service | Responsibility |
 |---|---|
 | `HarmonizeService` | Wraps `NetriasClient.harmonize()` with manifest merging and error handling |
-| `MappingDiscoveryService` | Wraps CDE discovery (currently delegates to `demo_bypass` — see ADR 005) |
-| `DataModelClient` | Fetches CDEs and PVs from Data Model Store API |
+| `MappingDiscoveryService` | Wraps `NetriasClient.discover_mapping_from_csv()` (confidence threshold 0.7) |
+| `data_model_adapter` | Thin adapter: SDK types → domain types (data model list, CDEs, PVs) |
 
 Services degrade gracefully: missing API keys or client init failures are
 logged and produce stub results so the workflow can continue.
@@ -342,20 +343,19 @@ Vanilla ES6 modules with direct DOM manipulation. No bundler. Key patterns:
 
 ## External Integrations
 
-### Netrias Client SDK (`netrias-client==0.1.0`)
+### Netrias Client SDK (`netrias-client 0.3.x`)
 
 | Method | Used by |
 |---|---|
-| `discover_cde_mapping()` | `MappingDiscoveryService` (currently bypassed — ADR 005) |
+| `discover_mapping_from_csv()` | `MappingDiscoveryService` (CDE recommendations) |
 | `harmonize()` | `HarmonizeService` |
+| `list_data_models()` | `data_model_adapter` (data model list) |
+| `list_cdes()` | `data_model_adapter` (CDE metadata) |
+| `get_pv_set_async()` | `data_model_adapter` (permissible values) |
 
 Configuration: `NETRIAS_API_KEY` environment variable (loaded from `.env`).
-
-### Data Model Store API
-
-Direct HTTP integration via `DataModelClient` for fetching CDEs, permissible
-values, and data model versions. Configuration: `DATA_MODEL_KEY` (required),
-`DATA_MODEL_STORE_API_KEY` (optional, falls back to `NETRIAS_API_KEY`).
+The client is initialized with `Environment.PROD` which resolves all service
+URLs (harmonization, discovery, Data Model Store) from a built-in registry.
 
 ---
 
@@ -367,7 +367,8 @@ See `adr/` for architectural decision records:
 - [ADR 002](adr/ADR_002_row_context_popup.md) — Row context popup
 - [ADR 003](adr/ADR_003_pv_manifest_persistence.md) — PV manifest persistence
 - [ADR 004](adr/ADR_004_pv_override_protection.md) — PV override protection
-- [ADR 005](adr/ADR_005_cde_lambda_migration.md) — CDE Lambda migration (netrias-client 0.1.0)
+- [ADR 005](adr/ADR_005_cde_lambda_migration.md) — CDE Lambda migration (initial netrias-client SDK adoption)
+- [ADR 006](adr/ADR_006_env_simplification.md) — Environment simplification and SDK migration
 
 **Key principles:**
 
@@ -376,7 +377,7 @@ See `adr/` for architectural decision records:
 - **Graceful degradation** — missing PV data doesn't block validation
 - **Character significance** — all character differences (case, whitespace, punctuation) are semantically meaningful
 - **PV Override Protection** — valid original values are never replaced by AI (ADR 004)
-- **Demo bypass** — temporary hardcoded CDE mappings until discovery API CDE IDs stabilize (ADR 005)
+- **Confidence threshold** — CDE discovery only accepts mappings with confidence ≥ 0.7; incomplete entries (missing `cde_id` or `targetField`) are filtered
 
 ---
 
@@ -452,8 +453,7 @@ Examples:
 
 | Dependency | Purpose |
 |------------|---------|
-| `netrias-client` (0.2.x) | CDE discovery and harmonization via Netrias Lambda API |
-| Data Model Store API | Versioned data models, CDEs, and permissible values (direct HTTP via `data_model_client.py`) |
+| `netrias-client` (0.3.x) | CDE discovery, harmonization, and Data Model Store access via Netrias SDK |
 
 ## Technology Stack
 
@@ -465,13 +465,3 @@ Examples:
 | Data Processing | PyArrow |
 | Package Management | uv |
 
----
-
-## Temporary Demo Scaffolding
-
-See [ADR 005](adr/ADR_005_cde_lambda_migration.md) for details. In summary:
-
-- `MappingDiscoveryService.discover()` delegates to `demo_bypass.py` which
-  returns hardcoded column-to-CDE mappings instead of calling the live API
-- This bypass will be removed when the CDE ID API stabilizes
-- Original API-calling code paths are preserved but dormant

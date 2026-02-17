@@ -101,8 +101,23 @@ def temp_storage(tmp_path: Path, test_constraints: UploadConstraints) -> UploadS
 
 @pytest.fixture
 def mock_netrias_client() -> Generator[MagicMock]:
-    """why: avoid real network calls and control mapping responses."""
+    """why: avoid real network calls to Netrias Lambda and Data Model Store APIs."""
+    import src.domain.dependencies as deps
+
     mock_client = MagicMock()
+
+    _cde_manifest = {
+        "column_mappings": {
+            "primary_diagnosis": {
+                "targetField": "primary_diagnosis",
+                "cde_id": 2,
+            },
+            "therapeutic_agents": {
+                "targetField": "therapeutic_agents",
+                "cde_id": 1,
+            },
+        },
+    }
 
     mock_client.discover_cde_mapping.return_value = MockCDEMappingResult(
         suggestions=[
@@ -115,20 +130,12 @@ def mock_netrias_client() -> Generator[MagicMock]:
                 options=[MockMappingOption(target="therapeutic_agents", confidence=0.90)],
             ),
         ],
-        raw={
-            "recognized_mappings": {"primary_diagnosis": 2, "therapeutic_agents": 1},
-            "column_mappings": {
-                "primary_diagnosis": {
-                    "targetField": "primary_diagnosis",
-                    "cde_id": 2,
-                },
-                "therapeutic_agents": {
-                    "targetField": "therapeutic_agents",
-                    "cde_id": 1,
-                },
-            },
-        },
+        raw={"recognized_mappings": {"primary_diagnosis": 2, "therapeutic_agents": 1}, **_cde_manifest},
     )
+
+    # MappingDiscoveryService.discover() calls this after demo_bypass removal
+    mock_client.discover_mapping_from_csv.return_value = _cde_manifest
+    mock_client.configure.return_value = None
 
     mock_client.harmonize.return_value = MockHarmonizeResult(
         status="succeeded",
@@ -136,11 +143,42 @@ def mock_netrias_client() -> Generator[MagicMock]:
         job_id="mock-job-id-12345",
     )
 
-    with (
-        patch.dict(os.environ, {"NETRIAS_API_KEY": "test-api-key", "DATA_MODEL_KEY": "test-data-model"}),
-        patch("src.domain.harmonize.NetriasClient", return_value=mock_client),
-    ):
+    # DMS methods on the shared NetriasClient mock
+    from netrias_client import CDE as SdkCDE
+    from netrias_client import DataModel, DataModelVersion
+
+    mock_client.list_data_models.return_value = (
+        DataModel(
+            data_commons_id=1, key="test-data-model", name="Test Data Model",
+            description=None, is_active=True,
+            versions=(DataModelVersion(version_label="1"),),
+        ),
+    )
+    mock_client.list_cdes.return_value = (
+        SdkCDE(cde_key="primary_diagnosis", cde_id=2, cde_version_id=1, description="Primary Diagnosis"),
+        SdkCDE(cde_key="therapeutic_agents", cde_id=1, cde_version_id=1, description="Therapeutic Agents"),
+    )
+    mock_client.get_pv_set.return_value = frozenset()
+    mock_client.get_pv_set_async.return_value = frozenset()
+
+    # Reset dependency singletons so the mock is injected
+    saved_client = deps._netrias_client
+    saved_init = deps._netrias_client_initialized
+    saved_mapping = deps._mapping_discovery
+    saved_harmonizer = deps._harmonizer
+    deps._netrias_client = mock_client
+    deps._netrias_client_initialized = True
+    deps._mapping_discovery = None
+    deps._harmonizer = None
+
+    with patch.dict(os.environ, {"NETRIAS_API_KEY": "test-api-key"}):
         yield mock_client
+
+    # Restore singletons to avoid leaking mock state
+    deps._netrias_client = saved_client
+    deps._netrias_client_initialized = saved_init
+    deps._mapping_discovery = saved_mapping
+    deps._harmonizer = saved_harmonizer
 
 
 @pytest.fixture

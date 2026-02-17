@@ -131,9 +131,12 @@ Upgrade to netrias-client 0.1.0 and update all call sites to use the new API pat
 - `src/domain/harmonize.py`: Client initialization and API calls
 - `src/domain/mapping_service.py`: Client initialization, protocol definition, dead production code removed (see git 6039810 for original)
 
-### Temporary Demo Bypass
+### Demo Bypass (Resolved)
 
-The 0.1.0 discovery API returns unstable CDE IDs that break downstream PV lookup. Until stabilized, `MappingDiscoveryService.discover()` delegates to `demo_bypass.discover_bypass()` which uses hardcoded CDE mappings. See `src/domain/demo_bypass.py` for the registry. Remove the bypass when CDE IDs are stable.
+The 0.1.0 discovery API initially returned unstable CDE IDs. A temporary
+`demo_bypass.py` provided hardcoded mappings until the API stabilized.
+The bypass has been removed — `MappingDiscoveryService` now calls the live
+`discover_mapping_from_csv()` endpoint with `confidence_threshold=0.7`.
 
 ### Rollback Procedure
 

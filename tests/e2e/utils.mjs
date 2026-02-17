@@ -13,6 +13,7 @@ export const getFileIdFromUrl = (page) => {
 
 export const uploadAndAnalyze = async (page, filePath) => {
   await mockDataModels(page);
+  await mockAnalyze(page);
   await page.goto('/stage-1');
   await page.setInputFiles('#fileInput', filePath);
   await page.locator('#analyzeButton').waitFor({ state: 'attached' });
@@ -46,6 +47,41 @@ export const mockHarmonizeSuccess = async (page) => {
       next_stage_url: `/stage-4?file_id=${fileId}&job_id=e2e-job-1&status=succeeded`,
       job_id_available: true,
       manifest_summary: null,
+    };
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(response),
+    });
+  });
+};
+
+export const mockAnalyze = async (page) => {
+  await page.route('**/stage-1/analyze', async (route) => {
+    const payload = route.request().postDataJSON?.() ?? {};
+    const fileId = payload.file_id ?? '';
+    const response = {
+      file_id: fileId,
+      file_name: 'test.csv',
+      total_rows: 3,
+      columns: [
+        {
+          column_name: 'col_a',
+          inferred_type: 'text',
+          sample_values: ['Foo', 'Bar'],
+          confidence_bucket: 'high',
+          confidence_score: 0.95,
+        },
+      ],
+      cde_targets: {},
+      next_stage: 'mapping',
+      next_step_hint: 'Review AI-suggested column mappings once ready.',
+      manual_overrides: {},
+      manifest: {
+        column_mappings: {
+          col_a: { targetField: 'col_a', cde_id: 1 },
+        },
+      },
     };
     await route.fulfill({
       status: 200,

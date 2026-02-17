@@ -7,7 +7,6 @@ Abstracts SDK initialization and provides graceful fallback when API key is miss
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
@@ -40,19 +39,10 @@ class HarmonizeResult:
 
 
 class HarmonizeService:
-    def __init__(self) -> None:
-        self._api_key: str | None = os.getenv("NETRIAS_API_KEY")
-        self._client: NetriasClient | None = self._build_client()
-
-    def _build_client(self) -> NetriasClient | None:
-        if not self._api_key:
-            logger.warning("NETRIAS_API_KEY missing; harmonize calls will be stubbed.")
-            return None
-        try:
-            return NetriasClient(api_key=self._api_key)
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.exception("Failed to initialize NetriasClient", exc_info=exc)
-            return None
+    def __init__(self, client: NetriasClient | None) -> None:
+        self._client = client
+        if not client:
+            logger.warning("NetriasClient unavailable; harmonize calls will be stubbed.")
 
     def run(
         self,
@@ -84,7 +74,7 @@ class HarmonizeService:
         manifest: ManifestPayload | None,
     ) -> ManifestPayload:
         if manifest is not None:
-            return _normalize_manifest(manifest)
+            return normalize_manifest(manifest)
         return self._discover_cde_map(file_path=file_path, target_schema=target_schema)
 
     def _discover_cde_map(self, *, file_path: Path, target_schema: str) -> ManifestPayload:
@@ -95,7 +85,7 @@ class HarmonizeService:
             target_schema=target_schema,
             target_version="latest",
         )
-        cde_map = _normalize_manifest(raw_cde_map)
+        cde_map = normalize_manifest(raw_cde_map)
         logger.info(
             "Discovered CDE map for harmonization",
             extra={"column_count": len(cde_map.get("column_mappings", {})), "target_schema": target_schema},
@@ -196,7 +186,8 @@ def _log_mapping_results(applied: list[ColumnMapping], skipped: list[str]) -> No
         logger.info("Skipped column mappings via 'No Mapping'", extra={"columns": skipped})
 
 
-def _normalize_manifest(manifest: Mapping[str, object] | object) -> ManifestPayload:
+def normalize_manifest(manifest: Mapping[str, object] | object) -> ManifestPayload:
+    """SDK returns varying shapes; normalize to a guaranteed ManifestPayload."""
     if not isinstance(manifest, Mapping):
         return {"column_mappings": {}}
 
@@ -208,11 +199,14 @@ def _normalize_manifest(manifest: Mapping[str, object] | object) -> ManifestPayl
 
 
 def _filter_valid_columns(entries: Mapping[object, object]) -> dict[str, ColumnMappingEntry]:
-    """SDK returns untyped dicts; cast to ColumnMappingEntry for downstream type safety."""
+    """SDK returns untyped dicts; only keep entries with required ColumnMappingEntry fields."""
     normalized: dict[str, ColumnMappingEntry] = {}
     for column, entry in entries.items():
-        if isinstance(column, str) and isinstance(entry, Mapping):
-            normalized[column] = cast(ColumnMappingEntry, dict(entry))
+        if not isinstance(column, str) or not isinstance(entry, Mapping):
+            continue
+        if "cde_id" not in entry or "targetField" not in entry:
+            continue
+        normalized[column] = cast(ColumnMappingEntry, dict(entry))
     return normalized
 
 

@@ -48,7 +48,7 @@ This automatically downloads the correct Python version (3.13+) and installs all
 cp .env.example .env
 ```
 
-Open `.env` in a text editor and replace `your_api_key_here` with your Netrias API key (contact Netrias for access). The other defaults are fine for local development.
+Open `.env` in a text editor and replace `your_api_key_here` with your Netrias API key (contact Netrias for access).
 
 ### 5. Run the application
 
@@ -62,10 +62,7 @@ Open http://localhost:8000 in your browser. You should see the Data Chord upload
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `NETRIAS_API_KEY` | Yes | API key for Netrias harmonization and Data Model Store |
-| `DATA_MODEL_KEY` | Yes | Target data model identifier (e.g., `gc`) |
-| `DATA_MODEL_STORE_API_KEY` | No | Separate API key for Data Model Store (falls back to `NETRIAS_API_KEY`) |
-| `DEV_MODE` | No | Set to `true` to disable static file caching |
+| `NETRIAS_API_KEY` | Yes | API key for Netrias harmonization, CDE discovery, and Data Model Store |
 
 ## Docker
 

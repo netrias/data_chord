@@ -6,7 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from src.domain import ModelSuggestion, get_default_target_schema
+from src.domain import ModelSuggestion
 from src.domain.manifest import ConfidenceBucket, ManifestPayload
 from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
 
@@ -21,7 +21,7 @@ class UploadResponse(BaseModel):
 
 class AnalyzeRequest(BaseModel):
     file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, max_length=128, pattern=FILE_ID_PATTERN)
-    target_schema: str = Field(default_factory=get_default_target_schema, min_length=1)
+    target_schema: str = Field(..., min_length=1)
 
 
 class ColumnPreview(BaseModel):

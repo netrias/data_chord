@@ -3,8 +3,8 @@
 from src.domain.cde import CDEInfo as CDEInfo
 from src.domain.cde import ColumnMapping as ColumnMapping
 from src.domain.cde import ColumnMappingSet as ColumnMappingSet
+from src.domain.cde import DataModelSummary as DataModelSummary
 from src.domain.cde import ModelSuggestion as ModelSuggestion
-from src.domain.cde import get_default_target_schema as get_default_target_schema
 from src.domain.cde import normalize_cde_key as normalize_cde_key
 from src.domain.change import CONFIDENCE as CONFIDENCE
 from src.domain.change import ChangeType as ChangeType

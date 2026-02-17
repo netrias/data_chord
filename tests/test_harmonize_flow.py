@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from httpx import AsyncClient
 
@@ -140,24 +140,22 @@ async def test_harmonize_without_client_returns_stubbed_job(
     # Given: An uploaded file, but Netrias client is unavailable
     _ = await upload_and_analyze(app_client, sample_csv_path)
 
-    with patch("src.domain.harmonize.HarmonizeService._build_client", return_value=None):
-        from src.domain import ColumnMappingSet
-        from src.domain.harmonize import HarmonizeService, HarmonizeStatus
+    from src.domain import ColumnMappingSet
+    from src.domain.harmonize import HarmonizeService, HarmonizeStatus
 
-        service = HarmonizeService()
-        service._client = None
+    service = HarmonizeService(client=None)
 
-        # When: Harmonization is attempted without the client
-        from src.domain.data_model_cache import SessionCache
+    # When: Harmonization is attempted without the client
+    from src.domain.data_model_cache import SessionCache
 
-        result = service.run(
-            file_path=Path("/tmp/test.csv"),
-            target_schema=TEST_TARGET_SCHEMA,
-            column_mappings=ColumnMappingSet.from_dict({}),
-            cache=SessionCache(),
-            manifest=None,
-        )
+    result = service.run(
+        file_path=Path("/tmp/test.csv"),
+        target_schema=TEST_TARGET_SCHEMA,
+        column_mappings=ColumnMappingSet.from_dict({}),
+        cache=SessionCache(),
+        manifest=None,
+    )
 
-        # Then: Returns a stubbed/queued job indicating service unavailability
-        assert result.status == HarmonizeStatus.QUEUED
-        assert "stubbed" in result.detail.lower() or "unavailable" in result.detail.lower()
+    # Then: Returns a stubbed/queued job indicating service unavailability
+    assert result.status == HarmonizeStatus.QUEUED
+    assert "stubbed" in result.detail.lower() or "unavailable" in result.detail.lower()
