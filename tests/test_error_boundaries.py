@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 
 import pytest
 from httpx import AsyncClient
+from netrias_client import DataModelStoreError
 
-from src.domain.data_model_client import DataModelClientError
 from tests.conftest import TEST_CSV_CONTENT_TYPE, TEST_TARGET_SCHEMA, upload_file
 
 pytestmark = pytest.mark.asyncio
@@ -132,11 +132,9 @@ class TestDataModelServiceErrors:
     ) -> None:
         """503 returned when Data Model Store API is unreachable."""
         # Given: Data Model Store API is unreachable
-        mock_client = MagicMock()
-        mock_client.list_data_models.side_effect = DataModelClientError("Connection failed")
         monkeypatch.setattr(
-            "src.stage_1_upload.router.get_data_model_client",
-            lambda: mock_client,
+            "src.stage_1_upload.router.list_data_model_summaries",
+            MagicMock(side_effect=DataModelStoreError("Connection failed")),
         )
 
         # When: GET /stage-1/data-models is called

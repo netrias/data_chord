@@ -7,7 +7,6 @@ Abstracts SDK initialization and provides graceful fallback when API key is miss
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
@@ -40,19 +39,10 @@ class HarmonizeResult:
 
 
 class HarmonizeService:
-    def __init__(self) -> None:
-        self._api_key: str | None = os.getenv("NETRIAS_API_KEY")
-        self._client: NetriasClient | None = self._build_client()
-
-    def _build_client(self) -> NetriasClient | None:
-        if not self._api_key:
-            logger.warning("NETRIAS_API_KEY missing; harmonize calls will be stubbed.")
-            return None
-        try:
-            return NetriasClient(api_key=self._api_key)
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.exception("Failed to initialize NetriasClient", exc_info=exc)
-            return None
+    def __init__(self, client: NetriasClient | None) -> None:
+        self._client = client
+        if not client:
+            logger.warning("NetriasClient unavailable; harmonize calls will be stubbed.")
 
     def run(
         self,

@@ -12,7 +12,6 @@ from pathlib import Path
 from netrias_client import NetriasClient
 
 from src.domain.cde import ModelSuggestion
-from src.domain.config import get_cde_recommend_url, get_netrias_api_key
 from src.domain.harmonize import normalize_manifest
 from src.domain.manifest import ManifestPayload
 
@@ -21,17 +20,10 @@ logger = logging.getLogger(__name__)
 
 class MappingDiscoveryService:
 
-    def __init__(self) -> None:
-        self._api_key = get_netrias_api_key()
-        self._client: NetriasClient | None = self._build_client()
-
-    def _build_client(self) -> NetriasClient | None:
-        if not self._api_key:
-            logger.warning("NETRIAS_API_KEY missing; discovery calls will fail.")
-            return None
-        client = NetriasClient(api_key=self._api_key)
-        client.configure(discovery_url=get_cde_recommend_url())
-        return client
+    def __init__(self, client: NetriasClient | None) -> None:
+        self._client = client
+        if not client:
+            logger.warning("NetriasClient unavailable; discovery calls will fail.")
 
     def discover(
         self,

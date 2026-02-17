@@ -272,12 +272,10 @@ async def test_stage1_analyze_is_idempotent(
 
 async def test_stage2_mapping_page_renders_manual_options(
     app_client: AsyncClient,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Stage 2 mapping page exposes CDE labels for manual mapping."""
 
-    # Given: the mapping page has not been loaded yet
-    monkeypatch.setenv("DATA_MODEL_KEY", "test-data-model")
+    # Given: CDE cache is pre-populated for the file
     file_id = "deadbeef"
     cache = get_session_cache(file_id)
     cache.set_cdes(
@@ -286,8 +284,8 @@ async def test_stage2_mapping_page_renders_manual_options(
         version_label="v1",
     )
 
-    # When: the mapping page is requested
-    response = await app_client.get(f"/stage-2?file_id={file_id}")
+    # When: the mapping page is requested with schema query param
+    response = await app_client.get(f"/stage-2?file_id={file_id}&schema=test-data-model")
 
     # Then: the page renders and includes CDE labels
     assert response.status_code == 200
@@ -296,16 +294,14 @@ async def test_stage2_mapping_page_renders_manual_options(
 
 async def test_stage2_mapping_page_includes_default_schema(
     app_client: AsyncClient,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Stage 2 mapping page renders the default schema value."""
+    """Stage 2 mapping page renders the schema from query param."""
 
     # Given: the mapping page has not been loaded yet
-    monkeypatch.setenv("DATA_MODEL_KEY", "test-data-model")
-    # When: the mapping page is requested
-    response = await app_client.get("/stage-2")
+    # When: the mapping page is requested with schema query param
+    response = await app_client.get("/stage-2?schema=test-data-model")
 
-    # Then: the default schema is embedded for client-side use
+    # Then: the schema is embedded for client-side use
     assert response.status_code == 200
     assert 'targetSchema: "test-data-model"' in response.text
 

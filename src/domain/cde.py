@@ -11,11 +11,12 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel
 
-from src.domain.config import get_data_model_key
 
-
-def get_default_target_schema() -> str:
-    return get_data_model_key()
+@dataclass(frozen=True)
+class DataModelSummary:
+    key: str
+    label: str
+    versions: list[str]
 
 
 @dataclass(frozen=True)

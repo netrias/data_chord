@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import logging
 
-from src.domain.data_model_client import DataModelClient
+from netrias_client import Environment, NetriasClient
+
+from src.domain.config import get_netrias_api_key
 from src.domain.harmonize import HarmonizeService
 from src.domain.mapping_service import MappingDiscoveryService
 from src.domain.paths import PROJECT_ROOT
@@ -25,7 +27,8 @@ _storage: UploadStorage | None = None
 _file_store: FileStore | None = None
 _mapping_discovery: MappingDiscoveryService | None = None
 _harmonizer: HarmonizeService | None = None
-_data_model_client: DataModelClient | None = None
+_netrias_client: NetriasClient | None = None
+_netrias_client_initialized: bool = False
 
 
 def get_upload_constraints() -> UploadConstraints:
@@ -56,11 +59,27 @@ def get_file_store() -> FileStore:
     return _file_store
 
 
+def get_netrias_client() -> NetriasClient | None:
+    """Why: None when NETRIAS_API_KEY missing — callers already guard with 'if not client'."""
+    global _netrias_client, _netrias_client_initialized  # noqa: PLW0603
+    if not _netrias_client_initialized:
+        api_key = get_netrias_api_key()
+        if api_key:
+            try:
+                _netrias_client = NetriasClient(api_key=api_key, environment=Environment.PROD)
+            except Exception:
+                logger.exception("Failed to initialize NetriasClient")
+        else:
+            logger.warning("NETRIAS_API_KEY missing; SDK calls will be unavailable.")
+        _netrias_client_initialized = True
+    return _netrias_client
+
+
 def get_mapping_service() -> MappingDiscoveryService:
     global _mapping_discovery  # noqa: PLW0603 - intentional singleton
     if _mapping_discovery is None:
         logger.info("Initializing mapping discovery service")
-        _mapping_discovery = MappingDiscoveryService()
+        _mapping_discovery = MappingDiscoveryService(get_netrias_client())
     return _mapping_discovery
 
 
@@ -68,25 +87,15 @@ def get_harmonize_service() -> HarmonizeService:
     global _harmonizer  # noqa: PLW0603 - intentional singleton
     if _harmonizer is None:
         logger.info("Initializing harmonization service")
-        _harmonizer = HarmonizeService()
+        _harmonizer = HarmonizeService(get_netrias_client())
     return _harmonizer
-
-
-def get_data_model_client() -> DataModelClient:
-    global _data_model_client  # noqa: PLW0603 - intentional singleton
-    if _data_model_client is None:
-        logger.info("Initializing Data Model Store client")
-        _data_model_client = DataModelClient()
-    return _data_model_client
 
 
 def cleanup_services() -> None:
     """Clean up resources held by singleton services (call on app shutdown)."""
-    global _data_model_client  # noqa: PLW0603
-    if _data_model_client is not None:
-        logger.info("Closing Data Model Store client")
-        _data_model_client.close()
-        _data_model_client = None
+    global _netrias_client, _netrias_client_initialized  # noqa: PLW0603
+    _netrias_client = None
+    _netrias_client_initialized = False
 
 
 __all__ = [
@@ -95,10 +104,10 @@ __all__ = [
     "MAX_UPLOAD_BYTES",
     "UPLOAD_BASE_DIR",
     "cleanup_services",
-    "get_data_model_client",
     "get_file_store",
     "get_harmonize_service",
     "get_mapping_service",
+    "get_netrias_client",
     "get_upload_constraints",
     "get_upload_storage",
 ]

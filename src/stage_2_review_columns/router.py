@@ -14,11 +14,10 @@ from fastapi import APIRouter, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from netrias_client import DataModelStoreError, NetriasAPIUnavailable
 
-from src.domain import UILabel, get_default_target_schema
+from src.domain import UILabel
 from src.domain.data_model_cache import get_session_cache, populate_cde_cache
-from src.domain.data_model_client import DataModelClientError
-from src.domain.dependencies import get_data_model_client
 
 MODULE_DIR = Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"
@@ -33,30 +32,30 @@ stage_two_router = APIRouter(tags=["Stage 2 Mapping"])
 async def render_stage_two(
     request: Request,
     file_id: Annotated[str | None, Query(min_length=8, pattern=r"^[a-f0-9]+$")] = None,
+    schema: Annotated[str | None, Query(min_length=1)] = None,
 ) -> HTMLResponse:
     cde_options: list[dict[str, object]] = []
 
-    if file_id:
-        cde_options = await _get_cde_options_for_session(file_id)
+    if file_id and schema:
+        cde_options = await _get_cde_options_for_session(file_id, schema)
 
     context = {
         "request": request,
-        "default_schema": get_default_target_schema(),
+        "default_schema": schema or "",
         "cde_options": cde_options,
         "no_mapping_label": UILabel.NO_MAPPING.value,
     }
     return _templates.TemplateResponse("stage_2_mappings.html", context)
 
 
-async def _get_cde_options_for_session(file_id: str) -> list[dict[str, object]]:
+async def _get_cde_options_for_session(file_id: str, target_schema: str) -> list[dict[str, object]]:
     """Returns empty list on API failure (graceful degradation)."""
     cache = get_session_cache(file_id)
 
     if not cache.has_cdes():
-        client = get_data_model_client()
         try:
-            await run_in_threadpool(populate_cde_cache, file_id, client)
-        except DataModelClientError:
+            await run_in_threadpool(populate_cde_cache, file_id, target_schema)
+        except (DataModelStoreError, NetriasAPIUnavailable):
             logger.warning("Data Model Store API unavailable; CDE options will be empty", extra={"file_id": file_id})
 
     return [

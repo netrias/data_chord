@@ -10,12 +10,12 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from netrias_client import DataModelStoreError, NetriasAPIUnavailable
 
-from src.domain import ModelSuggestion, get_default_target_schema
+from src.domain import ModelSuggestion
+from src.domain.data_model_adapter import list_data_model_summaries
 from src.domain.data_model_cache import clear_all_session_caches
-from src.domain.data_model_client import DataModelClientError
 from src.domain.dependencies import (
-    get_data_model_client,
     get_mapping_service,
     get_upload_constraints,
     get_upload_storage,
@@ -52,7 +52,7 @@ async def render_stage_one(request: Request) -> HTMLResponse:
     context = {
         "request": request,
         "ui_constraints": describe_constraints(_upload_constraints),
-        "default_schema": get_default_target_schema(),
+        "default_schema": None,
     }
     return _templates.TemplateResponse("stage_1_upload.html", context)
 
@@ -64,10 +64,9 @@ async def render_stage_one(request: Request) -> HTMLResponse:
 )
 async def list_data_models() -> list[DataModelSchema]:
     """Decouples frontend from model list changes; labels may vary by deployment."""
-    client = get_data_model_client()
     try:
-        models = await run_in_threadpool(client.list_data_models)
-    except DataModelClientError:
+        models = await run_in_threadpool(list_data_model_summaries)
+    except (DataModelStoreError, NetriasAPIUnavailable):
         _router_logger.warning("Data Model Store API unavailable")
         raise HTTPException(
             status_code=503,

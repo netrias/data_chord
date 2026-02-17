@@ -26,11 +26,10 @@ from src.domain import (
     HarmonizeResponse,
     ManifestSummarySchema,
     format_column_label,
-    get_default_target_schema,
 )
+from src.domain.data_model_adapter import fetch_pvs_batch_async
 from src.domain.data_model_cache import SessionCache, get_session_cache, populate_cde_cache
 from src.domain.dependencies import (
-    get_data_model_client,
     get_file_store,
     get_harmonize_service,
     get_upload_storage,
@@ -85,7 +84,6 @@ class ColumnStats(NamedTuple):
 async def render_stage_three(request: Request) -> HTMLResponse:
     context = {
         "request": request,
-        "default_schema": get_default_target_schema(),
         "next_stage_url": NEXT_STAGE_PATH,
     }
     return _templates.TemplateResponse("stage_3_harmonize.html", context)
@@ -117,7 +115,7 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
         _run_harmonization(cache, meta.saved_path, payload.target_schema, column_mappings, manifest_payload)
     )
     pv_fetch_task = asyncio.create_task(
-        _fetch_pvs_for_session(payload.file_id, manifest_payload, payload.manual_overrides)
+        _fetch_pvs_for_session(payload.file_id, manifest_payload, payload.manual_overrides, payload.target_schema)
     )
 
     # Wait for both to complete
@@ -227,7 +225,6 @@ def _validate_pv_fetch_preconditions(
 async def _fetch_and_cache_pvs(
     cache: SessionCache, data_model_key: str, version_label: str, cde_keys: list[str], file_id: str
 ) -> None:
-    client = get_data_model_client()
     _router_logger.info(
         "Fetching PVs from Data Model Store",
         extra={
@@ -237,7 +234,7 @@ async def _fetch_and_cache_pvs(
             "cde_keys": cde_keys,
         },
     )
-    pv_map = await run_in_threadpool(client.fetch_pvs_batch, data_model_key, version_label, cde_keys)
+    pv_map = await fetch_pvs_batch_async(data_model_key, version_label, cde_keys)
     cache.set_pvs_batch(pv_map)
     pv_counts = {k: len(v) for k, v in pv_map.items()}
     total_pvs = sum(pv_counts.values())
@@ -265,7 +262,7 @@ async def _fetch_and_cache_pvs(
 
 
 async def _fetch_pvs_for_session(
-    file_id: str, manifest: ManifestPayload | None, manual_overrides: dict[str, str]
+    file_id: str, manifest: ManifestPayload | None, manual_overrides: dict[str, str], target_schema: str
 ) -> None:
     """Runs in parallel with harmonization to hide PV fetch latency."""
     cache = get_session_cache(file_id)
@@ -276,8 +273,7 @@ async def _fetch_pvs_for_session(
     # Server restart between Stage 2 and Stage 3 clears in-memory CDEs; re-fetch.
     if not cache.has_cdes():
         _router_logger.info("CDEs missing from cache; re-fetching from Data Model Store", extra={"file_id": file_id})
-        client = get_data_model_client()
-        await run_in_threadpool(populate_cde_cache, file_id, client)
+        await run_in_threadpool(populate_cde_cache, file_id, target_schema)
 
     model_info = _validate_pv_fetch_preconditions(cache, cde_keys, file_id)
     if model_info is None:

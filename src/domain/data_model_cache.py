@@ -11,9 +11,9 @@ import logging
 import threading
 from dataclasses import dataclass, field
 
+from netrias_client import DataModelStoreError, NetriasAPIUnavailable
+
 from src.domain.cde import CDEInfo
-from src.domain.config import get_data_model_key
-from src.domain.data_model_client import DataModelClient, DataModelClientError
 
 _logger = logging.getLogger(__name__)
 
@@ -110,16 +110,17 @@ class SessionCache:
             return self.data_model_key, self.version_label
 
 
-def populate_cde_cache(file_id: str, client: DataModelClient) -> None:
+def populate_cde_cache(file_id: str, data_model_key: str) -> None:
     """PV validation in Stage 3+ requires model key and version; must run before PV fetch."""
-    data_model_key = get_data_model_key()
+    from src.domain.data_model_adapter import fetch_cdes, get_latest_version
+
     try:
-        version_label = client.get_latest_version(data_model_key)
-    except DataModelClientError:
+        version_label = get_latest_version(data_model_key)
+    except (DataModelStoreError, NetriasAPIUnavailable):
         _logger.warning("Data Model Store API unavailable; defaulting to version 1")
         version_label = "1"
 
-    cdes = client.fetch_cdes(data_model_key, version_label)
+    cdes = fetch_cdes(data_model_key, version_label)
     cache = get_session_cache(file_id)
     cache.set_cdes(cdes, data_model_key=data_model_key, version_label=version_label)
 

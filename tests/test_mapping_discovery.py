@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -16,24 +16,16 @@ from src.domain.mapping_service import MappingDiscoveryService, _cde_targets_fro
 
 
 @pytest.fixture
-def _env_with_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("NETRIAS_API_KEY", "test-key")
-    monkeypatch.setenv("CDE_RECOMMEND_URL", "https://test.example.com")
-
-
-@pytest.fixture
 def mock_client() -> MagicMock:
     return MagicMock()
 
 
 @pytest.fixture
 def service_with_mock_client(
-    _env_with_api_key: None,
     mock_client: MagicMock,
 ) -> tuple[MappingDiscoveryService, MagicMock]:
     """Inject a mock NetriasClient into MappingDiscoveryService."""
-    with patch("src.domain.mapping_service.NetriasClient", return_value=mock_client):
-        svc = MappingDiscoveryService()
+    svc = MappingDiscoveryService(mock_client)
     return svc, mock_client
 
 
@@ -142,17 +134,14 @@ def test_discover_skips_empty_target_fields() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_discover_raises_when_client_unavailable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_discover_raises_when_client_unavailable() -> None:
     """
-    Given: MappingDiscoveryService with no API key (client is None)
+    Given: MappingDiscoveryService with no client (None)
     When: discover() is called
     Then: RuntimeError is raised
     """
-    # Given: no API key → client is None
-    monkeypatch.delenv("NETRIAS_API_KEY", raising=False)
-    svc = MappingDiscoveryService()
+    # Given: no client → None
+    svc = MappingDiscoveryService(None)
     assert svc._client is None
 
     # When/Then

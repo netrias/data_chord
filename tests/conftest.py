@@ -15,7 +15,6 @@ import pyarrow.parquet as pq
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from src.domain.cde import CDEInfo
 from src.domain.storage import HARMONIZED_SUFFIX, UploadConstraints, UploadStorage
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -144,33 +143,40 @@ def mock_netrias_client() -> Generator[MagicMock]:
         job_id="mock-job-id-12345",
     )
 
-    # Mock DataModelClient to avoid hitting the real Data Model Store API
-    mock_dm_client = MagicMock()
-    mock_dm_client.get_latest_version.return_value = "1"
-    mock_dm_client.fetch_cdes.return_value = [
-        CDEInfo(cde_id=2, cde_key="primary_diagnosis", description="Primary Diagnosis", version_label="1"),
-        CDEInfo(cde_id=1, cde_key="therapeutic_agents", description="Therapeutic Agents", version_label="1"),
-    ]
-    mock_dm_client.fetch_pvs_batch.return_value = {}
+    # DMS methods on the shared NetriasClient mock
+    from netrias_client import CDE as SdkCDE
+    from netrias_client import DataModel, DataModelVersion
 
-    # Reset dependency singletons so patched constructors are called
-    saved_dm = deps._data_model_client
+    mock_client.list_data_models.return_value = (
+        DataModel(
+            data_commons_id=1, key="test-data-model", name="Test Data Model",
+            description=None, is_active=True,
+            versions=(DataModelVersion(version_label="1"),),
+        ),
+    )
+    mock_client.list_cdes.return_value = (
+        SdkCDE(cde_key="primary_diagnosis", cde_id=2, cde_version_id=1, description="Primary Diagnosis"),
+        SdkCDE(cde_key="therapeutic_agents", cde_id=1, cde_version_id=1, description="Therapeutic Agents"),
+    )
+    mock_client.get_pv_set.return_value = frozenset()
+    mock_client.get_pv_set_async.return_value = frozenset()
+
+    # Reset dependency singletons so the mock is injected
+    saved_client = deps._netrias_client
+    saved_init = deps._netrias_client_initialized
     saved_mapping = deps._mapping_discovery
     saved_harmonizer = deps._harmonizer
-    deps._data_model_client = None
+    deps._netrias_client = mock_client
+    deps._netrias_client_initialized = True
     deps._mapping_discovery = None
     deps._harmonizer = None
 
-    with (
-        patch.dict(os.environ, {"NETRIAS_API_KEY": "test-api-key", "DATA_MODEL_KEY": "test-data-model"}),
-        patch("src.domain.harmonize.NetriasClient", return_value=mock_client),
-        patch("src.domain.mapping_service.NetriasClient", return_value=mock_client),
-        patch("src.domain.dependencies.DataModelClient", return_value=mock_dm_client),
-    ):
+    with patch.dict(os.environ, {"NETRIAS_API_KEY": "test-api-key"}):
         yield mock_client
 
     # Restore singletons to avoid leaking mock state
-    deps._data_model_client = saved_dm
+    deps._netrias_client = saved_client
+    deps._netrias_client_initialized = saved_init
     deps._mapping_discovery = saved_mapping
     deps._harmonizer = saved_harmonizer
 

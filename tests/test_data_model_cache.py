@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from unittest.mock import MagicMock
 
 import pytest
+from netrias_client import CDE as SdkCDE
+from netrias_client import DataModel, DataModelStoreError, DataModelVersion
 
-from src.domain.cde import CDEInfo
 from src.domain.data_model_cache import clear_session_cache, get_session_cache, populate_cde_cache
-from src.domain.data_model_client import DataModelClientError
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -22,35 +23,45 @@ def _clean_cache() -> None:
 
 
 @pytest.fixture
-def _env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("DATA_MODEL_KEY", "gc")
+def mock_netrias() -> Generator[MagicMock]:
+    """Why: inject a mock NetriasClient into the adapter singleton."""
+    import src.domain.dependencies as deps
 
+    mock = MagicMock()
+    mock.list_data_models.return_value = (
+        DataModel(
+            data_commons_id=1, key="gc", name="Genomic Commons",
+            description=None, is_active=True,
+            versions=(DataModelVersion(version_label="2"),),
+        ),
+    )
+    mock.list_cdes.return_value = (
+        SdkCDE(cde_key="age", cde_id=1, cde_version_id=1, description="Age"),
+        SdkCDE(cde_key="sex", cde_id=2, cde_version_id=1, description="Sex"),
+        SdkCDE(cde_key="race", cde_id=3, cde_version_id=1, description="Race"),
+    )
 
-@pytest.fixture
-def mock_dm_client() -> MagicMock:
-    client = MagicMock()
-    client.get_latest_version.return_value = "2"
-    client.fetch_cdes.return_value = [
-        CDEInfo(cde_id=1, cde_key="age", description="Age", version_label="2"),
-        CDEInfo(cde_id=2, cde_key="sex", description="Sex", version_label="2"),
-        CDEInfo(cde_id=3, cde_key="race", description="Race", version_label="2"),
-    ]
-    return client
+    saved = deps._netrias_client
+    saved_init = deps._netrias_client_initialized
+    deps._netrias_client = mock
+    deps._netrias_client_initialized = True
+    yield mock
+    deps._netrias_client = saved
+    deps._netrias_client_initialized = saved_init
 
 
 # ---------------------------------------------------------------------------
-# Test 6: populate_cde_cache stores real CDEs
+# Test: populate_cde_cache stores real CDEs (TS-3)
 # ---------------------------------------------------------------------------
 
 
 def test_populate_cde_cache_stores_real_cdes(
-    _env: None,
-    mock_dm_client: MagicMock,
+    mock_netrias: MagicMock,
 ) -> None:
     """
-    Given: a mocked DataModelClient returning 3 CDEs
+    Given: a mocked NetriasClient returning 3 CDEs for model "gc"
            and the session cache has no CDEs
-    When: populate_cde_cache() is called
+    When: populate_cde_cache() is called with data_model_key="gc"
     Then: session cache contains all 3 CDEs with correct model info
     """
     # Given
@@ -58,7 +69,7 @@ def test_populate_cde_cache_stores_real_cdes(
     assert not cache.has_cdes()
 
     # When
-    populate_cde_cache("test-file-id", mock_dm_client)
+    populate_cde_cache("test-file-id", "gc")
 
     # Then
     assert cache.has_cdes()
@@ -71,38 +82,37 @@ def test_populate_cde_cache_stores_real_cdes(
     assert data_model_key == "gc"
     assert version_label == "2"
 
-    mock_dm_client.fetch_cdes.assert_called_once_with("gc", "2")
+    mock_netrias.list_cdes.assert_called_once_with("gc", "2", include_description=True)
 
 
 # ---------------------------------------------------------------------------
-# Test 7: populate_cde_cache falls back on version error
+# Test: populate_cde_cache falls back on version error
 # ---------------------------------------------------------------------------
 
 
 def test_populate_cde_cache_falls_back_on_version_error(
-    _env: None,
-    mock_dm_client: MagicMock,
+    mock_netrias: MagicMock,
 ) -> None:
     """
-    Given: a DataModelClient that raises on get_latest_version
+    Given: list_data_models raises DataModelStoreError (version lookup fails)
            and no CDEs are cached yet
     When: populate_cde_cache() is called
     Then: CDEs are fetched with version_label="1" (fallback)
     """
     # Given: version lookup fails
-    mock_dm_client.get_latest_version.side_effect = DataModelClientError("unavailable")
-    mock_dm_client.fetch_cdes.return_value = [
-        CDEInfo(cde_id=1, cde_key="age", description="Age", version_label="1"),
-    ]
+    mock_netrias.list_data_models.side_effect = DataModelStoreError("unavailable")
+    mock_netrias.list_cdes.return_value = (
+        SdkCDE(cde_key="age", cde_id=1, cde_version_id=1, description="Age"),
+    )
 
     cache = get_session_cache("test-file-id")
     assert not cache.has_cdes()
 
     # When
-    populate_cde_cache("test-file-id", mock_dm_client)
+    populate_cde_cache("test-file-id", "gc")
 
     # Then: fallback version "1" was used
-    mock_dm_client.fetch_cdes.assert_called_once_with("gc", "1")
+    mock_netrias.list_cdes.assert_called_once_with("gc", "1", include_description=True)
     assert cache.has_cdes()
 
     _, version_label = cache.get_model_info()
