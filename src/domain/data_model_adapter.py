@@ -35,7 +35,6 @@ def list_data_model_summaries() -> list[DataModelSummary]:
         )
         for m in models
     ]
-    # Why: preferred model first so the UI defaults to it
     summaries.sort(key=lambda s: (s.key != _PREFERRED_MODEL_KEY, s.key))
     return summaries
 

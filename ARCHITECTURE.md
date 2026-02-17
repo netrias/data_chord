@@ -274,7 +274,7 @@ Files are named `{file_id}_{suffix}.{extension}` (e.g.,
 | Service | Responsibility |
 |---|---|
 | `HarmonizeService` | Wraps `NetriasClient.harmonize()` with manifest merging and error handling |
-| `MappingDiscoveryService` | Wraps CDE discovery via Netrias recommendation Lambda (confidence threshold 0.7) |
+| `MappingDiscoveryService` | Wraps `NetriasClient.discover_mapping_from_csv()` (confidence threshold 0.7) |
 | `data_model_adapter` | Thin adapter: SDK types → domain types (data model list, CDEs, PVs) |
 
 Services degrade gracefully: missing API keys or client init failures are
@@ -367,7 +367,7 @@ See `adr/` for architectural decision records:
 - [ADR 002](adr/ADR_002_row_context_popup.md) — Row context popup
 - [ADR 003](adr/ADR_003_pv_manifest_persistence.md) — PV manifest persistence
 - [ADR 004](adr/ADR_004_pv_override_protection.md) — PV override protection
-- [ADR 005](adr/ADR_005_cde_lambda_migration.md) — CDE Lambda migration (netrias-client 0.1.0)
+- [ADR 005](adr/ADR_005_cde_lambda_migration.md) — CDE Lambda migration (initial netrias-client SDK adoption)
 - [ADR 006](adr/ADR_006_env_simplification.md) — Environment simplification and SDK migration
 
 **Key principles:**

@@ -36,6 +36,19 @@ initial implementation).
    `data_model_key` as a parameter (from the user's Stage 1 selection)
    instead of reading from an env var.
 
+## Files Changed
+
+- **Deleted**: `src/domain/data_model_client.py` (232 lines)
+- **Created**: `src/domain/data_model_adapter.py` — thin adapter wrapping SDK calls
+- **Modified**: `src/domain/dependencies.py` — single `NetriasClient` singleton
+- **Modified**: `src/domain/config.py` — stripped to `NETRIAS_API_KEY` only
+- **Modified**: `src/domain/data_model_cache.py` — `populate_cde_cache()` takes `data_model_key` param
+- **Modified**: Stage 1/2/3 routers — thread `target_schema` from UI selection
+
+## Related ADRs
+
+- [ADR 005](ADR_005_cde_lambda_migration.md) — initial `netrias-client` SDK migration; this ADR continues that work
+
 ## Consequences
 
 - **Simpler onboarding**: New developers only need one API key

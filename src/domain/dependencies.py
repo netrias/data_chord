@@ -1,5 +1,7 @@
 """
-Provide lazy-initialized service singletons for the harmonization workflow.
+Lazy-initialized service singletons shared across stages.
+
+Axis of change: service wiring and lifecycle. Stages depend on getters, not constructors.
 """
 
 from __future__ import annotations
