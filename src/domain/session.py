@@ -15,7 +15,3 @@ class UILabel(str, Enum):
     SELECT_MAPPING = "Select mapping"
 
 
-def format_column_label(column_name: str) -> str:
-    if not column_name:
-        return "Unknown"
-    return column_name.replace("_", " ").title()

@@ -17,4 +17,3 @@ from src.domain.schemas import HarmonizeResponse as HarmonizeResponse
 from src.domain.schemas import ManifestSummarySchema as ManifestSummarySchema
 from src.domain.session import SessionKey as SessionKey
 from src.domain.session import UILabel as UILabel
-from src.domain.session import format_column_label as format_column_label

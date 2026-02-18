@@ -17,7 +17,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from src.domain import CONFIDENCE, RecommendationType, format_column_label
+from src.domain import CONFIDENCE, RecommendationType
 from src.domain.data_model_cache import SessionCache, get_session_cache
 from src.domain.dependencies import get_file_store, get_upload_storage
 from src.domain.manifest import (
@@ -119,7 +119,7 @@ def _extract_columns_from_manifest(manifest: ManifestSummary) -> list[_ColumnInf
             seen.add(col_name)
             columns.append(_ColumnInfo(
                 column_name=col_name,
-                label=format_column_label(col_name),
+                label=col_name or "Unknown",
                 source_index=row.column_id,
             ))
     return columns
@@ -154,7 +154,7 @@ def _build_columns_from_manifest(manifest: ManifestSummary, file_id: str) -> lis
 
         columns.append(ColumnReviewData(
             columnKey=col_name,
-            columnLabel=format_column_label(col_name),
+            columnLabel=col_name or "Unknown",
             sourceColumnIndex=column_indices[col_name],
             termCount=len(transformations),
             termsWithChanges=terms_with_changes,
