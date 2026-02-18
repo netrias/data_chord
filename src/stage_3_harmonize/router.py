@@ -25,7 +25,6 @@ from src.domain import (
     HarmonizeRequest,
     HarmonizeResponse,
     ManifestSummarySchema,
-    format_column_label,
 )
 from src.domain.data_model_adapter import fetch_pvs_batch_async
 from src.domain.data_model_cache import SessionCache, get_session_cache, populate_cde_cache
@@ -433,7 +432,7 @@ def _create_breakdown_schema(
     unique_terms = len(col_rows)
     return ColumnBreakdownSchema(
         column_name=column_name,
-        label=format_column_label(column_name),
+        label=column_name or "Unknown",
         total_rows=stats.total_rows,
         changed_rows=stats.changed_rows,
         unchanged_rows=stats.total_rows - stats.changed_rows,

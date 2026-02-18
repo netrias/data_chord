@@ -63,10 +63,17 @@ const _showDropzoneCopy = () => {
   if (dropzoneFile) dropzoneFile.classList.add('hidden');
 };
 
+/* ~45 chars fills one line at 1.4rem in the 600px dropzone. */
+const LONG_NAME_THRESHOLD = 45;
+
 const _showDropzoneSummary = (file, statusText) => {
   if (dropzoneCopy) dropzoneCopy.classList.add('hidden');
   if (dropzoneFile) dropzoneFile.classList.remove('hidden');
-  if (dropzoneFileName) dropzoneFileName.textContent = file.name;
+  if (dropzoneFileName) {
+    dropzoneFileName.textContent = file.name;
+    dropzoneFileName.title = file.name;
+    dropzoneFileName.classList.toggle('file-name--long', file.name.length > LONG_NAME_THRESHOLD);
+  }
   /* Hydrated files have humanSize (pre-formatted); real Files have size (bytes). */
   if (dropzoneFileSize) dropzoneFileSize.textContent = file.humanSize ?? _formatBytes(file.size);
   if (dropzoneFileStatus) dropzoneFileStatus.textContent = statusText;

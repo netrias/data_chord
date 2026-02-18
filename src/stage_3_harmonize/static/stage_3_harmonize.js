@@ -122,11 +122,11 @@ const _persistJobMeta = (job) => {
 const _updateTitleForStatus = (status) => {
   const normalized = _normalizeStatus(status);
   if (_isFailedStatus(normalized)) {
-    if (stageThreeTitle) stageThreeTitle.textContent = 'Harmonization failed';
+    if (stageThreeTitle) stageThreeTitle.textContent = 'Harmonization Failed';
     return;
   }
   if (_isCompleteStatus(normalized)) {
-    if (stageThreeTitle) stageThreeTitle.textContent = 'Harmonization complete';
+    if (stageThreeTitle) stageThreeTitle.textContent = 'Harmonization Complete';
     return;
   }
   if (stageThreeTitle) stageThreeTitle.textContent = 'Harmonizing';
