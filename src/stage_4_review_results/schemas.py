@@ -33,6 +33,8 @@ class ReviewStateSchema(BaseModel):
     review_mode: str = "column"
     sort_mode: str = "original"
     scroll_mode: bool = False
+    show_case_only_changes: bool = False
+    show_unchanged_values: bool = False
     column_mode: ReviewModeStateSchema = Field(default_factory=ReviewModeStateSchema)
     row_mode: ReviewModeStateSchema = Field(default_factory=ReviewModeStateSchema)
 
