@@ -48,14 +48,17 @@ def _parse_manifest_rows(table: pa.Table) -> list[ManifestRow]:
 
 
 def _extract_row(batch: pa.RecordBatch, index: int) -> ManifestRow:
+    """Strip AI output fields to remove artifact whitespace from harmonization service."""
+    raw_harmonization = _get_string(batch, "top_harmonization", index, "")
+    raw_suggestions = _get_string_list(batch, "top_harmonizations", index)
     return ManifestRow(
         job_id=_get_string(batch, "job_id", index, ""),
         column_id=_get_int(batch, "column_id", index, 0),
         column_name=_get_string(batch, "column_name", index, ""),
         to_harmonize=_get_string(batch, "to_harmonize", index, ""),
-        top_harmonization=_get_string(batch, "top_harmonization", index, ""),
+        top_harmonization=raw_harmonization.strip(),
         ontology_id=_get_string_nullable(batch, "ontology_id", index),
-        top_harmonizations=_get_string_list(batch, "top_harmonizations", index),
+        top_harmonizations=[s.strip() for s in raw_suggestions],
         confidence_score=_get_float_nullable(batch, "confidence_score", index),
         error=_get_string_nullable(batch, "error", index),
         row_indices=_get_int_list(batch, "row_indices", index),

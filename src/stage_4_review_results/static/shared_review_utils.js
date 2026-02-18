@@ -113,6 +113,34 @@ export const escapeHtml = (str) => {
 };
 
 /**
+ * Render leading/trailing whitespace as visible middle-dot markers.
+ * Returns safe HTML — middle content is HTML-escaped, marker spans are trusted.
+ * @param {string} str
+ * @returns {string} HTML string safe for innerHTML assignment
+ */
+export const formatWhitespaceMarkers = (str) => {
+  if (typeof str !== 'string') return escapeHtml(String(str));
+
+  const leading = str.length - str.trimStart().length;
+  const trailing = str.length - str.trimEnd().length;
+
+  if (leading === 0 && trailing === 0) {
+    return escapeHtml(str);
+  }
+
+  const dot = '<span class="ws-marker">\u00B7</span>';
+
+  // All-whitespace: leading + trailing overlap, just render total length
+  if (leading + trailing >= str.length) {
+    return dot.repeat(str.length);
+  }
+
+  const end = trailing > 0 ? -trailing : undefined;
+  const middle = str.slice(leading, end);
+  return dot.repeat(leading) + escapeHtml(middle) + dot.repeat(trailing);
+};
+
+/**
  * Check if a cell's change is case-only (same text, different letter casing).
  * @param {Object} cell - Cell object with originalValue and harmonizedValue
  * @returns {boolean}
@@ -243,7 +271,7 @@ const _buildCardHTML = (params) => {
   const safeColumnLabel = escapeHtml(columnLabel);
   const safeLabelText = escapeHtml(labelText);
   const safeEffectiveValue = escapeHtml(effectiveValue);
-  const safeOriginalValue = escapeHtml(originalValue);
+  const originalValueHTML = formatWhitespaceMarkers(originalValue);
 
   // Both icons always present when PVs exist - toggle visibility based on conformance
   const warningHidden = isPVConformant ? ' style="display: none;"' : '';
@@ -267,7 +295,7 @@ const _buildCardHTML = (params) => {
     <div class="card-body" role="group" aria-label="${safeColumnLabel} transformation">
       <div class="original-context">
         <span class="original-context-label">was:</span>
-        <span class="original-context-value">${safeOriginalValue}</span>
+        <span class="original-context-value">${originalValueHTML}</span>
         <button type="button" class="revert-btn" aria-label="Revert to original value" title="Revert to original">↩</button>
       </div>
       <div class="target-value-wrapper">

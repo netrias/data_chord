@@ -520,6 +520,12 @@
   overflow: hidden;
 }
 
+/* Whitespace markers — visible middle dots for leading/trailing spaces */
+.ws-marker {
+  color: var(--gray-400);
+  opacity: 0.7;
+}
+
 /* Target value label - matches original context styling */
 .target-value-label {
   color: var(--gray-400);
