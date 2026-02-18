@@ -173,6 +173,7 @@ collect manual overrides via PV combobox.
 - `DELETE /stage-4/overrides/{file_id}` — Clear review session
 - `GET /stage-4/non-conformant/{file_id}` — Fetch non-conformant values for gating
 - `POST /stage-4/row-context` — Fetch original row data by indices
+- `POST /stage-4/term-row-indices` — Fetch full row indices for a term (when truncated in initial response)
 
 **Flow:** Loads original CSV and harmonization manifest. Builds comparison rows
 with PV conformance indicators. UI displays batches with confidence sorting.
@@ -369,6 +370,8 @@ See `adr/` for architectural decision records:
 - [ADR 004](adr/ADR_004_pv_override_protection.md) — PV override protection
 - [ADR 005](adr/ADR_005_cde_lambda_migration.md) — CDE Lambda migration (initial netrias-client SDK adoption)
 - [ADR 006](adr/ADR_006_env_simplification.md) — Environment simplification and SDK migration
+- [ADR 007](adr/ADR_007_ai_whitespace_trimming.md) — AI output whitespace trimming at reader boundary
+- [ADR 008](adr/ADR_008_release_strategy.md) — Release strategy (git tags + GitHub Releases)
 
 **Key principles:**
 
