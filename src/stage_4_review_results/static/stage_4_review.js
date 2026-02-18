@@ -57,7 +57,7 @@ const batchProgressList = document.getElementById('batchProgressList');
 const settingsButton = document.getElementById('settingsButton');
 const settingsModal = document.getElementById('settingsModal');
 const settingsCloseButton = document.getElementById('settingsCloseButton');
-const hideCaseOnlyChangesCheckbox = document.getElementById('hideCaseOnlyChanges');
+const showCaseOnlyChangesCheckbox = document.getElementById('showCaseOnlyChanges');
 const showUnchangedValuesCheckbox = document.getElementById('showUnchangedValues');
 const scrollModeCheckbox = document.getElementById('scrollModeCheckbox');
 
@@ -101,7 +101,7 @@ const state = {
   reviewMode: 'column',
   scrollMode: false,  // Continuous scrolling vs batch navigation
   pendingOverrides: {},
-  hideCaseOnlyChanges: true,  // Filter: hide entries where only casing differs
+  showCaseOnlyChanges: false,  // Filter: show entries where only casing differs
   showUnchangedValues: false,  // Filter: show entries where original equals harmonized
 
   columnMode: {
@@ -223,7 +223,7 @@ const _buildSavePayload = () => ({
     review_mode: state.reviewMode,
     sort_mode: state.sortMode,
     scroll_mode: state.scrollMode,
-    hide_case_only_changes: state.hideCaseOnlyChanges,
+    show_case_only_changes: state.showCaseOnlyChanges,
     show_unchanged_values: state.showUnchangedValues,
     column_mode: _serializeModeState(state.columnMode),
     row_mode: _serializeModeState(state.rowMode),
@@ -315,7 +315,7 @@ const recordOverrideForRows = (rowIndices, columnKey, aiValue, humanValue, origi
  * @returns {Object}
  */
 const _buildFilterOptions = () => ({
-  hideCaseOnlyChanges: state.hideCaseOnlyChanges,
+  showCaseOnlyChanges: state.showCaseOnlyChanges,
   showUnchangedValues: state.showUnchangedValues,
 });
 
@@ -744,9 +744,9 @@ const attachEventListeners = () => {
     });
   }
 
-  if (hideCaseOnlyChangesCheckbox) {
-    hideCaseOnlyChangesCheckbox.addEventListener('change', () => {
-      state.hideCaseOnlyChanges = hideCaseOnlyChangesCheckbox.checked;
+  if (showCaseOnlyChangesCheckbox) {
+    showCaseOnlyChangesCheckbox.addEventListener('change', () => {
+      state.showCaseOnlyChanges = showCaseOnlyChangesCheckbox.checked;
       // Reset to first unit since filtered entry count may change
       state.columnMode.currentUnit = 1;
       state.rowMode.currentUnit = 1;
@@ -790,8 +790,7 @@ const loadStateFromDisk = async () => {
   state.reviewMode = reviewState.review_mode || 'column';
   state.sortMode = reviewState.sort_mode || 'original';
   state.scrollMode = reviewState.scroll_mode ?? false;
-  // Default to true if not specified (checked by default)
-  state.hideCaseOnlyChanges = reviewState.hide_case_only_changes ?? true;
+  state.showCaseOnlyChanges = reviewState.show_case_only_changes ?? false;
   // Default to false if not specified (unchecked by default)
   state.showUnchangedValues = reviewState.show_unchanged_values ?? false;
 
@@ -942,8 +941,8 @@ const init = async () => {
   if (reviewModeSelect) {
     reviewModeSelect.value = state.reviewMode;
   }
-  if (hideCaseOnlyChangesCheckbox) {
-    hideCaseOnlyChangesCheckbox.checked = state.hideCaseOnlyChanges;
+  if (showCaseOnlyChangesCheckbox) {
+    showCaseOnlyChangesCheckbox.checked = state.showCaseOnlyChanges;
   }
   if (showUnchangedValuesCheckbox) {
     showUnchangedValuesCheckbox.checked = state.showUnchangedValues;

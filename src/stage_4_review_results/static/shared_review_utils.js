@@ -130,12 +130,12 @@ export const isCaseChangeOnly = (cell) => {
  * Check if a cell needs review (has changes or no AI recommendation).
  * @param {Object} cell - Cell object
  * @param {Object} [options] - Filter options
- * @param {boolean} [options.hideCaseOnlyChanges=false] - If true, excludes case-only changes
+ * @param {boolean} [options.showCaseOnlyChanges=false] - If true, includes case-only changes
  * @param {boolean} [options.showUnchangedValues=false] - If true, includes unchanged values
  * @returns {boolean}
  */
 export const cellNeedsReview = (cell, options = {}) => {
-  const { hideCaseOnlyChanges = false, showUnchangedValues = false } = options;
+  const { showCaseOnlyChanges = false, showUnchangedValues = false } = options;
 
   const original = cell.originalValue ?? '';
   const harmonized = cell.harmonizedValue ?? '';
@@ -160,8 +160,8 @@ export const cellNeedsReview = (cell, options = {}) => {
     return showUnchangedValues;
   }
 
-  // If filtering case-only changes and this is one, skip it
-  if (hideCaseOnlyChanges && isCaseChangeOnly(cell)) {
+  // If not showing case-only changes and this is one, skip it
+  if (!showCaseOnlyChanges && isCaseChangeOnly(cell)) {
     return false;
   }
 
