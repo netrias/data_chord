@@ -27,6 +27,15 @@
  */
 
 /**
+ * Check whether an override value represents a real change from the AI suggestion.
+ * @param {string} overrideValue - User's override (empty string = no override)
+ * @param {string} aiSuggestedValue - AI harmonized value
+ * @returns {boolean}
+ */
+export const isEffectiveOverride = (overrideValue, aiSuggestedValue) =>
+  overrideValue !== '' && overrideValue !== aiSuggestedValue;
+
+/**
  * Determine the complete display state for a value card.
  * Pure function - no side effects, deterministic output for given input.
  * @param {CardStateInput} input
@@ -43,9 +52,7 @@ export const determineCardState = (input) => {
     overrideIsKnownConformant,
   } = input;
 
-  // Derive: is there an override that differs from AI?
-  // Empty string or matching AI suggestion = no effective override
-  const hasOverride = overrideValue !== '' && overrideValue !== aiSuggestedValue;
+  const hasOverride = isEffectiveOverride(overrideValue, aiSuggestedValue);
 
   // Derive: what value is currently "active"?
   const activeValue = hasOverride ? overrideValue : aiSuggestedValue;

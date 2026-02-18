@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test combobox.test.js row-state.test.js"
+    "test": "node --test combobox.test.js row-state.test.js card-state.test.js whitespace-markers.test.js"
   },
   "devDependencies": {
     "jsdom": "^25.0.0"
