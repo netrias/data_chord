@@ -27,10 +27,17 @@ HIGH_CONFIDENCE_THRESHOLD: float = 0.8
 MEDIUM_CONFIDENCE_THRESHOLD: float = 0.45
 
 
+class AlternativeEntry(TypedDict, total=False):
+    target: str
+    similarity: float
+    cde_id: int
+
+
 class ColumnMappingEntry(TypedDict):
     targetField: str
     cde_id: int
     route: NotRequired[str]
+    alternatives: NotRequired[list[AlternativeEntry]]
 
 
 class ManifestPayload(TypedDict, total=False):
@@ -132,6 +139,7 @@ def get_manifest_schema() -> pa.Schema:
 
 
 __all__ = [
+    "AlternativeEntry",
     "COMPLETENESS_HIGH_THRESHOLD",
     "COMPLETENESS_MEDIUM_THRESHOLD",
     "ColumnMappingEntry",

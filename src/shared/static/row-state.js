@@ -23,8 +23,8 @@ export const determineRowState = ({ aiRecommendation, userSelection, noMappingVa
   const hasUserSelection = normalizedUserSel !== '';
   const isNoMappingSelection = normalizedUserSel === normalizedNoMapping;
 
-  /* Rule: No AI recommendation and (no selection OR "No Mapping" selected) → no-mapping */
-  if (!hasAiRecommendation && (!hasUserSelection || isNoMappingSelection)) {
+  /* Rule: Explicit "No Mapping" selection always shows as no-mapping, even with AI rec. */
+  if (isNoMappingSelection || (!hasAiRecommendation && !hasUserSelection)) {
     return { state: 'no-mapping', icon: '○' };
   }
 

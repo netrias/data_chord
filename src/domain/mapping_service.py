@@ -13,7 +13,7 @@ from netrias_client import NetriasClient
 
 from src.domain.cde import ModelSuggestion
 from src.domain.harmonize import normalize_manifest
-from src.domain.manifest import ManifestPayload
+from src.domain.manifest import AlternativeEntry, ManifestPayload
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,28 @@ def _cde_targets_from_manifest(
     column_mappings = manifest.get("column_mappings", {})
     targets: dict[str, list[ModelSuggestion]] = {}
     for column_name, entry in column_mappings.items():
-        target_field = entry["targetField"]
+        alternatives = entry.get("alternatives")
+        if isinstance(alternatives, list) and alternatives:
+            suggestions = _suggestions_from_alternatives(alternatives)
+            if suggestions:
+                targets[column_name] = suggestions
+                continue
+        target_field = entry.get("targetField")
         if target_field:
             targets[column_name] = [ModelSuggestion(target=target_field, similarity=1.0)]
     return targets
+
+
+def _suggestions_from_alternatives(
+    alternatives: list[AlternativeEntry],
+) -> list[ModelSuggestion]:
+    """External payload uses loose dicts; validate and convert to typed domain objects."""
+    suggestions: list[ModelSuggestion] = []
+    for alt in alternatives:
+        target = alt.get("target")
+        if not isinstance(target, str) or not target:
+            continue
+        similarity = alt.get("similarity")
+        score = float(similarity) if isinstance(similarity, (int, float)) else 0.0
+        suggestions.append(ModelSuggestion(target=target, similarity=score))
+    return suggestions

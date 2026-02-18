@@ -1,5 +1,6 @@
 """Core domain models for the data harmonization workflow."""
 
+from src.domain.cde import NO_MAPPING_SENTINEL as NO_MAPPING_SENTINEL
 from src.domain.cde import CDEInfo as CDEInfo
 from src.domain.cde import ColumnMapping as ColumnMapping
 from src.domain.cde import ColumnMappingSet as ColumnMappingSet

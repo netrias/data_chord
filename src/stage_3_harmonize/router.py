@@ -19,6 +19,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from src.domain import (
+    NO_MAPPING_SENTINEL,
     ColumnBreakdownSchema,
     ColumnMappingSet,
     ConfidenceBucketSchema,
@@ -177,12 +178,20 @@ def _extract_column_cde_mappings(manifest: ManifestPayload | None) -> dict[str, 
     return {col: target for col, entry in column_mappings.items() if (target := _get_target_field(entry))}
 
 
+def _effective_column_cde_map(
+    manifest: ManifestPayload | None, manual_overrides: dict[str, str]
+) -> dict[str, str]:
+    """Merge AI mappings with user overrides, filtering out explicit "No Mapping" selections."""
+    mappings = _extract_column_cde_mappings(manifest)
+    mappings.update(manual_overrides)
+    return {k: v for k, v in mappings.items() if v != NO_MAPPING_SENTINEL}
+
+
 def _store_column_mappings_in_cache(
     cache: SessionCache, manifest: ManifestPayload | None, manual_overrides: dict[str, str]
 ) -> None:
     """PV validation needs to know which CDE each column maps to."""
-    mappings = _extract_column_cde_mappings(manifest)
-    mappings.update(manual_overrides)
+    mappings = _effective_column_cde_map(manifest, manual_overrides)
     cache.set_column_mappings(mappings)
     _router_logger.info("Stored column→CDE mappings", extra={"mappings": mappings})
 
@@ -266,8 +275,7 @@ async def _fetch_pvs_for_session(
 ) -> None:
     """Runs in parallel with harmonization to hide PV fetch latency."""
     cache = get_session_cache(file_id)
-    column_cde_map = _extract_column_cde_mappings(manifest)
-    column_cde_map.update(manual_overrides)
+    column_cde_map = _effective_column_cde_map(manifest, manual_overrides)
     cde_keys = list(set(column_cde_map.values()))
 
     # Server restart between Stage 2 and Stage 3 clears in-memory CDEs; re-fetch.

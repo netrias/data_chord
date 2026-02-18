@@ -150,7 +150,85 @@ def test_discover_raises_when_client_unavailable() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 5: discover wraps SDK errors as RuntimeError
+# Test 5: alternatives from manifest populate suggestions
+# ---------------------------------------------------------------------------
+
+
+def test_cde_targets_reads_alternatives_from_manifest() -> None:
+    """
+    Given: a manifest with alternatives (ranked suggestions) from the updated SDK
+    When: _cde_targets_from_manifest processes it
+    Then: cde_targets contains multiple ModelSuggestions per column, sorted by confidence
+    """
+    # Given
+    manifest: ManifestPayload = {
+        "column_mappings": {
+            "age_col": {
+                "targetField": "age",
+                "cde_id": 900,
+                "alternatives": [
+                    {"target": "age", "similarity": 1.0, "cde_id": 900},
+                    {"target": "ageUnit", "similarity": 0.3, "cde_id": 904},
+                ],
+            },
+            "sex_col": {
+                "targetField": "sex",
+                "cde_id": 901,
+                "alternatives": [
+                    {"target": "sex", "similarity": 0.95, "cde_id": 901},
+                ],
+            },
+        }
+    }
+
+    # When
+    targets = _cde_targets_from_manifest(manifest)
+
+    # Then: age_col has two suggestions
+    assert len(targets["age_col"]) == 2
+    assert targets["age_col"][0].target == "age"
+    assert targets["age_col"][0].similarity == 1.0
+    assert targets["age_col"][1].target == "ageUnit"
+    assert targets["age_col"][1].similarity == 0.3
+
+    # Then: sex_col has one suggestion
+    assert len(targets["sex_col"]) == 1
+    assert targets["sex_col"][0].target == "sex"
+
+
+# ---------------------------------------------------------------------------
+# Test 6: empty alternatives falls back to targetField
+# ---------------------------------------------------------------------------
+
+
+def test_cde_targets_falls_back_to_target_field_when_alternatives_empty() -> None:
+    """
+    Given: a manifest where alternatives is present but all entries fail validation
+    When: _cde_targets_from_manifest processes it
+    Then: falls back to targetField as a single suggestion
+    """
+    # Given: alternatives list has no valid entries (missing target key)
+    manifest: ManifestPayload = {
+        "column_mappings": {
+            "age_col": {
+                "targetField": "age",
+                "cde_id": 900,
+                "alternatives": [{"similarity": 0.9}],  # no "target" key
+            },
+        }
+    }
+
+    # When
+    targets = _cde_targets_from_manifest(manifest)
+
+    # Then: falls back to targetField
+    assert len(targets["age_col"]) == 1
+    assert targets["age_col"][0].target == "age"
+    assert targets["age_col"][0].similarity == 1.0
+
+
+# ---------------------------------------------------------------------------
+# Test 7: discover wraps SDK errors as RuntimeError
 # ---------------------------------------------------------------------------
 
 

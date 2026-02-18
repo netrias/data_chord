@@ -14,7 +14,7 @@
  * 3. Override differs from AI recommendation → 'override'
  * 4. Override is CDE field and no AI recommendation → 'override'
  * 5. No AI recommendation and (no override OR override === noMappingValue) → 'no-mapping'
- * 6. AI recommendation exists and override === noMappingValue → 'override'
+ * 6. Explicit "No Mapping" selection always → 'no-mapping' (even with AI recommendation)
  */
 
 import { describe, it } from 'node:test';
@@ -76,24 +76,24 @@ describe('determineRowState', () => {
       assert.strictEqual(result.icon, '✎');
     });
 
-    it('user selects "No Mapping" → override (rejecting AI suggestion)', () => {
+    it('user selects "No Mapping" → no-mapping (explicitly rejecting AI suggestion)', () => {
       const result = determineRowState({
         aiRecommendation: AI_REC,
         userSelection: NO_MAPPING,
         noMappingValue: NO_MAPPING,
       });
-      assert.strictEqual(result.state, 'override');
-      assert.strictEqual(result.icon, '✎');
+      assert.strictEqual(result.state, 'no-mapping');
+      assert.strictEqual(result.icon, '○');
     });
 
-    it('user selects "No Mapping" (case-insensitive) → override', () => {
+    it('user selects "No Mapping" (case-insensitive) → no-mapping', () => {
       const result = determineRowState({
         aiRecommendation: AI_REC,
         userSelection: 'no mapping',
         noMappingValue: NO_MAPPING,
       });
-      assert.strictEqual(result.state, 'override');
-      assert.strictEqual(result.icon, '✎');
+      assert.strictEqual(result.state, 'no-mapping');
+      assert.strictEqual(result.icon, '○');
     });
   });
 
@@ -188,13 +188,13 @@ describe('determineRowState', () => {
       assert.strictEqual(result.state, 'recommended');
     });
 
-    it('user overrides then selects No Mapping on column with AI rec → override', () => {
+    it('user overrides then selects No Mapping on column with AI rec → no-mapping', () => {
       const result = determineRowState({
         aiRecommendation: AI_REC,
         userSelection: NO_MAPPING,
         noMappingValue: NO_MAPPING,
       });
-      assert.strictEqual(result.state, 'override');
+      assert.strictEqual(result.state, 'no-mapping');
     });
 
     it('user selects CDE then reverts to No Mapping on column without AI rec → no-mapping', () => {
@@ -213,7 +213,7 @@ describe('determineRowState', () => {
       { aiRec: AI_REC, userSel: null, expected: 'recommended' },
       { aiRec: AI_REC, userSel: AI_REC, expected: 'recommended' },
       { aiRec: AI_REC, userSel: OTHER_CDE, expected: 'override' },
-      { aiRec: AI_REC, userSel: NO_MAPPING, expected: 'override' },
+      { aiRec: AI_REC, userSel: NO_MAPPING, expected: 'no-mapping' },
       { aiRec: null, userSel: null, expected: 'no-mapping' },
       { aiRec: null, userSel: OTHER_CDE, expected: 'override' },
       { aiRec: null, userSel: NO_MAPPING, expected: 'no-mapping' },
