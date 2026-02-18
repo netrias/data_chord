@@ -31,7 +31,7 @@ Manual curation is accurate but slow. Automated normalization is fast but opaque
 | Backend | FastAPI (Python 3.13+) |
 | Templates | Jinja2 |
 | Interactivity | HTMX |
-| Data Processing | Pandas, PyArrow, Parquet |
+| Data Processing | PyArrow (Parquet) |
 | Harmonization | Netrias Client SDK |
 | Deployment | Docker |
 

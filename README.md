@@ -16,10 +16,11 @@ For a detailed overview, see [app.md](app.md).
    ```
    Restart your terminal after installing.
 
-2. Clone and install:
+2. Clone and check out the latest release:
    ```bash
    git clone https://github.com/netrias/data_chord.git
    cd data_chord
+   git checkout $(git describe --tags --abbrev=0)
    uv sync
    ```
 
@@ -34,6 +35,14 @@ For a detailed overview, see [app.md](app.md).
    uv run uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
    ```
    Open http://localhost:8000.
+
+## Updating
+
+```bash
+git fetch --tags
+git checkout $(git describe --tags --abbrev=0 origin/main)
+uv sync
+```
 
 ## Development
 

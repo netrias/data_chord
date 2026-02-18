@@ -1,7 +1,7 @@
 [project]
 name = "data-chord"
 version = "0.1.0"
-description = "Add your description here"
+description = "Data harmonization workflow — upload tabular data, review AI-suggested mappings, and export standardized results"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
