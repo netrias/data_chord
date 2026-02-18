@@ -11,6 +11,8 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel
 
+NO_MAPPING_SENTINEL = "No Mapping"
+
 
 @dataclass(frozen=True)
 class DataModelSummary:
@@ -39,7 +41,9 @@ def normalize_cde_key(selection: str | None) -> str | None:
     if not selection:
         return None
     cleaned = selection.strip()
-    return cleaned if cleaned else None
+    if not cleaned or cleaned == NO_MAPPING_SENTINEL:
+        return None
+    return cleaned
 
 
 @dataclass(frozen=True)

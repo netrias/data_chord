@@ -225,15 +225,18 @@ def test_compute_adjustment_non_conformant_when_no_match(
 # =============================================================================
 
 
-@given(st.text(min_size=1, max_size=100).filter(lambda s: s.strip()))
+NO_MAPPING_SENTINEL = "No Mapping"
+
+
+@given(st.text(min_size=1, max_size=100).filter(lambda s: s.strip() and s.strip() != NO_MAPPING_SENTINEL))
 def test_normalize_cde_key_preserves_non_whitespace(text: str) -> None:
-    """Non-empty, non-whitespace strings are returned stripped."""
+    """Non-empty, non-whitespace, non-sentinel strings are returned stripped."""
     result = normalize_cde_key(text)
     assert result is not None
     assert result == text.strip()
 
 
-@given(st.text(min_size=1, max_size=100).filter(lambda s: s.strip()))
+@given(st.text(min_size=1, max_size=100).filter(lambda s: s.strip() and s.strip() != NO_MAPPING_SENTINEL))
 def test_normalize_cde_key_is_idempotent(text: str) -> None:
     """Normalizing twice produces the same result."""
     first = normalize_cde_key(text)
@@ -246,6 +249,12 @@ def test_normalize_cde_key_is_idempotent(text: str) -> None:
 def test_normalize_cde_key_empty_returns_none(empty: str | None) -> None:
     """Empty or whitespace-only input returns None."""
     assert normalize_cde_key(empty) is None
+
+
+def test_normalize_cde_key_no_mapping_sentinel_returns_none() -> None:
+    """The 'No Mapping' UI sentinel is treated as no selection."""
+    assert normalize_cde_key(NO_MAPPING_SENTINEL) is None
+    assert normalize_cde_key(f"  {NO_MAPPING_SENTINEL}  ") is None
 
 
 # =============================================================================

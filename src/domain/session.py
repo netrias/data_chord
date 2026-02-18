@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from enum import Enum
 
+from src.domain.cde import NO_MAPPING_SENTINEL
+
 
 class SessionKey(str, Enum):
     STAGE_THREE_PAYLOAD = "stage3HarmonizePayload"
@@ -11,7 +13,6 @@ class SessionKey(str, Enum):
 
 
 class UILabel(str, Enum):
-    NO_MAPPING = "No Mapping"
-    SELECT_MAPPING = "Select mapping"
+    NO_MAPPING = NO_MAPPING_SENTINEL
 
 

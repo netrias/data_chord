@@ -68,12 +68,14 @@ export const createCombobox = ({ options, initialValue, placeholder, onChange, s
   /** Render dropdown options, optionally filtered by search text. */
   const renderOptions = (filter = '') => {
     dropdown.innerHTML = '';
-    const filterLower = filter.toLowerCase();
+    /* Normalize underscores to spaces so "primary diagnosis" matches "primary_diagnosis". */
+    const normalize = (s) => s.toLowerCase().replace(/_/g, ' ');
+    const filterNorm = normalize(filter);
 
     /* Build filtered list with original indices preserved */
     const filteredWithIndices = options
       .map((opt, idx) => ({ option: opt, originalIndex: idx }))
-      .filter(({ option }) => option.toLowerCase().includes(filterLower));
+      .filter(({ option }) => normalize(option).includes(filterNorm));
 
     if (filteredWithIndices.length === 0) {
       const noMatch = document.createElement('li');

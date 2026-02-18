@@ -13,16 +13,13 @@ const HARMONIZE_BUTTON_LABEL = 'Harmonize →';
 const NO_MAPPING_OPTION = config.noMappingLabel ?? 'No Mapping';
 const stageThreeUrl = config.stageThreeUrl ?? '/stage-3';
 
-/* why: index 0 is the 'No Mapping' option, visually separated from CDE options. */
-const NO_MAPPING_INDEX = 0;
-
 /* Build options from dynamic CDE data or fall back to legacy format */
 const cdeOptions = config.cdeOptions ?? [];
 const cdeLabels = cdeOptions.map((cde) => cde.cde_key ?? cde.label ?? cde);
-const manualOptions = [NO_MAPPING_OPTION, ...cdeLabels];
 
 /* Build lookup for CDE metadata (for tooltips/descriptions) */
 const cdeByKey = new Map(cdeOptions.map((cde) => [cde.cde_key ?? cde.label ?? cde, cde]));
+
 
 /* CSS class constants */
 const CSS_MAPPING_ROW = 'mapping-row';
@@ -66,6 +63,18 @@ const _getColumnSuggestions = (column) => {
   const rawSuggestions = targets[column.column_name] || [];
   /* Filter to only suggestions that match our allowable CDE options. */
   return rawSuggestions.filter((s) => cdeByKey.has(s.target));
+};
+
+/** Build per-column options: [No Mapping, ...AI suggestions, divider, ...remaining CDEs]. */
+const _buildColumnOptions = (suggestions) => {
+  const suggestionKeys = suggestions.map((s) => s.target);
+  const suggestionSet = new Set(suggestionKeys);
+  const remainingCdes = cdeLabels.filter((label) => !suggestionSet.has(label));
+  return {
+    options: [NO_MAPPING_OPTION, ...suggestionKeys, ...remainingCdes],
+    /* Separator goes after the last AI suggestion (or after No Mapping if none). */
+    separatorAfterIndex: suggestionKeys.length,
+  };
 };
 
 /** Save user overrides to payload and persist to storage. */
@@ -134,16 +143,17 @@ const _buildMappingRow = (column) => {
 
   suggestionCell.appendChild(suggestionTarget);
 
-  /* Use the Combobox widget for override selection */
+  /* Use the Combobox widget for override selection with per-column AI suggestions above divider. */
+  const { options: columnOptions, separatorAfterIndex } = _buildColumnOptions(suggestions);
   const combobox = createCombobox({
-    options: manualOptions,
+    options: columnOptions,
     initialValue: manualSelection,
     placeholder: topTarget ? 'Keep AI suggestion' : NO_MAPPING_OPTION,
-    separatorAfterIndex: NO_MAPPING_INDEX,
-    mutedIndices: [NO_MAPPING_INDEX],
+    separatorAfterIndex,
+    mutedIndices: [0],
     onChange: (newValue) => {
-      const isNoMappingSelection = newValue === NO_MAPPING_OPTION;
-      if (newValue && !isNoMappingSelection) {
+      /* "No Mapping" is stored as-is so backend sees the explicit override. */
+      if (newValue) {
         state.manualSelections.set(columnKey, newValue);
       } else {
         state.manualSelections.delete(columnKey);
