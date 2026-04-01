@@ -24,6 +24,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from src.domain import ChangeType
+from src.domain.cde_mapping_persistence import load_cde_mapping_json
 from src.domain.data_model_cache import SessionCache, clear_session_cache
 from src.domain.dependencies import get_file_store, get_upload_storage
 from src.domain.manifest import (
@@ -135,7 +136,7 @@ async def download_harmonized_data(payload: StageFiveRequest) -> StreamingRespon
     original_stem = Path(meta.original_name).stem
     base_name = f"{original_stem}_{payload.file_id}_{timestamp}"
 
-    zip_buffer = _create_zip_buffer(base_name, headers, final_rows, manifest_path)
+    zip_buffer = _create_zip_buffer(base_name, headers, final_rows, manifest_path, payload.file_id)
 
     # Session complete: release in-memory cache to prevent unbounded growth
     clear_session_cache(payload.file_id)
@@ -207,6 +208,7 @@ def _create_zip_buffer(
     headers: list[str],
     rows: list[dict[str, str]],
     manifest_path: Path | None,
+    file_id: str,
 ) -> io.BytesIO:
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -217,6 +219,10 @@ def _create_zip_buffer(
             json_content = _manifest_to_json(manifest_path)
             if json_content:
                 zf.writestr(f"{base_name}_manifest.json", json_content)
+
+        mapping_json = load_cde_mapping_json(file_id)
+        if mapping_json:
+            zf.writestr(f"{base_name}_cde_mapping.json", mapping_json)
 
     zip_buffer.seek(0)
     return zip_buffer

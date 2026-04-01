@@ -27,6 +27,7 @@ from src.domain import (
     HarmonizeResponse,
     ManifestSummarySchema,
 )
+from src.domain.cde_mapping_persistence import save_cde_mapping
 from src.domain.data_model_adapter import fetch_pvs_batch_async
 from src.domain.data_model_cache import SessionCache, get_session_cache, populate_cde_cache
 from src.domain.dependencies import (
@@ -143,6 +144,11 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
         "Manifest summary result",
         extra={"file_id": payload.file_id, "has_summary": manifest_summary is not None},
     )
+
+    # Persist CDE mapping decisions from Stage 2 for inclusion in the download zip
+    if payload.mapping_decisions:
+        _, version_label = cache.get_model_info()
+        save_cde_mapping(payload.file_id, payload.mapping_decisions, payload.target_schema, version_label or None)
 
     query_params = urlencode({
         "file_id": payload.file_id,

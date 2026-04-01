@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Literal, TypedDict
 
 from pydantic import BaseModel
 
@@ -72,3 +73,34 @@ class ColumnMappingSet:
 
     def get_skipped(self) -> list[str]:
         return [m.column_name for m in self.mappings if m.cde_key is None]
+
+
+class ColumnMappingDecision(TypedDict):
+    """Per-column CDE assignment emitted by Stage 2 as part of the harmonization request."""
+
+    column_name: str
+    cde_name: str | None
+    cde_id: int | None
+    cde_description: str | None
+    method: Literal["ai_recommendation", "user_override"]
+
+
+class CDEEntry(TypedDict):
+    """A column successfully mapped to a CDE, used in ai_mapped and user_overrides sections."""
+
+    column_name: str
+    cde_name: str
+    cde_id: int | None
+    cde_description: str | None
+
+
+class CDEMappingDocument(TypedDict):
+    """Persisted artifact documenting column-to-CDE assignments for a harmonization session."""
+
+    file_id: str
+    generated_at: str         # ISO 8601
+    schema_name: str          # target standard, e.g. "CDS"
+    version_label: str | None  # "1" is the fallback when API is unreachable
+    ai_mapped: list[CDEEntry]
+    user_overrides: list[CDEEntry]
+    unmapped_columns: list[str]

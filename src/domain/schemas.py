@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from src.domain.cde import ColumnMappingDecision
 from src.domain.harmonize import HarmonizeStatus
 from src.domain.manifest import ManifestPayload
 
@@ -20,6 +21,7 @@ class HarmonizeRequest(BaseModel):
     target_schema: str
     manual_overrides: dict[str, str] = Field(default_factory=dict)
     manifest: ManifestPayload | None = None
+    mapping_decisions: list[ColumnMappingDecision] = Field(default_factory=list)
 
 
 class ConfidenceBucketSchema(BaseModel):
