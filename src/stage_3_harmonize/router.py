@@ -27,6 +27,8 @@ from src.domain import (
     HarmonizeResponse,
     ManifestSummarySchema,
 )
+from src.domain.cde_mapping_persistence import save_cde_mapping
+from src.domain.column_assignment import build_column_assignments, extract_column_cde_mappings
 from src.domain.data_model_adapter import fetch_pvs_batch_async
 from src.domain.data_model_cache import SessionCache, get_session_cache, populate_cde_cache
 from src.domain.dependencies import (
@@ -47,7 +49,7 @@ from src.domain.manifest import (
 from src.domain.manifest.writer import apply_pv_adjustments_batch
 from src.domain.pv_persistence import save_pv_manifest_to_disk
 from src.domain.pv_validation import check_value_conformance, compute_pv_adjustment
-from src.domain.storage import FileType
+from src.domain.storage import FileType, load_csv
 
 MODULE_DIR = Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"
@@ -66,7 +68,8 @@ class ModelInfo(NamedTuple):
 
 
 class PVAdjustmentRecord(NamedTuple):
-    column_name: str
+    column_id: int      # Stable identifier for writer matching — unaffected by column renames
+    column_name: str    # Preserved for logging only
     to_harmonize: str
     adjusted_value: str
     source: str
@@ -104,11 +107,24 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
 
     stored_manifest = _storage.load_manifest(payload.file_id)
     manifest_payload = payload.manifest or cast(ManifestPayload | None, stored_manifest)
-    column_mappings = ColumnMappingSet.from_dict(payload.manual_overrides)
 
     # Store column->CDE key mappings in cache for PV lookup
     cache = get_session_cache(payload.file_id)
-    _store_column_mappings_in_cache(cache, manifest_payload, payload.manual_overrides)
+    headers, _ = load_csv(meta.saved_path)
+    _store_column_mappings_in_cache(cache, manifest_payload, payload.manual_overrides, headers)
+
+    # Convert index-keyed overrides to name-keyed for the harmonizer API boundary
+    name_keyed_overrides = {
+        headers[col_id]: cde_key
+        for col_id, cde_key in payload.manual_overrides.items()
+        if col_id < len(headers)
+    }
+    if len(name_keyed_overrides) < len(payload.manual_overrides):
+        _router_logger.warning(
+            "Duplicate column names caused override collision at harmonizer boundary",
+            extra={"override_count": len(payload.manual_overrides), "unique_names": len(name_keyed_overrides)},
+        )
+    column_mappings = ColumnMappingSet.from_dict(name_keyed_overrides)
 
     # Launch harmonization and PV fetch in parallel
     harmonize_task = asyncio.create_task(
@@ -144,6 +160,11 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
         extra={"file_id": payload.file_id, "has_summary": manifest_summary is not None},
     )
 
+    # Persist CDE mapping decisions from Stage 2 for inclusion in the download zip
+    if payload.mapping_decisions:
+        _, version_label = cache.get_model_info()
+        save_cde_mapping(payload.file_id, payload.mapping_decisions, payload.target_schema, version_label or None)
+
     query_params = urlencode({
         "file_id": payload.file_id,
         "job_id": result.job_id,
@@ -161,38 +182,20 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
     )
 
 
-def _get_target_field(entry: object) -> str | None:
-    """targetField may be absent or non-string in externally produced manifests."""
-    if not isinstance(entry, dict):
-        return None
-    target = entry.get("targetField")
-    return target if isinstance(target, str) else None
-
-
-def _extract_column_cde_mappings(manifest: ManifestPayload | None) -> dict[str, str]:
-    """PV validation and cache storage both need column→CDE key lookups."""
-    if manifest is None:
-        return {}
-    column_mappings = manifest.get("column_mappings", {})
-    return {col: target for col, entry in column_mappings.items() if (target := _get_target_field(entry))}
-
-
-def _effective_column_cde_map(
-    manifest: ManifestPayload | None, manual_overrides: dict[str, str]
-) -> dict[str, str]:
-    """Merge AI mappings with user overrides, filtering out explicit "No Mapping" selections."""
-    mappings = _extract_column_cde_mappings(manifest)
-    mappings.update(manual_overrides)
-    return {k: v for k, v in mappings.items() if v != NO_MAPPING_SENTINEL}
-
-
 def _store_column_mappings_in_cache(
-    cache: SessionCache, manifest: ManifestPayload | None, manual_overrides: dict[str, str]
+    cache: SessionCache,
+    manifest: ManifestPayload | None,
+    manual_overrides: dict[int, str],
+    csv_headers: list[str],
 ) -> None:
     """PV validation needs to know which CDE each column maps to."""
-    mappings = _effective_column_cde_map(manifest, manual_overrides)
-    cache.set_column_mappings(mappings)
-    _router_logger.info("Stored column→CDE mappings", extra={"mappings": mappings})
+    assignments = build_column_assignments(manifest, manual_overrides, csv_headers)
+    cache.set_column_assignments(assignments)
+    assigned_count = sum(1 for assignment in assignments.values() if assignment.cde_key is not None)
+    _router_logger.info(
+        "Stored column assignments",
+        extra={"column_count": len(assignments), "assigned_count": assigned_count},
+    )
 
 
 async def _run_harmonization(
@@ -270,12 +273,13 @@ async def _fetch_and_cache_pvs(
 
 
 async def _fetch_pvs_for_session(
-    file_id: str, manifest: ManifestPayload | None, manual_overrides: dict[str, str], target_schema: str
+    file_id: str, manifest: ManifestPayload | None, manual_overrides: dict[int, str], target_schema: str
 ) -> None:
     """Runs in parallel with harmonization to hide PV fetch latency."""
     cache = get_session_cache(file_id)
-    column_cde_map = _effective_column_cde_map(manifest, manual_overrides)
-    cde_keys = list(set(column_cde_map.values()))
+    from_manifest = set(extract_column_cde_mappings(manifest).values())
+    from_overrides = {v for v in manual_overrides.values() if v != NO_MAPPING_SENTINEL}
+    cde_keys = list(from_manifest | from_overrides)
 
     # Server restart between Stage 2 and Stage 3 clears in-memory CDEs; re-fetch.
     if not cache.has_cdes():
@@ -325,8 +329,8 @@ async def _read_store_and_adjust_manifest(
     final_data = await _store_and_adjust_manifest(file_id, manifest_path, manifest_data)
     cache = get_session_cache(file_id)
     column_pv_map = {
-        name: cache.get_pvs_for_column(name)
-        for name in {r.column_name for r in final_data.rows}
+        r.column_id: cache.get_pvs_for_column(r.column_id)
+        for r in final_data.rows
     }
     return _convert_to_schema(final_data, column_pv_map)
 
@@ -344,14 +348,16 @@ def _compute_row_adjustment(
         return None
     if result.adjusted_value == row.top_harmonization:
         return None
-    return PVAdjustmentRecord(row.column_name, row.to_harmonize, result.adjusted_value, result.adjustment_source.value)
+    return PVAdjustmentRecord(
+        row.column_id, row.column_name, row.to_harmonize, result.adjusted_value, result.adjustment_source.value
+    )
 
 
 def _process_row_for_adjustment(
     row: ManifestRow, cache: SessionCache
 ) -> PVAdjustmentRecord | None:
     """Skips columns without PVs — those don't need conformance adjustment."""
-    pv_set = cache.get_pvs_for_column(row.column_name)
+    pv_set = cache.get_pvs_for_column(row.column_id)
     if not pv_set:
         return None
     return _compute_row_adjustment(row, pv_set)
@@ -379,13 +385,13 @@ def _log_non_conformant_samples(rows: list[ManifestRow], cache: SessionCache) ->
 
 def _is_top_harmonization_non_conformant(row: ManifestRow, cache: SessionCache) -> bool:
     """Logging-only check; the adjustment path in _compute_row_adjustment handles the actual fix."""
-    pv_set = cache.get_pvs_for_column(row.column_name)
+    pv_set = cache.get_pvs_for_column(row.column_id)
     return pv_set is not None and row.top_harmonization not in pv_set
 
 
-def _records_to_tuples(records: list[PVAdjustmentRecord]) -> list[tuple[str, str, str, str]]:
-    """Writer API expects plain tuples; convert from typed records."""
-    return [(r.column_name, r.to_harmonize, r.adjusted_value, r.source) for r in records]
+def _records_to_tuples(records: list[PVAdjustmentRecord]) -> list[tuple[int, str, str, str]]:
+    """Writer API uses column_id for matching — immune to column renames."""
+    return [(r.column_id, r.to_harmonize, r.adjusted_value, r.source) for r in records]
 
 
 async def _apply_pv_adjustments(file_id: str, manifest_path: Path) -> int:
@@ -432,6 +438,7 @@ def _compute_column_stats(
 
 
 def _create_breakdown_schema(
+    column_id: int,
     column_name: str,
     col_rows: list[ManifestRow],
     pv_set: frozenset[str] | None,
@@ -439,6 +446,7 @@ def _create_breakdown_schema(
     stats = _compute_column_stats(col_rows, pv_set)
     unique_terms = len(col_rows)
     return ColumnBreakdownSchema(
+        column_id=column_id,
         column_name=column_name,
         label=column_name or "Unknown",
         total_rows=stats.total_rows,
@@ -457,15 +465,19 @@ def _create_breakdown_schema(
 
 def _build_column_breakdowns(
     rows: list[ManifestRow],
-    column_pv_map: dict[str, frozenset[str] | None],
+    column_pv_map: dict[int, frozenset[str] | None],
 ) -> list[ColumnBreakdownSchema]:
-    column_rows: dict[str, list[ManifestRow]] = defaultdict(list)
+    """Stable column_id grouping keeps duplicate headers as distinct breakdowns."""
+    column_rows: dict[int, list[ManifestRow]] = defaultdict(list)
+    column_names: dict[int, str] = {}
     for row in rows:
-        column_rows[row.column_name].append(row)
+        column_rows[row.column_id].append(row)
+        if row.column_id not in column_names:
+            column_names[row.column_id] = row.column_name
 
     breakdowns = [
-        _create_breakdown_schema(name, col_rows, column_pv_map.get(name))
-        for name, col_rows in column_rows.items()
+        _create_breakdown_schema(col_id, column_names[col_id], col_rows, column_pv_map.get(col_id))
+        for col_id, col_rows in column_rows.items()
     ]
     # Columns needing attention (changes OR non-conformant) sort first
     breakdowns.sort(key=lambda b: (b.changed_rows == 0 and b.non_conformant_terms == 0, -b.total_rows))
@@ -474,7 +486,7 @@ def _build_column_breakdowns(
 
 def _convert_to_schema(
     manifest: ManifestSummary,
-    column_pv_map: dict[str, frozenset[str] | None],
+    column_pv_map: dict[int, frozenset[str] | None],
 ) -> ManifestSummarySchema:
     column_breakdowns = _build_column_breakdowns(manifest.rows, column_pv_map)
     total_non_conformant = sum(b.non_conformant_terms for b in column_breakdowns)

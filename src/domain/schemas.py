@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from src.domain.cde import ColumnMappingDecision
 from src.domain.harmonize import HarmonizeStatus
 from src.domain.manifest import ManifestPayload
 
@@ -18,8 +19,9 @@ FILE_ID_MIN_LENGTH = 8
 class HarmonizeRequest(BaseModel):
     file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_PATTERN)
     target_schema: str
-    manual_overrides: dict[str, str] = Field(default_factory=dict)
+    manual_overrides: dict[int, str] = Field(default_factory=dict)
     manifest: ManifestPayload | None = None
+    mapping_decisions: list[ColumnMappingDecision] = Field(default_factory=list)
 
 
 class ConfidenceBucketSchema(BaseModel):
@@ -29,6 +31,7 @@ class ConfidenceBucketSchema(BaseModel):
 
 
 class ColumnBreakdownSchema(BaseModel):
+    column_id: int
     column_name: str
     label: str
     total_rows: int

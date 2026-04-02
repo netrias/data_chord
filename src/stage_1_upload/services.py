@@ -1,7 +1,7 @@
 """
 Analyze CSV structure and infer column types for upload preview.
 
-Re-exports storage classes from domain for backward compatibility.
+Re-exports upload storage types so callers can import from one place.
 """
 
 from __future__ import annotations
@@ -27,7 +27,6 @@ from .schemas import ColumnPreview
 
 logger = logging.getLogger(__name__)
 DEFAULT_CDE_SAMPLE_LIMIT = 50
-CSVRow = dict[str, str | None]
 
 __all__ = [
     "UploadConstraints",
@@ -47,19 +46,16 @@ def analyze_columns(csv_path: Path, max_preview_rows: int = 5) -> tuple[int, lis
         raise FileNotFoundError(csv_path)
 
     total_rows, headers, sample_rows = _read_csv_sample(csv_path, max_preview_rows)
-    columns = [_analyze_single_column(header, sample_rows) for header in headers]
+    columns = [_analyze_single_column(column_id, header, sample_rows) for column_id, header in enumerate(headers)]
     return total_rows, columns
 
 
-def _read_csv_sample(csv_path: Path, max_rows: int) -> tuple[int, list[str], list[dict[str, str]]]:
+def _read_csv_sample(csv_path: Path, max_rows: int) -> tuple[int, list[str], list[list[str]]]:
     with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
-        reader = csv.DictReader(handle)
-        headers = list(reader.fieldnames or [])
-        duplicates = {name for name in headers if headers.count(name) > 1}
-        if duplicates:
-            raise ValueError(f"Duplicate headers found: {', '.join(sorted(duplicates))}")
+        reader = csv.reader(handle)
+        headers = next(reader)
         total_rows = 0
-        sample_rows: list[dict[str, str]] = []
+        sample_rows: list[list[str]] = []
         for row in reader:
             total_rows += 1
             if len(sample_rows) < max_rows:
@@ -67,14 +63,15 @@ def _read_csv_sample(csv_path: Path, max_rows: int) -> tuple[int, list[str], lis
     return total_rows, headers, sample_rows
 
 
-def _analyze_single_column(header: str, sample_rows: list[dict[str, str]]) -> ColumnPreview:
-    samples = [_normalize_sample(row.get(header, "")) for row in sample_rows]
+def _analyze_single_column(column_id: int, column_name: str, sample_rows: list[list[str]]) -> ColumnPreview:
+    samples = [_normalize_sample(row[column_id] if column_id < len(row) else "") for row in sample_rows]
     non_empty_values = [value for value in samples if value]
     non_empty_count = len(non_empty_values)
     sample_size = max(len(samples), 1)
 
     return ColumnPreview(
-        column_name=header,
+        column_id=column_id,
+        column_name=column_name,
         inferred_type=_infer_type(non_empty_values),
         sample_values=samples,
         confidence_bucket=completeness_bucket(non_empty_count, sample_size),
@@ -137,12 +134,12 @@ def build_cde_payload(
 
     payload: dict[str, list[str]] = {header: [] for header in headers}
     with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
-        reader = csv.DictReader(handle)
+        reader = csv.reader(handle)
+        next(reader)
         total = 0
-        for row_raw in reader:
-            row: CSVRow = row_raw
-            for header in headers:
-                payload[header].append(_normalize_sample(row.get(header, "")))
+        for row in reader:
+            for i, header in enumerate(headers):
+                payload[header].append(_normalize_sample(row[i] if i < len(row) else ""))
             total += 1
             if total >= limit:
                 break

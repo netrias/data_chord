@@ -88,6 +88,43 @@ const _persistManualOverrides = () => {
   _savePayloadToStorage(nextPayload);
 };
 
+/** Build per-column CDE mapping decisions for downstream reporting.
+ *
+ * Stage 2 is the only point where both AI suggestions and user overrides are
+ * simultaneously available, so method attribution must be computed here.
+ */
+const _buildMappingDecisions = () => {
+  const columns = state.payload?.columns ?? [];
+  return columns.map((column) => {
+    const columnKey = column.column_id;
+    const userSelection = state.manualSelections.get(columnKey);
+    const suggestions = _getColumnSuggestions(column);
+    const aiTopTarget = suggestions[0]?.target ?? null;
+
+    /* User explicitly selected a value → user_override; AI suggestion kept (or no suggestion) → ai_recommendation */
+    const method = userSelection !== undefined ? 'user_override' : 'ai_recommendation';
+
+    /* Effective CDE: user's choice if present, else AI's top suggestion */
+    let cdeKey;
+    if (userSelection !== undefined) {
+      cdeKey = userSelection === NO_MAPPING_OPTION ? null : userSelection;
+    } else {
+      cdeKey = aiTopTarget;
+    }
+
+    /* Guard against undefined from stale sessions where cdeByKey may not have the key */
+    const cdeMeta = cdeKey ? (cdeByKey.get(cdeKey) ?? null) : null;
+
+    return {
+      column_name: column.column_name,
+      cde_name: cdeKey ?? null,
+      cde_id: cdeMeta?.cde_id ?? null,
+      cde_description: cdeMeta?.description ?? null,
+      method,
+    };
+  });
+};
+
 /** Store stage 3 payload in session storage for handoff. */
 const _persistStageThreePayload = (body) => {
   const payloadForStageThree = {
@@ -106,7 +143,7 @@ const _persistStageThreePayload = (body) => {
 const _buildMappingRow = (column) => {
   const suggestions = _getColumnSuggestions(column);
   const topTarget = suggestions[0];
-  const columnKey = column.column_name;
+  const columnKey = column.column_id;
   const manualSelection = state.manualSelections.get(columnKey) ?? null;
 
   const row = document.createElement('div');
@@ -284,6 +321,7 @@ const _submitHarmonize = async () => {
     target_schema: config.targetSchema,
     manual_overrides: overrides,
     manifest,
+    mapping_decisions: _buildMappingDecisions(),
   };
 
   removeFromSession(STAGE_3_JOB_KEY);
@@ -345,7 +383,11 @@ const _init = async () => {
   }
 
   state.payload = payload;
-  const overrides = payload.manual_overrides ? Object.entries(payload.manual_overrides) : [];
+  const overrides = payload.manual_overrides
+    ? Object.entries(payload.manual_overrides)
+        .map(([k, v]) => [parseInt(k, 10), v])
+        .filter(([k]) => !isNaN(k))  // drop stale pre-migration string keys from old sessions
+    : [];
   state.manualSelections = new Map(overrides);
   _hydrateView();
 };

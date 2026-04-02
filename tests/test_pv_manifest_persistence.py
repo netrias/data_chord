@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from src.domain.column_assignment import ColumnAssignment
 from src.domain.data_model_cache import (
     SessionCache,
     clear_all_session_caches,
@@ -31,8 +32,8 @@ class TestPVManifestPersistenceFeature:
             "data_model_key": "cptac",
             "version_label": "v2.1",
             "column_to_cde_key": {
-                "primary_diagnosis": "primary_diagnosis_cde",
-                "tissue_type": "tissue_or_organ_of_origin",
+                "0": "primary_diagnosis_cde",
+                "1": "tissue_or_organ_of_origin",
             },
             "pvs": {
                 "primary_diagnosis_cde": ["Adenocarcinoma", "Squamous Cell Carcinoma"],
@@ -59,16 +60,16 @@ class TestPVManifestPersistenceFeature:
         assert cache.has_any_pvs(), "Cache should have PVs after loading"
 
         # Column mappings are restored
-        assert cache.get_column_cde_key("primary_diagnosis") == "primary_diagnosis_cde"
-        assert cache.get_column_cde_key("tissue_type") == "tissue_or_organ_of_origin"
+        assert cache.get_column_cde_key(0) == "primary_diagnosis_cde"
+        assert cache.get_column_cde_key(1) == "tissue_or_organ_of_origin"
 
         # PV sets are restored as frozensets
-        primary_pvs = cache.get_pvs_for_column("primary_diagnosis")
+        primary_pvs = cache.get_pvs_for_column(0)
         assert primary_pvs is not None
         assert "Adenocarcinoma" in primary_pvs
         assert "Squamous Cell Carcinoma" in primary_pvs
 
-        tissue_pvs = cache.get_pvs_for_column("tissue_type")
+        tissue_pvs = cache.get_pvs_for_column(1)
         assert tissue_pvs is not None
         assert "Lung" in tissue_pvs
         assert len(tissue_pvs) == 3
@@ -93,7 +94,7 @@ class TestPVManifestPersistenceFeature:
             load_pv_manifest_from_disk(file_id, cache)
 
         assert not cache.has_any_pvs(), "Cache should remain empty"
-        assert cache.get_pvs_for_column("any_column") is None
+        assert cache.get_pvs_for_column(0) is None
 
     def test_new_upload_clears_stale_pv_cache(self) -> None:
         """FEATURE: Uploading a new file clears old PV data to prevent cross-contamination.
@@ -123,7 +124,7 @@ class TestPVManifestPersistenceFeature:
         # Given: A file with PV manifest on disk
         file_id = "ensure_test_file"
         pv_manifest_data = {
-            "column_to_cde_key": {"col1": "cde1"},
+            "column_to_cde_key": {"0": "cde1"},
             "pvs": {"cde1": ["Value A", "Value B"]},
         }
 
@@ -139,24 +140,28 @@ class TestPVManifestPersistenceFeature:
 
         # Then: Cache is returned with PVs loaded
         assert cache.has_any_pvs()
-        assert cache.get_pvs_for_column("col1") == frozenset(["Value A", "Value B"])
+        assert cache.get_pvs_for_column(0) == frozenset(["Value A", "Value B"])
 
 
 class TestSessionCacheThreadSafety:
     """Cache operations are thread-safe for concurrent async access."""
 
-    def test_get_column_mappings_returns_copy(self) -> None:
+    def test_get_column_assignments_returns_copy(self) -> None:
         """Thread-safe accessor returns a copy, not the internal dict."""
-        # Given: A cache with column mappings
+        # Given: A cache with column assignments
         cache = SessionCache()
-        cache.set_column_mappings({"col1": "cde1", "col2": "cde2"})
+        cache.set_column_assignments({
+            0: ColumnAssignment(0, "col_a", "cde1"),
+            1: ColumnAssignment(1, "col_b", "cde2"),
+        })
+        assert cache.get_column_assignment(2) is None
 
-        # When: Getting column mappings
-        mappings = cache.get_column_mappings()
+        # When: Getting column assignments and modifying the returned dict
+        assignments = cache.get_column_assignments()
+        assignments[2] = ColumnAssignment(2, "col_c", "cde3")
 
-        # Then: Returned dict is a copy (modifying it doesn't affect cache)
-        mappings["col3"] = "cde3"
-        assert cache.get_column_cde_key("col3") is None, "Cache should not be modified"
+        # Then: Cache is not affected by external mutation
+        assert cache.get_column_assignment(2) is None, "Cache should not be modified"
 
     def test_pvs_stored_as_frozenset(self) -> None:
         """PVs are stored as frozensets for immutability and O(1) lookup."""
@@ -193,17 +198,17 @@ class TestSessionCacheThreadSafety:
 
 
 class TestPVLookupByColumn:
-    """PV lookup via column name (through column→CDE mapping)."""
+    """PV lookup via column index (through column_id→CDE mapping)."""
 
-    def test_pvs_accessible_by_column_name(self) -> None:
-        """Stage 4/5 look up PVs by column name, not CDE key."""
-        # Given: A cache with column mappings and PVs
+    def test_pvs_accessible_by_column_index(self) -> None:
+        """Stage 4/5 look up PVs by column index, not name."""
+        # Given: A cache with column assignments and PVs
         cache = SessionCache()
-        cache.set_column_mappings({"diagnosis_col": "primary_diagnosis_cde"})
+        cache.set_column_assignments({0: ColumnAssignment(0, "diagnosis", "primary_diagnosis_cde")})
         cache.set_pvs("primary_diagnosis_cde", frozenset(["Cancer", "Normal"]))
 
-        # When: Looking up PVs by column name
-        pvs = cache.get_pvs_for_column("diagnosis_col")
+        # When: Looking up PVs by column index
+        pvs = cache.get_pvs_for_column(0)
 
         # Then: PVs are found via the mapping
         assert pvs is not None
@@ -212,26 +217,26 @@ class TestPVLookupByColumn:
 
     def test_unmapped_column_returns_none(self) -> None:
         """Columns without CDE mapping return None for PVs."""
-        # Given: A cache with some mappings but not for all columns
+        # Given: A cache with some assignments but not for all columns
         cache = SessionCache()
-        cache.set_column_mappings({"mapped_col": "some_cde"})
+        cache.set_column_assignments({0: ColumnAssignment(0, "mapped_col", "some_cde")})
         cache.set_pvs("some_cde", frozenset(["Value"]))
 
-        # When: Looking up PVs for an unmapped column
-        pvs = cache.get_pvs_for_column("unmapped_col")
+        # When: Looking up PVs for an unmapped column index
+        pvs = cache.get_pvs_for_column(1)
 
         # Then: Returns None (no PV validation for this column)
         assert pvs is None
 
     def test_column_mapped_but_no_pvs_returns_none(self) -> None:
         """Column mapped to CDE but CDE has no PVs (free-text field)."""
-        # Given: A column mapping but no PVs for that CDE
+        # Given: A column assignment but no PVs for that CDE
         cache = SessionCache()
-        cache.set_column_mappings({"notes_col": "clinical_notes_cde"})
+        cache.set_column_assignments({0: ColumnAssignment(0, "notes", "clinical_notes_cde")})
         # No PVs set for clinical_notes_cde (it's free-text)
 
         # When: Looking up PVs
-        pvs = cache.get_pvs_for_column("notes_col")
+        pvs = cache.get_pvs_for_column(0)
 
         # Then: Returns None (no conformance check needed)
         assert pvs is None

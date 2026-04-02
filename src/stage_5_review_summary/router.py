@@ -21,9 +21,9 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field
 
 from src.domain import ChangeType
+from src.domain.cde_mapping_persistence import load_cde_mapping_json
 from src.domain.data_model_cache import SessionCache, clear_session_cache
 from src.domain.dependencies import get_file_store, get_upload_storage
 from src.domain.manifest import (
@@ -34,8 +34,14 @@ from src.domain.manifest import (
 )
 from src.domain.pv_persistence import ensure_pvs_loaded
 from src.domain.pv_validation import check_value_conformance
-from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
 from src.domain.storage import FileType, UploadStorage, load_csv, resolve_harmonized_path_or_404
+from src.stage_5_review_summary.schemas import (
+    ColumnSummary,
+    StageFiveRequest,
+    StageFiveSummaryResponse,
+    TermMapping,
+    TransformationStep,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -50,40 +56,6 @@ _ERROR_MANIFEST_UNREADABLE = "Unable to read harmonization manifest."
 _templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 
 stage_five_router = APIRouter(prefix="/stage-5", tags=["Stage 5 Download"])
-
-
-class StageFiveRequest(BaseModel):
-    file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_PATTERN)
-
-
-class ColumnSummary(BaseModel):
-    column: str
-    distinct_terms: int
-    ai_changes: int
-    manual_changes: int
-    unchanged: int
-
-
-class TransformationStep(BaseModel):
-    value: str
-    source: str  # "original", "ai", "user"
-    timestamp: str | None = None
-    user_id: str | None = None
-    is_pv_conformant: bool = True
-
-
-class TermMapping(BaseModel):
-    column: str
-    original_value: str
-    final_value: str
-    is_pv_conformant: bool = True
-    history: list[TransformationStep] = []
-
-
-class StageFiveSummaryResponse(BaseModel):
-    column_summaries: list[ColumnSummary]
-    term_mappings: list[TermMapping]
-    non_conformant_count: int = 0
 
 
 @stage_five_router.get("", response_class=HTMLResponse, name="stage_five_review_page")
@@ -135,7 +107,7 @@ async def download_harmonized_data(payload: StageFiveRequest) -> StreamingRespon
     original_stem = Path(meta.original_name).stem
     base_name = f"{original_stem}_{payload.file_id}_{timestamp}"
 
-    zip_buffer = _create_zip_buffer(base_name, headers, final_rows, manifest_path)
+    zip_buffer = _create_zip_buffer(base_name, headers, final_rows, manifest_path, payload.file_id)
 
     # Session complete: release in-memory cache to prevent unbounded growth
     clear_session_cache(payload.file_id)
@@ -207,6 +179,7 @@ def _create_zip_buffer(
     headers: list[str],
     rows: list[dict[str, str]],
     manifest_path: Path | None,
+    file_id: str,
 ) -> io.BytesIO:
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -217,6 +190,10 @@ def _create_zip_buffer(
             json_content = _manifest_to_json(manifest_path)
             if json_content:
                 zf.writestr(f"{base_name}_manifest.json", json_content)
+
+        mapping_json = load_cde_mapping_json(file_id)
+        if mapping_json:
+            zf.writestr(f"{base_name}_cde_mapping.json", mapping_json)
 
     zip_buffer.seek(0)
     return zip_buffer
@@ -346,7 +323,7 @@ def _process_manifest_row(
     ai_counts: dict[int, int],
     manual_counts: dict[int, int],
     unchanged_counts: dict[int, int],
-    unique_mappings: dict[tuple[str, str, str], _MappingInfo],
+    unique_mappings: dict[tuple[int, str, str], _MappingInfo],
     cache: SessionCache,
     upload_timestamp: datetime | None,
 ) -> None:
@@ -376,7 +353,7 @@ def _build_summary_from_manifest(summary: ManifestSummary, file_id: str) -> Stag
     unchanged_counts: dict[int, int] = defaultdict(int)
     distinct_terms: dict[int, int] = defaultdict(int)
     column_names: dict[int, str] = {}
-    unique_mappings: dict[tuple[str, str, str], _MappingInfo] = {}
+    unique_mappings: dict[tuple[int, str, str], _MappingInfo] = {}
 
     for row in summary.rows:
         distinct_terms[row.column_id] += 1
@@ -387,13 +364,13 @@ def _build_summary_from_manifest(summary: ManifestSummary, file_id: str) -> Stag
     sorted_mappings = sorted(unique_mappings.items(), key=lambda x: x[0])
     term_mappings = [
         TermMapping(
-            column=col,
+            column=column_names[col_id],
             original_value=orig,
             final_value=final,
             is_pv_conformant=info.is_conformant,
             history=info.history,
         )
-        for (col, orig, final), info in sorted_mappings
+        for (col_id, orig, final), info in sorted_mappings
     ]
 
     return StageFiveSummaryResponse(
@@ -413,20 +390,20 @@ def _build_summary_from_manifest(summary: ManifestSummary, file_id: str) -> Stag
 
 
 def _track_mapping(
-    mappings: dict[tuple[str, str, str], _MappingInfo],
+    mappings: dict[tuple[int, str, str], _MappingInfo],
     row: ManifestRow,
     cache: SessionCache,
     upload_timestamp: datetime | None,
 ) -> None:
-    """Deduplicates by (column, original, final) so we check conformance once per unique mapping."""
+    """Deduplicates by stable column_id so duplicate headers remain distinct."""
     # Empty string means no data; whitespace-only values pass through as semantically significant
     if not row.to_harmonize:
         return
     final = _get_final_value(row)
-    key = (row.column_name, row.to_harmonize, final)
+    key = (row.column_id, row.to_harmonize, final)
     if key in mappings:
         return
-    pv_set = cache.get_pvs_for_column(row.column_name)
+    pv_set = cache.get_pvs_for_column(row.column_id)
     is_conformant = check_value_conformance(final, pv_set)
     history = _build_history(row, upload_timestamp, pv_set)
     mappings[key] = _MappingInfo(is_conformant, history)

@@ -104,6 +104,7 @@ async def fetch_stage_four_rows(payload: StageFourResultsRequest) -> StageFourRe
 
 @dataclass
 class _ColumnInfo:
+    column_id: int
     column_name: str
     label: str
     source_index: int  # Position in original spreadsheet for ordering
@@ -111,51 +112,55 @@ class _ColumnInfo:
 
 def _extract_columns_from_manifest(manifest: ManifestSummary) -> list[_ColumnInfo]:
     """Extract unique columns with their source index for ordering."""
-    seen: set[str] = set()
+    seen: set[int] = set()
     columns: list[_ColumnInfo] = []
     for row in manifest.rows:
-        col_name = row.column_name
-        if col_name and col_name not in seen:
-            seen.add(col_name)
+        if row.column_name and row.column_id not in seen:
+            seen.add(row.column_id)
             columns.append(_ColumnInfo(
-                column_name=col_name,
-                label=col_name or "Unknown",
+                column_id=row.column_id,
+                column_name=row.column_name,
+                label=row.column_name or "Unknown",
                 source_index=row.column_id,
             ))
     return columns
 
 
 def _build_columns_from_manifest(manifest: ManifestSummary, file_id: str) -> list[ColumnReviewData]:
-    """Build column-centric data structure grouped by column name."""
+    """Build column-centric data structure grouped by stable column identity."""
     cache = get_session_cache(file_id)
 
-    # Group manifest rows by column, track source index for ordering
-    columns_map: dict[str, list[ManifestRow]] = {}
-    column_indices: dict[str, int] = {}
+    columns_map: dict[int, list[ManifestRow]] = {}
+    column_info: dict[int, _ColumnInfo] = {}
 
     for row in manifest.rows:
-        col_name = row.column_name
-        if not col_name:
+        if not row.column_name:
             continue
-        if col_name not in columns_map:
-            columns_map[col_name] = []
-            column_indices[col_name] = row.column_id
-        columns_map[col_name].append(row)
+        if row.column_id not in columns_map:
+            columns_map[row.column_id] = []
+            column_info[row.column_id] = _ColumnInfo(
+                column_id=row.column_id,
+                column_name=row.column_name,
+                label=row.column_name or "Unknown",
+                source_index=row.column_id,
+            )
+        columns_map[row.column_id].append(row)
 
     # Build columns ordered by source spreadsheet position
     columns: list[ColumnReviewData] = []
-    for col_name in sorted(columns_map.keys(), key=lambda c: column_indices[c]):
-        manifest_rows = columns_map[col_name]
+    for column_id in sorted(columns_map.keys()):
+        manifest_rows = columns_map[column_id]
+        col_info = column_info[column_id]
         transformations = [
-            _build_transformation(r, col_name, cache) for r in manifest_rows
+            _build_transformation(r, r.column_id, cache) for r in manifest_rows
         ]
 
         terms_with_changes = sum(1 for t in transformations if t.isChanged)
 
         columns.append(ColumnReviewData(
-            columnKey=col_name,
-            columnLabel=col_name or "Unknown",
-            sourceColumnIndex=column_indices[col_name],
+            columnKey=col_info.column_name,
+            columnLabel=col_info.label,
+            sourceColumnIndex=col_info.source_index,
             termCount=len(transformations),
             termsWithChanges=terms_with_changes,
             transformations=transformations,
@@ -166,7 +171,7 @@ def _build_columns_from_manifest(manifest: ManifestSummary, file_id: str) -> lis
 
 def _build_transformation(
     row: ManifestRow,
-    col_key: str,
+    column_id: int,
     cache: SessionCache,
 ) -> Transformation:
     """Build a Transformation from a manifest row."""
@@ -186,7 +191,7 @@ def _build_transformation(
     manual_override = get_latest_override_value(row.manual_overrides)
     current_value = manual_override if manual_override is not None else harmonized_value
 
-    pv_set = cache.get_pvs_for_column(col_key)
+    pv_set = cache.get_pvs_for_column(column_id)
     pv_available = pv_set is not None and len(pv_set) > 0
     is_conformant = check_value_conformance(current_value, pv_set)
 
@@ -220,7 +225,7 @@ def _build_column_pvs(columns: list[_ColumnInfo], file_id: str) -> dict[str, lis
     columns_without_pvs: list[str] = []
 
     for col_info in columns:
-        pv_set = cache.get_pvs_for_column(col_info.column_name)
+        pv_set = cache.get_pvs_for_column(col_info.source_index)
         if pv_set:
             column_pvs[col_info.column_name] = sorted(pv_set)
         else:
@@ -385,7 +390,7 @@ async def delete_overrides(file_id: FileIdPath) -> DeleteOverridesResponse:
     name="stage_four_non_conformant",
 )
 async def get_non_conformant_values(file_id: FileIdPath) -> NonConformantResponse:
-    """Deduplicate by (column, original, final) to match Stage 5's unique mapping logic."""
+    """Deduplicate by stable column_id so duplicate headers remain distinct."""
     storage = get_upload_storage()
     cache = ensure_pvs_loaded(file_id)
     manifest = _load_manifest(storage, file_id)
@@ -394,7 +399,7 @@ async def get_non_conformant_values(file_id: FileIdPath) -> NonConformantRespons
         return NonConformantResponse(count=0, items=[])
 
     # Track unique (column, original, final) tuples to avoid counting duplicates
-    seen: set[tuple[str, str, str]] = set()
+    seen: set[tuple[int, str, str]] = set()
     non_conformant: list[NonConformantItem] = []
 
     for row in manifest.rows:
@@ -403,13 +408,13 @@ async def get_non_conformant_values(file_id: FileIdPath) -> NonConformantRespons
         current_value = latest_override if latest_override is not None else row.top_harmonization
 
         # Skip if we've already processed this exact mapping
-        key = (row.column_name, row.to_harmonize, current_value or "")
+        key = (row.column_id, row.to_harmonize, current_value or "")
         if key in seen:
             continue
         seen.add(key)
 
         # Check PV conformance using shared function for consistent behavior
-        pv_set = cache.get_pvs_for_column(row.column_name)
+        pv_set = cache.get_pvs_for_column(row.column_id)
         if pv_set and current_value and not check_value_conformance(current_value, pv_set):
             non_conformant.append(NonConformantItem(
                 column=row.column_name,

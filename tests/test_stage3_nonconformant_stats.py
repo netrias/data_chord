@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from typing import cast
 
+from src.domain.column_assignment import extract_column_cde_mappings as _extract_column_cde_mappings
 from src.domain.data_model_cache import SessionCache
 from src.domain.manifest import ManifestPayload, ManifestRow, ManifestSummary
 from src.stage_3_harmonize.router import (
     _compute_column_stats,
     _convert_to_schema,
-    _extract_column_cde_mappings,
     _store_column_mappings_in_cache,
 )
 
@@ -23,10 +23,11 @@ def _make_row(
     original: str,
     harmonized: str,
     row_indices: list[int] | None = None,
+    column_id: int = 0,
 ) -> ManifestRow:
     return ManifestRow(
         job_id="test-job",
-        column_id=0,
+        column_id=column_id,
         column_name=column_name,
         to_harmonize=original,
         top_harmonization=harmonized,
@@ -129,11 +130,11 @@ class TestSummaryAggregation:
 
     def test_aggregates_across_columns(self) -> None:
         rows = [
-            _make_row("col_a", "Bad1", "Bad1"),
-            _make_row("col_a", "Bad2", "Bad2"),
-            _make_row("col_a", "Bad3", "Bad3"),
-            _make_row("col_b", "BadX", "BadX"),
-            _make_row("col_b", "BadY", "BadY"),
+            _make_row("col_a", "Bad1", "Bad1", column_id=0),
+            _make_row("col_a", "Bad2", "Bad2", column_id=0),
+            _make_row("col_a", "Bad3", "Bad3", column_id=0),
+            _make_row("col_b", "BadX", "BadX", column_id=1),
+            _make_row("col_b", "BadY", "BadY", column_id=1),
         ]
         manifest = ManifestSummary(
             total_terms=5,
@@ -143,9 +144,9 @@ class TestSummaryAggregation:
             low_confidence_count=0,
             rows=rows,
         )
-        column_pv_map: dict[str, frozenset[str] | None] = {
-            "col_a": frozenset(["Good"]),
-            "col_b": frozenset(["Good"]),
+        column_pv_map: dict[int, frozenset[str] | None] = {
+            0: frozenset(["Good"]),
+            1: frozenset(["Good"]),
         }
 
         schema = _convert_to_schema(manifest, column_pv_map)
@@ -154,8 +155,8 @@ class TestSummaryAggregation:
 
     def test_columns_without_pvs_contribute_zero(self) -> None:
         rows = [
-            _make_row("with_pvs", "Bad", "Bad"),
-            _make_row("no_pvs", "Anything", "Anything"),
+            _make_row("with_pvs", "Bad", "Bad", column_id=0),
+            _make_row("no_pvs", "Anything", "Anything", column_id=1),
         ]
         manifest = ManifestSummary(
             total_terms=2,
@@ -165,9 +166,9 @@ class TestSummaryAggregation:
             low_confidence_count=0,
             rows=rows,
         )
-        column_pv_map: dict[str, frozenset[str] | None] = {
-            "with_pvs": frozenset(["Good"]),
-            "no_pvs": None,
+        column_pv_map: dict[int, frozenset[str] | None] = {
+            0: frozenset(["Good"]),
+            1: None,
         }
 
         schema = _convert_to_schema(manifest, column_pv_map)
@@ -192,15 +193,16 @@ class TestManualOverridePropagation:
                 "breed": {"targetField": "organism_species", "cde_id": 131},
             }
         })
-        manual_overrides = {"diagnosis": "primary_diagnosis"}
-        assert cache.get_column_cde_key("diagnosis") is None
+        manual_overrides = {1: "primary_diagnosis"}
+        csv_headers = ["breed", "diagnosis"]
+        assert cache.get_column_cde_key(1) is None
 
         # When
-        _store_column_mappings_in_cache(cache, manifest, manual_overrides)
+        _store_column_mappings_in_cache(cache, manifest, manual_overrides, csv_headers)
 
         # Then: both mappings present
-        assert cache.get_column_cde_key("breed") == "organism_species"
-        assert cache.get_column_cde_key("diagnosis") == "primary_diagnosis"
+        assert cache.get_column_cde_key(0) == "organism_species"
+        assert cache.get_column_cde_key(1) == "primary_diagnosis"
 
     def test_manual_override_takes_precedence_over_manifest(self) -> None:
         """
@@ -216,13 +218,14 @@ class TestManualOverridePropagation:
                 "col": {"targetField": "auto_target", "cde_id": 1},
             }
         })
-        manual_overrides = {"col": "manual_target"}
+        manual_overrides = {0: "manual_target"}
+        csv_headers = ["col"]
 
         # When
-        _store_column_mappings_in_cache(cache, manifest, manual_overrides)
+        _store_column_mappings_in_cache(cache, manifest, manual_overrides, csv_headers)
 
         # Then: manual override wins
-        assert cache.get_column_cde_key("col") == "manual_target"
+        assert cache.get_column_cde_key(0) == "manual_target"
 
     def test_extract_skips_entries_without_target_field(self) -> None:
         """
