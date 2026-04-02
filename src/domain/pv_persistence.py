@@ -9,6 +9,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from src.domain.column_assignment import (
+    assignments_to_snapshots,
+    legacy_mappings_to_assignments,
+    snapshots_to_assignments,
+)
 from src.domain.data_model_cache import SessionCache, get_session_cache
 from src.domain.dependencies import get_file_store
 from src.domain.storage import FileType
@@ -24,8 +29,12 @@ def load_pv_manifest_from_disk(file_id: str, cache: SessionCache) -> None:
         _logger.debug("No PV manifest found on disk", extra={"file_id": file_id})
         return
 
-    column_mappings = manifest_data.get("column_to_cde_key", {})
-    cache.set_column_mappings(column_mappings)
+    assignments = snapshots_to_assignments(manifest_data.get("column_assignments"))
+    if not assignments:
+        assignments = legacy_mappings_to_assignments(manifest_data.get("column_to_cde_key", {}))
+        if manifest_data.get("column_to_cde_key") and not assignments:
+            _logger.warning("Failed to load legacy column_to_cde_key manifest", extra={"file_id": file_id})
+    cache.set_column_assignments(assignments)
 
     pvs_raw = manifest_data.get("pvs", {})
     pv_map = {k: frozenset(v) for k, v in pvs_raw.items()}
@@ -33,7 +42,7 @@ def load_pv_manifest_from_disk(file_id: str, cache: SessionCache) -> None:
 
     _logger.info(
         "Loaded PV manifest from disk into cache",
-        extra={"file_id": file_id, "column_count": len(column_mappings), "cde_count": len(pv_map)},
+        extra={"file_id": file_id, "column_count": len(assignments), "cde_count": len(pv_map)},
     )
 
 
@@ -52,7 +61,7 @@ def save_pv_manifest_to_disk(file_id: str, cache: SessionCache, pv_map: dict[str
     manifest_data = {
         "data_model_key": data_model_key,
         "version_label": version_label,
-        "column_to_cde_key": cache.get_column_mappings(),
+        "column_assignments": assignments_to_snapshots(cache.get_column_assignments()),
         # Sorted for deterministic JSON output and human-readable diffs
         "pvs": {k: sorted(v) for k, v in pv_map.items()},
     }

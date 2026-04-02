@@ -70,7 +70,7 @@ async def test_harmonize_with_manual_overrides(
 
     # Given: An uploaded and analyzed CSV file with manual column overrides
     file_id = await upload_and_analyze(app_client, sample_csv_path)
-    overrides = {"primary_diagnosis": "primary_diagnosis"}
+    overrides = {2: "primary_diagnosis"}
 
     # When: Harmonization is triggered with manual overrides
     response = await app_client.post(

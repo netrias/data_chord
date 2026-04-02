@@ -68,20 +68,20 @@ def _apply_single_override(
 
 
 def _build_adjustment_map(
-    adjustments: list[tuple[str, str, str, str]],
-) -> dict[tuple[str, str], tuple[str, str]]:
+    adjustments: list[tuple[int, str, str, str]],
+) -> dict[tuple[int, str], tuple[str, str]]:
     """Dict lookup avoids O(n²) scan when matching rows to adjustments."""
-    return {(col, to_harm): (adjusted, source) for col, to_harm, adjusted, source in adjustments}
+    return {(col_id, to_harm): (adjusted, source) for col_id, to_harm, adjusted, source in adjustments}
 
 
 def _apply_adjustments_to_rows(
     rows: list[ManifestRow],
-    adjustment_map: dict[tuple[str, str], tuple[str, str]],
+    adjustment_map: dict[tuple[int, str], tuple[str, str]],
 ) -> AdjustmentResult:
     updated: list[ManifestRow] = []
     adjusted_count = 0
     for row in rows:
-        key = (row.column_name, row.to_harmonize)
+        key = (row.column_id, row.to_harmonize)
         if key in adjustment_map:
             adjusted_value, _source = adjustment_map[key]
             updated.append(replace(row, top_harmonization=adjusted_value))
@@ -93,7 +93,7 @@ def _apply_adjustments_to_rows(
 
 def apply_pv_adjustments_batch(
     manifest_path: Path,
-    adjustments: list[tuple[str, str, str, str]],
+    adjustments: list[tuple[int, str, str, str]],
 ) -> int:
     if not adjustments:
         return 0

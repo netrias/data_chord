@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+from src.domain.column_assignment import extract_column_cde_mappings as _extract_column_cde_mappings
 from src.domain.manifest import ManifestPayload
-from src.stage_3_harmonize.router import _extract_column_cde_mappings
 
 
 def _sdk_manifest(column_mappings: dict[str, dict[str, Any]]) -> ManifestPayload:

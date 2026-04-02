@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from typing import cast
 
+from src.domain.column_assignment import extract_column_cde_mappings as _extract_column_cde_mappings
 from src.domain.data_model_cache import SessionCache
 from src.domain.manifest import ManifestPayload, ManifestRow, ManifestSummary
 from src.stage_3_harmonize.router import (
     _compute_column_stats,
     _convert_to_schema,
-    _extract_column_cde_mappings,
     _store_column_mappings_in_cache,
 )
 
@@ -192,15 +192,16 @@ class TestManualOverridePropagation:
                 "breed": {"targetField": "organism_species", "cde_id": 131},
             }
         })
-        manual_overrides = {"diagnosis": "primary_diagnosis"}
-        assert cache.get_column_cde_key("diagnosis") is None
+        manual_overrides = {1: "primary_diagnosis"}
+        csv_headers = ["breed", "diagnosis"]
+        assert cache.get_column_cde_key(1) is None
 
         # When
-        _store_column_mappings_in_cache(cache, manifest, manual_overrides)
+        _store_column_mappings_in_cache(cache, manifest, manual_overrides, csv_headers)
 
         # Then: both mappings present
-        assert cache.get_column_cde_key("breed") == "organism_species"
-        assert cache.get_column_cde_key("diagnosis") == "primary_diagnosis"
+        assert cache.get_column_cde_key(0) == "organism_species"
+        assert cache.get_column_cde_key(1) == "primary_diagnosis"
 
     def test_manual_override_takes_precedence_over_manifest(self) -> None:
         """
@@ -216,13 +217,14 @@ class TestManualOverridePropagation:
                 "col": {"targetField": "auto_target", "cde_id": 1},
             }
         })
-        manual_overrides = {"col": "manual_target"}
+        manual_overrides = {0: "manual_target"}
+        csv_headers = ["col"]
 
         # When
-        _store_column_mappings_in_cache(cache, manifest, manual_overrides)
+        _store_column_mappings_in_cache(cache, manifest, manual_overrides, csv_headers)
 
         # Then: manual override wins
-        assert cache.get_column_cde_key("col") == "manual_target"
+        assert cache.get_column_cde_key(0) == "manual_target"
 
     def test_extract_skips_entries_without_target_field(self) -> None:
         """

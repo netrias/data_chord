@@ -18,15 +18,15 @@ from src.domain.pv_validation import check_value_conformance
 class MockSessionCache:
     """Mock session cache with configurable PV sets per column."""
 
-    pvs_by_column: dict[str, frozenset[str]]
+    pvs_by_column: dict[int, frozenset[str]]
 
-    def get_pvs_for_column(self, column_name: str) -> frozenset[str] | None:
-        return self.pvs_by_column.get(column_name)
+    def get_pvs_for_column(self, column_id: int) -> frozenset[str] | None:
+        return self.pvs_by_column.get(column_id)
 
 
 def _count_non_conformant_stage4(rows: list[ManifestRow], cache: MockSessionCache) -> int:
     """Stage 4's logic: deduplicate by (column, original, final)."""
-    seen: set[tuple[str, str, str]] = set()
+    seen: set[tuple[int, str, str]] = set()
     count = 0
 
     for row in rows:
@@ -35,13 +35,13 @@ def _count_non_conformant_stage4(rows: list[ManifestRow], cache: MockSessionCach
         current_value = latest_override if latest_override else row.top_harmonization
 
         # Skip if we've already processed this exact mapping
-        key = (row.column_name, row.to_harmonize, current_value or "")
+        key = (row.column_id, row.to_harmonize, current_value or "")
         if key in seen:
             continue
         seen.add(key)
 
         # Check PV conformance using shared function for consistency with router
-        pv_set = cache.get_pvs_for_column(row.column_name)
+        pv_set = cache.get_pvs_for_column(row.column_id)
         if pv_set and current_value and not check_value_conformance(current_value, pv_set):
             count += 1
 
@@ -50,14 +50,14 @@ def _count_non_conformant_stage4(rows: list[ManifestRow], cache: MockSessionCach
 
 def _count_non_conformant_stage5(rows: list[ManifestRow], cache: MockSessionCache) -> int:
     """Stage 5's logic: track all rows for conformance checking."""
-    unique_mappings: dict[tuple[str, str, str], bool] = {}
+    unique_mappings: dict[tuple[int, str, str], bool] = {}
 
     for row in rows:
         final = get_latest_override_value(row.manual_overrides) or row.top_harmonization
-        key = (row.column_name, row.to_harmonize, final)
+        key = (row.column_id, row.to_harmonize, final)
         if key in unique_mappings:
             continue
-        pv_set = cache.get_pvs_for_column(row.column_name)
+        pv_set = cache.get_pvs_for_column(row.column_id)
         is_conformant = check_value_conformance(final, pv_set)
         unique_mappings[key] = is_conformant
 
@@ -69,6 +69,7 @@ def _make_row(
     original: str,
     harmonized: str,
     overrides: list[dict[str, Any]] | None = None,
+    column_id: int = 0,
 ) -> ManifestRow:
     """Helper to create a ManifestRow for testing."""
     manual_overrides = [
@@ -81,7 +82,7 @@ def _make_row(
     ]
     return ManifestRow(
         job_id="test-job",
-        column_id=0,
+        column_id=column_id,
         column_name=column_name,
         to_harmonize=original,
         top_harmonization=harmonized,
@@ -105,7 +106,7 @@ class TestNonConformantCountConsistency:
         """
         # Given: A row where original == harmonized (unchanged) but both are non-conformant
         pv_set = frozenset(["Adenocarcinoma", "Squamous Cell Carcinoma"])
-        cache = MockSessionCache(pvs_by_column={"primary_diagnosis": pv_set})
+        cache = MockSessionCache(pvs_by_column={0: pv_set})
 
         # "Bad Value" is not in the PV set, and AI didn't change it
         rows = [_make_row("primary_diagnosis", "Bad Value", "Bad Value")]
@@ -122,7 +123,7 @@ class TestNonConformantCountConsistency:
     def test_changed_non_conformant_row_is_counted(self) -> None:
         """A row changed by AI to a non-conformant value is counted by both stages."""
         pv_set = frozenset(["Adenocarcinoma", "Squamous Cell Carcinoma"])
-        cache = MockSessionCache(pvs_by_column={"primary_diagnosis": pv_set})
+        cache = MockSessionCache(pvs_by_column={0: pv_set})
 
         # AI changed "Original" to "Bad Harmonization" which is not in PV set
         rows = [_make_row("primary_diagnosis", "Original", "Bad Harmonization")]
@@ -137,7 +138,7 @@ class TestNonConformantCountConsistency:
     def test_manual_override_to_non_conformant_is_counted(self) -> None:
         """A manual override to a non-conformant value is counted by both stages."""
         pv_set = frozenset(["Adenocarcinoma", "Squamous Cell Carcinoma"])
-        cache = MockSessionCache(pvs_by_column={"primary_diagnosis": pv_set})
+        cache = MockSessionCache(pvs_by_column={0: pv_set})
 
         # AI harmonized to conformant, but user overrode to non-conformant
         rows = [
@@ -159,7 +160,7 @@ class TestNonConformantCountConsistency:
     def test_conformant_values_not_counted(self) -> None:
         """Values that match the PV set are not counted as non-conformant."""
         pv_set = frozenset(["Adenocarcinoma", "Squamous Cell Carcinoma"])
-        cache = MockSessionCache(pvs_by_column={"primary_diagnosis": pv_set})
+        cache = MockSessionCache(pvs_by_column={0: pv_set})
 
         rows = [
             _make_row("primary_diagnosis", "Original", "Adenocarcinoma"),  # Conformant
@@ -175,7 +176,7 @@ class TestNonConformantCountConsistency:
     def test_deduplication_by_column_original_final(self) -> None:
         """Duplicate mappings (same column, original, final) are counted once."""
         pv_set = frozenset(["Adenocarcinoma"])
-        cache = MockSessionCache(pvs_by_column={"primary_diagnosis": pv_set})
+        cache = MockSessionCache(pvs_by_column={0: pv_set})
 
         # Same mapping appears in multiple rows (e.g., same value in multiple spreadsheet rows)
         rows = [
@@ -195,14 +196,14 @@ class TestNonConformantCountConsistency:
         """Non-conformant values across multiple columns are all counted."""
         cache = MockSessionCache(
             pvs_by_column={
-                "primary_diagnosis": frozenset(["Adenocarcinoma"]),
-                "tissue_type": frozenset(["Frozen", "FFPE"]),
+                0: frozenset(["Adenocarcinoma"]),
+                1: frozenset(["Frozen", "FFPE"]),
             }
         )
 
         rows = [
-            _make_row("primary_diagnosis", "Bad Diagnosis", "Bad Diagnosis"),
-            _make_row("tissue_type", "Bad Tissue", "Bad Tissue"),
+            _make_row("primary_diagnosis", "Bad Diagnosis", "Bad Diagnosis", column_id=0),
+            _make_row("tissue_type", "Bad Tissue", "Bad Tissue", column_id=1),
         ]
 
         stage4_count = _count_non_conformant_stage4(rows, cache)
@@ -216,14 +217,14 @@ class TestNonConformantCountConsistency:
         # Only primary_diagnosis has PVs; other_column does not
         cache = MockSessionCache(
             pvs_by_column={
-                "primary_diagnosis": frozenset(["Adenocarcinoma"]),
-                # "other_column" intentionally missing - no PV set
+                0: frozenset(["Adenocarcinoma"]),
+                # column_id=1 intentionally missing - no PV set
             }
         )
 
         rows = [
-            _make_row("primary_diagnosis", "Bad", "Bad"),  # Has PVs, non-conformant
-            _make_row("other_column", "Anything", "Anything"),  # No PVs, not counted
+            _make_row("primary_diagnosis", "Bad", "Bad", column_id=0),  # Has PVs, non-conformant
+            _make_row("other_column", "Anything", "Anything", column_id=1),  # No PVs, not counted
         ]
 
         stage4_count = _count_non_conformant_stage4(rows, cache)
@@ -235,7 +236,7 @@ class TestNonConformantCountConsistency:
     def test_empty_value_not_counted(self) -> None:
         """Empty/None values are not counted as non-conformant (graceful degradation)."""
         pv_set = frozenset(["Adenocarcinoma"])
-        cache = MockSessionCache(pvs_by_column={"primary_diagnosis": pv_set})
+        cache = MockSessionCache(pvs_by_column={0: pv_set})
 
         rows = [
             _make_row("primary_diagnosis", "", ""),  # Empty original and harmonized
@@ -247,3 +248,23 @@ class TestNonConformantCountConsistency:
 
         assert stage4_count == 0
         assert stage5_count == 0
+
+    def test_duplicate_column_names_are_counted_per_column_id(self) -> None:
+        """Duplicate-named columns remain distinct when keyed by stable column_id."""
+        cache = MockSessionCache(
+            pvs_by_column={
+                0: frozenset(["Allowed A"]),
+                1: frozenset(["Allowed B"]),
+            }
+        )
+
+        rows = [
+            _make_row("diagnosis", "Shared Bad", "Shared Bad", column_id=0),
+            _make_row("diagnosis", "Shared Bad", "Shared Bad", column_id=1),
+        ]
+
+        stage4_count = _count_non_conformant_stage4(rows, cache)
+        stage5_count = _count_non_conformant_stage5(rows, cache)
+
+        assert stage4_count == 2
+        assert stage5_count == 2

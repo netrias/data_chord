@@ -96,7 +96,7 @@ const _persistManualOverrides = () => {
 const _buildMappingDecisions = () => {
   const columns = state.payload?.columns ?? [];
   return columns.map((column) => {
-    const columnKey = column.column_name;
+    const columnKey = column.column_id;
     const userSelection = state.manualSelections.get(columnKey);
     const suggestions = _getColumnSuggestions(column);
     const aiTopTarget = suggestions[0]?.target ?? null;
@@ -116,7 +116,7 @@ const _buildMappingDecisions = () => {
     const cdeMeta = cdeKey ? (cdeByKey.get(cdeKey) ?? null) : null;
 
     return {
-      column_name: columnKey,
+      column_name: column.column_name,
       cde_name: cdeKey ?? null,
       cde_id: cdeMeta?.cde_id ?? null,
       cde_description: cdeMeta?.description ?? null,
@@ -143,7 +143,7 @@ const _persistStageThreePayload = (body) => {
 const _buildMappingRow = (column) => {
   const suggestions = _getColumnSuggestions(column);
   const topTarget = suggestions[0];
-  const columnKey = column.column_name;
+  const columnKey = column.column_id;
   const manualSelection = state.manualSelections.get(columnKey) ?? null;
 
   const row = document.createElement('div');
@@ -383,7 +383,11 @@ const _init = async () => {
   }
 
   state.payload = payload;
-  const overrides = payload.manual_overrides ? Object.entries(payload.manual_overrides) : [];
+  const overrides = payload.manual_overrides
+    ? Object.entries(payload.manual_overrides)
+        .map(([k, v]) => [parseInt(k, 10), v])
+        .filter(([k]) => !isNaN(k))  // drop stale pre-migration string keys from old sessions
+    : [];
   state.manualSelections = new Map(overrides);
   _hydrateView();
 };

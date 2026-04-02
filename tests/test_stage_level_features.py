@@ -141,27 +141,6 @@ async def test_stage1_analyze_handles_ragged_rows(
     assert col_b_samples[1] == ""
 
 
-async def test_stage1_analyze_rejects_duplicate_headers(
-    app_client: AsyncClient,
-    temp_storage: UploadStorage,
-) -> None:
-    """Analyze rejects CSVs with duplicate headers."""
-
-    # Given: a CSV with duplicate header names
-    content = b"col_a,col_a\nalpha,beta\n"
-    file_id = await upload_content(app_client, content, "dupe.csv")
-    assert temp_storage.load_manifest(file_id) is None
-
-    # When: analyze is requested
-    response = await app_client.post(
-        "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
-    )
-
-    # Then: bad request indicates duplicate headers
-    assert response.status_code == 400
-    assert "Duplicate headers" in response.text
-
 
 async def test_stage1_analyze_truncates_preview_only(
     app_client: AsyncClient,
