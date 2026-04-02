@@ -30,7 +30,7 @@ class MappingDiscoveryService:
         *,
         csv_path: Path,
         target_schema: str,
-    ) -> tuple[dict[str, list[ModelSuggestion]], dict[str, str], ManifestPayload]:
+    ) -> tuple[dict[str, list[ModelSuggestion]], dict[int, str], ManifestPayload]:
         """manual_overrides (pos 2) always empty — preserved for caller interface compatibility."""
         if not self._client:
             raise RuntimeError("NetriasClient unavailable (missing NETRIAS_API_KEY)")

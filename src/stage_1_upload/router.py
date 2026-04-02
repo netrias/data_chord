@@ -149,7 +149,7 @@ def _analyze_columns_safe(csv_path: Path, file_id: str) -> tuple[int, list[Colum
 async def _discover_mappings(
     csv_path: Path,
     target_schema: str,
-) -> tuple[dict[str, list[ModelSuggestion]], dict[str, str], ManifestPayload]:
+) -> tuple[dict[str, list[ModelSuggestion]], dict[int, str], ManifestPayload]:
     mapping_service = get_mapping_service()
     try:
         cde_targets, manual_overrides, manifest = await run_in_threadpool(
