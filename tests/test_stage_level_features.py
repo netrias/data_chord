@@ -12,7 +12,7 @@ from httpx import AsyncClient
 
 from src.domain.cde import CDEInfo
 from src.domain.data_model_cache import get_session_cache
-from src.domain.harmonize import HarmonizeResult
+from src.domain.harmonize import HarmonizeResult, HarmonizeStatus
 from src.domain.storage import UploadStorage
 from tests.conftest import (
     TEST_TARGET_SCHEMA,
@@ -297,7 +297,7 @@ async def test_stage3_harmonize_uses_stored_manifest_when_payload_missing(
 
         def run(self, *, file_path, target_schema, column_mappings, cache, manifest):  # type: ignore[no-untyped-def]
             self.received_manifest = manifest
-            return HarmonizeResult(job_id="job-1", status="succeeded", detail="ok")
+            return HarmonizeResult(job_id="job-1", status=HarmonizeStatus.SUCCEEDED, detail="ok")
 
     # Given: an uploaded file with a stored manifest
     file_id = await upload_content(app_client, create_csv_content([["col_a"], ["alpha"]]), "manifest.csv")
@@ -336,7 +336,7 @@ async def test_stage3_harmonize_prefers_payload_manifest(
 
         def run(self, *, file_path, target_schema, column_mappings, cache, manifest):  # type: ignore[no-untyped-def]
             self.received_manifest = manifest
-            return HarmonizeResult(job_id="job-2", status="succeeded", detail="ok")
+            return HarmonizeResult(job_id="job-2", status=HarmonizeStatus.SUCCEEDED, detail="ok")
 
     # Given: an uploaded file with a stored manifest
     file_id = await upload_content(app_client, create_csv_content([["col_a"], ["alpha"]]), "payload.csv")

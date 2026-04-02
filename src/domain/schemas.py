@@ -31,6 +31,7 @@ class ConfidenceBucketSchema(BaseModel):
 
 
 class ColumnBreakdownSchema(BaseModel):
+    column_id: int
     column_name: str
     label: str
     total_rows: int

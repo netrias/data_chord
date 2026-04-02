@@ -329,7 +329,7 @@ async def _read_store_and_adjust_manifest(
     final_data = await _store_and_adjust_manifest(file_id, manifest_path, manifest_data)
     cache = get_session_cache(file_id)
     column_pv_map = {
-        r.column_name: cache.get_pvs_for_column(r.column_id)
+        r.column_id: cache.get_pvs_for_column(r.column_id)
         for r in final_data.rows
     }
     return _convert_to_schema(final_data, column_pv_map)
@@ -438,6 +438,7 @@ def _compute_column_stats(
 
 
 def _create_breakdown_schema(
+    column_id: int,
     column_name: str,
     col_rows: list[ManifestRow],
     pv_set: frozenset[str] | None,
@@ -445,6 +446,7 @@ def _create_breakdown_schema(
     stats = _compute_column_stats(col_rows, pv_set)
     unique_terms = len(col_rows)
     return ColumnBreakdownSchema(
+        column_id=column_id,
         column_name=column_name,
         label=column_name or "Unknown",
         total_rows=stats.total_rows,
@@ -463,15 +465,19 @@ def _create_breakdown_schema(
 
 def _build_column_breakdowns(
     rows: list[ManifestRow],
-    column_pv_map: dict[str, frozenset[str] | None],
+    column_pv_map: dict[int, frozenset[str] | None],
 ) -> list[ColumnBreakdownSchema]:
-    column_rows: dict[str, list[ManifestRow]] = defaultdict(list)
+    """Stable column_id grouping keeps duplicate headers as distinct breakdowns."""
+    column_rows: dict[int, list[ManifestRow]] = defaultdict(list)
+    column_names: dict[int, str] = {}
     for row in rows:
-        column_rows[row.column_name].append(row)
+        column_rows[row.column_id].append(row)
+        if row.column_id not in column_names:
+            column_names[row.column_id] = row.column_name
 
     breakdowns = [
-        _create_breakdown_schema(name, col_rows, column_pv_map.get(name))
-        for name, col_rows in column_rows.items()
+        _create_breakdown_schema(col_id, column_names[col_id], col_rows, column_pv_map.get(col_id))
+        for col_id, col_rows in column_rows.items()
     ]
     # Columns needing attention (changes OR non-conformant) sort first
     breakdowns.sort(key=lambda b: (b.changed_rows == 0 and b.non_conformant_terms == 0, -b.total_rows))
@@ -480,7 +486,7 @@ def _build_column_breakdowns(
 
 def _convert_to_schema(
     manifest: ManifestSummary,
-    column_pv_map: dict[str, frozenset[str] | None],
+    column_pv_map: dict[int, frozenset[str] | None],
 ) -> ManifestSummarySchema:
     column_breakdowns = _build_column_breakdowns(manifest.rows, column_pv_map)
     total_non_conformant = sum(b.non_conformant_terms for b in column_breakdowns)

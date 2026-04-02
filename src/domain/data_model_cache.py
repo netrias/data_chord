@@ -65,30 +65,6 @@ class SessionCache:
         with self._lock:
             return len(self.cdes) > 0
 
-    def set_column_assignment(self, assignment: ColumnAssignment) -> None:
-        with self._lock:
-            self.assignments_by_column_id[assignment.column_id] = assignment
-
-    def set_column_mapping(self, column_id: int, cde_key: str) -> None:
-        with self._lock:
-            self.assignments_by_column_id[column_id] = ColumnAssignment(
-                column_id=column_id,
-                column_name="",
-                cde_key=cde_key,
-            )
-
-    def set_column_mappings(self, mappings: dict[int, str]) -> None:
-        """Compatibility shim for callers still passing primitive column→CDE maps."""
-        with self._lock:
-            self.assignments_by_column_id = {
-                column_id: ColumnAssignment(
-                    column_id=column_id,
-                    column_name="",
-                    cde_key=cde_key,
-                )
-                for column_id, cde_key in mappings.items()
-            }
-
     def set_column_assignments(self, assignments: dict[int, ColumnAssignment]) -> None:
         """Full replacement prevents stale keys from previous mapping passes."""
         with self._lock:
@@ -98,15 +74,6 @@ class SessionCache:
         with self._lock:
             assignment = self.assignments_by_column_id.get(column_id)
             return assignment.cde_key if assignment is not None else None
-
-    def get_column_mappings(self) -> dict[int, str]:
-        """Compatibility shim for legacy callers expecting primitive mappings."""
-        with self._lock:
-            return {
-                column_id: assignment.cde_key
-                for column_id, assignment in self.assignments_by_column_id.items()
-                if assignment.cde_key is not None
-            }
 
     def get_column_assignment(self, column_id: int) -> ColumnAssignment | None:
         with self._lock:
