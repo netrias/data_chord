@@ -84,7 +84,73 @@ export const mockAnalyze = async (page) => {
             column_name: 'col_a',
             cde_key: 'col_a',
             cde_id: 1,
-            alternatives: [{ target: 'col_a', confidence: 0.9, cde_id: 1 }],
+            harmonization: 'harmonizable',
+            alternatives: [{ target: 'col_a', confidence: 0.9, cde_id: 1, harmonization: 'harmonizable' }],
+          },
+        ],
+      },
+    };
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(response),
+    });
+  });
+};
+
+/** Analyze mock with two columns exercising different harmonization states.
+ *
+ * First column is 'harmonizable' (no badge); second is 'no_permissible_values'
+ * (renders the "Values pass through" badge on its top-suggestion cell).
+ */
+export const mockAnalyzeHarmonizationMix = async (page) => {
+  await page.route('**/stage-1/analyze', async (route) => {
+    const payload = route.request().postDataJSON?.() ?? {};
+    const fileId = payload.file_id ?? '';
+    const response = {
+      file_id: fileId,
+      file_name: 'test.csv',
+      total_rows: 2,
+      columns: [
+        {
+          column_id: 0,
+          column_name: 'diagnosis',
+          inferred_type: 'text',
+          sample_values: ['Cancer'],
+          confidence_bucket: 'high',
+          confidence_score: 0.9,
+        },
+        {
+          column_id: 1,
+          column_name: 'middle_name',
+          inferred_type: 'text',
+          sample_values: ['Ann'],
+          confidence_bucket: 'high',
+          confidence_score: 1.0,
+        },
+      ],
+      cde_targets: {
+        diagnosis: [{ target: 'disease_type', confidence: 0.9, harmonization: 'harmonizable' }],
+        middle_name: [{ target: 'middle_name', confidence: 1.0, harmonization: 'no_permissible_values' }],
+      },
+      next_stage: 'mapping',
+      next_step_hint: 'Review AI-suggested column mappings once ready.',
+      manual_overrides: {},
+      manifest: {
+        column_mappings: [
+          {
+            column_name: 'diagnosis',
+            cde_key: 'disease_type',
+            cde_id: 323,
+            harmonization: 'harmonizable',
+            alternatives: [{ target: 'disease_type', confidence: 0.9, cde_id: 323, harmonization: 'harmonizable' }],
+          },
+          {
+            column_name: 'middle_name',
+            cde_key: 'middle_name',
+            cde_id: 316,
+            harmonization: 'no_permissible_values',
+            alternatives: [{ target: 'middle_name', confidence: 1.0, cde_id: 316, harmonization: 'no_permissible_values' }],
           },
         ],
       },

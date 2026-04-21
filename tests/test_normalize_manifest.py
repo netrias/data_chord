@@ -106,6 +106,57 @@ class TestNormalizeManifestBoundary:
                 ]
             })
 
+    # (f) harmonization required on every entry and every alternative
+    def test_rejects_entry_missing_harmonization(self) -> None:
+        with pytest.raises(MappingValidationError) as exc:
+            normalize_manifest({
+                "column_mappings": [
+                    {
+                        "column_name": "dx",
+                        "cde_key": "disease_type",
+                        "cde_id": 1,
+                        "alternatives": [
+                            {"target": "disease_type", "confidence": 0.85, "harmonization": "harmonizable"},
+                        ],
+                    }
+                ]
+            })
+        assert "harmonization" in str(exc.value)
+
+    def test_rejects_entry_with_unknown_harmonization_value(self) -> None:
+        with pytest.raises(MappingValidationError) as exc:
+            normalize_manifest({
+                "column_mappings": [
+                    {
+                        "column_name": "dx",
+                        "cde_key": "disease_type",
+                        "cde_id": 1,
+                        "harmonization": "totally-made-up",
+                        "alternatives": [
+                            {"target": "disease_type", "confidence": 0.85, "harmonization": "harmonizable"},
+                        ],
+                    }
+                ]
+            })
+        assert "harmonization" in str(exc.value)
+
+    def test_rejects_alternative_missing_harmonization(self) -> None:
+        with pytest.raises(MappingValidationError) as exc:
+            normalize_manifest({
+                "column_mappings": [
+                    {
+                        "column_name": "dx",
+                        "cde_key": "disease_type",
+                        "cde_id": 1,
+                        "harmonization": "harmonizable",
+                        "alternatives": [
+                            {"target": "disease_type", "confidence": 0.85},
+                        ],
+                    }
+                ]
+            })
+        assert "harmonization" in str(exc.value)
+
     # Happy paths
     def test_accepts_canonical_manifest(self) -> None:
         manifest = {
@@ -114,8 +165,9 @@ class TestNormalizeManifestBoundary:
                     "column_name": "diagnosis",
                     "cde_key": "disease_type",
                     "cde_id": 323,
+                    "harmonization": "harmonizable",
                     "alternatives": [
-                        {"target": "disease_type", "confidence": 0.85, "cde_id": 323},
+                        {"target": "disease_type", "confidence": 0.85, "cde_id": 323, "harmonization": "harmonizable"},
                     ],
                 },
                 None,

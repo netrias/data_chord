@@ -282,3 +282,44 @@ def test_recommendations_surface_from_sdk(
     assert suggestions[0].target == "disease_type"
     assert suggestions[0].confidence == 0.85
     assert suggestions[1].target == "primary_diagnosis"
+
+
+# ---------------------------------------------------------------------------
+# Test 9: harmonization surfaces onto ModelSuggestion
+# ---------------------------------------------------------------------------
+
+
+def test_model_suggestion_carries_harmonization_from_alternative(
+    service_with_mock_client: tuple[MappingDiscoveryService, MagicMock],
+    tmp_path: Path,
+) -> None:
+    """
+    Given: SDK returns a manifest whose top alternative is 'no_permissible_values'
+    When: MappingDiscoveryService.discover() is invoked
+    Then: the produced ModelSuggestion.harmonization propagates the enum value
+    """
+    svc, mock_client = service_with_mock_client
+
+    mock_client.discover_mapping_from_csv.return_value = {
+        "column_mappings": [
+            {
+                "column_name": "middle_name",
+                "cde_key": "middle_name",
+                "cde_id": 316,
+                "harmonization": "no_permissible_values",
+                "alternatives": [
+                    {"target": "middle_name", "confidence": 1.0, "cde_id": 316, "harmonization": "no_permissible_values"},
+                    {"target": "last_name", "confidence": 0.6, "cde_id": 317, "harmonization": "no_permissible_values"},
+                ],
+            },
+        ]
+    }
+    csv_path = tmp_path / "names.csv"
+    csv_path.write_text("middle_name\nAnn\n")
+
+    cde_targets, _, _ = svc.discover(csv_path=csv_path, target_schema="gc")
+
+    suggestions = cde_targets["middle_name"]
+    assert len(suggestions) == 2
+    assert suggestions[0].harmonization == "no_permissible_values"
+    assert suggestions[1].harmonization == "no_permissible_values"

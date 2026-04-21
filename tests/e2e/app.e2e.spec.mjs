@@ -10,6 +10,7 @@ import {
   clickHarmonize,
   injectCdeOptions,
   mockDataModels,
+  mockAnalyzeHarmonizationMix,
   mockAnalyzeNoMappings,
   mockHarmonizeSuccess,
   mockHarmonizeFailure,
@@ -536,6 +537,39 @@ test('Stage 2 blocks Harmonize when no column has an effective CDE mapping', asy
     'Select a CDE mapping for at least one column before harmonizing.'
   );
 });
+
+test('Stage 2 shows "Values pass through" badge on no_permissible_values rows and none on harmonizable rows', async ({ page }) => {
+  // Given: analyze mock with one harmonizable column (diagnosis) and one no_permissible_values column (middle_name)
+  await mockDataModels(page);
+  await mockAnalyzeHarmonizationMix(page);
+  await page.goto('/stage-1');
+  await page.setInputFiles('#fileInput', fileFixture('basic.csv'));
+  await page.locator('#analyzeButton').waitFor({ state: 'visible' });
+  await page.waitForFunction(() => !document.querySelector('#analyzeButton')?.disabled);
+  await page.click('#analyzeButton');
+  const confirmButton = page.locator('.data-model-confirm-btn');
+  await confirmButton.waitFor({ state: 'visible' });
+  await confirmButton.click();
+  await page.waitForURL(/\/stage-2/);
+
+  // Baseline negative assertion — before any row renders, no badge is visible
+  await expect(page.locator('.harmonization-badge')).toHaveCount(0);
+
+  // Wait for the mapping rows to render
+  const rows = page.locator('#mappingResults .mapping-row');
+  await rows.first().waitFor({ state: 'visible' });
+  await expect(rows).toHaveCount(2);
+
+  // Then: diagnosis row has no badge; middle_name row shows the pass-through badge
+  const diagnosisRow = rows.filter({ hasText: 'diagnosis' }).first();
+  const middleNameRow = rows.filter({ hasText: 'middle_name' }).first();
+
+  await expect(diagnosisRow.locator('.harmonization-badge')).toHaveCount(0);
+  const middleNameBadge = middleNameRow.locator('.harmonization-badge--no-permissible-values');
+  await expect(middleNameBadge).toBeVisible();
+  await expect(middleNameBadge).toContainText('Values pass through');
+});
+
 
 test('Stage 2 enables Harmonize after the user selects a CDE for one column', async ({ page }) => {
   // Given: Stage 2 loaded with no effective CDE mappings but real CDE options available for override
