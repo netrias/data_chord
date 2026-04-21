@@ -190,9 +190,16 @@ class TestManualOverridePropagation:
         cache = SessionCache()
         manifest = cast(ManifestPayload, {
             "column_mappings": [
-                {"column_name": "breed", "cde_key": "organism_species", "cde_id": 131, "alternatives": [
-                    {"target": "organism_species", "confidence": 0.9, "cde_id": 131},
-                ]},
+                {
+                    "column_name": "breed", "cde_key": "organism_species", "cde_id": 131,
+                    "harmonization": "harmonizable",
+                    "alternatives": [
+                        {
+                            "target": "organism_species", "confidence": 0.9,
+                            "cde_id": 131, "harmonization": "harmonizable",
+                        },
+                    ],
+                },
                 None,
             ]
         })
@@ -218,9 +225,13 @@ class TestManualOverridePropagation:
         cache = SessionCache()
         manifest = cast(ManifestPayload, {
             "column_mappings": [
-                {"column_name": "col", "cde_key": "auto_target", "cde_id": 1, "alternatives": [
-                    {"target": "auto_target", "confidence": 0.9, "cde_id": 1},
-                ]},
+                {
+                    "column_name": "col", "cde_key": "auto_target", "cde_id": 1,
+                    "harmonization": "harmonizable",
+                    "alternatives": [
+                        {"target": "auto_target", "confidence": 0.9, "cde_id": 1, "harmonization": "harmonizable"},
+                    ],
+                },
             ]
         })
         manual_overrides = {0: "manual_target"}
@@ -241,9 +252,13 @@ class TestManualOverridePropagation:
         # Given
         manifest = cast(ManifestPayload, {
             "column_mappings": [
-                {"column_name": "good", "cde_key": "age", "cde_id": 1, "alternatives": [
-                    {"target": "age", "confidence": 0.9, "cde_id": 1},
-                ]},
+                {
+                    "column_name": "good", "cde_key": "age", "cde_id": 1,
+                    "harmonization": "harmonizable",
+                    "alternatives": [
+                        {"target": "age", "confidence": 0.9, "cde_id": 1, "harmonization": "harmonizable"},
+                    ],
+                },
                 None,
             ]
         })

@@ -13,10 +13,18 @@ from enum import Enum
 from pathlib import Path
 from uuid import uuid4
 
-from netrias_client import AlternativeEntry, ColumnMappingRecord, ManifestPayload, MappingValidationError, NetriasClient
+from netrias_client import (
+    AlternativeEntry,
+    ColumnMappingRecord,
+    Harmonization,
+    ManifestPayload,
+    MappingValidationError,
+    NetriasClient,
+)
 
 from src.domain.column_assignment import ColumnAssignment
 from src.domain.data_model_cache import SessionCache
+from src.domain.manifest.models import HARMONIZATION_VALUES
 
 logger = logging.getLogger(__name__)
 
@@ -158,10 +166,20 @@ def _apply_column_mappings(
         # Carry forward alternatives from SDK discovery; user selection doesn't add new ones.
         raw_alts = existing.get("alternatives") if existing is not None else None
         alternatives: list[AlternativeEntry] = list(raw_alts) if isinstance(raw_alts, list) else []
+        # Resolve harmonization from the matching alternative first (most specific), then
+        # from the existing entry (carry-forward on override), then error — SDK guarantees presence.
+        match = next((a for a in alternatives if a.get("target") == cde_key), None)
+        if match is not None and "harmonization" in match:
+            harmonization = _coerce_harmonization(match["harmonization"], cde_key, column_id)
+        elif existing is not None and "harmonization" in existing:
+            harmonization = _coerce_harmonization(existing["harmonization"], cde_key, column_id)
+        else:
+            raise ValueError(f"cde_key {cde_key!r} not in alternatives at col {column_id}")
         entry: ColumnMappingRecord = {
             "column_name": assignment.column_name,
             "cde_key": cde_key,
             "cde_id": cde_id,
+            "harmonization": harmonization,
             "alternatives": alternatives,
         }
         entries[column_id] = entry
@@ -201,6 +219,15 @@ def _resolve_cde_id(
         if isinstance(existing_id, int):
             return existing_id
     return None
+
+
+def _coerce_harmonization(value: object, cde_key: str, column_id: int) -> Harmonization:
+    """Narrow an untyped dict value to Harmonization; raises if the value is unexpected."""
+    if value in HARMONIZATION_VALUES:
+        return value  # type: ignore[return-value]
+    raise ValueError(
+        f"unexpected harmonization {value!r} for cde_key {cde_key!r} at col {column_id}"
+    )
 
 
 def _log_mapping_results(applied: list[tuple[str, str]], skipped: list[str]) -> None:
@@ -250,6 +277,7 @@ def _validate_entry(entry: object, idx: int) -> ColumnMappingRecord | None:
         ("column_name", str),
         ("cde_key", str),
         ("cde_id", int),
+        ("harmonization", str),
         ("alternatives", list),
     ):
         if key not in entry:
@@ -262,13 +290,18 @@ def _validate_entry(entry: object, idx: int) -> ColumnMappingRecord | None:
                 f"expected '{key}': {expected_type.__name__} at column_mappings[{idx}], "
                 f"found '{key}': {type(entry[key]).__name__}"
             )
+    if entry["harmonization"] not in HARMONIZATION_VALUES:
+        raise MappingValidationError(
+            f"expected 'harmonization' in {sorted(HARMONIZATION_VALUES)} "
+            f"at column_mappings[{idx}], found: {entry['harmonization']!r}"
+        )
     for alt_idx, alt in enumerate(entry["alternatives"]):
         _validate_alternative(alt, idx, alt_idx)
     return entry  # type: ignore[return-value]
 
 
 def _validate_alternative(alt: object, entry_idx: int, alt_idx: int) -> None:
-    """Each alternative must carry target (str) and confidence (float)."""
+    """Each alternative must carry target (str), confidence (float), and harmonization (str)."""
     source = f"column_mappings[{entry_idx}].alternatives[{alt_idx}]"
     if not isinstance(alt, dict):
         raise MappingValidationError(
@@ -281,6 +314,15 @@ def _validate_alternative(alt: object, entry_idx: int, alt_idx: int) -> None:
     if "confidence" not in alt or not isinstance(alt["confidence"], (int, float)):
         raise MappingValidationError(
             f"expected 'confidence': float at {source}, found keys: {list(alt.keys())}"
+        )
+    if "harmonization" not in alt:
+        raise MappingValidationError(
+            f"expected key 'harmonization' at {source}, found keys: {list(alt.keys())}"
+        )
+    if alt["harmonization"] not in HARMONIZATION_VALUES:
+        raise MappingValidationError(
+            f"expected 'harmonization' in {sorted(HARMONIZATION_VALUES)} "
+            f"at {source}, found: {alt['harmonization']!r}"
         )
 
 

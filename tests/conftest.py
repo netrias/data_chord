@@ -112,16 +112,18 @@ def mock_netrias_client() -> Generator[MagicMock]:
                 "column_name": "primary_diagnosis",
                 "cde_key": "primary_diagnosis",
                 "cde_id": 2,
+                "harmonization": "harmonizable",
                 "alternatives": [
-                    {"target": "primary_diagnosis", "confidence": 0.95, "cde_id": 2},
+                    {"target": "primary_diagnosis", "confidence": 0.95, "cde_id": 2, "harmonization": "harmonizable"},
                 ],
             },
             {
                 "column_name": "therapeutic_agents",
                 "cde_key": "therapeutic_agents",
                 "cde_id": 1,
+                "harmonization": "harmonizable",
                 "alternatives": [
-                    {"target": "therapeutic_agents", "confidence": 0.90, "cde_id": 1},
+                    {"target": "therapeutic_agents", "confidence": 0.90, "cde_id": 1, "harmonization": "harmonizable"},
                 ],
             },
         ],

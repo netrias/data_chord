@@ -32,8 +32,13 @@ class TestCanonicalColumnMappings:
 
     def test_writes_canonical_shape(self) -> None:
         """Entries carry column_name/cde_key/cde_id/alternatives; no legacy keys."""
-        # Given: two mapped columns, empty manifest
-        manifest = cast(ManifestPayload, {"column_mappings": []})
+        # Given: two mapped columns, manifest pre-populated from discovery
+        manifest = cast(ManifestPayload, {"column_mappings": [
+            {"column_name": "dx", "cde_key": "dx_cde", "cde_id": 1, "harmonization": "harmonizable",
+             "alternatives": [{"target": "dx_cde", "confidence": 0.9, "cde_id": 1, "harmonization": "harmonizable"}]},
+            {"column_name": "age", "cde_key": "age_cde", "cde_id": 2, "harmonization": "harmonizable",
+             "alternatives": [{"target": "age_cde", "confidence": 0.85, "cde_id": 2, "harmonization": "harmonizable"}]},
+        ]})
         assignments = {
             0: ColumnAssignment(0, "dx", "dx_cde"),
             1: ColumnAssignment(1, "age", "age_cde"),
@@ -63,8 +68,13 @@ class TestCanonicalColumnMappings:
 
     def test_mapped_columns_produce_entries_at_correct_positions(self) -> None:
         """Each mapped assignment creates an entry at its column_id index."""
-        # Given
-        manifest = cast(ManifestPayload, {"column_mappings": []})
+        # Given: manifest pre-populated from discovery so harmonization is available
+        manifest = cast(ManifestPayload, {"column_mappings": [
+            {"column_name": "dx", "cde_key": "dx_cde", "cde_id": 1, "harmonization": "harmonizable",
+             "alternatives": [{"target": "dx_cde", "confidence": 0.9, "cde_id": 1, "harmonization": "harmonizable"}]},
+            {"column_name": "age", "cde_key": "age_cde", "cde_id": 2, "harmonization": "harmonizable",
+             "alternatives": [{"target": "age_cde", "confidence": 0.85, "cde_id": 2, "harmonization": "harmonizable"}]},
+        ]})
         assignments = {
             0: ColumnAssignment(0, "dx", "dx_cde"),
             1: ColumnAssignment(1, "age", "age_cde"),
@@ -83,8 +93,12 @@ class TestCanonicalColumnMappings:
 
     def test_unmapped_column_is_none(self) -> None:
         """Unmapped column produces None at that index."""
-        # Given: col_0 mapped, col_1 unmapped
-        manifest = cast(ManifestPayload, {"column_mappings": []})
+        # Given: col_0 mapped, col_1 unmapped; manifest pre-populated from discovery
+        manifest = cast(ManifestPayload, {"column_mappings": [
+            {"column_name": "dx", "cde_key": "dx_cde", "cde_id": 1, "harmonization": "harmonizable",
+             "alternatives": [{"target": "dx_cde", "confidence": 0.9, "cde_id": 1, "harmonization": "harmonizable"}]},
+            None,
+        ]})
         assignments = {
             0: ColumnAssignment(0, "dx", "dx_cde"),
             1: ColumnAssignment(1, "age", None),
@@ -102,8 +116,25 @@ class TestCanonicalColumnMappings:
 
     def test_duplicate_headers_get_independent_entries(self) -> None:
         """Duplicate column names at different positions get independent entries."""
-        # Given: col_0 and col_1 both named "dx", col_0 mapped, col_1 unmapped
-        manifest = cast(ManifestPayload, {"column_mappings": []})
+        # Given: col_0 and col_1 both named "dx", col_0 mapped, col_1 unmapped;
+        # manifest pre-populated from discovery so harmonization is available
+        manifest = cast(ManifestPayload, {"column_mappings": [
+            {
+                "column_name": "dx", "cde_key": "primary_dx", "cde_id": 1,
+                "harmonization": "harmonizable",
+                "alternatives": [
+                    {"target": "primary_dx", "confidence": 0.9, "cde_id": 1, "harmonization": "harmonizable"},
+                ],
+            },
+            None,
+            {
+                "column_name": "age", "cde_key": "age_cde", "cde_id": 2,
+                "harmonization": "harmonizable",
+                "alternatives": [
+                    {"target": "age_cde", "confidence": 0.85, "cde_id": 2, "harmonization": "harmonizable"},
+                ],
+            },
+        ]})
         assignments = {
             0: ColumnAssignment(0, "dx", "primary_dx"),
             1: ColumnAssignment(1, "dx", None),
@@ -131,9 +162,10 @@ class TestCanonicalColumnMappings:
                     "column_name": "dx",
                     "cde_key": "dx_cde",
                     "cde_id": 1,
+                    "harmonization": "harmonizable",
                     "alternatives": [
-                        {"target": "dx_cde", "confidence": 0.9, "cde_id": 1},
-                        {"target": "alt_cde", "confidence": 0.6, "cde_id": 7},
+                        {"target": "dx_cde", "confidence": 0.9, "cde_id": 1, "harmonization": "harmonizable"},
+                        {"target": "alt_cde", "confidence": 0.6, "cde_id": 7, "harmonization": "harmonizable"},
                     ],
                 },
                 None,

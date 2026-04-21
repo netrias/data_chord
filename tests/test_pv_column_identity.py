@@ -32,11 +32,11 @@ class TestDuplicateColumnNameIdentity:
         csv_headers = ["col", "col"]  # duplicate name at positions 0 and 1
         # Both positions explicitly mapped; list index = CSV column position
         manifest = cast(ManifestPayload, {"column_mappings": [
-            {"column_name": "col", "cde_key": "cde_a", "cde_id": 1, "alternatives": [
-                {"target": "cde_a", "confidence": 0.9, "cde_id": 1},
+            {"column_name": "col", "cde_key": "cde_a", "cde_id": 1, "harmonization": "harmonizable", "alternatives": [
+                {"target": "cde_a", "confidence": 0.9, "cde_id": 1, "harmonization": "harmonizable"},
             ]},
-            {"column_name": "col", "cde_key": "cde_a", "cde_id": 1, "alternatives": [
-                {"target": "cde_a", "confidence": 0.9, "cde_id": 1},
+            {"column_name": "col", "cde_key": "cde_a", "cde_id": 1, "harmonization": "harmonizable", "alternatives": [
+                {"target": "cde_a", "confidence": 0.9, "cde_id": 1, "harmonization": "harmonizable"},
             ]},
         ]})
         assert cache.get_pvs_for_column(0) is None, "No PVs loaded yet"

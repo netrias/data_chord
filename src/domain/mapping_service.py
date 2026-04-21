@@ -14,6 +14,7 @@ from netrias_client import AlternativeEntry, ManifestPayload, NetriasClient
 
 from src.domain.cde import ModelSuggestion
 from src.domain.harmonize import normalize_manifest
+from src.domain.manifest import HARMONIZATION_VALUES
 
 logger = logging.getLogger(__name__)
 
@@ -88,5 +89,12 @@ def _suggestions_from_alternatives(
             continue
         raw_confidence = alt_entry.get("confidence")
         score = float(raw_confidence) if isinstance(raw_confidence, (int, float)) else 0.0
-        suggestions.append(ModelSuggestion(target=target, confidence=score))
+        # SDK boundary guarantees harmonization presence; ValueError here is defense-in-depth.
+        raw_harmonization = alt_entry.get("harmonization")
+        if raw_harmonization not in HARMONIZATION_VALUES:
+            raise ValueError(
+                f"expected harmonization in {sorted(HARMONIZATION_VALUES)}, "
+                f"found {raw_harmonization!r} for target {target!r}"
+            )
+        suggestions.append(ModelSuggestion(target=target, confidence=score, harmonization=raw_harmonization))
     return suggestions

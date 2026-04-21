@@ -8,9 +8,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import get_args
 
 import pyarrow as pa
-from netrias_client import AlternativeEntry, ColumnMappingRecord, ManifestPayload
+from netrias_client import AlternativeEntry, ColumnMappingRecord, Harmonization, ManifestPayload
 
 
 class MANIFEST_KEYS:
@@ -22,6 +23,11 @@ class MANIFEST_KEYS:
     ALTERNATIVES = "alternatives"
     TARGET = "target"
     CONFIDENCE = "confidence"
+    HARMONIZATION = "harmonization"
+
+
+# Derived from the SDK type so the two stay in sync automatically.
+HARMONIZATION_VALUES: frozenset[str] = frozenset(get_args(Harmonization))
 
 
 class ConfidenceBucket(str, Enum):
@@ -138,7 +144,9 @@ __all__ = [
     "COMPLETENESS_MEDIUM_THRESHOLD",
     "ColumnMappingRecord",
     "ConfidenceBucket",
+    "HARMONIZATION_VALUES",
     "HIGH_CONFIDENCE_THRESHOLD",
+    "Harmonization",
     "MANIFEST_KEYS",
     "MEDIUM_CONFIDENCE_THRESHOLD",
     "ManifestPayload",

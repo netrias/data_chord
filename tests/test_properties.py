@@ -347,7 +347,8 @@ def _canonical_entry(column_name: str, cde_key: str) -> dict:
         "column_name": column_name,
         "cde_key": cde_key,
         "cde_id": 1,
-        "alternatives": [{"target": cde_key, "confidence": 0.9, "cde_id": 1}],
+        "harmonization": "harmonizable",
+        "alternatives": [{"target": cde_key, "confidence": 0.9, "cde_id": 1, "harmonization": "harmonizable"}],
     }
 
 

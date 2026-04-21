@@ -45,15 +45,30 @@ class TestColumnAssignmentBuilder:
         # List positions match CSV column positions: 0=diagnosis, 1=diagnosis, 2=age
         manifest = cast(ManifestPayload, {
             "column_mappings": [
-                {"column_name": "diagnosis", "cde_key": "auto_dx", "cde_id": 1, "alternatives": [
-                    {"target": "auto_dx", "confidence": 0.9, "cde_id": 1},
-                ]},
-                {"column_name": "diagnosis", "cde_key": "auto_dx", "cde_id": 1, "alternatives": [
-                    {"target": "auto_dx", "confidence": 0.9, "cde_id": 1},
-                ]},
-                {"column_name": "age", "cde_key": "age_at_diagnosis", "cde_id": 2, "alternatives": [
-                    {"target": "age_at_diagnosis", "confidence": 0.85, "cde_id": 2},
-                ]},
+                {
+                    "column_name": "diagnosis", "cde_key": "auto_dx", "cde_id": 1,
+                    "harmonization": "harmonizable",
+                    "alternatives": [
+                        {"target": "auto_dx", "confidence": 0.9, "cde_id": 1, "harmonization": "harmonizable"},
+                    ],
+                },
+                {
+                    "column_name": "diagnosis", "cde_key": "auto_dx", "cde_id": 1,
+                    "harmonization": "harmonizable",
+                    "alternatives": [
+                        {"target": "auto_dx", "confidence": 0.9, "cde_id": 1, "harmonization": "harmonizable"},
+                    ],
+                },
+                {
+                    "column_name": "age", "cde_key": "age_at_diagnosis", "cde_id": 2,
+                    "harmonization": "harmonizable",
+                    "alternatives": [
+                        {
+                            "target": "age_at_diagnosis", "confidence": 0.85,
+                            "cde_id": 2, "harmonization": "harmonizable",
+                        },
+                    ],
+                },
             ]
         })
         manual_overrides = {0: "manual_dx"}

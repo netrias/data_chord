@@ -12,6 +12,8 @@ from typing import Literal, TypedDict
 
 from pydantic import BaseModel
 
+from src.domain.manifest import Harmonization
+
 NO_MAPPING_SENTINEL = "No Mapping"
 
 
@@ -35,6 +37,7 @@ class CDEInfo:
 class ModelSuggestion(BaseModel):
     target: str
     confidence: float
+    harmonization: Harmonization
 
 
 def normalize_cde_key(selection: str | None) -> str | None:

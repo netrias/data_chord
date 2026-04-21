@@ -19,7 +19,10 @@ def _entry(column_name: str, cde_key: str, cde_id: int = 1, confidence: float = 
         "column_name": column_name,
         "cde_key": cde_key,
         "cde_id": cde_id,
-        "alternatives": [{"target": cde_key, "confidence": confidence, "cde_id": cde_id}],
+        "harmonization": "harmonizable",
+        "alternatives": [
+            {"target": cde_key, "confidence": confidence, "cde_id": cde_id, "harmonization": "harmonizable"},
+        ],
     }
 
 

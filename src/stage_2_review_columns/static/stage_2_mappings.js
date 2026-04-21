@@ -16,6 +16,28 @@ const MANIFEST_KEYS = Object.freeze({
   ALTERNATIVES: "alternatives",
   TARGET: "target",
   CONFIDENCE: "confidence",
+  HARMONIZATION: "harmonization",
+});
+
+/* Mirrors the Python-side HarmonizationStatus enum. */
+const HARMONIZATION = Object.freeze({
+  HARMONIZABLE: 'harmonizable',
+  NO_PERMISSIBLE_VALUES: 'no_permissible_values',
+  NUMERIC: 'numeric',
+});
+
+/* Badge config keyed by harmonization status — only non-harmonizable statuses appear here. */
+const HARMONIZATION_BADGES = Object.freeze({
+  [HARMONIZATION.NO_PERMISSIBLE_VALUES]: {
+    label: 'Values pass through',
+    tooltip: 'Target CDE has no permissible values.',
+    cssClass: 'harmonization-badge harmonization-badge--no-permissible-values',
+  },
+  [HARMONIZATION.NUMERIC]: {
+    label: 'Numeric — not harmonized',
+    tooltip: 'Numeric columns are not value-mapped.',
+    cssClass: 'harmonization-badge harmonization-badge--numeric',
+  },
 });
 
 /* Configuration and constants */
@@ -170,6 +192,37 @@ const _persistStageThreePayload = (body) => {
   return writeToSession(STAGE_3_PAYLOAD_KEY, payloadForStageThree);
 };
 
+/** Build a harmonization status badge element, or null when no badge is warranted.
+ *
+ * Reads from the top-level manifest entry rather than the cde_targets suggestion
+ * so that user overrides (which update the manifest) are reflected correctly.
+ */
+const _buildHarmonizationBadge = (columnId) => {
+  const manifestMappings = state.payload?.manifest?.[MANIFEST_KEYS.COLUMN_MAPPINGS] ?? [];
+  const manifestEntry = manifestMappings[columnId];
+  const status = manifestEntry?.[MANIFEST_KEYS.HARMONIZATION];
+
+  if (!status || status === HARMONIZATION.HARMONIZABLE) {
+    return null;
+  }
+
+  const badgeConfig = HARMONIZATION_BADGES[status];
+  const span = document.createElement('span');
+
+  if (badgeConfig) {
+    span.className = badgeConfig.cssClass;
+    span.textContent = badgeConfig.label;
+    span.title = badgeConfig.tooltip;
+  } else {
+    /* Forward-compat: unknown status gets a generic badge rather than silently hiding. */
+    span.className = 'harmonization-badge harmonization-badge--unknown';
+    span.textContent = 'Not harmonized';
+    span.title = `Unknown harmonization status: ${status}`;
+  }
+
+  return span;
+};
+
 /** Build and render a single mapping row for a column. */
 const _buildMappingRow = (column) => {
   const suggestions = _getColumnSuggestions(column);
@@ -210,6 +263,11 @@ const _buildMappingRow = (column) => {
   }
 
   suggestionCell.appendChild(suggestionTarget);
+
+  const badge = _buildHarmonizationBadge(columnKey);
+  if (badge) {
+    suggestionCell.appendChild(badge);
+  }
 
   /* Use the Combobox widget for override selection with per-column AI suggestions above divider. */
   const { options: columnOptions, separatorAfterIndex } = _buildColumnOptions(suggestions);

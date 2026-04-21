@@ -302,9 +302,13 @@ async def test_stage3_harmonize_uses_stored_manifest_when_payload_missing(
     # Given: an uploaded file with a stored manifest
     file_id = await upload_content(app_client, create_csv_content([["col_a"], ["alpha"]]), "manifest.csv")
     stored_manifest: dict = {"column_mappings": [
-        {"column_name": "col_a", "cde_key": "primary_diagnosis", "cde_id": 2, "alternatives": [
-            {"target": "primary_diagnosis", "confidence": 0.9, "cde_id": 2},
-        ]},
+        {
+            "column_name": "col_a", "cde_key": "primary_diagnosis", "cde_id": 2,
+            "harmonization": "harmonizable",
+            "alternatives": [
+                {"target": "primary_diagnosis", "confidence": 0.9, "cde_id": 2, "harmonization": "harmonizable"},
+            ],
+        },
     ]}
     temp_storage.save_manifest(file_id, stored_manifest)
     stub = StubHarmonizer()
@@ -347,15 +351,23 @@ async def test_stage3_harmonize_prefers_payload_manifest(
     temp_storage.save_manifest(
         file_id,
         {"column_mappings": [
-            {"column_name": "col_a", "cde_key": "primary_diagnosis", "cde_id": 2, "alternatives": [
-                {"target": "primary_diagnosis", "confidence": 0.9, "cde_id": 2},
-            ]},
+            {
+                "column_name": "col_a", "cde_key": "primary_diagnosis", "cde_id": 2,
+                "harmonization": "harmonizable",
+                "alternatives": [
+                    {"target": "primary_diagnosis", "confidence": 0.9, "cde_id": 2, "harmonization": "harmonizable"},
+                ],
+            },
         ]},
     )
     payload_manifest: dict = {"column_mappings": [
-        {"column_name": "col_a", "cde_key": "morphology", "cde_id": 3, "alternatives": [
-            {"target": "morphology", "confidence": 0.88, "cde_id": 3},
-        ]},
+        {
+            "column_name": "col_a", "cde_key": "morphology", "cde_id": 3,
+            "harmonization": "harmonizable",
+            "alternatives": [
+                {"target": "morphology", "confidence": 0.88, "cde_id": 3, "harmonization": "harmonizable"},
+            ],
+        },
     ]}
     stub = StubHarmonizer()
 

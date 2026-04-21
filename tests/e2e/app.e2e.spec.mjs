@@ -543,6 +543,10 @@ test('Stage 2 shows "Values pass through" badge on no_permissible_values rows an
   await mockDataModels(page);
   await mockAnalyzeHarmonizationMix(page);
   await page.goto('/stage-1');
+
+  // Baseline negative assertion — Stage 1 does not render harmonization badges
+  await expect(page.locator('.harmonization-badge')).toHaveCount(0);
+
   await page.setInputFiles('#fileInput', fileFixture('basic.csv'));
   await page.locator('#analyzeButton').waitFor({ state: 'visible' });
   await page.waitForFunction(() => !document.querySelector('#analyzeButton')?.disabled);
@@ -551,9 +555,6 @@ test('Stage 2 shows "Values pass through" badge on no_permissible_values rows an
   await confirmButton.waitFor({ state: 'visible' });
   await confirmButton.click();
   await page.waitForURL(/\/stage-2/);
-
-  // Baseline negative assertion — before any row renders, no badge is visible
-  await expect(page.locator('.harmonization-badge')).toHaveCount(0);
 
   // Wait for the mapping rows to render
   const rows = page.locator('#mappingResults .mapping-row');

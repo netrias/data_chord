@@ -326,6 +326,38 @@
   }
 }
 
+/* Harmonization status badges — informational pills on suggestion cells */
+
+.harmonization-badge {
+  display: inline-block;
+  margin-top: var(--space-1);
+  padding: 0.15em 0.5em;
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.4;
+  border-radius: var(--radius-full, 9999px);
+  background-color: var(--gray-100);
+  color: var(--gray-600);
+  border: 1px solid var(--gray-200);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+/* no_permissible_values and numeric share the same muted blue-gray informational treatment */
+.harmonization-badge--no-permissible-values,
+.harmonization-badge--numeric {
+  background-color: var(--slate-100, #f1f5f9);
+  color: var(--slate-600, #475569);
+  border-color: var(--slate-200, #e2e8f0);
+}
+
+/* Unknown status — slightly more conservative gray with a visible border */
+.harmonization-badge--unknown {
+  background-color: var(--gray-100);
+  color: var(--gray-500);
+  border: 1px solid var(--gray-300);
+}
+
 /* Disabled button must not capture pointer events so wrapper :hover reaches the tooltip. */
 .btn-3d:disabled {
   pointer-events: none;

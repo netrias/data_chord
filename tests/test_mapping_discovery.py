@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -48,12 +49,20 @@ def test_discover_returns_manifest_from_client(
     # Given: client returns a manifest with two mapped columns
     mock_client.discover_mapping_from_csv.return_value = {
         "column_mappings": [
-            {"column_name": "breed", "cde_key": "organism_species", "cde_id": 131, "alternatives": [
-                {"target": "organism_species", "confidence": 0.9, "cde_id": 131},
-            ]},
-            {"column_name": "diagnosis", "cde_key": "primary_diagnosis", "cde_id": 2, "alternatives": [
-                {"target": "primary_diagnosis", "confidence": 0.85, "cde_id": 2},
-            ]},
+            {
+                "column_name": "breed", "cde_key": "organism_species", "cde_id": 131,
+                "harmonization": "harmonizable",
+                "alternatives": [
+                    {"target": "organism_species", "confidence": 0.9, "cde_id": 131, "harmonization": "harmonizable"},
+                ],
+            },
+            {
+                "column_name": "diagnosis", "cde_key": "primary_diagnosis", "cde_id": 2,
+                "harmonization": "harmonizable",
+                "alternatives": [
+                    {"target": "primary_diagnosis", "confidence": 0.85, "cde_id": 2, "harmonization": "harmonizable"},
+                ],
+            },
         ]
     }
     csv_path = tmp_path / "test.csv"
@@ -92,12 +101,20 @@ def test_discover_builds_cde_targets_from_manifest(
     # Given
     mock_client.discover_mapping_from_csv.return_value = {
         "column_mappings": [
-            {"column_name": "breed", "cde_key": "organism_species", "cde_id": 131, "alternatives": [
-                {"target": "organism_species", "confidence": 0.9, "cde_id": 131},
-            ]},
-            {"column_name": "diagnosis", "cde_key": "primary_diagnosis", "cde_id": 2, "alternatives": [
-                {"target": "primary_diagnosis", "confidence": 0.85, "cde_id": 2},
-            ]},
+            {
+                "column_name": "breed", "cde_key": "organism_species", "cde_id": 131,
+                "harmonization": "harmonizable",
+                "alternatives": [
+                    {"target": "organism_species", "confidence": 0.9, "cde_id": 131, "harmonization": "harmonizable"},
+                ],
+            },
+            {
+                "column_name": "diagnosis", "cde_key": "primary_diagnosis", "cde_id": 2,
+                "harmonization": "harmonizable",
+                "alternatives": [
+                    {"target": "primary_diagnosis", "confidence": 0.85, "cde_id": 2, "harmonization": "harmonizable"},
+                ],
+            },
         ]
     }
     csv_path = tmp_path / "test.csv"
@@ -125,14 +142,18 @@ def test_discover_skips_none_entries() -> None:
     Then: only the non-None entry appears in cde_targets
     """
     # Given
-    manifest: ManifestPayload = {
+    manifest = cast(ManifestPayload, {
         "column_mappings": [
-            {"column_name": "breed", "cde_key": "organism_species", "cde_id": 131, "alternatives": [
-                {"target": "organism_species", "confidence": 0.9, "cde_id": 131},
-            ]},
+            {
+                "column_name": "breed", "cde_key": "organism_species", "cde_id": 131,
+                "harmonization": "harmonizable",
+                "alternatives": [
+                    {"target": "organism_species", "confidence": 0.9, "cde_id": 131, "harmonization": "harmonizable"},
+                ],
+            },
             None,
         ]
-    }
+    })
 
     # When
     targets = _cde_targets_from_manifest(manifest)
@@ -174,27 +195,29 @@ def test_cde_targets_reads_alternatives_from_manifest() -> None:
     Then: cde_targets contains multiple ModelSuggestions per column, sorted by confidence
     """
     # Given
-    manifest: ManifestPayload = {
+    manifest = cast(ManifestPayload, {
         "column_mappings": [
             {
                 "column_name": "age_col",
                 "cde_key": "age",
                 "cde_id": 900,
+                "harmonization": "harmonizable",
                 "alternatives": [
-                    {"target": "age", "confidence": 1.0, "cde_id": 900},
-                    {"target": "ageUnit", "confidence": 0.3, "cde_id": 904},
+                    {"target": "age", "confidence": 1.0, "cde_id": 900, "harmonization": "harmonizable"},
+                    {"target": "ageUnit", "confidence": 0.3, "cde_id": 904, "harmonization": "harmonizable"},
                 ],
             },
             {
                 "column_name": "sex_col",
                 "cde_key": "sex",
                 "cde_id": 901,
+                "harmonization": "harmonizable",
                 "alternatives": [
-                    {"target": "sex", "confidence": 0.95, "cde_id": 901},
+                    {"target": "sex", "confidence": 0.95, "cde_id": 901, "harmonization": "harmonizable"},
                 ],
             },
         ]
-    }
+    })
 
     # When
     targets = _cde_targets_from_manifest(manifest)
@@ -261,9 +284,10 @@ def test_recommendations_surface_from_sdk(
                 "column_name": "diagnosis",
                 "cde_key": "disease_type",
                 "cde_id": 323,
+                "harmonization": "harmonizable",
                 "alternatives": [
-                    {"target": "disease_type", "confidence": 0.85, "cde_id": 323},
-                    {"target": "primary_diagnosis", "confidence": 0.72, "cde_id": 2},
+                    {"target": "disease_type", "confidence": 0.85, "cde_id": 323, "harmonization": "harmonizable"},
+                    {"target": "primary_diagnosis", "confidence": 0.72, "cde_id": 2, "harmonization": "harmonizable"},
                 ],
             },
             None,
@@ -308,8 +332,14 @@ def test_model_suggestion_carries_harmonization_from_alternative(
                 "cde_id": 316,
                 "harmonization": "no_permissible_values",
                 "alternatives": [
-                    {"target": "middle_name", "confidence": 1.0, "cde_id": 316, "harmonization": "no_permissible_values"},
-                    {"target": "last_name", "confidence": 0.6, "cde_id": 317, "harmonization": "no_permissible_values"},
+                    {
+                        "target": "middle_name", "confidence": 1.0,
+                        "cde_id": 316, "harmonization": "no_permissible_values",
+                    },
+                    {
+                        "target": "last_name", "confidence": 0.6,
+                        "cde_id": 317, "harmonization": "no_permissible_values",
+                    },
                 ],
             },
         ]
