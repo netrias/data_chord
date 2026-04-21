@@ -68,8 +68,8 @@ async def test_download_applies_override_per_column_term(
     overrides_payload = {
         "file_id": file_id,
         "overrides": {
-            "1": {"col_a": {"ai_value": "Foo", "human_value": "Baz", "original_value": "Foo"}},
-            "2": {"col_a": {"ai_value": "Foo", "human_value": "Baz", "original_value": "Foo"}},
+            "1": {"1": {"ai_value": "Foo", "human_value": "Baz", "original_value": "Foo"}},
+            "2": {"1": {"ai_value": "Foo", "human_value": "Baz", "original_value": "Foo"}},
         },
         "review_state": review_state_payload(),
     }
@@ -115,7 +115,7 @@ async def test_stage4_preserves_whitespace_values_in_overrides(
     overrides_payload = {
         "file_id": file_id,
         "overrides": {
-            "1": {"col_a": {"ai_value": "  Foo ", "human_value": "Bar", "original_value": "  Foo "}},
+            "1": {"0": {"ai_value": "  Foo ", "human_value": "Bar", "original_value": "  Foo "}},
         },
         "review_state": review_state_payload(),
     }
@@ -148,7 +148,7 @@ async def test_stage4_handles_bom_headers(
     columns = rows_response.json()["columns"]
     assert len(columns) >= 1
     # Verify the col_a column has the expected transformation
-    col_a = next((c for c in columns if c["columnKey"] == "col_a"), None)
+    col_a = next((c for c in columns if c["columnLabel"] == "col_a"), None)
     assert col_a is not None
     assert col_a["transformations"][0]["originalValue"] == "Foo"
 

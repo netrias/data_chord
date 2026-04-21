@@ -341,48 +341,48 @@ def test_column_mapping_applied_plus_skipped_equals_total(overrides: dict[str, s
 # =============================================================================
 
 
-def _valid_column_entry() -> st.SearchStrategy[dict[str, str]]:
-    """Entries with required ColumnMappingEntry fields survive _filter_valid_columns."""
-    return st.fixed_dictionaries({
-        "cde_id": st.text(min_size=1, max_size=10),
-        "targetField": st.text(min_size=1, max_size=20),
-    })
+def _canonical_entry(column_name: str, cde_key: str) -> dict:
+    """Build a valid canonical ColumnMappingRecord entry for property tests."""
+    return {
+        "column_name": column_name,
+        "cde_key": cde_key,
+        "cde_id": 1,
+        "alternatives": [{"target": cde_key, "confidence": 0.9, "cde_id": 1}],
+    }
 
 
-@given(st.dictionaries(
-    keys=st.text(min_size=1, max_size=30),
-    values=_valid_column_entry(),
-    min_size=1,
-    max_size=5,
-))
-def test_normalize_manifest_preserves_valid_entries(column_mappings: dict[str, dict[str, str]]) -> None:
-    """Entries with cde_id and targetField survive normalization."""
-    manifest = {"column_mappings": column_mappings}
-    result = normalize_manifest(manifest)
-    result_mappings = result.get("column_mappings", {})
-
-    for key in column_mappings:
-        assert key in result_mappings, f"Valid entry '{key}' was dropped"
-
-
-@given(st.dictionaries(
-    keys=st.text(min_size=1, max_size=30),
-    values=st.dictionaries(
-        keys=st.text(min_size=1, max_size=20).filter(lambda k: k not in ("cde_id", "targetField")),
-        values=st.text(max_size=30),
-        min_size=1,
-        max_size=3,
+@given(st.lists(
+    st.tuples(
+        st.text(min_size=1, max_size=30).filter(str.strip),
+        st.text(min_size=1, max_size=20).filter(str.strip),
     ),
     min_size=1,
     max_size=5,
 ))
-def test_normalize_manifest_drops_incomplete_entries(column_mappings: dict[str, dict[str, str]]) -> None:
-    """Entries missing cde_id or targetField are filtered out."""
-    manifest = {"column_mappings": column_mappings}
+def test_normalize_manifest_preserves_valid_entries(pairs: list[tuple[str, str]]) -> None:
+    """Canonical entries survive normalization and are returned unchanged."""
+    entries = [_canonical_entry(col, cde) for col, cde in pairs]
+    manifest = {"column_mappings": entries}
     result = normalize_manifest(manifest)
-    result_mappings = result.get("column_mappings", {})
+    result_mappings = result.get("column_mappings", [])
 
-    assert result_mappings == {}
+    assert isinstance(result_mappings, list)
+    assert len(result_mappings) == len(entries)
+
+
+@given(st.one_of(
+    st.just({"column_mappings": {"legacy_col": {"targetField": "age", "cde_id": 1}}}),
+    st.just({"column_mappings": "not-a-list"}),
+    st.just({"column_mappings": [{"missing_required_keys": True}]}),
+))
+def test_normalize_manifest_rejects_invalid_shapes(bad_input: object) -> None:
+    """Invalid manifest shapes raise MappingValidationError."""
+    from netrias_client import MappingValidationError
+    try:
+        normalize_manifest(bad_input)
+        raise AssertionError("Expected MappingValidationError was not raised")
+    except MappingValidationError:
+        pass
 
 
 @given(st.one_of(
@@ -392,6 +392,10 @@ def test_normalize_manifest_drops_incomplete_entries(column_mappings: dict[str, 
     st.just([1, 2, 3]),
 ))
 def test_normalize_manifest_rejects_non_mapping(bad_input: object) -> None:
-    """Non-Mapping inputs produce empty column_mappings."""
-    result = normalize_manifest(bad_input)
-    assert result.get("column_mappings", {}) == {}
+    """Non-Mapping inputs raise MappingValidationError."""
+    from netrias_client import MappingValidationError
+    try:
+        normalize_manifest(bad_input)
+        raise AssertionError("Expected MappingValidationError was not raised")
+    except MappingValidationError:
+        pass

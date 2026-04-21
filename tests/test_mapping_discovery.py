@@ -47,10 +47,14 @@ def test_discover_returns_manifest_from_client(
 
     # Given: client returns a manifest with two mapped columns
     mock_client.discover_mapping_from_csv.return_value = {
-        "column_mappings": {
-            "breed": {"targetField": "organism_species", "cde_id": 131},
-            "diagnosis": {"targetField": "primary_diagnosis", "cde_id": 2},
-        }
+        "column_mappings": [
+            {"column_name": "breed", "cde_key": "organism_species", "cde_id": 131, "alternatives": [
+                {"target": "organism_species", "confidence": 0.9, "cde_id": 131},
+            ]},
+            {"column_name": "diagnosis", "cde_key": "primary_diagnosis", "cde_id": 2, "alternatives": [
+                {"target": "primary_diagnosis", "confidence": 0.85, "cde_id": 2},
+            ]},
+        ]
     }
     csv_path = tmp_path / "test.csv"
     csv_path.write_text("breed,diagnosis\nLabrador,Cancer\n")
@@ -59,11 +63,14 @@ def test_discover_returns_manifest_from_client(
     _, _, manifest = svc.discover(csv_path=csv_path, target_schema="ccdi")
 
     # Then: manifest contains both columns
-    column_mappings = manifest.get("column_mappings", {})
-    assert "breed" in column_mappings
-    assert "diagnosis" in column_mappings
-    assert column_mappings["breed"]["targetField"] == "organism_species"
-    assert column_mappings["diagnosis"]["targetField"] == "primary_diagnosis"
+    column_mappings = manifest.get("column_mappings", [])
+    names = [e["column_name"] for e in column_mappings if e is not None]
+    assert "breed" in names
+    assert "diagnosis" in names
+    breed_entry = next(e for e in column_mappings if e and e["column_name"] == "breed")
+    diagnosis_entry = next(e for e in column_mappings if e and e["column_name"] == "diagnosis")
+    assert breed_entry["cde_key"] == "organism_species"
+    assert diagnosis_entry["cde_key"] == "primary_diagnosis"
 
 
 # ---------------------------------------------------------------------------
@@ -84,10 +91,14 @@ def test_discover_builds_cde_targets_from_manifest(
 
     # Given
     mock_client.discover_mapping_from_csv.return_value = {
-        "column_mappings": {
-            "breed": {"targetField": "organism_species", "cde_id": 131},
-            "diagnosis": {"targetField": "primary_diagnosis", "cde_id": 2},
-        }
+        "column_mappings": [
+            {"column_name": "breed", "cde_key": "organism_species", "cde_id": 131, "alternatives": [
+                {"target": "organism_species", "confidence": 0.9, "cde_id": 131},
+            ]},
+            {"column_name": "diagnosis", "cde_key": "primary_diagnosis", "cde_id": 2, "alternatives": [
+                {"target": "primary_diagnosis", "confidence": 0.85, "cde_id": 2},
+            ]},
+        ]
     }
     csv_path = tmp_path / "test.csv"
     csv_path.write_text("breed,diagnosis\nLabrador,Cancer\n")
@@ -107,18 +118,20 @@ def test_discover_builds_cde_targets_from_manifest(
 # ---------------------------------------------------------------------------
 
 
-def test_discover_skips_empty_target_fields() -> None:
+def test_discover_skips_none_entries() -> None:
     """
-    Given: a manifest where one column has targetField="" and another is valid
+    Given: a canonical list-format manifest where one entry is None (unmapped column)
     When: _cde_targets_from_manifest processes it
-    Then: only the valid column appears in cde_targets
+    Then: only the non-None entry appears in cde_targets
     """
     # Given
     manifest: ManifestPayload = {
-        "column_mappings": {
-            "breed": {"targetField": "organism_species", "cde_id": 131},
-            "empty_col": {"targetField": "", "cde_id": 0},
-        }
+        "column_mappings": [
+            {"column_name": "breed", "cde_key": "organism_species", "cde_id": 131, "alternatives": [
+                {"target": "organism_species", "confidence": 0.9, "cde_id": 131},
+            ]},
+            None,
+        ]
     }
 
     # When
@@ -126,7 +139,7 @@ def test_discover_skips_empty_target_fields() -> None:
 
     # Then: only breed appears
     assert "breed" in targets
-    assert "empty_col" not in targets
+    assert len(targets) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -156,29 +169,31 @@ def test_discover_raises_when_client_unavailable() -> None:
 
 def test_cde_targets_reads_alternatives_from_manifest() -> None:
     """
-    Given: a manifest with alternatives (ranked suggestions) from the updated SDK
+    Given: a canonical list-format manifest with alternatives (ranked suggestions)
     When: _cde_targets_from_manifest processes it
     Then: cde_targets contains multiple ModelSuggestions per column, sorted by confidence
     """
     # Given
     manifest: ManifestPayload = {
-        "column_mappings": {
-            "age_col": {
-                "targetField": "age",
+        "column_mappings": [
+            {
+                "column_name": "age_col",
+                "cde_key": "age",
                 "cde_id": 900,
                 "alternatives": [
-                    {"target": "age", "similarity": 1.0, "cde_id": 900},
-                    {"target": "ageUnit", "similarity": 0.3, "cde_id": 904},
+                    {"target": "age", "confidence": 1.0, "cde_id": 900},
+                    {"target": "ageUnit", "confidence": 0.3, "cde_id": 904},
                 ],
             },
-            "sex_col": {
-                "targetField": "sex",
+            {
+                "column_name": "sex_col",
+                "cde_key": "sex",
                 "cde_id": 901,
                 "alternatives": [
-                    {"target": "sex", "similarity": 0.95, "cde_id": 901},
+                    {"target": "sex", "confidence": 0.95, "cde_id": 901},
                 ],
             },
-        }
+        ]
     }
 
     # When
@@ -187,44 +202,13 @@ def test_cde_targets_reads_alternatives_from_manifest() -> None:
     # Then: age_col has two suggestions
     assert len(targets["age_col"]) == 2
     assert targets["age_col"][0].target == "age"
-    assert targets["age_col"][0].similarity == 1.0
+    assert targets["age_col"][0].confidence == 1.0
     assert targets["age_col"][1].target == "ageUnit"
-    assert targets["age_col"][1].similarity == 0.3
+    assert targets["age_col"][1].confidence == 0.3
 
     # Then: sex_col has one suggestion
     assert len(targets["sex_col"]) == 1
     assert targets["sex_col"][0].target == "sex"
-
-
-# ---------------------------------------------------------------------------
-# Test 6: empty alternatives falls back to targetField
-# ---------------------------------------------------------------------------
-
-
-def test_cde_targets_falls_back_to_target_field_when_alternatives_empty() -> None:
-    """
-    Given: a manifest where alternatives is present but all entries fail validation
-    When: _cde_targets_from_manifest processes it
-    Then: falls back to targetField as a single suggestion
-    """
-    # Given: alternatives list has no valid entries (missing target key)
-    manifest: ManifestPayload = {
-        "column_mappings": {
-            "age_col": {
-                "targetField": "age",
-                "cde_id": 900,
-                "alternatives": [{"similarity": 0.9}],  # no "target" key
-            },
-        }
-    }
-
-    # When
-    targets = _cde_targets_from_manifest(manifest)
-
-    # Then: falls back to targetField
-    assert len(targets["age_col"]) == 1
-    assert targets["age_col"][0].target == "age"
-    assert targets["age_col"][0].similarity == 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -251,3 +235,50 @@ def test_discover_wraps_sdk_errors_as_runtime_error(
     # When/Then
     with pytest.raises(RuntimeError, match="CDE discovery failed.*connection refused"):
         svc.discover(csv_path=csv_path, target_schema="ccdi")
+
+
+# ---------------------------------------------------------------------------
+# Test 8: SDK canonical list shape surfaces as cde_targets
+# ---------------------------------------------------------------------------
+
+
+def test_recommendations_surface_from_sdk(
+    service_with_mock_client: tuple[MappingDiscoveryService, MagicMock],
+    tmp_path: Path,
+) -> None:
+    """
+    Given: SDK returns canonical list-format manifest with one real entry
+    When: discover() processes it
+    Then: cde_targets is keyed by column_name and contains ranked alternatives
+          built from the canonical `confidence` field
+    """
+    svc, mock_client = service_with_mock_client
+
+    # Given: canonical list-format (matches netrias_client >=0.4.1 wire shape)
+    mock_client.discover_mapping_from_csv.return_value = {
+        "column_mappings": [
+            {
+                "column_name": "diagnosis",
+                "cde_key": "disease_type",
+                "cde_id": 323,
+                "alternatives": [
+                    {"target": "disease_type", "confidence": 0.85, "cde_id": 323},
+                    {"target": "primary_diagnosis", "confidence": 0.72, "cde_id": 2},
+                ],
+            },
+            None,
+        ]
+    }
+    csv_path = tmp_path / "test.csv"
+    csv_path.write_text("diagnosis,other\nCancer,x\n")
+
+    # When
+    cde_targets, _, _ = svc.discover(csv_path=csv_path, target_schema="ccdi")
+
+    # Then
+    assert "diagnosis" in cde_targets, f"expected 'diagnosis' in cde_targets, got {list(cde_targets)}"
+    suggestions = cde_targets["diagnosis"]
+    assert len(suggestions) == 2
+    assert suggestions[0].target == "disease_type"
+    assert suggestions[0].confidence == 0.85
+    assert suggestions[1].target == "primary_diagnosis"

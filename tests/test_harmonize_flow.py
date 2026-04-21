@@ -140,7 +140,6 @@ async def test_harmonize_without_client_returns_stubbed_job(
     # Given: An uploaded file, but Netrias client is unavailable
     _ = await upload_and_analyze(app_client, sample_csv_path)
 
-    from src.domain import ColumnMappingSet
     from src.domain.harmonize import HarmonizeService, HarmonizeStatus
 
     service = HarmonizeService(client=None)
@@ -151,7 +150,7 @@ async def test_harmonize_without_client_returns_stubbed_job(
     result = service.run(
         file_path=Path("/tmp/test.csv"),
         target_schema=TEST_TARGET_SCHEMA,
-        column_mappings=ColumnMappingSet.from_dict({}),
+        assignments={},
         cache=SessionCache(),
         manifest=None,
     )
@@ -159,3 +158,5 @@ async def test_harmonize_without_client_returns_stubbed_job(
     # Then: Returns a stubbed/queued job indicating service unavailability
     assert result.status == HarmonizeStatus.QUEUED
     assert "stubbed" in result.detail.lower() or "unavailable" in result.detail.lower()
+
+

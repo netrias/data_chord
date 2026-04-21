@@ -21,14 +21,13 @@ from fastapi.templating import Jinja2Templates
 from src.domain import (
     NO_MAPPING_SENTINEL,
     ColumnBreakdownSchema,
-    ColumnMappingSet,
     ConfidenceBucketSchema,
     HarmonizeRequest,
     HarmonizeResponse,
     ManifestSummarySchema,
 )
 from src.domain.cde_mapping_persistence import save_cde_mapping
-from src.domain.column_assignment import build_column_assignments, extract_column_cde_mappings
+from src.domain.column_assignment import ColumnAssignment, build_column_assignments, extract_column_cde_mappings
 from src.domain.data_model_adapter import fetch_pvs_batch_async
 from src.domain.data_model_cache import SessionCache, get_session_cache, populate_cde_cache
 from src.domain.dependencies import (
@@ -113,22 +112,12 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
     headers, _ = load_csv(meta.saved_path)
     _store_column_mappings_in_cache(cache, manifest_payload, payload.manual_overrides, headers)
 
-    # Convert index-keyed overrides to name-keyed for the harmonizer API boundary
-    name_keyed_overrides = {
-        headers[col_id]: cde_key
-        for col_id, cde_key in payload.manual_overrides.items()
-        if col_id < len(headers)
-    }
-    if len(name_keyed_overrides) < len(payload.manual_overrides):
-        _router_logger.warning(
-            "Duplicate column names caused override collision at harmonizer boundary",
-            extra={"override_count": len(payload.manual_overrides), "unique_names": len(name_keyed_overrides)},
-        )
-    column_mappings = ColumnMappingSet.from_dict(name_keyed_overrides)
+    # Canonical assignments carry column_id — safe for duplicate headers
+    assignments = cache.get_column_assignments()
 
     # Launch harmonization and PV fetch in parallel
     harmonize_task = asyncio.create_task(
-        _run_harmonization(cache, meta.saved_path, payload.target_schema, column_mappings, manifest_payload)
+        _run_harmonization(cache, meta.saved_path, payload.target_schema, assignments, manifest_payload)
     )
     pv_fetch_task = asyncio.create_task(
         _fetch_pvs_for_session(payload.file_id, manifest_payload, payload.manual_overrides, payload.target_schema)
@@ -202,7 +191,7 @@ async def _run_harmonization(
     cache: SessionCache,
     file_path: Path,
     target_schema: str,
-    column_mappings: ColumnMappingSet,
+    assignments: dict[int, ColumnAssignment],
     manifest: ManifestPayload | None,
 ) -> HarmonizeResult:
     """Netrias client is sync; run in threadpool to avoid blocking the event loop."""
@@ -211,7 +200,7 @@ async def _run_harmonization(
         harmonizer.run,
         file_path=file_path,
         target_schema=target_schema,
-        column_mappings=column_mappings,
+        assignments=assignments,
         cache=cache,
         manifest=manifest,
     )
@@ -277,7 +266,7 @@ async def _fetch_pvs_for_session(
 ) -> None:
     """Runs in parallel with harmonization to hide PV fetch latency."""
     cache = get_session_cache(file_id)
-    from_manifest = set(extract_column_cde_mappings(manifest).values())
+    from_manifest = {m["cde_key"] for m in extract_column_cde_mappings(manifest).values()}
     from_overrides = {v for v in manual_overrides.values() if v != NO_MAPPING_SENTINEL}
     cde_keys = list(from_manifest | from_overrides)
 

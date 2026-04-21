@@ -295,13 +295,17 @@ async def test_stage3_harmonize_uses_stored_manifest_when_payload_missing(
         def __init__(self) -> None:
             self.received_manifest = None
 
-        def run(self, *, file_path, target_schema, column_mappings, cache, manifest):  # type: ignore[no-untyped-def]
+        def run(self, *, file_path, target_schema, assignments, cache, manifest):  # type: ignore[no-untyped-def]
             self.received_manifest = manifest
             return HarmonizeResult(job_id="job-1", status=HarmonizeStatus.SUCCEEDED, detail="ok")
 
     # Given: an uploaded file with a stored manifest
     file_id = await upload_content(app_client, create_csv_content([["col_a"], ["alpha"]]), "manifest.csv")
-    stored_manifest = {"column_mappings": {"col_a": {"targetField": "primary_diagnosis", "cde_id": 2}}}
+    stored_manifest: dict = {"column_mappings": [
+        {"column_name": "col_a", "cde_key": "primary_diagnosis", "cde_id": 2, "alternatives": [
+            {"target": "primary_diagnosis", "confidence": 0.9, "cde_id": 2},
+        ]},
+    ]}
     temp_storage.save_manifest(file_id, stored_manifest)
     stub = StubHarmonizer()
     assert stub.received_manifest is None
@@ -334,7 +338,7 @@ async def test_stage3_harmonize_prefers_payload_manifest(
         def __init__(self) -> None:
             self.received_manifest = None
 
-        def run(self, *, file_path, target_schema, column_mappings, cache, manifest):  # type: ignore[no-untyped-def]
+        def run(self, *, file_path, target_schema, assignments, cache, manifest):  # type: ignore[no-untyped-def]
             self.received_manifest = manifest
             return HarmonizeResult(job_id="job-2", status=HarmonizeStatus.SUCCEEDED, detail="ok")
 
@@ -342,9 +346,17 @@ async def test_stage3_harmonize_prefers_payload_manifest(
     file_id = await upload_content(app_client, create_csv_content([["col_a"], ["alpha"]]), "payload.csv")
     temp_storage.save_manifest(
         file_id,
-        {"column_mappings": {"col_a": {"targetField": "primary_diagnosis", "cde_id": 2}}},
+        {"column_mappings": [
+            {"column_name": "col_a", "cde_key": "primary_diagnosis", "cde_id": 2, "alternatives": [
+                {"target": "primary_diagnosis", "confidence": 0.9, "cde_id": 2},
+            ]},
+        ]},
     )
-    payload_manifest = {"column_mappings": {"col_a": {"targetField": "morphology", "cde_id": 3}}}
+    payload_manifest: dict = {"column_mappings": [
+        {"column_name": "col_a", "cde_key": "morphology", "cde_id": 3, "alternatives": [
+            {"target": "morphology", "confidence": 0.88, "cde_id": 3},
+        ]},
+    ]}
     stub = StubHarmonizer()
 
     # When: harmonize is triggered with a manifest payload
@@ -431,7 +443,7 @@ async def test_stage5_download_ignores_invalid_row_keys(
         json={
             "file_id": file_id,
             "overrides": {
-                "99": {"col_a": {"ai_value": "alpha", "human_value": "gamma", "original_value": "alpha"}},
+                "99": {"0": {"ai_value": "alpha", "human_value": "gamma", "original_value": "alpha"}},
             },
             "review_state": review_state_payload(),
         },

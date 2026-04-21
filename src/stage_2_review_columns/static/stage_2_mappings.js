@@ -7,6 +7,17 @@ import { STAGE_2_PAYLOAD_KEY, STAGE_3_PAYLOAD_KEY, STAGE_3_JOB_KEY, isValidFileI
 import { createCombobox } from '/assets/shared/combobox.js';
 import { determineRowState } from '/assets/shared/row-state.js';
 
+/* Canonical JSON-key constants — mirrors src/domain/manifest/models.py MANIFEST_KEYS. */
+const MANIFEST_KEYS = Object.freeze({
+  COLUMN_MAPPINGS: "column_mappings",
+  COLUMN_NAME: "column_name",
+  CDE_KEY: "cde_key",
+  CDE_ID: "cde_id",
+  ALTERNATIVES: "alternatives",
+  TARGET: "target",
+  CONFIDENCE: "confidence",
+});
+
 /* Configuration and constants */
 const config = window.stageTwoConfig ?? {};
 const HARMONIZE_BUTTON_LABEL = 'Harmonize →';
@@ -122,6 +133,26 @@ const _buildMappingDecisions = () => {
       cde_description: cdeMeta?.description ?? null,
       method,
     };
+  });
+};
+
+/** Mirror of src/domain/column_assignment.py:_resolve_cde_key for the submittability gate.
+ *
+ * A column has an effective mapping when the user's override resolves to a real CDE,
+ * or (absent an override) the manifest's column_mappings entry carries a non-null cde_key.
+ * "No Mapping" override wins over any manifest entry — that's the explicit null case.
+ * column_mappings is always a list indexed by column_id (canonical shape from SDK).
+ */
+const _hasEffectiveMapping = () => {
+  const columns = state.payload?.columns ?? [];
+  const manifestMappings = state.payload?.manifest?.[MANIFEST_KEYS.COLUMN_MAPPINGS] ?? [];
+  return columns.some((column) => {
+    const override = state.manualSelections.get(column.column_id);
+    if (override !== undefined) {
+      return override !== NO_MAPPING_OPTION;
+    }
+    const manifestEntry = manifestMappings[column.column_id];
+    return manifestEntry?.[MANIFEST_KEYS.CDE_KEY] != null;
   });
 };
 
@@ -243,8 +274,16 @@ const _renderMappingRows = () => {
     emptyState.classList.add('hidden');
   }
 
+  /* Submittable iff at least one column resolves to a non-null CDE. The canonical rule
+     lives in src/domain/column_assignment.py:_resolve_cde_key — override wins over
+     manifest.column_mappings[column_id].cde_key; NO_MAPPING sentinel means explicit null. */
   if (harmonizeButton) {
-    harmonizeButton.disabled = !state.payload;
+    const canSubmit = state.payload != null && _hasEffectiveMapping();
+    harmonizeButton.disabled = !canSubmit;
+    const wrapper = harmonizeButton.closest('.progress-tracker-action');
+    if (wrapper) {
+      wrapper.classList.toggle('is-blocked', state.payload != null && !canSubmit);
+    }
   }
 };
 
@@ -297,7 +336,7 @@ const _submitHarmonize = async () => {
 
   const overrides = Object.fromEntries(state.manualSelections.entries());
   const manifest = state.payload?.manifest;
-  if (!manifest || !manifest.column_mappings) {
+  if (!manifest || !manifest[MANIFEST_KEYS.COLUMN_MAPPINGS]) {
     state.isSubmitting = false;
     harmonizeButton.disabled = false;
     if (harmonizeButtonText) harmonizeButtonText.textContent = HARMONIZE_BUTTON_LABEL;

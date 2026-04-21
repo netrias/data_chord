@@ -325,3 +325,40 @@
     max-width: 100%;
   }
 }
+
+/* Disabled button must not capture pointer events so wrapper :hover reaches the tooltip. */
+.btn-3d:disabled {
+  pointer-events: none;
+}
+
+/* Tooltip revealed on wrapper hover only when the submittability gate is blocking. */
+.progress-tracker-action {
+  position: relative;
+}
+
+.harmonize-action-tooltip {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: max-content;
+  max-width: 280px;
+  padding: var(--space-3) var(--space-4);
+  background: var(--gray-800);
+  color: var(--white);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xl);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--transition-normal), visibility var(--transition-normal);
+  z-index: 1000;
+  pointer-events: none;
+  text-align: left;
+}
+
+.progress-tracker-action.is-blocked:hover .harmonize-action-tooltip,
+.progress-tracker-action.is-blocked:focus-within .harmonize-action-tooltip {
+  opacity: 1;
+  visibility: visible;
+}

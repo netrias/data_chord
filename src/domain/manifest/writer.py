@@ -29,7 +29,7 @@ class AdjustmentResult(NamedTuple):
 
 def add_manual_overrides_batch(
     manifest_path: Path,
-    overrides: list[tuple[str, str, str]],
+    overrides: list[tuple[int, str, str]],
     user_id: str | None = None,
 ) -> bool:
     """Single read/write avoids N parquet rewrites when applying N overrides."""
@@ -44,22 +44,23 @@ def add_manual_overrides_batch(
     timestamp = datetime.now(UTC).isoformat()
     updated_rows = summary.rows
 
-    for column_name, to_harmonize, override_value in overrides:
+    for column_id, to_harmonize, override_value in overrides:
         new_override = ManualOverride(user_id=user_id, timestamp=timestamp, value=override_value)
-        updated_rows = _apply_single_override(updated_rows, column_name, to_harmonize, new_override)
+        updated_rows = _apply_single_override(updated_rows, column_id, to_harmonize, new_override)
 
     return _write_manifest_parquet(manifest_path, updated_rows)
 
 
 def _apply_single_override(
     rows: list[ManifestRow],
-    column_name: str,
+    column_id: int,
     to_harmonize: str,
     new_override: ManualOverride,
 ) -> list[ManifestRow]:
+    """Match by column_id — immune to column renames and duplicate headers."""
     updated: list[ManifestRow] = []
     for row in rows:
-        if row.column_name == column_name and row.to_harmonize == to_harmonize:
+        if row.column_id == column_id and row.to_harmonize == to_harmonize:
             updated_overrides = [*row.manual_overrides, new_override]
             updated.append(replace(row, manual_overrides=updated_overrides))
         else:

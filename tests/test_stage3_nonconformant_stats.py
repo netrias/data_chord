@@ -189,9 +189,12 @@ class TestManualOverridePropagation:
         # Given
         cache = SessionCache()
         manifest = cast(ManifestPayload, {
-            "column_mappings": {
-                "breed": {"targetField": "organism_species", "cde_id": 131},
-            }
+            "column_mappings": [
+                {"column_name": "breed", "cde_key": "organism_species", "cde_id": 131, "alternatives": [
+                    {"target": "organism_species", "confidence": 0.9, "cde_id": 131},
+                ]},
+                None,
+            ]
         })
         manual_overrides = {1: "primary_diagnosis"}
         csv_headers = ["breed", "diagnosis"]
@@ -214,9 +217,11 @@ class TestManualOverridePropagation:
         # Given
         cache = SessionCache()
         manifest = cast(ManifestPayload, {
-            "column_mappings": {
-                "col": {"targetField": "auto_target", "cde_id": 1},
-            }
+            "column_mappings": [
+                {"column_name": "col", "cde_key": "auto_target", "cde_id": 1, "alternatives": [
+                    {"target": "auto_target", "confidence": 0.9, "cde_id": 1},
+                ]},
+            ]
         })
         manual_overrides = {0: "manual_target"}
         csv_headers = ["col"]
@@ -227,23 +232,26 @@ class TestManualOverridePropagation:
         # Then: manual override wins
         assert cache.get_column_cde_key(0) == "manual_target"
 
-    def test_extract_skips_entries_without_target_field(self) -> None:
+    def test_extract_skips_none_entries(self) -> None:
         """
-        Given: a manifest with one valid and one missing targetField entry
+        Given: a canonical list-format manifest with one mapped and one None entry
         When: _extract_column_cde_mappings is called
-        Then: only the valid entry is returned
+        Then: only the mapped entry is returned
         """
         # Given
         manifest = cast(ManifestPayload, {
-            "column_mappings": {
-                "good": {"targetField": "age", "cde_id": 1},
-                "bad": {"cde_id": 2},
-            }
+            "column_mappings": [
+                {"column_name": "good", "cde_key": "age", "cde_id": 1, "alternatives": [
+                    {"target": "age", "confidence": 0.9, "cde_id": 1},
+                ]},
+                None,
+            ]
         })
 
         # When
         result = _extract_column_cde_mappings(manifest)
 
-        # Then
-        assert "good" in result
-        assert "bad" not in result
+        # Then: position 0 is mapped, position 1 (None) is absent
+        assert 0 in result
+        assert result[0]["column_name"] == "good"
+        assert 1 not in result

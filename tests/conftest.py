@@ -107,16 +107,24 @@ def mock_netrias_client() -> Generator[MagicMock]:
     mock_client = MagicMock()
 
     _cde_manifest = {
-        "column_mappings": {
-            "primary_diagnosis": {
-                "targetField": "primary_diagnosis",
+        "column_mappings": [
+            {
+                "column_name": "primary_diagnosis",
+                "cde_key": "primary_diagnosis",
                 "cde_id": 2,
+                "alternatives": [
+                    {"target": "primary_diagnosis", "confidence": 0.95, "cde_id": 2},
+                ],
             },
-            "therapeutic_agents": {
-                "targetField": "therapeutic_agents",
+            {
+                "column_name": "therapeutic_agents",
+                "cde_key": "therapeutic_agents",
                 "cde_id": 1,
+                "alternatives": [
+                    {"target": "therapeutic_agents", "confidence": 0.90, "cde_id": 1},
+                ],
             },
-        },
+        ],
     }
 
     mock_client.discover_cde_mapping.return_value = MockCDEMappingResult(

@@ -66,6 +66,7 @@ export const mockAnalyze = async (page) => {
       total_rows: 3,
       columns: [
         {
+          column_id: 0,
           column_name: 'col_a',
           inferred_type: 'text',
           sample_values: ['Foo', 'Bar'],
@@ -78,9 +79,14 @@ export const mockAnalyze = async (page) => {
       next_step_hint: 'Review AI-suggested column mappings once ready.',
       manual_overrides: {},
       manifest: {
-        column_mappings: {
-          col_a: { targetField: 'col_a', cde_id: 1 },
-        },
+        column_mappings: [
+          {
+            column_name: 'col_a',
+            cde_key: 'col_a',
+            cde_id: 1,
+            alternatives: [{ target: 'col_a', confidence: 0.9, cde_id: 1 }],
+          },
+        ],
       },
     };
     await route.fulfill({
@@ -89,6 +95,72 @@ export const mockAnalyze = async (page) => {
       body: JSON.stringify(response),
     });
   });
+};
+
+/** Same shape as mockAnalyze but with zero effective mappings.
+ *
+ * cde_targets is empty and column_mappings is an empty list so
+ * build_column_assignments produces no CDE assignments. Used to test the Stage 2
+ * submittability gate without touching the stable mockAnalyze fixture.
+ */
+export const mockAnalyzeNoMappings = async (page) => {
+  await page.route('**/stage-1/analyze', async (route) => {
+    const payload = route.request().postDataJSON?.() ?? {};
+    const fileId = payload.file_id ?? '';
+    const response = {
+      file_id: fileId,
+      file_name: 'test.csv',
+      total_rows: 3,
+      columns: [
+        {
+          column_id: 0,
+          column_name: 'col_a',
+          inferred_type: 'text',
+          sample_values: ['Foo', 'Bar'],
+          confidence_bucket: 'high',
+          confidence_score: 0.95,
+        },
+      ],
+      cde_targets: {},
+      next_stage: 'mapping',
+      next_step_hint: 'Review AI-suggested column mappings once ready.',
+      manual_overrides: {},
+      manifest: {
+        column_mappings: [],
+      },
+    };
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(response),
+    });
+  });
+};
+
+/** Inject real CDE options into Stage 2's server-rendered config.
+ *
+ * Stage 2 reads CDE options from window.stageTwoConfig.cdeOptions, which the server
+ * populates from the Netrias cache. In E2E tests that cache is empty because the
+ * Netrias client is not reachable, so the override combobox only contains "No Mapping".
+ * Intercept the assignment and inject real CDEs so interaction tests can actually
+ * select a non-"No Mapping" option.
+ */
+export const injectCdeOptions = async (page, cdes) => {
+  const payload = cdes ?? [
+    { cde_id: 1, cde_key: 'primary_diagnosis', label: 'primary_diagnosis', description: 'Primary diagnosis' },
+  ];
+  await page.addInitScript((options) => {
+    let value;
+    Object.defineProperty(window, 'stageTwoConfig', {
+      get() {
+        return value;
+      },
+      set(incoming) {
+        value = { ...incoming, cdeOptions: options };
+      },
+      configurable: true,
+    });
+  }, payload);
 };
 
 export const mockDataModels = async (page) => {

@@ -103,18 +103,18 @@ async def test_full_flow_overrides_propagate_within_column(
     assert columns_data, "Expected review columns for override flow"
 
     # Find transformations for col_a where originalValue is "Foo"
+    col_a = next(c for c in columns_data if c["columnLabel"] == "col_a")
+    col_a_key = col_a["columnKey"]
     row_indices: list[int] = []
-    for col in columns_data:
-        if col["columnKey"] == "col_a":
-            for t in col["transformations"]:
-                if t["originalValue"] == "Foo":
-                    row_indices.extend(t["rowIndices"])
+    for t in col_a["transformations"]:
+        if t["originalValue"] == "Foo":
+            row_indices.extend(t["rowIndices"])
     row_indices = sorted(set(row_indices))
 
     overrides_payload = {
         "file_id": file_id,
         "overrides": {
-            str(index): {"col_a": {"ai_value": "Foo", "human_value": "Baz", "original_value": "Foo"}}
+            str(index): {col_a_key: {"ai_value": "Foo", "human_value": "Baz", "original_value": "Foo"}}
             for index in row_indices
         },
         "review_state": review_state_payload(),
@@ -167,7 +167,7 @@ async def test_full_flow_two_files_isolated_overrides(
         json={
             "file_id": file_one,
             "overrides": {
-                "1": {"col_a": {"ai_value": "alpha", "human_value": "gamma", "original_value": "alpha"}},
+                "1": {"0": {"ai_value": "alpha", "human_value": "gamma", "original_value": "alpha"}},
             },
             "review_state": review_state_payload(),
         },
@@ -214,7 +214,7 @@ async def test_full_flow_reharmonize_clears_overrides(
         json={
             "file_id": file_id,
             "overrides": {
-                "1": {"col_a": {"ai_value": "alpha", "human_value": "gamma", "original_value": "alpha"}},
+                "1": {"0": {"ai_value": "alpha", "human_value": "gamma", "original_value": "alpha"}},
             },
             "review_state": review_state_payload(),
         },
@@ -265,12 +265,12 @@ async def test_full_flow_bom_overrides_apply(
     assert columns_data, "Expected review columns"
 
     # Find transformations for col_a where originalValue is "Foo"
+    col_a = next(c for c in columns_data if c["columnLabel"] == "col_a")
+    col_a_key = col_a["columnKey"]
     row_indices: list[int] = []
-    for col in columns_data:
-        if col["columnKey"] == "col_a":
-            for t in col["transformations"]:
-                if t["originalValue"] == "Foo":
-                    row_indices.extend(t["rowIndices"])
+    for t in col_a["transformations"]:
+        if t["originalValue"] == "Foo":
+            row_indices.extend(t["rowIndices"])
     row_indices = sorted(set(row_indices))
 
     save_response = await app_client.post(
@@ -278,7 +278,7 @@ async def test_full_flow_bom_overrides_apply(
         json={
             "file_id": file_id,
             "overrides": {
-                str(index): {"col_a": {"ai_value": "Foo", "human_value": "Bar", "original_value": "Foo"}}
+                str(index): {col_a_key: {"ai_value": "Foo", "human_value": "Bar", "original_value": "Foo"}}
                 for index in row_indices
             },
             "review_state": review_state_payload(),

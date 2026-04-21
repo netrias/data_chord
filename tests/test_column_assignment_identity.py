@@ -42,11 +42,19 @@ class TestColumnAssignmentBuilder:
         When: canonical assignments are built
         Then: each header position gets its own assignment and overrides win
         """
+        # List positions match CSV column positions: 0=diagnosis, 1=diagnosis, 2=age
         manifest = cast(ManifestPayload, {
-            "column_mappings": {
-                "diagnosis": {"targetField": "auto_dx", "cde_id": 1},
-                "age": {"targetField": "age_at_diagnosis", "cde_id": 2},
-            }
+            "column_mappings": [
+                {"column_name": "diagnosis", "cde_key": "auto_dx", "cde_id": 1, "alternatives": [
+                    {"target": "auto_dx", "confidence": 0.9, "cde_id": 1},
+                ]},
+                {"column_name": "diagnosis", "cde_key": "auto_dx", "cde_id": 1, "alternatives": [
+                    {"target": "auto_dx", "confidence": 0.9, "cde_id": 1},
+                ]},
+                {"column_name": "age", "cde_key": "age_at_diagnosis", "cde_id": 2, "alternatives": [
+                    {"target": "age_at_diagnosis", "confidence": 0.85, "cde_id": 2},
+                ]},
+            ]
         })
         manual_overrides = {0: "manual_dx"}
         csv_headers = ["diagnosis", "diagnosis", "age"]
@@ -87,7 +95,7 @@ class TestStage4ColumnIdentity:
 
         assert len(columns) == 2
         assert [column.sourceColumnIndex for column in columns] == [0, 1]
-        assert [column.columnKey for column in columns] == ["diagnosis", "diagnosis"]
+        assert [column.columnKey for column in columns] == ["0", "1"]
         assert [column.transformations[0].originalValue for column in columns] == ["Foo", "Bar"]
 
 

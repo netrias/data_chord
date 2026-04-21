@@ -4,14 +4,15 @@ Harmonization results including AI suggestions, confidence scores, and manual ov
 Encapsulates manifest structure, reading, and writing; tracks override audit trail.
 """
 
+from netrias_client import AlternativeEntry, ColumnMappingRecord, ManifestPayload
+
 from src.domain.manifest.models import (
     COMPLETENESS_HIGH_THRESHOLD,
     COMPLETENESS_MEDIUM_THRESHOLD,
     HIGH_CONFIDENCE_THRESHOLD,
+    MANIFEST_KEYS,
     MEDIUM_CONFIDENCE_THRESHOLD,
-    ColumnMappingEntry,
     ConfidenceBucket,
-    ManifestPayload,
     ManifestRow,
     ManifestSummary,
     ManualOverride,
@@ -21,9 +22,6 @@ from src.domain.manifest.models import (
     get_manifest_schema,
     is_value_changed,
 )
-from src.domain.manifest.models import (
-    AlternativeEntry as AlternativeEntry,
-)
 from src.domain.manifest.reader import read_manifest_parquet
 from src.domain.manifest.writer import add_manual_overrides_batch
 
@@ -31,9 +29,10 @@ __all__ = [
     "AlternativeEntry",
     "COMPLETENESS_HIGH_THRESHOLD",
     "COMPLETENESS_MEDIUM_THRESHOLD",
-    "ColumnMappingEntry",
+    "ColumnMappingRecord",
     "ConfidenceBucket",
     "HIGH_CONFIDENCE_THRESHOLD",
+    "MANIFEST_KEYS",
     "MEDIUM_CONFIDENCE_THRESHOLD",
     "ManifestPayload",
     "ManifestRow",

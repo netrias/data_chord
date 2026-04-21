@@ -30,7 +30,15 @@ class TestDuplicateColumnNameIdentity:
         cache = SessionCache()
         cache.set_pvs("cde_a", frozenset(["PV1", "PV2"]))
         csv_headers = ["col", "col"]  # duplicate name at positions 0 and 1
-        manifest = cast(ManifestPayload, {"column_mappings": {"col": {"targetField": "cde_a"}}})
+        # Both positions explicitly mapped; list index = CSV column position
+        manifest = cast(ManifestPayload, {"column_mappings": [
+            {"column_name": "col", "cde_key": "cde_a", "cde_id": 1, "alternatives": [
+                {"target": "cde_a", "confidence": 0.9, "cde_id": 1},
+            ]},
+            {"column_name": "col", "cde_key": "cde_a", "cde_id": 1, "alternatives": [
+                {"target": "cde_a", "confidence": 0.9, "cde_id": 1},
+            ]},
+        ]})
         assert cache.get_pvs_for_column(0) is None, "No PVs loaded yet"
 
         # When

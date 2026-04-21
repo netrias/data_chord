@@ -7,13 +7,13 @@ Axis of change: CDE recommendation service integration and response normalizatio
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 
-from netrias_client import NetriasClient
+from netrias_client import AlternativeEntry, ManifestPayload, NetriasClient
 
 from src.domain.cde import ModelSuggestion
 from src.domain.harmonize import normalize_manifest
-from src.domain.manifest import AlternativeEntry, ManifestPayload
 
 logger = logging.getLogger(__name__)
 
@@ -53,31 +53,40 @@ def _cde_targets_from_manifest(
     manifest: ManifestPayload,
 ) -> dict[str, list[ModelSuggestion]]:
     """AnalyzeResponse needs per-column suggestions for frontend display."""
-    column_mappings = manifest.get("column_mappings", {})
+    # normalize_manifest guarantees list shape; dict fallback removed post-0.4.0
+    return _targets_from_list_manifest(manifest["column_mappings"])
+
+
+def _targets_from_list_manifest(
+    entries: Sequence[object],
+) -> dict[str, list[ModelSuggestion]]:
+    """List entry column_name becomes the dict key for Stage 2 display."""
     targets: dict[str, list[ModelSuggestion]] = {}
-    for column_name, entry in column_mappings.items():
-        alternatives = entry.get("alternatives")
-        if isinstance(alternatives, list) and alternatives:
-            suggestions = _suggestions_from_alternatives(alternatives)
-            if suggestions:
-                targets[column_name] = suggestions
-                continue
-        target_field = entry.get("targetField")
-        if target_field:
-            targets[column_name] = [ModelSuggestion(target=target_field, similarity=1.0)]
+    for entry in entries:
+        if entry is None or not isinstance(entry, dict):
+            continue
+        column_name = entry.get("column_name")
+        if not isinstance(column_name, str):
+            continue
+        suggestions = _suggestions_from_alternatives(entry.get("alternatives", []))
+        if suggestions:
+            targets[column_name] = suggestions
     return targets
 
 
 def _suggestions_from_alternatives(
-    alternatives: list[AlternativeEntry],
+    alternatives: object,
 ) -> list[ModelSuggestion]:
     """External payload uses loose dicts; validate and convert to typed domain objects."""
+    if not isinstance(alternatives, list):
+        return []
     suggestions: list[ModelSuggestion] = []
     for alt in alternatives:
-        target = alt.get("target")
+        alt_entry: AlternativeEntry = alt  # type: ignore[assignment]
+        target = alt_entry.get("target")
         if not isinstance(target, str) or not target:
             continue
-        similarity = alt.get("similarity")
-        score = float(similarity) if isinstance(similarity, (int, float)) else 0.0
-        suggestions.append(ModelSuggestion(target=target, similarity=score))
+        raw_confidence = alt_entry.get("confidence")
+        score = float(raw_confidence) if isinstance(raw_confidence, (int, float)) else 0.0
+        suggestions.append(ModelSuggestion(target=target, confidence=score))
     return suggestions

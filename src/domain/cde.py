@@ -34,7 +34,7 @@ class CDEInfo:
 
 class ModelSuggestion(BaseModel):
     target: str
-    similarity: float
+    confidence: float
 
 
 def normalize_cde_key(selection: str | None) -> str | None:

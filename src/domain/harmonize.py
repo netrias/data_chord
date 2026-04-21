@@ -11,14 +11,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import cast
 from uuid import uuid4
 
-from netrias_client import NetriasClient
+from netrias_client import AlternativeEntry, ColumnMappingRecord, ManifestPayload, MappingValidationError, NetriasClient
 
-from src.domain.cde import ColumnMapping, ColumnMappingSet
+from src.domain.column_assignment import ColumnAssignment
 from src.domain.data_model_cache import SessionCache
-from src.domain.manifest import ColumnMappingEntry, ManifestPayload
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +47,7 @@ class HarmonizeService:
         *,
         file_path: Path,
         target_schema: str,
-        column_mappings: ColumnMappingSet,
+        assignments: dict[int, ColumnAssignment],
         cache: SessionCache,
         manifest: ManifestPayload | None = None,
     ) -> HarmonizeResult:
@@ -61,7 +59,7 @@ class HarmonizeService:
 
         try:
             cde_map = self._prepare_cde_map(file_path, target_schema, manifest)
-            _apply_column_mappings(cde_map, column_mappings, cache)
+            _apply_column_mappings(cde_map, assignments, cache)
             return self._execute_harmonization(file_path, cde_map, job_id, target_schema)
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception("Harmonize call failed; falling back to stub", exc_info=exc)
@@ -88,7 +86,7 @@ class HarmonizeService:
         cde_map = normalize_manifest(raw_cde_map)
         logger.info(
             "Discovered CDE map for harmonization",
-            extra={"column_count": len(cde_map.get("column_mappings", {})), "target_schema": target_schema},
+            extra={"column_count": len(cde_map["column_mappings"]), "target_schema": target_schema},
         )
         return cde_map
 
@@ -135,79 +133,155 @@ class HarmonizeService:
 
 def _apply_column_mappings(
     manifest: ManifestPayload,
-    mappings: ColumnMappingSet,
+    assignments: dict[int, ColumnAssignment],
     cache: SessionCache,
 ) -> None:
-    if not mappings.mappings:
+    """Write position-keyed column mappings from resolved assignments."""
+    if not assignments:
         return
 
-    column_map = manifest.setdefault("column_mappings", {})
-    applied = mappings.get_applied()
-    skipped = mappings.get_skipped()
+    max_id = max(assignments.keys())
+    entries: list[ColumnMappingRecord | None] = [None] * (max_id + 1)
+    applied: list[tuple[str, str]] = []
+    skipped: list[str] = []
 
-    for mapping in applied:
-        if mapping.cde_key is None:
+    for column_id in sorted(assignments):
+        assignment = assignments[column_id]
+        if assignment.cde_key is None:
+            skipped.append(assignment.column_name)
             continue
-        column_map[mapping.column_name] = _build_mapping_entry(
-            column_map.get(mapping.column_name),
-            mapping.cde_key,
-            cache,
-        )
+        cde_key = assignment.cde_key
+        existing = _find_existing_entry(manifest, column_id)
+        cde_id = _resolve_cde_id(cde_key, existing, cache)
+        if cde_id is None:
+            raise ValueError(f"Unknown CDE key: {cde_key}")
+        # Carry forward alternatives from SDK discovery; user selection doesn't add new ones.
+        raw_alts = existing.get("alternatives") if existing is not None else None
+        alternatives: list[AlternativeEntry] = list(raw_alts) if isinstance(raw_alts, list) else []
+        entry: ColumnMappingRecord = {
+            "column_name": assignment.column_name,
+            "cde_key": cde_key,
+            "cde_id": cde_id,
+            "alternatives": alternatives,
+        }
+        entries[column_id] = entry
+        applied.append((assignment.column_name, cde_key))
 
-    for column_name in skipped:
-        if column_name in column_map:
-            del column_map[column_name]
-
+    manifest["column_mappings"] = entries
     _log_mapping_results(applied, skipped)
 
 
-def _build_mapping_entry(
-    existing: Mapping[str, object] | None,
+def _find_existing_entry(
+    manifest: ManifestPayload,
+    column_id: int,
+) -> Mapping[str, object] | None:
+    """Look up existing manifest entry so alternatives can be preserved."""
+    column_mappings = manifest.get("column_mappings")
+    if not isinstance(column_mappings, list):
+        return None
+    if 0 <= column_id < len(column_mappings):
+        entry = column_mappings[column_id]
+        return entry if isinstance(entry, Mapping) else None
+    return None
+
+
+def _resolve_cde_id(
     cde_key: str,
+    existing: Mapping[str, object] | None,
     cache: SessionCache,
-) -> ColumnMappingEntry:
-    """Look up cde_id from session cache (populated in Stage 2)."""
+) -> int | None:
+    """Prefer cache (authoritative after discovery); fall back to existing entry's cde_id
+    when the cache hasn't been populated (e.g. Stage 3 invoked without a prior Stage 1 in
+    this process) but the SDK-produced manifest already carries cde_id."""
     cde_info = cache.get_cde_by_key(cde_key)
-    if cde_info is None:
-        raise ValueError(f"Unknown CDE key: {cde_key}")
-    entry = ColumnMappingEntry(targetField=cde_key, cde_id=cde_info.cde_id)
-    if existing and "route" in existing:
-        entry["route"] = str(existing["route"])
-    return entry
+    if cde_info is not None:
+        return cde_info.cde_id
+    if existing is not None and existing.get("cde_key") == cde_key:
+        existing_id = existing.get("cde_id")
+        if isinstance(existing_id, int):
+            return existing_id
+    return None
 
 
-def _log_mapping_results(applied: list[ColumnMapping], skipped: list[str]) -> None:
+def _log_mapping_results(applied: list[tuple[str, str]], skipped: list[str]) -> None:
     if applied:
         logger.info(
             "Applied column mappings",
-            extra={"mappings": {m.column_name: m.cde_key for m in applied if m.cde_key}},
+            extra={"mappings": dict(applied)},
         )
     if skipped:
         logger.info("Skipped column mappings via 'No Mapping'", extra={"columns": skipped})
 
 
-def normalize_manifest(manifest: Mapping[str, object] | object) -> ManifestPayload:
-    """SDK returns varying shapes; normalize to a guaranteed ManifestPayload."""
+def normalize_manifest(manifest: object) -> ManifestPayload:
+    """Strict boundary validator — raises MappingValidationError on any deviation from the
+    canonical wire shape so callers never see partial or legacy data.
+    """
     if not isinstance(manifest, Mapping):
-        return {"column_mappings": {}}
+        raise MappingValidationError(
+            f"expected Mapping, found {type(manifest).__name__} [source: normalize_manifest]"
+        )
+    if "column_mappings" not in manifest:
+        raise MappingValidationError(
+            f"expected key 'column_mappings', found keys: {list(manifest.keys())} "
+            f"[source: normalize_manifest]"
+        )
+    column_mappings = manifest["column_mappings"]
+    if not isinstance(column_mappings, list):
+        raise MappingValidationError(
+            f"expected list for 'column_mappings', found {type(column_mappings).__name__} "
+            f"[source: normalize_manifest]"
+        )
+    validated: list[ColumnMappingRecord | None] = [
+        _validate_entry(entry, idx) for idx, entry in enumerate(column_mappings)
+    ]
+    return {"column_mappings": validated}
 
-    column_mappings = manifest.get("column_mappings")
-    if not isinstance(column_mappings, Mapping):
-        return {"column_mappings": {}}
 
-    return {"column_mappings": _filter_valid_columns(column_mappings)}
+def _validate_entry(entry: object, idx: int) -> ColumnMappingRecord | None:
+    """Validate a single list slot; None is a valid 'no mapping' sentinel."""
+    if entry is None:
+        return None
+    if not isinstance(entry, dict):
+        raise MappingValidationError(
+            f"expected dict or None at column_mappings[{idx}], found {type(entry).__name__}"
+        )
+    for key, expected_type in (
+        ("column_name", str),
+        ("cde_key", str),
+        ("cde_id", int),
+        ("alternatives", list),
+    ):
+        if key not in entry:
+            raise MappingValidationError(
+                f"expected key '{key}' at column_mappings[{idx}], "
+                f"found keys: {list(entry.keys())}"
+            )
+        if not isinstance(entry[key], expected_type):
+            raise MappingValidationError(
+                f"expected '{key}': {expected_type.__name__} at column_mappings[{idx}], "
+                f"found '{key}': {type(entry[key]).__name__}"
+            )
+    for alt_idx, alt in enumerate(entry["alternatives"]):
+        _validate_alternative(alt, idx, alt_idx)
+    return entry  # type: ignore[return-value]
 
 
-def _filter_valid_columns(entries: Mapping[object, object]) -> dict[str, ColumnMappingEntry]:
-    """SDK returns untyped dicts; only keep entries with required ColumnMappingEntry fields."""
-    normalized: dict[str, ColumnMappingEntry] = {}
-    for column, entry in entries.items():
-        if not isinstance(column, str) or not isinstance(entry, Mapping):
-            continue
-        if "cde_id" not in entry or "targetField" not in entry:
-            continue
-        normalized[column] = cast(ColumnMappingEntry, dict(entry))
-    return normalized
+def _validate_alternative(alt: object, entry_idx: int, alt_idx: int) -> None:
+    """Each alternative must carry target (str) and confidence (float)."""
+    source = f"column_mappings[{entry_idx}].alternatives[{alt_idx}]"
+    if not isinstance(alt, dict):
+        raise MappingValidationError(
+            f"expected dict at {source}, found {type(alt).__name__}"
+        )
+    if "target" not in alt or not isinstance(alt["target"], str):
+        raise MappingValidationError(
+            f"expected 'target': str at {source}, found keys: {list(alt.keys())}"
+        )
+    if "confidence" not in alt or not isinstance(alt["confidence"], (int, float)):
+        raise MappingValidationError(
+            f"expected 'confidence': float at {source}, found keys: {list(alt.keys())}"
+        )
 
 
 def _extract_manifest_path(netrias_result: object) -> Path | None:

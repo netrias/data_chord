@@ -158,7 +158,7 @@ def _build_columns_from_manifest(manifest: ManifestSummary, file_id: str) -> lis
         terms_with_changes = sum(1 for t in transformations if t.isChanged)
 
         columns.append(ColumnReviewData(
-            columnKey=col_info.column_name,
+            columnKey=str(col_info.column_id),
             columnLabel=col_info.label,
             sourceColumnIndex=col_info.source_index,
             termCount=len(transformations),
@@ -227,7 +227,7 @@ def _build_column_pvs(columns: list[_ColumnInfo], file_id: str) -> dict[str, lis
     for col_info in columns:
         pv_set = cache.get_pvs_for_column(col_info.source_index)
         if pv_set:
-            column_pvs[col_info.column_name] = sorted(pv_set)
+            column_pvs[str(col_info.column_id)] = sorted(pv_set)
         else:
             columns_without_pvs.append(col_info.column_name)
 
@@ -357,15 +357,16 @@ def _sync_overrides_to_manifest(storage: UploadStorage, payload: SaveOverridesRe
 
 def _collect_overrides_for_batch(
     payload: SaveOverridesRequest,
-) -> list[tuple[str, str, str]]:
-    """Deduplicate by (col, original, value) to avoid duplicate ManualOverride entries."""
-    seen: set[tuple[str, str, str]] = set()
-    overrides: list[tuple[str, str, str]] = []
+) -> list[tuple[int, str, str]]:
+    """Deduplicate by (column_id, original, value) to avoid duplicate ManualOverride entries."""
+    seen: set[tuple[int, str, str]] = set()
+    overrides: list[tuple[int, str, str]] = []
     for _row_key, cols in payload.overrides.items():
         for col_key, override in cols.items():
             if override.original_value is None:
                 continue
-            key = (col_key, override.original_value, override.human_value)
+            column_id = int(col_key)
+            key = (column_id, override.original_value, override.human_value)
             if key not in seen:
                 seen.add(key)
                 overrides.append(key)
@@ -417,6 +418,7 @@ async def get_non_conformant_values(file_id: FileIdPath) -> NonConformantRespons
         pv_set = cache.get_pvs_for_column(row.column_id)
         if pv_set and current_value and not check_value_conformance(current_value, pv_set):
             non_conformant.append(NonConformantItem(
+                column_id=row.column_id,
                 column=row.column_name,
                 value=current_value,
                 original=row.to_harmonize,
@@ -474,8 +476,9 @@ async def get_term_row_indices(payload: TermRowIndicesRequest) -> TermRowIndices
     if manifest is None:
         raise HTTPException(status_code=404, detail="Manifest not found")
 
+    target_column_id = int(payload.column_key)
     for row in manifest.rows:
-        if row.column_name == payload.column_key and row.to_harmonize == payload.original_value:
+        if row.column_id == target_column_id and row.to_harmonize == payload.original_value:
             return TermRowIndicesResponse(row_indices=row.row_indices)
 
     return TermRowIndicesResponse(row_indices=[])

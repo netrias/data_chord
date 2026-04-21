@@ -87,21 +87,12 @@ async function _fetchAllRowsChunked(fileId, rowIndices, onProgress) {
 }
 
 /**
- * Strip BOM and whitespace for header matching.
- * CSV headers often have invisible BOM characters from Excel exports that would
- * otherwise cause column highlighting to fail silently.
- */
-function _normalizeForComparison(str) {
-  return str.replace(/^\uFEFF/, '').trim();
-}
-
-/**
  * Build the table header row HTML.
+ * Highlights the target column by index (column_id).
  */
-function _buildTableHeader(headers, columnKey) {
-  const normalizedColumnKey = _normalizeForComparison(columnKey);
-  const headerCells = headers.map((h) => {
-    const isHighlight = _normalizeForComparison(h) === normalizedColumnKey;
+function _buildTableHeader(headers, columnIndex) {
+  const headerCells = headers.map((h, idx) => {
+    const isHighlight = idx === columnIndex;
     const classes = isHighlight ? 'row-context-highlight' : '';
     const dataAttr = isHighlight ? ' data-target-column="true"' : '';
     return `<th class="${classes}"${dataAttr}>${escapeHtml(h)}</th>`;
@@ -114,14 +105,11 @@ function _buildTableHeader(headers, columnKey) {
  * Build table body rows as an array of HTML strings for Clusterize.
  * @returns {string[]} Array of <tr>...</tr> strings
  */
-function _buildTableRowsArray(rows, rowIndices, headers, columnKey) {
-  const normalizedColumnKey = _normalizeForComparison(columnKey);
-  const highlightColIdx = headers.findIndex((h) => _normalizeForComparison(h) === normalizedColumnKey);
-
+function _buildTableRowsArray(rows, rowIndices, columnIndex) {
   return rows.map((row, i) => {
     const excelRowNum = toExcelRowNumber(rowIndices[i] + 1);
     const cells = row.map((value, colIdx) => {
-      const highlightClass = colIdx === highlightColIdx ? ' class="row-context-highlight"' : '';
+      const highlightClass = colIdx === columnIndex ? ' class="row-context-highlight"' : '';
       return `<td${highlightClass}>${escapeHtml(value)}</td>`;
     });
     return `<tr><td>${excelRowNum}</td>${cells.join('')}</tr>`;
@@ -151,13 +139,13 @@ function _buildToggleHTML(filteredCount, totalCount, currentMode) {
  * Build title HTML.
  */
 function _buildTitleHTML(params) {
-  const { term, columnKey, displayedRowCount, mode } = params;
+  const { term, columnLabel, displayedRowCount, mode } = params;
   const safeTerm = escapeHtml(term);
-  const safeColumnKey = escapeHtml(columnKey);
+  const safeColumnLabel = escapeHtml(columnLabel);
   const rowText = displayedRowCount === 1 ? 'row' : 'rows';
 
   const mainTitle = mode === 'all' ? 'All Rows' : `"${safeTerm}"`;
-  const subtitle = `<span class="row-context-column-link" data-action="scroll-to-column">${safeColumnKey}</span> · ${displayedRowCount} ${rowText}`;
+  const subtitle = `<span class="row-context-column-link" data-action="scroll-to-column">${safeColumnLabel}</span> · ${displayedRowCount} ${rowText}`;
 
   return `
     <span class="row-context-title-main">${mainTitle}</span>
@@ -172,6 +160,7 @@ function _buildDialogHTML(params) {
   const {
     term,
     columnKey,
+    columnLabel,
     headers,
     displayedRowCount,
     mode,
@@ -180,8 +169,9 @@ function _buildDialogHTML(params) {
     showToggle,
   } = params;
 
+  const columnIndex = parseInt(columnKey);
   const toggleHTML = showToggle ? _buildToggleHTML(filteredCount, totalOriginalRows, mode) : '';
-  const titleHTML = _buildTitleHTML({ term, columnKey, displayedRowCount, mode });
+  const titleHTML = _buildTitleHTML({ term, columnLabel, displayedRowCount, mode });
 
   // Single scrollable table with sticky header
   // Clusterize manages tbody content for virtualization
@@ -194,7 +184,7 @@ function _buildDialogHTML(params) {
       </div>
       <div id="rowContextScrollArea" class="row-context-table-wrapper clusterize-scroll">
         <table class="row-context-table">
-          <thead class="row-context-thead">${_buildTableHeader(headers, columnKey)}</thead>
+          <thead class="row-context-thead">${_buildTableHeader(headers, columnIndex)}</thead>
           <tbody id="rowContextContentArea" class="clusterize-content">
             <tr class="clusterize-no-data">
               <td>Loading...</td>
@@ -333,13 +323,14 @@ function _attachToggleHandler(dialog, onModeChange) {
  * Show the row context popup with virtualized rendering.
  * @param {Object} params
  * @param {string} params.term - The original value being reviewed
- * @param {string} params.columnKey - Raw column name from spreadsheet
+ * @param {string} params.columnKey - str(column_id) identifying the column by position
+ * @param {string} params.columnLabel - Human-readable column name for display
  * @param {number[]} params.rowIndices - 0-based row indices where term appears (may be truncated)
  * @param {number} [params.rowCount] - True count of rows (indices may be truncated for large arrays)
  * @param {string} params.fileId - File ID for fetching context
  * @param {number} [params.totalOriginalRows] - Total rows in original spreadsheet
  */
-export async function showRowContextPopup({ term, columnKey, rowIndices, rowCount, fileId, totalOriginalRows = 0 }) {
+export async function showRowContextPopup({ term, columnKey, columnLabel, rowIndices, rowCount, fileId, totalOriginalRows = 0 }) {
   const dialog = document.createElement('dialog');
   dialog.className = 'row-context-dialog';
 
@@ -418,6 +409,7 @@ export async function showRowContextPopup({ term, columnKey, rowIndices, rowCoun
       dialog.innerHTML = _buildDialogHTML({
         term,
         columnKey,
+        columnLabel,
         headers: data.headers,
         displayedRowCount,
         mode,
@@ -432,7 +424,7 @@ export async function showRowContextPopup({ term, columnKey, rowIndices, rowCoun
       _attachToggleHandler(dialog, renderContent);
 
       // Build row data for Clusterize
-      const rowsHTML = _buildTableRowsArray(data.rows, currentIndices, data.headers, columnKey);
+      const rowsHTML = _buildTableRowsArray(data.rows, currentIndices, parseInt(columnKey));
 
       // Initialize Clusterize for virtualized rendering
       // Clusterize is loaded globally via CDN

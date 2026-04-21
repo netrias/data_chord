@@ -230,6 +230,7 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
           showRowContextPopup({
             term: entry.originalValue,
             columnKey: entry.columnKey,
+            columnLabel: entry.columnLabel,
             rowIndices: entry.rowIndices.map((idx) => idx - 1),
             rowCount,
             fileId,

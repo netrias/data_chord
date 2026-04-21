@@ -8,7 +8,9 @@ import {
   getFileIdFromUrl,
   uploadAndAnalyze,
   clickHarmonize,
+  injectCdeOptions,
   mockDataModels,
+  mockAnalyzeNoMappings,
   mockHarmonizeSuccess,
   mockHarmonizeFailure,
   seedHarmonization,
@@ -503,4 +505,73 @@ test('history dialog shows correct attribution labels', async ({ page }) => {
 
   // Close dialog
   await dialog.locator('button:has-text("Close")').click();
+});
+
+test('Stage 2 blocks Harmonize when no column has an effective CDE mapping', async ({ page }) => {
+  // Given: Stage 2 loaded with a payload that has no effective CDE mappings
+  await mockDataModels(page);
+  await mockAnalyzeNoMappings(page);
+  await page.goto('/stage-1');
+  await page.setInputFiles('#fileInput', fileFixture('basic.csv'));
+  await page.locator('#analyzeButton').waitFor({ state: 'visible' });
+  await page.waitForFunction(() => !document.querySelector('#analyzeButton')?.disabled);
+  await page.click('#analyzeButton');
+  const confirmButton = page.locator('.data-model-confirm-btn');
+  await confirmButton.waitFor({ state: 'visible' });
+  await confirmButton.click();
+  await page.waitForURL(/\/stage-2/);
+
+  // Baseline negative assertions — must hold before the hover action under test:
+  //   - button is disabled (no mappings configured yet)
+  //   - tooltip is not yet visible (requires hover on wrapper to appear)
+  await expect(page.locator('#harmonizeButton')).toBeDisabled();
+  await expect(page.locator('.harmonize-action-tooltip')).toBeHidden();
+
+  // When: hover the wrapper (pointer-events: none on disabled button means wrapper receives hover)
+  await page.locator('.progress-tracker-action').hover();
+
+  // Then: tooltip becomes visible with the correct message
+  await expect(page.locator('.harmonize-action-tooltip')).toBeVisible();
+  await expect(page.locator('.harmonize-action-tooltip')).toContainText(
+    'Select a CDE mapping for at least one column before harmonizing.'
+  );
+});
+
+test('Stage 2 enables Harmonize after the user selects a CDE for one column', async ({ page }) => {
+  // Given: Stage 2 loaded with no effective CDE mappings but real CDE options available for override
+  await injectCdeOptions(page);
+  await mockDataModels(page);
+  await mockAnalyzeNoMappings(page);
+  await page.goto('/stage-1');
+  await page.setInputFiles('#fileInput', fileFixture('basic.csv'));
+  await page.locator('#analyzeButton').waitFor({ state: 'visible' });
+  await page.waitForFunction(() => !document.querySelector('#analyzeButton')?.disabled);
+  await page.click('#analyzeButton');
+  const confirmButton = page.locator('.data-model-confirm-btn');
+  await confirmButton.waitFor({ state: 'visible' });
+  await confirmButton.click();
+  await page.waitForURL(/\/stage-2/);
+
+  // Baseline negative assertion — button is disabled before the user selects a CDE
+  await expect(page.locator('#harmonizeButton')).toBeDisabled();
+
+  // When: open the first mapping row's combobox and pick the first real CDE (not "No Mapping")
+  const firstRow = page.locator('#mappingResults .mapping-row').first();
+  await firstRow.waitFor({ state: 'visible' });
+  const toggleBtn = firstRow.locator('.combobox-toggle');
+  await toggleBtn.click();
+
+  // Pick the first option that is not "No Mapping" from the open dropdown
+  const dropdown = firstRow.locator('.combobox-dropdown');
+  await dropdown.waitFor({ state: 'visible' });
+  const realCdeOption = dropdown.locator('.combobox-option:not(.combobox-option--muted):not(.combobox-option--empty)').first();
+  await realCdeOption.click();
+
+  // Then: button becomes enabled and the blocked state is cleared
+  await expect(page.locator('#harmonizeButton')).toBeEnabled();
+  await expect(page.locator('.progress-tracker-action')).not.toHaveClass(/is-blocked/);
+
+  // And: tooltip stays hidden on hover (gate is lifted)
+  await page.locator('.progress-tracker-action').hover();
+  await expect(page.locator('.harmonize-action-tooltip')).toBeHidden();
 });

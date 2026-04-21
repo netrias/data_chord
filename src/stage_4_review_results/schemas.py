@@ -107,6 +107,7 @@ class DeleteOverridesResponse(BaseModel):
 class NonConformantItem(BaseModel):
     """A single non-conformant value for the gating dialog."""
 
+    column_id: int
     column: str
     value: str
     original: str

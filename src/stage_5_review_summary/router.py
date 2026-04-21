@@ -101,6 +101,7 @@ async def download_harmonized_data(payload: StageFiveRequest) -> StreamingRespon
         raise HTTPException(status_code=400, detail=_ERROR_DATASET_UNREADABLE)
 
     overrides = _load_review_overrides(payload.file_id)
+    overrides = _resolve_override_column_keys(overrides, headers)
     final_rows = _apply_overrides(harmonized_rows, overrides)
 
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
@@ -129,6 +130,25 @@ def _load_review_overrides(file_id: str) -> dict[str, dict[str, str]]:
             for col, info in columns.items()
             if info.get("human_value") is not None
         }
+    return result
+
+
+def _resolve_override_column_keys(
+    overrides: dict[str, dict[str, str]],
+    headers: list[str],
+) -> dict[str, dict[str, str]]:
+    """Translate str(column_id) override keys to column names for CSV application."""
+    result: dict[str, dict[str, str]] = {}
+    for row_key, cols in overrides.items():
+        resolved: dict[str, str] = {}
+        for col_key, value in cols.items():
+            if col_key.isdigit():
+                idx = int(col_key)
+                if 0 <= idx < len(headers):
+                    resolved[headers[idx]] = value
+                    continue
+            resolved[col_key] = value
+        result[row_key] = resolved
     return result
 
 

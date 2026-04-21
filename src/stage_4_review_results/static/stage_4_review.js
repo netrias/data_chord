@@ -499,6 +499,7 @@ const renderColumnScrollMode = (entries) => {
           showRowContextPopup({
             term: entry.originalValue,
             columnKey: entry.columnKey,
+            columnLabel: entry.columnLabel,
             rowIndices: zeroBasedIndices,
             fileId,
             totalOriginalRows: state.totalOriginalRows,
@@ -804,6 +805,30 @@ const loadStateFromDisk = async () => {
 };
 
 /**
+ * Convert legacy column-name override keys to str(column_id).
+ * Old override files use column names as inner keys; new format uses str(column_id).
+ * Must run after fetchRows() populates state.columns.
+ */
+const _migrateOverrideKeys = () => {
+  if (!state.columns.length || !Object.keys(state.pendingOverrides).length) return;
+
+  const labelToKey = {};
+  for (const col of state.columns) {
+    labelToKey[col.columnLabel] = col.columnKey;
+  }
+
+  for (const rowKey of Object.keys(state.pendingOverrides)) {
+    const cols = state.pendingOverrides[rowKey];
+    for (const colKey of Object.keys(cols)) {
+      if (colKey in labelToKey && colKey !== labelToKey[colKey]) {
+        cols[labelToKey[colKey]] = cols[colKey];
+        delete cols[colKey];
+      }
+    }
+  }
+};
+
+/**
  * Flush overrides to the server, then navigate to Stage 5.
  * Awaiting ensures the manifest parquet write completes before the page transitions.
  */
@@ -966,6 +991,7 @@ const init = async () => {
   });
 
   await fetchRows();
+  _migrateOverrideKeys();
   _clampCurrentUnitsToValidRange();
   render();
 };
