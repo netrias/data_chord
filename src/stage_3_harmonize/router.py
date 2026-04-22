@@ -19,7 +19,6 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from src.domain import (
-    NO_MAPPING_SENTINEL,
     ColumnBreakdownSchema,
     ConfidenceBucketSchema,
     HarmonizeRequest,
@@ -27,7 +26,7 @@ from src.domain import (
     ManifestSummarySchema,
 )
 from src.domain.cde_mapping_persistence import save_cde_mapping
-from src.domain.column_assignment import ColumnAssignment, build_column_assignments, extract_column_cde_mappings
+from src.domain.column_assignment import ColumnAssignment, build_column_assignments
 from src.domain.data_model_adapter import fetch_pvs_batch_async
 from src.domain.data_model_cache import SessionCache, get_session_cache, populate_cde_cache
 from src.domain.dependencies import (
@@ -120,7 +119,7 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
         _run_harmonization(cache, meta.saved_path, payload.target_schema, assignments, manifest_payload)
     )
     pv_fetch_task = asyncio.create_task(
-        _fetch_pvs_for_session(payload.file_id, manifest_payload, payload.manual_overrides, payload.target_schema)
+        _fetch_pvs_for_session(payload.file_id, assignments, payload.target_schema)
     )
 
     # Wait for both to complete
@@ -152,7 +151,10 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
     # Persist CDE mapping decisions from Stage 2 for inclusion in the download zip
     if payload.mapping_decisions:
         _, version_label = cache.get_model_info()
-        save_cde_mapping(payload.file_id, payload.mapping_decisions, payload.target_schema, version_label or None)
+        save_cde_mapping(
+            payload.file_id, payload.mapping_decisions, assignments,
+            payload.target_schema, version_label or None,
+        )
 
     query_params = urlencode({
         "file_id": payload.file_id,
@@ -262,13 +264,18 @@ async def _fetch_and_cache_pvs(
 
 
 async def _fetch_pvs_for_session(
-    file_id: str, manifest: ManifestPayload | None, manual_overrides: dict[int, str], target_schema: str
+    file_id: str,
+    assignments: dict[int, ColumnAssignment],
+    target_schema: str,
 ) -> None:
     """Runs in parallel with harmonization to hide PV fetch latency."""
     cache = get_session_cache(file_id)
-    from_manifest = {m["cde_key"] for m in extract_column_cde_mappings(manifest).values()}
-    from_overrides = {v for v in manual_overrides.values() if v != NO_MAPPING_SENTINEL}
-    cde_keys = list(from_manifest | from_overrides)
+    # Only harmonizable CDEs have PV sets worth fetching; non-harmonizable columns pass through.
+    cde_keys = sorted({
+        a.cde_key
+        for a in assignments.values()
+        if a.cde_key is not None and a.harmonization == "harmonizable"
+    })
 
     # Server restart between Stage 2 and Stage 3 clears in-memory CDEs; re-fetch.
     if not cache.has_cdes():

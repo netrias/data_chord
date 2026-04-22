@@ -151,14 +151,14 @@ class TestSessionCacheThreadSafety:
         # Given: A cache with column assignments
         cache = SessionCache()
         cache.set_column_assignments({
-            0: ColumnAssignment(0, "col_a", "cde1"),
-            1: ColumnAssignment(1, "col_b", "cde2"),
+            0: ColumnAssignment(0, "col_a", "cde1", "harmonizable"),
+            1: ColumnAssignment(1, "col_b", "cde2", "harmonizable"),
         })
         assert cache.get_column_assignment(2) is None
 
         # When: Getting column assignments and modifying the returned dict
         assignments = cache.get_column_assignments()
-        assignments[2] = ColumnAssignment(2, "col_c", "cde3")
+        assignments[2] = ColumnAssignment(2, "col_c", "cde3", "harmonizable")
 
         # Then: Cache is not affected by external mutation
         assert cache.get_column_assignment(2) is None, "Cache should not be modified"
@@ -204,7 +204,7 @@ class TestPVLookupByColumn:
         """Stage 4/5 look up PVs by column index, not name."""
         # Given: A cache with column assignments and PVs
         cache = SessionCache()
-        cache.set_column_assignments({0: ColumnAssignment(0, "diagnosis", "primary_diagnosis_cde")})
+        cache.set_column_assignments({0: ColumnAssignment(0, "diagnosis", "primary_diagnosis_cde", "harmonizable")})
         cache.set_pvs("primary_diagnosis_cde", frozenset(["Cancer", "Normal"]))
 
         # When: Looking up PVs by column index
@@ -219,7 +219,7 @@ class TestPVLookupByColumn:
         """Columns without CDE mapping return None for PVs."""
         # Given: A cache with some assignments but not for all columns
         cache = SessionCache()
-        cache.set_column_assignments({0: ColumnAssignment(0, "mapped_col", "some_cde")})
+        cache.set_column_assignments({0: ColumnAssignment(0, "mapped_col", "some_cde", "harmonizable")})
         cache.set_pvs("some_cde", frozenset(["Value"]))
 
         # When: Looking up PVs for an unmapped column index
@@ -232,7 +232,7 @@ class TestPVLookupByColumn:
         """Column mapped to CDE but CDE has no PVs (free-text field)."""
         # Given: A column assignment but no PVs for that CDE
         cache = SessionCache()
-        cache.set_column_assignments({0: ColumnAssignment(0, "notes", "clinical_notes_cde")})
+        cache.set_column_assignments({0: ColumnAssignment(0, "notes", "clinical_notes_cde", "harmonizable")})
         # No PVs set for clinical_notes_cde (it's free-text)
 
         # When: Looking up PVs

@@ -29,6 +29,10 @@ class MANIFEST_KEYS:
 # Derived from the SDK type so the two stay in sync automatically.
 HARMONIZATION_VALUES: frozenset[str] = frozenset(get_args(Harmonization))
 
+# Statuses that mean "target CDE identified but no value transformation" — used by
+# harmonize-call construction to skip rows and by the audit bucket routing to tag them.
+PASS_THROUGH_HARMONIZATIONS: frozenset[str] = frozenset({"numeric", "no_permissible_values"})
+
 
 class ConfidenceBucket(str, Enum):
     HIGH = "high"

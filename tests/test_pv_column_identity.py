@@ -65,8 +65,8 @@ class TestPVManifestJsonRoundTrip:
         clear_all_session_caches()
         cache = get_session_cache(file_id)
         cache.set_column_assignments({
-            0: ColumnAssignment(0, "col_zero", "cde_key_zero"),
-            1: ColumnAssignment(1, "col_one", "cde_key_one"),
+            0: ColumnAssignment(0, "col_zero", "cde_key_zero", "harmonizable"),
+            1: ColumnAssignment(1, "col_one", "cde_key_one", "harmonizable"),
         })
         cache.set_pvs("cde_key_zero", frozenset(["A"]))
         cache.set_pvs("cde_key_one", frozenset(["B"]))
@@ -99,8 +99,8 @@ class TestPVManifestJsonRoundTrip:
         # Then: integer keys survived the round-trip
         assert new_cache.get_column_cde_key(0) == "cde_key_zero"
         assert new_cache.get_column_cde_key(1) == "cde_key_one"
-        assert new_cache.get_column_assignment(0) == ColumnAssignment(0, "col_zero", "cde_key_zero")
-        assert new_cache.get_column_assignment(1) == ColumnAssignment(1, "col_one", "cde_key_one")
+        assert new_cache.get_column_assignment(0) == ColumnAssignment(0, "col_zero", "cde_key_zero", "harmonizable")
+        assert new_cache.get_column_assignment(1) == ColumnAssignment(1, "col_one", "cde_key_one", "harmonizable")
         assert new_cache.get_pvs_for_column(0) == frozenset(["A"])
         assert new_cache.get_pvs_for_column(1) == frozenset(["B"])
 

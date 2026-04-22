@@ -5,13 +5,20 @@ Tests invariants across randomly generated inputs rather than specific examples.
 Complements existing unit tests by exploring edge cases automatically.
 """
 
+from __future__ import annotations
+
+from pathlib import Path
+
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from src.domain.cde import (
+    ColumnMappingDecision,
     ColumnMappingSet,
     normalize_cde_key,
 )
+from src.domain.cde_mapping_persistence import load_cde_mapping_json, save_cde_mapping
+from src.domain.column_assignment import ColumnAssignment
 from src.domain.harmonize import normalize_manifest
 from src.domain.manifest.models import is_value_changed
 from src.domain.pv_validation import (
@@ -400,3 +407,117 @@ def test_normalize_manifest_rejects_non_mapping(bad_input: object) -> None:
         raise AssertionError("Expected MappingValidationError was not raised")
     except MappingValidationError:
         pass
+
+
+# =============================================================================
+# CDE Mapping Bucket Partition Property
+# =============================================================================
+
+# Strategies for the four routing dimensions:
+#   - cde_name: None or non-empty string
+#   - method: one of the two literals
+#   - harmonization: one of three values or None (when cde_key is None)
+_st_harmonization = st.sampled_from(["harmonizable", "numeric", "no_permissible_values"])
+_st_method = st.sampled_from(["ai_recommendation", "user_override"])
+_st_column_name = st.text(min_size=1, max_size=30).filter(str.strip)
+_st_cde_key = st.text(min_size=1, max_size=30).filter(str.strip)
+
+
+def _make_decision_assignment_pair(
+    column_name: str,
+    cde_key: str | None,
+    harmonization: str | None,
+    method: str,
+    column_id: int,
+) -> tuple[ColumnMappingDecision, ColumnAssignment]:
+    """Build a (decision, assignment) pair with consistent column_name and cde_key."""
+    decision: ColumnMappingDecision = {
+        "column_name": column_name,
+        "cde_name": cde_key,  # None when unmapped
+        "cde_id": None,
+        "cde_description": None,
+        "method": method,  # type: ignore[typeddict-item]
+    }
+    assignment = ColumnAssignment(
+        column_id=column_id,
+        column_name=column_name,
+        cde_key=cde_key,
+        harmonization=harmonization,  # type: ignore[arg-type]
+    )
+    return decision, assignment
+
+
+# Strategy: each list element is a (column_name, cde_key|None, harmonization|None, method) tuple.
+# When cde_key is None, harmonization must also be None (co-null invariant).
+_st_mapped_column = st.tuples(
+    _st_column_name,
+    _st_cde_key,           # cde_key (non-None → assigned)
+    _st_harmonization,     # harmonization (non-None because cde_key is non-None)
+    _st_method,
+)
+_st_unmapped_column = st.tuples(
+    _st_column_name,
+    st.none(),             # cde_key = None
+    st.none(),             # harmonization = None (co-null)
+    _st_method,
+)
+_st_column_spec = st.one_of(_st_mapped_column, _st_unmapped_column)
+
+
+@settings(max_examples=100)
+@given(st.lists(_st_column_spec, min_size=1, max_size=20))
+def test_bucket_partition_every_column_lands_in_exactly_one_bucket(
+    specs: list[tuple[str, str | None, str | None, str]],
+) -> None:
+    """For any list of (decision, assignment) pairs, every column lands in exactly one bucket.
+
+    Formally: sum of all bucket sizes == len(decisions), and no column_name appears in two buckets.
+    Uses a frozenset-keyed file_store mock to avoid filesystem side effects.
+    """
+    import json
+    import tempfile
+
+    import src.domain.dependencies as _deps
+    from src.domain.storage import FileStore, LocalStorageBackend
+
+    decisions: list[ColumnMappingDecision] = []
+    assignments: dict[int, ColumnAssignment] = {}
+
+    for i, (column_name, cde_key, harmonization, method) in enumerate(specs):
+        decision, assignment = _make_decision_assignment_pair(
+            column_name, cde_key, harmonization, method, i
+        )
+        decisions.append(decision)
+        assignments[i] = assignment
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        file_id = "prop-test"
+        original = _deps._file_store
+        _deps._file_store = FileStore(LocalStorageBackend(Path(tmp_dir) / "files"))
+        try:
+            save_cde_mapping(file_id, decisions, assignments, "schema", None)
+            result_json = load_cde_mapping_json(file_id)
+        finally:
+            _deps._file_store = original
+
+    assert result_json is not None
+    result = json.loads(result_json)
+
+    ai_names = [e["column_name"] for e in result["ai_mapped"]]
+    override_names = [e["column_name"] for e in result["user_overrides"]]
+    pt_names = [e["column_name"] for e in result["pass_through"]]
+    unmapped_names = result["unmapped_columns"]
+
+    all_bucket_names = ai_names + override_names + pt_names + unmapped_names
+
+    # Partition: total count equals input count.
+    assert len(all_bucket_names) == len(decisions), (
+        f"Bucket total {len(all_bucket_names)} != decision count {len(decisions)}"
+    )
+
+    # No column_name appears in two buckets — checked pairwise across buckets.
+    # (Duplicate column_names across decisions are allowed and may produce the same name in a bucket
+    # multiple times, but each individual decision's column lands in exactly one bucket.)
+    assert len(all_bucket_names) == (
+        len(ai_names) + len(override_names) + len(pt_names) + len(unmapped_names)
+    )

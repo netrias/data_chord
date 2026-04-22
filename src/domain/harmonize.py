@@ -16,7 +16,6 @@ from uuid import uuid4
 from netrias_client import (
     AlternativeEntry,
     ColumnMappingRecord,
-    Harmonization,
     ManifestPayload,
     MappingValidationError,
     NetriasClient,
@@ -24,7 +23,7 @@ from netrias_client import (
 
 from src.domain.column_assignment import ColumnAssignment
 from src.domain.data_model_cache import SessionCache
-from src.domain.manifest.models import HARMONIZATION_VALUES
+from src.domain.manifest.models import HARMONIZATION_VALUES, PASS_THROUGH_HARMONIZATIONS
 
 logger = logging.getLogger(__name__)
 
@@ -151,12 +150,18 @@ def _apply_column_mappings(
     max_id = max(assignments.keys())
     entries: list[ColumnMappingRecord | None] = [None] * (max_id + 1)
     applied: list[tuple[str, str]] = []
-    skipped: list[str] = []
+    no_mapping_skipped: list[str] = []
+    pass_through_skipped: list[str] = []
 
     for column_id in sorted(assignments):
         assignment = assignments[column_id]
+        # No cde_key means explicit No Mapping — user chose not to map this column.
         if assignment.cde_key is None:
-            skipped.append(assignment.column_name)
+            no_mapping_skipped.append(assignment.column_name)
+            continue
+        # Non-harmonizable CDEs pass through unchanged; SDK doesn't transform them.
+        if assignment.harmonization in PASS_THROUGH_HARMONIZATIONS:
+            pass_through_skipped.append(assignment.column_name)
             continue
         cde_key = assignment.cde_key
         existing = _find_existing_entry(manifest, column_id)
@@ -166,27 +171,18 @@ def _apply_column_mappings(
         # Carry forward alternatives from SDK discovery; user selection doesn't add new ones.
         raw_alts = existing.get("alternatives") if existing is not None else None
         alternatives: list[AlternativeEntry] = list(raw_alts) if isinstance(raw_alts, list) else []
-        # Resolve harmonization from the matching alternative first (most specific), then
-        # from the existing entry (carry-forward on override), then error — SDK guarantees presence.
-        match = next((a for a in alternatives if a.get("target") == cde_key), None)
-        if match is not None and "harmonization" in match:
-            harmonization = _coerce_harmonization(match["harmonization"], cde_key, column_id)
-        elif existing is not None and "harmonization" in existing:
-            harmonization = _coerce_harmonization(existing["harmonization"], cde_key, column_id)
-        else:
-            raise ValueError(f"cde_key {cde_key!r} not in alternatives at col {column_id}")
         entry: ColumnMappingRecord = {
             "column_name": assignment.column_name,
             "cde_key": cde_key,
             "cde_id": cde_id,
-            "harmonization": harmonization,
+            "harmonization": assignment.harmonization,  # type: ignore[typeddict-item]
             "alternatives": alternatives,
         }
         entries[column_id] = entry
         applied.append((assignment.column_name, cde_key))
 
     manifest["column_mappings"] = entries
-    _log_mapping_results(applied, skipped)
+    _log_mapping_results(applied, no_mapping_skipped, pass_through_skipped)
 
 
 def _find_existing_entry(
@@ -221,23 +217,26 @@ def _resolve_cde_id(
     return None
 
 
-def _coerce_harmonization(value: object, cde_key: str, column_id: int) -> Harmonization:
-    """Narrow an untyped dict value to Harmonization; raises if the value is unexpected."""
-    if value in HARMONIZATION_VALUES:
-        return value  # type: ignore[return-value]
-    raise ValueError(
-        f"unexpected harmonization {value!r} for cde_key {cde_key!r} at col {column_id}"
-    )
-
-
-def _log_mapping_results(applied: list[tuple[str, str]], skipped: list[str]) -> None:
+def _log_mapping_results(
+    applied: list[tuple[str, str]],
+    no_mapping_skipped: list[str],
+    pass_through_skipped: list[str],
+) -> None:
     if applied:
         logger.info(
             "Applied column mappings",
             extra={"mappings": dict(applied)},
         )
-    if skipped:
-        logger.info("Skipped column mappings via 'No Mapping'", extra={"columns": skipped})
+    if no_mapping_skipped:
+        logger.info(
+            "Skipped column mappings",
+            extra={"reason": "no_mapping", "columns": no_mapping_skipped},
+        )
+    if pass_through_skipped:
+        logger.info(
+            "Skipped column mappings",
+            extra={"reason": "pass_through", "columns": pass_through_skipped},
+        )
 
 
 def normalize_manifest(manifest: object) -> ManifestPayload:

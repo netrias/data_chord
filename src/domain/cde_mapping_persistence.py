@@ -9,10 +9,12 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
-from src.domain.cde import CDEMappingDocument, ColumnMappingDecision
+from src.domain.cde import CDEEntry, CDEMappingDocument, ColumnMappingDecision
+from src.domain.column_assignment import ColumnAssignment
 from src.domain.dependencies import get_file_store
+from src.domain.manifest.models import PASS_THROUGH_HARMONIZATIONS
 from src.domain.storage import FileType
 
 _logger = logging.getLogger(__name__)
@@ -21,32 +23,24 @@ _logger = logging.getLogger(__name__)
 def save_cde_mapping(
     file_id: str,
     decisions: list[ColumnMappingDecision],
+    assignments: dict[int, ColumnAssignment],
     schema_name: str,
     version_label: str | None,
 ) -> None:
-    """Persist mapping decisions so Stage 5 can include them in the download zip."""
-    ai_mapped = []
-    user_overrides = []
-    unmapped_columns = []
+    """Persist mapping decisions so Stage 5 can include them in the download zip.
 
-    for d in decisions:
-        cde_name = d["cde_name"]
-        if cde_name is None:
-            unmapped_columns.append(d["column_name"])
-        elif d["method"] == "user_override":
-            user_overrides.append({
-                "column_name": d["column_name"],
-                "cde_name": cde_name,
-                "cde_id": d["cde_id"],
-                "cde_description": d["cde_description"],
-            })
-        else:
-            ai_mapped.append({
-                "column_name": d["column_name"],
-                "cde_name": cde_name,
-                "cde_id": d["cde_id"],
-                "cde_description": d["cde_description"],
-            })
+    Routing rule applied per positional pair (decisions[i], assignments[i]) because
+    Stage 2 JS builds mapping_decisions by iterating columns in column_id order.
+    Precedence: unmapped → pass_through → user_overrides → ai_mapped.
+    """
+    ai_mapped: list[CDEEntry] = []
+    user_overrides: list[CDEEntry] = []
+    pass_through: list[CDEEntry] = []
+    unmapped_columns: list[str] = []
+
+    for i, d in enumerate(decisions):
+        assignment = assignments.get(i)
+        _route_decision(d, assignment, ai_mapped, user_overrides, pass_through, unmapped_columns)
 
     document: CDEMappingDocument = {
         "file_id": file_id,
@@ -55,11 +49,61 @@ def save_cde_mapping(
         "version_label": version_label,
         "ai_mapped": ai_mapped,
         "user_overrides": user_overrides,
+        "pass_through": pass_through,
         "unmapped_columns": unmapped_columns,
     }
     store = get_file_store()
     store.save(file_id, FileType.COLUMN_MAPPING, document)
     _logger.info("Saved CDE mapping document", extra={"file_id": file_id, "column_count": len(decisions)})
+
+
+def _route_decision(
+    d: ColumnMappingDecision,
+    assignment: ColumnAssignment | None,
+    ai_mapped: list[CDEEntry],
+    user_overrides: list[CDEEntry],
+    pass_through: list[CDEEntry],
+    unmapped_columns: list[str],
+) -> None:
+    """Apply the four-bucket routing rule to a single (decision, assignment) pair.
+
+    Precedence order matters: cde_key=None wins over harmonization check so that
+    explicit "No Mapping" decisions are never accidentally routed to pass_through.
+    """
+    cde_name = d["cde_name"]
+
+    # Rule 1: no CDE assigned — explicit No Mapping or unresolved column.
+    if cde_name is None or assignment is None or assignment.cde_key is None:
+        unmapped_columns.append(d["column_name"])
+        return
+
+    entry = _build_entry(d, cde_name, d["method"])
+
+    # Rule 2: non-harmonizable CDEs pass through without value transformation.
+    if assignment.harmonization in PASS_THROUGH_HARMONIZATIONS:
+        pass_through.append(entry)
+        return
+
+    # Rules 3 & 4: split by method for harmonizable columns.
+    if d["method"] == "user_override":
+        user_overrides.append(entry)
+    else:
+        ai_mapped.append(entry)
+
+
+def _build_entry(
+    d: ColumnMappingDecision,
+    cde_name: str,
+    method: Literal["ai_recommendation", "user_override"],
+) -> CDEEntry:
+    """Construct a CDEEntry from a decision and its resolved method."""
+    return CDEEntry(
+        column_name=d["column_name"],
+        cde_name=cde_name,
+        cde_id=d["cde_id"],
+        cde_description=d["cde_description"],
+        method=method,
+    )
 
 
 def load_cde_mapping_json(file_id: str) -> str | None:

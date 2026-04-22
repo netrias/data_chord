@@ -10,9 +10,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal, TypedDict
 
+from netrias_client import Harmonization
 from pydantic import BaseModel
-
-from src.domain.manifest import Harmonization
 
 NO_MAPPING_SENTINEL = "No Mapping"
 
@@ -89,12 +88,13 @@ class ColumnMappingDecision(TypedDict):
 
 
 class CDEEntry(TypedDict):
-    """A column successfully mapped to a CDE, used in ai_mapped and user_overrides sections."""
+    """A column assigned to a CDE; method preserved inside every populated bucket."""
 
     column_name: str
     cde_name: str
     cde_id: int | None
     cde_description: str | None
+    method: Literal["ai_recommendation", "user_override"]
 
 
 class CDEMappingDocument(TypedDict):
@@ -106,4 +106,5 @@ class CDEMappingDocument(TypedDict):
     version_label: str | None  # "1" is the fallback when API is unreachable
     ai_mapped: list[CDEEntry]
     user_overrides: list[CDEEntry]
+    pass_through: list[CDEEntry]  # Target CDE identified but values not transformed (numeric / no-PV).
     unmapped_columns: list[str]

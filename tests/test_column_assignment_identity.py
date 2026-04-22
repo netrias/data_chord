@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import cast
 from unittest.mock import MagicMock, patch
 
+from src.domain.cde import NO_MAPPING_SENTINEL
 from src.domain.column_assignment import ColumnAssignment, build_column_assignments
 from src.domain.data_model_cache import clear_all_session_caches, get_session_cache
 from src.domain.manifest import ManifestPayload, ManifestRow, ManifestSummary
@@ -77,9 +78,152 @@ class TestColumnAssignmentBuilder:
         assignments = build_column_assignments(manifest, manual_overrides, csv_headers)
 
         assert len(assignments) == 3
-        assert assignments[0] == ColumnAssignment(0, "diagnosis", "manual_dx")
-        assert assignments[1] == ColumnAssignment(1, "diagnosis", "auto_dx")
-        assert assignments[2] == ColumnAssignment(2, "age", "age_at_diagnosis")
+        # manual_dx is not in alternatives; falls through to top-level harmonization ("harmonizable")
+        assert assignments[0] == ColumnAssignment(0, "diagnosis", "manual_dx", "harmonizable")
+        assert assignments[1] == ColumnAssignment(1, "diagnosis", "auto_dx", "harmonizable")
+        assert assignments[2] == ColumnAssignment(2, "age", "age_at_diagnosis", "harmonizable")
+
+
+class TestHarmonizationResolution:
+    """build_column_assignments resolves harmonization as single source of truth."""
+
+    def test_manifest_harmonization_numeric_flows_through(self) -> None:
+        """
+        Given: manifest entry with harmonization="numeric" and no override
+        When: assignments are built
+        Then: assignments[1].harmonization == "numeric" (co-null invariant: cde_key is also non-None)
+
+        Negative baseline: the assignment must carry a non-None cde_key (confirms this is not
+        a no-mapping case where harmonization being None would be correct).
+        """
+        manifest = cast(ManifestPayload, {
+            "column_mappings": [
+                {
+                    "column_name": "age", "cde_key": "age_at_dx", "cde_id": 2,
+                    "harmonization": "numeric",
+                    "alternatives": [
+                        {"target": "age_at_dx", "confidence": 0.9, "cde_id": 2, "harmonization": "numeric"},
+                    ],
+                },
+            ]
+        })
+
+        assignments = build_column_assignments(manifest, {}, ["age"])
+
+        # Baseline: cde_key is present, so harmonization must NOT be None
+        assert assignments[0].cde_key is not None
+        assert assignments[0].harmonization == "numeric"
+
+    def test_override_to_alternative_with_numeric_harmonization(self) -> None:
+        """
+        Given: manifest entry with harmonization="harmonizable" and an alternative
+               with harmonization="numeric", plus a manual override pointing to that alternative
+        When: assignments are built
+        Then: assignments[0].harmonization == "numeric" (alternative lookup wins over top-level)
+        """
+        manifest = cast(ManifestPayload, {
+            "column_mappings": [
+                {
+                    "column_name": "diagnosis", "cde_key": "dx_string", "cde_id": 1,
+                    "harmonization": "harmonizable",
+                    "alternatives": [
+                        {"target": "dx_string", "confidence": 0.9, "cde_id": 1, "harmonization": "harmonizable"},
+                        {"target": "dx_numeric", "confidence": 0.7, "cde_id": 3, "harmonization": "numeric"},
+                    ],
+                },
+            ]
+        })
+        manual_overrides = {0: "dx_numeric"}
+
+        assignments = build_column_assignments(manifest, manual_overrides, ["diagnosis"])
+
+        # Override to an alternative that carries "numeric" → resolved from alternatives list
+        assert assignments[0].cde_key == "dx_numeric"
+        assert assignments[0].harmonization == "numeric"
+
+    def test_no_mapping_sentinel_produces_null_cde_and_harmonization(self) -> None:
+        """
+        Given: manual override set to NO_MAPPING_SENTINEL
+        When: assignments are built
+        Then: cde_key is None AND harmonization is None (co-null invariant satisfied)
+        """
+        manifest = cast(ManifestPayload, {
+            "column_mappings": [
+                {
+                    "column_name": "diagnosis", "cde_key": "dx_auto", "cde_id": 1,
+                    "harmonization": "harmonizable",
+                    "alternatives": [],
+                },
+            ]
+        })
+        manual_overrides = {0: NO_MAPPING_SENTINEL}
+
+        assignments = build_column_assignments(manifest, manual_overrides, ["diagnosis"])
+
+        assert assignments[0].cde_key is None
+        assert assignments[0].harmonization is None
+
+    def test_override_to_harmonizable_cde_from_another_column(self) -> None:
+        """
+        Given: column 0 is AI-mapped to a no-PV CDE (pass-through); column 1 is AI-mapped
+               to a harmonizable CDE. User overrides column 0 to the harmonizable CDE
+               that only appears as column 1's top-level (not in column 0's alternatives).
+        When: assignments are built
+        Then: assignments[0].harmonization == "harmonizable" (from the cross-column lookup,
+               NOT inherited from column 0's original no-PV harmonization).
+
+        Regression: previously, _resolve_harmonization fell through to the current column's
+        entry.harmonization even when the override pointed to a CDE outside that column's
+        alternatives — incorrectly routing the override to the pass_through bucket.
+        """
+        manifest = cast(ManifestPayload, {
+            "column_mappings": [
+                {
+                    "column_name": "record_id", "cde_key": "participant_id", "cde_id": 342,
+                    "harmonization": "no_permissible_values",
+                    "alternatives": [
+                        {
+                            "target": "participant_id", "confidence": 0.8,
+                            "cde_id": 342, "harmonization": "no_permissible_values",
+                        },
+                        {
+                            "target": "sample_id", "confidence": 0.6,
+                            "cde_id": 304, "harmonization": "no_permissible_values",
+                        },
+                    ],
+                },
+                {
+                    "column_name": "morphology", "cde_key": "morphology", "cde_id": 312,
+                    "harmonization": "harmonizable",
+                    "alternatives": [
+                        {"target": "morphology", "confidence": 1.0, "cde_id": 312, "harmonization": "harmonizable"},
+                    ],
+                },
+            ]
+        })
+        manual_overrides = {0: "morphology"}
+
+        assignments = build_column_assignments(manifest, manual_overrides, ["record_id", "morphology"])
+
+        assert assignments[0].cde_key == "morphology"
+        assert assignments[0].harmonization == "harmonizable", (
+            "Override to a harmonizable CDE must not inherit the original column's no-PV harmonization"
+        )
+
+    def test_manifest_absent_column_produces_null_cde_and_harmonization(self) -> None:
+        """
+        Given: manifest=None (no manifest loaded for session)
+        When: assignments are built
+        Then: every column has cde_key=None AND harmonization=None
+
+        Negative baseline: with no manifest the cde_key cannot be non-None, so
+        harmonization must also be None (co-null invariant).
+        """
+        assignments = build_column_assignments(None, {}, ["diagnosis", "age"])
+
+        for assignment in assignments.values():
+            assert assignment.cde_key is None
+            assert assignment.harmonization is None
 
 
 class TestStage4ColumnIdentity:
@@ -127,8 +271,8 @@ class TestStage5ColumnIdentity:
         file_id = "def67890"
         cache = get_session_cache(file_id)
         cache.set_column_assignments({
-            0: ColumnAssignment(0, "diagnosis", "dx_a"),
-            1: ColumnAssignment(1, "diagnosis", "dx_b"),
+            0: ColumnAssignment(0, "diagnosis", "dx_a", "harmonizable"),
+            1: ColumnAssignment(1, "diagnosis", "dx_b", "harmonizable"),
         })
         cache.set_pvs("dx_a", frozenset(["Allowed A"]))
         cache.set_pvs("dx_b", frozenset(["Allowed B"]))

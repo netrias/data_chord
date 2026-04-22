@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 from typing import cast
+from unittest.mock import patch
 
+import pytest
+
+from src.domain.column_assignment import ColumnAssignment
 from src.domain.column_assignment import extract_column_cde_mappings as _extract_column_cde_mappings
+from src.domain.data_model_cache import SessionCache
 from src.domain.manifest import ManifestPayload
 
 
@@ -121,3 +126,107 @@ class TestExtractColumnCDEMappings:
         assert len(unique_cde_keys) == 2
         assert "primary_diagnosis" in unique_cde_keys
         assert "therapeutic_agents" in unique_cde_keys
+
+
+def _make_cache_with_model_info() -> SessionCache:
+    """Session cache seeded with model info so _validate_pv_fetch_preconditions returns."""
+    cache = SessionCache()
+    from src.domain.cde import CDEInfo
+    cache.set_cdes(
+        [CDEInfo(cde_id=1, cde_key="dx_cde", description=None, version_label="v1")],
+        data_model_key="CCDI",
+        version_label="v1",
+    )
+    return cache
+
+
+class TestFetchPVsForSessionFiltering:
+    """_fetch_pvs_for_session must only fetch cde_keys for harmonizable assignments."""
+
+    @pytest.mark.asyncio
+    async def test_fetches_only_harmonizable_cde_key(self) -> None:
+        """Given one harmonizable + one numeric assignment, only the harmonizable cde_key is fetched."""
+        # Given: numeric col is already populated in assignments (not filtered pre-call)
+        assignments: dict[int, ColumnAssignment] = {
+            0: ColumnAssignment(0, "dx", "dx_cde", "harmonizable"),
+            1: ColumnAssignment(1, "age", "age_cde", "numeric"),
+        }
+        cache = _make_cache_with_model_info()
+        fetched_keys: list[list[str]] = []
+
+        async def _capture_fetch(
+            _cache: object, data_model_key: str, version_label: str, cde_keys: list[str], file_id: str
+        ) -> None:
+            fetched_keys.append(cde_keys)
+
+        with (
+            patch("src.stage_3_harmonize.router.get_session_cache", return_value=cache),
+            patch("src.stage_3_harmonize.router._fetch_and_cache_pvs", side_effect=_capture_fetch),
+        ):
+            from src.stage_3_harmonize.router import _fetch_pvs_for_session
+            await _fetch_pvs_for_session("file-001", assignments, "CCDI")
+
+        assert fetched_keys == [["dx_cde"]]
+
+    @pytest.mark.asyncio
+    async def test_skips_no_permissible_values_cde_key(self) -> None:
+        """Given an override to a no_permissible_values CDE, that cde_key is NOT fetched."""
+        # Given: user overrode to a CDE that has no PV set — assignment reflects the resolved status
+        assignments: dict[int, ColumnAssignment] = {
+            0: ColumnAssignment(0, "tumor", "tumor_cde", "no_permissible_values"),
+        }
+        cache = _make_cache_with_model_info()
+        # Update cde in cache to match the assignment's cde_key
+        from src.domain.cde import CDEInfo
+        cache.set_cdes(
+            [CDEInfo(cde_id=2, cde_key="tumor_cde", description=None, version_label="v1")],
+            data_model_key="CCDI",
+            version_label="v1",
+        )
+        fetched_keys: list[list[str]] = []
+
+        async def _capture_fetch(
+            _cache: object, data_model_key: str, version_label: str, cde_keys: list[str], file_id: str
+        ) -> None:
+            fetched_keys.append(cde_keys)  # pragma: no cover
+
+        with (
+            patch("src.stage_3_harmonize.router.get_session_cache", return_value=cache),
+            patch("src.stage_3_harmonize.router._fetch_and_cache_pvs", side_effect=_capture_fetch),
+        ):
+            from src.stage_3_harmonize.router import _fetch_pvs_for_session
+            await _fetch_pvs_for_session("file-002", assignments, "CCDI")
+
+        # No fetch should be triggered — empty cde_keys causes early return
+        assert fetched_keys == []
+
+    @pytest.mark.asyncio
+    async def test_override_from_numeric_to_harmonizable_is_fetched(self) -> None:
+        """Given an override from numeric to harmonizable, the new cde_key IS fetched."""
+        # Given: AI suggested numeric CDE; user overrode to harmonizable CDE —
+        # assignment.harmonization="harmonizable" reflects the resolved override
+        assignments: dict[int, ColumnAssignment] = {
+            0: ColumnAssignment(0, "age", "age_harmonizable_cde", "harmonizable"),
+        }
+        cache = _make_cache_with_model_info()
+        from src.domain.cde import CDEInfo
+        cache.set_cdes(
+            [CDEInfo(cde_id=3, cde_key="age_harmonizable_cde", description=None, version_label="v1")],
+            data_model_key="CCDI",
+            version_label="v1",
+        )
+        fetched_keys: list[list[str]] = []
+
+        async def _capture_fetch(
+            _cache: object, data_model_key: str, version_label: str, cde_keys: list[str], file_id: str
+        ) -> None:
+            fetched_keys.append(cde_keys)
+
+        with (
+            patch("src.stage_3_harmonize.router.get_session_cache", return_value=cache),
+            patch("src.stage_3_harmonize.router._fetch_and_cache_pvs", side_effect=_capture_fetch),
+        ):
+            from src.stage_3_harmonize.router import _fetch_pvs_for_session
+            await _fetch_pvs_for_session("file-003", assignments, "CCDI")
+
+        assert fetched_keys == [["age_harmonizable_cde"]]
