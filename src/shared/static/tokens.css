@@ -57,6 +57,25 @@
   --magenta-100: #f5cce4;
   --magenta-50: #fae6f2;
 
+  /* --------------------------------------------------------------------------
+     AMBER (Heads-up status)
+     Brand extension: hex values are the missing permutation of the {179,115,6}
+     brand pattern, so amber sits alongside the triadic core as a fourth family
+     color even though it isn't part of the 120° triadic harmony itself.
+
+     Use for: Informational status indicators where the user should be aware of
+              a fact but isn't being asked to act on it (e.g., a data column
+              will pass through unchanged).
+     DO NOT use for: Items requiring review or action (use magenta); errors
+                     (use semantic error colors); routine success (use green).
+     Conveys: "Heads up — note this"
+     -------------------------------------------------------------------------- */
+  --amber-500: #b37306;
+  --amber-600: #8f5c05;
+  --amber-700: #6f4704;
+  --amber-100: #f5e5cc;
+  --amber-50: #faf2e6;
+
   /* Netrias green glow/shadow colors */
   --netrias-glow-light: rgba(115, 179, 6, 0.1);
   --netrias-glow-medium: rgba(115, 179, 6, 0.3);

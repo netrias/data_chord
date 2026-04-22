@@ -26,17 +26,16 @@ const HARMONIZATION = Object.freeze({
   NUMERIC: 'numeric',
 });
 
-/* Badge config keyed by harmonization status — only non-harmonizable statuses appear here. */
+/* Badge config keyed by harmonization status — only non-harmonizable statuses appear here.
+ * Both variants share the same glyph and modifier class; tooltip copy distinguishes the reason. */
 const HARMONIZATION_BADGES = Object.freeze({
   [HARMONIZATION.NO_PERMISSIBLE_VALUES]: {
-    label: 'Values pass through',
-    tooltip: 'Target CDE has no permissible values.',
-    cssClass: 'harmonization-badge harmonization-badge--no-permissible-values',
+    glyph: '⊘',
+    tooltip: 'This target CDE has no permissible values. This means we cannot harmonize your data against a set of known good values so no transformation will be applied to this data.',
   },
   [HARMONIZATION.NUMERIC]: {
-    label: 'Numeric — not harmonized',
-    tooltip: 'Numeric columns are not value-mapped.',
-    cssClass: 'harmonization-badge harmonization-badge--numeric',
+    glyph: '⊘',
+    tooltip: 'This target CDE stores numeric data. Numeric columns aren\'t mapped against a set of known values, so no transformation will be applied to this data.',
   },
 });
 
@@ -58,6 +57,19 @@ const cdeByKey = new Map(cdeOptions.map((cde) => [cde.cde_key ?? cde.label ?? cd
 const CSS_MAPPING_ROW = 'mapping-row';
 const CSS_MAPPING_TD = 'mapping-td';
 const CSS_SUGGESTION_TARGET = 'suggestion-target';
+const CSS_BADGE = 'harmonization-badge';
+const CSS_ICON_TOOLTIP_HOST = 'icon-tooltip-host';
+const CSS_ICON_TOOLTIP = 'icon-tooltip';
+
+/* Tooltip copy for each row state — shown on hover over the leftmost status glyph.
+ * Phrased to work in both the legend and the per-row status context.
+ * NOTE: these strings are duplicated in stage_2_mappings.html (legend items' aria-label
+ * and .icon-tooltip text). Keep both lists in sync when editing copy. */
+const ROW_STATE_TOOLTIPS = Object.freeze({
+  recommended: 'Column will be mapped to the CDE the AI recommended.',
+  override: 'Column is mapped to a manually-selected CDE instead of the AI recommendation.',
+  'no-mapping': 'No target CDE selected — column data will not be adjusted.',
+});
 
 /* User-facing messages */
 const MSG_NO_ANALYSIS_DATA = 'No analysis data found. Upload a file on Stage 1 to begin.';
@@ -192,12 +204,49 @@ const _persistStageThreePayload = (body) => {
   return writeToSession(STAGE_3_PAYLOAD_KEY, payloadForStageThree);
 };
 
+/** Wrap a symbol in a hover-host with a sibling tooltip node.
+ *
+ * Every glyph-only affordance on this page (row status, harmonization gutter, legend)
+ * routes through this helper so the tooltip DOM shape and hover behavior stay identical.
+ * The icon carries the tooltip text as `aria-label` so AT users get the same explanation
+ * that sighted users see on hover.
+ */
+const _buildIconWithTooltip = ({ glyph, tooltipText, iconClass }) => {
+  const host = document.createElement('span');
+  host.className = CSS_ICON_TOOLTIP_HOST;
+
+  const icon = document.createElement('span');
+  icon.setAttribute('role', 'img');
+  icon.setAttribute('aria-label', tooltipText);
+  if (iconClass) {
+    icon.className = iconClass;
+  }
+  icon.textContent = glyph;
+
+  const tooltip = document.createElement('span');
+  tooltip.className = CSS_ICON_TOOLTIP;
+  tooltip.setAttribute('role', 'tooltip');
+  tooltip.textContent = tooltipText;
+
+  host.appendChild(icon);
+  host.appendChild(tooltip);
+  return host;
+};
+
 /** Build a harmonization status badge element, or null when no badge is warranted.
  *
- * Reads from the top-level manifest entry rather than the cde_targets suggestion
- * so that user overrides (which update the manifest) are reflected correctly.
+ * Reads harmonization from the manifest entry for the column's AI-suggested CDE. When
+ * the user has overridden to a different CDE, the badge is suppressed because harmonization
+ * will be re-resolved server-side from the override target — we can't determine it locally
+ * unless the override happens to be an alternative with a known harmonization value.
  */
 const _buildHarmonizationBadge = (columnId) => {
+  /* User override wins: badge reflects server re-resolution, which happens after submit. */
+  const manualOverride = state.manualSelections.get(columnId);
+  if (manualOverride !== undefined && manualOverride !== NO_MAPPING_OPTION) {
+    return null;
+  }
+
   const manifestMappings = state.payload?.manifest?.[MANIFEST_KEYS.COLUMN_MAPPINGS] ?? [];
   const manifestEntry = manifestMappings[columnId];
   const status = manifestEntry?.[MANIFEST_KEYS.HARMONIZATION];
@@ -207,20 +256,20 @@ const _buildHarmonizationBadge = (columnId) => {
   }
 
   const badgeConfig = HARMONIZATION_BADGES[status];
-  const span = document.createElement('span');
-
   if (badgeConfig) {
-    span.className = badgeConfig.cssClass;
-    span.textContent = badgeConfig.label;
-    span.title = badgeConfig.tooltip;
-  } else {
-    /* Forward-compat: unknown status gets a generic badge rather than silently hiding. */
-    span.className = 'harmonization-badge harmonization-badge--unknown';
-    span.textContent = 'Not harmonized';
-    span.title = `Unknown harmonization status: ${status}`;
+    return _buildIconWithTooltip({
+      glyph: badgeConfig.glyph,
+      tooltipText: badgeConfig.tooltip,
+      iconClass: `${CSS_BADGE} ${CSS_BADGE}--pass-through`,
+    });
   }
 
-  return span;
+  /* Forward-compat: unknown status gets a generic icon rather than silently hiding. */
+  return _buildIconWithTooltip({
+    glyph: '?',
+    tooltipText: `Unknown harmonization status: ${status}`,
+    iconClass: `${CSS_BADGE} ${CSS_BADGE}--unknown`,
+  });
 };
 
 /** Build and render a single mapping row for a column. */
@@ -239,15 +288,28 @@ const _buildMappingRow = (column) => {
   });
   row.className = `${CSS_MAPPING_ROW} ${CSS_MAPPING_ROW}--${rowState}`;
 
-  /* Status icon cell (first column, no header) */
+  /* Status icon cell — bare glyph wrapped in a tooltip host so hovering the symbol
+   * explains the row state (mirrors the pass-through badge affordance). */
   const statusCell = document.createElement('div');
   statusCell.className = `${CSS_MAPPING_TD} ${CSS_MAPPING_TD}-status`;
-  statusCell.setAttribute('aria-hidden', 'true');
-  statusCell.textContent = statusIcon;
+  statusCell.appendChild(_buildIconWithTooltip({
+    glyph: statusIcon,
+    tooltipText: ROW_STATE_TOOLTIPS[rowState] ?? '',
+  }));
 
   const columnCell = document.createElement('div');
   columnCell.className = `${CSS_MAPPING_TD} ${CSS_MAPPING_TD}-column`;
   columnCell.textContent = column.column_name;
+
+  /* Dedicated badge cell renders on every row — empty when harmonizable, filled with
+   * the pass-through icon otherwise. Fixed-width grid column keeps the CDE name in
+   * the next cell vertically aligned across every row regardless of badge presence. */
+  const badgeCell = document.createElement('div');
+  badgeCell.className = `${CSS_MAPPING_TD} ${CSS_MAPPING_TD}-badge`;
+  const badge = _buildHarmonizationBadge(columnKey);
+  if (badge) {
+    badgeCell.appendChild(badge);
+  }
 
   const suggestionCell = document.createElement('div');
   suggestionCell.className = `${CSS_MAPPING_TD} ${CSS_MAPPING_TD}-suggestion`;
@@ -263,11 +325,6 @@ const _buildMappingRow = (column) => {
   }
 
   suggestionCell.appendChild(suggestionTarget);
-
-  const badge = _buildHarmonizationBadge(columnKey);
-  if (badge) {
-    suggestionCell.appendChild(badge);
-  }
 
   /* Use the Combobox widget for override selection with per-column AI suggestions above divider. */
   const { options: columnOptions, separatorAfterIndex } = _buildColumnOptions(suggestions);
@@ -295,6 +352,7 @@ const _buildMappingRow = (column) => {
 
   row.appendChild(statusCell);
   row.appendChild(columnCell);
+  row.appendChild(badgeCell);
   row.appendChild(suggestionCell);
   row.appendChild(overrideCell);
   return row;

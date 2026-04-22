@@ -538,7 +538,7 @@ test('Stage 2 blocks Harmonize when no column has an effective CDE mapping', asy
   );
 });
 
-test('Stage 2 shows "Values pass through" badge on no_permissible_values rows and none on harmonizable rows', async ({ page }) => {
+test('Stage 2 shows pass-through badge on no_permissible_values rows and none on harmonizable rows', async ({ page }) => {
   // Given: analyze mock with one harmonizable column (diagnosis) and one no_permissible_values column (middle_name)
   await mockDataModels(page);
   await mockAnalyzeHarmonizationMix(page);
@@ -561,14 +561,63 @@ test('Stage 2 shows "Values pass through" badge on no_permissible_values rows an
   await rows.first().waitFor({ state: 'visible' });
   await expect(rows).toHaveCount(2);
 
-  // Then: diagnosis row has no badge; middle_name row shows the pass-through badge
+  // Then: diagnosis row has no badge; middle_name row shows the pass-through dash badge
   const diagnosisRow = rows.filter({ hasText: 'diagnosis' }).first();
   const middleNameRow = rows.filter({ hasText: 'middle_name' }).first();
 
   await expect(diagnosisRow.locator('.harmonization-badge')).toHaveCount(0);
-  const middleNameBadge = middleNameRow.locator('.harmonization-badge--no-permissible-values');
+  const middleNameBadge = middleNameRow.locator('.harmonization-badge--pass-through');
   await expect(middleNameBadge).toBeVisible();
-  await expect(middleNameBadge).toContainText('Values pass through');
+  await expect(middleNameBadge).toHaveText('⊘');
+  // Accessible name for AT users is carried on the icon; the visible tooltip sibling
+  // is rendered via a custom element so it can appear immediately on hover.
+  const expectedTooltip = 'This target CDE has no permissible values. This means we cannot harmonize your data against a set of known good values so no transformation will be applied to this data.';
+  await expect(middleNameBadge).toHaveAttribute('aria-label', expectedTooltip);
+  const tooltipNode = middleNameRow.locator('.mapping-td-badge .icon-tooltip');
+  await expect(tooltipNode).toHaveText(expectedTooltip);
+});
+
+test('Stage 2 pass-through badge disappears when user overrides to a harmonizable CDE', async ({ page }) => {
+  // Given: analyze mock with a pass-through column (middle_name) and a harmonizable CDE available for override
+  // Inject a harmonizable CDE option so the combobox has something to pick beyond "No Mapping"
+  await injectCdeOptions(page, [
+    { cde_id: 99, cde_key: 'primary_diagnosis', label: 'primary_diagnosis', description: 'Primary diagnosis' },
+  ]);
+  await mockDataModels(page);
+  await mockAnalyzeHarmonizationMix(page);
+  await page.goto('/stage-1');
+
+  // Baseline negative assertion — pass-through badge not yet present on Stage 1
+  await expect(page.locator('.harmonization-badge--pass-through')).toHaveCount(0);
+
+  await page.setInputFiles('#fileInput', fileFixture('basic.csv'));
+  await page.locator('#analyzeButton').waitFor({ state: 'visible' });
+  await page.waitForFunction(() => !document.querySelector('#analyzeButton')?.disabled);
+  await page.click('#analyzeButton');
+  const confirmButton = page.locator('.data-model-confirm-btn');
+  await confirmButton.waitFor({ state: 'visible' });
+  await confirmButton.click();
+  await page.waitForURL(/\/stage-2/);
+
+  // Wait for the mapping rows to render
+  const rows = page.locator('#mappingResults .mapping-row');
+  await rows.first().waitFor({ state: 'visible' });
+  const middleNameRow = rows.filter({ hasText: 'middle_name' }).first();
+
+  // Pre-condition: the pass-through badge is visible before the override
+  await expect(middleNameRow.locator('.harmonization-badge--pass-through')).toBeVisible();
+
+  // When: user opens the override combobox on the middle_name row and picks the injected harmonizable CDE
+  const toggleBtn = middleNameRow.locator('.combobox-toggle');
+  await toggleBtn.click();
+  const dropdown = middleNameRow.locator('.combobox-dropdown');
+  await dropdown.waitFor({ state: 'visible' });
+  // Pick the first non-muted, non-empty option (the injected harmonizable CDE)
+  const realCdeOption = dropdown.locator('.combobox-option:not(.combobox-option--muted):not(.combobox-option--empty)').first();
+  await realCdeOption.click();
+
+  // Then: the pass-through badge is gone — this column is now overridden to a harmonizable CDE
+  await expect(middleNameRow.locator('.harmonization-badge--pass-through')).toHaveCount(0);
 });
 
 

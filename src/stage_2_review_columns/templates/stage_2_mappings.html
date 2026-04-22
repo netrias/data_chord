@@ -55,23 +55,35 @@
     <main class="stage-shell">
       <section class="stage-card">
         <div class="mapping-table-wrapper">
+          {# Tooltip copy for each legend symbol duplicates ROW_STATE_TOOLTIPS in
+             stage_2_mappings.js (per-row status icons). Keep both lists in sync. #}
           <div class="mapping-legend">
             <div class="legend-item legend-item--recommended">
-              <span class="legend-icon" aria-hidden="true">✓</span>
+              <span class="icon-tooltip-host legend-icon">
+                <span role="img" aria-label="Column will be mapped to the CDE the AI recommended.">✓</span>
+                <span class="icon-tooltip" role="tooltip">Column will be mapped to the CDE the AI recommended.</span>
+              </span>
               <span class="legend-label">Use AI recommendation</span>
             </div>
             <div class="legend-item legend-item--override">
-              <span class="legend-icon" aria-hidden="true">✎</span>
+              <span class="icon-tooltip-host legend-icon">
+                <span role="img" aria-label="Column is mapped to a manually-selected CDE instead of the AI recommendation.">✎</span>
+                <span class="icon-tooltip" role="tooltip">Column is mapped to a manually-selected CDE instead of the AI recommendation.</span>
+              </span>
               <span class="legend-label">Manual override</span>
             </div>
             <div class="legend-item legend-item--no-mapping">
-              <span class="legend-icon" aria-hidden="true">○</span>
+              <span class="icon-tooltip-host legend-icon">
+                <span role="img" aria-label="No target CDE selected — column data will not be adjusted.">○</span>
+                <span class="icon-tooltip" role="tooltip">No target CDE selected — column data will not be adjusted.</span>
+              </span>
               <span class="legend-label">No mapping</span>
             </div>
           </div>
           <div class="mapping-table-header">
             <div class="mapping-th mapping-th--status"><span class="sr-only">Status</span></div>
             <div class="mapping-th">Your Column</div>
+            <div class="mapping-th mapping-th--badge"><span class="sr-only">Harmonization</span></div>
             <div class="mapping-th">AI Recommended CDE</div>
             <div class="mapping-th">Override</div>
           </div>

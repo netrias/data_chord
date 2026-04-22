@@ -49,7 +49,9 @@
 /* Fixed table header */
 .mapping-table-header {
   display: grid;
-  grid-template-columns: 32px 1fr 1fr 1.5fr;
+  /* Badge slot (col 3) is a fixed-width gutter so the CDE column stays vertically aligned
+   * across rows regardless of whether the row has a pass-through indicator. */
+  grid-template-columns: 32px 1fr 28px 1fr 1.5fr;
   gap: var(--space-4);
   padding: var(--space-3) var(--space-4);
   background: var(--gray-50);
@@ -76,7 +78,7 @@
 /* Individual mapping row */
 .mapping-row {
   display: grid;
-  grid-template-columns: 32px 1fr 1fr 1.5fr;
+  grid-template-columns: 32px 1fr 28px 1fr 1.5fr;
   gap: var(--space-4);
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--gray-100);
@@ -287,7 +289,7 @@
 @media (max-width: 700px) {
   .mapping-table-header,
   .mapping-row {
-    grid-template-columns: 32px 1fr 1fr;
+    grid-template-columns: 32px 1fr 28px 1fr;
   }
 
   .mapping-th:last-child,
@@ -302,9 +304,15 @@
   }
 
   .mapping-row {
+    /* Narrow viewports stack cells in a 2×N grid — badge column is hidden to preserve
+     * the original mobile layout since horizontal space is already tight. */
     grid-template-columns: 32px 1fr;
     gap: var(--space-2);
     padding: var(--space-4);
+  }
+
+  .mapping-td-badge {
+    display: none;
   }
 
   .mapping-td-column {
@@ -326,36 +334,85 @@
   }
 }
 
-/* Harmonization status badges — informational pills on suggestion cells */
+/* Harmonization status column — fixed-width gutter that holds the pass-through icon
+ * for rows whose AI-suggested CDE isn't harmonizable. Empty for all other rows, which
+ * keeps the AI-recommended CDE text vertically aligned across every row. */
+.mapping-td-badge,
+.mapping-th--badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 
+/* Glyph-only treatment for the pass-through indicator. Sized and weighted to match
+ * the row status icons (✓ ✎ ○) so all four glyphs read as the same visual family. */
 .harmonization-badge {
-  display: inline-block;
-  margin-top: var(--space-1);
-  padding: 0.15em 0.5em;
-  font-size: 0.72rem;
-  font-weight: 500;
-  line-height: 1.4;
-  border-radius: var(--radius-full, 9999px);
-  background-color: var(--gray-100);
-  color: var(--gray-600);
-  border: 1px solid var(--gray-200);
-  white-space: nowrap;
-  vertical-align: middle;
+  font-size: 1rem;
+  line-height: 1;
+  user-select: none;
 }
 
-/* no_permissible_values and numeric share the same muted blue-gray informational treatment */
-.harmonization-badge--no-permissible-values,
-.harmonization-badge--numeric {
-  background-color: var(--slate-100, #f1f5f9);
-  color: var(--slate-600, #475569);
-  border-color: var(--slate-200, #e2e8f0);
+/* Amber picks up the "informational, heads-up" slot in the status palette alongside
+ * green (recommended), blue (override), and gray (no-op). See tokens.css AMBER section
+ * for the semantic contract and brand-palette rationale. */
+.harmonization-badge--pass-through {
+  color: var(--amber-500);
 }
 
-/* Unknown status — slightly more conservative gray with a visible border */
+/* Forward-compat marker for unrecognized statuses — lighter so it doesn't read as
+ * authoritative until a real treatment is wired up. */
 .harmonization-badge--unknown {
-  background-color: var(--gray-100);
-  color: var(--gray-500);
-  border: 1px solid var(--gray-300);
+  color: var(--gray-400);
+}
+
+/* Generic symbol-with-tooltip pattern. Any icon can be wrapped in `.icon-tooltip-host`
+ * with a sibling `.icon-tooltip`; the tooltip shows immediately on hover (no transition
+ * delay — the ~500ms native title-attribute delay felt too slow for isolated glyphs). */
+.icon-tooltip-host {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: help;
+}
+
+/* When a host fills a table cell (row status, harmonization gutter), expand the hit
+ * area so landing on the symbol is forgiving. */
+.mapping-td-status .icon-tooltip-host,
+.mapping-td-badge .icon-tooltip-host,
+.mapping-th--status .icon-tooltip-host {
+  width: 100%;
+  height: 100%;
+  min-height: 1.75rem;
+}
+
+.icon-tooltip {
+  /* Positioned below-right of the host. Avoids occluding the mapping row above,
+   * and for icons sitting in the leftmost column leaves room to flow rightward. */
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 50%;
+  width: max-content;
+  max-width: 280px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--gray-800);
+  color: var(--white);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xl);
+  opacity: 0;
+  visibility: hidden;
+  z-index: 1000;
+  pointer-events: none;
+  text-align: left;
+  white-space: normal;
+}
+
+.icon-tooltip-host:hover .icon-tooltip,
+.icon-tooltip-host:focus-within .icon-tooltip {
+  opacity: 1;
+  visibility: visible;
 }
 
 /* Disabled button must not capture pointer events so wrapper :hover reaches the tooltip. */
