@@ -444,12 +444,9 @@ async def get_row_context(payload: RowContextRequest) -> RowContextResponse:
 
     headers, original_rows = load_csv(meta.saved_path)
 
-    selected_rows: list[list[str]] = []
-    for idx in payload.row_indices:
-        if 0 <= idx < len(original_rows):
-            row_dict = original_rows[idx]
-            row_values = [row_dict.get(h, "") for h in headers]
-            selected_rows.append(row_values)
+    selected_rows: list[list[str]] = [
+        list(original_rows[idx]) for idx in payload.row_indices if 0 <= idx < len(original_rows)
+    ]
 
     return RowContextResponse(headers=headers, rows=selected_rows)
 

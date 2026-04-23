@@ -130,8 +130,8 @@ export const mockAnalyzeHarmonizationMix = async (page) => {
         },
       ],
       cde_targets: {
-        diagnosis: [{ target: 'disease_type', confidence: 0.9, harmonization: 'harmonizable' }],
-        middle_name: [{ target: 'middle_name', confidence: 1.0, harmonization: 'no_permissible_values' }],
+        0: [{ target: 'disease_type', confidence: 0.9, harmonization: 'harmonizable' }],
+        1: [{ target: 'middle_name', confidence: 1.0, harmonization: 'no_permissible_values' }],
       },
       next_stage: 'mapping',
       next_step_hint: 'Review AI-suggested column mappings once ready.',

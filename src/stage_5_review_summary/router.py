@@ -101,7 +101,6 @@ async def download_harmonized_data(payload: StageFiveRequest) -> StreamingRespon
         raise HTTPException(status_code=400, detail=_ERROR_DATASET_UNREADABLE)
 
     overrides = _load_review_overrides(payload.file_id)
-    overrides = _resolve_override_column_keys(overrides, headers)
     final_rows = _apply_overrides(harmonized_rows, overrides)
 
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
@@ -133,42 +132,36 @@ def _load_review_overrides(file_id: str) -> dict[str, dict[str, str]]:
     return result
 
 
-def _resolve_override_column_keys(
-    overrides: dict[str, dict[str, str]],
-    headers: list[str],
-) -> dict[str, dict[str, str]]:
-    """Translate str(column_id) override keys to column names for CSV application."""
-    result: dict[str, dict[str, str]] = {}
-    for row_key, cols in overrides.items():
-        resolved: dict[str, str] = {}
-        for col_key, value in cols.items():
-            if col_key.isdigit():
-                idx = int(col_key)
-                if 0 <= idx < len(headers):
-                    resolved[headers[idx]] = value
-                    continue
-            resolved[col_key] = value
-        result[row_key] = resolved
-    return result
-
-
-def _apply_row_overrides(row: dict[str, str], row_key: str, row_overrides: dict[str, str]) -> dict[str, str]:
-    invalid_columns = {k for k in row_overrides if k not in row}
-    if invalid_columns:
-        _logger.warning("Row %s has overrides for non-existent columns: %s", row_key, invalid_columns)
-    valid_overrides = {k: v for k, v in row_overrides.items() if k in row}
-    return {**row, **valid_overrides}
+def _apply_row_overrides(row: list[str], row_key: str, row_overrides: dict[str, str]) -> list[str]:
+    """Apply positional overrides by column_id; stale name-keyed entries log a warning and skip."""
+    updated = list(row)
+    invalid_keys: list[str] = []
+    out_of_range: list[int] = []
+    for col_key, value in row_overrides.items():
+        if not col_key.isdigit():
+            invalid_keys.append(col_key)
+            continue
+        column_id = int(col_key)
+        if 0 <= column_id < len(updated):
+            updated[column_id] = value
+        else:
+            out_of_range.append(column_id)
+    if invalid_keys:
+        _logger.warning("Row %s skipped non-numeric override keys: %s", row_key, invalid_keys)
+    if out_of_range:
+        _logger.warning("Row %s has overrides for out-of-range column_ids: %s", row_key, out_of_range)
+    return updated
 
 
 def _apply_overrides(
-    rows: list[dict[str, str]],
+    rows: list[list[str]],
     overrides: dict[str, dict[str, str]],
-) -> list[dict[str, str]]:
+) -> list[list[str]]:
     """Row keys are 1-indexed to match Stage 4 UI numbering."""
     if not overrides:
         return rows
 
-    result: list[dict[str, str]] = []
+    result: list[list[str]] = []
     for idx, row in enumerate(rows):
         row_key = str(idx + 1)
         if row_key in overrides:
@@ -178,10 +171,11 @@ def _apply_overrides(
     return result
 
 
-def _rows_to_csv_string(headers: list[str], rows: list[dict[str, str]]) -> str:
+def _rows_to_csv_string(headers: list[str], rows: list[list[str]]) -> str:
+    """Positional writer preserves duplicate-header columns; lineterminator matches legacy LF output."""
     csv_output = io.StringIO()
-    writer = csv.DictWriter(csv_output, fieldnames=headers, lineterminator="\n")
-    writer.writeheader()
+    writer = csv.writer(csv_output, lineterminator="\n")
+    writer.writerow(headers)
     writer.writerows(rows)
     return csv_output.getvalue()
 
@@ -197,7 +191,7 @@ def _manifest_to_json(manifest_path: Path) -> str | None:
 def _create_zip_buffer(
     base_name: str,
     headers: list[str],
-    rows: list[dict[str, str]],
+    rows: list[list[str]],
     manifest_path: Path | None,
     file_id: str,
 ) -> io.BytesIO:
@@ -312,7 +306,7 @@ def _build_history(
 def _sort_steps_chronologically(steps: list[TransformationStep]) -> list[TransformationStep]:
     """Sort steps by timestamp, keeping original first and preserving order for ties."""
     if len(steps) <= 1:
-        return steps
+        return list(steps)
 
     original = steps[0]
     rest = steps[1:]

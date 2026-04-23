@@ -49,5 +49,4 @@ class AnalyzeResponse(BaseModel):
     cde_targets: dict[str, list[ModelSuggestion]]
     next_stage: str
     next_step_hint: str
-    manual_overrides: dict[int, str] = Field(default_factory=dict)
     manifest: ManifestPayload = Field(default_factory=lambda: {"column_mappings": []})

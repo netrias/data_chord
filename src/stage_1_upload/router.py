@@ -116,7 +116,7 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please upload again.")
 
     total_rows, columns = await run_in_threadpool(_analyze_columns_safe, meta.saved_path, payload.file_id)
-    cde_targets, manual_overrides, manifest = await _discover_mappings(
+    cde_targets, manifest = await _discover_mappings(
         meta.saved_path, payload.target_schema
     )
     _storage.save_manifest(meta.file_id, manifest)
@@ -130,7 +130,6 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
         cde_targets=cde_targets,
         next_stage="mapping",
         next_step_hint="Review AI-suggested column mappings once ready.",
-        manual_overrides=manual_overrides,
         manifest=manifest,
     )
 
@@ -149,15 +148,15 @@ def _analyze_columns_safe(csv_path: Path, file_id: str) -> tuple[int, list[Colum
 async def _discover_mappings(
     csv_path: Path,
     target_schema: str,
-) -> tuple[dict[str, list[ModelSuggestion]], dict[int, str], ManifestPayload]:
+) -> tuple[dict[str, list[ModelSuggestion]], ManifestPayload]:
     mapping_service = get_mapping_service()
     try:
-        cde_targets, manual_overrides, manifest = await run_in_threadpool(
+        cde_targets, manifest = await run_in_threadpool(
             mapping_service.discover,
             csv_path=csv_path,
             target_schema=target_schema,
         )
-        return cde_targets, manual_overrides, manifest
+        return cde_targets, manifest
     except (UnicodeDecodeError, ValueError) as exc:
         _router_logger.warning("Upload failed validation during analysis", extra={"file_id": csv_path.stem})
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -179,7 +178,7 @@ def _log_analysis_results(
 ) -> None:
     cde_target_keys = set(cde_targets)
     missing_columns = [
-        col.column_name for col in columns if col.column_name not in cde_target_keys
+        col.column_name for col in columns if str(col.column_id) not in cde_target_keys
     ]
     _router_logger.info(
         "Analyze completed",

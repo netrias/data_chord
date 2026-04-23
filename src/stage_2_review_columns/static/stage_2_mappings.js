@@ -47,10 +47,18 @@ const stageThreeUrl = config.stageThreeUrl ?? '/stage-3';
 
 /* Build options from dynamic CDE data or fall back to legacy format */
 const cdeOptions = config.cdeOptions ?? [];
-const cdeLabels = cdeOptions.map((cde) => cde.cde_key ?? cde.label ?? cde);
+
+/* Pre-filter to entries with a valid cde_key — the fallback to label/raw value was silently
+ * dropping suggestions downstream when cde_key was absent. Warn so the problem is visible. */
+const filteredCdes = cdeOptions.filter((cde) => cde.cde_key != null);
+if (filteredCdes.length !== cdeOptions.length) {
+  const excluded = cdeOptions.filter((cde) => cde.cde_key == null);
+  console.warn('CDE options missing cde_key were excluded from suggestions:', excluded);
+}
+const cdeLabels = filteredCdes.map((cde) => cde.cde_key);
 
 /* Build lookup for CDE metadata (for tooltips/descriptions) */
-const cdeByKey = new Map(cdeOptions.map((cde) => [cde.cde_key ?? cde.label ?? cde, cde]));
+const cdeByKey = new Map(filteredCdes.map((cde) => [cde.cde_key, cde]));
 
 
 /* CSS class constants */
@@ -62,9 +70,8 @@ const CSS_ICON_TOOLTIP_HOST = 'icon-tooltip-host';
 const CSS_ICON_TOOLTIP = 'icon-tooltip';
 
 /* Tooltip copy for each row state — shown on hover over the leftmost status glyph.
- * Phrased to work in both the legend and the per-row status context.
- * NOTE: these strings are duplicated in stage_2_mappings.html (legend items' aria-label
- * and .icon-tooltip text). Keep both lists in sync when editing copy. */
+ * Canonical owner: this object. The HTML legend reads from it at DOMContentLoaded via
+ * data-row-state attributes, so there is no duplicated copy to keep in sync. */
 const ROW_STATE_TOOLTIPS = Object.freeze({
   recommended: 'Column will be mapped to the CDE the AI recommended.',
   override: 'Column is mapped to a manually-selected CDE instead of the AI recommendation.',
@@ -101,11 +108,12 @@ const _readPayloadFromStorage = () => {
 
 /** Look up CDE target suggestions for a column, filtering to valid CDEs only. */
 const _getColumnSuggestions = (column) => {
-  if (!column?.column_name) {
+  if (!column) {
     return [];
   }
   const targets = state.payload?.cde_targets ?? {};
-  const rawSuggestions = targets[column.column_name] || [];
+  const columnIdKey = String(column.column_id);
+  const rawSuggestions = targets[columnIdKey] || targets[column.column_name] || [];
   /* Filter to only suggestions that match our allowable CDE options. */
   return rawSuggestions.filter((s) => cdeByKey.has(s.target));
 };
@@ -540,11 +548,32 @@ const _init = async () => {
   state.payload = payload;
   const overrides = payload.manual_overrides
     ? Object.entries(payload.manual_overrides)
-        .map(([k, v]) => [parseInt(k, 10), v])
+        .map(([k, v]) => [Number(k), v])
         .filter(([k]) => !isNaN(k))  // drop stale pre-migration string keys from old sessions
     : [];
   state.manualSelections = new Map(overrides);
   _hydrateView();
 };
+
+/** Hydrate legend tooltip copy from ROW_STATE_TOOLTIPS — the HTML carries data-row-state
+ * attributes as keys; this ensures the legend and per-row tooltips share one source of truth. */
+const _hydrateLegendTooltips = () => {
+  document.querySelectorAll('[data-row-state]').forEach((el) => {
+    const copy = ROW_STATE_TOOLTIPS[el.dataset.rowState];
+    if (!copy) {
+      return;
+    }
+    const img = el.querySelector('[role="img"]');
+    const tooltip = el.querySelector('[role="tooltip"]');
+    if (img) {
+      img.setAttribute('aria-label', copy);
+    }
+    if (tooltip) {
+      tooltip.textContent = copy;
+    }
+  });
+};
+
+document.addEventListener('DOMContentLoaded', _hydrateLegendTooltips);
 
 _init();

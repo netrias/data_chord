@@ -31,8 +31,7 @@ class MappingDiscoveryService:
         *,
         csv_path: Path,
         target_schema: str,
-    ) -> tuple[dict[str, list[ModelSuggestion]], dict[int, str], ManifestPayload]:
-        """manual_overrides (pos 2) always empty — preserved for caller interface compatibility."""
+    ) -> tuple[dict[str, list[ModelSuggestion]], ManifestPayload]:
         if not self._client:
             raise RuntimeError("NetriasClient unavailable (missing NETRIAS_API_KEY)")
 
@@ -47,7 +46,7 @@ class MappingDiscoveryService:
 
         manifest = normalize_manifest(raw_manifest)
         cde_targets = _cde_targets_from_manifest(manifest)
-        return cde_targets, {}, manifest
+        return cde_targets, manifest
 
 
 def _cde_targets_from_manifest(
@@ -61,9 +60,13 @@ def _cde_targets_from_manifest(
 def _targets_from_list_manifest(
     entries: Sequence[object],
 ) -> dict[str, list[ModelSuggestion]]:
-    """List entry column_name becomes the dict key for Stage 2 display."""
+    """List index becomes the dict key for Stage 2 display.
+
+    Column names can repeat in valid CSVs, so the transport key must be the stable
+    column position rather than the header text.
+    """
     targets: dict[str, list[ModelSuggestion]] = {}
-    for entry in entries:
+    for column_id, entry in enumerate(entries):
         if entry is None or not isinstance(entry, dict):
             continue
         column_name = entry.get("column_name")
@@ -71,7 +74,7 @@ def _targets_from_list_manifest(
             continue
         suggestions = _suggestions_from_alternatives(entry.get("alternatives", []))
         if suggestions:
-            targets[column_name] = suggestions
+            targets[str(column_id)] = suggestions
     return targets
 
 

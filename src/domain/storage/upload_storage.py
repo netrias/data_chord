@@ -283,14 +283,30 @@ def resolve_harmonized_path_or_404(original_path: Path, file_id: str) -> Path:
     return path
 
 
-def load_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
+def load_csv(path: Path) -> tuple[list[str], list[list[str]]]:
+    """Positional rows preserve duplicate-header CSVs through upload → harmonize → download.
+
+    Why: header-name dict rows (csv.DictReader) collapse two columns that share a name
+    into a single entry; column identity lives in position, not the header string.
+    """
     if not path.exists():
         raise HTTPException(status_code=404, detail=_ERROR_DATASET_NOT_FOUND)
     with path.open(encoding="utf-8-sig", newline="") as handle:
-        reader = csv.DictReader(handle)
+        reader = csv.reader(handle)
         rows = list(reader)
-        headers = list(reader.fieldnames) if reader.fieldnames else []
-    return headers, rows
+    if not rows:
+        return [], []
+    headers, body = rows[0], rows[1:]
+    return headers, [_normalize_csv_row(row, len(headers)) for row in body]
+
+
+def _normalize_csv_row(row: list[str], width: int) -> list[str]:
+    """Return exactly one cell per header so positional column IDs stay valid."""
+    if len(row) == width:
+        return row
+    if len(row) < width:
+        return [*row, *([""] * (width - len(row)))]
+    return row[:width]
 
 
 __all__ = [

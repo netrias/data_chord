@@ -69,7 +69,7 @@ def test_discover_returns_manifest_from_client(
     csv_path.write_text("breed,diagnosis\nLabrador,Cancer\n")
 
     # When
-    _, _, manifest = svc.discover(csv_path=csv_path, target_schema="ccdi")
+    _, manifest = svc.discover(csv_path=csv_path, target_schema="ccdi")
 
     # Then: manifest contains both columns
     column_mappings = manifest.get("column_mappings", [])
@@ -94,7 +94,7 @@ def test_discover_builds_cde_targets_from_manifest(
     """
     Given: a manifest with columns "breed" and "diagnosis" mapped to CDEs
     When: discover() processes it
-    Then: cde_targets has ModelSuggestion entries for both columns
+    Then: cde_targets has ModelSuggestion entries for both column positions
     """
     svc, mock_client = service_with_mock_client
 
@@ -121,13 +121,13 @@ def test_discover_builds_cde_targets_from_manifest(
     csv_path.write_text("breed,diagnosis\nLabrador,Cancer\n")
 
     # When
-    cde_targets, _, _ = svc.discover(csv_path=csv_path, target_schema="ccdi")
+    cde_targets, _ = svc.discover(csv_path=csv_path, target_schema="ccdi")
 
-    # Then: cde_targets has entries for both columns
-    assert "breed" in cde_targets
-    assert "diagnosis" in cde_targets
-    assert cde_targets["breed"][0].target == "organism_species"
-    assert cde_targets["diagnosis"][0].target == "primary_diagnosis"
+    # Then: cde_targets has entries for both column IDs
+    assert "0" in cde_targets
+    assert "1" in cde_targets
+    assert cde_targets["0"][0].target == "organism_species"
+    assert cde_targets["1"][0].target == "primary_diagnosis"
 
 
 # ---------------------------------------------------------------------------
@@ -158,8 +158,8 @@ def test_discover_skips_none_entries() -> None:
     # When
     targets = _cde_targets_from_manifest(manifest)
 
-    # Then: only breed appears
-    assert "breed" in targets
+    # Then: only column 0 appears
+    assert "0" in targets
     assert len(targets) == 1
 
 
@@ -222,16 +222,54 @@ def test_cde_targets_reads_alternatives_from_manifest() -> None:
     # When
     targets = _cde_targets_from_manifest(manifest)
 
-    # Then: age_col has two suggestions
-    assert len(targets["age_col"]) == 2
-    assert targets["age_col"][0].target == "age"
-    assert targets["age_col"][0].confidence == 1.0
-    assert targets["age_col"][1].target == "ageUnit"
-    assert targets["age_col"][1].confidence == 0.3
+    # Then: column 0 has two suggestions
+    assert len(targets["0"]) == 2
+    assert targets["0"][0].target == "age"
+    assert targets["0"][0].confidence == 1.0
+    assert targets["0"][1].target == "ageUnit"
+    assert targets["0"][1].confidence == 0.3
 
-    # Then: sex_col has one suggestion
-    assert len(targets["sex_col"]) == 1
-    assert targets["sex_col"][0].target == "sex"
+    # Then: column 1 has one suggestion
+    assert len(targets["1"]) == 1
+    assert targets["1"][0].target == "sex"
+
+
+def test_duplicate_header_recommendations_are_keyed_by_column_position() -> None:
+    """
+    Given: a manifest with duplicate header names but different recommendations
+    When: _cde_targets_from_manifest processes it
+    Then: each duplicate column keeps its own suggestions under its column_id key
+    """
+    # Given
+    manifest = cast(ManifestPayload, {
+        "column_mappings": [
+            {
+                "column_name": "sample_id",
+                "cde_key": "left_sample",
+                "cde_id": 1,
+                "harmonization": "harmonizable",
+                "alternatives": [
+                    {"target": "left_sample", "confidence": 0.9, "cde_id": 1, "harmonization": "harmonizable"},
+                ],
+            },
+            {
+                "column_name": "sample_id",
+                "cde_key": "right_sample",
+                "cde_id": 2,
+                "harmonization": "harmonizable",
+                "alternatives": [
+                    {"target": "right_sample", "confidence": 0.8, "cde_id": 2, "harmonization": "harmonizable"},
+                ],
+            },
+        ]
+    })
+
+    # When
+    targets = _cde_targets_from_manifest(manifest)
+
+    # Then
+    assert targets["0"][0].target == "left_sample"
+    assert targets["1"][0].target == "right_sample"
 
 
 # ---------------------------------------------------------------------------
@@ -272,7 +310,7 @@ def test_recommendations_surface_from_sdk(
     """
     Given: SDK returns canonical list-format manifest with one real entry
     When: discover() processes it
-    Then: cde_targets is keyed by column_name and contains ranked alternatives
+    Then: cde_targets is keyed by column_id and contains ranked alternatives
           built from the canonical `confidence` field
     """
     svc, mock_client = service_with_mock_client
@@ -297,11 +335,11 @@ def test_recommendations_surface_from_sdk(
     csv_path.write_text("diagnosis,other\nCancer,x\n")
 
     # When
-    cde_targets, _, _ = svc.discover(csv_path=csv_path, target_schema="ccdi")
+    cde_targets, _ = svc.discover(csv_path=csv_path, target_schema="ccdi")
 
     # Then
-    assert "diagnosis" in cde_targets, f"expected 'diagnosis' in cde_targets, got {list(cde_targets)}"
-    suggestions = cde_targets["diagnosis"]
+    assert "0" in cde_targets, f"expected column id '0' in cde_targets, got {list(cde_targets)}"
+    suggestions = cde_targets["0"]
     assert len(suggestions) == 2
     assert suggestions[0].target == "disease_type"
     assert suggestions[0].confidence == 0.85
@@ -347,9 +385,9 @@ def test_model_suggestion_carries_harmonization_from_alternative(
     csv_path = tmp_path / "names.csv"
     csv_path.write_text("middle_name\nAnn\n")
 
-    cde_targets, _, _ = svc.discover(csv_path=csv_path, target_schema="gc")
+    cde_targets, _ = svc.discover(csv_path=csv_path, target_schema="gc")
 
-    suggestions = cde_targets["middle_name"]
+    suggestions = cde_targets["0"]
     assert len(suggestions) == 2
     assert suggestions[0].harmonization == "no_permissible_values"
     assert suggestions[1].harmonization == "no_permissible_values"
