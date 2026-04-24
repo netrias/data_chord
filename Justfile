@@ -13,7 +13,27 @@ typecheck:
 	uv run basedpyright
 
 test:
+	uv run python scripts/check_requirements_traceability.py --write
 	uv run pytest
+
+requirements-trace:
+	uv run python scripts/check_requirements_traceability.py --write
+
+requirements-coverage:
+	uv run python scripts/check_requirements_traceability.py --write
+	@mkdir -p .artifacts/requirements-coverage
+	COVERAGE_FILE=.artifacts/requirements-coverage/.coverage uv run pytest tests/requirements \
+		--cov=src \
+		--cov=backend \
+		--cov-branch \
+		--cov-context=test \
+		--cov-report=term-missing \
+		--cov-report=html:.artifacts/requirements-coverage/html \
+		--cov-report=json:.artifacts/requirements-coverage/coverage.json \
+		--cov-report=xml:.artifacts/requirements-coverage/coverage.xml
+	@echo "HTML coverage report: .artifacts/requirements-coverage/html/index.html"
+	@echo "JSON coverage report: .artifacts/requirements-coverage/coverage.json"
+	@echo "XML coverage report: .artifacts/requirements-coverage/coverage.xml"
 
 test-e2e:
 	npm run test:e2e

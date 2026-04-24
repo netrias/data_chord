@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from netrias_client import Harmonization
 from pydantic import BaseModel
@@ -80,6 +80,7 @@ class ColumnMappingSet:
 class ColumnMappingDecision(TypedDict):
     """Per-column CDE assignment emitted by Stage 2 as part of the harmonization request."""
 
+    column_id: NotRequired[int]  # Optional while accepting stale browser session payloads.
     column_name: str
     cde_name: str | None
     cde_id: int | None

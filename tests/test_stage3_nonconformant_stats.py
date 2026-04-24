@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import cast
 
-from src.domain.column_assignment import extract_column_cde_mappings as _extract_column_cde_mappings
 from src.domain.data_model_cache import SessionCache
 from src.domain.manifest import ManifestPayload, ManifestRow, ManifestSummary
 from src.stage_3_harmonize.router import (
@@ -243,13 +242,14 @@ class TestManualOverridePropagation:
         # Then: manual override wins
         assert cache.get_column_cde_key(0) == "manual_target"
 
-    def test_extract_skips_none_entries(self) -> None:
+    def test_store_column_mappings_preserves_none_entries_as_unmapped(self) -> None:
         """
         Given: a canonical list-format manifest with one mapped and one None entry
-        When: _extract_column_cde_mappings is called
-        Then: only the mapped entry is returned
+        When: _store_column_mappings_in_cache is called
+        Then: both column positions are preserved and the None entry is unmapped
         """
         # Given
+        cache = SessionCache()
         manifest = cast(ManifestPayload, {
             "column_mappings": [
                 {
@@ -262,11 +262,12 @@ class TestManualOverridePropagation:
                 None,
             ]
         })
+        csv_headers = ["good", "empty"]
 
         # When
-        result = _extract_column_cde_mappings(manifest)
+        _store_column_mappings_in_cache(cache, manifest, {}, csv_headers)
 
-        # Then: position 0 is mapped, position 1 (None) is absent
-        assert 0 in result
-        assert result[0]["column_name"] == "good"
-        assert 1 not in result
+        # Then: position 0 is mapped, position 1 is present but unmapped
+        assert cache.get_column_cde_key(0) == "age"
+        assert cache.get_column_assignment(1) is not None
+        assert cache.get_column_cde_key(1) is None

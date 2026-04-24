@@ -269,6 +269,52 @@ class TestRoutingRules:
         assert result["user_overrides"] == []
         assert result["pass_through"] == []
 
+    def test_column_id_routes_decisions_even_when_payload_order_differs(self, tmp_path: Path) -> None:
+        """
+        Given: mapping decisions with explicit column_id but not in source column order
+        When: save_cde_mapping is called
+        Then: each decision uses its column_id assignment instead of its list position
+        """
+        # Given
+        decisions: list[ColumnMappingDecision] = [
+            {
+                "column_id": 1,
+                "column_name": "age",
+                "cde_name": "age_at_diagnosis",
+                "cde_id": 5,
+                "cde_description": "Age",
+                "method": "ai_recommendation",
+            },
+            {
+                "column_id": 0,
+                "column_name": "diagnosis",
+                "cde_name": "primary_diagnosis",
+                "cde_id": 2,
+                "cde_description": "Diagnosis",
+                "method": "ai_recommendation",
+            },
+        ]
+        assignments: dict[int, ColumnAssignment] = {
+            0: ColumnAssignment(
+                column_id=0, column_name="diagnosis",
+                cde_key="primary_diagnosis", harmonization="harmonizable",
+            ),
+            1: ColumnAssignment(
+                column_id=1, column_name="age",
+                cde_key="age_at_diagnosis", harmonization="numeric",
+            ),
+        }
+
+        assert assignments[1].harmonization == "numeric"
+        assert decisions[0]["column_name"] == "age"
+
+        # When
+        result = self._save_and_load(tmp_path, decisions, assignments)
+
+        # Then
+        assert [entry["column_name"] for entry in result["pass_through"]] == ["age"]
+        assert [entry["column_name"] for entry in result["ai_mapped"]] == ["diagnosis"]
+
 
 class TestSaveCdeMappingRoundtrip:
     """CDE mapping documents survive a save/load roundtrip with all fields intact."""

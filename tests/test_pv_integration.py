@@ -7,8 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.domain.column_assignment import ColumnAssignment
-from src.domain.column_assignment import extract_column_cde_mappings as _extract_column_cde_mappings
+from src.domain.column_assignment import ColumnAssignment, build_column_assignments
 from src.domain.data_model_cache import SessionCache
 from src.domain.manifest import ManifestPayload
 
@@ -31,11 +30,11 @@ def _entry(column_name: str, cde_key: str, cde_id: int = 1, confidence: float = 
     }
 
 
-class TestExtractColumnCDEMappings:
-    """PV fetch should use AI-recommended column mappings from manifest."""
+class TestBuildColumnAssignmentsFromManifest:
+    """PV fetch should use canonical assignments resolved from the manifest."""
 
-    def test_extracts_cde_key_from_column_mappings(self) -> None:
-        """Column->CDE mappings are correctly extracted; keyed by column position."""
+    def test_builds_assignments_with_cde_keys_from_column_mappings(self) -> None:
+        """Column->CDE mappings are resolved into assignments keyed by column position."""
 
         # Given: A canonical list-format manifest with two mapped columns
         manifest = _list_manifest(
@@ -43,17 +42,17 @@ class TestExtractColumnCDEMappings:
             _entry("drug_name", "therapeutic_agents", 1, 0.87),
         )
 
-        # When: CDE mappings are extracted from the manifest
-        result = _extract_column_cde_mappings(manifest)
+        # When: CDE mappings are resolved from the manifest
+        result = build_column_assignments(manifest, {}, ["patient_diagnosis", "drug_name"])
 
-        # Then: Column positions map to their ColumnCdeMapping entries
-        assert result[0]["column_name"] == "patient_diagnosis"
-        assert result[0]["cde_key"] == "primary_diagnosis"
-        assert result[1]["column_name"] == "drug_name"
-        assert result[1]["cde_key"] == "therapeutic_agents"
+        # Then: Column positions map to canonical assignments
+        assert result[0].column_name == "patient_diagnosis"
+        assert result[0].cde_key == "primary_diagnosis"
+        assert result[1].column_name == "drug_name"
+        assert result[1].cde_key == "therapeutic_agents"
 
-    def test_skips_none_entries(self) -> None:
-        """None entries (unmapped columns) are excluded from mappings."""
+    def test_none_entries_become_unmapped_assignments(self) -> None:
+        """None entries keep their column identity with no assigned CDE."""
 
         # Given: A manifest where one slot is None (unmapped column)
         manifest = _list_manifest(
@@ -61,47 +60,47 @@ class TestExtractColumnCDEMappings:
             None,
         )
 
-        # When: CDE mappings are extracted
-        result = _extract_column_cde_mappings(manifest)
+        # When: assignments are resolved
+        result = build_column_assignments(manifest, {}, ["mapped_col", "unmapped_col"])
 
-        # Then: Only mapped columns are included; position 1 (None) is absent
-        assert 0 in result
-        assert 1 not in result
+        # Then: Both positions remain present; position 1 has no CDE
+        assert result[0].cde_key == "primary_diagnosis"
+        assert result[1].column_name == "unmapped_col"
+        assert result[1].cde_key is None
 
     def test_handles_none_manifest(self) -> None:
-        """Returns empty dict when manifest is None."""
+        """Returns unmapped assignments when manifest is None."""
 
         # Given: No manifest available
-        # When: CDE mappings are extracted from None
-        result = _extract_column_cde_mappings(None)
+        # When: assignments are resolved from None
+        result = build_column_assignments(None, {}, ["diagnosis"])
 
-        # Then: Returns empty dict without error
-        assert result == {}
+        # Then: Column identity is preserved without a CDE
+        assert result[0] == ColumnAssignment(0, "diagnosis", None, None)
 
     def test_handles_empty_column_mappings(self) -> None:
-        """Returns empty dict when column_mappings is empty."""
+        """Returns unmapped assignments when column_mappings is empty."""
 
         # Given: A manifest with empty column_mappings list
         manifest: ManifestPayload = {"column_mappings": []}
 
-        # When: CDE mappings are extracted
-        result = _extract_column_cde_mappings(manifest)
+        # When: assignments are resolved
+        result = build_column_assignments(manifest, {}, ["diagnosis"])
 
-        # Then: Returns empty dict
-        assert result == {}
+        # Then: Column identity is preserved without a CDE
+        assert result[0] == ColumnAssignment(0, "diagnosis", None, None)
 
     def test_handles_missing_column_mappings_key(self) -> None:
-        """Raises ValueError when column_mappings key is missing (not a list)."""
+        """Treats missing column_mappings as no manifest entries."""
 
-        # Given: A manifest without column_mappings key (None value → not a list)
+        # Given: A manifest without column_mappings key
         manifest = cast(ManifestPayload, {})
 
-        # When/Then: Raises since column_mappings is absent (None is not a list)
-        try:
-            _extract_column_cde_mappings(manifest)
-            # If it returns an empty dict, that's also acceptable — guard succeeds
-        except ValueError:
-            pass  # expected for non-list column_mappings
+        # When: assignments are resolved
+        result = build_column_assignments(manifest, {}, ["diagnosis"])
+
+        # Then: The column remains present but unmapped
+        assert result[0] == ColumnAssignment(0, "diagnosis", None, None)
 
     def test_deduplicates_cde_keys(self) -> None:
         """Multiple columns can map to the same CDE (dedupe happens at fetch time)."""
@@ -113,16 +112,16 @@ class TestExtractColumnCDEMappings:
             _entry("treatment", "therapeutic_agents", 1, 0.88),
         )
 
-        # When: CDE mappings are extracted
-        result = _extract_column_cde_mappings(manifest)
+        # When: assignments are resolved
+        result = build_column_assignments(manifest, {}, ["diagnosis_1", "diagnosis_2", "treatment"])
 
         # Then: All positions are present
-        assert result[0]["cde_key"] == "primary_diagnosis"
-        assert result[1]["cde_key"] == "primary_diagnosis"
-        assert result[2]["cde_key"] == "therapeutic_agents"
+        assert result[0].cde_key == "primary_diagnosis"
+        assert result[1].cde_key == "primary_diagnosis"
+        assert result[2].cde_key == "therapeutic_agents"
 
         # Verify that unique CDE keys can be derived
-        unique_cde_keys = list({m["cde_key"] for m in result.values()})
+        unique_cde_keys = list({m.cde_key for m in result.values() if m.cde_key is not None})
         assert len(unique_cde_keys) == 2
         assert "primary_diagnosis" in unique_cde_keys
         assert "therapeutic_agents" in unique_cde_keys

@@ -169,6 +169,7 @@ const _buildMappingDecisions = () => {
     const cdeMeta = cdeKey ? (cdeByKey.get(cdeKey) ?? null) : null;
 
     return {
+      column_id: column.column_id,
       column_name: column.column_name,
       cde_name: cdeKey ?? null,
       cde_id: cdeMeta?.cde_id ?? null,

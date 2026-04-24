@@ -7,7 +7,7 @@ resolution rules change.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TypedDict
 
@@ -198,48 +198,11 @@ def legacy_mappings_to_assignments(payload: object) -> dict[int, ColumnAssignmen
     return assignments
 
 
-def extract_column_cde_mappings(manifest: ManifestPayload | None) -> dict[int, ColumnCdeMapping]:
-    """Read cde_key from each canonical list entry; keyed by column_id (list index).
-
-    Defense in depth: callers should already have a validated manifest, but we guard
-    against non-list shapes to avoid silent empty results if called out of order.
-    """
-    if manifest is None:
-        return {}
-    column_mappings = manifest.get("column_mappings")
-    if not isinstance(column_mappings, list):
-        raise ValueError(
-            f"extract_column_cde_mappings requires list-format column_mappings, "
-            f"got {type(column_mappings).__name__}"
-        )
-    return _extract_from_list_manifest(column_mappings)
-
-
-class ColumnCdeMapping(TypedDict):
-    column_name: str
-    cde_key: str
-
-
-def _extract_from_list_manifest(entries: Sequence[object]) -> dict[int, ColumnCdeMapping]:
-    """Each non-None entry carries column_name and cde_key directly."""
-    result: dict[int, ColumnCdeMapping] = {}
-    for idx, entry in enumerate(entries):
-        if entry is None or not isinstance(entry, dict):
-            continue
-        column_name = entry.get("column_name")
-        cde_key = entry.get("cde_key")
-        if isinstance(column_name, str) and isinstance(cde_key, str):
-            result[idx] = ColumnCdeMapping(column_name=column_name, cde_key=cde_key)
-    return result
-
-
 __all__ = [
     "ColumnAssignment",
     "ColumnAssignmentSnapshot",
-    "ColumnCdeMapping",
     "assignments_to_snapshots",
     "build_column_assignments",
-    "extract_column_cde_mappings",
     "legacy_mappings_to_assignments",
     "snapshots_to_assignments",
 ]

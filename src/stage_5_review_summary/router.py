@@ -11,8 +11,7 @@ import io
 import json
 import logging
 import zipfile
-from collections import defaultdict
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -332,25 +331,34 @@ class _MappingInfo(NamedTuple):
     history: list[TransformationStep]
 
 
+@dataclass
+class _StageFiveColumnStats:
+    column_name: str
+    distinct_terms: int = 0
+    ai_changes: int = 0
+    manual_changes: int = 0
+    unchanged: int = 0
+
+
 def _process_manifest_row(
     row: ManifestRow,
-    ai_counts: dict[int, int],
-    manual_counts: dict[int, int],
-    unchanged_counts: dict[int, int],
+    column_stats: dict[int, _StageFiveColumnStats],
     unique_mappings: dict[tuple[int, str, str], _MappingInfo],
     cache: SessionCache,
     upload_timestamp: datetime | None,
 ) -> None:
-    col_id = row.column_id
+    stats = column_stats.setdefault(row.column_id, _StageFiveColumnStats(column_name=row.column_name))
+    stats.distinct_terms += 1
+
     change_type = _classify_change(row)
 
     match change_type:
         case ChangeType.AI_HARMONIZED:
-            ai_counts[col_id] += 1
+            stats.ai_changes += 1
         case ChangeType.MANUAL_OVERRIDE:
-            manual_counts[col_id] += 1
+            stats.manual_changes += 1
         case ChangeType.UNCHANGED:
-            unchanged_counts[col_id] += 1
+            stats.unchanged += 1
 
     # Track all rows for conformance checking, not just changed ones
     _track_mapping(unique_mappings, row, cache, upload_timestamp)
@@ -362,23 +370,17 @@ def _build_summary_from_manifest(summary: ManifestSummary, file_id: str) -> Stag
     meta = storage.load(file_id)
     upload_timestamp = meta.uploaded_at if meta else None
 
-    ai_counts: dict[int, int] = defaultdict(int)
-    manual_counts: dict[int, int] = defaultdict(int)
-    unchanged_counts: dict[int, int] = defaultdict(int)
-    distinct_terms: dict[int, int] = defaultdict(int)
-    column_names: dict[int, str] = {}
+    column_stats: dict[int, _StageFiveColumnStats] = {}
     unique_mappings: dict[tuple[int, str, str], _MappingInfo] = {}
 
     for row in summary.rows:
-        distinct_terms[row.column_id] += 1
-        column_names[row.column_id] = row.column_name
-        _process_manifest_row(row, ai_counts, manual_counts, unchanged_counts, unique_mappings, cache, upload_timestamp)
+        _process_manifest_row(row, column_stats, unique_mappings, cache, upload_timestamp)
 
-    column_ids = sorted(distinct_terms.keys())
+    column_ids = sorted(column_stats)
     sorted_mappings = sorted(unique_mappings.items(), key=lambda x: x[0])
     term_mappings = [
         TermMapping(
-            column=column_names[col_id],
+            column=column_stats[col_id].column_name,
             original_value=orig,
             final_value=final,
             is_pv_conformant=info.is_conformant,
@@ -390,11 +392,11 @@ def _build_summary_from_manifest(summary: ManifestSummary, file_id: str) -> Stag
     return StageFiveSummaryResponse(
         column_summaries=[
             ColumnSummary(
-                column=column_names[col_id],
-                distinct_terms=distinct_terms[col_id],
-                ai_changes=ai_counts[col_id],
-                manual_changes=manual_counts[col_id],
-                unchanged=unchanged_counts[col_id],
+                column=column_stats[col_id].column_name,
+                distinct_terms=column_stats[col_id].distinct_terms,
+                ai_changes=column_stats[col_id].ai_changes,
+                manual_changes=column_stats[col_id].manual_changes,
+                unchanged=column_stats[col_id].unchanged,
             )
             for col_id in column_ids
         ],

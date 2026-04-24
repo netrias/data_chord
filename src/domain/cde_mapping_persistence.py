@@ -29,8 +29,8 @@ def save_cde_mapping(
 ) -> None:
     """Persist mapping decisions so Stage 5 can include them in the download zip.
 
-    Routing rule applied per positional pair (decisions[i], assignments[i]) because
-    Stage 2 JS builds mapping_decisions by iterating columns in column_id order.
+    Routing rule applied by explicit decision column_id. Stale browser payloads
+    without column_id fall back to positional pairing.
     Precedence: unmapped → pass_through → user_overrides → ai_mapped.
     """
     ai_mapped: list[CDEEntry] = []
@@ -39,7 +39,7 @@ def save_cde_mapping(
     unmapped_columns: list[str] = []
 
     for i, d in enumerate(decisions):
-        assignment = assignments.get(i)
+        assignment = _assignment_for_decision(d, i, assignments)
         _route_decision(d, assignment, ai_mapped, user_overrides, pass_through, unmapped_columns)
 
     document: CDEMappingDocument = {
@@ -55,6 +55,17 @@ def save_cde_mapping(
     store = get_file_store()
     store.save(file_id, FileType.COLUMN_MAPPING, document)
     _logger.info("Saved CDE mapping document", extra={"file_id": file_id, "column_count": len(decisions)})
+
+
+def _assignment_for_decision(
+    decision: ColumnMappingDecision,
+    position: int,
+    assignments: dict[int, ColumnAssignment],
+) -> ColumnAssignment | None:
+    column_id = decision.get("column_id")
+    if isinstance(column_id, int):
+        return assignments.get(column_id)
+    return assignments.get(position)
 
 
 def _route_decision(

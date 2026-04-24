@@ -33,6 +33,7 @@ dev = [
     "pytest-playwright>=0.6.2",
     # transitive dep pin for security (CVE remediation)
     "filelock>=3.20.1",  # CVE-2025-68146 (via virtualenv/pre-commit)
+    "pytest-cov>=7.1.0",
 ]
 
 [tool.pytest.ini_options]
@@ -44,6 +45,7 @@ pythonpath = ["."]
 addopts = "--ignore=tests/e2e"
 markers = [
     "e2e: end-to-end browser tests requiring Playwright",
+    "requirements(*ids): tests that cover one or more numbered requirements",
 ]
 
 [tool.ruff]
@@ -71,6 +73,16 @@ typeCheckingMode = "standard"
 [tool.bandit]
 exclude_dirs = ["tests"]
 skips = ["B101"]  # skip assert warnings (used in tests)
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+
+[tool.coverage.html]
+show_contexts = true
+
+[tool.coverage.json]
+show_contexts = true
 
 [dependency-groups]
 dev = [

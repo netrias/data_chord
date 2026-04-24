@@ -27,9 +27,12 @@ class ColumnAssignment:
     column_id: int
     column_name: str
     cde_key: str | None
+    harmonization: Harmonization | None
 ```
 
 This is the canonical in-memory representation for PV validation and review routing.
+`harmonization` is included because it determines whether a resolved CDE should be
+harmonized, pass through unchanged, or be skipped for PV fetching.
 
 ### 2. Keep the Canonical Model Minimal
 
@@ -40,8 +43,9 @@ This is the canonical in-memory representation for PV validation and review rout
 
 Provenance belongs to reporting and download artifacts, not PV validation routing.
 `cde_id` remains derivable from the CDE cache when a downstream boundary needs it.
-Keeping the assignment model to `column_id`, `column_name`, and `cde_key` keeps
-manifest/override resolution as a pure transformation.
+Keeping the assignment model to column identity, resolved CDE key, and resolved
+harmonization keeps manifest/override resolution as a pure transformation while
+preserving the routing rules that later stages need.
 
 ### 3. Treat Existing Payload Shapes as Boundary DTOs
 

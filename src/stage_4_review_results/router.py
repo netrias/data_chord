@@ -88,12 +88,12 @@ async def fetch_stage_four_rows(payload: StageFourResultsRequest) -> StageFourRe
     if manifest is None:
         raise HTTPException(status_code=404, detail="Harmonization manifest not found. Please rerun Stage 3.")
 
-    column_info = _extract_columns_from_manifest(manifest)
+    column_groups = _group_manifest_rows_by_column(manifest)
 
     # Load PVs before building transformations so pvSetAvailable/isPVConformant are populated
-    column_pvs = _build_column_pvs(column_info, payload.file_id)
+    column_pvs = _build_column_pvs(column_groups, payload.file_id)
 
-    columns = _build_columns_from_manifest(manifest, payload.file_id)
+    columns = _build_columns_from_groups(column_groups, payload.file_id)
 
     return StageFourResultsResponse(
         columns=columns,
@@ -102,37 +102,16 @@ async def fetch_stage_four_rows(payload: StageFourResultsRequest) -> StageFourRe
     )
 
 
-@dataclass
+@dataclass(frozen=True)
 class _ColumnInfo:
     column_id: int
     column_name: str
-    label: str
-    source_index: int  # Position in original spreadsheet for ordering
 
 
-def _extract_columns_from_manifest(manifest: ManifestSummary) -> list[_ColumnInfo]:
-    """Extract unique columns with their source index for ordering."""
-    seen: set[int] = set()
-    columns: list[_ColumnInfo] = []
-    for row in manifest.rows:
-        if row.column_name and row.column_id not in seen:
-            seen.add(row.column_id)
-            columns.append(_ColumnInfo(
-                column_id=row.column_id,
-                column_name=row.column_name,
-                label=row.column_name or "Unknown",
-                source_index=row.column_id,
-            ))
-    return columns
-
-
-def _build_columns_from_manifest(manifest: ManifestSummary, file_id: str) -> list[ColumnReviewData]:
-    """Build column-centric data structure grouped by stable column identity."""
-    cache = get_session_cache(file_id)
-
+def _group_manifest_rows_by_column(manifest: ManifestSummary) -> list[tuple[_ColumnInfo, list[ManifestRow]]]:
+    """Group rows once by stable column identity, ordered by source spreadsheet position."""
     columns_map: dict[int, list[ManifestRow]] = {}
     column_info: dict[int, _ColumnInfo] = {}
-
     for row in manifest.rows:
         if not row.column_name:
             continue
@@ -141,16 +120,26 @@ def _build_columns_from_manifest(manifest: ManifestSummary, file_id: str) -> lis
             column_info[row.column_id] = _ColumnInfo(
                 column_id=row.column_id,
                 column_name=row.column_name,
-                label=row.column_name or "Unknown",
-                source_index=row.column_id,
             )
         columns_map[row.column_id].append(row)
+    return [
+        (column_info[column_id], columns_map[column_id])
+        for column_id in sorted(columns_map)
+    ]
 
-    # Build columns ordered by source spreadsheet position
+
+def _build_columns_from_manifest(manifest: ManifestSummary, file_id: str) -> list[ColumnReviewData]:
+    """Build column-centric data structure grouped by stable column identity."""
+    return _build_columns_from_groups(_group_manifest_rows_by_column(manifest), file_id)
+
+
+def _build_columns_from_groups(
+    column_groups: list[tuple[_ColumnInfo, list[ManifestRow]]],
+    file_id: str,
+) -> list[ColumnReviewData]:
+    cache = get_session_cache(file_id)
     columns: list[ColumnReviewData] = []
-    for column_id in sorted(columns_map.keys()):
-        manifest_rows = columns_map[column_id]
-        col_info = column_info[column_id]
+    for col_info, manifest_rows in column_groups:
         transformations = [
             _build_transformation(r, r.column_id, cache) for r in manifest_rows
         ]
@@ -159,8 +148,8 @@ def _build_columns_from_manifest(manifest: ManifestSummary, file_id: str) -> lis
 
         columns.append(ColumnReviewData(
             columnKey=str(col_info.column_id),
-            columnLabel=col_info.label,
-            sourceColumnIndex=col_info.source_index,
+            columnLabel=col_info.column_name or "Unknown",
+            sourceColumnIndex=col_info.column_id,
             termCount=len(transformations),
             termsWithChanges=terms_with_changes,
             transformations=transformations,
@@ -218,14 +207,17 @@ def _build_transformation(
     )
 
 
-def _build_column_pvs(columns: list[_ColumnInfo], file_id: str) -> dict[str, list[str]]:
+def _build_column_pvs(
+    column_groups: list[tuple[_ColumnInfo, list[ManifestRow]]],
+    file_id: str,
+) -> dict[str, list[str]]:
     """Alphabetical sort ensures predictable dropdown ordering across page loads."""
     cache = ensure_pvs_loaded(file_id)
     column_pvs: dict[str, list[str]] = {}
     columns_without_pvs: list[str] = []
 
-    for col_info in columns:
-        pv_set = cache.get_pvs_for_column(col_info.source_index)
+    for col_info, _rows in column_groups:
+        pv_set = cache.get_pvs_for_column(col_info.column_id)
         if pv_set:
             column_pvs[str(col_info.column_id)] = sorted(pv_set)
         else:
@@ -243,10 +235,10 @@ def _build_column_pvs(columns: list[_ColumnInfo], file_id: str) -> dict[str, lis
         },
     )
 
-    if not column_pvs and columns:
+    if not column_pvs and column_groups:
         logger.warning(
             "No PVs available for any column. PV combobox will not appear in Stage 4.",
-            extra={"file_id": file_id, "column_count": len(columns)},
+            extra={"file_id": file_id, "column_count": len(column_groups)},
         )
 
     return column_pvs
