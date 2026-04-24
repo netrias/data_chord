@@ -36,44 +36,56 @@ def _find_original_path(file_id: str, upload_base_dir: Path) -> Path:
     return matches[0]
 
 
-def _read_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
+def _read_csv(path: Path) -> tuple[list[str], list[list[str]]]:
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
-        reader = csv.DictReader(handle)
+        reader = csv.reader(handle)
+        headers = next(reader, [])
         rows = list(reader)
-        headers = list(reader.fieldnames or [])
     return headers, rows
 
 
-def _write_harmonized(path: Path, headers: list[str], rows: list[dict[str, str]]) -> Path:
+def _write_harmonized(path: Path, headers: list[str], rows: list[list[str]]) -> Path:
     harmonized_path = path.with_name(f"{path.stem}.harmonized.csv")
     with harmonized_path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=headers)
-        writer.writeheader()
+        writer = csv.writer(handle)
+        writer.writerow(headers)
         writer.writerows(rows)
     return harmonized_path
 
 
+def _cell(row: list[str], column_id: int) -> str:
+    if 0 <= column_id < len(row):
+        return row[column_id]
+    return ""
+
+
 def _build_manifest_rows(
     headers: list[str],
-    original_rows: list[dict[str, str]],
-    harmonized_rows: list[dict[str, str]],
+    original_rows: list[list[str]],
+    harmonized_rows: list[list[str]],
     changes: dict[int, dict[str, str]],
     file_id: str,
 ) -> list[dict[str, Any]]:
-    columns_with_changes = {col for row in changes.values() for col in row.keys()}
+    columns_with_changes: set[int] = set()
+    for row in changes.values():
+        for col in row:
+            column_id = _resolve_column_id(headers, col)
+            if column_id is not None:
+                columns_with_changes.add(column_id)
     if not columns_with_changes:
-        columns_with_changes = set(headers[:2]) if len(headers) >= 2 else set(headers)
+        columns_with_changes = set(range(min(len(headers), 2))) if len(headers) >= 2 else set(range(len(headers)))
 
     manifest_rows: list[dict[str, Any]] = []
-    for col_name in columns_with_changes:
+    for column_id in sorted(columns_with_changes):
+        col_name = headers[column_id] if 0 <= column_id < len(headers) else ""
         grouped: dict[str, dict[str, Any]] = {}
         for row_idx, original_row in enumerate(original_rows):
-            original_value = original_row.get(col_name, "")
-            harmonized_value = harmonized_rows[row_idx].get(col_name, original_value)
+            original_value = _cell(original_row, column_id)
+            harmonized_value = _cell(harmonized_rows[row_idx], column_id) or original_value
             if original_value not in grouped:
                 grouped[original_value] = {
                     "job_id": f"e2e-job-{file_id}",
-                    "column_id": headers.index(col_name) if col_name in headers else 0,
+                    "column_id": column_id,
                     "column_name": col_name,
                     "to_harmonize": original_value,
                     "top_harmonization": harmonized_value,
@@ -119,6 +131,15 @@ def _parse_changes(raw: str | None) -> dict[int, dict[str, str]]:
     return {int(key): value for key, value in parsed.items()}
 
 
+def _resolve_column_id(headers: list[str], column_key: str) -> int | None:
+    if column_key.isdigit():
+        column_id = int(column_key)
+        return column_id if 0 <= column_id < len(headers) else None
+    if column_key in headers:
+        return headers.index(column_key)
+    return None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--file-id", required=True)
@@ -130,12 +151,18 @@ def main() -> None:
     upload_base_dir = _resolve_upload_base_dir(args.upload_base_dir)
     original_path = _find_original_path(args.file_id, upload_base_dir)
     headers, original_rows = _read_csv(original_path)
-    harmonized_rows = [row.copy() for row in original_rows]
+    harmonized_rows = [list(row) for row in original_rows]
     changes = _parse_changes(args.changes)
 
     for row_idx, column_changes in changes.items():
         if row_idx < len(harmonized_rows):
-            harmonized_rows[row_idx].update(column_changes)
+            for column_key, value in column_changes.items():
+                column_id = _resolve_column_id(headers, column_key)
+                if column_id is None:
+                    continue
+                while len(harmonized_rows[row_idx]) <= column_id:
+                    harmonized_rows[row_idx].append("")
+                harmonized_rows[row_idx][column_id] = value
 
     _write_harmonized(original_path, headers, harmonized_rows)
 

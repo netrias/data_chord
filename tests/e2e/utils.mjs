@@ -275,6 +275,13 @@ export const seedHarmonization = (fileId, changes = {}, options = {}) => {
 };
 
 export const parseDownloadedCsv = async (response) => {
+  const { headers, rows } = await parseDownloadedCsvTable(response);
+  return rows.map((values) => {
+    return Object.fromEntries(headers.map((header, idx) => [header, values[idx] ?? '']));
+  });
+};
+
+export const parseDownloadedCsvTable = async (response) => {
   const buffer = await response.body();
   const zip = new AdmZip(Buffer.from(buffer));
   const entry = zip.getEntries().find((item) => item.entryName.endsWith('.csv'));
@@ -288,13 +295,16 @@ export const parseDownloadedCsv = async (response) => {
   }
   const headerLine = lines.shift();
   if (!headerLine) {
-    return [];
+    return { headers: [], rows: [] };
   }
   const headers = parseCsvLine(headerLine);
-  return lines.map((line) => {
-    const values = parseCsvLine(line);
-    return Object.fromEntries(headers.map((header, idx) => [header, values[idx] ?? '']));
-  });
+  return { headers, rows: lines.map((line) => parseCsvLine(line)) };
+};
+
+export const downloadedZipEntries = async (response) => {
+  const buffer = await response.body();
+  const zip = new AdmZip(Buffer.from(buffer));
+  return zip.getEntries().map((entry) => entry.entryName);
 };
 
 const parseCsvLine = (line) => {

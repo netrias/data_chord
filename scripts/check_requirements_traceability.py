@@ -5,7 +5,8 @@ The checker intentionally relies on a small convention:
 - requirements live in ``requirements.md`` as flat ``R-###.`` entries
 - requirement tests live under ``tests/requirements``
 - requirement tests use ``@pytest.mark.requirements("R-###", ...)``
-- marked tests include Given/When/Then lines in the test docstring
+- Playwright requirement tests include bracketed IDs in the test title
+- marked tests include Given/When/Then lines in the test docstring or comments
 
 This keeps the report useful without asking the script to infer intent from
 arbitrary test code.
@@ -30,6 +31,12 @@ DEFAULT_REPORT_PATH = REQUIREMENTS_TESTS_DIR / "TRACEABILITY.md"
 REQUIREMENT_RE = re.compile(r"^(R-\d{3})\. (.*)$")
 HEADING_RE = re.compile(r"^## (.+)$")
 GIVEN_WHEN_THEN_RE = re.compile(r"^\s*(Given|When|Then):\s*(.+?)\s*$")
+PLAYWRIGHT_TEST_RE = re.compile(
+    r"\b(?P<call>test(?:\.fail)?)\(\s*(?P<quote>['\"])(?P<title>.*?)(?P=quote)\s*,",
+    re.DOTALL,
+)
+PLAYWRIGHT_REQUIREMENT_RE = re.compile(r"R-\d{3}")
+PLAYWRIGHT_GIVEN_WHEN_THEN_RE = re.compile(r"//\s*(Given|When|Then):\s*(.+?)\s*(?:\n|$)")
 
 
 @dataclass(frozen=True)
@@ -220,6 +227,14 @@ def _extract_given_when_then(docstring: str | None) -> tuple[str | None, str | N
     return found.get("Given"), found.get("When"), found.get("Then")
 
 
+def _extract_playwright_given_when_then(body: str) -> tuple[str | None, str | None, str | None]:
+    found: dict[str, str] = {}
+    for match in PLAYWRIGHT_GIVEN_WHEN_THEN_RE.finditer(body):
+        label, text = match.groups()
+        found[label] = text.strip()
+    return found.get("Given"), found.get("When"), found.get("Then")
+
+
 def _iter_test_functions(tree: ast.AST) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
     return [
         node
@@ -250,16 +265,17 @@ def _validate_coverage_convention(coverage: TestCoverage) -> list[str]:
 
     lowered_name = coverage.test_name.lower()
     for requirement_id in coverage.requirement_ids:
-        expected_fragment = requirement_id.lower().replace("-", "")
-        if expected_fragment not in lowered_name:
+        compact_fragment = requirement_id.lower().replace("-", "")
+        dashed_fragment = requirement_id.lower()
+        if compact_fragment not in lowered_name and dashed_fragment not in lowered_name:
             errors.append(
                 f"{coverage.node_id} marks {requirement_id}, but the test name does not include "
-                f"'{expected_fragment}'"
+                f"'{compact_fragment}' or '{dashed_fragment}'"
             )
     return errors
 
 
-def _collect_test_coverages(tests_dir: Path) -> tuple[list[TestCoverage], list[str]]:
+def _collect_pytest_coverages(tests_dir: Path) -> tuple[list[TestCoverage], list[str]]:
     coverages: list[TestCoverage] = []
     errors: list[str] = []
     for path in sorted(tests_dir.rglob("test_*.py")):
@@ -284,6 +300,60 @@ def _collect_test_coverages(tests_dir: Path) -> tuple[list[TestCoverage], list[s
             errors.extend(_validate_coverage_convention(coverage))
 
     return coverages, errors
+
+
+def _iter_playwright_blocks(source: str) -> list[tuple[str, str, int, str | None]]:
+    blocks: list[tuple[str, str, int, str | None]] = []
+    matches = list(PLAYWRIGHT_TEST_RE.finditer(source))
+    for index, match in enumerate(matches):
+        title = " ".join(match.group("title").split())
+        requirement_ids = PLAYWRIGHT_REQUIREMENT_RE.findall(title)
+        if not requirement_ids:
+            continue
+
+        line_number = source.count("\n", 0, match.start()) + 1
+        next_start = matches[index + 1].start() if index + 1 < len(matches) else len(source)
+        body = source[match.end():next_start]
+        expected_failure = "Expected Playwright failure" if match.group("call") == "test.fail" else None
+        blocks.append((title, body, line_number, expected_failure))
+    return blocks
+
+
+def _collect_playwright_coverages(tests_dir: Path) -> tuple[list[TestCoverage], list[str]]:
+    coverages: list[TestCoverage] = []
+    errors: list[str] = []
+    playwright_paths = sorted(
+        {
+            *tests_dir.rglob("*.spec.js"),
+            *tests_dir.rglob("*.spec.mjs"),
+            *tests_dir.rglob("*.e2e.js"),
+            *tests_dir.rglob("*.e2e.mjs"),
+        }
+    )
+    for path in playwright_paths:
+        source = path.read_text(encoding="utf-8")
+        for title, body, line_number, expected_failure in _iter_playwright_blocks(source):
+            requirement_ids = tuple(PLAYWRIGHT_REQUIREMENT_RE.findall(title))
+            given, when, then = _extract_playwright_given_when_then(body)
+            coverage = TestCoverage(
+                requirement_ids=requirement_ids,
+                path=path,
+                test_name=title,
+                given=given,
+                when=when,
+                then=then,
+                line_number=line_number,
+                expected_failure=expected_failure,
+            )
+            coverages.append(coverage)
+            errors.extend(_validate_coverage_convention(coverage))
+    return coverages, errors
+
+
+def _collect_test_coverages(tests_dir: Path) -> tuple[list[TestCoverage], list[str]]:
+    pytest_coverages, pytest_errors = _collect_pytest_coverages(tests_dir)
+    playwright_coverages, playwright_errors = _collect_playwright_coverages(tests_dir)
+    return [*pytest_coverages, *playwright_coverages], [*pytest_errors, *playwright_errors]
 
 
 def _index_coverages_by_requirement(coverages: list[TestCoverage]) -> dict[str, list[TestCoverage]]:
@@ -357,7 +427,7 @@ def _build_report(
         lines.extend([
             f"#### {requirement.requirement_id}: {requirement.text}",
             "",
-            f"Status: {status}  ",
+            f"Status: {status}",
             f"Source: [requirements.md:{requirement.line_number}](../../requirements.md#L{requirement.line_number})",
             "",
         ])

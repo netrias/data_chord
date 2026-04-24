@@ -19,6 +19,9 @@ test:
 requirements-trace:
 	uv run python scripts/check_requirements_traceability.py --write
 
+requirements-e2e:
+	npm run test:requirements-e2e
+
 requirements-coverage:
 	uv run python scripts/check_requirements_traceability.py --write
 	@mkdir -p .artifacts/requirements-coverage
