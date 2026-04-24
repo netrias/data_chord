@@ -16,6 +16,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from src.domain.storage import HARMONIZED_SUFFIX, UploadConstraints, UploadStorage
+from tests.cache_helpers import storage_manifest_path
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -424,9 +425,8 @@ def create_manifest_for_file(
 
         manifest_rows.extend(grouped.values())
 
-    manifest_dir = storage.manifest_dir
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = manifest_dir / f"{file_id}_harmonization.parquet"
+    manifest_path = storage_manifest_path(storage, file_id)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
     return create_test_manifest_parquet(manifest_path, manifest_rows)
 
 
@@ -465,7 +465,6 @@ def create_manifest_with_manual_override(
         ],
     }]
 
-    manifest_dir = storage.manifest_dir
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = manifest_dir / f"{file_id}_harmonization.parquet"
+    manifest_path = storage_manifest_path(storage, file_id)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
     return create_test_manifest_parquet(manifest_path, manifest_rows)

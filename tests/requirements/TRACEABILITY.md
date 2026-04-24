@@ -93,7 +93,7 @@ Status: Covered
 Source: [requirements.md:32](../../requirements.md#L32)
 
 Tests:
-- [tests/requirements/workflow/test_r007_r083__new_upload_resets_stale_session_state.py:15](../../tests/requirements/workflow/test_r007_r083__new_upload_resets_stale_session_state.py#L15)::test_r007_r083__new_upload_clears_stale_pv_state
+- [tests/requirements/workflow/test_r007_r083__new_upload_resets_stale_session_state.py:16](../../tests/requirements/workflow/test_r007_r083__new_upload_resets_stale_session_state.py#L16)::test_r007_r083__new_upload_clears_stale_pv_state
   - Given: A prior workflow has cached permissible values.
   - When: The user uploads a new source CSV through Stage 1.
   - Then: The stale cached permissible values are cleared before the new workflow continues.
@@ -373,7 +373,7 @@ Status: Covered
 Source: [requirements.md:118](../../requirements.md#L118)
 
 Tests:
-- [tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py:53](../../tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py#L53)::test_r031_r032_r041__summary_counts_case_mismatch_as_non_conformant
+- [tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py:54](../../tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py#L54)::test_r031_r032_r041__summary_counts_case_mismatch_as_non_conformant
   - Given: A harmonized value differs from the only permissible value by case.
   - When: The user requests the Stage 5 summary.
   - Then: The summary marks the value non-conformant by exact PV matching.
@@ -384,7 +384,7 @@ Status: Covered
 Source: [requirements.md:120](../../requirements.md#L120)
 
 Tests:
-- [tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py:53](../../tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py#L53)::test_r031_r032_r041__summary_counts_case_mismatch_as_non_conformant
+- [tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py:54](../../tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py#L54)::test_r031_r032_r041__summary_counts_case_mismatch_as_non_conformant
   - Given: A harmonized value differs from the only permissible value by case.
   - When: The user requests the Stage 5 summary.
   - Then: The summary marks the value non-conformant by exact PV matching.
@@ -406,7 +406,7 @@ Status: Covered
 Source: [requirements.md:127](../../requirements.md#L127)
 
 Tests:
-- [tests/requirements/summary_export/test_r034_r035_r051__summary_reads_manifest_boundaries.py:42](../../tests/requirements/summary_export/test_r034_r035_r051__summary_reads_manifest_boundaries.py#L42)::test_r034_r035_r051__summary_strips_ai_output_but_not_original_user_value
+- [tests/requirements/summary_export/test_r034_r035_r051__summary_reads_manifest_boundaries.py:43](../../tests/requirements/summary_export/test_r034_r035_r051__summary_reads_manifest_boundaries.py#L43)::test_r034_r035_r051__summary_strips_ai_output_but_not_original_user_value
   - Given: A workflow has manifest data with meaningful original whitespace and AI artifact whitespace.
   - When: The user requests the Stage 5 summary.
   - Then: The history shows stripped AI output and the unstripped original user value.
@@ -417,7 +417,7 @@ Status: Covered
 Source: [requirements.md:130](../../requirements.md#L130)
 
 Tests:
-- [tests/requirements/summary_export/test_r034_r035_r051__summary_reads_manifest_boundaries.py:42](../../tests/requirements/summary_export/test_r034_r035_r051__summary_reads_manifest_boundaries.py#L42)::test_r034_r035_r051__summary_strips_ai_output_but_not_original_user_value
+- [tests/requirements/summary_export/test_r034_r035_r051__summary_reads_manifest_boundaries.py:43](../../tests/requirements/summary_export/test_r034_r035_r051__summary_reads_manifest_boundaries.py#L43)::test_r034_r035_r051__summary_strips_ai_output_but_not_original_user_value
   - Given: A workflow has manifest data with meaningful original whitespace and AI artifact whitespace.
   - When: The user requests the Stage 5 summary.
   - Then: The history shows stripped AI output and the unstripped original user value.
@@ -452,7 +452,7 @@ Status: Covered
 Source: [requirements.md:141](../../requirements.md#L141)
 
 Tests:
-- [tests/requirements/permissible_values/test_r038__pv_cache_immutability.py:12](../../tests/requirements/permissible_values/test_r038__pv_cache_immutability.py#L12)::test_r038_r075__pv_cache_stores_values_as_immutable_lookup_sets
+- [tests/requirements/permissible_values/test_r038__pv_cache_immutability.py:13](../../tests/requirements/permissible_values/test_r038__pv_cache_immutability.py#L13)::test_r038_r075__pv_cache_stores_values_as_immutable_lookup_sets
   - Given: PVs are loaded into a session cache.
   - When: A caller retrieves the PV set for a CDE.
   - Then: The PVs are available as an immutable lookup set.
@@ -485,7 +485,7 @@ Status: Covered
 Source: [requirements.md:152](../../requirements.md#L152)
 
 Tests:
-- [tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py:53](../../tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py#L53)::test_r031_r032_r041__summary_counts_case_mismatch_as_non_conformant
+- [tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py:54](../../tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py#L54)::test_r031_r032_r041__summary_counts_case_mismatch_as_non_conformant
   - Given: A harmonized value differs from the only permissible value by case.
   - When: The user requests the Stage 5 summary.
   - Then: The summary marks the value non-conformant by exact PV matching.
@@ -577,7 +577,7 @@ Status: Covered
 Source: [requirements.md:183](../../requirements.md#L183)
 
 Tests:
-- [tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py:98](../../tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py#L98)::test_r049_r052__summary_classifies_changes_and_collapses_duplicate_override_history
+- [tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py:99](../../tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py#L99)::test_r049_r052__summary_classifies_changes_and_collapses_duplicate_override_history
   - Given: A manifest contains unchanged, AI-harmonized, and repeated manual override transformations.
   - When: The user requests the Stage 5 summary.
   - Then: The summary classifies each change type and collapses consecutive duplicate override history.
@@ -588,7 +588,7 @@ Status: Covered
 Source: [requirements.md:186](../../requirements.md#L186)
 
 Tests:
-- [tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py:148](../../tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py#L148)::test_r050__summary_preserves_duplicate_named_columns_by_column_id
+- [tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py:149](../../tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py#L149)::test_r050__summary_preserves_duplicate_named_columns_by_column_id
   - Given: A manifest has two duplicate-named columns with different column ids.
   - When: The user requests the Stage 5 summary.
   - Then: The summary preserves both mappings as distinct entries.
@@ -599,7 +599,7 @@ Status: Covered
 Source: [requirements.md:189](../../requirements.md#L189)
 
 Tests:
-- [tests/requirements/summary_export/test_r034_r035_r051__summary_reads_manifest_boundaries.py:42](../../tests/requirements/summary_export/test_r034_r035_r051__summary_reads_manifest_boundaries.py#L42)::test_r034_r035_r051__summary_strips_ai_output_but_not_original_user_value
+- [tests/requirements/summary_export/test_r034_r035_r051__summary_reads_manifest_boundaries.py:43](../../tests/requirements/summary_export/test_r034_r035_r051__summary_reads_manifest_boundaries.py#L43)::test_r034_r035_r051__summary_strips_ai_output_but_not_original_user_value
   - Given: A workflow has manifest data with meaningful original whitespace and AI artifact whitespace.
   - When: The user requests the Stage 5 summary.
   - Then: The history shows stripped AI output and the unstripped original user value.
@@ -610,7 +610,7 @@ Status: Covered
 Source: [requirements.md:192](../../requirements.md#L192)
 
 Tests:
-- [tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py:98](../../tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py#L98)::test_r049_r052__summary_classifies_changes_and_collapses_duplicate_override_history
+- [tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py:99](../../tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py#L99)::test_r049_r052__summary_classifies_changes_and_collapses_duplicate_override_history
   - Given: A manifest contains unchanged, AI-harmonized, and repeated manual override transformations.
   - When: The user requests the Stage 5 summary.
   - Then: The summary classifies each change type and collapses consecutive duplicate override history.
@@ -877,7 +877,7 @@ Status: Covered
 Source: [requirements.md:266](../../requirements.md#L266)
 
 Tests:
-- [tests/requirements/permissible_values/test_r038__pv_cache_immutability.py:12](../../tests/requirements/permissible_values/test_r038__pv_cache_immutability.py#L12)::test_r038_r075__pv_cache_stores_values_as_immutable_lookup_sets
+- [tests/requirements/permissible_values/test_r038__pv_cache_immutability.py:13](../../tests/requirements/permissible_values/test_r038__pv_cache_immutability.py#L13)::test_r038_r075__pv_cache_stores_values_as_immutable_lookup_sets
   - Given: PVs are loaded into a session cache.
   - When: A caller retrieves the PV set for a CDE.
   - Then: The PVs are available as an immutable lookup set.
@@ -971,7 +971,7 @@ Status: Covered
 Source: [requirements.md:295](../../requirements.md#L295)
 
 Tests:
-- [tests/requirements/workflow/test_r007_r083__new_upload_resets_stale_session_state.py:15](../../tests/requirements/workflow/test_r007_r083__new_upload_resets_stale_session_state.py#L15)::test_r007_r083__new_upload_clears_stale_pv_state
+- [tests/requirements/workflow/test_r007_r083__new_upload_resets_stale_session_state.py:16](../../tests/requirements/workflow/test_r007_r083__new_upload_resets_stale_session_state.py#L16)::test_r007_r083__new_upload_clears_stale_pv_state
   - Given: A prior workflow has cached permissible values.
   - When: The user uploads a new source CSV through Stage 1.
   - Then: The stale cached permissible values are cleared before the new workflow continues.

@@ -128,11 +128,6 @@ def _group_manifest_rows_by_column(manifest: ManifestSummary) -> list[tuple[_Col
     ]
 
 
-def _build_columns_from_manifest(manifest: ManifestSummary, file_id: str) -> list[ColumnReviewData]:
-    """Build column-centric data structure grouped by stable column identity."""
-    return _build_columns_from_groups(_group_manifest_rows_by_column(manifest), file_id)
-
-
 def _build_columns_from_groups(
     column_groups: list[tuple[_ColumnInfo, list[ManifestRow]]],
     file_id: str,

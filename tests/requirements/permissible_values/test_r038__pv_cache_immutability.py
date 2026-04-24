@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from src.domain.data_model_cache import SessionCache
+from tests.cache_helpers import cache_pvs_for_cde, set_cache_pvs
 from tests.requirements.helpers import CANONICAL_DIAGNOSIS, PRIMARY_DIAGNOSIS_CDE
 
 
@@ -21,8 +22,8 @@ def test_r038_r075__pv_cache_stores_values_as_immutable_lookup_sets() -> None:
     assert isinstance(mutable_source, list)
 
     # When
-    cache.set_pvs(PRIMARY_DIAGNOSIS_CDE, frozenset(mutable_source))
-    pvs = cache.get_pvs_for_cde(PRIMARY_DIAGNOSIS_CDE)
+    set_cache_pvs(cache, PRIMARY_DIAGNOSIS_CDE, frozenset(mutable_source))
+    pvs = cache_pvs_for_cde(cache, PRIMARY_DIAGNOSIS_CDE)
 
     # Then
     assert isinstance(pvs, frozenset)

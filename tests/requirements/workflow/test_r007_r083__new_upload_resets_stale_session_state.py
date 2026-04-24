@@ -6,6 +6,7 @@ import pytest
 from httpx import AsyncClient
 
 from src.domain.data_model_cache import get_session_cache
+from tests.cache_helpers import set_cache_pvs
 from tests.requirements.helpers import CANONICAL_DIAGNOSIS, CSV_MIME_TYPE, DIAGNOSIS_COLUMN, single_column_csv
 
 pytestmark = pytest.mark.asyncio
@@ -20,7 +21,7 @@ async def test_r007_r083__new_upload_clears_stale_pv_state(app_client: AsyncClie
     """
     # Given
     stale_cache = get_session_cache("old-workflow")
-    stale_cache.set_pvs("old_cde", frozenset(["Old Value"]))
+    set_cache_pvs(stale_cache, "old_cde", frozenset(["Old Value"]))
     assert stale_cache.has_any_pvs()
 
     # When

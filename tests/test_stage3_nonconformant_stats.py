@@ -15,6 +15,7 @@ from src.stage_3_harmonize.router import (
     _convert_to_schema,
     _store_column_mappings_in_cache,
 )
+from tests.cache_helpers import cache_assignment, cache_cde_key
 
 
 def _make_row(
@@ -204,14 +205,14 @@ class TestManualOverridePropagation:
         })
         manual_overrides = {1: "primary_diagnosis"}
         csv_headers = ["breed", "diagnosis"]
-        assert cache.get_column_cde_key(1) is None
+        assert cache_cde_key(cache, 1) is None
 
         # When
         _store_column_mappings_in_cache(cache, manifest, manual_overrides, csv_headers)
 
         # Then: both mappings present
-        assert cache.get_column_cde_key(0) == "organism_species"
-        assert cache.get_column_cde_key(1) == "primary_diagnosis"
+        assert cache_cde_key(cache, 0) == "organism_species"
+        assert cache_cde_key(cache, 1) == "primary_diagnosis"
 
     def test_manual_override_takes_precedence_over_manifest(self) -> None:
         """
@@ -240,7 +241,7 @@ class TestManualOverridePropagation:
         _store_column_mappings_in_cache(cache, manifest, manual_overrides, csv_headers)
 
         # Then: manual override wins
-        assert cache.get_column_cde_key(0) == "manual_target"
+        assert cache_cde_key(cache, 0) == "manual_target"
 
     def test_store_column_mappings_preserves_none_entries_as_unmapped(self) -> None:
         """
@@ -268,6 +269,6 @@ class TestManualOverridePropagation:
         _store_column_mappings_in_cache(cache, manifest, {}, csv_headers)
 
         # Then: position 0 is mapped, position 1 is present but unmapped
-        assert cache.get_column_cde_key(0) == "age"
-        assert cache.get_column_assignment(1) is not None
-        assert cache.get_column_cde_key(1) is None
+        assert cache_cde_key(cache, 0) == "age"
+        assert cache_assignment(cache, 1) is not None
+        assert cache_cde_key(cache, 1) is None

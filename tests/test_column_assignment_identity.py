@@ -9,8 +9,9 @@ from src.domain.cde import NO_MAPPING_SENTINEL
 from src.domain.column_assignment import ColumnAssignment, build_column_assignments
 from src.domain.data_model_cache import clear_all_session_caches, get_session_cache
 from src.domain.manifest import ManifestPayload, ManifestRow, ManifestSummary
-from src.stage_4_review_results.router import _build_columns_from_manifest
+from src.stage_4_review_results.router import _build_columns_from_groups, _group_manifest_rows_by_column
 from src.stage_5_review_summary.router import _build_summary_from_manifest
+from tests.cache_helpers import set_cache_pvs
 
 
 def _make_row(
@@ -250,7 +251,7 @@ class TestStage4ColumnIdentity:
             rows=rows,
         )
 
-        columns = _build_columns_from_manifest(manifest, file_id)
+        columns = _build_columns_from_groups(_group_manifest_rows_by_column(manifest), file_id)
 
         assert len(columns) == 2
         assert [column.sourceColumnIndex for column in columns] == [0, 1]
@@ -274,8 +275,8 @@ class TestStage5ColumnIdentity:
             0: ColumnAssignment(0, "diagnosis", "dx_a", "harmonizable"),
             1: ColumnAssignment(1, "diagnosis", "dx_b", "harmonizable"),
         })
-        cache.set_pvs("dx_a", frozenset(["Allowed A"]))
-        cache.set_pvs("dx_b", frozenset(["Allowed B"]))
+        set_cache_pvs(cache, "dx_a", frozenset(["Allowed A"]))
+        set_cache_pvs(cache, "dx_b", frozenset(["Allowed B"]))
         rows = [
             _make_row(0, "diagnosis", "Shared", "Shared"),
             _make_row(1, "diagnosis", "Shared", "Shared"),

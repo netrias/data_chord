@@ -2,11 +2,9 @@
 
 from src.domain.cde import NO_MAPPING_SENTINEL as NO_MAPPING_SENTINEL
 from src.domain.cde import CDEInfo as CDEInfo
-from src.domain.cde import ColumnMapping as ColumnMapping
 from src.domain.cde import ColumnMappingDecision as ColumnMappingDecision
 from src.domain.cde import DataModelSummary as DataModelSummary
 from src.domain.cde import ModelSuggestion as ModelSuggestion
-from src.domain.cde import normalize_cde_key as normalize_cde_key
 from src.domain.change import CONFIDENCE as CONFIDENCE
 from src.domain.change import ChangeType as ChangeType
 from src.domain.change import ConfidenceThresholds as ConfidenceThresholds

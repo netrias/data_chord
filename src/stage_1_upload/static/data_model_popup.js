@@ -11,7 +11,6 @@ const DEFAULT_DATA_MODEL = window.stageOneUploadConfig?.defaultDataModel ?? null
 /* Preload state - enables instant popup after page load. */
 let _cachedDataModels = null;
 let _preloadPromise = null;
-let _retryTimeoutId = null;
 /** Single retry after 2s delay. Keeps implementation simple - if server is down, user must refresh anyway. */
 const RETRY_DELAY_MS = 2000;
 let _retryScheduled = false;
@@ -63,20 +62,11 @@ function _getLatestVersion(versions) {
 function _scheduleRetry() {
   if (_retryScheduled) return;
   _retryScheduled = true;
-  _retryTimeoutId = setTimeout(() => {
-    _retryTimeoutId = null;
+  setTimeout(() => {
     _retryScheduled = false;
     _preloadPromise = null;
     preloadDataModels();
   }, RETRY_DELAY_MS);
-}
-
-function _clearRetry() {
-  if (_retryTimeoutId) {
-    clearTimeout(_retryTimeoutId);
-    _retryTimeoutId = null;
-  }
-  _retryScheduled = false;
 }
 
 /**

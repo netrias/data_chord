@@ -8,6 +8,7 @@ import pytest
 from httpx import AsyncClient
 
 from src.domain.storage import UploadStorage
+from tests.cache_helpers import storage_manifest_path
 from tests.conftest import create_harmonized_csv, create_test_manifest_parquet, upload_content
 from tests.requirements.helpers import CANONICAL_LUNG_CANCER, DIAGNOSIS_COLUMN, LOWERCASE_LUNG_CANCER
 
@@ -32,9 +33,9 @@ def _create_manifest_with_ai_whitespace(
         "row_indices": [0],
         "manual_overrides": [],
     }]
-    manifest_dir = storage.manifest_dir
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    create_test_manifest_parquet(manifest_dir / f"{file_id}_harmonization.parquet", manifest_rows)
+    manifest_path = storage_manifest_path(storage, file_id)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    create_test_manifest_parquet(manifest_path, manifest_rows)
     create_harmonized_csv(original_path, {0: {DIAGNOSIS_COLUMN: CANONICAL_LUNG_CANCER}})
 
 

@@ -9,6 +9,7 @@ import pytest
 from httpx import AsyncClient
 
 from src.domain.storage import UploadStorage
+from tests.cache_helpers import storage_manifest_path
 from tests.conftest import (
     create_harmonized_csv,
     create_test_manifest_parquet,
@@ -40,9 +41,8 @@ def _create_manifest_with_history(
         "manual_overrides": manual_overrides,
     }]
 
-    manifest_dir = storage.manifest_dir
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = manifest_dir / f"{file_id}_harmonization.parquet"
+    manifest_path = storage_manifest_path(storage, file_id)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
     return create_test_manifest_parquet(manifest_path, manifest_rows)
 
 

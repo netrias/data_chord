@@ -64,31 +64,14 @@ class SessionCache:
         with self._lock:
             self.assignments_by_column_id = dict(assignments)
 
-    def get_column_cde_key(self, column_id: int) -> str | None:
-        with self._lock:
-            assignment = self.assignments_by_column_id.get(column_id)
-            return assignment.cde_key if assignment is not None else None
-
-    def get_column_assignment(self, column_id: int) -> ColumnAssignment | None:
-        with self._lock:
-            return self.assignments_by_column_id.get(column_id)
-
     def get_column_assignments(self) -> dict[int, ColumnAssignment]:
         """Thread-safe copy of column assignments for persistence and routing."""
         with self._lock:
             return dict(self.assignments_by_column_id)
 
-    def set_pvs(self, cde_key: str, values: frozenset[str]) -> None:
-        with self._lock:
-            self.pvs[cde_key] = values
-
     def set_pvs_batch(self, pv_map: dict[str, frozenset[str]]) -> None:
         with self._lock:
             self.pvs.update(pv_map)
-
-    def get_pvs_for_cde(self, cde_key: str) -> frozenset[str] | None:
-        with self._lock:
-            return self.pvs.get(cde_key)
 
     def get_pvs_for_column(self, column_id: int) -> frozenset[str] | None:
         with self._lock:

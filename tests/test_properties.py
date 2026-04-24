@@ -14,8 +14,6 @@ from hypothesis import strategies as st
 
 from src.domain.cde import (
     ColumnMappingDecision,
-    ColumnMappingSet,
-    normalize_cde_key,
 )
 from src.domain.cde_mapping_persistence import load_cde_mapping_json, save_cde_mapping
 from src.domain.column_assignment import ColumnAssignment
@@ -225,122 +223,6 @@ def test_compute_adjustment_non_conformant_when_no_match(
     assert result.adjusted_value is None
     assert result.original_value == original
     assert result.attempted_value == top
-
-
-# =============================================================================
-# CDE Key Normalization Properties
-# =============================================================================
-
-
-NO_MAPPING_SENTINEL = "No Mapping"
-
-
-@given(st.text(min_size=1, max_size=100).filter(lambda s: s.strip() and s.strip() != NO_MAPPING_SENTINEL))
-def test_normalize_cde_key_preserves_non_whitespace(text: str) -> None:
-    """Non-empty, non-whitespace, non-sentinel strings are returned stripped."""
-    result = normalize_cde_key(text)
-    assert result is not None
-    assert result == text.strip()
-
-
-@given(st.text(min_size=1, max_size=100).filter(lambda s: s.strip() and s.strip() != NO_MAPPING_SENTINEL))
-def test_normalize_cde_key_is_idempotent(text: str) -> None:
-    """Normalizing twice produces the same result."""
-    first = normalize_cde_key(text)
-    assert first is not None
-    second = normalize_cde_key(first)
-    assert second == first
-
-
-@given(st.sampled_from([None, "", "   ", "\t\n"]))
-def test_normalize_cde_key_empty_returns_none(empty: str | None) -> None:
-    """Empty or whitespace-only input returns None."""
-    assert normalize_cde_key(empty) is None
-
-
-def test_normalize_cde_key_no_mapping_sentinel_returns_none() -> None:
-    """The 'No Mapping' UI sentinel is treated as no selection."""
-    assert normalize_cde_key(NO_MAPPING_SENTINEL) is None
-    assert normalize_cde_key(f"  {NO_MAPPING_SENTINEL}  ") is None
-
-
-# =============================================================================
-# ColumnMappingSet Roundtrip Properties
-# =============================================================================
-
-
-@given(st.dictionaries(
-    keys=st.text(min_size=1, max_size=50).filter(lambda s: s.strip()),
-    values=st.text(min_size=1, max_size=50).filter(lambda s: s.strip()),
-    min_size=1,
-    max_size=10,
-))
-def test_column_mapping_roundtrip_preserves_columns(overrides: dict[str, str]) -> None:
-    """from_dict preserves column names through to_dict."""
-    mapping_set = ColumnMappingSet.from_dict(overrides)
-    result = mapping_set.to_dict()
-
-    # All original columns should be present
-    assert set(result.keys()) == set(overrides.keys())
-
-
-@given(st.dictionaries(
-    keys=st.text(min_size=1, max_size=50).filter(lambda s: s.strip()),
-    values=st.text(min_size=1, max_size=50).filter(lambda s: s.strip()),
-    min_size=1,
-    max_size=10,
-))
-def test_column_mapping_values_are_cleaned(overrides: dict[str, str]) -> None:
-    """All values are cleaned (stripped) strings."""
-    mapping_set = ColumnMappingSet.from_dict(overrides)
-    result = mapping_set.to_dict()
-
-    for key, value in result.items():
-        if value is not None:
-            # Value should be the stripped version of the input
-            assert value == overrides[key].strip()
-
-
-@given(st.dictionaries(
-    keys=st.text(min_size=1, max_size=50).filter(lambda s: s.strip()),
-    values=st.sampled_from(["", "   ", "\t\n"]),
-    min_size=1,
-    max_size=5,
-))
-def test_column_mapping_empty_values_become_none(overrides: dict[str, str]) -> None:
-    """Empty or whitespace-only CDE selections normalize to None (skipped columns)."""
-    mapping_set = ColumnMappingSet.from_dict(overrides)
-    result = mapping_set.to_dict()
-
-    # All empty/whitespace values should become None
-    for value in result.values():
-        assert value is None
-
-
-@settings(max_examples=50)
-@given(st.dictionaries(
-    keys=st.text(min_size=1, max_size=30).filter(lambda s: s.strip()),
-    values=st.one_of(
-        st.text(min_size=1, max_size=30).filter(lambda s: s.strip()),
-        st.just(""),
-    ),
-    min_size=0,
-    max_size=10,
-))
-def test_column_mapping_applied_plus_skipped_equals_total(overrides: dict[str, str]) -> None:
-    """Applied mappings + skipped columns = total columns."""
-    mapping_set = ColumnMappingSet.from_dict(overrides)
-
-    applied = mapping_set.get_applied()
-    skipped = mapping_set.get_skipped()
-
-    # No overlap
-    applied_cols = {m.column_name for m in applied}
-    skipped_cols = set(skipped)
-    assert applied_cols.isdisjoint(skipped_cols)
-
-    # Together they cover all input columns
-    assert applied_cols | skipped_cols == set(overrides.keys())
 
 
 # =============================================================================

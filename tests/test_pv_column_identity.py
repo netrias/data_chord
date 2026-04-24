@@ -15,6 +15,7 @@ from src.domain.data_model_cache import SessionCache, clear_all_session_caches, 
 from src.domain.manifest import ManifestPayload
 from src.domain.pv_persistence import load_pv_manifest_from_disk, save_pv_manifest_to_disk
 from src.stage_3_harmonize.router import _store_column_mappings_in_cache
+from tests.cache_helpers import cache_assignment, cache_cde_key, set_cache_pvs
 
 
 class TestDuplicateColumnNameIdentity:
@@ -28,7 +29,7 @@ class TestDuplicateColumnNameIdentity:
         """
         # Given
         cache = SessionCache()
-        cache.set_pvs("cde_a", frozenset(["PV1", "PV2"]))
+        set_cache_pvs(cache, "cde_a", frozenset(["PV1", "PV2"]))
         csv_headers = ["col", "col"]  # duplicate name at positions 0 and 1
         # Both positions explicitly mapped; list index = CSV column position
         manifest = cast(ManifestPayload, {"column_mappings": [
@@ -45,8 +46,8 @@ class TestDuplicateColumnNameIdentity:
         _store_column_mappings_in_cache(cache, manifest, {}, csv_headers)
 
         # Then: both positions get the mapping (neither is dropped)
-        assert cache.get_column_cde_key(0) == "cde_a"
-        assert cache.get_column_cde_key(1) == "cde_a"
+        assert cache_cde_key(cache, 0) == "cde_a"
+        assert cache_cde_key(cache, 1) == "cde_a"
         assert cache.get_pvs_for_column(0) == frozenset(["PV1", "PV2"])
         assert cache.get_pvs_for_column(1) == frozenset(["PV1", "PV2"])
 
@@ -68,8 +69,8 @@ class TestPVManifestJsonRoundTrip:
             0: ColumnAssignment(0, "col_zero", "cde_key_zero", "harmonizable"),
             1: ColumnAssignment(1, "col_one", "cde_key_one", "harmonizable"),
         })
-        cache.set_pvs("cde_key_zero", frozenset(["A"]))
-        cache.set_pvs("cde_key_one", frozenset(["B"]))
+        set_cache_pvs(cache, "cde_key_zero", frozenset(["A"]))
+        set_cache_pvs(cache, "cde_key_one", frozenset(["B"]))
         pv_map = {"cde_key_zero": frozenset(["A"]), "cde_key_one": frozenset(["B"])}
 
         saved_data: dict[str, Any] = {}
@@ -97,10 +98,10 @@ class TestPVManifestJsonRoundTrip:
             load_pv_manifest_from_disk(file_id, new_cache)
 
         # Then: integer keys survived the round-trip
-        assert new_cache.get_column_cde_key(0) == "cde_key_zero"
-        assert new_cache.get_column_cde_key(1) == "cde_key_one"
-        assert new_cache.get_column_assignment(0) == ColumnAssignment(0, "col_zero", "cde_key_zero", "harmonizable")
-        assert new_cache.get_column_assignment(1) == ColumnAssignment(1, "col_one", "cde_key_one", "harmonizable")
+        assert cache_cde_key(new_cache, 0) == "cde_key_zero"
+        assert cache_cde_key(new_cache, 1) == "cde_key_one"
+        assert cache_assignment(new_cache, 0) == ColumnAssignment(0, "col_zero", "cde_key_zero", "harmonizable")
+        assert cache_assignment(new_cache, 1) == ColumnAssignment(1, "col_one", "cde_key_one", "harmonizable")
         assert new_cache.get_pvs_for_column(0) == frozenset(["A"])
         assert new_cache.get_pvs_for_column(1) == frozenset(["B"])
 
@@ -118,11 +119,11 @@ class TestAbsentColumnIndexSkipped:
         cache = SessionCache()
         manual_overrides = {99: "some_cde"}
         csv_headers = ["col_a", "col_b"]
-        assert cache.get_column_cde_key(0) is None, "Cache starts empty"
+        assert cache_cde_key(cache, 0) is None, "Cache starts empty"
 
         # When
         _store_column_mappings_in_cache(cache, None, manual_overrides, csv_headers)
 
         # Then: no error, and no entries were added for the out-of-range index
-        assert cache.get_column_cde_key(0) is None
-        assert cache.get_column_cde_key(1) is None
+        assert cache_cde_key(cache, 0) is None
+        assert cache_cde_key(cache, 1) is None

@@ -16,6 +16,7 @@ from src.domain.data_model_cache import (
     get_session_cache,
 )
 from src.domain.pv_persistence import ensure_pvs_loaded, load_pv_manifest_from_disk
+from tests.cache_helpers import cache_assignment, cache_cde_key, cache_pvs_for_cde, set_cache_pvs
 
 
 class TestPVManifestPersistenceFeature:
@@ -60,8 +61,8 @@ class TestPVManifestPersistenceFeature:
         assert cache.has_any_pvs(), "Cache should have PVs after loading"
 
         # Column mappings are restored
-        assert cache.get_column_cde_key(0) == "primary_diagnosis_cde"
-        assert cache.get_column_cde_key(1) == "tissue_or_organ_of_origin"
+        assert cache_cde_key(cache, 0) == "primary_diagnosis_cde"
+        assert cache_cde_key(cache, 1) == "tissue_or_organ_of_origin"
 
         # PV sets are restored as frozensets
         primary_pvs = cache.get_pvs_for_column(0)
@@ -104,7 +105,7 @@ class TestPVManifestPersistenceFeature:
         # Given: A previous session has PVs in cache
         old_file_id = "old_file_abc"
         old_cache = get_session_cache(old_file_id)
-        old_cache.set_pvs("some_cde", frozenset(["Old Value 1", "Old Value 2"]))
+        set_cache_pvs(old_cache, "some_cde", frozenset(["Old Value 1", "Old Value 2"]))
         assert old_cache.has_any_pvs()
 
         # When: User uploads a new file (Stage 1 clears caches)
@@ -154,14 +155,14 @@ class TestSessionCacheThreadSafety:
             0: ColumnAssignment(0, "col_a", "cde1", "harmonizable"),
             1: ColumnAssignment(1, "col_b", "cde2", "harmonizable"),
         })
-        assert cache.get_column_assignment(2) is None
+        assert cache_assignment(cache, 2) is None
 
         # When: Getting column assignments and modifying the returned dict
         assignments = cache.get_column_assignments()
         assignments[2] = ColumnAssignment(2, "col_c", "cde3", "harmonizable")
 
         # Then: Cache is not affected by external mutation
-        assert cache.get_column_assignment(2) is None, "Cache should not be modified"
+        assert cache_assignment(cache, 2) is None, "Cache should not be modified"
 
     def test_pvs_stored_as_frozenset(self) -> None:
         """PVs are stored as frozensets for immutability and O(1) lookup."""
@@ -170,10 +171,10 @@ class TestSessionCacheThreadSafety:
 
         # When: Setting PVs
         pv_list = ["Value A", "Value B", "Value C"]
-        cache.set_pvs("test_cde", frozenset(pv_list))
+        set_cache_pvs(cache, "test_cde", frozenset(pv_list))
 
         # Then: PVs are retrievable and membership check is O(1)
-        pvs = cache.get_pvs_for_cde("test_cde")
+        pvs = cache_pvs_for_cde(cache, "test_cde")
         assert pvs is not None
         assert isinstance(pvs, frozenset)
         assert "Value A" in pvs
@@ -192,8 +193,8 @@ class TestSessionCacheThreadSafety:
         cache.set_pvs_batch(pv_map)
 
         # Then: All PVs are available
-        assert cache.get_pvs_for_cde("cde1") == frozenset(["A", "B"])
-        assert cache.get_pvs_for_cde("cde2") == frozenset(["X", "Y", "Z"])
+        assert cache_pvs_for_cde(cache, "cde1") == frozenset(["A", "B"])
+        assert cache_pvs_for_cde(cache, "cde2") == frozenset(["X", "Y", "Z"])
         assert cache.has_any_pvs()
 
 
@@ -205,7 +206,7 @@ class TestPVLookupByColumn:
         # Given: A cache with column assignments and PVs
         cache = SessionCache()
         cache.set_column_assignments({0: ColumnAssignment(0, "diagnosis", "primary_diagnosis_cde", "harmonizable")})
-        cache.set_pvs("primary_diagnosis_cde", frozenset(["Cancer", "Normal"]))
+        set_cache_pvs(cache, "primary_diagnosis_cde", frozenset(["Cancer", "Normal"]))
 
         # When: Looking up PVs by column index
         pvs = cache.get_pvs_for_column(0)
@@ -220,7 +221,7 @@ class TestPVLookupByColumn:
         # Given: A cache with some assignments but not for all columns
         cache = SessionCache()
         cache.set_column_assignments({0: ColumnAssignment(0, "mapped_col", "some_cde", "harmonizable")})
-        cache.set_pvs("some_cde", frozenset(["Value"]))
+        set_cache_pvs(cache, "some_cde", frozenset(["Value"]))
 
         # When: Looking up PVs for an unmapped column index
         pvs = cache.get_pvs_for_column(1)

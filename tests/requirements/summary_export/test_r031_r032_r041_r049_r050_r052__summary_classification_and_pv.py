@@ -8,6 +8,7 @@ from httpx import AsyncClient
 from src.domain.column_assignment import ColumnAssignment
 from src.domain.data_model_cache import get_session_cache
 from src.domain.storage import UploadStorage
+from tests.cache_helpers import set_cache_pvs, storage_manifest_path
 from tests.conftest import create_harmonized_csv, create_test_manifest_parquet, upload_content
 from tests.requirements.helpers import (
     CANONICAL_LUNG_CANCER,
@@ -20,9 +21,9 @@ pytestmark = pytest.mark.asyncio
 
 
 def _write_manifest(storage: UploadStorage, file_id: str, rows: list[dict[str, object]]) -> None:
-    manifest_dir = storage.manifest_dir
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    create_test_manifest_parquet(manifest_dir / f"{file_id}_harmonization.parquet", rows)
+    manifest_path = storage_manifest_path(storage, file_id)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    create_test_manifest_parquet(manifest_path, rows)
 
 
 def _manifest_row(
@@ -79,7 +80,7 @@ async def test_r031_r032_r041__summary_counts_case_mismatch_as_non_conformant(
     )
     cache = get_session_cache(file_id)
     cache.set_column_assignments({0: ColumnAssignment(0, DIAGNOSIS_COLUMN, PRIMARY_DIAGNOSIS_CDE, "harmonizable")})
-    cache.set_pvs(PRIMARY_DIAGNOSIS_CDE, frozenset([CANONICAL_LUNG_CANCER]))
+    set_cache_pvs(cache, PRIMARY_DIAGNOSIS_CDE, frozenset([CANONICAL_LUNG_CANCER]))
     pvs = cache.get_pvs_for_column(0)
     assert pvs is not None
     assert LOWERCASE_LUNG_CANCER not in pvs

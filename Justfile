@@ -35,6 +35,9 @@ requirements-coverage:
 	@echo "JSON coverage report: .artifacts/requirements-coverage/coverage.json"
 	@echo "XML coverage report: .artifacts/requirements-coverage/coverage.xml"
 
+test-only-code:
+	uv run python scripts/check_test_only_code.py
+
 test-e2e:
 	npm run test:e2e
 
