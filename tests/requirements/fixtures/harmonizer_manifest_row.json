@@ -1,0 +1,13 @@
+{
+  "job_id": "requirements-manifest",
+  "column_id": 0,
+  "column_name": "diagnosis",
+  "to_harmonize": "",
+  "top_harmonization": "",
+  "ontology_id": null,
+  "top_harmonizations": [],
+  "confidence_score": 0.85,
+  "error": null,
+  "row_indices": [0],
+  "manual_overrides": []
+}

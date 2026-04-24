@@ -1,0 +1,112 @@
+{
+  "file_id": "",
+  "file_name": "requirements-mapping.csv",
+  "total_rows": 2,
+  "columns": [
+    {
+      "column_id": 0,
+      "column_name": "diagnosis",
+      "inferred_type": "text",
+      "sample_values": ["melanoma"],
+      "confidence_bucket": "high",
+      "confidence_score": 0.95
+    },
+    {
+      "column_id": 1,
+      "column_name": "status",
+      "inferred_type": "text",
+      "sample_values": ["draft"],
+      "confidence_bucket": "medium",
+      "confidence_score": 0.75
+    },
+    {
+      "column_id": 2,
+      "column_name": "notes",
+      "inferred_type": "text",
+      "sample_values": ["keep"],
+      "confidence_bucket": "low",
+      "confidence_score": 0.4
+    }
+  ],
+  "cde_targets": {
+    "0": [
+      {
+        "target": "primary_diagnosis",
+        "confidence": 0.9,
+        "cde_id": 101,
+        "harmonization": "harmonizable"
+      }
+    ],
+    "1": [
+      {
+        "target": "status_code",
+        "confidence": 0.9,
+        "cde_id": 102,
+        "harmonization": "harmonizable"
+      }
+    ],
+    "2": [
+      {
+        "target": "clinical_note",
+        "confidence": 0.9,
+        "cde_id": 103,
+        "harmonization": "harmonizable"
+      }
+    ]
+  },
+  "next_stage": "mapping",
+  "next_step_hint": "Review AI-suggested column mappings once ready.",
+  "manual_overrides": {},
+  "manifest": {
+    "column_mappings": [
+      {
+        "column_name": "diagnosis",
+        "cde_key": "primary_diagnosis",
+        "cde_id": 101,
+        "harmonization": "harmonizable",
+        "alternatives": [
+          {
+            "target": "primary_diagnosis",
+            "confidence": 0.9,
+            "cde_id": 101,
+            "harmonization": "harmonizable"
+          }
+        ]
+      },
+      {
+        "column_name": "status",
+        "cde_key": "status_code",
+        "cde_id": 102,
+        "harmonization": "harmonizable",
+        "alternatives": [
+          {
+            "target": "status_code",
+            "confidence": 0.9,
+            "cde_id": 102,
+            "harmonization": "harmonizable"
+          },
+          {
+            "target": "vital_status",
+            "confidence": 0.9,
+            "cde_id": 104,
+            "harmonization": "harmonizable"
+          }
+        ]
+      },
+      {
+        "column_name": "notes",
+        "cde_key": "clinical_note",
+        "cde_id": 103,
+        "harmonization": "harmonizable",
+        "alternatives": [
+          {
+            "target": "clinical_note",
+            "confidence": 0.9,
+            "cde_id": 103,
+            "harmonization": "harmonizable"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -18,7 +18,8 @@ from tests.requirements.helpers import (
     CANONICAL_LUNG_CANCER,
     DIAGNOSIS_COLUMN,
     LOWERCASE_LUNG_CANCER,
-    PRIMARY_DIAGNOSIS_CDE,
+    harmonizer_manifest_row,
+    load_reference_json,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -34,19 +35,12 @@ def _write_harmonizer_manifest(
     create_test_manifest_parquet(
         path,
         [
-            {
-                "job_id": "pv-adjustment",
-                "column_id": 0,
-                "column_name": DIAGNOSIS_COLUMN,
-                "to_harmonize": original,
-                "top_harmonization": ai_value,
-                "ontology_id": None,
-                "top_harmonizations": alternatives,
-                "confidence_score": 0.85,
-                "error": None,
-                "row_indices": [0],
-                "manual_overrides": [],
-            }
+            harmonizer_manifest_row(
+                original=original,
+                ai_value=ai_value,
+                alternatives=alternatives,
+                job_id="pv-adjustment",
+            )
         ],
     )
 
@@ -75,24 +69,7 @@ async def _run_stage_three_with_manifest(
             "file_id": file_id,
             "target_schema": TEST_TARGET_SCHEMA,
             "manual_overrides": {},
-            "manifest": {
-                "column_mappings": [
-                    {
-                        "column_name": DIAGNOSIS_COLUMN,
-                        "cde_key": PRIMARY_DIAGNOSIS_CDE,
-                        "cde_id": 2,
-                        "harmonization": "harmonizable",
-                        "alternatives": [
-                            {
-                                "target": PRIMARY_DIAGNOSIS_CDE,
-                                "confidence": 0.9,
-                                "cde_id": 2,
-                                "harmonization": "harmonizable",
-                            }
-                        ],
-                    }
-                ]
-            },
+            "manifest": load_reference_json("stage3_primary_diagnosis_manifest.json"),
         },
     )
     assert response.status_code == 200

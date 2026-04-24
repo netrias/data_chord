@@ -60,7 +60,7 @@ Tests:
   - Given: The web application is running.
   - When: The user opens each major workflow stage page.
   - Then: Each stage page renders successfully.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:172](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L172)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:127](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L127)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
   - Given: a CSV upload has not created any review overrides yet.
   - When: the user harmonizes, reviews a changed value, saves an override, and opens the summary.
   - Then: Stage 5 shows transformation history and export applies the saved override.
@@ -75,7 +75,7 @@ Tests:
   - Given: Saved overrides address two duplicate-named columns by positional column id.
   - When: Stage 5 export downloads the harmonized CSV.
   - Then: Each override lands in its positional column and duplicate headers are preserved.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:172](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L172)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:127](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L127)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
   - Given: a CSV upload has not created any review overrides yet.
   - When: the user harmonizes, reviews a changed value, saves an override, and opens the summary.
   - Then: Stage 5 shows transformation history and export applies the saved override.
@@ -94,7 +94,7 @@ Tests:
   - Given: A user has uploaded a file but has not completed harmonization.
   - When: The user requests Stage 4 review rows.
   - Then: The API returns a recoverable error explaining that the manifest is missing.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:386](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L386)::[R-006 R-029 R-040 R-067 R-068 R-069] browser surfaces recoverable workflow errors without crashing
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:330](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L330)::[R-006 R-029 R-040 R-067 R-068 R-069] browser surfaces recoverable workflow errors without crashing
   - Given: the browser is on Stage 1 with no upload error visible.
   - When: the user uploads an unsupported file and later hits missing workflow state.
   - Then: the user sees recoverable empty/error states and not a server traceback.
@@ -109,7 +109,7 @@ Tests:
   - Given: A prior workflow has cached permissible values.
   - When: The user uploads a new source CSV through Stage 1.
   - Then: The stale cached permissible values are cleared before the new workflow continues.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:410](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L410)::[R-007 R-077 R-082 R-083 R-084] Stage 5 navigation can return to upload and start a fresh workflow
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:354](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L354)::[R-007 R-077 R-082 R-083 R-084] Stage 5 navigation can return to upload and start a fresh workflow
   - Given: a user has reached Stage 5 for one uploaded file.
   - When: the user navigates back to upload and starts a new workflow.
   - Then: the new workflow gets a different file ID and does not reuse the previous file state.
@@ -126,7 +126,7 @@ Tests:
   - Given: A user has CSV content ready to upload.
   - When: The user uploads the CSV through Stage 1.
   - Then: The response includes a stable file id that loads the stored upload.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:172](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L172)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:127](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L127)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
   - Given: a CSV upload has not created any review overrides yet.
   - When: the user harmonizes, reviews a changed value, saves an override, and opens the summary.
   - Then: Stage 5 shows transformation history and export applies the saved override.
@@ -141,7 +141,7 @@ Tests:
   - Given: A user has CSV content ready to upload.
   - When: The user uploads the CSV through Stage 1.
   - Then: The response includes a stable file id that loads the stored upload.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:172](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L172)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:127](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L127)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
   - Given: a CSV upload has not created any review overrides yet.
   - When: the user harmonizes, reviews a changed value, saves an override, and opens the summary.
   - Then: Stage 5 shows transformation history and export applies the saved override.
@@ -182,7 +182,7 @@ Tests:
   - Given: Saved overrides address two duplicate-named columns by positional column id.
   - When: Stage 5 export downloads the harmonized CSV.
   - Then: Each override lands in its positional column and duplicate headers are preserved.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:282](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L282)::[R-012 R-013 R-014 R-046 R-047 R-050 R-056 R-059] duplicate headers and short rows stay positional through review and export
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:237](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L237)::[R-012 R-013 R-014 R-046 R-047 R-050 R-056 R-059] duplicate headers and short rows stay positional through review and export
   - Given: a CSV has duplicate headers and a row missing the trailing cell.
   - When: saved review overrides target each duplicate column and the padded trailing column by column ID.
   - Then: duplicate columns stay distinct, short rows are padded, and CSV output uses the project line ending.
@@ -201,7 +201,7 @@ Tests:
   - Given: Saved overrides address two duplicate-named columns by positional column id.
   - When: Stage 5 export downloads the harmonized CSV.
   - Then: Each override lands in its positional column and duplicate headers are preserved.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:282](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L282)::[R-012 R-013 R-014 R-046 R-047 R-050 R-056 R-059] duplicate headers and short rows stay positional through review and export
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:237](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L237)::[R-012 R-013 R-014 R-046 R-047 R-050 R-056 R-059] duplicate headers and short rows stay positional through review and export
   - Given: a CSV has duplicate headers and a row missing the trailing cell.
   - When: saved review overrides target each duplicate column and the padded trailing column by column ID.
   - Then: duplicate columns stay distinct, short rows are padded, and CSV output uses the project line ending.
@@ -216,7 +216,7 @@ Tests:
   - Given: A harmonized CSV row is shorter than the header and has a saved trailing override.
   - When: Stage 5 export downloads the harmonized CSV.
   - Then: The row is padded and the override appears in the intended trailing column.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:282](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L282)::[R-012 R-013 R-014 R-046 R-047 R-050 R-056 R-059] duplicate headers and short rows stay positional through review and export
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:237](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L237)::[R-012 R-013 R-014 R-046 R-047 R-050 R-056 R-059] duplicate headers and short rows stay positional through review and export
   - Given: a CSV has duplicate headers and a row missing the trailing cell.
   - When: saved review overrides target each duplicate column and the padded trailing column by column ID.
   - Then: duplicate columns stay distinct, short rows are padded, and CSV output uses the project line ending.
@@ -229,11 +229,11 @@ Status: Covered
 Source: [requirements.md:62](../../requirements.md#L62)
 
 Tests:
-- [tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py:78](../../tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py#L78)::test_r015_r016_r017_r018_r019_r021_r022_r023_r025_r026__harmonize_resolves_column_assignments_by_position
+- [tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py:29](../../tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py#L29)::test_r015_r016_r017_r018_r019_r021_r022_r023_r025_r026__harmonize_resolves_column_assignments_by_position
   - Given: A user has AI mappings, a manual override, a numeric pass-through, and an unmapped column.
   - When: The user starts harmonization from Stage 3.
   - Then: Harmonization uses resolved positional assignments and sends only harmonizable mappings to the SDK.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:210](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L210)::[R-015 R-016 R-017 R-018 R-019] Stage 2 resolves accepted, overridden, and unmapped columns by position
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:165](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L165)::[R-015 R-016 R-017 R-018 R-019] Stage 2 resolves accepted, overridden, and unmapped columns by position
   - Given: Stage 2 has three positional columns with AI suggestions and no manual selections.
   - When: the user keeps one AI mapping, overrides one mapping, and explicitly leaves one unmapped.
   - Then: the browser-submitted request keeps stable column IDs and gives manual choices precedence.
@@ -244,11 +244,11 @@ Status: Covered
 Source: [requirements.md:65](../../requirements.md#L65)
 
 Tests:
-- [tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py:78](../../tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py#L78)::test_r015_r016_r017_r018_r019_r021_r022_r023_r025_r026__harmonize_resolves_column_assignments_by_position
+- [tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py:29](../../tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py#L29)::test_r015_r016_r017_r018_r019_r021_r022_r023_r025_r026__harmonize_resolves_column_assignments_by_position
   - Given: A user has AI mappings, a manual override, a numeric pass-through, and an unmapped column.
   - When: The user starts harmonization from Stage 3.
   - Then: Harmonization uses resolved positional assignments and sends only harmonizable mappings to the SDK.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:210](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L210)::[R-015 R-016 R-017 R-018 R-019] Stage 2 resolves accepted, overridden, and unmapped columns by position
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:165](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L165)::[R-015 R-016 R-017 R-018 R-019] Stage 2 resolves accepted, overridden, and unmapped columns by position
   - Given: Stage 2 has three positional columns with AI suggestions and no manual selections.
   - When: the user keeps one AI mapping, overrides one mapping, and explicitly leaves one unmapped.
   - Then: the browser-submitted request keeps stable column IDs and gives manual choices precedence.
@@ -259,11 +259,11 @@ Status: Covered
 Source: [requirements.md:68](../../requirements.md#L68)
 
 Tests:
-- [tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py:78](../../tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py#L78)::test_r015_r016_r017_r018_r019_r021_r022_r023_r025_r026__harmonize_resolves_column_assignments_by_position
+- [tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py:29](../../tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py#L29)::test_r015_r016_r017_r018_r019_r021_r022_r023_r025_r026__harmonize_resolves_column_assignments_by_position
   - Given: A user has AI mappings, a manual override, a numeric pass-through, and an unmapped column.
   - When: The user starts harmonization from Stage 3.
   - Then: Harmonization uses resolved positional assignments and sends only harmonizable mappings to the SDK.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:210](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L210)::[R-015 R-016 R-017 R-018 R-019] Stage 2 resolves accepted, overridden, and unmapped columns by position
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:165](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L165)::[R-015 R-016 R-017 R-018 R-019] Stage 2 resolves accepted, overridden, and unmapped columns by position
   - Given: Stage 2 has three positional columns with AI suggestions and no manual selections.
   - When: the user keeps one AI mapping, overrides one mapping, and explicitly leaves one unmapped.
   - Then: the browser-submitted request keeps stable column IDs and gives manual choices precedence.
@@ -274,11 +274,11 @@ Status: Covered
 Source: [requirements.md:71](../../requirements.md#L71)
 
 Tests:
-- [tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py:78](../../tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py#L78)::test_r015_r016_r017_r018_r019_r021_r022_r023_r025_r026__harmonize_resolves_column_assignments_by_position
+- [tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py:29](../../tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py#L29)::test_r015_r016_r017_r018_r019_r021_r022_r023_r025_r026__harmonize_resolves_column_assignments_by_position
   - Given: A user has AI mappings, a manual override, a numeric pass-through, and an unmapped column.
   - When: The user starts harmonization from Stage 3.
   - Then: Harmonization uses resolved positional assignments and sends only harmonizable mappings to the SDK.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:210](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L210)::[R-015 R-016 R-017 R-018 R-019] Stage 2 resolves accepted, overridden, and unmapped columns by position
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:165](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L165)::[R-015 R-016 R-017 R-018 R-019] Stage 2 resolves accepted, overridden, and unmapped columns by position
   - Given: Stage 2 has three positional columns with AI suggestions and no manual selections.
   - When: the user keeps one AI mapping, overrides one mapping, and explicitly leaves one unmapped.
   - Then: the browser-submitted request keeps stable column IDs and gives manual choices precedence.
@@ -289,11 +289,11 @@ Status: Covered
 Source: [requirements.md:74](../../requirements.md#L74)
 
 Tests:
-- [tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py:78](../../tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py#L78)::test_r015_r016_r017_r018_r019_r021_r022_r023_r025_r026__harmonize_resolves_column_assignments_by_position
+- [tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py:29](../../tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py#L29)::test_r015_r016_r017_r018_r019_r021_r022_r023_r025_r026__harmonize_resolves_column_assignments_by_position
   - Given: A user has AI mappings, a manual override, a numeric pass-through, and an unmapped column.
   - When: The user starts harmonization from Stage 3.
   - Then: Harmonization uses resolved positional assignments and sends only harmonizable mappings to the SDK.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:210](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L210)::[R-015 R-016 R-017 R-018 R-019] Stage 2 resolves accepted, overridden, and unmapped columns by position
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:165](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L165)::[R-015 R-016 R-017 R-018 R-019] Stage 2 resolves accepted, overridden, and unmapped columns by position
   - Given: Stage 2 has three positional columns with AI suggestions and no manual selections.
   - When: the user keeps one AI mapping, overrides one mapping, and explicitly leaves one unmapped.
   - Then: the browser-submitted request keeps stable column IDs and gives manual choices precedence.
@@ -308,7 +308,7 @@ Tests:
   - Given: A workflow has an unmapped column and a persisted column-mapping artifact.
   - When: The user downloads the Stage 5 export bundle.
   - Then: The CSV preserves unmapped values and the bundle includes a CDE mapping JSON artifact.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:256](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L256)::[R-020 R-057 R-058] unmapped columns pass through export unchanged while mapped columns harmonize
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:211](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L211)::[R-020 R-057 R-058] unmapped columns pass through export unchanged while mapped columns harmonize
   - Given: one column is explicitly unmapped before harmonization.
   - When: another column is harmonized and the user downloads the export.
   - Then: the harmonized column changes and the unmapped column value remains untouched.
@@ -319,7 +319,7 @@ Status: Covered
 Source: [requirements.md:80](../../requirements.md#L80)
 
 Tests:
-- [tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py:78](../../tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py#L78)::test_r015_r016_r017_r018_r019_r021_r022_r023_r025_r026__harmonize_resolves_column_assignments_by_position
+- [tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py:29](../../tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py#L29)::test_r015_r016_r017_r018_r019_r021_r022_r023_r025_r026__harmonize_resolves_column_assignments_by_position
   - Given: A user has AI mappings, a manual override, a numeric pass-through, and an unmapped column.
   - When: The user starts harmonization from Stage 3.
   - Then: Harmonization uses resolved positional assignments and sends only harmonizable mappings to the SDK.
@@ -330,7 +330,7 @@ Status: Covered
 Source: [requirements.md:83](../../requirements.md#L83)
 
 Tests:
-- [tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py:78](../../tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py#L78)::test_r015_r016_r017_r018_r019_r021_r022_r023_r025_r026__harmonize_resolves_column_assignments_by_position
+- [tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py:29](../../tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py#L29)::test_r015_r016_r017_r018_r019_r021_r022_r023_r025_r026__harmonize_resolves_column_assignments_by_position
   - Given: A user has AI mappings, a manual override, a numeric pass-through, and an unmapped column.
   - When: The user starts harmonization from Stage 3.
   - Then: Harmonization uses resolved positional assignments and sends only harmonizable mappings to the SDK.
@@ -341,7 +341,7 @@ Status: Covered
 Source: [requirements.md:86](../../requirements.md#L86)
 
 Tests:
-- [tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py:78](../../tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py#L78)::test_r015_r016_r017_r018_r019_r021_r022_r023_r025_r026__harmonize_resolves_column_assignments_by_position
+- [tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py:29](../../tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py#L29)::test_r015_r016_r017_r018_r019_r021_r022_r023_r025_r026__harmonize_resolves_column_assignments_by_position
   - Given: A user has AI mappings, a manual override, a numeric pass-through, and an unmapped column.
   - When: The user starts harmonization from Stage 3.
   - Then: Harmonization uses resolved positional assignments and sends only harmonizable mappings to the SDK.
@@ -365,7 +365,7 @@ Status: Covered
 Source: [requirements.md:96](../../requirements.md#L96)
 
 Tests:
-- [tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py:78](../../tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py#L78)::test_r015_r016_r017_r018_r019_r021_r022_r023_r025_r026__harmonize_resolves_column_assignments_by_position
+- [tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py:29](../../tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py#L29)::test_r015_r016_r017_r018_r019_r021_r022_r023_r025_r026__harmonize_resolves_column_assignments_by_position
   - Given: A user has AI mappings, a manual override, a numeric pass-through, and an unmapped column.
   - When: The user starts harmonization from Stage 3.
   - Then: Harmonization uses resolved positional assignments and sends only harmonizable mappings to the SDK.
@@ -376,7 +376,7 @@ Status: Covered
 Source: [requirements.md:99](../../requirements.md#L99)
 
 Tests:
-- [tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py:78](../../tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py#L78)::test_r015_r016_r017_r018_r019_r021_r022_r023_r025_r026__harmonize_resolves_column_assignments_by_position
+- [tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py:29](../../tests/requirements/column_mapping/test_r015_r018_r019_r021_r022_r023_r025_r026__harmonize_uses_resolved_assignments.py#L29)::test_r015_r016_r017_r018_r019_r021_r022_r023_r025_r026__harmonize_resolves_column_assignments_by_position
   - Given: A user has AI mappings, a manual override, a numeric pass-through, and an unmapped column.
   - When: The user starts harmonization from Stage 3.
   - Then: Harmonization uses resolved positional assignments and sends only harmonizable mappings to the SDK.
@@ -391,7 +391,7 @@ Tests:
   - Given: A user has harmonized data ready for review.
   - When: The user fetches Stage 4 rows and saves a manual review override.
   - Then: Review data includes original and AI metadata, and the saved override can be loaded back.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:172](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L172)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:127](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L127)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
   - Given: a CSV upload has not created any review overrides yet.
   - When: the user harmonizes, reviews a changed value, saves an override, and opens the summary.
   - Then: Stage 5 shows transformation history and export applies the saved override.
@@ -402,7 +402,7 @@ Status: Covered
 Source: [requirements.md:107](../../requirements.md#L107)
 
 Tests:
-- [tests/requirements/permissible_values/test_r033_r042__stage3_pv_adjustments.py:103](../../tests/requirements/permissible_values/test_r033_r042__stage3_pv_adjustments.py#L103)::test_r028_r033_r064__stage3_preserves_valid_original_pv_for_stage5_summary
+- [tests/requirements/permissible_values/test_r033_r042__stage3_pv_adjustments.py:80](../../tests/requirements/permissible_values/test_r033_r042__stage3_pv_adjustments.py#L80)::test_r028_r033_r064__stage3_preserves_valid_original_pv_for_stage5_summary
   - Given: The harmonizer returns a different AI value while the user's original value is already a valid PV.
   - When: The user runs Stage 3 and then requests the Stage 5 summary.
   - Then: The persisted manifest used by Stage 5 preserves the original value as final.
@@ -417,7 +417,7 @@ Tests:
   - Given: The external harmonization client is unavailable.
   - When: The user starts harmonization.
   - Then: The API returns a controlled workflow response without exposing traceback details.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:386](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L386)::[R-006 R-029 R-040 R-067 R-068 R-069] browser surfaces recoverable workflow errors without crashing
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:330](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L330)::[R-006 R-029 R-040 R-067 R-068 R-069] browser surfaces recoverable workflow errors without crashing
   - Given: the browser is on Stage 1 with no upload error visible.
   - When: the user uploads an unsupported file and later hits missing workflow state.
   - Then: the user sees recoverable empty/error states and not a server traceback.
@@ -441,7 +441,7 @@ Status: Covered
 Source: [requirements.md:118](../../requirements.md#L118)
 
 Tests:
-- [tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py:54](../../tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py#L54)::test_r031_r032_r041__summary_counts_case_mismatch_as_non_conformant
+- [tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py:31](../../tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py#L31)::test_r031_r032_r041__summary_counts_case_mismatch_as_non_conformant
   - Given: A harmonized value differs from the only permissible value by case.
   - When: The user requests the Stage 5 summary.
   - Then: The summary marks the value non-conformant by exact PV matching.
@@ -452,7 +452,7 @@ Status: Covered
 Source: [requirements.md:120](../../requirements.md#L120)
 
 Tests:
-- [tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py:54](../../tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py#L54)::test_r031_r032_r041__summary_counts_case_mismatch_as_non_conformant
+- [tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py:31](../../tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py#L31)::test_r031_r032_r041__summary_counts_case_mismatch_as_non_conformant
   - Given: A harmonized value differs from the only permissible value by case.
   - When: The user requests the Stage 5 summary.
   - Then: The summary marks the value non-conformant by exact PV matching.
@@ -463,7 +463,7 @@ Status: Covered
 Source: [requirements.md:123](../../requirements.md#L123)
 
 Tests:
-- [tests/requirements/permissible_values/test_r033_r042__stage3_pv_adjustments.py:103](../../tests/requirements/permissible_values/test_r033_r042__stage3_pv_adjustments.py#L103)::test_r028_r033_r064__stage3_preserves_valid_original_pv_for_stage5_summary
+- [tests/requirements/permissible_values/test_r033_r042__stage3_pv_adjustments.py:80](../../tests/requirements/permissible_values/test_r033_r042__stage3_pv_adjustments.py#L80)::test_r028_r033_r064__stage3_preserves_valid_original_pv_for_stage5_summary
   - Given: The harmonizer returns a different AI value while the user's original value is already a valid PV.
   - When: The user runs Stage 3 and then requests the Stage 5 summary.
   - Then: The persisted manifest used by Stage 5 preserves the original value as final.
@@ -500,7 +500,7 @@ Tests:
   - Given: The review UI needs to show meaningful edge whitespace differences.
   - When: The Stage 4 shared review assets are inspected.
   - Then: They include a whitespace marker renderer and visible marker styles.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:329](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L329)::[R-036 R-048] review renders whitespace markers and restores review mode after reload
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:284](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L284)::[R-036 R-048] review renders whitespace markers and restores review mode after reload
   - Given: review has whitespace-significant values and starts in column mode.
   - When: the user switches to row mode and reloads the review page.
   - Then: row mode and whitespace markers are still visible.
@@ -550,7 +550,7 @@ Tests:
   - Given: A workflow has reviewable harmonization data but no persisted PV manifest.
   - When: The user opens Stage 4 review rows.
   - Then: Review data loads without crashing and PV-dependent data is absent.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:386](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L386)::[R-006 R-029 R-040 R-067 R-068 R-069] browser surfaces recoverable workflow errors without crashing
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:330](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L330)::[R-006 R-029 R-040 R-067 R-068 R-069] browser surfaces recoverable workflow errors without crashing
   - Given: the browser is on Stage 1 with no upload error visible.
   - When: the user uploads an unsupported file and later hits missing workflow state.
   - Then: the user sees recoverable empty/error states and not a server traceback.
@@ -561,11 +561,11 @@ Status: Covered
 Source: [requirements.md:152](../../requirements.md#L152)
 
 Tests:
-- [tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py:54](../../tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py#L54)::test_r031_r032_r041__summary_counts_case_mismatch_as_non_conformant
+- [tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py:31](../../tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py#L31)::test_r031_r032_r041__summary_counts_case_mismatch_as_non_conformant
   - Given: A harmonized value differs from the only permissible value by case.
   - When: The user requests the Stage 5 summary.
   - Then: The summary marks the value non-conformant by exact PV matching.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:357](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L357)::[R-041] summary marks values outside permissible values as non-conformant
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:312](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L312)::[R-041] summary marks values outside permissible values as non-conformant
   - Given: a harmonized workflow has a value that is not in the persisted PV set.
   - When: Stage 5 summary loads after PV data is seeded with only the canonical case.
   - Then: the summary shows the value as non-conformant.
@@ -576,7 +576,7 @@ Status: Covered
 Source: [requirements.md:156](../../requirements.md#L156)
 
 Tests:
-- [tests/requirements/permissible_values/test_r033_r042__stage3_pv_adjustments.py:141](../../tests/requirements/permissible_values/test_r033_r042__stage3_pv_adjustments.py#L141)::test_r042__stage3_uses_first_conformant_alternative_for_stage5_summary
+- [tests/requirements/permissible_values/test_r033_r042__stage3_pv_adjustments.py:118](../../tests/requirements/permissible_values/test_r033_r042__stage3_pv_adjustments.py#L118)::test_r042__stage3_uses_first_conformant_alternative_for_stage5_summary
   - Given: The original and AI values are not valid PVs but a later alternative is valid.
   - When: The user runs Stage 3 and then requests the Stage 5 summary.
   - Then: The persisted manifest used by Stage 5 contains the first conformant alternative.
@@ -593,7 +593,7 @@ Tests:
   - Given: A user has harmonized data ready for review.
   - When: The user fetches Stage 4 rows and saves a manual review override.
   - Then: Review data includes original and AI metadata, and the saved override can be loaded back.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:172](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L172)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:127](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L127)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
   - Given: a CSV upload has not created any review overrides yet.
   - When: the user harmonizes, reviews a changed value, saves an override, and opens the summary.
   - Then: Stage 5 shows transformation history and export applies the saved override.
@@ -608,7 +608,7 @@ Tests:
   - Given: A user has harmonized data ready for review.
   - When: The user fetches Stage 4 rows and saves a manual review override.
   - Then: Review data includes original and AI metadata, and the saved override can be loaded back.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:172](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L172)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:127](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L127)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
   - Given: a CSV upload has not created any review overrides yet.
   - When: the user harmonizes, reviews a changed value, saves an override, and opens the summary.
   - Then: Stage 5 shows transformation history and export applies the saved override.
@@ -623,7 +623,7 @@ Tests:
   - Given: A user has harmonized data ready for review.
   - When: The user fetches Stage 4 rows and saves a manual review override.
   - Then: Review data includes original and AI metadata, and the saved override can be loaded back.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:172](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L172)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:127](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L127)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
   - Given: a CSV upload has not created any review overrides yet.
   - When: the user harmonizes, reviews a changed value, saves an override, and opens the summary.
   - Then: Stage 5 shows transformation history and export applies the saved override.
@@ -638,7 +638,7 @@ Tests:
   - Given: Saved overrides address two duplicate-named columns by positional column id.
   - When: Stage 5 export downloads the harmonized CSV.
   - Then: Each override lands in its positional column and duplicate headers are preserved.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:282](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L282)::[R-012 R-013 R-014 R-046 R-047 R-050 R-056 R-059] duplicate headers and short rows stay positional through review and export
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:237](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L237)::[R-012 R-013 R-014 R-046 R-047 R-050 R-056 R-059] duplicate headers and short rows stay positional through review and export
   - Given: a CSV has duplicate headers and a row missing the trailing cell.
   - When: saved review overrides target each duplicate column and the padded trailing column by column ID.
   - Then: duplicate columns stay distinct, short rows are padded, and CSV output uses the project line ending.
@@ -653,7 +653,7 @@ Tests:
   - Given: A CSV has two columns with the same header and distinct positional values.
   - When: Stage 4 row context is requested for those rows.
   - Then: The response preserves both duplicate headers and each positional cell value.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:282](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L282)::[R-012 R-013 R-014 R-046 R-047 R-050 R-056 R-059] duplicate headers and short rows stay positional through review and export
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:237](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L237)::[R-012 R-013 R-014 R-046 R-047 R-050 R-056 R-059] duplicate headers and short rows stay positional through review and export
   - Given: a CSV has duplicate headers and a row missing the trailing cell.
   - When: saved review overrides target each duplicate column and the padded trailing column by column ID.
   - Then: duplicate columns stay distinct, short rows are padded, and CSV output uses the project line ending.
@@ -668,7 +668,7 @@ Tests:
   - Given: A user has harmonized data ready for review.
   - When: The user fetches Stage 4 rows and saves a manual review override.
   - Then: Review data includes original and AI metadata, and the saved override can be loaded back.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:329](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L329)::[R-036 R-048] review renders whitespace markers and restores review mode after reload
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:284](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L284)::[R-036 R-048] review renders whitespace markers and restores review mode after reload
   - Given: review has whitespace-significant values and starts in column mode.
   - When: the user switches to row mode and reloads the review page.
   - Then: row mode and whitespace markers are still visible.
@@ -681,11 +681,11 @@ Status: Covered
 Source: [requirements.md:183](../../requirements.md#L183)
 
 Tests:
-- [tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py:99](../../tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py#L99)::test_r049_r052__summary_classifies_changes_and_collapses_duplicate_override_history
+- [tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py:76](../../tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py#L76)::test_r049_r052__summary_classifies_changes_and_collapses_duplicate_override_history
   - Given: A manifest contains unchanged, AI-harmonized, and repeated manual override transformations.
   - When: The user requests the Stage 5 summary.
   - Then: The summary classifies each change type and collapses consecutive duplicate override history.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:172](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L172)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:127](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L127)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
   - Given: a CSV upload has not created any review overrides yet.
   - When: the user harmonizes, reviews a changed value, saves an override, and opens the summary.
   - Then: Stage 5 shows transformation history and export applies the saved override.
@@ -696,11 +696,11 @@ Status: Covered
 Source: [requirements.md:186](../../requirements.md#L186)
 
 Tests:
-- [tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py:149](../../tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py#L149)::test_r050__summary_preserves_duplicate_named_columns_by_column_id
+- [tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py:128](../../tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py#L128)::test_r050__summary_preserves_duplicate_named_columns_by_column_id
   - Given: A manifest has two duplicate-named columns with different column ids.
   - When: The user requests the Stage 5 summary.
   - Then: The summary preserves both mappings as distinct entries.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:282](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L282)::[R-012 R-013 R-014 R-046 R-047 R-050 R-056 R-059] duplicate headers and short rows stay positional through review and export
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:237](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L237)::[R-012 R-013 R-014 R-046 R-047 R-050 R-056 R-059] duplicate headers and short rows stay positional through review and export
   - Given: a CSV has duplicate headers and a row missing the trailing cell.
   - When: saved review overrides target each duplicate column and the padded trailing column by column ID.
   - Then: duplicate columns stay distinct, short rows are padded, and CSV output uses the project line ending.
@@ -715,7 +715,7 @@ Tests:
   - Given: A workflow has manifest data with meaningful original whitespace and AI artifact whitespace.
   - When: The user requests the Stage 5 summary.
   - Then: The history shows stripped AI output and the unstripped original user value.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:172](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L172)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:127](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L127)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
   - Given: a CSV upload has not created any review overrides yet.
   - When: the user harmonizes, reviews a changed value, saves an override, and opens the summary.
   - Then: Stage 5 shows transformation history and export applies the saved override.
@@ -726,11 +726,11 @@ Status: Covered
 Source: [requirements.md:192](../../requirements.md#L192)
 
 Tests:
-- [tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py:99](../../tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py#L99)::test_r049_r052__summary_classifies_changes_and_collapses_duplicate_override_history
+- [tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py:76](../../tests/requirements/summary_export/test_r031_r032_r041_r049_r050_r052__summary_classification_and_pv.py#L76)::test_r049_r052__summary_classifies_changes_and_collapses_duplicate_override_history
   - Given: A manifest contains unchanged, AI-harmonized, and repeated manual override transformations.
   - When: The user requests the Stage 5 summary.
   - Then: The summary classifies each change type and collapses consecutive duplicate override history.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:172](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L172)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:127](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L127)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
   - Given: a CSV upload has not created any review overrides yet.
   - When: the user harmonizes, reviews a changed value, saves an override, and opens the summary.
   - Then: Stage 5 shows transformation history and export applies the saved override.
@@ -749,7 +749,7 @@ Tests:
   - Given: A workflow has an unmapped column and a persisted column-mapping artifact.
   - When: The user downloads the Stage 5 export bundle.
   - Then: The CSV preserves unmapped values and the bundle includes a CDE mapping JSON artifact.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:172](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L172)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:127](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L127)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
   - Given: a CSV upload has not created any review overrides yet.
   - When: the user harmonizes, reviews a changed value, saves an override, and opens the summary.
   - Then: Stage 5 shows transformation history and export applies the saved override.
@@ -764,7 +764,7 @@ Tests:
   - Given: A workflow has an unmapped column and a persisted column-mapping artifact.
   - When: The user downloads the Stage 5 export bundle.
   - Then: The CSV preserves unmapped values and the bundle includes a CDE mapping JSON artifact.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:172](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L172)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:127](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L127)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
   - Given: a CSV upload has not created any review overrides yet.
   - When: the user harmonizes, reviews a changed value, saves an override, and opens the summary.
   - Then: Stage 5 shows transformation history and export applies the saved override.
@@ -779,7 +779,7 @@ Tests:
   - Given: Saved overrides address two duplicate-named columns by positional column id.
   - When: Stage 5 export downloads the harmonized CSV.
   - Then: Each override lands in its positional column and duplicate headers are preserved.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:172](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L172)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:127](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L127)::[R-004 R-005 R-008 R-009 R-027 R-043 R-044 R-045 R-049 R-051 R-052 R-053 R-054 R-055] browser workflow reaches export with persisted review decisions
   - Given: a CSV upload has not created any review overrides yet.
   - When: the user harmonizes, reviews a changed value, saves an override, and opens the summary.
   - Then: Stage 5 shows transformation history and export applies the saved override.
@@ -794,7 +794,7 @@ Tests:
   - Given: Saved overrides address two duplicate-named columns by positional column id.
   - When: Stage 5 export downloads the harmonized CSV.
   - Then: Each override lands in its positional column and duplicate headers are preserved.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:282](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L282)::[R-012 R-013 R-014 R-046 R-047 R-050 R-056 R-059] duplicate headers and short rows stay positional through review and export
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:237](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L237)::[R-012 R-013 R-014 R-046 R-047 R-050 R-056 R-059] duplicate headers and short rows stay positional through review and export
   - Given: a CSV has duplicate headers and a row missing the trailing cell.
   - When: saved review overrides target each duplicate column and the padded trailing column by column ID.
   - Then: duplicate columns stay distinct, short rows are padded, and CSV output uses the project line ending.
@@ -809,7 +809,7 @@ Tests:
   - Given: A user uploads a CSV with leading and trailing whitespace in an untouched cell.
   - When: The user downloads the Stage 5 CSV for that workflow.
   - Then: The exported CSV preserves the untouched cell value exactly.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:256](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L256)::[R-020 R-057 R-058] unmapped columns pass through export unchanged while mapped columns harmonize
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:211](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L211)::[R-020 R-057 R-058] unmapped columns pass through export unchanged while mapped columns harmonize
   - Given: one column is explicitly unmapped before harmonization.
   - When: another column is harmonized and the user downloads the export.
   - Then: the harmonized column changes and the unmapped column value remains untouched.
@@ -824,7 +824,7 @@ Tests:
   - Given: A workflow has an unmapped column and a persisted column-mapping artifact.
   - When: The user downloads the Stage 5 export bundle.
   - Then: The CSV preserves unmapped values and the bundle includes a CDE mapping JSON artifact.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:256](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L256)::[R-020 R-057 R-058] unmapped columns pass through export unchanged while mapped columns harmonize
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:211](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L211)::[R-020 R-057 R-058] unmapped columns pass through export unchanged while mapped columns harmonize
   - Given: one column is explicitly unmapped before harmonization.
   - When: another column is harmonized and the user downloads the export.
   - Then: the harmonized column changes and the unmapped column value remains untouched.
@@ -839,7 +839,7 @@ Tests:
   - Given: A harmonized CSV row is shorter than the header and has a saved trailing override.
   - When: Stage 5 export downloads the harmonized CSV.
   - Then: The row is padded and the override appears in the intended trailing column.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:282](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L282)::[R-012 R-013 R-014 R-046 R-047 R-050 R-056 R-059] duplicate headers and short rows stay positional through review and export
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:237](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L237)::[R-012 R-013 R-014 R-046 R-047 R-050 R-056 R-059] duplicate headers and short rows stay positional through review and export
   - Given: a CSV has duplicate headers and a row missing the trailing cell.
   - When: saved review overrides target each duplicate column and the padded trailing column by column ID.
   - Then: duplicate columns stay distinct, short rows are padded, and CSV output uses the project line ending.
@@ -896,7 +896,7 @@ Status: Covered
 Source: [requirements.md:230](../../requirements.md#L230)
 
 Tests:
-- [tests/requirements/permissible_values/test_r033_r042__stage3_pv_adjustments.py:103](../../tests/requirements/permissible_values/test_r033_r042__stage3_pv_adjustments.py#L103)::test_r028_r033_r064__stage3_preserves_valid_original_pv_for_stage5_summary
+- [tests/requirements/permissible_values/test_r033_r042__stage3_pv_adjustments.py:80](../../tests/requirements/permissible_values/test_r033_r042__stage3_pv_adjustments.py#L80)::test_r028_r033_r064__stage3_preserves_valid_original_pv_for_stage5_summary
   - Given: The harmonizer returns a different AI value while the user's original value is already a valid PV.
   - When: The user runs Stage 3 and then requests the Stage 5 summary.
   - Then: The persisted manifest used by Stage 5 preserves the original value as final.
@@ -935,7 +935,7 @@ Tests:
   - Given: A workflow request references a file id that is not in upload storage.
   - When: The user tries to harmonize that missing file.
   - Then: The API returns a not-found response instead of an unhandled exception.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:386](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L386)::[R-006 R-029 R-040 R-067 R-068 R-069] browser surfaces recoverable workflow errors without crashing
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:330](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L330)::[R-006 R-029 R-040 R-067 R-068 R-069] browser surfaces recoverable workflow errors without crashing
   - Given: the browser is on Stage 1 with no upload error visible.
   - When: the user uploads an unsupported file and later hits missing workflow state.
   - Then: the user sees recoverable empty/error states and not a server traceback.
@@ -950,7 +950,7 @@ Tests:
   - Given: A user has uploaded a file but has not completed harmonization.
   - When: The user requests Stage 4 review rows.
   - Then: The API returns a recoverable error explaining that the manifest is missing.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:386](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L386)::[R-006 R-029 R-040 R-067 R-068 R-069] browser surfaces recoverable workflow errors without crashing
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:330](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L330)::[R-006 R-029 R-040 R-067 R-068 R-069] browser surfaces recoverable workflow errors without crashing
   - Given: the browser is on Stage 1 with no upload error visible.
   - When: the user uploads an unsupported file and later hits missing workflow state.
   - Then: the user sees recoverable empty/error states and not a server traceback.
@@ -969,7 +969,7 @@ Tests:
   - Given: A user has uploaded a file but has not completed harmonization.
   - When: The user requests Stage 4 review rows.
   - Then: The API returns a recoverable error explaining that the manifest is missing.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:386](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L386)::[R-006 R-029 R-040 R-067 R-068 R-069] browser surfaces recoverable workflow errors without crashing
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:330](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L330)::[R-006 R-029 R-040 R-067 R-068 R-069] browser surfaces recoverable workflow errors without crashing
   - Given: the browser is on Stage 1 with no upload error visible.
   - When: the user uploads an unsupported file and later hits missing workflow state.
   - Then: the user sees recoverable empty/error states and not a server traceback.
@@ -1065,7 +1065,7 @@ Tests:
   - Given: The user is on the final review stage.
   - When: Stage 5 renders.
   - Then: The page includes navigation targets for previous stages and returning to upload.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:410](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L410)::[R-007 R-077 R-082 R-083 R-084] Stage 5 navigation can return to upload and start a fresh workflow
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:354](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L354)::[R-007 R-077 R-082 R-083 R-084] Stage 5 navigation can return to upload and start a fresh workflow
   - Given: a user has reached Stage 5 for one uploaded file.
   - When: the user navigates back to upload and starts a new workflow.
   - Then: the new workflow gets a different file ID and does not reuse the previous file state.
@@ -1081,7 +1081,7 @@ Tests:
   - Given: A user has uploaded and analyzed a file.
   - When: The user navigates back to Stage 2 for that workflow.
   - Then: Stage 2 renders the saved mapping state for the current workflow.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:431](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L431)::[R-078] navigating back to Stage 2 restores saved mapping state
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:375](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L375)::[R-078] navigating back to Stage 2 restores saved mapping state
   - Given: a user changed a Stage 2 mapping and continued to review.
   - When: the user navigates back to Stage 2.
   - Then: the manually selected CDE is still shown instead of a blank or reset mapping.
@@ -1097,7 +1097,7 @@ Tests:
   - Given: A user is viewing workflow stage pages.
   - When: The pages render forward navigation or action controls.
   - Then: Controls expose whether they only navigate or run a workflow action.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:454](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L454)::[R-079] forward controls distinguish navigation from workflow actions
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:398](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L398)::[R-079] forward controls distinguish navigation from workflow actions
   - Given: Stage 2 is loaded before harmonization has run.
   - When: the user inspects the forward control.
   - Then: the UI clearly indicates this control will run harmonization rather than merely navigate forward.
@@ -1113,7 +1113,7 @@ Tests:
   - Given: A user has completed harmonization and then changes the upstream column mapping.
   - When: The user tries to review results without rerunning harmonization.
   - Then: The application blocks stale review results and requires harmonization to run again.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:467](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L467)::[R-080 R-081] changing Stage 2 mapping after harmonization blocks stale review and export
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:411](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L411)::[R-080 R-081] changing Stage 2 mapping after harmonization blocks stale review and export
   - Expected failure: Expected Playwright failure
   - Given: a workflow has already been harmonized.
   - When: the user changes an upstream mapping after harmonization.
@@ -1130,7 +1130,7 @@ Tests:
   - Given: A user has completed harmonization and then changes the upstream column mapping.
   - When: The user tries to review results without rerunning harmonization.
   - Then: The application blocks stale review results and requires harmonization to run again.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:467](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L467)::[R-080 R-081] changing Stage 2 mapping after harmonization blocks stale review and export
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:411](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L411)::[R-080 R-081] changing Stage 2 mapping after harmonization blocks stale review and export
   - Expected failure: Expected Playwright failure
   - Given: a workflow has already been harmonized.
   - When: the user changes an upstream mapping after harmonization.
@@ -1146,7 +1146,7 @@ Tests:
   - Given: The user is on the final review stage.
   - When: Stage 5 renders.
   - Then: The page includes navigation targets for previous stages and returning to upload.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:410](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L410)::[R-007 R-077 R-082 R-083 R-084] Stage 5 navigation can return to upload and start a fresh workflow
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:354](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L354)::[R-007 R-077 R-082 R-083 R-084] Stage 5 navigation can return to upload and start a fresh workflow
   - Given: a user has reached Stage 5 for one uploaded file.
   - When: the user navigates back to upload and starts a new workflow.
   - Then: the new workflow gets a different file ID and does not reuse the previous file state.
@@ -1161,7 +1161,7 @@ Tests:
   - Given: A prior workflow has cached permissible values.
   - When: The user uploads a new source CSV through Stage 1.
   - Then: The stale cached permissible values are cleared before the new workflow continues.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:410](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L410)::[R-007 R-077 R-082 R-083 R-084] Stage 5 navigation can return to upload and start a fresh workflow
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:354](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L354)::[R-007 R-077 R-082 R-083 R-084] Stage 5 navigation can return to upload and start a fresh workflow
   - Given: a user has reached Stage 5 for one uploaded file.
   - When: the user navigates back to upload and starts a new workflow.
   - Then: the new workflow gets a different file ID and does not reuse the previous file state.
@@ -1176,7 +1176,7 @@ Tests:
   - Given: The user is on the final review stage.
   - When: Stage 5 renders.
   - Then: The page includes navigation targets for previous stages and returning to upload.
-- [tests/requirements/e2e/requirements.e2e.spec.mjs:410](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L410)::[R-007 R-077 R-082 R-083 R-084] Stage 5 navigation can return to upload and start a fresh workflow
+- [tests/requirements/e2e/requirements.e2e.spec.mjs:354](../../tests/requirements/e2e/requirements.e2e.spec.mjs#L354)::[R-007 R-077 R-082 R-083 R-084] Stage 5 navigation can return to upload and start a fresh workflow
   - Given: a user has reached Stage 5 for one uploaded file.
   - When: the user navigates back to upload and starts a new workflow.
   - Then: the new workflow gets a different file ID and does not reuse the previous file state.

@@ -15,6 +15,7 @@ from tests.requirements.helpers import (
     DIAGNOSIS_COLUMN,
     LOWERCASE_LUNG_CANCER,
     PRIMARY_DIAGNOSIS_CDE,
+    harmonizer_manifest_row,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -24,30 +25,6 @@ def _write_manifest(storage: UploadStorage, file_id: str, rows: list[dict[str, o
     manifest_path = storage_manifest_path(storage, file_id)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     create_test_manifest_parquet(manifest_path, rows)
-
-
-def _manifest_row(
-    *,
-    column_id: int,
-    column_name: str,
-    original: str,
-    ai_value: str,
-    row_index: int,
-    manual_overrides: list[dict[str, str | None]] | None = None,
-) -> dict[str, object]:
-    return {
-        "job_id": "requirements-summary",
-        "column_id": column_id,
-        "column_name": column_name,
-        "to_harmonize": original,
-        "top_harmonization": ai_value,
-        "ontology_id": None,
-        "top_harmonizations": [ai_value] if ai_value else [],
-        "confidence_score": 0.85,
-        "error": None,
-        "row_indices": [row_index],
-        "manual_overrides": manual_overrides or [],
-    }
 
 
 @pytest.mark.requirements("R-031", "R-032", "R-041")
@@ -69,7 +46,7 @@ async def test_r031_r032_r041__summary_counts_case_mismatch_as_non_conformant(
         temp_storage,
         file_id,
         [
-            _manifest_row(
+            harmonizer_manifest_row(
                 column_id=0,
                 column_name=DIAGNOSIS_COLUMN,
                 original=LOWERCASE_LUNG_CANCER,
@@ -114,11 +91,13 @@ async def test_r049_r052__summary_classifies_changes_and_collapses_duplicate_ove
         temp_storage,
         file_id,
         [
-            _manifest_row(
+            harmonizer_manifest_row(
                 column_id=0, column_name=DIAGNOSIS_COLUMN, original="Original", ai_value="AI Value", row_index=0
             ),
-            _manifest_row(column_id=0, column_name=DIAGNOSIS_COLUMN, original="Same", ai_value="Same", row_index=1),
-            _manifest_row(
+            harmonizer_manifest_row(
+                column_id=0, column_name=DIAGNOSIS_COLUMN, original="Same", ai_value="Same", row_index=1
+            ),
+            harmonizer_manifest_row(
                 column_id=0,
                 column_name=DIAGNOSIS_COLUMN,
                 original="Manual",
@@ -168,8 +147,12 @@ async def test_r050__summary_preserves_duplicate_named_columns_by_column_id(
         temp_storage,
         file_id,
         [
-            _manifest_row(column_id=0, column_name=DIAGNOSIS_COLUMN, original="Shared", ai_value="Shared", row_index=0),
-            _manifest_row(column_id=1, column_name=DIAGNOSIS_COLUMN, original="Shared", ai_value="Shared", row_index=0),
+            harmonizer_manifest_row(
+                column_id=0, column_name=DIAGNOSIS_COLUMN, original="Shared", ai_value="Shared", row_index=0
+            ),
+            harmonizer_manifest_row(
+                column_id=1, column_name=DIAGNOSIS_COLUMN, original="Shared", ai_value="Shared", row_index=0
+            ),
         ],
     )
 

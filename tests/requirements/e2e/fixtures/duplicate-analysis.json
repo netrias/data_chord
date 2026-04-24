@@ -1,0 +1,106 @@
+{
+  "file_id": "",
+  "file_name": "duplicate-short.csv",
+  "total_rows": 2,
+  "columns": [
+    {
+      "column_id": 0,
+      "column_name": "dup",
+      "inferred_type": "text",
+      "sample_values": ["left"],
+      "confidence_bucket": "high",
+      "confidence_score": 0.9
+    },
+    {
+      "column_id": 1,
+      "column_name": "dup",
+      "inferred_type": "text",
+      "sample_values": ["right"],
+      "confidence_bucket": "high",
+      "confidence_score": 0.9
+    },
+    {
+      "column_id": 2,
+      "column_name": "trailing",
+      "inferred_type": "text",
+      "sample_values": [""],
+      "confidence_bucket": "medium",
+      "confidence_score": 0.7
+    }
+  ],
+  "cde_targets": {
+    "0": [
+      {
+        "target": "left_dup_cde",
+        "confidence": 0.9,
+        "cde_id": 201,
+        "harmonization": "harmonizable"
+      }
+    ],
+    "1": [
+      {
+        "target": "right_dup_cde",
+        "confidence": 0.9,
+        "cde_id": 202,
+        "harmonization": "harmonizable"
+      }
+    ],
+    "2": [
+      {
+        "target": "trailing_cde",
+        "confidence": 0.9,
+        "cde_id": 203,
+        "harmonization": "harmonizable"
+      }
+    ]
+  },
+  "next_stage": "mapping",
+  "next_step_hint": "Review AI-suggested column mappings once ready.",
+  "manual_overrides": {},
+  "manifest": {
+    "column_mappings": [
+      {
+        "column_name": "dup",
+        "cde_key": "left_dup_cde",
+        "cde_id": 201,
+        "harmonization": "harmonizable",
+        "alternatives": [
+          {
+            "target": "left_dup_cde",
+            "confidence": 0.9,
+            "cde_id": 201,
+            "harmonization": "harmonizable"
+          }
+        ]
+      },
+      {
+        "column_name": "dup",
+        "cde_key": "right_dup_cde",
+        "cde_id": 202,
+        "harmonization": "harmonizable",
+        "alternatives": [
+          {
+            "target": "right_dup_cde",
+            "confidence": 0.9,
+            "cde_id": 202,
+            "harmonization": "harmonizable"
+          }
+        ]
+      },
+      {
+        "column_name": "trailing",
+        "cde_key": "trailing_cde",
+        "cde_id": 203,
+        "harmonization": "harmonizable",
+        "alternatives": [
+          {
+            "target": "trailing_cde",
+            "confidence": 0.9,
+            "cde_id": 203,
+            "harmonization": "harmonizable"
+          }
+        ]
+      }
+    ]
+  }
+}

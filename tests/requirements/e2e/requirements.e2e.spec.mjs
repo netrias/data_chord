@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import AdmZip from 'adm-zip';
 
@@ -19,6 +20,8 @@ import {
 } from '../../e2e/utils.mjs';
 
 const requirementFixture = (name) => path.resolve('tests/requirements/e2e/fixtures', name);
+
+const requirementJsonFixture = (name) => JSON.parse(fs.readFileSync(requirementFixture(name), 'utf-8'));
 
 const requirementMessage = (requirementIds, message) => `[${requirementIds}] ${message}`;
 
@@ -92,64 +95,16 @@ const uploadAndAnalyzeWithPayload = async (page, filePath, payloadForFile) => {
   return getFileIdFromUrl(page);
 };
 
-const mappingOption = (target, cdeId, harmonization = 'harmonizable') => ({
-  target,
-  confidence: 0.9,
-  cde_id: cdeId,
-  harmonization,
+const analyzePayload = (name, fileId) => ({
+  ...requirementJsonFixture(name),
+  file_id: fileId,
 });
 
-const threeColumnAnalyzePayload = (fileId) => ({
-  file_id: fileId,
-  file_name: 'requirements-mapping.csv',
-  total_rows: 2,
-  columns: [
-    { column_id: 0, column_name: 'diagnosis', inferred_type: 'text', sample_values: ['melanoma'], confidence_bucket: 'high', confidence_score: 0.95 },
-    { column_id: 1, column_name: 'status', inferred_type: 'text', sample_values: ['draft'], confidence_bucket: 'medium', confidence_score: 0.75 },
-    { column_id: 2, column_name: 'notes', inferred_type: 'text', sample_values: ['keep'], confidence_bucket: 'low', confidence_score: 0.4 },
-  ],
-  cde_targets: {
-    0: [mappingOption('primary_diagnosis', 101)],
-    1: [mappingOption('status_code', 102)],
-    2: [mappingOption('clinical_note', 103)],
-  },
-  next_stage: 'mapping',
-  next_step_hint: 'Review AI-suggested column mappings once ready.',
-  manual_overrides: {},
-  manifest: {
-    column_mappings: [
-      { column_name: 'diagnosis', cde_key: 'primary_diagnosis', cde_id: 101, harmonization: 'harmonizable', alternatives: [mappingOption('primary_diagnosis', 101)] },
-      { column_name: 'status', cde_key: 'status_code', cde_id: 102, harmonization: 'harmonizable', alternatives: [mappingOption('status_code', 102), mappingOption('vital_status', 104)] },
-      { column_name: 'notes', cde_key: 'clinical_note', cde_id: 103, harmonization: 'harmonizable', alternatives: [mappingOption('clinical_note', 103)] },
-    ],
-  },
-});
+const threeColumnAnalyzePayload = (fileId) => analyzePayload('three-column-analysis.json', fileId);
 
-const duplicateAnalyzePayload = (fileId) => ({
-  file_id: fileId,
-  file_name: 'duplicate-short.csv',
-  total_rows: 2,
-  columns: [
-    { column_id: 0, column_name: 'dup', inferred_type: 'text', sample_values: ['left'], confidence_bucket: 'high', confidence_score: 0.9 },
-    { column_id: 1, column_name: 'dup', inferred_type: 'text', sample_values: ['right'], confidence_bucket: 'high', confidence_score: 0.9 },
-    { column_id: 2, column_name: 'trailing', inferred_type: 'text', sample_values: [''], confidence_bucket: 'medium', confidence_score: 0.7 },
-  ],
-  cde_targets: {
-    0: [mappingOption('left_dup_cde', 201)],
-    1: [mappingOption('right_dup_cde', 202)],
-    2: [mappingOption('trailing_cde', 203)],
-  },
-  next_stage: 'mapping',
-  next_step_hint: 'Review AI-suggested column mappings once ready.',
-  manual_overrides: {},
-  manifest: {
-    column_mappings: [
-      { column_name: 'dup', cde_key: 'left_dup_cde', cde_id: 201, harmonization: 'harmonizable', alternatives: [mappingOption('left_dup_cde', 201)] },
-      { column_name: 'dup', cde_key: 'right_dup_cde', cde_id: 202, harmonization: 'harmonizable', alternatives: [mappingOption('right_dup_cde', 202)] },
-      { column_name: 'trailing', cde_key: 'trailing_cde', cde_id: 203, harmonization: 'harmonizable', alternatives: [mappingOption('trailing_cde', 203)] },
-    ],
-  },
-});
+const duplicateAnalyzePayload = (fileId) => analyzePayload('duplicate-analysis.json', fileId);
+
+const singleDiagnosisAnalyzePayload = (fileId) => analyzePayload('single-diagnosis-analysis.json', fileId);
 
 const seedPvs = (fileId, columnId, columnName, cdeKey, values) => {
   execFileSync('uv', [
@@ -357,18 +312,7 @@ test('[R-036 R-048] review renders whitespace markers and restores review mode a
 test('[R-041] summary marks values outside permissible values as non-conformant', async ({ page }) => {
   // Given: a harmonized workflow has a value that is not in the persisted PV set.
   await mockHarmonizeSuccess(page);
-  const fileId = await uploadAndAnalyzeWithPayload(page, requirementFixture('case.csv'), (id) => ({
-    ...threeColumnAnalyzePayload(id),
-    file_name: 'case.csv',
-    total_rows: 1,
-    columns: [{ column_id: 0, column_name: 'diagnosis', inferred_type: 'text', sample_values: ['lung cancer'], confidence_bucket: 'high', confidence_score: 0.9 }],
-    cde_targets: { 0: [mappingOption('primary_diagnosis', 101)] },
-    manifest: {
-      column_mappings: [
-        { column_name: 'diagnosis', cde_key: 'primary_diagnosis', cde_id: 101, harmonization: 'harmonizable', alternatives: [mappingOption('primary_diagnosis', 101)] },
-      ],
-    },
-  }));
+  const fileId = await uploadAndAnalyzeWithPayload(page, requirementFixture('case.csv'), singleDiagnosisAnalyzePayload);
 
   // When: Stage 5 summary loads after PV data is seeded with only the canonical case.
   await clickHarmonize(page);

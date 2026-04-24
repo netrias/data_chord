@@ -1,0 +1,18 @@
+{
+  "column_mappings": [
+    {
+      "column_name": "diagnosis",
+      "cde_key": "primary_diagnosis",
+      "cde_id": 2,
+      "harmonization": "harmonizable",
+      "alternatives": [
+        {
+          "target": "primary_diagnosis",
+          "confidence": 0.9,
+          "cde_id": 2,
+          "harmonization": "harmonizable"
+        }
+      ]
+    }
+  ]
+}

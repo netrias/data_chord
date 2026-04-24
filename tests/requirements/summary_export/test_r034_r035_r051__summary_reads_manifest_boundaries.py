@@ -10,7 +10,12 @@ from httpx import AsyncClient
 from src.domain.storage import UploadStorage
 from tests.cache_helpers import storage_manifest_path
 from tests.conftest import create_harmonized_csv, create_test_manifest_parquet, upload_content
-from tests.requirements.helpers import CANONICAL_LUNG_CANCER, DIAGNOSIS_COLUMN, LOWERCASE_LUNG_CANCER
+from tests.requirements.helpers import (
+    CANONICAL_LUNG_CANCER,
+    DIAGNOSIS_COLUMN,
+    LOWERCASE_LUNG_CANCER,
+    harmonizer_manifest_row,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -20,19 +25,14 @@ def _create_manifest_with_ai_whitespace(
     file_id: str,
     original_path: Path,
 ) -> None:
-    manifest_rows = [{
-        "job_id": f"test-job-{file_id}",
-        "column_id": 0,
-        "column_name": DIAGNOSIS_COLUMN,
-        "to_harmonize": f" {LOWERCASE_LUNG_CANCER} ",
-        "top_harmonization": f" {CANONICAL_LUNG_CANCER} ",
-        "ontology_id": None,
-        "top_harmonizations": [f" {CANONICAL_LUNG_CANCER} ", " Breast Cancer "],
-        "confidence_score": 0.85,
-        "error": None,
-        "row_indices": [0],
-        "manual_overrides": [],
-    }]
+    manifest_rows = [
+        harmonizer_manifest_row(
+            original=f" {LOWERCASE_LUNG_CANCER} ",
+            ai_value=f" {CANONICAL_LUNG_CANCER} ",
+            alternatives=[f" {CANONICAL_LUNG_CANCER} ", " Breast Cancer "],
+            job_id=f"test-job-{file_id}",
+        )
+    ]
     manifest_path = storage_manifest_path(storage, file_id)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     create_test_manifest_parquet(manifest_path, manifest_rows)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -18,58 +17,10 @@ from tests.requirements.helpers import (
     DIAGNOSIS_COLUMN,
     NOTES_COLUMN,
     PRIMARY_DIAGNOSIS_CDE,
-    THERAPEUTIC_AGENTS_CDE,
+    load_reference_json,
 )
 
 pytestmark = pytest.mark.asyncio
-
-
-def _manifest_for_assignment_resolution() -> dict[str, list[dict[str, Any] | None]]:
-    return {
-        "column_mappings": [
-            {
-                "column_name": DIAGNOSIS_COLUMN,
-                "cde_key": THERAPEUTIC_AGENTS_CDE,
-                "cde_id": 1,
-                "harmonization": "harmonizable",
-                "alternatives": [
-                    {
-                        "target": THERAPEUTIC_AGENTS_CDE,
-                        "confidence": 0.9,
-                        "cde_id": 1,
-                        "harmonization": "harmonizable",
-                    },
-                    {
-                        "target": PRIMARY_DIAGNOSIS_CDE,
-                        "confidence": 0.8,
-                        "cde_id": 2,
-                        "harmonization": "harmonizable",
-                    },
-                ],
-            },
-            {
-                "column_name": AGE_COLUMN,
-                "cde_key": AGE_AT_DIAGNOSIS_CDE,
-                "cde_id": 5,
-                "harmonization": "numeric",
-                "alternatives": [
-                    {
-                        "target": AGE_AT_DIAGNOSIS_CDE,
-                        "confidence": 0.9,
-                        "cde_id": 5,
-                        "harmonization": "numeric",
-                    },
-                ],
-            },
-            {
-                "column_name": NOTES_COLUMN,
-                "cde_key": THERAPEUTIC_AGENTS_CDE,
-                "cde_id": 1,
-                "harmonization": "harmonizable",
-                "alternatives": [],
-            },
-        ]
-    }
 
 
 @pytest.mark.requirements(
@@ -97,7 +48,7 @@ async def test_r015_r016_r017_r018_r019_r021_r022_r023_r025_r026__harmonize_reso
             "file_id": file_id,
             "target_schema": TEST_TARGET_SCHEMA,
             "manual_overrides": {"0": PRIMARY_DIAGNOSIS_CDE, "2": NO_MAPPING_SENTINEL},
-            "manifest": _manifest_for_assignment_resolution(),
+            "manifest": load_reference_json("stage3_assignment_resolution_manifest.json"),
         },
     )
 

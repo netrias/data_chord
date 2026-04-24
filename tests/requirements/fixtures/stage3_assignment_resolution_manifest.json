@@ -1,0 +1,45 @@
+{
+  "column_mappings": [
+    {
+      "column_name": "diagnosis",
+      "cde_key": "therapeutic_agents",
+      "cde_id": 1,
+      "harmonization": "harmonizable",
+      "alternatives": [
+        {
+          "target": "therapeutic_agents",
+          "confidence": 0.9,
+          "cde_id": 1,
+          "harmonization": "harmonizable"
+        },
+        {
+          "target": "primary_diagnosis",
+          "confidence": 0.8,
+          "cde_id": 2,
+          "harmonization": "harmonizable"
+        }
+      ]
+    },
+    {
+      "column_name": "age",
+      "cde_key": "age_at_diagnosis",
+      "cde_id": 5,
+      "harmonization": "numeric",
+      "alternatives": [
+        {
+          "target": "age_at_diagnosis",
+          "confidence": 0.9,
+          "cde_id": 5,
+          "harmonization": "numeric"
+        }
+      ]
+    },
+    {
+      "column_name": "notes",
+      "cde_key": "therapeutic_agents",
+      "cde_id": 1,
+      "harmonization": "harmonizable",
+      "alternatives": []
+    }
+  ]
+}
