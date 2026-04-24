@@ -117,8 +117,12 @@ jobs:
       - name: Run bandit
         run: uv run bandit -r src/ -c pyproject.toml
 
+      - name: Upgrade pip
+        run: uv run pip install --upgrade pip
+
+      # CVE-2026-3219 affects all currently released pip versions; no fix published yet.
       - name: Run dependency audit
-        run: uv run pip-audit
+        run: uv run pip-audit --ignore-vuln CVE-2026-3219
 
   # E2E tests using Playwright with Chromium for browser automation.
   e2e:
