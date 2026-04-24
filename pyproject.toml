@@ -87,4 +87,5 @@ show_contexts = true
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
+    "vulture>=2.16",
 ]

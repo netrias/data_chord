@@ -29,7 +29,6 @@ class SessionCache:
 
     # CDE list (fetched in Stage 2)
     cdes: list[CDEInfo] = field(default_factory=list)
-    cde_by_id: dict[int, CDEInfo] = field(default_factory=dict)
     cde_by_key: dict[str, CDEInfo] = field(default_factory=dict)
 
     # Resolved column assignments (set in Stage 3, used for PV lookup)
@@ -46,12 +45,7 @@ class SessionCache:
             self.data_model_key = data_model_key
             self.version_label = version_label
             self.cdes = list(cdes)
-            self.cde_by_id = {c.cde_id: c for c in cdes}
             self.cde_by_key = {c.cde_key: c for c in cdes}
-
-    def get_cde_by_id(self, cde_id: int) -> CDEInfo | None:
-        with self._lock:
-            return self.cde_by_id.get(cde_id)
 
     def get_cde_by_key(self, cde_key: str) -> CDEInfo | None:
         with self._lock:
