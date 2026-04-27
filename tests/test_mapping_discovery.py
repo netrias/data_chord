@@ -41,15 +41,15 @@ def test_discover_returns_manifest_from_client(
     """
     Given: a mocked NetriasClient returning a manifest with two column mappings
     When: MappingDiscoveryService.discover() is called
-    Then: the manifest is returned with column_mappings for both columns
+    Then: the manifest is returned with stable column-key mappings for both columns
     """
     svc, mock_client = service_with_mock_client
 
     # Given: client returns a manifest with two mapped columns
-    mock_client.discover_mapping_from_csv.return_value = {
+    mock_client.discover_mapping_from_tabular.return_value = {
         "column_mappings": {
-            "breed": {"targetField": "organism_species", "cde_id": 131},
-            "diagnosis": {"targetField": "primary_diagnosis", "cde_id": 2},
+            "col_0000": {"cde_key": "organism_species", "cde_id": 131},
+            "col_0001": {"cde_key": "primary_diagnosis", "cde_id": 2},
         }
     }
     csv_path = tmp_path / "test.csv"
@@ -60,10 +60,10 @@ def test_discover_returns_manifest_from_client(
 
     # Then: manifest contains both columns
     column_mappings = manifest.get("column_mappings", {})
-    assert "breed" in column_mappings
-    assert "diagnosis" in column_mappings
-    assert column_mappings["breed"]["targetField"] == "organism_species"
-    assert column_mappings["diagnosis"]["targetField"] == "primary_diagnosis"
+    assert "col_0000" in column_mappings
+    assert "col_0001" in column_mappings
+    assert column_mappings["col_0000"]["targetField"] == "organism_species"
+    assert column_mappings["col_0001"]["targetField"] == "primary_diagnosis"
 
 
 # ---------------------------------------------------------------------------
@@ -78,15 +78,15 @@ def test_discover_builds_cde_targets_from_manifest(
     """
     Given: a manifest with columns "breed" and "diagnosis" mapped to CDEs
     When: discover() processes it
-    Then: cde_targets has ModelSuggestion entries for both columns
+    Then: cde_targets has ModelSuggestion entries for both column keys
     """
     svc, mock_client = service_with_mock_client
 
     # Given
-    mock_client.discover_mapping_from_csv.return_value = {
+    mock_client.discover_mapping_from_tabular.return_value = {
         "column_mappings": {
-            "breed": {"targetField": "organism_species", "cde_id": 131},
-            "diagnosis": {"targetField": "primary_diagnosis", "cde_id": 2},
+            "col_0000": {"cde_key": "organism_species", "cde_id": 131},
+            "col_0001": {"cde_key": "primary_diagnosis", "cde_id": 2},
         }
     }
     csv_path = tmp_path / "test.csv"
@@ -96,10 +96,10 @@ def test_discover_builds_cde_targets_from_manifest(
     cde_targets, _, _ = svc.discover(csv_path=csv_path, target_schema="ccdi")
 
     # Then: cde_targets has entries for both columns
-    assert "breed" in cde_targets
-    assert "diagnosis" in cde_targets
-    assert cde_targets["breed"][0].target == "organism_species"
-    assert cde_targets["diagnosis"][0].target == "primary_diagnosis"
+    assert "col_0000" in cde_targets
+    assert "col_0001" in cde_targets
+    assert cde_targets["col_0000"][0].target == "organism_species"
+    assert cde_targets["col_0001"][0].target == "primary_diagnosis"
 
 
 # ---------------------------------------------------------------------------
@@ -244,10 +244,48 @@ def test_discover_wraps_sdk_errors_as_runtime_error(
     svc, mock_client = service_with_mock_client
 
     # Given: client raises
-    mock_client.discover_mapping_from_csv.side_effect = Exception("connection refused")
+    mock_client.discover_mapping_from_tabular.side_effect = Exception("connection refused")
     csv_path = tmp_path / "test.csv"
     csv_path.write_text("a,b\n1,2\n")
 
     # When/Then
     with pytest.raises(RuntimeError, match="CDE discovery failed.*connection refused"):
         svc.discover(csv_path=csv_path, target_schema="ccdi")
+
+
+def test_discover_preserves_duplicate_headers_with_column_keys(
+    service_with_mock_client: tuple[MappingDiscoveryService, MagicMock],
+    tmp_path: Path,
+) -> None:
+    """
+    Given: duplicate source headers and a Netrias response keyed by column keys
+    When: discover() processes the response
+    Then: returned mappings are keyed by stable source column keys
+    """
+    svc, mock_client = service_with_mock_client
+
+    def _discover_mapping_from_tabular(
+        *,
+        source_path: Path,
+        target_schema: str,
+        confidence_threshold: float,
+    ) -> dict[str, object]:
+        assert source_path.name == "dupes.csv"
+        return {
+            "column_mappings": {
+                "col_0000": {"cde_key": "first_name", "cde_id": 10},
+                "col_0001": {"cde_key": "last_name", "cde_id": 11},
+            }
+        }
+
+    mock_client.discover_mapping_from_tabular.side_effect = _discover_mapping_from_tabular
+    csv_path = tmp_path / "dupes.csv"
+    csv_path.write_text("name,name\nAlice,Smith\n")
+
+    cde_targets, _, manifest = svc.discover(csv_path=csv_path, target_schema="ccdi")
+
+    column_mappings = manifest.get("column_mappings", {})
+    assert column_mappings["col_0000"]["targetField"] == "first_name"
+    assert column_mappings["col_0001"]["targetField"] == "last_name"
+    assert cde_targets["col_0000"][0].target == "first_name"
+    assert cde_targets["col_0001"][0].target == "last_name"

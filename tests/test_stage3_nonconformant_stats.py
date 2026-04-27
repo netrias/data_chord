@@ -23,10 +23,11 @@ def _make_row(
     original: str,
     harmonized: str,
     row_indices: list[int] | None = None,
+    column_id: int = 0,
 ) -> ManifestRow:
     return ManifestRow(
         job_id="test-job",
-        column_id=0,
+        column_id=column_id,
         column_name=column_name,
         to_harmonize=original,
         top_harmonization=harmonized,
@@ -132,8 +133,8 @@ class TestSummaryAggregation:
             _make_row("col_a", "Bad1", "Bad1"),
             _make_row("col_a", "Bad2", "Bad2"),
             _make_row("col_a", "Bad3", "Bad3"),
-            _make_row("col_b", "BadX", "BadX"),
-            _make_row("col_b", "BadY", "BadY"),
+            _make_row("col_b", "BadX", "BadX", column_id=1),
+            _make_row("col_b", "BadY", "BadY", column_id=1),
         ]
         manifest = ManifestSummary(
             total_terms=5,
@@ -155,7 +156,7 @@ class TestSummaryAggregation:
     def test_columns_without_pvs_contribute_zero(self) -> None:
         rows = [
             _make_row("with_pvs", "Bad", "Bad"),
-            _make_row("no_pvs", "Anything", "Anything"),
+            _make_row("no_pvs", "Anything", "Anything", column_id=1),
         ]
         manifest = ManifestSummary(
             total_terms=2,

@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from netrias_client import column_key_for_index
 
 from src.domain import (
     NO_MAPPING_SENTINEL,
@@ -66,7 +67,7 @@ class ModelInfo(NamedTuple):
 
 
 class PVAdjustmentRecord(NamedTuple):
-    column_name: str
+    column_key: str
     to_harmonize: str
     adjusted_value: str
     source: str
@@ -325,8 +326,8 @@ async def _read_store_and_adjust_manifest(
     final_data = await _store_and_adjust_manifest(file_id, manifest_path, manifest_data)
     cache = get_session_cache(file_id)
     column_pv_map = {
-        name: cache.get_pvs_for_column(name)
-        for name in {r.column_name for r in final_data.rows}
+        column_key_for_index(row.column_id): cache.get_pvs_for_column(column_key_for_index(row.column_id))
+        for row in final_data.rows
     }
     return _convert_to_schema(final_data, column_pv_map)
 
@@ -344,14 +345,19 @@ def _compute_row_adjustment(
         return None
     if result.adjusted_value == row.top_harmonization:
         return None
-    return PVAdjustmentRecord(row.column_name, row.to_harmonize, result.adjusted_value, result.adjustment_source.value)
+    return PVAdjustmentRecord(
+        column_key_for_index(row.column_id),
+        row.to_harmonize,
+        result.adjusted_value,
+        result.adjustment_source.value,
+    )
 
 
 def _process_row_for_adjustment(
     row: ManifestRow, cache: SessionCache
 ) -> PVAdjustmentRecord | None:
     """Skips columns without PVs — those don't need conformance adjustment."""
-    pv_set = cache.get_pvs_for_column(row.column_name)
+    pv_set = cache.get_pvs_for_column(column_key_for_index(row.column_id))
     if not pv_set:
         return None
     return _compute_row_adjustment(row, pv_set)
@@ -379,13 +385,13 @@ def _log_non_conformant_samples(rows: list[ManifestRow], cache: SessionCache) ->
 
 def _is_top_harmonization_non_conformant(row: ManifestRow, cache: SessionCache) -> bool:
     """Logging-only check; the adjustment path in _compute_row_adjustment handles the actual fix."""
-    pv_set = cache.get_pvs_for_column(row.column_name)
+    pv_set = cache.get_pvs_for_column(column_key_for_index(row.column_id))
     return pv_set is not None and row.top_harmonization not in pv_set
 
 
 def _records_to_tuples(records: list[PVAdjustmentRecord]) -> list[tuple[str, str, str, str]]:
     """Writer API expects plain tuples; convert from typed records."""
-    return [(r.column_name, r.to_harmonize, r.adjusted_value, r.source) for r in records]
+    return [(r.column_key, r.to_harmonize, r.adjusted_value, r.source) for r in records]
 
 
 async def _apply_pv_adjustments(file_id: str, manifest_path: Path) -> int:
@@ -461,11 +467,15 @@ def _build_column_breakdowns(
 ) -> list[ColumnBreakdownSchema]:
     column_rows: dict[str, list[ManifestRow]] = defaultdict(list)
     for row in rows:
-        column_rows[row.column_name].append(row)
+        column_rows[column_key_for_index(row.column_id)].append(row)
 
     breakdowns = [
-        _create_breakdown_schema(name, col_rows, column_pv_map.get(name))
-        for name, col_rows in column_rows.items()
+        _create_breakdown_schema(
+            col_rows[0].column_name,
+            col_rows,
+            column_pv_map.get(key, column_pv_map.get(col_rows[0].column_name)),
+        )
+        for key, col_rows in column_rows.items()
     ]
     # Columns needing attention (changes OR non-conformant) sort first
     breakdowns.sort(key=lambda b: (b.changed_rows == 0 and b.non_conformant_terms == 0, -b.total_rows))

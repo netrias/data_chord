@@ -341,11 +341,11 @@ def test_column_mapping_applied_plus_skipped_equals_total(overrides: dict[str, s
 # =============================================================================
 
 
-def _valid_column_entry() -> st.SearchStrategy[dict[str, str]]:
-    """Entries with required ColumnMappingEntry fields survive _filter_valid_columns."""
+def _valid_column_entry() -> st.SearchStrategy[dict[str, object]]:
+    """SDK-style entries with cde_key and cde_id survive normalization."""
     return st.fixed_dictionaries({
-        "cde_id": st.text(min_size=1, max_size=10),
-        "targetField": st.text(min_size=1, max_size=20),
+        "cde_id": st.integers(min_value=0, max_value=1_000_000),
+        "cde_key": st.text(min_size=1, max_size=20),
     })
 
 
@@ -355,20 +355,21 @@ def _valid_column_entry() -> st.SearchStrategy[dict[str, str]]:
     min_size=1,
     max_size=5,
 ))
-def test_normalize_manifest_preserves_valid_entries(column_mappings: dict[str, dict[str, str]]) -> None:
-    """Entries with cde_id and targetField survive normalization."""
+def test_normalize_manifest_preserves_valid_entries(column_mappings: dict[str, dict[str, object]]) -> None:
+    """Entries with cde_id and cde_key survive as Data Chord targetField entries."""
     manifest = {"column_mappings": column_mappings}
     result = normalize_manifest(manifest)
     result_mappings = result.get("column_mappings", {})
 
     for key in column_mappings:
         assert key in result_mappings, f"Valid entry '{key}' was dropped"
+        assert result_mappings[key]["targetField"] == column_mappings[key]["cde_key"]
 
 
 @given(st.dictionaries(
     keys=st.text(min_size=1, max_size=30),
     values=st.dictionaries(
-        keys=st.text(min_size=1, max_size=20).filter(lambda k: k not in ("cde_id", "targetField")),
+        keys=st.text(min_size=1, max_size=20).filter(lambda k: k not in ("cde_id", "cde_key", "targetField")),
         values=st.text(max_size=30),
         min_size=1,
         max_size=3,
@@ -377,7 +378,7 @@ def test_normalize_manifest_preserves_valid_entries(column_mappings: dict[str, d
     max_size=5,
 ))
 def test_normalize_manifest_drops_incomplete_entries(column_mappings: dict[str, dict[str, str]]) -> None:
-    """Entries missing cde_id or targetField are filtered out."""
+    """Entries missing cde_id or a target key are filtered out."""
     manifest = {"column_mappings": column_mappings}
     result = normalize_manifest(manifest)
     result_mappings = result.get("column_mappings", {})
@@ -395,3 +396,22 @@ def test_normalize_manifest_rejects_non_mapping(bad_input: object) -> None:
     """Non-Mapping inputs produce empty column_mappings."""
     result = normalize_manifest(bad_input)
     assert result.get("column_mappings", {}) == {}
+
+
+def test_normalize_manifest_translates_sdk_confidence_to_similarity() -> None:
+    """Data Chord keeps similarity internally while the SDK exposes confidence."""
+    result = normalize_manifest({
+        "column_mappings": {
+            "col_0000": {
+                "cde_key": "age",
+                "cde_id": 900,
+                "alternatives": [
+                    {"target": "age", "confidence": 0.91, "cde_id": 900},
+                ],
+            },
+        }
+    })
+
+    alternatives = result["column_mappings"]["col_0000"]["alternatives"]
+    assert alternatives[0]["target"] == "age"
+    assert alternatives[0]["similarity"] == 0.91

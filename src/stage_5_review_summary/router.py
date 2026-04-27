@@ -21,6 +21,12 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from netrias_client import (
+    TabularDataset,
+    column_key_for_index,
+    dataset_from_rows,
+    read_tabular,
+)
 from pydantic import BaseModel, Field
 
 from src.domain import ChangeType
@@ -35,7 +41,7 @@ from src.domain.manifest import (
 from src.domain.pv_persistence import ensure_pvs_loaded
 from src.domain.pv_validation import check_value_conformance
 from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
-from src.domain.storage import FileType, UploadStorage, load_csv, resolve_harmonized_path_or_404
+from src.domain.storage import FileType, UploadStorage, resolve_harmonized_path_or_404
 
 _logger = logging.getLogger(__name__)
 
@@ -124,18 +130,24 @@ async def download_harmonized_data(payload: StageFiveRequest) -> StreamingRespon
     harmonized_path = resolve_harmonized_path_or_404(meta.saved_path, payload.file_id)
     manifest_path = storage.load_harmonization_manifest_path(payload.file_id)
 
-    headers, harmonized_rows = load_csv(harmonized_path)
-    if not headers:
+    original_dataset = read_tabular(meta.saved_path)
+    harmonized_dataset = read_tabular(harmonized_path)
+    if not original_dataset.columns:
         raise HTTPException(status_code=400, detail=_ERROR_DATASET_UNREADABLE)
 
     overrides = _load_review_overrides(payload.file_id)
-    final_rows = _apply_overrides(harmonized_rows, overrides)
+    final_rows = _apply_overrides(harmonized_dataset.rows, overrides, original_dataset)
+    final_dataset = dataset_from_rows(
+        columns=original_dataset.columns,
+        rows=final_rows,
+        source_format=original_dataset.source_format,
+    )
 
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     original_stem = Path(meta.original_name).stem
     base_name = f"{original_stem}_{payload.file_id}_{timestamp}"
 
-    zip_buffer = _create_zip_buffer(base_name, headers, final_rows, manifest_path)
+    zip_buffer = _create_zip_buffer(base_name, final_dataset, manifest_path)
 
     # Session complete: release in-memory cache to prevent unbounded growth
     clear_session_cache(payload.file_id)
@@ -160,38 +172,45 @@ def _load_review_overrides(file_id: str) -> dict[str, dict[str, str]]:
     return result
 
 
-def _apply_row_overrides(row: dict[str, str], row_key: str, row_overrides: dict[str, str]) -> dict[str, str]:
-    invalid_columns = {k for k in row_overrides if k not in row}
+def _column_lookup(dataset: TabularDataset) -> dict[str, int]:
+    return {column.key: column.index for column in dataset.columns}
+
+
+def _apply_row_overrides(
+    row: list[str],
+    row_key: str,
+    row_overrides: dict[str, str],
+    column_lookup: dict[str, int],
+) -> list[str]:
+    result = list(row)
+    invalid_columns = {k for k in row_overrides if k not in column_lookup}
     if invalid_columns:
         _logger.warning("Row %s has overrides for non-existent columns: %s", row_key, invalid_columns)
-    valid_overrides = {k: v for k, v in row_overrides.items() if k in row}
-    return {**row, **valid_overrides}
+    for column_key, value in row_overrides.items():
+        index = column_lookup.get(column_key)
+        if index is not None and index < len(result):
+            result[index] = value
+    return result
 
 
 def _apply_overrides(
-    rows: list[dict[str, str]],
+    rows: list[list[str]],
     overrides: dict[str, dict[str, str]],
-) -> list[dict[str, str]]:
+    dataset: TabularDataset,
+) -> list[list[str]]:
     """Row keys are 1-indexed to match Stage 4 UI numbering."""
     if not overrides:
         return rows
 
-    result: list[dict[str, str]] = []
+    result: list[list[str]] = []
+    column_lookup = _column_lookup(dataset)
     for idx, row in enumerate(rows):
         row_key = str(idx + 1)
         if row_key in overrides:
-            result.append(_apply_row_overrides(row, row_key, overrides[row_key]))
+            result.append(_apply_row_overrides(row, row_key, overrides[row_key], column_lookup))
         else:
             result.append(row)
     return result
-
-
-def _rows_to_csv_string(headers: list[str], rows: list[dict[str, str]]) -> str:
-    csv_output = io.StringIO()
-    writer = csv.DictWriter(csv_output, fieldnames=headers, lineterminator="\n")
-    writer.writeheader()
-    writer.writerows(rows)
-    return csv_output.getvalue()
 
 
 def _manifest_to_json(manifest_path: Path) -> str | None:
@@ -204,14 +223,17 @@ def _manifest_to_json(manifest_path: Path) -> str | None:
 
 def _create_zip_buffer(
     base_name: str,
-    headers: list[str],
-    rows: list[dict[str, str]],
+    dataset: TabularDataset,
     manifest_path: Path | None,
 ) -> io.BytesIO:
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        csv_content = _rows_to_csv_string(headers, rows)
-        zf.writestr(f"{base_name}.csv", csv_content)
+        output = io.StringIO()
+        temp_path = Path(f"{base_name}{dataset.source_format.suffix}")
+        writer = csv.writer(output, delimiter=dataset.source_format.delimiter, lineterminator="\n")
+        writer.writerow(dataset.headers)
+        writer.writerows(dataset.rows)
+        zf.writestr(temp_path.name, output.getvalue())
 
         if manifest_path:
             json_content = _manifest_to_json(manifest_path)
@@ -346,7 +368,7 @@ def _process_manifest_row(
     ai_counts: dict[int, int],
     manual_counts: dict[int, int],
     unchanged_counts: dict[int, int],
-    unique_mappings: dict[tuple[str, str, str], _MappingInfo],
+    unique_mappings: dict[tuple[str, str, str, str], _MappingInfo],
     cache: SessionCache,
     upload_timestamp: datetime | None,
 ) -> None:
@@ -376,7 +398,7 @@ def _build_summary_from_manifest(summary: ManifestSummary, file_id: str) -> Stag
     unchanged_counts: dict[int, int] = defaultdict(int)
     distinct_terms: dict[int, int] = defaultdict(int)
     column_names: dict[int, str] = {}
-    unique_mappings: dict[tuple[str, str, str], _MappingInfo] = {}
+    unique_mappings: dict[tuple[str, str, str, str], _MappingInfo] = {}
 
     for row in summary.rows:
         distinct_terms[row.column_id] += 1
@@ -393,7 +415,7 @@ def _build_summary_from_manifest(summary: ManifestSummary, file_id: str) -> Stag
             is_pv_conformant=info.is_conformant,
             history=info.history,
         )
-        for (col, orig, final), info in sorted_mappings
+        for (_col_key, col, orig, final), info in sorted_mappings
     ]
 
     return StageFiveSummaryResponse(
@@ -413,7 +435,7 @@ def _build_summary_from_manifest(summary: ManifestSummary, file_id: str) -> Stag
 
 
 def _track_mapping(
-    mappings: dict[tuple[str, str, str], _MappingInfo],
+    mappings: dict[tuple[str, str, str, str], _MappingInfo],
     row: ManifestRow,
     cache: SessionCache,
     upload_timestamp: datetime | None,
@@ -423,10 +445,11 @@ def _track_mapping(
     if not row.to_harmonize:
         return
     final = _get_final_value(row)
-    key = (row.column_name, row.to_harmonize, final)
+    col_key = column_key_for_index(row.column_id)
+    key = (col_key, row.column_name, row.to_harmonize, final)
     if key in mappings:
         return
-    pv_set = cache.get_pvs_for_column(row.column_name)
+    pv_set = cache.get_pvs_for_column(col_key)
     is_conformant = check_value_conformance(final, pv_set)
     history = _build_history(row, upload_timestamp, pv_set)
     mappings[key] = _MappingInfo(is_conformant, history)

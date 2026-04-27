@@ -26,6 +26,9 @@ class AnalyzeRequest(BaseModel):
 
 class ColumnPreview(BaseModel):
     column_name: str
+    column_key: str
+    source_index: int
+    header: str
     inferred_type: str
     sample_values: list[str]
     confidence_bucket: ConfidenceBucket

@@ -9,8 +9,8 @@ export const STAGE_ORDER = ['upload', 'mapping', 'harmonize', 'verify', 'review'
 
 export const STEP_INSTRUCTIONS = {
   upload: {
-    short: "Upload your CSV dataset to begin the harmonization workflow.",
-    long: "Select a CSV file from your computer to upload. The system will analyze your file's columns and prepare them for mapping to standard ontologies."
+    short: "Upload your CSV or TSV dataset to begin the harmonization workflow.",
+    long: "Select a CSV or TSV file from your computer to upload. The system will analyze your file's columns and prepare them for mapping to standard ontologies."
   },
   mapping: {
     short: "Review and confirm which ontologies your data columns should map to.",
@@ -30,6 +30,6 @@ export const STEP_INSTRUCTIONS = {
   },
   review: {
     short: "Download your harmonized dataset and review the change summary.",
-    long: "Your harmonization is complete. Review the summary statistics showing AI changes vs manual overrides per column. Download the final harmonized dataset in CSV format. You can also start a new harmonization workflow from here."
+    long: "Your harmonization is complete. Review the summary statistics showing AI changes vs manual overrides per column. Download the final harmonized dataset in the same file format you uploaded. You can also start a new harmonization workflow from here."
   }
 };

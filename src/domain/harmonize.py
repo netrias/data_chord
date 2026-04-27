@@ -11,14 +11,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import cast
 from uuid import uuid4
 
 from netrias_client import NetriasClient
 
 from src.domain.cde import ColumnMapping, ColumnMappingSet
 from src.domain.data_model_cache import SessionCache
-from src.domain.manifest import ColumnMappingEntry, ManifestPayload
+from src.domain.manifest import AlternativeEntry, ColumnMappingEntry, ManifestPayload
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +79,8 @@ class HarmonizeService:
     def _discover_cde_map(self, *, file_path: Path, target_schema: str) -> ManifestPayload:
         if not self._client:
             raise RuntimeError("Netrias client unavailable")
-        raw_cde_map = self._client.discover_mapping_from_csv(
-            source_csv=file_path,
+        raw_cde_map = self._client.discover_mapping_from_tabular(
+            source_path=file_path,
             target_schema=target_schema,
             target_version="latest",
         )
@@ -187,7 +186,7 @@ def _log_mapping_results(applied: list[ColumnMapping], skipped: list[str]) -> No
 
 
 def normalize_manifest(manifest: Mapping[str, object] | object) -> ManifestPayload:
-    """SDK returns varying shapes; normalize to a guaranteed ManifestPayload."""
+    """Translate SDK column-keyed manifests into Data Chord's manifest shape."""
     if not isinstance(manifest, Mapping):
         return {"column_mappings": {}}
 
@@ -199,15 +198,61 @@ def normalize_manifest(manifest: Mapping[str, object] | object) -> ManifestPaylo
 
 
 def _filter_valid_columns(entries: Mapping[object, object]) -> dict[str, ColumnMappingEntry]:
-    """SDK returns untyped dicts; only keep entries with required ColumnMappingEntry fields."""
+    """SDK returns untyped dicts; only keep entries with required fields."""
     normalized: dict[str, ColumnMappingEntry] = {}
     for column, entry in entries.items():
-        if not isinstance(column, str) or not isinstance(entry, Mapping):
+        if not isinstance(column, str):
             continue
-        if "cde_id" not in entry or "targetField" not in entry:
+        converted = _normalize_mapping_entry(entry)
+        if converted is None:
             continue
-        normalized[column] = cast(ColumnMappingEntry, dict(entry))
+        normalized[column] = converted
     return normalized
+
+
+def _normalize_mapping_entry(entry: object) -> ColumnMappingEntry | None:
+    if not isinstance(entry, Mapping):
+        return None
+    target = entry.get("targetField")
+    if not isinstance(target, str) or not target:
+        target = entry.get("cde_key")
+    if not isinstance(target, str) or not target:
+        return None
+    cde_id = entry.get("cde_id")
+    if not isinstance(cde_id, int):
+        return None
+    converted = ColumnMappingEntry(targetField=target, cde_id=cde_id)
+    alternatives = entry.get("alternatives")
+    if isinstance(alternatives, list):
+        converted["alternatives"] = _normalize_alternatives(alternatives)
+    route = entry.get("route")
+    if isinstance(route, str):
+        converted["route"] = route
+    return converted
+
+
+def _normalize_alternatives(alternatives: list[object]) -> list[AlternativeEntry]:
+    normalized: list[AlternativeEntry] = []
+    for alternative in alternatives:
+        if not isinstance(alternative, Mapping):
+            continue
+        target = alternative.get("target")
+        if not isinstance(target, str) or not target:
+            continue
+        score = _recommendation_score(alternative)
+        entry = AlternativeEntry(target=target, similarity=score)
+        cde_id = alternative.get("cde_id")
+        if isinstance(cde_id, int):
+            entry["cde_id"] = cde_id
+        normalized.append(entry)
+    return normalized
+
+
+def _recommendation_score(alternative: Mapping[str, object]) -> float:
+    raw_score = alternative.get("similarity")
+    if not isinstance(raw_score, (int, float)):
+        raw_score = alternative.get("confidence")
+    return float(raw_score) if isinstance(raw_score, (int, float)) else 0.0
 
 
 def _extract_manifest_path(netrias_result: object) -> Path | None:

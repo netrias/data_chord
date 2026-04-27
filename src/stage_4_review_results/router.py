@@ -15,6 +15,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Path, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from netrias_client import column_key_for_index, read_tabular
 from pydantic import BaseModel, Field
 
 from src.domain import CONFIDENCE, RecommendationType
@@ -33,7 +34,7 @@ from src.domain.manifest import (
 from src.domain.pv_persistence import ensure_pvs_loaded
 from src.domain.pv_validation import check_value_conformance
 from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
-from src.domain.storage import FileType, UploadStorage, load_csv
+from src.domain.storage import FileType, UploadStorage
 from src.stage_4_review_results.schemas import (
     ColumnReviewData,
     DeleteOverridesResponse,
@@ -82,7 +83,7 @@ async def fetch_stage_four_rows(payload: StageFourResultsRequest) -> StageFourRe
     if not meta:
         raise HTTPException(status_code=404, detail="Upload not found. Please rerun harmonization.")
 
-    _, original_rows = load_csv(meta.saved_path)
+    original_dataset = read_tabular(meta.saved_path)
 
     manifest = _load_manifest(storage, payload.file_id)
     if manifest is None:
@@ -98,12 +99,13 @@ async def fetch_stage_four_rows(payload: StageFourResultsRequest) -> StageFourRe
     return StageFourResultsResponse(
         columns=columns,
         columnPVs=column_pvs,
-        totalOriginalRows=len(original_rows),
+        totalOriginalRows=len(original_dataset.rows),
     )
 
 
 @dataclass
 class _ColumnInfo:
+    column_key: str
     column_name: str
     label: str
     source_index: int  # Position in original spreadsheet for ordering
@@ -114,10 +116,12 @@ def _extract_columns_from_manifest(manifest: ManifestSummary) -> list[_ColumnInf
     seen: set[str] = set()
     columns: list[_ColumnInfo] = []
     for row in manifest.rows:
+        col_key = column_key_for_index(row.column_id)
         col_name = row.column_name
-        if col_name and col_name not in seen:
-            seen.add(col_name)
+        if col_key not in seen:
+            seen.add(col_key)
             columns.append(_ColumnInfo(
+                column_key=col_key,
                 column_name=col_name,
                 label=col_name or "Unknown",
                 source_index=row.column_id,
@@ -132,30 +136,30 @@ def _build_columns_from_manifest(manifest: ManifestSummary, file_id: str) -> lis
     # Group manifest rows by column, track source index for ordering
     columns_map: dict[str, list[ManifestRow]] = {}
     column_indices: dict[str, int] = {}
+    column_labels: dict[str, str] = {}
 
     for row in manifest.rows:
-        col_name = row.column_name
-        if not col_name:
-            continue
-        if col_name not in columns_map:
-            columns_map[col_name] = []
-            column_indices[col_name] = row.column_id
-        columns_map[col_name].append(row)
+        col_key = column_key_for_index(row.column_id)
+        if col_key not in columns_map:
+            columns_map[col_key] = []
+            column_indices[col_key] = row.column_id
+            column_labels[col_key] = row.column_name
+        columns_map[col_key].append(row)
 
     # Build columns ordered by source spreadsheet position
     columns: list[ColumnReviewData] = []
-    for col_name in sorted(columns_map.keys(), key=lambda c: column_indices[c]):
-        manifest_rows = columns_map[col_name]
+    for col_key in sorted(columns_map.keys(), key=lambda c: column_indices[c]):
+        manifest_rows = columns_map[col_key]
         transformations = [
-            _build_transformation(r, col_name, cache) for r in manifest_rows
+            _build_transformation(r, col_key, cache) for r in manifest_rows
         ]
 
         terms_with_changes = sum(1 for t in transformations if t.isChanged)
 
         columns.append(ColumnReviewData(
-            columnKey=col_name,
-            columnLabel=col_name or "Unknown",
-            sourceColumnIndex=column_indices[col_name],
+            columnKey=col_key,
+            columnLabel=column_labels[col_key] or "Unknown",
+            sourceColumnIndex=column_indices[col_key],
             termCount=len(transformations),
             termsWithChanges=terms_with_changes,
             transformations=transformations,
@@ -220,9 +224,9 @@ def _build_column_pvs(columns: list[_ColumnInfo], file_id: str) -> dict[str, lis
     columns_without_pvs: list[str] = []
 
     for col_info in columns:
-        pv_set = cache.get_pvs_for_column(col_info.column_name)
+        pv_set = cache.get_pvs_for_column(col_info.column_key)
         if pv_set:
-            column_pvs[col_info.column_name] = sorted(pv_set)
+            column_pvs[col_info.column_key] = sorted(pv_set)
         else:
             columns_without_pvs.append(col_info.column_name)
 
@@ -403,13 +407,14 @@ async def get_non_conformant_values(file_id: FileIdPath) -> NonConformantRespons
         current_value = latest_override if latest_override is not None else row.top_harmonization
 
         # Skip if we've already processed this exact mapping
-        key = (row.column_name, row.to_harmonize, current_value or "")
+        col_key = column_key_for_index(row.column_id)
+        key = (col_key, row.to_harmonize, current_value or "")
         if key in seen:
             continue
         seen.add(key)
 
         # Check PV conformance using shared function for consistent behavior
-        pv_set = cache.get_pvs_for_column(row.column_name)
+        pv_set = cache.get_pvs_for_column(col_key)
         if pv_set and current_value and not check_value_conformance(current_value, pv_set):
             non_conformant.append(NonConformantItem(
                 column=row.column_name,
@@ -435,16 +440,14 @@ async def get_row_context(payload: RowContextRequest) -> RowContextResponse:
     if not meta:
         raise HTTPException(status_code=404, detail="Upload not found")
 
-    headers, original_rows = load_csv(meta.saved_path)
+    dataset = read_tabular(meta.saved_path)
 
     selected_rows: list[list[str]] = []
     for idx in payload.row_indices:
-        if 0 <= idx < len(original_rows):
-            row_dict = original_rows[idx]
-            row_values = [row_dict.get(h, "") for h in headers]
-            selected_rows.append(row_values)
+        if 0 <= idx < len(dataset.rows):
+            selected_rows.append(dataset.rows[idx])
 
-    return RowContextResponse(headers=headers, rows=selected_rows)
+    return RowContextResponse(headers=dataset.headers, rows=selected_rows)
 
 
 class TermRowIndicesRequest(BaseModel):
@@ -470,7 +473,7 @@ async def get_term_row_indices(payload: TermRowIndicesRequest) -> TermRowIndices
         raise HTTPException(status_code=404, detail="Manifest not found")
 
     for row in manifest.rows:
-        if row.column_name == payload.column_key and row.to_harmonize == payload.original_value:
+        if column_key_for_index(row.column_id) == payload.column_key and row.to_harmonize == payload.original_value:
             return TermRowIndicesResponse(row_indices=row.row_indices)
 
     return TermRowIndicesResponse(row_indices=[])

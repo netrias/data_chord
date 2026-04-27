@@ -6,7 +6,6 @@ Orchestrates file I/O, metadata tracking, and directory organization.
 
 from __future__ import annotations
 
-import csv
 import json
 import logging
 import shutil
@@ -18,11 +17,13 @@ from typing import TypedDict, cast
 from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile
+from netrias_client import (
+    SUPPORTED_TABULAR_SUFFIXES,
+    get_tabular_format,
+    is_supported_tabular_content_type,
+)
 
 logger = logging.getLogger(__name__)
-
-HARMONIZED_SUFFIX = ".harmonized.csv"
-
 
 class StoredMeta(TypedDict):
     file_id: str
@@ -35,8 +36,6 @@ class StoredMeta(TypedDict):
 
 @dataclass(frozen=True)
 class UploadConstraints:
-    allowed_suffixes: tuple[str, ...]
-    allowed_content_types: tuple[str, ...]
     max_bytes: int
     chunk_size: int = 1024 * 1024
 
@@ -84,11 +83,16 @@ def _remove_temp_file(source: Path, destination: Path) -> None:
         logger.debug("Could not remove temp file", extra={"path": str(source)})
 
 
+def _harmonized_suffix_for(original_path: Path) -> str:
+    return f".harmonized{original_path.suffix.lower() or '.csv'}"
+
+
 def _find_harmonized_in_cwd(file_id: str, original_path: Path) -> Path | None:
-    """NetriasClient writes harmonized CSVs to CWD with varying name patterns."""
+    """NetriasClient writes harmonized files using the source file format."""
+    harmonized_suffix = _harmonized_suffix_for(original_path)
     candidates = [
-        Path.cwd() / f"{file_id}{HARMONIZED_SUFFIX}",
-        original_path.with_name(f"{original_path.stem}{HARMONIZED_SUFFIX}"),
+        Path.cwd() / f"{file_id}{harmonized_suffix}",
+        original_path.with_name(f"{original_path.stem}{harmonized_suffix}"),
     ]
     for candidate in candidates:
         if candidate.exists():
@@ -224,11 +228,11 @@ class UploadStorage:
         return path if path.exists() else None
 
     def relocate_harmonized_output(self, file_id: str, original_path: Path) -> Path | None:
-        """NetriasClient drops harmonized CSVs in CWD; move into managed storage."""
+        """Move the SDK harmonized output into managed storage."""
         source = _find_harmonized_in_cwd(file_id, original_path)
         if source is None:
             return None
-        destination = self._harmonized_dir / f"{file_id}{HARMONIZED_SUFFIX}"
+        destination = self._harmonized_dir / f"{file_id}{_harmonized_suffix_for(original_path)}"
         shutil.copy2(source, destination)
         _remove_temp_file(source, destination)
         logger.info("Relocated harmonized output", extra={"file_id": file_id, "path": str(destination)})
@@ -243,28 +247,33 @@ class UploadStorage:
         return self._manifest_dir
 
     def _validate_upload(self, suffix: str, content_type: str) -> None:
-        if suffix not in self._constraints.allowed_suffixes:
+        if suffix not in SUPPORTED_TABULAR_SUFFIXES:
             raise UnsupportedUploadError(f"Unsupported file extension: {suffix}")
-        if content_type not in self._constraints.allowed_content_types:
-            raise UnsupportedUploadError(f"Unsupported content type: {content_type}")
+        try:
+            file_format = get_tabular_format(Path(f"dataset{suffix}"), content_type)
+        except ValueError as exc:
+            raise UnsupportedUploadError(str(exc)) from exc
+        if not is_supported_tabular_content_type(content_type, file_format):
+            raise UnsupportedUploadError(f"Unsupported content type for {suffix}: {content_type}")
 
 
 def describe_constraints(constraints: UploadConstraints) -> dict[str, str | int]:
     max_mb = constraints.max_bytes / (1024 * 1024)
     return {
         "max_mb": f"{max_mb:.0f}",
-        "allowed_types": ", ".join(sorted(constraints.allowed_suffixes)),
+        "allowed_types": ", ".join(sorted(SUPPORTED_TABULAR_SUFFIXES)),
         "max_bytes": constraints.max_bytes,
     }
 
 
 def resolve_harmonized_path(original_path: Path, file_id: str) -> Path | None:
-    """Managed storage is the primary location; CWD fallback covers pre-migration runs."""
+    """Managed storage is primary; CWD fallback covers direct SDK writes."""
     harmonized_dir = original_path.parent.parent / "harmonized"
+    harmonized_suffix = _harmonized_suffix_for(original_path)
     candidates = [
-        harmonized_dir / f"{file_id}{HARMONIZED_SUFFIX}",
-        original_path.with_name(f"{original_path.stem}{HARMONIZED_SUFFIX}"),
-        Path.cwd() / f"{file_id}{HARMONIZED_SUFFIX}",
+        harmonized_dir / f"{file_id}{harmonized_suffix}",
+        original_path.with_name(f"{original_path.stem}{harmonized_suffix}"),
+        Path.cwd() / f"{file_id}{harmonized_suffix}",
     ]
     for candidate in candidates:
         if candidate.exists():
@@ -283,18 +292,7 @@ def resolve_harmonized_path_or_404(original_path: Path, file_id: str) -> Path:
     return path
 
 
-def load_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
-    if not path.exists():
-        raise HTTPException(status_code=404, detail=_ERROR_DATASET_NOT_FOUND)
-    with path.open(encoding="utf-8-sig", newline="") as handle:
-        reader = csv.DictReader(handle)
-        rows = list(reader)
-        headers = list(reader.fieldnames) if reader.fieldnames else []
-    return headers, rows
-
-
 __all__ = [
-    "HARMONIZED_SUFFIX",
     "StoredMeta",
     "UploadConstraints",
     "UploadedFileMeta",
@@ -303,7 +301,6 @@ __all__ = [
     "UploadTooLargeError",
     "UploadStorage",
     "describe_constraints",
-    "load_csv",
     "resolve_harmonized_path",
     "resolve_harmonized_path_or_404",
 ]

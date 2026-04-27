@@ -15,6 +15,7 @@ from typing import Any, NamedTuple
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+from netrias_client import column_key_for_index
 
 from src.domain.manifest.models import ManifestRow, ManualOverride, get_manifest_schema
 from src.domain.manifest.reader import read_manifest_parquet
@@ -44,22 +45,22 @@ def add_manual_overrides_batch(
     timestamp = datetime.now(UTC).isoformat()
     updated_rows = summary.rows
 
-    for column_name, to_harmonize, override_value in overrides:
+    for column_key, to_harmonize, override_value in overrides:
         new_override = ManualOverride(user_id=user_id, timestamp=timestamp, value=override_value)
-        updated_rows = _apply_single_override(updated_rows, column_name, to_harmonize, new_override)
+        updated_rows = _apply_single_override(updated_rows, column_key, to_harmonize, new_override)
 
     return _write_manifest_parquet(manifest_path, updated_rows)
 
 
 def _apply_single_override(
     rows: list[ManifestRow],
-    column_name: str,
+    column_key: str,
     to_harmonize: str,
     new_override: ManualOverride,
 ) -> list[ManifestRow]:
     updated: list[ManifestRow] = []
     for row in rows:
-        if row.column_name == column_name and row.to_harmonize == to_harmonize:
+        if column_key == _row_column_key(row) and row.to_harmonize == to_harmonize:
             updated_overrides = [*row.manual_overrides, new_override]
             updated.append(replace(row, manual_overrides=updated_overrides))
         else:
@@ -81,7 +82,7 @@ def _apply_adjustments_to_rows(
     updated: list[ManifestRow] = []
     adjusted_count = 0
     for row in rows:
-        key = (row.column_name, row.to_harmonize)
+        key = (_row_column_key(row), row.to_harmonize)
         if key in adjustment_map:
             adjusted_value, _source = adjustment_map[key]
             updated.append(replace(row, top_harmonization=adjusted_value))
@@ -114,6 +115,10 @@ def apply_pv_adjustments_batch(
         extra={"path": str(manifest_path), "adjustment_count": result.adjustment_count},
     )
     return result.adjustment_count
+
+
+def _row_column_key(row: ManifestRow) -> str:
+    return column_key_for_index(row.column_id)
 
 
 def _write_manifest_parquet(manifest_path: Path, rows: list[ManifestRow]) -> bool:

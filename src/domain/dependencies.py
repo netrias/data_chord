@@ -21,8 +21,6 @@ logger = logging.getLogger(__name__)
 UPLOAD_BASE_DIR = PROJECT_ROOT / "uploads"
 
 MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024
-ALLOWED_SUFFIXES: tuple[str, ...] = (".csv",)
-ALLOWED_CONTENT_TYPES: tuple[str, ...] = ("text/csv", "application/csv", "application/vnd.ms-excel")
 
 _upload_constraints: UploadConstraints | None = None
 _storage: UploadStorage | None = None
@@ -36,11 +34,7 @@ _netrias_client_initialized: bool = False
 def get_upload_constraints() -> UploadConstraints:
     global _upload_constraints  # noqa: PLW0603 - intentional singleton
     if _upload_constraints is None:
-        _upload_constraints = UploadConstraints(
-            allowed_suffixes=ALLOWED_SUFFIXES,
-            allowed_content_types=ALLOWED_CONTENT_TYPES,
-            max_bytes=MAX_UPLOAD_BYTES,
-        )
+        _upload_constraints = UploadConstraints(max_bytes=MAX_UPLOAD_BYTES)
     return _upload_constraints
 
 
@@ -101,8 +95,6 @@ def cleanup_services() -> None:
 
 
 __all__ = [
-    "ALLOWED_CONTENT_TYPES",
-    "ALLOWED_SUFFIXES",
     "MAX_UPLOAD_BYTES",
     "UPLOAD_BASE_DIR",
     "cleanup_services",

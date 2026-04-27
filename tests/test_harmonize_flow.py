@@ -159,3 +159,36 @@ async def test_harmonize_without_client_returns_stubbed_job(
     # Then: Returns a stubbed/queued job indicating service unavailability
     assert result.status == HarmonizeStatus.QUEUED
     assert "stubbed" in result.detail.lower() or "unavailable" in result.detail.lower()
+
+
+def test_harmonize_sends_source_file_and_column_keyed_manifest(tmp_path: Path) -> None:
+    """Harmonize lets the SDK handle tabular format details directly."""
+
+    # Given: a duplicate-header CSV and a manifest keyed by source column key
+    from src.domain import ColumnMappingSet
+    from src.domain.data_model_cache import SessionCache
+    from src.domain.harmonize import HarmonizeService
+
+    csv_path = tmp_path / "dupes.csv"
+    csv_path.write_text("name,name\nAlice,Smith\n", encoding="utf-8")
+    mock_client = MagicMock()
+    mock_client.harmonize.return_value = MagicMock(status="succeeded", description="ok", job_id="job-1")
+    service = HarmonizeService(mock_client)
+    manifest = {"column_mappings": {"col_0001": {"targetField": "last_name", "cde_id": 11}}}
+
+    # When: harmonization is run
+    result = service.run(
+        file_path=csv_path,
+        target_schema=TEST_TARGET_SCHEMA,
+        column_mappings=ColumnMappingSet.from_dict({}),
+        cache=SessionCache(),
+        manifest=manifest,
+    )
+
+    # Then: the SDK sees the original file and column-keyed manifest directly
+    assert result.job_id == "job-1"
+    harmonize_kwargs = mock_client.harmonize.call_args.kwargs
+    sdk_manifest = harmonize_kwargs["manifest"]
+    sdk_keys = list(sdk_manifest["column_mappings"].keys())
+    assert sdk_keys == ["col_0001"]
+    assert harmonize_kwargs["source_path"].name == "dupes.csv"

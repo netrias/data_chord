@@ -16,6 +16,7 @@ from src.domain.harmonize import HarmonizeResult
 from src.domain.storage import UploadStorage
 from tests.conftest import (
     TEST_TARGET_SCHEMA,
+    TEST_TSV_CONTENT_TYPE,
     create_csv_content,
     create_harmonized_csv,
     create_manifest_for_file,
@@ -31,6 +32,13 @@ def _read_downloaded_csv(response_bytes: bytes) -> list[dict[str, str]]:
         csv_name = next(name for name in zf.namelist() if name.endswith(".csv"))
         csv_content = zf.read(csv_name).decode("utf-8")
     return list(csv.DictReader(io.StringIO(csv_content)))
+
+
+def _read_downloaded_tabular(response_bytes: bytes, suffix: str, delimiter: str) -> list[list[str]]:
+    with zipfile.ZipFile(BytesIO(response_bytes), "r") as zf:
+        data_name = next(name for name in zf.namelist() if name.endswith(suffix))
+        content = zf.read(data_name).decode("utf-8")
+    return list(csv.reader(io.StringIO(content), delimiter=delimiter))
 
 
 async def test_stage1_upload_persists_exact_bytes(
@@ -141,11 +149,11 @@ async def test_stage1_analyze_handles_ragged_rows(
     assert col_b_samples[1] == ""
 
 
-async def test_stage1_analyze_rejects_duplicate_headers(
+async def test_stage1_analyze_accepts_duplicate_headers_with_distinct_column_keys(
     app_client: AsyncClient,
     temp_storage: UploadStorage,
 ) -> None:
-    """Analyze rejects CSVs with duplicate headers."""
+    """Analyze preserves duplicate headers by assigning distinct column keys."""
 
     # Given: a CSV with duplicate header names
     content = b"col_a,col_a\nalpha,beta\n"
@@ -158,9 +166,37 @@ async def test_stage1_analyze_rejects_duplicate_headers(
         json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
     )
 
-    # Then: bad request indicates duplicate headers
-    assert response.status_code == 400
-    assert "Duplicate headers" in response.text
+    # Then: both duplicate columns are present and independently addressable
+    assert response.status_code == 200
+    columns = response.json()["columns"]
+    assert [column["column_name"] for column in columns] == ["col_a", "col_a"]
+    assert [column["column_key"] for column in columns] == ["col_0000", "col_0001"]
+    assert columns[0]["sample_values"] == ["alpha"]
+    assert columns[1]["sample_values"] == ["beta"]
+
+
+async def test_stage1_analyze_accepts_tsv(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """Analyze treats tabs as column delimiters for TSV uploads."""
+
+    # Given: a TSV with commas inside values and no manifest stored yet
+    content = b"col_a\tcol_b\nalpha, beta\tgamma\n"
+    file_id = await upload_content(app_client, content, "data.tsv", TEST_TSV_CONTENT_TYPE)
+    assert temp_storage.load_manifest(file_id) is None
+
+    # When: analyze is requested
+    response = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
+    )
+
+    # Then: tab-separated columns are parsed and comma text is preserved
+    assert response.status_code == 200
+    columns = response.json()["columns"]
+    assert [column["column_name"] for column in columns] == ["col_a", "col_b"]
+    assert columns[0]["sample_values"] == ["alpha, beta"]
 
 
 async def test_stage1_analyze_truncates_preview_only(
@@ -434,6 +470,35 @@ async def test_stage5_download_succeeds_without_manifest(
     assert not any(name.endswith(".parquet") for name in names)
 
 
+async def test_stage5_download_tsv_input_exports_tsv(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """A TSV upload downloads a TSV data file, with comma text preserved."""
+
+    # Given: a TSV input and a TSV-shaped harmonized intermediate
+    content = b"col_a\tcol_b\nalpha, beta\tgamma\n"
+    file_id = await upload_content(app_client, content, "download.tsv", TEST_TSV_CONTENT_TYPE)
+    meta = temp_storage.load(file_id)
+    assert meta is not None
+    harmonized_path = meta.saved_path.with_name(f"{meta.saved_path.stem}.harmonized.tsv")
+    with harmonized_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle, delimiter="\t")
+        writer.writerows([["col_a", "col_b"], ["delta, epsilon", "gamma"]])
+
+    # When: the download endpoint is invoked
+    response = await app_client.post("/stage-5/download", json={"file_id": file_id})
+
+    # Then: the zip contains TSV output and values are tab-delimited
+    assert response.status_code == 200
+    with zipfile.ZipFile(BytesIO(response.content), "r") as zf:
+        names = zf.namelist()
+    assert any(name.endswith(".tsv") for name in names)
+    assert not any(name.endswith(".csv") for name in names)
+    output_rows = _read_downloaded_tabular(response.content, ".tsv", "\t")
+    assert output_rows == [["col_a", "col_b"], ["delta, epsilon", "gamma"]]
+
+
 async def test_stage5_download_ignores_invalid_row_keys(
     app_client: AsyncClient,
     temp_storage: UploadStorage,
@@ -452,7 +517,7 @@ async def test_stage5_download_ignores_invalid_row_keys(
         json={
             "file_id": file_id,
             "overrides": {
-                "99": {"col_a": {"ai_value": "alpha", "human_value": "gamma", "original_value": "alpha"}},
+                "99": {"col_0000": {"ai_value": "alpha", "human_value": "gamma", "original_value": "alpha"}},
             },
             "review_state": review_state_payload(),
         },

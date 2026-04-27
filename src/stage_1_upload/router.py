@@ -21,6 +21,11 @@ from src.domain.dependencies import (
     get_upload_storage,
 )
 from src.domain.manifest import ManifestPayload
+from src.domain.storage import (
+    UnsupportedUploadError,
+    UploadTooLargeError,
+    describe_constraints,
+)
 
 from .schemas import (
     AnalyzeRequest,
@@ -29,12 +34,7 @@ from .schemas import (
     DataModelSchema,
     UploadResponse,
 )
-from .services import (
-    UnsupportedUploadError,
-    UploadTooLargeError,
-    analyze_columns,
-    describe_constraints,
-)
+from .services import analyze_columns
 
 MODULE_DIR = Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"
@@ -179,7 +179,7 @@ def _log_analysis_results(
 ) -> None:
     cde_target_keys = set(cde_targets)
     missing_columns = [
-        col.column_name for col in columns if col.column_name not in cde_target_keys
+        col.column_key for col in columns if col.column_key not in cde_target_keys
     ]
     _router_logger.info(
         "Analyze completed",

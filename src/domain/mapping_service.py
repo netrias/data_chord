@@ -36,8 +36,8 @@ class MappingDiscoveryService:
             raise RuntimeError("NetriasClient unavailable (missing NETRIAS_API_KEY)")
 
         try:
-            raw_manifest = self._client.discover_mapping_from_csv(
-                source_csv=csv_path,
+            raw_manifest = self._client.discover_mapping_from_tabular(
+                source_path=csv_path,
                 target_schema=target_schema,
                 confidence_threshold=0.7,
             )

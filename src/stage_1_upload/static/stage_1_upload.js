@@ -103,8 +103,8 @@ const _validateFile = (file) => {
   if (!file) {
     errors.push('No file detected.');
   }
-  if (file && !file.name.toLowerCase().endsWith('.csv')) {
-    errors.push('Only CSV files are supported right now.');
+  if (file && !/\.(csv|tsv)$/i.test(file.name)) {
+    errors.push('Only CSV or TSV files are supported right now.');
   }
   if (file && config.maxBytes && file.size > Number(config.maxBytes)) {
     errors.push(`File exceeds the ${_formatBytes(Number(config.maxBytes))} limit.`);

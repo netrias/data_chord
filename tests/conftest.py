@@ -15,13 +15,15 @@ import pyarrow.parquet as pq
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from src.domain.storage import HARMONIZED_SUFFIX, UploadConstraints, UploadStorage
+from src.domain.storage import UploadConstraints, UploadStorage
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 # Test constants
 TEST_CSV_CONTENT_TYPE = "text/csv"
+TEST_TSV_CONTENT_TYPE = "text/tab-separated-values"
 TEST_TARGET_SCHEMA = "CCDI"
+TEST_HARMONIZED_CSV_SUFFIX = ".harmonized.csv"
 SAMPLE_CSV_ROW_COUNT = 10
 SAMPLE_CSV_COLUMN_COUNT = 6
 MAX_EXAMPLES_LIMIT = 20
@@ -86,11 +88,7 @@ class MockHarmonizeResult:
 @pytest.fixture
 def test_constraints() -> UploadConstraints:
     """why: provide smaller limits for faster test execution."""
-    return UploadConstraints(
-        allowed_suffixes=(".csv",),
-        allowed_content_types=(TEST_CSV_CONTENT_TYPE, "application/csv", "application/vnd.ms-excel"),
-        max_bytes=25 * 1024 * 1024,
-    )
+    return UploadConstraints(max_bytes=25 * 1024 * 1024)
 
 
 @pytest.fixture
@@ -108,11 +106,11 @@ def mock_netrias_client() -> Generator[MagicMock]:
 
     _cde_manifest = {
         "column_mappings": {
-            "primary_diagnosis": {
+            "col_0000": {
                 "targetField": "primary_diagnosis",
                 "cde_id": 2,
             },
-            "therapeutic_agents": {
+            "col_0001": {
                 "targetField": "therapeutic_agents",
                 "cde_id": 1,
             },
@@ -134,7 +132,7 @@ def mock_netrias_client() -> Generator[MagicMock]:
     )
 
     # MappingDiscoveryService.discover() calls this after demo_bypass removal
-    mock_client.discover_mapping_from_csv.return_value = _cde_manifest
+    mock_client.discover_mapping_from_tabular.return_value = _cde_manifest
     mock_client.configure.return_value = None
 
     mock_client.harmonize.return_value = MockHarmonizeResult(
@@ -273,11 +271,16 @@ async def upload_file(client: AsyncClient, csv_path: Path) -> str:
     return response.json()["file_id"]
 
 
-async def upload_content(client: AsyncClient, content: bytes, filename: str = "test.csv") -> str:
+async def upload_content(
+    client: AsyncClient,
+    content: bytes,
+    filename: str = "test.csv",
+    content_type: str = TEST_CSV_CONTENT_TYPE,
+) -> str:
     """why: upload raw content and return its file_id for dynamic test scenarios."""
     response = await client.post(
         "/stage-1/upload",
-        files={"file": (filename, content, TEST_CSV_CONTENT_TYPE)},
+        files={"file": (filename, content, content_type)},
     )
     assert response.status_code == 201, f"Upload failed: {response.status_code} {response.text}"
     return response.json()["file_id"]
@@ -304,7 +307,7 @@ def create_harmonized_csv(original_path: Path, changes: dict[int, dict[str, str]
         if row_idx < len(rows):
             rows[row_idx].update(column_changes)
 
-    harmonized_path = original_path.with_name(f"{original_path.stem}{HARMONIZED_SUFFIX}")
+    harmonized_path = original_path.with_name(f"{original_path.stem}{TEST_HARMONIZED_CSV_SUFFIX}")
     with harmonized_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=headers)
         writer.writeheader()

@@ -56,11 +56,12 @@ const _readPayloadFromStorage = () => {
 
 /** Look up CDE target suggestions for a column, filtering to valid CDEs only. */
 const _getColumnSuggestions = (column) => {
-  if (!column?.column_name) {
+  const columnKey = column?.column_key ?? column?.column_name;
+  if (!columnKey) {
     return [];
   }
   const targets = state.payload?.cde_targets ?? {};
-  const rawSuggestions = targets[column.column_name] || [];
+  const rawSuggestions = targets[columnKey] || [];
   /* Filter to only suggestions that match our allowable CDE options. */
   return rawSuggestions.filter((s) => cdeByKey.has(s.target));
 };
@@ -106,7 +107,7 @@ const _persistStageThreePayload = (body) => {
 const _buildMappingRow = (column) => {
   const suggestions = _getColumnSuggestions(column);
   const topTarget = suggestions[0];
-  const columnKey = column.column_name;
+  const columnKey = column.column_key ?? column.column_name;
   const manualSelection = state.manualSelections.get(columnKey) ?? null;
 
   const row = document.createElement('div');
@@ -126,7 +127,10 @@ const _buildMappingRow = (column) => {
 
   const columnCell = document.createElement('div');
   columnCell.className = `${CSS_MAPPING_TD} ${CSS_MAPPING_TD}-column`;
-  columnCell.textContent = column.column_name;
+  columnCell.textContent = column.header ?? column.column_name;
+  if (column.source_index !== undefined) {
+    columnCell.title = `Column ${Number(column.source_index) + 1}`;
+  }
 
   const suggestionCell = document.createElement('div');
   suggestionCell.className = `${CSS_MAPPING_TD} ${CSS_MAPPING_TD}-suggestion`;

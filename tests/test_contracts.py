@@ -11,6 +11,7 @@ from src.domain.storage import UploadStorage
 from tests.conftest import (
     TEST_CSV_CONTENT_TYPE,
     TEST_TARGET_SCHEMA,
+    TEST_TSV_CONTENT_TYPE,
     create_harmonized_csv,
     create_manifest_for_file,
     upload_file,
@@ -71,6 +72,7 @@ class TestUploadContract:
         [
             ("test.csv", "text/csv", 201),
             ("test.csv", "application/csv", 201),
+            ("test.tsv", TEST_TSV_CONTENT_TYPE, 201),
             ("test.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 415),
             ("test.json", "application/json", 415),
         ],
@@ -147,6 +149,9 @@ class TestAnalyzeContract:
         assert len(columns) > 0
         for col in columns:
             assert "column_name" in col
+            assert "column_key" in col
+            assert "source_index" in col
+            assert "header" in col
             assert "inferred_type" in col
             assert "sample_values" in col
             assert "confidence_bucket" in col
