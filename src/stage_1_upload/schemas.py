@@ -17,11 +17,15 @@ class UploadResponse(BaseModel):
     human_size: str
     content_type: str
     uploaded_at: datetime
+    tabular_format: str
+    sheet_names: list[str] = Field(default_factory=list)
+    selected_sheet: str | None = None
 
 
 class AnalyzeRequest(BaseModel):
     file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, max_length=128, pattern=FILE_ID_PATTERN)
     target_schema: str = Field(..., min_length=1)
+    sheet_name: str | None = None
 
 
 class ColumnPreview(BaseModel):

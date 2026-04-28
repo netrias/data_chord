@@ -1,7 +1,7 @@
 # Data Chord Architecture
 
 Data Chord is a web-based data harmonization application that transforms tabular
-CSV data into standardized Common Data Element (CDE) formats through a guided,
+data into standardized Common Data Element (CDE) formats through a guided,
 human-in-the-loop workflow. See [app.md](app.md) for the product overview.
 
 ---
@@ -109,11 +109,11 @@ functions (`get_upload_storage()`, `get_file_store()`, `get_mapping_service()`,
 
 ## Data Flow
 
-1. **Upload** (Stage 1): CSV → `UploadStorage` → file_id → data model selection
+1. **Upload** (Stage 1): tabular file → `UploadStorage` → optional worksheet selection → file_id → data model selection
 2. **Mapping** (Stage 2): file_id → `MappingService` → column-to-CDE mappings
 3. **Harmonize** (Stage 3): mappings → `HarmonizeService` → manifest (Parquet) + PV adjustments
 4. **Review** (Stage 4): manifest + PV combobox overrides → reviewed manifest with audit trail
-5. **Export** (Stage 5): manifest → harmonized CSV + JSON manifest (human-readable audit trail)
+5. **Export** (Stage 5): manifest → harmonized tabular file + JSON manifest (human-readable audit trail)
 
 ---
 
@@ -121,7 +121,7 @@ functions (`get_upload_storage()`, `get_file_store()`, `get_mapping_service()`,
 
 ### Stage 1: Upload
 
-**Purpose:** Accept a CSV file, select data model, and discover CDE column mappings.
+**Purpose:** Accept a CSV, TSV, or XLSX file, select data model, and discover CDE column mappings.
 
 **Endpoints:**
 - `GET /stage-1` — Render upload page
@@ -129,8 +129,9 @@ functions (`get_upload_storage()`, `get_file_store()`, `get_mapping_service()`,
 - `POST /stage-1/analyze` — Profile columns, call `MappingDiscoveryService.discover()`
 - `GET /stage-1/data-models` — Fetch available data models from Data Model Store API
 
-**Flow:** User drops CSV → file stored to disk → user selects data model and
-version in modal → navigates to Stage 2 with `file_id` query parameter.
+**Flow:** User drops a tabular file → file stored to disk → XLSX uploads default
+to the first worksheet and may choose another worksheet → user selects data
+model and version in modal → navigates to Stage 2 with `file_id` query parameter.
 
 ### Stage 2: Review Column Mappings
 
@@ -267,15 +268,16 @@ FileStore (facade)
 Files are named `{file_id}_{suffix}.{extension}` (e.g.,
 `abc123_overrides.json`, `abc123_harmonization.parquet`).
 
-`UploadStorage` handles uploaded CSV persistence, constraints validation
-(file size, type, extension), and metadata tracking via `UploadedFileMeta`.
+`UploadStorage` handles uploaded tabular file persistence, constraints validation
+(file size, type, extension), XLSX worksheet metadata, and metadata tracking via
+`UploadedFileMeta`.
 
 ### Services
 
 | Service | Responsibility |
 |---|---|
 | `HarmonizeService` | Wraps `NetriasClient.harmonize()` with manifest merging and error handling |
-| `MappingDiscoveryService` | Wraps `NetriasClient.discover_mapping_from_csv()` (confidence threshold 0.7) |
+| `MappingDiscoveryService` | Wraps `NetriasClient.discover_mapping_from_tabular()` (confidence threshold 0.7) |
 | `data_model_adapter` | Thin adapter: SDK types → domain types (data model list, CDEs, PVs) |
 
 Services degrade gracefully: missing API keys or client init failures are
@@ -298,10 +300,11 @@ All persistent data lives under a single base directory (configurable via
 ```
 uploads/
 ├── files/
-│   ├── {file_id}.csv                    # Original uploaded CSV
-│   └── {file_id}_harmonized.csv         # Harmonized CSV from Netrias
+│   └── {file_id}.{csv|tsv|xlsx}         # Original uploaded tabular file
+├── harmonized/
+│   └── {file_id}.harmonized.{csv|tsv|xlsx}
 ├── meta/
-│   └── {file_id}.json                   # UploadedFileMeta (name, size, timestamp)
+│   └── {file_id}.json                   # UploadedFileMeta (name, size, timestamp, worksheet)
 └── manifests/
     ├── {file_id}.json                   # Stored manifest payload (JSON)
     ├── {file_id}_harmonization.parquet  # Harmonization manifest (Parquet)
@@ -467,4 +470,3 @@ Examples:
 | Interactivity | HTMX |
 | Data Processing | PyArrow |
 | Package Management | uv |
-

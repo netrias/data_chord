@@ -14,6 +14,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 from httpx import ASGITransport, AsyncClient
+from openpyxl import Workbook
+from openpyxl.worksheet.worksheet import Worksheet
 
 from src.domain.storage import UploadConstraints, UploadStorage
 
@@ -22,6 +24,7 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 # Test constants
 TEST_CSV_CONTENT_TYPE = "text/csv"
 TEST_TSV_CONTENT_TYPE = "text/tab-separated-values"
+TEST_XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 TEST_TARGET_SCHEMA = "CCDI"
 TEST_HARMONIZED_CSV_SUFFIX = ".harmonized.csv"
 SAMPLE_CSV_ROW_COUNT = 10
@@ -259,6 +262,23 @@ def create_csv_content(rows: list[list[str]]) -> bytes:
     """why: dynamically generate CSV content for specific test scenarios."""
     lines: list[str] = [",".join(row) for row in rows]
     return "\n".join(lines).encode("utf-8")
+
+
+def create_xlsx_content(sheets: dict[str, list[list[str]]]) -> bytes:
+    """why: dynamically generate XLSX content for workbook selection tests."""
+    from io import BytesIO
+    from typing import cast
+
+    workbook = Workbook()
+    default_sheet = cast(Worksheet, workbook.active)
+    for index, (sheet_name, rows) in enumerate(sheets.items()):
+        sheet = default_sheet if index == 0 else cast(Worksheet, workbook.create_sheet(sheet_name))
+        sheet.title = sheet_name
+        for row in rows:
+            sheet.append(row)
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()
 
 
 async def upload_file(client: AsyncClient, csv_path: Path) -> str:

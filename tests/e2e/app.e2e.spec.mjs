@@ -7,6 +7,7 @@ import {
   fileFixture,
   getFileIdFromUrl,
   uploadAndAnalyze,
+  uploadAndAnalyzeSheet,
   clickHarmonize,
   mockDataModels,
   mockHarmonizeSuccess,
@@ -14,6 +15,8 @@ import {
   seedHarmonization,
   parseDownloadedCsv,
   parseDownloadedTabular,
+  createWorkbookFixture,
+  parseDownloadedWorkbook,
 } from './utils.mjs';
 
 const waitForReviewRows = async (page) => {
@@ -38,6 +41,12 @@ const downloadTsvRows = async (page, fileId) => {
   const response = await page.request.post('/stage-5/download', { data: { file_id: fileId } });
   expect(response.ok()).toBeTruthy();
   return parseDownloadedTabular(response, '.tsv', '\t');
+};
+
+const downloadWorkbookRows = async (page, fileId, sheetName) => {
+  const response = await page.request.post('/stage-5/download', { data: { file_id: fileId } });
+  expect(response.ok()).toBeTruthy();
+  return parseDownloadedWorkbook(response, sheetName);
 };
 
 test('happy path flow: upload → analyze → harmonize → review → summary → download', async ({ page }) => {
@@ -85,6 +94,28 @@ test('TSV flow preserves TSV format through download', async ({ page }) => {
   const rows = await downloadTsvRows(page, fileId);
   expect(rows[0].col_a).toBe('Baz, still one cell');
   expect(rows[0].col_b).toBe('value, one');
+});
+
+test('XLSX flow selects a worksheet and preserves XLSX format through download', async ({ page }) => {
+  await mockHarmonizeSuccess(page);
+
+  // Given: a workbook is uploaded and the second worksheet is selected
+  const workbookPath = createWorkbookFixture();
+  const fileId = await uploadAndAnalyzeSheet(page, workbookPath, 'Patients');
+  const preOverrides = await page.request.get(`/stage-4/overrides/${fileId}`);
+  expect(await preOverrides.json()).toBeNull();
+
+  // When: the user harmonizes and downloads the result
+  await clickHarmonize(page);
+  await expect(page.locator('#reviewButton')).toBeEnabled();
+  seedHarmonization(fileId, { 0: { col_a: 'Baz, still one cell' } });
+
+  // Then: the selected worksheet is exported as XLSX and comma-bearing values stay in one cell
+  const patientRows = await downloadWorkbookRows(page, fileId, 'Patients');
+  expect(patientRows[0]).toEqual(['col_a', 'col_b']);
+  expect(patientRows[1]).toEqual(['Baz, still one cell', 'value, one']);
+  const keptRows = await downloadWorkbookRows(page, fileId, 'Keep');
+  expect(keptRows[1]).toEqual(['unchanged']);
 });
 
 test('override propagation applies to all instances in a column', async ({ page }) => {

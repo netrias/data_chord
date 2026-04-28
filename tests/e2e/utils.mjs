@@ -1,4 +1,6 @@
 import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import AdmZip from 'adm-zip';
 
@@ -19,6 +21,24 @@ export const uploadAndAnalyze = async (page, filePath) => {
   await page.locator('#analyzeButton').waitFor({ state: 'attached' });
   await page.locator('#analyzeButton').waitFor({ state: 'visible' });
   await page.waitForFunction(() => !document.querySelector('#analyzeButton')?.disabled);
+  await page.click('#analyzeButton');
+  const confirmButton = page.locator('.data-model-confirm-btn');
+  await confirmButton.waitFor({ state: 'visible' });
+  await confirmButton.click();
+  await page.waitForURL(/\/stage-2/);
+  return getFileIdFromUrl(page);
+};
+
+export const uploadAndAnalyzeSheet = async (page, filePath, sheetName) => {
+  await mockDataModels(page);
+  await mockAnalyze(page);
+  await page.goto('/stage-1');
+  await page.setInputFiles('#fileInput', filePath);
+  await page.locator('#analyzeButton').waitFor({ state: 'attached' });
+  await page.locator('#analyzeButton').waitFor({ state: 'visible' });
+  await page.waitForFunction(() => !document.querySelector('#analyzeButton')?.disabled);
+  await page.locator('#sheetSelect').waitFor({ state: 'visible' });
+  await page.selectOption('#sheetSelect', sheetName);
   await page.click('#analyzeButton');
   const confirmButton = page.locator('.data-model-confirm-btn');
   await confirmButton.waitFor({ state: 'visible' });
@@ -60,6 +80,9 @@ export const mockAnalyze = async (page) => {
   await page.route('**/stage-1/analyze', async (route) => {
     const payload = route.request().postDataJSON?.() ?? {};
     const fileId = payload.file_id ?? '';
+    if (fileId && payload.sheet_name) {
+      persistSelectedSheet(fileId, payload.sheet_name);
+    }
     const response = {
       file_id: fileId,
       file_name: 'test.csv',
@@ -134,6 +157,47 @@ export const seedHarmonization = (fileId, changes = {}, options = {}) => {
     args.push('--no-manifest');
   }
   execFileSync('uv', args, { stdio: 'inherit' });
+};
+
+export const createWorkbookFixture = () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'data-chord-e2e-xlsx-'));
+  const workbookPath = path.join(tmpDir, 'workbook.xlsx');
+  execFileSync('uv', [
+    'run',
+    'python',
+    path.resolve('tests/e2e/support/create_workbook_fixture.py'),
+    '--output',
+    workbookPath,
+  ], { stdio: 'inherit' });
+  return workbookPath;
+};
+
+export const parseDownloadedWorkbook = async (response, sheetName) => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'data-chord-e2e-download-'));
+  const zipPath = path.join(tmpDir, 'download.zip');
+  fs.writeFileSync(zipPath, Buffer.from(await response.body()));
+  const output = execFileSync('uv', [
+    'run',
+    'python',
+    path.resolve('tests/e2e/support/read_downloaded_workbook.py'),
+    '--zip-path',
+    zipPath,
+    '--sheet-name',
+    sheetName,
+  ], { encoding: 'utf-8' });
+  return JSON.parse(output);
+};
+
+const persistSelectedSheet = (fileId, sheetName) => {
+  execFileSync('uv', [
+    'run',
+    'python',
+    path.resolve('tests/e2e/support/select_sheet.py'),
+    '--file-id',
+    fileId,
+    '--sheet-name',
+    sheetName,
+  ], { stdio: 'inherit' });
 };
 
 export const parseDownloadedCsv = async (response) => {

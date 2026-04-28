@@ -121,6 +121,7 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
             column_mappings,
             manifest.to_payload(),
             output_path,
+            meta.selected_sheet,
         )
     )
     pv_fetch_task = asyncio.create_task(
@@ -183,6 +184,7 @@ async def _run_harmonization(
     column_mappings: ColumnMappingSet,
     manifest: ManifestPayload | None,
     output_path: Path,
+    sheet_name: str | None,
 ) -> HarmonizeResult:
     """Netrias client is sync; run in threadpool to avoid blocking the event loop."""
     harmonizer = get_harmonize_service()
@@ -194,6 +196,7 @@ async def _run_harmonization(
         cache=cache,
         manifest=manifest,
         output_path=output_path,
+        sheet_name=sheet_name,
     )
 
 

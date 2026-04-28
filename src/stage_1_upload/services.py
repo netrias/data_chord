@@ -13,11 +13,15 @@ from src.domain.manifest import completeness_bucket
 from .schemas import ColumnPreview
 
 
-def analyze_columns(csv_path: Path, max_preview_rows: int = 5) -> tuple[int, list[ColumnPreview]]:
+def analyze_columns(
+    csv_path: Path,
+    max_preview_rows: int = 5,
+    sheet_name: str | None = None,
+) -> tuple[int, list[ColumnPreview]]:
     if not csv_path.exists():
         raise FileNotFoundError(csv_path)
 
-    dataset = read_tabular(csv_path)
+    dataset = read_tabular(csv_path, sheet_name=sheet_name)
     sample_rows = dataset.rows[:max_preview_rows]
     columns = [_analyze_single_column(column, sample_rows) for column in dataset.columns]
     total_rows = len(dataset.rows)

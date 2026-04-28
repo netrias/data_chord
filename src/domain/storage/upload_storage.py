@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import NotRequired, TypedDict, cast
 from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile
@@ -21,6 +21,7 @@ from netrias_client import (
     SUPPORTED_TABULAR_SUFFIXES,
     get_tabular_format,
     is_supported_tabular_content_type,
+    list_workbook_sheets,
 )
 
 from src.domain.manifest import ManifestPayload, normalize_manifest
@@ -35,6 +36,9 @@ class StoredMeta(TypedDict):
     size_bytes: int
     saved_name: str
     uploaded_at: str
+    tabular_format: NotRequired[str]
+    sheet_names: NotRequired[list[str]]
+    selected_sheet: NotRequired[str | None]
 
 
 @dataclass(frozen=True)
@@ -51,6 +55,9 @@ class UploadedFileMeta:
     size_bytes: int
     saved_path: Path
     uploaded_at: datetime
+    tabular_format: str
+    sheet_names: list[str]
+    selected_sheet: str | None = None
 
     @property
     def human_size(self) -> str:
@@ -118,7 +125,11 @@ class UploadStorage:
         finally:
             await upload.close()
 
-        return self._create_and_save_metadata(file_id, filename, content_type, total_bytes, destination)
+        try:
+            return self._create_and_save_metadata(file_id, filename, content_type, total_bytes, destination)
+        except UnsupportedUploadError:
+            destination.unlink(missing_ok=True)
+            raise
 
     def _extract_upload_info(self, upload: UploadFile) -> tuple[str, str, str]:
         filename = upload.filename or "dataset.csv"
@@ -150,6 +161,9 @@ class UploadStorage:
         total_bytes: int,
         destination: Path,
     ) -> UploadedFileMeta:
+        file_format = get_tabular_format(destination, content_type)
+        sheet_names = _sheet_names_for(destination)
+        selected_sheet = sheet_names[0] if sheet_names else None
         meta = UploadedFileMeta(
             file_id=file_id,
             original_name=filename,
@@ -157,6 +171,9 @@ class UploadStorage:
             size_bytes=total_bytes,
             saved_path=destination,
             uploaded_at=datetime.now(UTC),
+            tabular_format=file_format.value,
+            sheet_names=sheet_names,
+            selected_sheet=selected_sheet,
         )
         self._write_metadata(meta)
         logger.info("Stored upload", extra={"file_id": file_id, "size_bytes": total_bytes})
@@ -175,6 +192,9 @@ class UploadStorage:
             size_bytes=payload["size_bytes"],
             saved_path=self._data_dir / payload["saved_name"],
             uploaded_at=datetime.fromisoformat(payload["uploaded_at"]),
+            tabular_format=payload.get("tabular_format", Path(payload["saved_name"]).suffix.lower().lstrip(".")),
+            sheet_names=payload.get("sheet_names", []),
+            selected_sheet=payload.get("selected_sheet"),
         )
 
     def _write_metadata(self, meta: UploadedFileMeta) -> None:
@@ -185,9 +205,36 @@ class UploadStorage:
             "size_bytes": meta.size_bytes,
             "saved_name": meta.saved_path.name,
             "uploaded_at": meta.uploaded_at.isoformat(),
+            "tabular_format": meta.tabular_format,
+            "sheet_names": meta.sheet_names,
+            "selected_sheet": meta.selected_sheet,
         }
         meta_path = self._meta_dir / f"{meta.file_id}.json"
         meta_path.write_text(json.dumps(meta_payload, indent=2))
+
+    def select_sheet(self, file_id: str, sheet_name: str | None) -> UploadedFileMeta:
+        meta = self.load(file_id)
+        if meta is None:
+            raise FileNotFoundError(file_id)
+        if not meta.sheet_names:
+            return meta
+        selected_sheet = sheet_name or meta.sheet_names[0]
+        if selected_sheet not in meta.sheet_names:
+            available = ", ".join(meta.sheet_names)
+            raise ValueError(f"Unknown worksheet: {selected_sheet}. Available worksheets: {available}")
+        updated = UploadedFileMeta(
+            file_id=meta.file_id,
+            original_name=meta.original_name,
+            content_type=meta.content_type,
+            size_bytes=meta.size_bytes,
+            saved_path=meta.saved_path,
+            uploaded_at=meta.uploaded_at,
+            tabular_format=meta.tabular_format,
+            sheet_names=meta.sheet_names,
+            selected_sheet=selected_sheet,
+        )
+        self._write_metadata(updated)
+        return updated
 
     def save_manifest(self, file_id: str, manifest: ManifestPayload | Mapping[str, object]) -> Path:
         path = self._manifest_dir / f"{file_id}.json"
@@ -245,6 +292,15 @@ def describe_constraints(constraints: UploadConstraints) -> dict[str, str | int]
         "allowed_types": ", ".join(sorted(SUPPORTED_TABULAR_SUFFIXES)),
         "max_bytes": constraints.max_bytes,
     }
+
+
+def _sheet_names_for(path: Path) -> list[str]:
+    try:
+        return [sheet.name for sheet in list_workbook_sheets(path)]
+    except ValueError:
+        return []
+    except Exception as exc:
+        raise UnsupportedUploadError(f"Unable to read workbook sheets: {exc}") from exc
 
 
 def resolve_harmonized_path(original_path: Path, file_id: str) -> Path | None:

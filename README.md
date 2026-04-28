@@ -1,6 +1,11 @@
 # Data Chord
 
-Data harmonization workflow application. Upload tabular data, review AI-suggested column mappings, run harmonization, and approve results before export.
+Data harmonization workflow application. Upload CSV, TSV, or XLSX tabular data, review AI-suggested column mappings, run harmonization, and approve results before export.
+
+XLSX uploads are treated as workbooks at the upload boundary. Stage 1 defaults
+to the first worksheet and lets the user select another sheet before mapping.
+Only the selected worksheet is harmonized, and downloads preserve the input
+format.
 
 For a detailed overview, see [app.md](app.md).
 

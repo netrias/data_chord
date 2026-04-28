@@ -15,10 +15,14 @@ const dropzoneFileSize = document.getElementById('dropzoneFileSize');
 const dropzoneFileStatus = document.getElementById('dropzoneFileStatus');
 const changeFileButton = document.getElementById('changeFileButton');
 const analyzeOverlay = document.getElementById('analyzeOverlay');
+const sheetSelectorPanel = document.getElementById('sheetSelectorPanel');
+const sheetSelect = document.getElementById('sheetSelect');
 
 const state = {
   file: null,
   uploaded: null,
+  sheetNames: [],
+  selectedSheet: null,
   isUploading: false,
   isAnalyzing: false,
 };
@@ -88,12 +92,15 @@ const _openFilePicker = () => {
 const _resetUploadState = () => {
   state.file = null;
   state.uploaded = null;
+  state.sheetNames = [];
+  state.selectedSheet = null;
   state.isUploading = false;
   state.isAnalyzing = false;
   if (fileInput) fileInput.value = '';
   _setAnalyzeButtonVisible(false);
   if (dropzone) dropzone.classList.remove('has-file');
   _showDropzoneCopy();
+  _renderSheetSelector();
   _setStatus('');
   setActiveStage('upload');
 };
@@ -103,8 +110,8 @@ const _validateFile = (file) => {
   if (!file) {
     errors.push('No file detected.');
   }
-  if (file && !/\.(csv|tsv)$/i.test(file.name)) {
-    errors.push('Only CSV or TSV files are supported right now.');
+  if (file && !/\.(csv|tsv|xlsx)$/i.test(file.name)) {
+    errors.push('Only CSV, TSV, or XLSX files are supported right now.');
   }
   if (file && config.maxBytes && file.size > Number(config.maxBytes)) {
     errors.push(`File exceeds the ${_formatBytes(Number(config.maxBytes))} limit.`);
@@ -152,9 +159,12 @@ const _uploadDataset = async () => {
       throw new Error(payload.detail || 'Upload failed.');
     }
     state.uploaded = payload;
+    state.sheetNames = Array.isArray(payload.sheet_names) ? payload.sheet_names : [];
+    state.selectedSheet = payload.selected_sheet ?? state.sheetNames[0] ?? null;
     _persistFileSession(payload, state.file.name);
     if (dropzone) dropzone.classList.add('has-file');
     _showDropzoneSummary(state.file, 'Uploaded');
+    _renderSheetSelector();
     _setAnalyzeButtonVisible(true);
   } catch (error) {
     console.error(error);
@@ -179,6 +189,8 @@ const _persistFileSession = (uploadResponse, fileName) => {
     original_name: fileName,
     uploaded_at: new Date().toISOString(),
     human_size: uploadResponse.human_size,
+    sheet_names: uploadResponse.sheet_names ?? [],
+    selected_sheet: uploadResponse.selected_sheet ?? null,
   });
 };
 
@@ -191,11 +203,31 @@ const _hydrateFromSession = () => {
 
   state.uploaded = { file_id: session.file_id, human_size: session.human_size };
   state.file = { name: session.original_name, humanSize: session.human_size };
+  state.sheetNames = Array.isArray(session.sheet_names) ? session.sheet_names : [];
+  state.selectedSheet = session.selected_sheet ?? state.sheetNames[0] ?? null;
 
   if (dropzone) dropzone.classList.add('has-file');
   _showDropzoneSummary(state.file, 'Uploaded');
+  _renderSheetSelector();
   _setAnalyzeButtonVisible(true);
   return true;
+};
+
+const _renderSheetSelector = () => {
+  if (!sheetSelectorPanel || !sheetSelect) return;
+  sheetSelect.replaceChildren();
+  if (!state.sheetNames.length) {
+    sheetSelectorPanel.classList.add('hidden');
+    return;
+  }
+  for (const sheetName of state.sheetNames) {
+    const option = document.createElement('option');
+    option.value = sheetName;
+    option.textContent = sheetName;
+    option.selected = sheetName === state.selectedSheet;
+    sheetSelect.append(option);
+  }
+  sheetSelectorPanel.classList.remove('hidden');
 };
 
 const _persistStageTwoPayload = (payload) => {
@@ -244,6 +276,7 @@ const _analyzeDataset = async () => {
       body: JSON.stringify({
         file_id: state.uploaded.file_id,
         target_schema: selection.dataModelKey,
+        sheet_name: state.selectedSheet,
       }),
     });
     const payload = await response.json().catch(() => ({}));
@@ -335,6 +368,22 @@ const _init = () => {
       const file = files[0];
       if (file) {
         _handleFileSelection(file);
+      }
+    });
+  }
+
+  if (sheetSelect) {
+    sheetSelect.addEventListener('change', () => {
+      state.selectedSheet = sheetSelect.value || null;
+      if (state.uploaded && state.file) {
+        _persistFileSession(
+          {
+            ...state.uploaded,
+            sheet_names: state.sheetNames,
+            selected_sheet: state.selectedSheet,
+          },
+          state.file.name,
+        );
       }
     });
   }

@@ -83,7 +83,7 @@ async def fetch_stage_four_rows(payload: StageFourResultsRequest) -> StageFourRe
     if not meta:
         raise HTTPException(status_code=404, detail="Upload not found. Please rerun harmonization.")
 
-    original_dataset = read_tabular(meta.saved_path)
+    original_dataset = read_tabular(meta.saved_path, sheet_name=meta.selected_sheet)
 
     manifest = _load_manifest(storage, payload.file_id)
     if manifest is None:
@@ -401,7 +401,7 @@ async def get_row_context(payload: RowContextRequest) -> RowContextResponse:
     if not meta:
         raise HTTPException(status_code=404, detail="Upload not found")
 
-    dataset = read_tabular(meta.saved_path)
+    dataset = read_tabular(meta.saved_path, sheet_name=meta.selected_sheet)
 
     selected_rows: list[list[str]] = []
     for idx in payload.row_indices:

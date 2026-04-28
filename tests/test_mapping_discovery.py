@@ -270,8 +270,10 @@ def test_discover_preserves_duplicate_headers_with_column_keys(
         source_path: Path,
         target_schema: str,
         confidence_threshold: float,
+        sheet_name: str | None = None,
     ) -> dict[str, object]:
         assert source_path.name == "dupes.csv"
+        assert sheet_name is None
         return {
             "column_mappings": {
                 "col_0000": {"cde_key": "first_name", "cde_id": 10},

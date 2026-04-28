@@ -23,6 +23,7 @@ from src.domain.dependencies import (
 from src.domain.manifest import ManifestPayload
 from src.domain.storage import (
     UnsupportedUploadError,
+    UploadedFileMeta,
     UploadTooLargeError,
     describe_constraints,
 )
@@ -102,6 +103,9 @@ async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadRespon
         human_size=meta.human_size,
         content_type=meta.content_type,
         uploaded_at=meta.uploaded_at,
+        tabular_format=meta.tabular_format,
+        sheet_names=meta.sheet_names,
+        selected_sheet=meta.selected_sheet,
     )
 
 
@@ -115,9 +119,15 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     if not meta:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please upload again.")
 
-    total_rows, columns = await run_in_threadpool(_analyze_columns_safe, meta.saved_path, payload.file_id)
+    meta = _select_sheet_safe(payload.file_id, payload.sheet_name)
+    total_rows, columns = await run_in_threadpool(
+        _analyze_columns_safe,
+        meta.saved_path,
+        payload.file_id,
+        meta.selected_sheet,
+    )
     cde_targets, manual_overrides, manifest = await _discover_mappings(
-        meta.saved_path, payload.target_schema
+        meta.saved_path, payload.target_schema, meta.selected_sheet
     )
     _storage.save_manifest(meta.file_id, manifest)
     _log_analysis_results(total_rows, columns, cde_targets)
@@ -135,9 +145,21 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     )
 
 
-def _analyze_columns_safe(csv_path: Path, file_id: str) -> tuple[int, list[ColumnPreview]]:
+def _select_sheet_safe(file_id: str, sheet_name: str | None) -> UploadedFileMeta:
     try:
-        return analyze_columns(csv_path)
+        return _storage.select_sheet(file_id, sheet_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Upload not found. Please upload again.",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+def _analyze_columns_safe(csv_path: Path, file_id: str, sheet_name: str | None) -> tuple[int, list[ColumnPreview]]:
+    try:
+        return analyze_columns(csv_path, sheet_name=sheet_name)
     except (UnicodeDecodeError, ValueError) as exc:
         _router_logger.warning("Upload failed validation during analysis", extra={"file_id": file_id})
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -149,6 +171,7 @@ def _analyze_columns_safe(csv_path: Path, file_id: str) -> tuple[int, list[Colum
 async def _discover_mappings(
     csv_path: Path,
     target_schema: str,
+    sheet_name: str | None,
 ) -> tuple[dict[str, list[ModelSuggestion]], dict[str, str], ManifestPayload]:
     mapping_service = get_mapping_service()
     try:
@@ -156,6 +179,7 @@ async def _discover_mappings(
             mapping_service.discover,
             csv_path=csv_path,
             target_schema=target_schema,
+            sheet_name=sheet_name,
         )
         return cde_targets, manual_overrides, manifest
     except (UnicodeDecodeError, ValueError) as exc:

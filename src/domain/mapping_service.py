@@ -29,6 +29,7 @@ class MappingDiscoveryService:
         *,
         csv_path: Path,
         target_schema: str,
+        sheet_name: str | None = None,
     ) -> tuple[dict[str, list[ModelSuggestion]], dict[str, str], ManifestPayload]:
         """manual_overrides (pos 2) always empty — preserved for caller interface compatibility."""
         if not self._client:
@@ -39,6 +40,7 @@ class MappingDiscoveryService:
                 source_path=csv_path,
                 target_schema=target_schema,
                 confidence_threshold=0.7,
+                sheet_name=sheet_name,
             )
         except Exception as exc:
             raise RuntimeError(f"CDE discovery failed: {exc}") from exc

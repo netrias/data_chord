@@ -6,9 +6,13 @@ import csv
 import io
 import zipfile
 from io import BytesIO
+from typing import cast
 
 import pytest
 from httpx import AsyncClient
+from netrias_client import TabularFormat, dataset_from_rows, write_tabular
+from openpyxl import load_workbook
+from openpyxl.worksheet.worksheet import Worksheet
 
 from src.domain.cde import CDEInfo
 from src.domain.data_model_cache import get_session_cache
@@ -18,9 +22,11 @@ from src.domain.storage import UploadStorage
 from tests.conftest import (
     TEST_TARGET_SCHEMA,
     TEST_TSV_CONTENT_TYPE,
+    TEST_XLSX_CONTENT_TYPE,
     create_csv_content,
     create_harmonized_csv,
     create_manifest_for_file,
+    create_xlsx_content,
     review_state_payload,
     upload_content,
 )
@@ -40,6 +46,15 @@ def _read_downloaded_tabular(response_bytes: bytes, suffix: str, delimiter: str)
         data_name = next(name for name in zf.namelist() if name.endswith(suffix))
         content = zf.read(data_name).decode("utf-8")
     return list(csv.reader(io.StringIO(content), delimiter=delimiter))
+
+
+def _read_downloaded_xlsx(response_bytes: bytes, sheet_name: str) -> list[list[str]]:
+    with zipfile.ZipFile(BytesIO(response_bytes), "r") as zf:
+        workbook_name = next(name for name in zf.namelist() if name.endswith(".xlsx"))
+        workbook_bytes = BytesIO(zf.read(workbook_name))
+    workbook = load_workbook(workbook_bytes, data_only=True)
+    sheet = cast(Worksheet, workbook[sheet_name])
+    return [[str(value) if value is not None else "" for value in row] for row in sheet.iter_rows(values_only=True)]
 
 
 async def test_stage1_upload_persists_exact_bytes(
@@ -200,6 +215,62 @@ async def test_stage1_analyze_accepts_tsv(
     assert columns[0]["sample_values"] == ["alpha, beta"]
 
 
+async def test_stage1_analyze_xlsx_defaults_to_first_sheet(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """Analyze reads the first worksheet by default for XLSX uploads."""
+
+    # Given: an XLSX workbook with distinct values on each sheet
+    content = create_xlsx_content({
+        "First": [["col_a"], ["first-value"]],
+        "Second": [["col_a"], ["second-value"]],
+    })
+    file_id = await upload_content(app_client, content, "data.xlsx", TEST_XLSX_CONTENT_TYPE)
+    assert temp_storage.load_manifest(file_id) is None
+
+    # When: analyze is requested without a sheet override
+    response = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
+    )
+
+    # Then: samples come from the first sheet
+    assert response.status_code == 200
+    columns = response.json()["columns"]
+    assert columns[0]["sample_values"] == ["first-value"]
+
+
+async def test_stage1_analyze_xlsx_uses_selected_sheet(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """Analyze uses the sheet selected in Stage 1 for XLSX uploads."""
+
+    # Given: an XLSX workbook with duplicate headers on the second sheet
+    content = create_xlsx_content({
+        "First": [["ignored"], ["nope"]],
+        "Patients": [["col_a", "col_a"], ["alpha", "beta"]],
+    })
+    file_id = await upload_content(app_client, content, "data.xlsx", TEST_XLSX_CONTENT_TYPE)
+    assert temp_storage.load_manifest(file_id) is None
+
+    # When: analyze is requested for the second sheet
+    response = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "sheet_name": "Patients"},
+    )
+
+    # Then: selected-sheet columns are parsed without collapsing duplicate headers
+    assert response.status_code == 200
+    columns = response.json()["columns"]
+    assert [column["column_name"] for column in columns] == ["col_a", "col_a"]
+    assert [column["column_key"] for column in columns] == ["col_0000", "col_0001"]
+    meta = temp_storage.load(file_id)
+    assert meta is not None
+    assert meta.selected_sheet == "Patients"
+
+
 async def test_stage1_analyze_truncates_preview_only(
     app_client: AsyncClient,
     temp_storage: UploadStorage,
@@ -353,7 +424,9 @@ async def test_stage3_harmonize_uses_stored_manifest_when_payload_missing(
         def __init__(self) -> None:
             self.received_manifest = None
 
-        def run(self, *, file_path, target_schema, column_mappings, cache, manifest, output_path):  # type: ignore[no-untyped-def]
+        def run(  # type: ignore[no-untyped-def]
+            self, *, file_path, target_schema, column_mappings, cache, manifest, output_path, sheet_name
+        ):
             self.received_manifest = manifest
             return HarmonizeResult(job_id="job-1", status=HarmonizeStatus.SUCCEEDED, detail="ok")
 
@@ -392,7 +465,9 @@ async def test_stage3_harmonize_prefers_payload_manifest(
         def __init__(self) -> None:
             self.received_manifest = None
 
-        def run(self, *, file_path, target_schema, column_mappings, cache, manifest, output_path):  # type: ignore[no-untyped-def]
+        def run(  # type: ignore[no-untyped-def]
+            self, *, file_path, target_schema, column_mappings, cache, manifest, output_path, sheet_name
+        ):
             self.received_manifest = manifest
             return HarmonizeResult(job_id="job-2", status=HarmonizeStatus.SUCCEEDED, detail="ok")
 
@@ -500,6 +575,49 @@ async def test_stage5_download_tsv_input_exports_tsv(
     assert not any(name.endswith(".csv") for name in names)
     output_rows = _read_downloaded_tabular(response.content, ".tsv", "\t")
     assert output_rows == [["col_a", "col_b"], ["delta, epsilon", "gamma"]]
+
+
+async def test_stage5_download_xlsx_input_exports_xlsx_selected_sheet(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """An XLSX upload downloads XLSX output while updating only the selected sheet."""
+
+    # Given: an XLSX input where Stage 1 selected the second sheet
+    content = create_xlsx_content({
+        "Keep": [["status"], ["unchanged"]],
+        "Patients": [["col_a", "col_b"], ["alpha", "gamma"]],
+    })
+    file_id = await upload_content(app_client, content, "download.xlsx", TEST_XLSX_CONTENT_TYPE)
+    analyze_response = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "sheet_name": "Patients"},
+    )
+    assert analyze_response.status_code == 200
+    meta = temp_storage.load(file_id)
+    assert meta is not None
+    harmonized_dir = meta.saved_path.parent.parent / "harmonized"
+    harmonized_dir.mkdir(parents=True, exist_ok=True)
+    harmonized_path = harmonized_dir / f"{meta.saved_path.stem}.harmonized.xlsx"
+    harmonized_dataset = dataset_from_rows(
+        headers=["col_a", "col_b"],
+        rows=[["delta", "gamma"]],
+        source_format=TabularFormat.XLSX,
+        sheet_name="Patients",
+    )
+    write_tabular(harmonized_path, harmonized_dataset, template_path=meta.saved_path)
+
+    # When: the download endpoint is invoked
+    response = await app_client.post("/stage-5/download", json={"file_id": file_id})
+
+    # Then: the zip contains XLSX output, and non-selected sheets are preserved
+    assert response.status_code == 200
+    with zipfile.ZipFile(BytesIO(response.content), "r") as zf:
+        names = zf.namelist()
+    assert any(name.endswith(".xlsx") for name in names)
+    assert not any(name.endswith(".csv") for name in names)
+    assert _read_downloaded_xlsx(response.content, "Keep") == [["status"], ["unchanged"]]
+    assert _read_downloaded_xlsx(response.content, "Patients") == [["col_a", "col_b"], ["delta", "gamma"]]
 
 
 async def test_stage5_download_ignores_invalid_row_keys(

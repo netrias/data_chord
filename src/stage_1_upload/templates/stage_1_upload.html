@@ -56,7 +56,7 @@
         <div class="upload-grid">
           <div class="upload-column">
             <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Upload dataset">
-              <input id="fileInput" type="file" accept=".csv,.tsv" hidden />
+              <input id="fileInput" type="file" accept=".csv,.tsv,.xlsx" hidden />
               <div id="dropzoneCopy" class="dropzone-copy">
                 <div class="dropzone-icon" aria-hidden="true">
                   <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -66,7 +66,7 @@
                   </svg>
                 </div>
                 <p class="dropzone-title">Click or drag to upload</p>
-                <p class="dropzone-hint">CSV or TSV · up to {{ ui_constraints.max_mb }} MB</p>
+                <p class="dropzone-hint">CSV, TSV, or XLSX · up to {{ ui_constraints.max_mb }} MB</p>
               </div>
               <div id="dropzoneFile" class="dropzone-file hidden">
                 <div class="dropzone-success-icon" aria-hidden="true">
@@ -79,6 +79,10 @@
                 <p class="file-status" id="dropzoneFileStatus">Waiting for upload</p>
                 <button id="changeFileButton" class="linklike" type="button">Change file</button>
               </div>
+            </div>
+            <div id="sheetSelectorPanel" class="sheet-selector-panel hidden">
+              <label class="sheet-selector-label" for="sheetSelect">Worksheet</label>
+              <select id="sheetSelect" class="sheet-selector"></select>
             </div>
             <p id="statusMessage" class="status" role="status" aria-live="polite"></p>
           </div>

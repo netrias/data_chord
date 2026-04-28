@@ -36,6 +36,15 @@ def _find_original_path(file_id: str, upload_base_dir: Path) -> Path:
     return matches[0]
 
 
+def _selected_sheet_for(file_id: str, upload_base_dir: Path) -> str | None:
+    meta_path = upload_base_dir / "meta" / f"{file_id}.json"
+    if not meta_path.exists():
+        return None
+    payload = json.loads(meta_path.read_text())
+    selected_sheet = payload.get("selected_sheet")
+    return selected_sheet if isinstance(selected_sheet, str) else None
+
+
 def _write_harmonized(
     file_id: str,
     original_path: Path,
@@ -44,7 +53,8 @@ def _write_harmonized(
 ) -> Path:
     harmonized_path = upload_base_dir / "harmonized" / f"{file_id}.harmonized{original_path.suffix.lower()}"
     harmonized_path.parent.mkdir(parents=True, exist_ok=True)
-    write_tabular(harmonized_path, dataset)
+    template_path = original_path if dataset.source_format.value == "xlsx" else None
+    write_tabular(harmonized_path, dataset, template_path=template_path)
     return harmonized_path
 
 
@@ -129,7 +139,8 @@ def main() -> None:
 
     upload_base_dir = _resolve_upload_base_dir(args.upload_base_dir)
     original_path = _find_original_path(args.file_id, upload_base_dir)
-    original_dataset = read_tabular(original_path)
+    selected_sheet = _selected_sheet_for(args.file_id, upload_base_dir)
+    original_dataset = read_tabular(original_path, sheet_name=selected_sheet)
     harmonized_rows = [row.copy() for row in original_dataset.rows]
     changes = _parse_changes(args.changes)
     header_by_index = {column.header: column for column in original_dataset.columns}
@@ -145,6 +156,7 @@ def main() -> None:
         columns=original_dataset.columns,
         rows=harmonized_rows,
         source_format=original_dataset.source_format,
+        sheet_name=original_dataset.sheet_name,
     )
 
     _write_harmonized(args.file_id, original_path, harmonized_dataset, upload_base_dir)

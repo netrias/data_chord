@@ -164,6 +164,30 @@
   font-weight: 500;
 }
 
+.sheet-selector-panel {
+  width: 100%;
+  margin-top: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.sheet-selector-label {
+  font-weight: 600;
+  color: var(--gray-700);
+}
+
+.sheet-selector {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius-md);
+  padding: 0 var(--space-3);
+  background: var(--white);
+  color: var(--gray-900);
+  font: inherit;
+}
+
 /* Responsive */
 
 @media (max-width: 640px) {

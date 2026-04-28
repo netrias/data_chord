@@ -9,7 +9,7 @@ dependencies = [
     "jinja2>=3.1.4",
     "python-multipart>=0.0.26",  # CVE remediation
     "uvicorn[standard]>=0.30.0",
-    "netrias_client @ git+https://github.com/netrias/netrias_client.git@e339a2a",
+    "netrias_client @ git+https://github.com/netrias/netrias_client.git@10fa39d",
     "python-dotenv>=1.2.2",
     "pyarrow>=15.0.0",
     # transitive dep pins for security (CVE remediation)

@@ -9,6 +9,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import tempfile
 import zipfile
 from collections import defaultdict
 from dataclasses import asdict
@@ -22,8 +23,10 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from netrias_client import (
     TabularDataset,
+    TabularFormat,
     dataset_from_rows,
     read_tabular,
+    write_tabular,
 )
 from pydantic import BaseModel, Field
 
@@ -127,8 +130,8 @@ async def download_harmonized_data(payload: StageFiveRequest) -> StreamingRespon
     harmonized_path = resolve_harmonized_path_or_404(meta.saved_path, payload.file_id)
     manifest_path = storage.load_harmonization_manifest_path(payload.file_id)
 
-    original_dataset = read_tabular(meta.saved_path)
-    harmonized_dataset = read_tabular(harmonized_path)
+    original_dataset = read_tabular(meta.saved_path, sheet_name=meta.selected_sheet)
+    harmonized_dataset = read_tabular(harmonized_path, sheet_name=meta.selected_sheet)
     if not original_dataset.columns:
         raise HTTPException(status_code=400, detail=_ERROR_DATASET_UNREADABLE)
 
@@ -142,13 +145,14 @@ async def download_harmonized_data(payload: StageFiveRequest) -> StreamingRespon
         columns=original_dataset.columns,
         rows=final_rows,
         source_format=original_dataset.source_format,
+        sheet_name=original_dataset.sheet_name,
     )
 
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     original_stem = Path(meta.original_name).stem
     base_name = f"{original_stem}_{payload.file_id}_{timestamp}"
 
-    zip_buffer = _create_zip_buffer(base_name, final_dataset, manifest_path)
+    zip_buffer = _create_zip_buffer(base_name, final_dataset, manifest_path, meta.saved_path)
 
     # Session complete: release in-memory cache to prevent unbounded growth
     clear_session_cache(payload.file_id)
@@ -173,15 +177,12 @@ def _create_zip_buffer(
     base_name: str,
     dataset: TabularDataset,
     manifest_path: Path | None,
+    template_path: Path | None = None,
 ) -> io.BytesIO:
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        output = io.StringIO()
         temp_path = Path(f"{base_name}{dataset.source_format.suffix}")
-        writer = csv.writer(output, delimiter=dataset.source_format.delimiter, lineterminator="\n")
-        writer.writerow(dataset.headers)
-        writer.writerows(dataset.rows)
-        zf.writestr(temp_path.name, output.getvalue())
+        zf.writestr(temp_path.name, _tabular_bytes(dataset, template_path))
 
         if manifest_path:
             json_content = _manifest_to_json(manifest_path)
@@ -190,6 +191,20 @@ def _create_zip_buffer(
 
     zip_buffer.seek(0)
     return zip_buffer
+
+
+def _tabular_bytes(dataset: TabularDataset, template_path: Path | None) -> bytes | str:
+    if dataset.source_format == TabularFormat.XLSX:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / f"output{dataset.source_format.suffix}"
+            write_tabular(output_path, dataset, template_path=template_path)
+            return output_path.read_bytes()
+
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=dataset.source_format.delimiter, lineterminator="\n")
+    writer.writerow(dataset.headers)
+    writer.writerows(dataset.rows)
+    return output.getvalue()
 
 
 def _create_streaming_response(base_name: str, zip_buffer: io.BytesIO) -> StreamingResponse:
