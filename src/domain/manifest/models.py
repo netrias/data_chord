@@ -12,6 +12,8 @@ from typing import NotRequired, TypedDict
 
 import pyarrow as pa
 
+from src.domain.columns import ColumnKey, column_key_for_index
+
 
 class ConfidenceBucket(str, Enum):
     HIGH = "high"
@@ -27,20 +29,23 @@ HIGH_CONFIDENCE_THRESHOLD: float = 0.8
 MEDIUM_CONFIDENCE_THRESHOLD: float = 0.45
 
 
-class AlternativeEntry(TypedDict, total=False):
+class AlternativeEntry(TypedDict):
     target: str
-    similarity: float
-    cde_id: int
+    confidence: float
+    cde_id: NotRequired[int]
+    harmonization: NotRequired[str]
 
 
 class ColumnMappingEntry(TypedDict):
-    targetField: str
+    cde_key: str
     cde_id: int
+    column_name: NotRequired[str]
+    harmonization: NotRequired[str]
     route: NotRequired[str]
     alternatives: NotRequired[list[AlternativeEntry]]
 
 
-class ManifestPayload(TypedDict, total=False):
+class ManifestPayload(TypedDict):
     column_mappings: dict[str, ColumnMappingEntry]
 
 
@@ -64,6 +69,10 @@ class ManifestRow:
     error: str | None
     row_indices: list[int]
     manual_overrides: list[ManualOverride]
+
+    @property
+    def column_key(self) -> ColumnKey:
+        return column_key_for_index(self.column_id)
 
 
 @dataclass(frozen=True)

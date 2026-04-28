@@ -12,7 +12,8 @@ from httpx import AsyncClient
 
 from src.domain.cde import CDEInfo
 from src.domain.data_model_cache import get_session_cache
-from src.domain.harmonize import HarmonizeResult
+from src.domain.harmonize import HarmonizeResult, HarmonizeStatus
+from src.domain.manifest import ManifestPayload
 from src.domain.storage import UploadStorage
 from tests.conftest import (
     TEST_TARGET_SCHEMA,
@@ -352,13 +353,13 @@ async def test_stage3_harmonize_uses_stored_manifest_when_payload_missing(
         def __init__(self) -> None:
             self.received_manifest = None
 
-        def run(self, *, file_path, target_schema, column_mappings, cache, manifest):  # type: ignore[no-untyped-def]
+        def run(self, *, file_path, target_schema, column_mappings, cache, manifest, output_path):  # type: ignore[no-untyped-def]
             self.received_manifest = manifest
-            return HarmonizeResult(job_id="job-1", status="succeeded", detail="ok")
+            return HarmonizeResult(job_id="job-1", status=HarmonizeStatus.SUCCEEDED, detail="ok")
 
     # Given: an uploaded file with a stored manifest
     file_id = await upload_content(app_client, create_csv_content([["col_a"], ["alpha"]]), "manifest.csv")
-    stored_manifest = {"column_mappings": {"col_a": {"targetField": "primary_diagnosis", "cde_id": 2}}}
+    stored_manifest: ManifestPayload = {"column_mappings": {"col_a": {"cde_key": "primary_diagnosis", "cde_id": 2}}}
     temp_storage.save_manifest(file_id, stored_manifest)
     stub = StubHarmonizer()
     assert stub.received_manifest is None
@@ -391,17 +392,17 @@ async def test_stage3_harmonize_prefers_payload_manifest(
         def __init__(self) -> None:
             self.received_manifest = None
 
-        def run(self, *, file_path, target_schema, column_mappings, cache, manifest):  # type: ignore[no-untyped-def]
+        def run(self, *, file_path, target_schema, column_mappings, cache, manifest, output_path):  # type: ignore[no-untyped-def]
             self.received_manifest = manifest
-            return HarmonizeResult(job_id="job-2", status="succeeded", detail="ok")
+            return HarmonizeResult(job_id="job-2", status=HarmonizeStatus.SUCCEEDED, detail="ok")
 
     # Given: an uploaded file with a stored manifest
     file_id = await upload_content(app_client, create_csv_content([["col_a"], ["alpha"]]), "payload.csv")
     temp_storage.save_manifest(
         file_id,
-        {"column_mappings": {"col_a": {"targetField": "primary_diagnosis", "cde_id": 2}}},
+        {"column_mappings": {"col_a": {"cde_key": "primary_diagnosis", "cde_id": 2}}},
     )
-    payload_manifest = {"column_mappings": {"col_a": {"targetField": "morphology", "cde_id": 3}}}
+    payload_manifest: ManifestPayload = {"column_mappings": {"col_a": {"cde_key": "morphology", "cde_id": 3}}}
     stub = StubHarmonizer()
 
     # When: harmonize is triggered with a manifest payload
@@ -481,7 +482,9 @@ async def test_stage5_download_tsv_input_exports_tsv(
     file_id = await upload_content(app_client, content, "download.tsv", TEST_TSV_CONTENT_TYPE)
     meta = temp_storage.load(file_id)
     assert meta is not None
-    harmonized_path = meta.saved_path.with_name(f"{meta.saved_path.stem}.harmonized.tsv")
+    harmonized_dir = meta.saved_path.parent.parent / "harmonized"
+    harmonized_dir.mkdir(parents=True, exist_ok=True)
+    harmonized_path = harmonized_dir / f"{meta.saved_path.stem}.harmonized.tsv"
     with harmonized_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle, delimiter="\t")
         writer.writerows([["col_a", "col_b"], ["delta, epsilon", "gamma"]])

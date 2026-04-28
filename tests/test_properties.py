@@ -12,7 +12,7 @@ from src.domain.cde import (
     ColumnMappingSet,
     normalize_cde_key,
 )
-from src.domain.harmonize import normalize_manifest
+from src.domain.manifest import normalize_manifest
 from src.domain.manifest.models import is_value_changed
 from src.domain.pv_validation import (
     AdjustmentSource,
@@ -328,7 +328,7 @@ def test_column_mapping_applied_plus_skipped_equals_total(overrides: dict[str, s
     skipped = mapping_set.get_skipped()
 
     # No overlap
-    applied_cols = {m.column_name for m in applied}
+    applied_cols = {str(m.column_key) for m in applied}
     skipped_cols = set(skipped)
     assert applied_cols.isdisjoint(skipped_cols)
 
@@ -356,20 +356,20 @@ def _valid_column_entry() -> st.SearchStrategy[dict[str, object]]:
     max_size=5,
 ))
 def test_normalize_manifest_preserves_valid_entries(column_mappings: dict[str, dict[str, object]]) -> None:
-    """Entries with cde_id and cde_key survive as Data Chord targetField entries."""
+    """Entries with cde_id and cde_key survive as SDK-shaped manifest entries."""
     manifest = {"column_mappings": column_mappings}
     result = normalize_manifest(manifest)
     result_mappings = result.get("column_mappings", {})
 
     for key in column_mappings:
         assert key in result_mappings, f"Valid entry '{key}' was dropped"
-        assert result_mappings[key]["targetField"] == column_mappings[key]["cde_key"]
+        assert result_mappings[key]["cde_key"] == column_mappings[key]["cde_key"]
 
 
 @given(st.dictionaries(
     keys=st.text(min_size=1, max_size=30),
     values=st.dictionaries(
-        keys=st.text(min_size=1, max_size=20).filter(lambda k: k not in ("cde_id", "cde_key", "targetField")),
+        keys=st.text(min_size=1, max_size=20).filter(lambda k: k not in ("cde_id", "cde_key")),
         values=st.text(max_size=30),
         min_size=1,
         max_size=3,
@@ -398,8 +398,8 @@ def test_normalize_manifest_rejects_non_mapping(bad_input: object) -> None:
     assert result.get("column_mappings", {}) == {}
 
 
-def test_normalize_manifest_translates_sdk_confidence_to_similarity() -> None:
-    """Data Chord keeps similarity internally while the SDK exposes confidence."""
+def test_normalize_manifest_preserves_sdk_confidence() -> None:
+    """The canonical manifest uses the SDK confidence key."""
     result = normalize_manifest({
         "column_mappings": {
             "col_0000": {
@@ -412,6 +412,7 @@ def test_normalize_manifest_translates_sdk_confidence_to_similarity() -> None:
         }
     })
 
-    alternatives = result["column_mappings"]["col_0000"]["alternatives"]
+    alternatives = result["column_mappings"]["col_0000"].get("alternatives", [])
+    assert alternatives
     assert alternatives[0]["target"] == "age"
-    assert alternatives[0]["similarity"] == 0.91
+    assert alternatives[0]["confidence"] == 0.91

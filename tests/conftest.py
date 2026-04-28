@@ -107,11 +107,11 @@ def mock_netrias_client() -> Generator[MagicMock]:
     _cde_manifest = {
         "column_mappings": {
             "col_0000": {
-                "targetField": "primary_diagnosis",
+                "cde_key": "primary_diagnosis",
                 "cde_id": 2,
             },
             "col_0001": {
-                "targetField": "therapeutic_agents",
+                "cde_key": "therapeutic_agents",
                 "cde_id": 1,
             },
         },
@@ -297,7 +297,7 @@ async def upload_and_analyze(client: AsyncClient, csv_path: Path) -> str:
 
 
 def create_harmonized_csv(original_path: Path, changes: dict[int, dict[str, str]]) -> Path:
-    """why: create a .harmonized.csv alongside the original with specified changes."""
+    """why: create a managed harmonized CSV with specified changes."""
     with original_path.open("r", newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         rows = list(reader)
@@ -307,7 +307,9 @@ def create_harmonized_csv(original_path: Path, changes: dict[int, dict[str, str]
         if row_idx < len(rows):
             rows[row_idx].update(column_changes)
 
-    harmonized_path = original_path.with_name(f"{original_path.stem}{TEST_HARMONIZED_CSV_SUFFIX}")
+    harmonized_dir = original_path.parent.parent / "harmonized"
+    harmonized_dir.mkdir(parents=True, exist_ok=True)
+    harmonized_path = harmonized_dir / f"{original_path.stem}{TEST_HARMONIZED_CSV_SUFFIX}"
     with harmonized_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=headers)
         writer.writeheader()

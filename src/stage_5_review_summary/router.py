@@ -9,13 +9,12 @@ from __future__ import annotations
 import csv
 import io
 import json
-import logging
 import zipfile
 from collections import defaultdict
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import NamedTuple
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
@@ -23,7 +22,6 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from netrias_client import (
     TabularDataset,
-    column_key_for_index,
     dataset_from_rows,
     read_tabular,
 )
@@ -40,10 +38,9 @@ from src.domain.manifest import (
 )
 from src.domain.pv_persistence import ensure_pvs_loaded
 from src.domain.pv_validation import check_value_conformance
+from src.domain.review_overrides import ReviewOverrides
 from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
-from src.domain.storage import FileType, UploadStorage, resolve_harmonized_path_or_404
-
-_logger = logging.getLogger(__name__)
+from src.domain.storage import UploadStorage, resolve_harmonized_path_or_404
 
 _MODULE_DIR = Path(__file__).parent
 _TEMPLATE_DIR = _MODULE_DIR / "templates"
@@ -94,7 +91,7 @@ class StageFiveSummaryResponse(BaseModel):
 
 @stage_five_router.get("", response_class=HTMLResponse, name="stage_five_review_page")
 async def render_stage_five(request: Request) -> HTMLResponse:
-    context: dict[str, Any] = {
+    context: dict[str, object] = {
         "request": request,
         "stage_one_url": request.url_for("stage_one_upload_page"),
         "stage_two_url": request.url_for("stage_two_mapping_page"),
@@ -136,7 +133,11 @@ async def download_harmonized_data(payload: StageFiveRequest) -> StreamingRespon
         raise HTTPException(status_code=400, detail=_ERROR_DATASET_UNREADABLE)
 
     overrides = _load_review_overrides(payload.file_id)
-    final_rows = _apply_overrides(harmonized_dataset.rows, overrides, original_dataset)
+    final_rows = (
+        overrides.apply_to_rows(harmonized_dataset.rows, original_dataset)
+        if overrides
+        else harmonized_dataset.rows
+    )
     final_dataset = dataset_from_rows(
         columns=original_dataset.columns,
         rows=final_rows,
@@ -155,62 +156,9 @@ async def download_harmonized_data(payload: StageFiveRequest) -> StreamingRespon
     return _create_streaming_response(base_name, zip_buffer)
 
 
-def _load_review_overrides(file_id: str) -> dict[str, dict[str, str]]:
+def _load_review_overrides(file_id: str) -> ReviewOverrides | None:
     store = get_file_store()
-    data = store.load(file_id, FileType.REVIEW_OVERRIDES)
-    if data is None:
-        return {}
-
-    result: dict[str, dict[str, str]] = {}
-    overrides_data: dict[str, Any] = data.get("overrides", {})
-    for row_key, columns in overrides_data.items():
-        result[row_key] = {
-            col: info["human_value"]
-            for col, info in columns.items()
-            if info.get("human_value") is not None
-        }
-    return result
-
-
-def _column_lookup(dataset: TabularDataset) -> dict[str, int]:
-    return {column.key: column.index for column in dataset.columns}
-
-
-def _apply_row_overrides(
-    row: list[str],
-    row_key: str,
-    row_overrides: dict[str, str],
-    column_lookup: dict[str, int],
-) -> list[str]:
-    result = list(row)
-    invalid_columns = {k for k in row_overrides if k not in column_lookup}
-    if invalid_columns:
-        _logger.warning("Row %s has overrides for non-existent columns: %s", row_key, invalid_columns)
-    for column_key, value in row_overrides.items():
-        index = column_lookup.get(column_key)
-        if index is not None and index < len(result):
-            result[index] = value
-    return result
-
-
-def _apply_overrides(
-    rows: list[list[str]],
-    overrides: dict[str, dict[str, str]],
-    dataset: TabularDataset,
-) -> list[list[str]]:
-    """Row keys are 1-indexed to match Stage 4 UI numbering."""
-    if not overrides:
-        return rows
-
-    result: list[list[str]] = []
-    column_lookup = _column_lookup(dataset)
-    for idx, row in enumerate(rows):
-        row_key = str(idx + 1)
-        if row_key in overrides:
-            result.append(_apply_row_overrides(row, row_key, overrides[row_key], column_lookup))
-        else:
-            result.append(row)
-    return result
+    return store.load_review_overrides(file_id)
 
 
 def _manifest_to_json(manifest_path: Path) -> str | None:
@@ -445,7 +393,7 @@ def _track_mapping(
     if not row.to_harmonize:
         return
     final = _get_final_value(row)
-    col_key = column_key_for_index(row.column_id)
+    col_key = str(row.column_key)
     key = (col_key, row.column_name, row.to_harmonize, final)
     if key in mappings:
         return

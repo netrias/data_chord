@@ -9,11 +9,13 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from src.domain.columns import column_key_from_string
 from src.domain.data_model_cache import (
     SessionCache,
     clear_all_session_caches,
     get_session_cache,
 )
+from src.domain.pv_manifest import PVManifest
 from src.domain.pv_persistence import ensure_pvs_loaded, load_pv_manifest_from_disk
 
 
@@ -50,7 +52,7 @@ class TestPVManifestPersistenceFeature:
         # When: Stage 4/5 lazy-loads PVs from disk
         with patch("src.domain.pv_persistence.get_file_store") as mock_get_store:
             mock_store = MagicMock()
-            mock_store.load.return_value = pv_manifest_data
+            mock_store.load_pv_manifest.return_value = PVManifest.from_store(pv_manifest_data)
             mock_get_store.return_value = mock_store
 
             load_pv_manifest_from_disk(file_id, cache)
@@ -86,7 +88,7 @@ class TestPVManifestPersistenceFeature:
         # When: Attempting to load from non-existent manifest
         with patch("src.domain.pv_persistence.get_file_store") as mock_get_store:
             mock_store = MagicMock()
-            mock_store.load.return_value = None  # No manifest found
+            mock_store.load_pv_manifest.return_value = None  # No manifest found
             mock_get_store.return_value = mock_store
 
             # Then: No exception raised, cache remains empty
@@ -132,7 +134,7 @@ class TestPVManifestPersistenceFeature:
         # When: ensure_pvs_loaded is called
         with patch("src.domain.pv_persistence.get_file_store") as mock_get_store:
             mock_store = MagicMock()
-            mock_store.load.return_value = pv_manifest_data
+            mock_store.load_pv_manifest.return_value = PVManifest.from_store(pv_manifest_data)
             mock_get_store.return_value = mock_store
 
             cache = ensure_pvs_loaded(file_id)
@@ -154,8 +156,8 @@ class TestSessionCacheThreadSafety:
         # When: Getting column mappings
         mappings = cache.get_column_mappings()
 
-        # Then: Returned dict is a copy (modifying it doesn't affect cache)
-        mappings["col3"] = "cde3"
+        # Then: Returned map is a copy (modifying it doesn't affect cache)
+        mappings.mappings[column_key_from_string("col3")] = "cde3"
         assert cache.get_column_cde_key("col3") is None, "Cache should not be modified"
 
     def test_pvs_stored_as_frozenset(self) -> None:

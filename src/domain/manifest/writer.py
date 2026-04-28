@@ -15,7 +15,6 @@ from typing import Any, NamedTuple
 
 import pyarrow as pa
 import pyarrow.parquet as pq
-from netrias_client import column_key_for_index
 
 from src.domain.manifest.models import ManifestRow, ManualOverride, get_manifest_schema
 from src.domain.manifest.reader import read_manifest_parquet
@@ -118,7 +117,7 @@ def apply_pv_adjustments_batch(
 
 
 def _row_column_key(row: ManifestRow) -> str:
-    return column_key_for_index(row.column_id)
+    return str(row.column_key)
 
 
 def _write_manifest_parquet(manifest_path: Path, rows: list[ManifestRow]) -> bool:

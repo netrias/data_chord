@@ -79,7 +79,7 @@ export const mockAnalyze = async (page) => {
       manual_overrides: {},
       manifest: {
         column_mappings: {
-          col_a: { targetField: 'col_a', cde_id: 1 },
+          col_a: { cde_key: 'col_a', cde_id: 1 },
         },
       },
     };
@@ -137,11 +137,17 @@ export const seedHarmonization = (fileId, changes = {}, options = {}) => {
 };
 
 export const parseDownloadedCsv = async (response) => {
+  return parseDownloadedTabular(response, '.csv', ',');
+};
+
+export const parseDownloadedTabular = async (response, suffix, delimiter) => {
   const buffer = await response.body();
   const zip = new AdmZip(Buffer.from(buffer));
-  const entry = zip.getEntries().find((item) => item.entryName.endsWith('.csv'));
+  const entries = zip.getEntries();
+  const entry = entries.find((item) => item.entryName.endsWith(suffix));
   if (!entry) {
-    throw new Error('No CSV found in download zip.');
+    const entryNames = entries.map((item) => item.entryName).join(', ');
+    throw new Error(`No ${suffix} found in download zip. Entries: ${entryNames}`);
   }
   const content = entry.getData().toString('utf-8');
   const lines = content.split(/\r?\n/);
@@ -152,14 +158,14 @@ export const parseDownloadedCsv = async (response) => {
   if (!headerLine) {
     return [];
   }
-  const headers = parseCsvLine(headerLine);
+  const headers = parseDelimitedLine(headerLine, delimiter);
   return lines.map((line) => {
-    const values = parseCsvLine(line);
+    const values = parseDelimitedLine(line, delimiter);
     return Object.fromEntries(headers.map((header, idx) => [header, values[idx] ?? '']));
   });
 };
 
-const parseCsvLine = (line) => {
+const parseDelimitedLine = (line, delimiter) => {
   const values = [];
   let current = '';
   let inQuotes = false;
@@ -173,7 +179,7 @@ const parseCsvLine = (line) => {
       } else {
         inQuotes = !inQuotes;
       }
-    } else if (char === ',' && !inQuotes) {
+    } else if (char === delimiter && !inQuotes) {
       values.push(current);
       current = '';
     } else {

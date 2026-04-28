@@ -11,6 +11,8 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel
 
+from src.domain.columns import ColumnKey, column_key_from_string
+
 NO_MAPPING_SENTINEL = "No Mapping"
 
 
@@ -48,7 +50,7 @@ def normalize_cde_key(selection: str | None) -> str | None:
 
 @dataclass(frozen=True)
 class ColumnMapping:
-    column_name: str
+    column_key: ColumnKey
     cde_key: str | None  # None means "No Mapping" selected
 
 
@@ -59,16 +61,19 @@ class ColumnMappingSet:
     @classmethod
     def from_dict(cls, overrides: Mapping[str, str]) -> ColumnMappingSet:
         mappings: list[ColumnMapping] = []
-        for column, selection in overrides.items():
+        for column_key, selection in overrides.items():
             cde_key = normalize_cde_key(selection)
-            mappings.append(ColumnMapping(column_name=column, cde_key=cde_key))
+            mappings.append(ColumnMapping(column_key=column_key_from_string(column_key), cde_key=cde_key))
         return cls(mappings=tuple(mappings))
 
     def to_dict(self) -> dict[str, str | None]:
-        return {m.column_name: m.cde_key for m in self.mappings}
+        return {str(m.column_key): m.cde_key for m in self.mappings}
+
+    def to_override_map(self) -> dict[ColumnKey, str | None]:
+        return {m.column_key: m.cde_key for m in self.mappings}
 
     def get_applied(self) -> list[ColumnMapping]:
         return [m for m in self.mappings if m.cde_key is not None]
 
-    def get_skipped(self) -> list[str]:
-        return [m.column_name for m in self.mappings if m.cde_key is None]
+    def get_skipped(self) -> list[ColumnKey]:
+        return [m.column_key for m in self.mappings if m.cde_key is None]

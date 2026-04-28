@@ -8,12 +8,13 @@ from __future__ import annotations
 
 from typing import cast
 
+from src.domain import ColumnMappingSet
 from src.domain.data_model_cache import SessionCache
-from src.domain.manifest import ManifestPayload, ManifestRow, ManifestSummary
+from src.domain.manifest import ColumnMappingManifest, ManifestPayload, ManifestRow, ManifestSummary
 from src.stage_3_harmonize.router import (
+    _column_cde_map_for_session,
     _compute_column_stats,
     _convert_to_schema,
-    _extract_column_cde_mappings,
     _store_column_mappings_in_cache,
 )
 
@@ -190,14 +191,18 @@ class TestManualOverridePropagation:
         cache = SessionCache()
         manifest = cast(ManifestPayload, {
             "column_mappings": {
-                "breed": {"targetField": "organism_species", "cde_id": 131},
+                "breed": {"cde_key": "organism_species", "cde_id": 131},
             }
         })
         manual_overrides = {"diagnosis": "primary_diagnosis"}
         assert cache.get_column_cde_key("diagnosis") is None
 
         # When
-        _store_column_mappings_in_cache(cache, manifest, manual_overrides)
+        column_cde_map = _column_cde_map_for_session(
+            ColumnMappingManifest.from_payload(manifest),
+            ColumnMappingSet.from_dict(manual_overrides),
+        )
+        _store_column_mappings_in_cache(cache, column_cde_map)
 
         # Then: both mappings present
         assert cache.get_column_cde_key("breed") == "organism_species"
@@ -214,33 +219,37 @@ class TestManualOverridePropagation:
         cache = SessionCache()
         manifest = cast(ManifestPayload, {
             "column_mappings": {
-                "col": {"targetField": "auto_target", "cde_id": 1},
+                "col": {"cde_key": "auto_target", "cde_id": 1},
             }
         })
         manual_overrides = {"col": "manual_target"}
 
         # When
-        _store_column_mappings_in_cache(cache, manifest, manual_overrides)
+        column_cde_map = _column_cde_map_for_session(
+            ColumnMappingManifest.from_payload(manifest),
+            ColumnMappingSet.from_dict(manual_overrides),
+        )
+        _store_column_mappings_in_cache(cache, column_cde_map)
 
         # Then: manual override wins
         assert cache.get_column_cde_key("col") == "manual_target"
 
     def test_extract_skips_entries_without_target_field(self) -> None:
         """
-        Given: a manifest with one valid and one missing targetField entry
-        When: _extract_column_cde_mappings is called
+        Given: a manifest with one valid and one missing cde_key entry
+        When: the manifest domain model extracts column-CDE mappings
         Then: only the valid entry is returned
         """
         # Given
         manifest = cast(ManifestPayload, {
             "column_mappings": {
-                "good": {"targetField": "age", "cde_id": 1},
+                "good": {"cde_key": "age", "cde_id": 1},
                 "bad": {"cde_id": 2},
             }
         })
 
         # When
-        result = _extract_column_cde_mappings(manifest)
+        result = ColumnMappingManifest.from_payload(manifest).column_cde_map().to_strings()
 
         # Then
         assert "good" in result

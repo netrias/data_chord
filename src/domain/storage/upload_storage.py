@@ -23,7 +23,10 @@ from netrias_client import (
     is_supported_tabular_content_type,
 )
 
+from src.domain.manifest import ManifestPayload, normalize_manifest
+
 logger = logging.getLogger(__name__)
+
 
 class StoredMeta(TypedDict):
     file_id: str
@@ -74,7 +77,7 @@ class UploadTooLargeError(UploadError):
 
 
 def _remove_temp_file(source: Path, destination: Path) -> None:
-    """NetriasClient drops files in CWD; clean up after copying to storage."""
+    """Clean up temporary SDK outputs after copying them into managed storage."""
     if source.resolve() == destination.resolve():
         return
     try:
@@ -85,19 +88,6 @@ def _remove_temp_file(source: Path, destination: Path) -> None:
 
 def _harmonized_suffix_for(original_path: Path) -> str:
     return f".harmonized{original_path.suffix.lower() or '.csv'}"
-
-
-def _find_harmonized_in_cwd(file_id: str, original_path: Path) -> Path | None:
-    """NetriasClient writes harmonized files using the source file format."""
-    harmonized_suffix = _harmonized_suffix_for(original_path)
-    candidates = [
-        Path.cwd() / f"{file_id}{harmonized_suffix}",
-        original_path.with_name(f"{original_path.stem}{harmonized_suffix}"),
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return None
 
 
 class UploadStorage:
@@ -199,24 +189,23 @@ class UploadStorage:
         meta_path = self._meta_dir / f"{meta.file_id}.json"
         meta_path.write_text(json.dumps(meta_payload, indent=2))
 
-    def save_manifest(self, file_id: str, manifest: Mapping[str, object]) -> Path:
+    def save_manifest(self, file_id: str, manifest: ManifestPayload | Mapping[str, object]) -> Path:
         path = self._manifest_dir / f"{file_id}.json"
-        path.write_text(json.dumps(manifest, indent=2))
+        path.write_text(json.dumps(normalize_manifest(manifest), indent=2))
         logger.info("Stored manifest", extra={"file_id": file_id, "manifest_path": str(path)})
         return path
 
-    def load_manifest(self, file_id: str) -> Mapping[str, object] | None:
+    def load_manifest(self, file_id: str) -> ManifestPayload | None:
         path = self._manifest_dir / f"{file_id}.json"
         if not path.exists():
             return None
         try:
-            return cast(Mapping[str, object], json.loads(path.read_text()))
+            return normalize_manifest(cast(object, json.loads(path.read_text())))
         except json.JSONDecodeError:
             logger.warning("Manifest file corrupt", extra={"file_id": file_id, "path": str(path)})
             return None
 
     def save_harmonization_manifest(self, file_id: str, manifest_path: Path) -> Path:
-        """Move (not copy) to avoid leaving temp parquet files in CWD."""
         destination = self._manifest_dir / f"{file_id}_harmonization.parquet"
         shutil.copy2(manifest_path, destination)
         _remove_temp_file(manifest_path, destination)
@@ -227,16 +216,8 @@ class UploadStorage:
         path = self._manifest_dir / f"{file_id}_harmonization.parquet"
         return path if path.exists() else None
 
-    def relocate_harmonized_output(self, file_id: str, original_path: Path) -> Path | None:
-        """Move the SDK harmonized output into managed storage."""
-        source = _find_harmonized_in_cwd(file_id, original_path)
-        if source is None:
-            return None
-        destination = self._harmonized_dir / f"{file_id}{_harmonized_suffix_for(original_path)}"
-        shutil.copy2(source, destination)
-        _remove_temp_file(source, destination)
-        logger.info("Relocated harmonized output", extra={"file_id": file_id, "path": str(destination)})
-        return destination
+    def harmonized_path_for(self, file_id: str, original_path: Path) -> Path:
+        return self._harmonized_dir / f"{file_id}{_harmonized_suffix_for(original_path)}"
 
     @property
     def harmonized_dir(self) -> Path:
@@ -267,22 +248,12 @@ def describe_constraints(constraints: UploadConstraints) -> dict[str, str | int]
 
 
 def resolve_harmonized_path(original_path: Path, file_id: str) -> Path | None:
-    """Managed storage is primary; CWD fallback covers direct SDK writes."""
     harmonized_dir = original_path.parent.parent / "harmonized"
-    harmonized_suffix = _harmonized_suffix_for(original_path)
-    candidates = [
-        harmonized_dir / f"{file_id}{harmonized_suffix}",
-        original_path.with_name(f"{original_path.stem}{harmonized_suffix}"),
-        Path.cwd() / f"{file_id}{harmonized_suffix}",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return None
+    candidate = harmonized_dir / f"{file_id}{_harmonized_suffix_for(original_path)}"
+    return candidate if candidate.exists() else None
 
 
 _ERROR_HARMONIZED_NOT_FOUND = "Harmonized file not found. Please rerun Stage 3."
-_ERROR_DATASET_NOT_FOUND = "Required dataset file not found."
 
 
 def resolve_harmonized_path_or_404(original_path: Path, file_id: str) -> Path:

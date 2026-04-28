@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from netrias_client import DataModelStoreError, NetriasAPIUnavailable
 
 from src.domain.cde import CDEInfo
+from src.domain.column_cde_map import ColumnCdeMap
+from src.domain.columns import ColumnKey
 
 _logger = logging.getLogger(__name__)
 
@@ -32,7 +34,7 @@ class SessionCache:
     cde_by_key: dict[str, CDEInfo] = field(default_factory=dict)
 
     # Column -> CDE mappings (set in Stage 2/3, used for PV lookup)
-    column_to_cde_key: dict[str, str] = field(default_factory=dict)
+    column_to_cde_key: ColumnCdeMap = field(default_factory=ColumnCdeMap.empty)
 
     # PV sets keyed by cde_key (fetched in Stage 3)
     pvs: dict[str, frozenset[str]] = field(default_factory=dict)
@@ -64,23 +66,28 @@ class SessionCache:
         with self._lock:
             return len(self.cdes) > 0
 
-    def set_column_mapping(self, column_name: str, cde_key: str) -> None:
+    def set_column_mapping(self, column_key: ColumnKey | str, cde_key: str) -> None:
         with self._lock:
-            self.column_to_cde_key[column_name] = cde_key
+            mappings = self.column_to_cde_key.to_strings()
+            mappings[str(column_key)] = cde_key
+            self.column_to_cde_key = ColumnCdeMap.from_strings(mappings)
 
-    def set_column_mappings(self, mappings: dict[str, str]) -> None:
+    def set_column_mappings(self, mappings: ColumnCdeMap | dict[str, str]) -> None:
         """Full replacement prevents stale keys from previous mapping passes."""
         with self._lock:
-            self.column_to_cde_key = dict(mappings)
+            if isinstance(mappings, ColumnCdeMap):
+                self.column_to_cde_key = mappings
+                return
+            self.column_to_cde_key = ColumnCdeMap.from_strings(mappings)
 
-    def get_column_cde_key(self, column_name: str) -> str | None:
+    def get_column_cde_key(self, column_key: ColumnKey | str) -> str | None:
         with self._lock:
-            return self.column_to_cde_key.get(column_name)
+            return self.column_to_cde_key.mappings.get(ColumnKey(str(column_key)))
 
-    def get_column_mappings(self) -> dict[str, str]:
+    def get_column_mappings(self) -> ColumnCdeMap:
         """Thread-safe copy of column-to-CDE mappings for serialization."""
         with self._lock:
-            return dict(self.column_to_cde_key)
+            return ColumnCdeMap(dict(self.column_to_cde_key.mappings))
 
     def set_pvs(self, cde_key: str, values: frozenset[str]) -> None:
         with self._lock:
@@ -94,9 +101,9 @@ class SessionCache:
         with self._lock:
             return self.pvs.get(cde_key)
 
-    def get_pvs_for_column(self, column_name: str) -> frozenset[str] | None:
+    def get_pvs_for_column(self, column_key: ColumnKey | str) -> frozenset[str] | None:
         with self._lock:
-            cde_key = self.column_to_cde_key.get(column_name)
+            cde_key = self.column_to_cde_key.mappings.get(ColumnKey(str(column_key)))
             if cde_key is None:
                 return None
             return self.pvs.get(cde_key)

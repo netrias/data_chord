@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 from httpx import AsyncClient
 
+from src.domain.manifest import ManifestPayload
 from tests.conftest import TEST_TARGET_SCHEMA, upload_and_analyze
 
 
@@ -174,7 +175,7 @@ def test_harmonize_sends_source_file_and_column_keyed_manifest(tmp_path: Path) -
     mock_client = MagicMock()
     mock_client.harmonize.return_value = MagicMock(status="succeeded", description="ok", job_id="job-1")
     service = HarmonizeService(mock_client)
-    manifest = {"column_mappings": {"col_0001": {"targetField": "last_name", "cde_id": 11}}}
+    manifest: ManifestPayload = {"column_mappings": {"col_0001": {"cde_key": "last_name", "cde_id": 11}}}
 
     # When: harmonization is run
     result = service.run(

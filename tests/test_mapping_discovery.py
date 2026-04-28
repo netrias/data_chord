@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
 
-from src.domain.manifest import ManifestPayload
-from src.domain.mapping_service import MappingDiscoveryService, _cde_targets_from_manifest
+from src.domain.manifest import ColumnMappingManifest, ManifestPayload
+from src.domain.mapping_service import MappingDiscoveryService
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -62,8 +63,8 @@ def test_discover_returns_manifest_from_client(
     column_mappings = manifest.get("column_mappings", {})
     assert "col_0000" in column_mappings
     assert "col_0001" in column_mappings
-    assert column_mappings["col_0000"]["targetField"] == "organism_species"
-    assert column_mappings["col_0001"]["targetField"] == "primary_diagnosis"
+    assert column_mappings["col_0000"]["cde_key"] == "organism_species"
+    assert column_mappings["col_0001"]["cde_key"] == "primary_diagnosis"
 
 
 # ---------------------------------------------------------------------------
@@ -109,20 +110,20 @@ def test_discover_builds_cde_targets_from_manifest(
 
 def test_discover_skips_empty_target_fields() -> None:
     """
-    Given: a manifest where one column has targetField="" and another is valid
-    When: _cde_targets_from_manifest processes it
+    Given: a manifest where one column has cde_key="" and another is valid
+    When: ColumnMappingManifest processes it
     Then: only the valid column appears in cde_targets
     """
     # Given
     manifest: ManifestPayload = {
         "column_mappings": {
-            "breed": {"targetField": "organism_species", "cde_id": 131},
-            "empty_col": {"targetField": "", "cde_id": 0},
+            "breed": {"cde_key": "organism_species", "cde_id": 131},
+            "empty_col": {"cde_key": "", "cde_id": 0},
         }
     }
 
     # When
-    targets = _cde_targets_from_manifest(manifest)
+    targets = ColumnMappingManifest.from_payload(manifest).suggestions_by_column()
 
     # Then: only breed appears
     assert "breed" in targets
@@ -157,32 +158,32 @@ def test_discover_raises_when_client_unavailable() -> None:
 def test_cde_targets_reads_alternatives_from_manifest() -> None:
     """
     Given: a manifest with alternatives (ranked suggestions) from the updated SDK
-    When: _cde_targets_from_manifest processes it
+    When: ColumnMappingManifest processes it
     Then: cde_targets contains multiple ModelSuggestions per column, sorted by confidence
     """
     # Given
     manifest: ManifestPayload = {
         "column_mappings": {
             "age_col": {
-                "targetField": "age",
+                "cde_key": "age",
                 "cde_id": 900,
                 "alternatives": [
-                    {"target": "age", "similarity": 1.0, "cde_id": 900},
-                    {"target": "ageUnit", "similarity": 0.3, "cde_id": 904},
+                    {"target": "age", "confidence": 1.0, "cde_id": 900},
+                    {"target": "ageUnit", "confidence": 0.3, "cde_id": 904},
                 ],
             },
             "sex_col": {
-                "targetField": "sex",
+                "cde_key": "sex",
                 "cde_id": 901,
                 "alternatives": [
-                    {"target": "sex", "similarity": 0.95, "cde_id": 901},
+                    {"target": "sex", "confidence": 0.95, "cde_id": 901},
                 ],
             },
         }
     }
 
     # When
-    targets = _cde_targets_from_manifest(manifest)
+    targets = ColumnMappingManifest.from_payload(manifest).suggestions_by_column()
 
     # Then: age_col has two suggestions
     assert len(targets["age_col"]) == 2
@@ -197,31 +198,31 @@ def test_cde_targets_reads_alternatives_from_manifest() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 6: empty alternatives falls back to targetField
+# Test 6: empty alternatives falls back to cde_key
 # ---------------------------------------------------------------------------
 
 
 def test_cde_targets_falls_back_to_target_field_when_alternatives_empty() -> None:
     """
     Given: a manifest where alternatives is present but all entries fail validation
-    When: _cde_targets_from_manifest processes it
-    Then: falls back to targetField as a single suggestion
+    When: ColumnMappingManifest processes it
+    Then: falls back to cde_key as a single suggestion
     """
     # Given: alternatives list has no valid entries (missing target key)
-    manifest: ManifestPayload = {
+    manifest = cast(ManifestPayload, {
         "column_mappings": {
             "age_col": {
-                "targetField": "age",
+                "cde_key": "age",
                 "cde_id": 900,
-                "alternatives": [{"similarity": 0.9}],  # no "target" key
+                "alternatives": [{"confidence": 0.9}],  # no "target" key
             },
         }
-    }
+    })
 
     # When
-    targets = _cde_targets_from_manifest(manifest)
+    targets = ColumnMappingManifest.from_payload(manifest).suggestions_by_column()
 
-    # Then: falls back to targetField
+    # Then: falls back to cde_key
     assert len(targets["age_col"]) == 1
     assert targets["age_col"][0].target == "age"
     assert targets["age_col"][0].similarity == 1.0
@@ -285,7 +286,7 @@ def test_discover_preserves_duplicate_headers_with_column_keys(
     cde_targets, _, manifest = svc.discover(csv_path=csv_path, target_schema="ccdi")
 
     column_mappings = manifest.get("column_mappings", {})
-    assert column_mappings["col_0000"]["targetField"] == "first_name"
-    assert column_mappings["col_0001"]["targetField"] == "last_name"
+    assert column_mappings["col_0000"]["cde_key"] == "first_name"
+    assert column_mappings["col_0001"]["cde_key"] == "last_name"
     assert cde_targets["col_0000"][0].target == "first_name"
     assert cde_targets["col_0001"][0].target == "last_name"

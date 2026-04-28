@@ -325,7 +325,9 @@ async def test_full_flow_duplicate_headers_keep_columns_separate(
 
     meta = temp_storage.load(file_id)
     assert meta is not None
-    harmonized_path = meta.saved_path.with_name(f"{meta.saved_path.stem}.harmonized.csv")
+    harmonized_dir = meta.saved_path.parent.parent / "harmonized"
+    harmonized_dir.mkdir(parents=True, exist_ok=True)
+    harmonized_path = harmonized_dir / f"{meta.saved_path.stem}.harmonized.csv"
     with harmonized_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerows(rows)

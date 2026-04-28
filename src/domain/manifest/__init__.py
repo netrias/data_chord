@@ -4,6 +4,12 @@ Harmonization results including AI suggestions, confidence scores, and manual ov
 Encapsulates manifest structure, reading, and writing; tracks override audit trail.
 """
 
+from src.domain.manifest.mapping_manifest import (
+    ColumnMappingManifest,
+    ColumnMappingRecord,
+    MappingAlternative,
+    normalize_manifest,
+)
 from src.domain.manifest.models import (
     COMPLETENESS_HIGH_THRESHOLD,
     COMPLETENESS_MEDIUM_THRESHOLD,
@@ -32,6 +38,8 @@ __all__ = [
     "COMPLETENESS_HIGH_THRESHOLD",
     "COMPLETENESS_MEDIUM_THRESHOLD",
     "ColumnMappingEntry",
+    "ColumnMappingManifest",
+    "ColumnMappingRecord",
     "ConfidenceBucket",
     "HIGH_CONFIDENCE_THRESHOLD",
     "MEDIUM_CONFIDENCE_THRESHOLD",
@@ -39,11 +47,13 @@ __all__ = [
     "ManifestRow",
     "ManifestSummary",
     "ManualOverride",
+    "MappingAlternative",
     "add_manual_overrides_batch",
     "completeness_bucket",
     "confidence_bucket",
     "get_latest_override_value",
     "get_manifest_schema",
     "is_value_changed",
+    "normalize_manifest",
     "read_manifest_parquet",
 ]

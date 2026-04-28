@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 from abc import ABC, abstractmethod
-from typing import Any
 
 from .file_types import FileType
 
@@ -17,21 +16,21 @@ class Serializer(ABC):
     """Abstract serializer interface."""
 
     @abstractmethod
-    def serialize(self, data: Any) -> bytes:
+    def serialize(self, data: object) -> bytes:
         """Encode data to bytes."""
 
     @abstractmethod
-    def deserialize(self, raw: bytes) -> Any:
+    def deserialize(self, raw: bytes) -> object:
         """Decode bytes to data."""
 
 
 class JSONSerializer(Serializer):
     """JSON serialization for dict/list data."""
 
-    def serialize(self, data: Any) -> bytes:
+    def serialize(self, data: object) -> bytes:
         return json.dumps(data, indent=2, default=str).encode("utf-8")
 
-    def deserialize(self, raw: bytes) -> Any:
+    def deserialize(self, raw: bytes) -> object:
         return json.loads(raw.decode("utf-8"))
 
 
@@ -42,7 +41,9 @@ class ParquetSerializer(Serializer):
     conversion to/from DataFrame or other structures.
     """
 
-    def serialize(self, data: bytes) -> bytes:
+    def serialize(self, data: object) -> bytes:
+        if not isinstance(data, bytes):
+            raise TypeError("ParquetSerializer expects bytes")
         return data
 
     def deserialize(self, raw: bytes) -> bytes:
@@ -52,7 +53,9 @@ class ParquetSerializer(Serializer):
 class RawBytesSerializer(Serializer):
     """Pass-through for raw file content (CSV, etc.)."""
 
-    def serialize(self, data: bytes) -> bytes:
+    def serialize(self, data: object) -> bytes:
+        if not isinstance(data, bytes):
+            raise TypeError("RawBytesSerializer expects bytes")
         return data
 
     def deserialize(self, raw: bytes) -> bytes:

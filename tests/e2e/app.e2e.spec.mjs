@@ -13,6 +13,7 @@ import {
   mockHarmonizeFailure,
   seedHarmonization,
   parseDownloadedCsv,
+  parseDownloadedTabular,
 } from './utils.mjs';
 
 const waitForReviewRows = async (page) => {
@@ -31,6 +32,12 @@ const downloadCsvRows = async (page, fileId) => {
   const response = await page.request.post('/stage-5/download', { data: { file_id: fileId } });
   expect(response.ok()).toBeTruthy();
   return parseDownloadedCsv(response);
+};
+
+const downloadTsvRows = async (page, fileId) => {
+  const response = await page.request.post('/stage-5/download', { data: { file_id: fileId } });
+  expect(response.ok()).toBeTruthy();
+  return parseDownloadedTabular(response, '.tsv', '\t');
 };
 
 test('happy path flow: upload → analyze → harmonize → review → summary → download', async ({ page }) => {
@@ -59,6 +66,25 @@ test('happy path flow: upload → analyze → harmonize → review → summary �
 
   const rows = await downloadCsvRows(page, fileId);
   expect(rows[0].col_a).toBe('Baz');
+});
+
+test('TSV flow preserves TSV format through download', async ({ page }) => {
+  await mockHarmonizeSuccess(page);
+
+  // Given: a TSV file is uploaded and analyzed
+  const fileId = await uploadAndAnalyze(page, fileFixture('basic.tsv'));
+  const preOverrides = await page.request.get(`/stage-4/overrides/${fileId}`);
+  expect(await preOverrides.json()).toBeNull();
+
+  // When: the user harmonizes and downloads the result
+  await clickHarmonize(page);
+  await expect(page.locator('#reviewButton')).toBeEnabled();
+  seedHarmonization(fileId, { 0: { col_a: 'Baz, still one cell' } });
+
+  // Then: the exported tabular payload is TSV and keeps comma-bearing values intact
+  const rows = await downloadTsvRows(page, fileId);
+  expect(rows[0].col_a).toBe('Baz, still one cell');
+  expect(rows[0].col_b).toBe('value, one');
 });
 
 test('override propagation applies to all instances in a column', async ({ page }) => {
