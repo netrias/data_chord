@@ -9,7 +9,10 @@ import {
   uploadAndAnalyze,
   uploadAndAnalyzeSheet,
   clickHarmonize,
+  mockColumnDetail,
+  mockAnalyze,
   mockDataModels,
+  mockDataModelsWithVersionCount,
   mockHarmonizeSuccess,
   mockHarmonizeFailure,
   seedHarmonization,
@@ -49,6 +52,66 @@ const downloadWorkbookRows = async (page, fileId, sheetName) => {
   return parseDownloadedWorkbook(response, sheetName);
 };
 
+const _stage2Column = (key) => ({
+  column_name: key,
+  column_key: key,
+  source_index: 0,
+  header: key,
+  inferred_type: 'text',
+  sample_values: [],
+  confidence_bucket: 'high',
+  confidence_score: 0.9,
+});
+
+const _stage2Cde = (key, type) => ({
+  cde_id: key.length,
+  cde_key: key,
+  label: key,
+  description: `${key} description`,
+  cde_type: type,
+});
+
+const _stage2HarnessHtml = (cdeCatalog) => `
+<!DOCTYPE html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>Stage 2 Harness</title></head>
+  <body>
+    <nav class="progress-tracker">
+      <ol>
+        <li class="step" data-stage="upload" data-url="/stage-1"></li>
+        <li class="step" data-stage="mapping" data-url="/stage-2"></li>
+        <li class="step" data-stage="harmonize" data-url="/stage-3"></li>
+      </ol>
+      <button id="harmonizeButton" disabled><span class="btn-3d-front">Harmonize →</span></button>
+      <div id="stepInstruction"><p class="step-instruction-text"></p><span class="step-instruction-tooltip"></span></div>
+    </nav>
+    <main>
+      <div id="sourceFilter"></div>
+      <input id="colSearch" />
+      <div class="mapping-list-head"><div></div><div>Your column</div><div>Target standard</div><div>Value fit</div><div></div></div>
+      <div id="mappingRows"></div>
+      <div id="mappingEmptyState" class="hidden"></div>
+    </main>
+    <div class="takeover hidden" id="takeover">
+      <div class="takeover-backdrop" data-action="close-takeover"></div>
+      <div class="takeover-card" id="takeoverCard"></div>
+    </div>
+    <script>
+      window.stageTwoConfig = {
+        analyzeEndpoint: "/stage-1/analyze",
+        columnDetailBase: "/stage-2/column-detail",
+        targetSchema: "gc",
+        targetVersionNumber: 1,
+        cdeCatalog: ${JSON.stringify(cdeCatalog)},
+        noMappingLabel: "No Mapping",
+        stageThreeUrl: "/stage-3"
+      };
+    </script>
+    <script type="module" src="/assets/stage-2/stage_2_mappings.js"></script>
+  </body>
+</html>
+`;
+
 test('happy path flow: upload → analyze → harmonize → review → summary → download', async ({ page }) => {
   await mockHarmonizeSuccess(page);
 
@@ -75,6 +138,381 @@ test('happy path flow: upload → analyze → harmonize → review → summary �
 
   const rows = await downloadCsvRows(page, fileId);
   expect(rows[0].col_a).toBe('Baz');
+});
+
+test('Stage 2 list opens a takeover modal on row click', async ({ page }) => {
+  /*
+   * Given: a CSV is analyzed and Stage 2 lands on the list view
+   * When:  a row is clicked
+   * Then:  the takeover modal opens with "Your column" + "Target standard"
+   *        panes; closing the takeover returns to the list.
+   */
+  await mockColumnDetail(page);
+  await uploadAndAnalyze(page, fileFixture('basic.csv'));
+
+  // Negative: takeover starts hidden
+  await expect(page.locator('#takeover')).toHaveClass(/hidden/);
+  // List rows render
+  const row = page.locator('#mappingRows .mapping-row').first();
+  await expect(row).toBeVisible();
+
+  // Open takeover
+  await row.click();
+  await expect(page.locator('#takeover')).not.toHaveClass(/hidden/);
+  await expect(page.locator('.takeover-pane--data .takeover-pane-title')).toHaveText(/your column/i);
+  await expect(page.locator('.takeover-pane--target .takeover-pane-title')).toHaveText(/target standard/i);
+
+  // Close via the ✕ button
+  await page.locator('.takeover-btn--close').click();
+  await expect(page.locator('#takeover')).toHaveClass(/hidden/);
+});
+
+test('Stage 2 splits picker sections by mapping kind', async ({ page }) => {
+  const payload = {
+    file_id: 'abcdef0123456789',
+    file_name: 'mixed.csv',
+    total_rows: 5,
+    columns: [
+      _stage2Column('diagnosis'),
+      _stage2Column('notes'),
+      _stage2Column('age_value'),
+      _stage2Column('unknown_field'),
+      _stage2Column('empty_col'),
+      _stage2Column('low_match'),
+    ],
+    cde_targets: {
+      diagnosis: [{ target: 'dx', similarity: 0.95 }],
+      notes: [{ target: 'notes_cde', similarity: 0.9 }],
+      age_value: [{ target: 'age_cde', similarity: 0.9 }],
+      empty_col: [{ target: 'empty_dx', similarity: 0.8 }],
+      low_match: [{ target: 'low_dx', similarity: 0.8 }],
+    },
+    column_summaries: {
+      diagnosis: { value_overlap_ratio: 0.8 },
+      notes: { value_overlap_ratio: null },
+      age_value: { value_overlap_ratio: null },
+      unknown_field: { value_overlap_ratio: null },
+      empty_col: { value_overlap_ratio: null },
+      low_match: { value_overlap_ratio: 0.0 },
+    },
+    next_stage: 'mapping',
+    next_step_hint: 'Review mappings.',
+    manual_overrides: {},
+    manifest: { column_mappings: {} },
+  };
+  const cdeCatalog = [
+    _stage2Cde('dx', 'pv'),
+    _stage2Cde('empty_dx', 'pv'),
+    _stage2Cde('low_dx', 'pv'),
+    _stage2Cde('notes_cde', 'passthrough'),
+    _stage2Cde('age_cde', 'numeric'),
+  ];
+
+  await page.addInitScript((stagePayload) => {
+    sessionStorage.setItem('stage2Payload', JSON.stringify(stagePayload));
+    sessionStorage.setItem('maxReachedStage', 'mapping');
+  }, payload);
+  await page.route('**/stage-2?**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/html',
+      body: _stage2HarnessHtml(cdeCatalog),
+    });
+  });
+  await page.route('**/stage-2/column-detail/**', async (route) => {
+    const url = new URL(route.request().url());
+    const columnKey = decodeURIComponent(url.pathname.split('/').at(-1) ?? '');
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        column_key: columnKey,
+        profile: {
+          column_key: columnKey,
+          total_rows: 5,
+          distinct_values: [
+            { value: 'Lung', count: 1 },
+            { value: 'Breast', count: 1 },
+            { value: 'Glioma', count: 1 },
+            { value: 'Other', count: 1 },
+            { value: 'Unknown', count: 1 },
+          ],
+          null_count: 0,
+          total_distinct: 5,
+          null_pct: 0.0,
+          is_all_unique: true,
+        },
+        match_counts: { dx: 4, empty_dx: 0, low_dx: 0 },
+        overlap_by_cde: { dx: 0.8, empty_dx: 0.0, low_dx: 0.0 },
+        cde_types: { dx: 'pv', empty_dx: 'pv', low_dx: 'pv', notes_cde: 'passthrough', age_cde: 'numeric' },
+        selected_pvs: ['Breast', 'Glioma', 'Lung', 'Other'],
+      }),
+    });
+  });
+
+  await page.goto('/stage-2?file_id=abcdef0123456789&schema=gc&version_number=1');
+
+  await expect(page.locator('#mappingRows .mapping-row')).toHaveCount(6);
+  await expect(page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-fit')).toHaveText('80%');
+  await expect(page.locator('.mapping-row', { hasText: 'low_match' }).locator('.mapping-row-fit')).toHaveText('0%');
+  await expect(page.locator('.mapping-row', { hasText: 'notes' }).locator('.mapping-row-fit--passthrough')).toBeVisible();
+  await expect(page.locator('.mapping-row', { hasText: 'age_value' }).locator('.mapping-row-fit')).toHaveText('0%');
+
+  await page.locator('.mapping-row', { hasText: 'diagnosis' }).click();
+  await page.locator('#cdePicker').click();
+
+  await expect(page.locator('.dd-section-label', { hasText: 'Harmonize values' })).toBeVisible();
+  await expect(page.locator('.dd-section-label', { hasText: 'No value harmonization' })).toBeVisible();
+  await expect(page.locator('.dd-section--rename-only .dd-opt', { hasText: 'notes_cde' })).toBeVisible();
+  await expect(page.locator('.dd-section--rename-only .dd-opt', { hasText: 'notes_cde' })).not.toContainText('5 matches');
+  await expect(page.locator('.dd-section--rename-only .dd-opt', { hasText: 'notes_cde' })).toContainText('0 matches');
+
+  await page.locator('.dd-section--rename-only .dd-opt', { hasText: 'notes_cde' }).click();
+
+  // After overriding diagnosis to a passthrough CDE, the fit cell shows the
+  // passthrough badge (no permissible-value comparison applies).
+  await expect(page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-fit--passthrough')).toBeVisible();
+});
+
+test('Stage 2 will-change-values filter chip narrows list by target CDE type', async ({ page }) => {
+  /*
+   * Given: Stage 2 with four columns covering each chip cell — one PV-mapped,
+   *        one numeric-mapped, one pass-through-mapped, one unmapped.
+   * When:  the user clicks the Will-change-values chip.
+   * Then:  the list narrows to columns whose effective target CDE has
+   *        cde_type === 'pv' (the only type whose values are rewritten by
+   *        harmonization). Overriding the PV-mapped column to a pass-through
+   *        CDE drops the chip count to 0, confirming the filter delegates to
+   *        _effectiveCde (overrides honored), not to the original AI rec.
+   */
+  const payload = {
+    file_id: 'abcdef0123456789',
+    file_name: 'mixed.csv',
+    total_rows: 5,
+    columns: [
+      _stage2Column('dx_col'),
+      _stage2Column('age_col'),
+      _stage2Column('notes_col'),
+      _stage2Column('junk_col'),
+    ],
+    cde_targets: {
+      dx_col: [{ target: 'dx_cde', similarity: 0.95 }],
+      age_col: [{ target: 'age_cde', similarity: 0.9 }],
+      notes_col: [{ target: 'notes_cde', similarity: 0.9 }],
+      // junk_col deliberately omitted — exercises the No-Mapping cell.
+    },
+    column_summaries: {
+      dx_col: { value_overlap_ratio: 0.8 },
+      age_col: { value_overlap_ratio: null },
+      notes_col: { value_overlap_ratio: null },
+      junk_col: { value_overlap_ratio: null },
+    },
+    next_stage: 'mapping',
+    next_step_hint: 'Review mappings.',
+    manual_overrides: {},
+    manifest: { column_mappings: {} },
+  };
+  const cdeCatalog = [
+    _stage2Cde('dx_cde', 'pv'),
+    _stage2Cde('age_cde', 'numeric'),
+    _stage2Cde('notes_cde', 'passthrough'),
+  ];
+
+  await page.addInitScript((stagePayload) => {
+    sessionStorage.setItem('stage2Payload', JSON.stringify(stagePayload));
+    sessionStorage.setItem('maxReachedStage', 'mapping');
+  }, payload);
+  await page.route('**/stage-2?**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/html',
+      body: _stage2HarnessHtml(cdeCatalog),
+    });
+  });
+  await page.route('**/stage-2/column-detail/**', async (route) => {
+    const url = new URL(route.request().url());
+    const columnKey = decodeURIComponent(url.pathname.split('/').at(-1) ?? '');
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        column_key: columnKey,
+        profile: {
+          column_key: columnKey,
+          total_rows: 5,
+          distinct_values: [{ value: 'a', count: 1 }],
+          null_count: 0,
+          total_distinct: 1,
+          null_pct: 0.0,
+          is_all_unique: true,
+        },
+        match_counts: { dx_cde: 0, age_cde: 0 },
+        overlap_by_cde: { dx_cde: 0.0, age_cde: 0.0 },
+        cde_types: { dx_cde: 'pv', age_cde: 'numeric', notes_cde: 'passthrough' },
+        selected_pvs: [],
+      }),
+    });
+  });
+
+  await page.goto('/stage-2?file_id=abcdef0123456789&schema=gc&version_number=1');
+
+  // Negative: takeover starts hidden, all four rows render, ordering matches CSV.
+  await expect(page.locator('#takeover')).toHaveClass(/hidden/);
+  await expect(page.locator('#mappingRows .mapping-row')).toHaveCount(4);
+
+  // All five chips render with the expected counts. AI Rec=3, Override=0,
+  // No Mapping=1 (junk_col), Will-change-values=1 (only dx_col → dx_cde is PV).
+  await expect(page.locator('.mapping-filter-btn--all .mapping-filter-count')).toHaveText('4');
+  await expect(page.locator('.mapping-filter-btn--rec .mapping-filter-count')).toHaveText('3');
+  await expect(page.locator('.mapping-filter-btn--ovr .mapping-filter-count')).toHaveText('0');
+  await expect(page.locator('.mapping-filter-btn--none .mapping-filter-count')).toHaveText('1');
+  await expect(page.locator('.mapping-filter-btn--will-change .mapping-filter-count')).toHaveText('1');
+
+  // Activating Will-change-values narrows the list to dx_col only.
+  await page.locator('.mapping-filter-btn--will-change').click();
+  await expect(page.locator('#mappingRows .mapping-row')).toHaveCount(1);
+  await expect(page.locator('#mappingRows .mapping-row').first()).toContainText('dx_col');
+
+  // Resetting via All restores all four rows in CSV input order.
+  await page.locator('.mapping-filter-btn--all').click();
+  const rowHeaders = page.locator('#mappingRows .mapping-row .mapping-row-col');
+  await expect(rowHeaders).toHaveCount(4);
+  await expect(rowHeaders.nth(0)).toContainText('dx_col');
+  await expect(rowHeaders.nth(1)).toContainText('age_col');
+  await expect(rowHeaders.nth(2)).toContainText('notes_col');
+  await expect(rowHeaders.nth(3)).toContainText('junk_col');
+
+  // Override dx_col (the only PV-mapped column) to the pass-through CDE.
+  // _isWillChangeValuesColumn must follow the override (via _effectiveCde),
+  // so the chip count drops from 1 to 0 and activating it leaves the list empty.
+  await page.locator('.mapping-row', { hasText: 'dx_col' }).click();
+  await page.locator('#cdePicker').click();
+  await page.locator('.dd-section--rename-only .dd-opt', { hasText: 'notes_cde' }).click();
+  await page.locator('.takeover-btn--close').click();
+  await expect(page.locator('#takeover')).toHaveClass(/hidden/);
+
+  await expect(page.locator('.mapping-filter-btn--will-change .mapping-filter-count')).toHaveText('0');
+  await page.locator('.mapping-filter-btn--will-change').click();
+  await expect(page.locator('#mappingRows .mapping-row')).toHaveCount(0);
+});
+
+test('Stage 2 picker surfaces all AI candidates as separate rows', async ({ page }) => {
+  /*
+   * Given: cde_targets["diagnosis"] returns two ranked AI candidates.
+   * When:  the user opens the picker for that column.
+   * Then:  both candidates render as .dd-opt.ai rows in similarity order
+   *        (top first), each with the ✦ AI rec badge, and neither key
+   *        appears in the "Harmonize values" / "No value harmonization"
+   *        sections below the divider. Picking any AI candidate keeps the
+   *        row's status as REC — picking the 2nd-ranked one still counts
+   *        as "aligned with the AI." Picking a non-AI catalog CDE flips
+   *        the row to OVR.
+   */
+  const payload = {
+    file_id: 'abcdef0123456789',
+    file_name: 'multi.csv',
+    total_rows: 5,
+    columns: [_stage2Column('diagnosis'), _stage2Column('notes')],
+    cde_targets: {
+      diagnosis: [
+        { target: 'dx', similarity: 0.95 },
+        { target: 'dx_alt', similarity: 0.82 },
+      ],
+      notes: [{ target: 'notes_cde', similarity: 0.9 }],
+    },
+    column_summaries: {
+      diagnosis: { value_overlap_ratio: 0.8 },
+      notes: { value_overlap_ratio: null },
+    },
+    next_stage: 'mapping',
+    next_step_hint: 'Review mappings.',
+    manual_overrides: {},
+    manifest: { column_mappings: {} },
+  };
+  const cdeCatalog = [
+    _stage2Cde('dx', 'pv'),
+    _stage2Cde('dx_alt', 'pv'),
+    _stage2Cde('other_dx', 'pv'),
+    _stage2Cde('notes_cde', 'passthrough'),
+  ];
+
+  await page.addInitScript((stagePayload) => {
+    sessionStorage.setItem('stage2Payload', JSON.stringify(stagePayload));
+    sessionStorage.setItem('maxReachedStage', 'mapping');
+  }, payload);
+  await page.route('**/stage-2?**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/html',
+      body: _stage2HarnessHtml(cdeCatalog),
+    });
+  });
+  await page.route('**/stage-2/column-detail/**', async (route) => {
+    const url = new URL(route.request().url());
+    const columnKey = decodeURIComponent(url.pathname.split('/').at(-1) ?? '');
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        column_key: columnKey,
+        profile: {
+          column_key: columnKey,
+          total_rows: 5,
+          distinct_values: [
+            { value: 'Lung', count: 1 },
+            { value: 'Breast', count: 1 },
+          ],
+          null_count: 0,
+          total_distinct: 2,
+          null_pct: 0.0,
+          is_all_unique: false,
+        },
+        match_counts: { dx: 2, dx_alt: 1, other_dx: 0 },
+        overlap_by_cde: { dx: 1.0, dx_alt: 0.5, other_dx: 0.0 },
+        cde_types: { dx: 'pv', dx_alt: 'pv', other_dx: 'pv', notes_cde: 'passthrough' },
+        selected_pvs: ['Lung', 'Breast'],
+      }),
+    });
+  });
+
+  await page.goto('/stage-2?file_id=abcdef0123456789&schema=gc&version_number=1');
+
+  // Open takeover for the diagnosis column, then open the picker.
+  await page.locator('.mapping-row', { hasText: 'diagnosis' }).click();
+  await page.locator('#cdePicker').click();
+
+  // Top section: both AI candidates render as .dd-opt.ai rows, top-first
+  // (similarity order), both carrying the ✦ AI rec badge.
+  const aiRows = page.locator('#pickerDropdown .dd-opt.ai');
+  await expect(aiRows).toHaveCount(2);
+  await expect(aiRows.nth(0)).toContainText('dx');
+  await expect(aiRows.nth(0)).toContainText('AI rec');
+  await expect(aiRows.nth(1)).toContainText('dx_alt');
+  await expect(aiRows.nth(1)).toContainText('AI rec');
+
+  // Dedup: AI candidates do not also appear in the lower sections.
+  await expect(page.locator('#pickerDropdown .dd-section .dd-opt[data-value="dx"]')).toHaveCount(0);
+  await expect(page.locator('#pickerDropdown .dd-section .dd-opt[data-value="dx_alt"]')).toHaveCount(0);
+
+  // Default state: row reflects the top AI candidate (REC, not OVR).
+  await expect(
+    page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-status.mapping-ico--rec')
+  ).toBeVisible();
+
+  // Picking the 2nd-ranked AI candidate keeps the row REC: it was still the
+  // model's suggestion. The user is aligned with the AI either way.
+  await aiRows.nth(1).click();
+  await expect(
+    page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-status.mapping-ico--rec')
+  ).toBeVisible();
+
+  // Picking a non-AI catalog CDE flips the row to OVR — the user went
+  // off-script, picking something the AI never suggested.
+  await page.locator('#cdePicker').click();
+  await page.locator('#pickerDropdown .dd-opt[data-value="other_dx"]').click();
+  await expect(
+    page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-status.mapping-ico--ovr')
+  ).toBeVisible();
 });
 
 test('TSV flow preserves TSV format through download', async ({ page }) => {
@@ -248,6 +686,53 @@ test('autosave persists overrides across reloads', async ({ page }) => {
 
   // Then: the override value is restored
   await expect(card.locator('.target-value-input')).toHaveValue('Persisted');
+});
+
+test('version dropdown panel renders below trigger and scrolls when versions overflow', async ({ page }) => {
+  /*
+   * Given: 20 versions exist for the default data model, exceeding the panel max-height
+   * When:  the user opens the data-model popup and clicks the version trigger
+   * Then:  the panel renders below the trigger (no overlap), shows all 20 items,
+   *        is scrollable (scrollHeight > clientHeight), and the latest version
+   *        sits at index 0 selected
+   */
+  await mockDataModelsWithVersionCount(page, 20);
+  await mockAnalyze(page);
+
+  await page.goto('/stage-1');
+  await page.setInputFiles('#fileInput', fileFixture('basic.csv'));
+  await page.locator('#analyzeButton').waitFor({ state: 'visible' });
+  await page.waitForFunction(() => !document.querySelector('#analyzeButton')?.disabled);
+  await page.click('#analyzeButton');
+
+  await page.locator('.data-model-dialog').waitFor({ state: 'visible' });
+
+  // Negative check: panel hidden before trigger click
+  await expect(page.locator('.data-model-dropdown-panel')).toBeHidden();
+
+  await page.click('#versionDropdownTrigger');
+  await page.locator('.data-model-dropdown-panel').waitFor({ state: 'visible' });
+
+  const geom = await page.evaluate(() => {
+    const trigger = document.querySelector('#versionDropdownTrigger');
+    const panel = document.querySelector('.data-model-dropdown-panel');
+    /* Scroll lives on the inner list; outer panel only clips for rounded corners. */
+    const list = document.querySelector('.data-model-dropdown-list');
+    return {
+      triggerBottom: trigger.getBoundingClientRect().bottom,
+      panelTop: panel.getBoundingClientRect().top,
+      listClientHeight: list.clientHeight,
+      listScrollHeight: list.scrollHeight,
+      itemCount: panel.querySelectorAll('.data-model-dropdown-item').length,
+    };
+  });
+  expect(geom.panelTop).toBeGreaterThanOrEqual(geom.triggerBottom);
+  expect(geom.itemCount).toBe(20);
+  expect(geom.listScrollHeight).toBeGreaterThan(geom.listClientHeight);
+
+  const items = page.locator('.data-model-dropdown-item');
+  await expect(items.first()).toHaveText('v20.0');
+  await expect(items.first()).toHaveAttribute('aria-selected', 'true');
 });
 
 test('error handling: wrong file type and oversize upload', async ({ page }) => {

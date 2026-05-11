@@ -65,6 +65,34 @@ def test_discover_returns_manifest_from_client(
     assert "col_0001" in column_mappings
     assert column_mappings["col_0000"]["cde_key"] == "organism_species"
     assert column_mappings["col_0001"]["cde_key"] == "primary_diagnosis"
+    mock_client.discover_mapping_from_tabular.assert_called_once()
+    assert mock_client.discover_mapping_from_tabular.call_args.kwargs["target_version"] == "latest"
+
+
+def test_discover_passes_selected_target_version(
+    service_with_mock_client: tuple[MappingDiscoveryService, MagicMock],
+    tmp_path: Path,
+) -> None:
+    """
+    Given: a selected model version from the Stage 1 popup
+    When: MappingDiscoveryService.discover() is called with that version
+    Then: the discovery API receives the same target_version
+    """
+    svc, mock_client = service_with_mock_client
+
+    # Given
+    mock_client.discover_mapping_from_tabular.return_value = {
+        "column_mappings": {"col_0000": {"cde_key": "organism_species", "cde_id": 131}}
+    }
+    csv_path = tmp_path / "test.csv"
+    csv_path.write_text("breed\nLabrador\n")
+    assert mock_client.discover_mapping_from_tabular.call_count == 0
+
+    # When
+    svc.discover(csv_path=csv_path, target_schema="ccdi", target_version="2")
+
+    # Then
+    assert mock_client.discover_mapping_from_tabular.call_args.kwargs["target_version"] == "2"
 
 
 # ---------------------------------------------------------------------------
@@ -269,10 +297,12 @@ def test_discover_preserves_duplicate_headers_with_column_keys(
         *,
         source_path: Path,
         target_schema: str,
+        target_version: str,
         confidence_threshold: float,
         sheet_name: str | None = None,
     ) -> dict[str, object]:
         assert source_path.name == "dupes.csv"
+        assert target_version == "latest"
         assert sheet_name is None
         return {
             "column_mappings": {

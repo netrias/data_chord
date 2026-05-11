@@ -7,7 +7,8 @@ Axis of change: CDE metadata shapes and column-mapping serialization.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import StrEnum
 
 from pydantic import BaseModel
 
@@ -16,11 +17,37 @@ from src.domain.columns import ColumnKey, column_key_from_string
 NO_MAPPING_SENTINEL = "No Mapping"
 
 
+class CdeType(StrEnum):
+    """How a CDE validates incoming column values.
+
+    The Stage 2 takeover branches on this in three places: the picker badge,
+    the conform pill wording, and the right-pane content (PV list vs. type
+    explanatory card). Owner of assignment: ``cde_type_overrides.classify_cde``.
+    """
+
+    PV = "pv"                  # value must equal one of the CDE's permissible values
+    NUMERIC = "numeric"        # value must parse as a number; no PV list
+    PASSTHROUGH = "passthrough"  # value is stored as-is; no validation
+
+
+def is_rename_only(cde_type: CdeType) -> bool:
+    """Numeric and pass-through CDEs only rename columns; they do not map values."""
+    return cde_type != CdeType.PV
+
+
+@dataclass(frozen=True)
+class DataModelVersionInfo:
+    version_label: str
+    version_number: int
+    external_version_number: str | None = None
+    is_default: bool = False
+
+
 @dataclass(frozen=True)
 class DataModelSummary:
     key: str
     label: str
-    versions: list[str]
+    versions: list[DataModelVersionInfo]
 
 
 @dataclass(frozen=True)
@@ -31,6 +58,7 @@ class CDEInfo:
     cde_key: str
     description: str | None
     version_label: str
+    cde_type: CdeType = field(default=CdeType.PV)
 
 
 class ModelSuggestion(BaseModel):
@@ -59,7 +87,7 @@ class ColumnMappingSet:
     mappings: tuple[ColumnMapping, ...]
 
     @classmethod
-    def from_dict(cls, overrides: Mapping[str, str]) -> ColumnMappingSet:
+    def from_dict(cls, overrides: Mapping[str, str | None]) -> ColumnMappingSet:
         mappings: list[ColumnMapping] = []
         for column_key, selection in overrides.items():
             cde_key = normalize_cde_key(selection)

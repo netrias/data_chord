@@ -7,6 +7,7 @@ import io
 import zipfile
 from io import BytesIO
 from typing import cast
+from unittest.mock import MagicMock
 
 import pytest
 from httpx import AsyncClient
@@ -378,6 +379,41 @@ async def test_stage1_analyze_is_idempotent(
     assert manifest_one == manifest_two, "Manifest changed between analyses"
 
 
+async def test_stage1_analyze_uses_selected_version_and_primes_reference_cache(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+    mock_netrias_client: MagicMock,
+) -> None:
+    """Analyze passes the selected model version and warms CDE/PV cache."""
+
+    # Given: an uploaded CSV and an empty session cache
+    content = create_csv_content([["diagnosis"], ["Lung"], ["Breast"]])
+    file_id = await upload_content(app_client, content, "versioned.csv")
+    cache = get_session_cache(file_id)
+    assert not cache.has_cdes()
+    assert not cache.has_any_pvs()
+
+    # When: analysis is requested for GC version 2
+    response = await app_client.post(
+        "/stage-1/analyze",
+        json={
+            "file_id": file_id,
+            "target_schema": "gc",
+            "target_version_number": 2,
+        },
+    )
+
+    # Then: discovery and the session cache use the selected version number
+    assert response.status_code == 200
+    assert response.json()["target_version_number"] == 2
+    assert mock_netrias_client.discover_mapping_from_tabular.call_args.kwargs["target_version"] == "2"
+    data_model_key, version_label = cache.get_model_info()
+    assert data_model_key == "gc"
+    assert version_label == "2"
+    assert cache.has_cdes()
+    assert cache.has_any_pvs()
+
+
 async def test_stage2_mapping_page_renders_manual_options(
     app_client: AsyncClient,
 ) -> None:
@@ -425,7 +461,7 @@ async def test_stage3_harmonize_uses_stored_manifest_when_payload_missing(
             self.received_manifest = None
 
         def run(  # type: ignore[no-untyped-def]
-            self, *, file_path, target_schema, column_mappings, cache, manifest, output_path, sheet_name
+            self, *, file_path, target_schema, column_mappings, cache, target_version, manifest, output_path, sheet_name
         ):
             self.received_manifest = manifest
             return HarmonizeResult(job_id="job-1", status=HarmonizeStatus.SUCCEEDED, detail="ok")
@@ -464,11 +500,13 @@ async def test_stage3_harmonize_prefers_payload_manifest(
     class StubHarmonizer:
         def __init__(self) -> None:
             self.received_manifest = None
+            self.received_target_version = None
 
         def run(  # type: ignore[no-untyped-def]
-            self, *, file_path, target_schema, column_mappings, cache, manifest, output_path, sheet_name
+            self, *, file_path, target_schema, column_mappings, cache, target_version, manifest, output_path, sheet_name
         ):
             self.received_manifest = manifest
+            self.received_target_version = target_version
             return HarmonizeResult(job_id="job-2", status=HarmonizeStatus.SUCCEEDED, detail="ok")
 
     # Given: an uploaded file with a stored manifest
@@ -489,6 +527,7 @@ async def test_stage3_harmonize_prefers_payload_manifest(
             json={
                 "file_id": file_id,
                 "target_schema": TEST_TARGET_SCHEMA,
+                "target_version_number": 2,
                 "manual_overrides": {},
                 "manifest": payload_manifest,
             },
@@ -497,6 +536,7 @@ async def test_stage3_harmonize_prefers_payload_manifest(
     # Then: payload manifest is used instead of the stored one
     assert response.status_code == 200
     assert stub.received_manifest == payload_manifest
+    assert stub.received_target_version == "2"
 
 
 async def test_stage5_download_matches_harmonized_when_no_overrides(

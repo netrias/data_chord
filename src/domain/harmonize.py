@@ -49,6 +49,7 @@ class HarmonizeService:
         target_schema: str,
         column_mappings: ColumnMappingSet,
         cache: SessionCache,
+        target_version: str = "latest",
         manifest: ManifestPayload | None = None,
         output_path: Path | None = None,
         sheet_name: str | None = None,
@@ -60,7 +61,7 @@ class HarmonizeService:
             return HarmonizeResult(job_id=job_id, status=HarmonizeStatus.QUEUED, detail=detail)
 
         try:
-            cde_map = self._prepare_cde_map(file_path, target_schema, manifest, sheet_name)
+            cde_map = self._prepare_cde_map(file_path, target_schema, target_version, manifest, sheet_name)
             cde_map = _apply_column_mappings(cde_map, column_mappings, cache)
             return self._execute_harmonization(file_path, cde_map, job_id, target_schema, output_path, sheet_name)
         except Exception as exc:  # pragma: no cover - defensive
@@ -71,18 +72,25 @@ class HarmonizeService:
         self,
         file_path: Path,
         target_schema: str,
+        target_version: str,
         manifest: ManifestPayload | None,
         sheet_name: str | None,
     ) -> ColumnMappingManifest:
         if manifest is not None:
             return ColumnMappingManifest.from_payload(manifest)
-        return self._discover_cde_map(file_path=file_path, target_schema=target_schema, sheet_name=sheet_name)
+        return self._discover_cde_map(
+            file_path=file_path,
+            target_schema=target_schema,
+            target_version=target_version,
+            sheet_name=sheet_name,
+        )
 
     def _discover_cde_map(
         self,
         *,
         file_path: Path,
         target_schema: str,
+        target_version: str,
         sheet_name: str | None,
     ) -> ColumnMappingManifest:
         if not self._client:
@@ -90,7 +98,7 @@ class HarmonizeService:
         raw_cde_map = self._client.discover_mapping_from_tabular(
             source_path=file_path,
             target_schema=target_schema,
-            target_version="latest",
+            target_version=target_version,
             sheet_name=sheet_name,
         )
         cde_map = ColumnMappingManifest.from_payload(raw_cde_map)

@@ -23,7 +23,10 @@
 
 .upload-column {
   width: 100%;
-  max-width: 600px;
+  /* Scale with the viewport so the dropzone and worksheet picker take a
+     substantial slice of the available horizontal space; clamps prevent it
+     from getting awkwardly narrow on tiny screens or stretching on huge ones. */
+  max-width: clamp(560px, 72vw, 1040px);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -32,7 +35,9 @@
 /* Dropzone */
 .dropzone {
   width: 100%;
-  min-height: 360px;
+  /* Vertical breathing room scales with viewport too — taller monitors get a
+     larger drop target without bloating shorter ones. */
+  min-height: clamp(360px, 38vh, 500px);
   border: 1px solid var(--gray-200);
   border-radius: var(--radius-2xl);
   padding: var(--space-10) var(--space-8);
@@ -164,28 +169,339 @@
   font-weight: 500;
 }
 
-.sheet-selector-panel {
+/* ==========================================================================
+   WORKBOOK TABS — XLSX worksheet picker.
+
+   A single elevated card holds a centered header (icon + title + sheet
+   count) above a wrapped grid of worksheet tabs. The active tab carries
+   a netrias-green underline (CSS-only). For large workbooks the strip
+   caps at a viewport-relative max-height and shows a persistent
+   scrollbar so the overflow is discoverable.
+   ========================================================================== */
+
+.workbook-tabs {
   width: 100%;
-  margin-top: var(--space-4);
+  margin-top: var(--space-5);
+  position: relative;
+  animation: workbook-rise 380ms cubic-bezier(0.25, 0.8, 0.35, 1.05) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workbook-tabs {
+    animation: none;
+  }
+}
+
+@keyframes workbook-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.workbook-tabs-card {
+  position: relative;
+  background: var(--white);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm), var(--shadow-md);
+  padding: var(--space-5) var(--space-6) var(--space-3);
+  overflow: hidden;
+}
+
+.workbook-tabs-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--gray-100);
+}
+
+.workbook-tabs-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--netrias-50), var(--netrias-100));
+  color: var(--netrias-600);
+  flex-shrink: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 2px 6px var(--netrias-glow-light);
+}
+
+.workbook-tabs-meta {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  align-items: center;
+  text-align: center;
+  gap: 1px;
+  min-width: 0;
 }
 
-.sheet-selector-label {
+.workbook-tabs-title {
+  font-size: 0.95rem;
   font-weight: 600;
-  color: var(--gray-700);
+  color: var(--gray-900);
+  letter-spacing: -0.005em;
 }
 
-.sheet-selector {
-  width: 100%;
-  min-height: 44px;
-  border: 1px solid var(--gray-300);
+.workbook-tabs-subtitle {
+  font-size: 0.78rem;
+  color: var(--gray-500);
+  font-variant-numeric: tabular-nums;
+}
+
+.workbook-tabs-subtitle .workbook-tabs-subtitle-active {
+  color: var(--netrias-700);
+  font-weight: 600;
+}
+
+/* Tabs wrap onto multiple rows so they're all visible at once for the
+   common case. Very large workbooks scroll vertically, with a persistent
+   styled scrollbar so the overflow is discoverable. */
+.workbook-tabs-strip {
+  position: relative;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* Viewport-relative cap — taller monitors get more room before scrolling. */
+  max-height: clamp(240px, 38vh, 520px);
+  /* Reserve gutter so the layout doesn't shift when overflow appears. */
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--gray-400) var(--gray-100);
+}
+
+.workbook-tabs-strip::-webkit-scrollbar {
+  width: 12px;
+}
+
+/* Custom scrollbar styling overrides macOS's auto-hide behaviour, so
+   the bar stays visible whenever there is overflow — that's the cue to scroll. */
+.workbook-tabs-strip::-webkit-scrollbar-track {
+  background: var(--gray-100);
+  border-radius: 6px;
+  margin: 4px 0;
+}
+
+.workbook-tabs-strip::-webkit-scrollbar-thumb {
+  background: var(--gray-300);
+  border-radius: 6px;
+  border: 3px solid var(--gray-100);
+}
+
+.workbook-tabs-strip::-webkit-scrollbar-thumb:hover {
+  background: var(--gray-400);
+}
+
+.workbook-tabs-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: var(--space-2) 2px;
+  padding: var(--space-3) 2px;
+}
+
+.workbook-tab {
+  position: relative;
+  flex-shrink: 0;
+  padding: 0.5rem 0.9rem;
+  border: none;
   border-radius: var(--radius-md);
-  padding: 0 var(--space-3);
+  background: transparent;
+  color: var(--gray-500);
+  font-size: 0.92rem;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  white-space: nowrap;
+  max-width: 240px;
+  /* Ease into hover/active states; the underline indicator handles position. */
+  transition:
+    color 200ms ease,
+    background-color 200ms ease,
+    transform 160ms ease;
+}
+
+.workbook-tab:hover {
+  color: var(--gray-800);
+  background: var(--gray-50);
+}
+
+.workbook-tab:active {
+  transform: translateY(1px);
+}
+
+.workbook-tab:focus-visible {
+  outline: 2px solid var(--netrias-500);
+  outline-offset: 2px;
+}
+
+.workbook-tab-index {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--gray-500);
+  letter-spacing: 0.04em;
+  background: var(--gray-100);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  line-height: 1;
+  transition: background-color 200ms ease, color 200ms ease;
+}
+
+.workbook-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+.workbook-tab-check {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--netrias-600);
+  /* Hidden by default; faded in on the active tab. */
+  opacity: 0;
+  transform: scale(0.5);
+  transition: opacity 220ms ease, transform 260ms cubic-bezier(0.4, 1.6, 0.5, 1);
+}
+
+.workbook-tab.is-active {
+  color: var(--netrias-700);
+  background: var(--netrias-50);
+  font-weight: 600;
+  /* Inset shadow draws a clean netrias-green underline that respects the
+     tab's rounded corners — replaces the row-only sliding indicator now
+     that tabs wrap onto multiple lines. */
+  box-shadow: inset 0 -2px 0 0 var(--netrias-500);
+}
+
+.workbook-tab.is-active .workbook-tab-index {
+  background: var(--netrias-500);
+  color: var(--white);
+  box-shadow: 0 1px 3px var(--netrias-glow-medium);
+}
+
+.workbook-tab.is-active .workbook-tab-check {
+  opacity: 1;
+  transform: scale(1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workbook-tab-check {
+    transition: opacity 120ms ease;
+    transform: none;
+  }
+}
+
+.sheet-preview-popover {
+  position: fixed;
+  z-index: 9999;
+  top: 0;
+  left: 0;
+  width: min(440px, 92vw);
+  overflow: visible;
   background: var(--white);
   color: var(--gray-900);
-  font: inherit;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-md);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 80ms ease, transform 80ms ease;
+  box-shadow: var(--shadow-md);
+}
+
+.sheet-preview-popover::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: var(--white);
+}
+
+.sheet-preview-popover.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.sheet-preview-popover-header {
+  padding: 0.65rem 0.8rem;
+  border-bottom: 1px solid var(--gray-100);
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--gray-900);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sheet-preview-popover-body {
+  max-height: 290px;
+  overflow: auto;
+  padding: 0.65rem;
+}
+
+.sheet-preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 0.76rem;
+}
+
+.sheet-preview-table th,
+.sheet-preview-table td {
+  border: 1px solid var(--gray-100);
+  padding: 0.35rem 0.45rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.sheet-preview-table th {
+  background: var(--gray-50);
+  color: var(--gray-700);
+  font-weight: 700;
+}
+
+.sheet-preview-table td {
+  color: var(--gray-800);
+}
+
+.sheet-preview-empty,
+.sheet-preview-footer {
+  margin: 0;
+  color: var(--gray-500);
+  font-size: 0.78rem;
+}
+
+.sheet-preview-footer {
+  margin-top: 0.55rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet-preview-popover {
+    transition: opacity 60ms ease;
+    transform: none;
+  }
+  .sheet-preview-popover.is-visible {
+    transform: none;
+  }
 }
 
 /* Responsive */

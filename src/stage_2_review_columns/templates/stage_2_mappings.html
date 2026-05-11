@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Data Chord · Mapping Suggestions</title>
+    <title>Data Chord · Mapping</title>
     <link rel="stylesheet" href="/assets/shared/tokens.css" />
     <link rel="stylesheet" href="{{ request.url_for('stage_one_static', path='stage_1_upload.css') }}" />
     <link rel="stylesheet" href="{{ request.url_for('stage_two_static', path='stage_2_mappings.css') }}" />
@@ -51,42 +51,43 @@
       </div>
     </nav>
 
-    <main class="stage-shell">
-      <section class="stage-card">
-        <div class="mapping-table-wrapper">
-          <div class="mapping-legend">
-            <div class="legend-item legend-item--recommended">
-              <span class="legend-icon" aria-hidden="true">✓</span>
-              <span class="legend-label">Use AI recommendation</span>
-            </div>
-            <div class="legend-item legend-item--override">
-              <span class="legend-icon" aria-hidden="true">✎</span>
-              <span class="legend-label">Manual override</span>
-            </div>
-            <div class="legend-item legend-item--no-mapping">
-              <span class="legend-icon" aria-hidden="true">○</span>
-              <span class="legend-label">No mapping</span>
-            </div>
+    <main class="stage-shell stage-shell--mapping">
+      <section class="stage-card mapping-card">
+        <div class="mapping-toolbar">
+          <div class="mapping-filter-bar" id="sourceFilter"></div>
+          <input type="search" class="mapping-col-search" id="colSearch" placeholder="Filter columns…" autocomplete="off" />
+        </div>
+
+        <div class="mapping-list">
+          <div class="mapping-list-head">
+            <div></div>
+            <div>Your column</div>
+            <div>Target standard</div>
+            <button id="valueFitSortBtn" class="mapping-list-head-sort" type="button" aria-label="Sort by value fit">
+              <span>Value fit</span>
+              <span class="mapping-list-head-sort-arrow" aria-hidden="true">⇅</span>
+            </button>
+            <div></div>
           </div>
-          <div class="mapping-table-header">
-            <div class="mapping-th mapping-th--status"><span class="sr-only">Status</span></div>
-            <div class="mapping-th">Your Column</div>
-            <div class="mapping-th">AI Recommended CDE</div>
-            <div class="mapping-th">Override</div>
-          </div>
-          <div id="mappingResults" class="mapping-table-body"></div>
+          <div id="mappingRows"></div>
         </div>
         <div id="mappingEmptyState" class="mapping-empty hidden"></div>
       </section>
     </main>
 
+    <div class="takeover hidden" id="takeover">
+      <div class="takeover-backdrop" data-action="close-takeover"></div>
+      <div class="takeover-card" id="takeoverCard"></div>
+    </div>
+
     <script>
       window.stageTwoConfig = {
         analyzeEndpoint: "{{ request.url_for('stage_one_upload_analyze') }}",
+        columnDetailBase: "/stage-2/column-detail",
         targetSchema: "{{ default_schema }}",
-        cdeOptions: {{ cde_options | tojson }},
+        targetVersionNumber: {{ default_version_number|tojson }},
+        cdeCatalog: {{ cde_catalog | tojson }},
         noMappingLabel: {{ no_mapping_label | tojson }},
-        minConfidence: 0.5,
         stageThreeUrl: "{{ request.url_for('stage_three_entry') }}",
       };
     </script>

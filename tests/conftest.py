@@ -264,7 +264,7 @@ def create_csv_content(rows: list[list[str]]) -> bytes:
     return "\n".join(lines).encode("utf-8")
 
 
-def create_xlsx_content(sheets: dict[str, list[list[str]]]) -> bytes:
+def create_xlsx_content(sheets: dict[str, list[list[object]]]) -> bytes:
     """why: dynamically generate XLSX content for workbook selection tests."""
     from io import BytesIO
     from typing import cast

@@ -234,6 +234,57 @@ class TestManualOverridePropagation:
         # Then: manual override wins
         assert cache.get_column_cde_key("col") == "manual_target"
 
+    def test_null_manual_override_removes_manifest_mapping(self) -> None:
+        """
+        Given: a manifest mapping "col" to "auto_target" and the user selected
+               No Mapping in Stage 2
+        When: the Stage 3 column map is built from a null manual override
+        Then: the manifest mapping is removed instead of treating a UI sentinel
+              as a real CDE key
+        """
+        # Given
+        cache = SessionCache()
+        manifest = cast(ManifestPayload, {
+            "column_mappings": {
+                "col": {"cde_key": "auto_target", "cde_id": 1},
+            }
+        })
+        manual_overrides = {"col": None}
+        assert cache.get_column_cde_key("col") is None
+
+        # When
+        column_cde_map = _column_cde_map_for_session(
+            ColumnMappingManifest.from_payload(manifest),
+            ColumnMappingSet.from_dict(manual_overrides),
+        )
+        _store_column_mappings_in_cache(cache, column_cde_map)
+
+        # Then
+        assert cache.get_column_cde_key("col") is None
+
+    def test_harmonize_request_accepts_null_manual_override(self) -> None:
+        """
+        Given: Stage 2 sends null for an explicit No Mapping choice
+        When: the Stage 3 request model validates the payload
+        Then: the null is preserved for the domain normalizer to remove the
+              manifest mapping
+        """
+        from src.domain.schemas import HarmonizeRequest
+
+        # Given
+        payload = {
+            "file_id": "abcdef0123456789",
+            "target_schema": "CCDI",
+            "manual_overrides": {"col": None},
+        }
+        assert payload["manual_overrides"]["col"] is None
+
+        # When
+        request = HarmonizeRequest.model_validate(payload)
+
+        # Then
+        assert request.manual_overrides == {"col": None}
+
     def test_extract_skips_entries_without_target_field(self) -> None:
         """
         Given: a manifest with one valid and one missing cde_key entry

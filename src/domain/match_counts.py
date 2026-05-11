@@ -1,0 +1,92 @@
+"""Column-to-CDE conformance summaries for Stage 2.
+
+Axis of change: how a column's distinct values are summarized against each CDE
+under that CDE's type. Owns both integer match counts and PV overlap ratios so
+the frontend never recomputes conformance semantics.
+
+Match-count output is sparse: only entries with a positive count appear. The
+frontend treats a missing key as zero. Overlap-ratio output omits undefined
+ratios, but includes PV CDEs with a real zero overlap as ``0.0``.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping
+
+from src.domain.cde import CDEInfo, CdeType
+
+
+def column_value_overlap_ratio(
+    distinct_values: frozenset[str],
+    cde_type: CdeType,
+    pv_set: frozenset[str] | None,
+) -> float | None:
+    """PV overlap is undefined for rename-only CDEs, unfetched PVs, and empty columns."""
+    if cde_type != CdeType.PV:
+        return None
+    if pv_set is None:
+        return None
+    if not distinct_values:
+        return None
+    return len(distinct_values & pv_set) / len(distinct_values)
+
+
+def compute_column_overlap_by_cde(
+    distinct_values: frozenset[str],
+    cdes: Iterable[CDEInfo],
+    pv_sets: Mapping[str, frozenset[str]],
+) -> dict[str, float]:
+    """Build a per-CDE PV overlap map while preserving real zero-overlap results."""
+    overlaps: dict[str, float] = {}
+    for cde in cdes:
+        ratio = column_value_overlap_ratio(
+            distinct_values,
+            cde.cde_type,
+            pv_sets.get(cde.cde_key),
+        )
+        if ratio is not None:
+            overlaps[cde.cde_key] = ratio
+    return overlaps
+
+
+def compute_match_counts(
+    distinct_values: frozenset[str],
+    cdes: Iterable[CDEInfo],
+    pv_sets: Mapping[str, frozenset[str]],
+) -> dict[str, int]:
+    """For each CDE, count the column's distinct values that conform under its type.
+
+    PV          → ``|distinct_values & pv_sets[cde_key]|``
+    NUMERIC     → number of distinct values that parse as float
+    PASSTHROUGH → ``len(distinct_values)`` (everything passes through)
+
+    ``pv_sets`` only needs entries for PV-typed CDEs; missing keys for PV CDEs
+    contribute zero (and are dropped from the sparse output). This lets callers
+    avoid fetching PVs for non-PV CDEs.
+    """
+    numeric_count = sum(1 for v in distinct_values if _is_numeric(v))
+    passthrough_count = len(distinct_values)
+    out: dict[str, int] = {}
+    for cde in cdes:
+        match cde.cde_type:
+            case CdeType.PV:
+                pv_set = pv_sets.get(cde.cde_key)
+                count = len(distinct_values & pv_set) if pv_set else 0
+            case CdeType.NUMERIC:
+                count = numeric_count
+            case CdeType.PASSTHROUGH:
+                count = passthrough_count
+        if count > 0:
+            out[cde.cde_key] = count
+    return out
+
+
+def _is_numeric(value: str) -> bool:
+    """A value counts as numeric if Python's ``float()`` parses it."""
+    if not value:
+        return False
+    try:
+        float(value)
+        return True
+    except ValueError:
+        return False

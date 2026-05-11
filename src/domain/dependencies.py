@@ -62,7 +62,7 @@ def get_netrias_client() -> NetriasClient | None:
         api_key = get_netrias_api_key()
         if api_key:
             try:
-                _netrias_client = NetriasClient(api_key=api_key, environment=Environment.PROD)
+                _netrias_client = NetriasClient(api_key=api_key, environment=Environment.STAGING)
             except Exception:
                 logger.exception("Failed to initialize NetriasClient")
         else:

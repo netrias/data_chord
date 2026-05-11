@@ -9,7 +9,8 @@ dependencies = [
     "jinja2>=3.1.4",
     "python-multipart>=0.0.26",  # CVE remediation
     "uvicorn[standard]>=0.30.0",
-    "netrias_client @ git+https://github.com/netrias/netrias_client.git@10fa39d",
+    "netrias_client @ git+https://github.com/netrias/netrias_client.git@81ba58c",
+    "openpyxl>=3.1.5",
     "python-dotenv>=1.2.2",
     "pyarrow>=15.0.0",
     # transitive dep pins for security (CVE remediation)
@@ -50,6 +51,7 @@ markers = [
 [tool.ruff]
 target-version = "py313"
 line-length = 120
+extend-exclude = ["mocks"]
 
 [tool.ruff.lint]
 select = [

@@ -29,6 +29,7 @@ class MappingDiscoveryService:
         *,
         csv_path: Path,
         target_schema: str,
+        target_version: str = "latest",
         sheet_name: str | None = None,
     ) -> tuple[dict[str, list[ModelSuggestion]], dict[str, str], ManifestPayload]:
         """manual_overrides (pos 2) always empty — preserved for caller interface compatibility."""
@@ -39,6 +40,7 @@ class MappingDiscoveryService:
             raw_manifest = self._client.discover_mapping_from_tabular(
                 source_path=csv_path,
                 target_schema=target_schema,
+                target_version=target_version,
                 confidence_threshold=0.7,
                 sheet_name=sheet_name,
             )

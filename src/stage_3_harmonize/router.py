@@ -27,7 +27,7 @@ from src.domain import (
     ManifestSummarySchema,
 )
 from src.domain.column_cde_map import ColumnCdeMap
-from src.domain.data_model_adapter import fetch_pvs_batch_async
+from src.domain.data_model_adapter import fetch_all_pvs_async
 from src.domain.data_model_cache import SessionCache, get_session_cache, populate_cde_cache
 from src.domain.dependencies import (
     get_file_store,
@@ -118,6 +118,7 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
             cache,
             meta.saved_path,
             payload.target_schema,
+            _target_version_from_number(payload.target_version_number),
             column_mappings,
             manifest.to_payload(),
             output_path,
@@ -125,7 +126,12 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
         )
     )
     pv_fetch_task = asyncio.create_task(
-        _fetch_pvs_for_session(payload.file_id, column_cde_map, payload.target_schema)
+        _fetch_pvs_for_session(
+            payload.file_id,
+            column_cde_map,
+            payload.target_schema,
+            payload.target_version_number,
+        )
     )
 
     # Wait for both to complete
@@ -177,10 +183,15 @@ def _store_column_mappings_in_cache(cache: SessionCache, column_cde_map: ColumnC
     _router_logger.info("Stored column→CDE mappings", extra={"mappings": column_cde_map.to_strings()})
 
 
+def _target_version_from_number(version_number: int | None) -> str:
+    return str(version_number) if version_number is not None else "latest"
+
+
 async def _run_harmonization(
     cache: SessionCache,
     file_path: Path,
     target_schema: str,
+    target_version: str,
     column_mappings: ColumnMappingSet,
     manifest: ManifestPayload | None,
     output_path: Path,
@@ -194,6 +205,7 @@ async def _run_harmonization(
         target_schema=target_schema,
         column_mappings=column_mappings,
         cache=cache,
+        target_version=target_version,
         manifest=manifest,
         output_path=output_path,
         sheet_name=sheet_name,
@@ -228,7 +240,8 @@ async def _fetch_and_cache_pvs(
             "cde_keys": cde_keys,
         },
     )
-    pv_map = await fetch_pvs_batch_async(data_model_key, version_label, cde_keys)
+    raw_pv_map = await fetch_all_pvs_async(data_model_key, version_label)
+    pv_map = {cde_key: raw_pv_map.get(cde_key, frozenset()) for cde_key in cde_keys}
     cache.set_pvs_batch(pv_map)
     pv_counts = {k: len(v) for k, v in pv_map.items()}
     total_pvs = sum(pv_counts.values())
@@ -256,7 +269,7 @@ async def _fetch_and_cache_pvs(
 
 
 async def _fetch_pvs_for_session(
-    file_id: str, column_cde_map: ColumnCdeMap, target_schema: str
+    file_id: str, column_cde_map: ColumnCdeMap, target_schema: str, version_number: int | None = None
 ) -> None:
     """Runs in parallel with harmonization to hide PV fetch latency."""
     cache = get_session_cache(file_id)
@@ -265,13 +278,16 @@ async def _fetch_pvs_for_session(
     # Server restart between Stage 2 and Stage 3 clears in-memory CDEs; re-fetch.
     if not cache.has_cdes():
         _router_logger.info("CDEs missing from cache; re-fetching from Data Model Store", extra={"file_id": file_id})
-        await run_in_threadpool(populate_cde_cache, file_id, target_schema)
+        await run_in_threadpool(populate_cde_cache, file_id, target_schema, version_number)
 
     model_info = _validate_pv_fetch_preconditions(cache, cde_keys, file_id)
     if model_info is None:
         return
 
     try:
+        if cache.has_any_pvs():
+            save_pv_manifest_to_disk(file_id, cache, cache.get_all_pvs())
+            return
         await _fetch_and_cache_pvs(cache, model_info.data_model_key, model_info.version_label, cde_keys, file_id)
     except Exception:
         _router_logger.exception("Failed to fetch PVs for session", extra={"file_id": file_id})

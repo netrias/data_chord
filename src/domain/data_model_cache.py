@@ -15,6 +15,7 @@ from netrias_client import DataModelStoreError, NetriasAPIUnavailable
 
 from src.domain.cde import CDEInfo
 from src.domain.column_cde_map import ColumnCdeMap
+from src.domain.column_profile import ColumnProfile
 from src.domain.columns import ColumnKey
 
 _logger = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ class SessionCache:
     # Data model metadata
     data_model_key: str = ""
     version_label: str = ""
+    version_number: int | None = None
 
     # CDE list (fetched in Stage 2)
     cdes: list[CDEInfo] = field(default_factory=list)
@@ -39,13 +41,26 @@ class SessionCache:
     # PV sets keyed by cde_key (fetched in Stage 3)
     pvs: dict[str, frozenset[str]] = field(default_factory=dict)
 
+    # Per-column distinct-value profiles (computed in Stage 1 analyze, read by
+    # the Stage 2 takeover via the column-detail endpoint).
+    column_profiles: dict[str, ColumnProfile] = field(default_factory=dict)
+
     # Thread safety
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
-    def set_cdes(self, cdes: list[CDEInfo], data_model_key: str, version_label: str) -> None:
+    def set_cdes(
+        self,
+        cdes: list[CDEInfo],
+        data_model_key: str,
+        version_label: str,
+        version_number: int | None = None,
+    ) -> None:
         with self._lock:
             self.data_model_key = data_model_key
             self.version_label = version_label
+            self.version_number = (
+                version_number if version_number is not None else _version_number_from_label(version_label)
+            )
             self.cdes = list(cdes)
             self.cde_by_id = {c.cde_id: c for c in cdes}
             self.cde_by_key = {c.cde_key: c for c in cdes}
@@ -112,24 +127,63 @@ class SessionCache:
         with self._lock:
             return len(self.pvs) > 0
 
+    def get_all_pvs(self) -> dict[str, frozenset[str]]:
+        """Thread-safe snapshot of every cached PV set, keyed by cde_key."""
+        with self._lock:
+            return dict(self.pvs)
+
+    def cde_keys_missing_pvs(self) -> list[str]:
+        """Returns the cached CDE keys whose PV sets have not yet been fetched."""
+        with self._lock:
+            return [c.cde_key for c in self.cdes if c.cde_key not in self.pvs]
+
+    def set_column_profiles(self, profiles: dict[str, ColumnProfile]) -> None:
+        """Full replacement: a re-analyze always supersedes prior profiles."""
+        with self._lock:
+            self.column_profiles = dict(profiles)
+
+    def set_column_profile(self, profile: ColumnProfile) -> None:
+        """Add or replace one profile, used when Stage 2 rebuilds after restart."""
+        with self._lock:
+            self.column_profiles[profile.column_key] = profile
+
+    def get_column_profile(self, column_key: str) -> ColumnProfile | None:
+        with self._lock:
+            return self.column_profiles.get(column_key)
+
+    def replace_cdes(self, cdes: list[CDEInfo]) -> None:
+        """Swap the CDE list in place — used to apply post-PV-fetch type refinement."""
+        with self._lock:
+            self.cdes = list(cdes)
+            self.cde_by_id = {c.cde_id: c for c in cdes}
+            self.cde_by_key = {c.cde_key: c for c in cdes}
+
     def get_model_info(self) -> tuple[str, str]:
         with self._lock:
             return self.data_model_key, self.version_label
 
 
-def populate_cde_cache(file_id: str, data_model_key: str) -> None:
+def populate_cde_cache(file_id: str, data_model_key: str, version_number: int | None = None) -> None:
     """PV validation in Stage 3+ requires model key and version; must run before PV fetch."""
     from src.domain.data_model_adapter import fetch_cdes, get_latest_version
 
-    try:
-        version_label = get_latest_version(data_model_key)
-    except (DataModelStoreError, NetriasAPIUnavailable):
-        _logger.warning("Data Model Store API unavailable; defaulting to version 1")
-        version_label = "1"
+    if version_number is None:
+        try:
+            version_label = get_latest_version(data_model_key)
+        except (DataModelStoreError, NetriasAPIUnavailable):
+            _logger.warning("Data Model Store API unavailable; defaulting to version 1")
+            version_label = "1"
+    else:
+        version_label = str(version_number)
 
     cdes = fetch_cdes(data_model_key, version_label)
     cache = get_session_cache(file_id)
-    cache.set_cdes(cdes, data_model_key=data_model_key, version_label=version_label)
+    cache.set_cdes(
+        cdes,
+        data_model_key=data_model_key,
+        version_label=version_label,
+        version_number=version_number,
+    )
 
     _logger.info(
         "Populated CDE cache from Data Model Store API",
@@ -170,6 +224,11 @@ def clear_all_session_caches() -> None:
 def has_session_cache(file_id: str) -> bool:
     with _global_lock:
         return file_id in _session_caches
+
+
+def _version_number_from_label(version_label: str) -> int | None:
+    cleaned = version_label.removeprefix("v")
+    return int(cleaned) if cleaned.isdigit() else None
 
 
 __all__ = [

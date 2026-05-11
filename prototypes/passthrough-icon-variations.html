@@ -1,0 +1,2935 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Stage 2 — Passthrough Icon Variations</title>
+<style>
+  :root {
+    --netrias-500: #73b306;
+    --netrias-700: #4a7304;
+    --azure-500: #0673b3;
+    --gray-900: #0f172a;
+    --gray-800: #1e293b;
+    --gray-700: #334155;
+    --gray-600: #475569;
+    --gray-500: #64748b;
+    --gray-400: #94a3b8;
+    --gray-300: #cbd5e1;
+    --gray-200: #e2e8f0;
+    --gray-100: #f1f5f9;
+    --gray-50:  #f8fafc;
+    --white: #fff;
+
+    --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+    --shadow-md: 0 4px 16px rgba(15, 23, 42, 0.08);
+    --shadow-lg: 0 20px 60px rgba(15, 23, 42, 0.08);
+
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-full: 999px;
+
+    --space-2: 0.5rem;
+    --space-3: 0.75rem;
+    --space-4: 1rem;
+    --space-5: 1.25rem;
+    --space-6: 1.5rem;
+    --space-8: 2rem;
+
+    --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    font-family: var(--font-family);
+    color: var(--gray-900);
+    background: var(--gray-50);
+    margin: 0;
+    padding: var(--space-8);
+  }
+
+  h1 {
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin: 0 0 var(--space-3);
+  }
+
+  .lede {
+    color: var(--gray-600);
+    font-size: 0.92rem;
+    margin: 0 0 var(--space-6);
+    max-width: 720px;
+  }
+
+  .section {
+    background: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-lg);
+    padding: var(--space-5) var(--space-6);
+    margin-bottom: var(--space-5);
+  }
+
+  .section-title {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--gray-500);
+    font-weight: 700;
+    margin: 0 0 var(--space-4);
+  }
+
+  .section-desc {
+    font-size: 0.85rem;
+    color: var(--gray-600);
+    margin: 0 0 var(--space-4);
+  }
+
+  /* ==== Variation grid ==== */
+
+  .variant-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: var(--space-4);
+  }
+
+  .variant-card {
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+    background: var(--gray-50);
+  }
+
+  .variant-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--gray-600);
+    font-weight: 600;
+    margin-bottom: var(--space-3);
+  }
+
+  .variant-display {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-4);
+    padding: var(--space-3);
+    background: var(--white);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--gray-100);
+    min-height: 80px;
+  }
+
+  .variant-display .at-row {
+    /* The size you'd see in the actual stage-2 fit cell */
+    flex: 0 0 auto;
+  }
+
+  .variant-display .at-large {
+    /* Larger demo so you can inspect the strokes/shape */
+    flex: 0 0 auto;
+    transform: scale(2.2);
+    transform-origin: center;
+    margin-left: var(--space-6);
+    color: var(--gray-700);
+  }
+
+  .variant-notes {
+    margin-top: var(--space-3);
+    font-size: 0.78rem;
+    color: var(--gray-500);
+    line-height: 1.4;
+  }
+
+  /* ==== Mock stage-2 row ==== */
+
+  .row-mock-block {
+    margin-top: var(--space-4);
+  }
+
+  .mapping-list-head,
+  .mapping-row {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr) minmax(0, 1.4fr) 84px 22px;
+    gap: var(--space-4);
+    align-items: center;
+    padding: 0.65rem 0.85rem;
+  }
+
+  .mapping-list-head {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--gray-500);
+    font-weight: 600;
+    border-bottom: 1px solid var(--gray-200);
+    padding-top: 0.4rem;
+    padding-bottom: 0.4rem;
+    margin-bottom: 0.4rem;
+  }
+
+  .mapping-row {
+    border-radius: var(--radius-md);
+    border: 1px solid var(--gray-100);
+    background: var(--white);
+    margin-bottom: 0.3rem;
+  }
+
+  .mapping-row-status {
+    font-size: 1.05rem;
+    text-align: center;
+    color: var(--gray-400);
+  }
+
+  .mapping-row-col {
+    font-weight: 600;
+    color: var(--gray-900);
+    font-size: 0.92rem;
+  }
+
+  .mapping-row-target {
+    color: var(--gray-700);
+    font-size: 0.85rem;
+  }
+
+  .mapping-row-fit {
+    justify-self: end;
+    min-width: 64px;
+    text-align: right;
+    font-size: 0.82rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .mapping-row-fit--ratio {
+    color: var(--netrias-700);
+    font-weight: 700;
+  }
+
+  .mapping-row-chev {
+    color: var(--gray-500);
+    text-align: center;
+    font-size: 1.15rem;
+  }
+
+  /* ==== Passthrough cell — base layout shared by every variant ==== */
+
+  .pt-cell {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    cursor: help;
+  }
+
+  /* ==== Tooltip pattern (fast appearance) ==== */
+  .pt-cell[data-fast-tooltip]::after {
+    content: attr(data-fast-tooltip);
+    position: absolute;
+    top: 50%;
+    right: calc(100% + 8px);
+    transform: translateY(-50%);
+    width: max-content;
+    max-width: 260px;
+    padding: var(--space-2) var(--space-3);
+    background: var(--gray-800);
+    color: var(--white);
+    font-size: 0.78rem;
+    font-weight: 400;
+    line-height: 1.4;
+    text-align: left;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 60ms ease-out, visibility 60ms ease-out;
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  .pt-cell[data-fast-tooltip]:hover::after {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  /* ==== Variant icon styles ==== */
+
+  /* Default icon stroke color (used for all "stroke=currentColor" SVGs) */
+  .pt-icon { color: var(--gray-700); }
+
+  /* Variant tints */
+  .pt-icon--slate-light { color: var(--gray-500); }
+  .pt-icon--slate-mid   { color: var(--gray-700); }
+  .pt-icon--slate-dark  { color: var(--gray-900); }
+  .pt-icon--azure       { color: var(--azure-500); }
+
+  /* Background variants for badges */
+  .pt-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 999px;
+  }
+  .pt-badge--gray-fill   { background: var(--gray-100); border: 1px solid var(--gray-200); }
+  .pt-badge--gray-outline { background: transparent;    border: 1.5px solid var(--gray-400); }
+  .pt-badge--square      { border-radius: var(--radius-sm); background: var(--gray-100); border: 1px solid var(--gray-200); }
+  .pt-badge--bare        { background: transparent; border: none; }
+
+  /* When a variant scales up, we want it readable */
+  .at-large .pt-badge { width: 36px; height: 36px; }
+  .at-large svg { width: 28px; height: 28px; }
+
+</style>
+</head>
+<body>
+
+  <h1>Stage 2 — Passthrough icon variations</h1>
+  <p class="lede">
+    Goal: replace the misleading "0%" in the Value-fit column with iconography that conveys
+    "this column is mapped to a standard with no permissible-value list, so values pass through unchanged."
+    Direction settled on: <strong>arrow with a strikethrough</strong> in a neutral slate color, no enclosing
+    prohibition-style red circle. This page surveys variations of that direction so we can pick.
+  </p>
+
+  <!-- ====================================================================== -->
+  <!-- Family A — Bare arrow + diagonal slash, no badge                       -->
+  <!-- ====================================================================== -->
+  <section class="section">
+    <h2 class="section-title">Family A — Bare arrow + diagonal slash</h2>
+    <p class="section-desc">
+      Just the arrow with a slash through it — no enclosing badge or background. Most minimal.
+      Each card shows the icon at row scale (left) and 2.2× scale (right) so you can compare line weight.
+    </p>
+
+    <div class="variant-grid">
+
+      <!-- A1 -->
+      <div class="variant-card">
+        <div class="variant-label">A1 — Thin straight, 45° slash</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14"/>
+                <path d="M13 7l5 5-5 5"/>
+                <path d="M19 5L5 19"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M19 5L5 19"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Lightest weight. Slash extends past the arrow on both sides.</div>
+      </div>
+
+      <!-- A2 -->
+      <div class="variant-card">
+        <div class="variant-label">A2 — Medium straight, 45° slash</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14"/>
+                <path d="M13 7l5 5-5 5"/>
+                <path d="M19 5L5 19"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M19 5L5 19"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Recommended baseline. Strong but not chunky.</div>
+      </div>
+
+      <!-- A3 -->
+      <div class="variant-card">
+        <div class="variant-label">A3 — Heavy straight, 45° slash</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h13"/>
+                <path d="M13 7l5 5-5 5"/>
+                <path d="M19 5L5 19"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12h13"/><path d="M13 7l5 5-5 5"/><path d="M19 5L5 19"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Bolder; reads more emphatic. Risk: starts feeling prohibition-y.</div>
+      </div>
+
+      <!-- A4 -->
+      <div class="variant-card">
+        <div class="variant-label">A4 — Short slash (only crosses arrow)</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14"/>
+                <path d="M13 7l5 5-5 5"/>
+                <path d="M15 8l-6 8"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M15 8l-6 8"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Quieter — slash sits within the arrow's footprint, not extending past it.</div>
+      </div>
+
+      <!-- A5 -->
+      <div class="variant-card">
+        <div class="variant-label">A5 — Vertical slash through arrow</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14"/>
+                <path d="M13 7l5 5-5 5"/>
+                <path d="M12 5v14"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M12 5v14"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Vertical line reads more like a "stop" than a "skipped" — tradeoff.</div>
+      </div>
+
+      <!-- A6 -->
+      <div class="variant-card">
+        <div class="variant-label">A6 — "Not equal" slash style</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14"/>
+                <path d="M13 7l5 5-5 5"/>
+                <path d="M16 4l-8 16"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M16 4l-8 16"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Steeper, narrower slash — borrows the "≠" gesture. Subtler.</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ====================================================================== -->
+  <!-- Family B — Arrow with slash inside a soft badge                        -->
+  <!-- ====================================================================== -->
+  <section class="section">
+    <h2 class="section-title">Family B — Inside a soft badge</h2>
+    <p class="section-desc">
+      Same icon as A2, framed in a subtle background badge. Adds visual weight in the column without
+      tipping into prohibition-sign territory (no red, no high-contrast border).
+    </p>
+
+    <div class="variant-grid">
+
+      <!-- B1 -->
+      <div class="variant-card">
+        <div class="variant-label">B1 — Gray-fill round badge</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-badge pt-badge--gray-fill pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M19 5L5 19"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <span class="pt-badge pt-badge--gray-fill pt-icon pt-icon--slate-mid" style="display:inline-flex;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M19 5L5 19"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="variant-notes">Soft gray-100 fill, gray-200 border. Reads as "informational chip".</div>
+      </div>
+
+      <!-- B2 -->
+      <div class="variant-card">
+        <div class="variant-label">B2 — Outline-only round badge</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-badge pt-badge--gray-outline pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M19 5L5 19"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <span class="pt-badge pt-badge--gray-outline pt-icon pt-icon--slate-mid" style="display:inline-flex;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M19 5L5 19"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="variant-notes">Hollow circle outline — quieter than B1, more emphasized than A2.</div>
+      </div>
+
+      <!-- B3 -->
+      <div class="variant-card">
+        <div class="variant-label">B3 — Square-rounded chip</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-badge pt-badge--square pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M19 5L5 19"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <span class="pt-badge pt-badge--square pt-icon pt-icon--slate-mid" style="display:inline-flex;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M19 5L5 19"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="variant-notes">Square chip with rounded corners — different visual language from B1/B2.</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ====================================================================== -->
+  <!-- Family C — Color tone variations on the bare-arrow icon (A2 base)      -->
+  <!-- ====================================================================== -->
+  <section class="section">
+    <h2 class="section-title">Family C — Color tone variations</h2>
+    <p class="section-desc">
+      Same shape as A2, exploring how light/dark slate or a touch of azure affects how the icon
+      "weighs" in the column. None use red — staying clear of prohibition territory.
+    </p>
+
+    <div class="variant-grid">
+
+      <!-- C1 -->
+      <div class="variant-card">
+        <div class="variant-label">C1 — Light slate (gray-500)</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-light" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M19 5L5 19"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--slate-light">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M19 5L5 19"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Quietest. Reads as "informational, low-priority".</div>
+      </div>
+
+      <!-- C2 -->
+      <div class="variant-card">
+        <div class="variant-label">C2 — Mid slate (gray-700)</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M19 5L5 19"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--slate-mid">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M19 5L5 19"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Recommended default — visible but not loud.</div>
+      </div>
+
+      <!-- C3 -->
+      <div class="variant-card">
+        <div class="variant-label">C3 — Dark slate (gray-900)</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-dark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M19 5L5 19"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--slate-dark">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M19 5L5 19"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Heaviest neutral. Demands attention; might be too loud for an "informational" cell.</div>
+      </div>
+
+      <!-- C4 -->
+      <div class="variant-card">
+        <div class="variant-label">C4 — Azure tint</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--azure" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M19 5L5 19"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--azure">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M19 5L5 19"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Borrows azure (already used for "override" elsewhere) — risk of visual collision.</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ====================================================================== -->
+  <!-- Family D — Stage 2 row mockups (in real layout, hover the cells)       -->
+  <!-- ====================================================================== -->
+  <section class="section">
+    <h2 class="section-title">Family D — In context: real Stage 2 row mockups (hover to test tooltip)</h2>
+    <p class="section-desc">
+      How each candidate would actually look sitting in the Value-fit column, beside real percentage values and dashes.
+      The tooltip uses a 60ms transition, so it should feel near-instant on hover.
+    </p>
+
+    <div class="row-mock-block">
+      <div class="mapping-list-head">
+        <div></div>
+        <div>Column</div>
+        <div>Standard</div>
+        <div style="text-align:right;">Value fit</div>
+        <div></div>
+      </div>
+
+      <!-- Row 1 — A2 (bare arrow, mid slate, 45° full slash) -->
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">tumor_grade</div>
+        <div class="mapping-row-target">case.diagnoses.tumor_grade</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M19 5L5 19"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <!-- Row 2 — Real percentage for contrast -->
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">primary_site</div>
+        <div class="mapping-row-target">case.diagnoses.primary_site</div>
+        <div class="mapping-row-fit">
+          <div class="mapping-row-fit--ratio">73%</div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <!-- Row 3 — A4 (short slash) -->
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">specimen_id</div>
+        <div class="mapping-row-target">case.specimens.specimen_id</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M15 8l-6 8"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <!-- Row 4 — B1 (in soft badge) -->
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">patient_notes</div>
+        <div class="mapping-row-target">case.demographics.notes</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-badge pt-badge--gray-fill pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M19 5L5 19"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <!-- Row 5 — Light slate (C1) -->
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">collection_date</div>
+        <div class="mapping-row-target">case.specimens.collection_date</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-light" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M19 5L5 19"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <!-- Row 6 — Another real percentage for contrast -->
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">disease_type</div>
+        <div class="mapping-row-target">case.diagnoses.disease_type</div>
+        <div class="mapping-row-fit">
+          <div class="mapping-row-fit--ratio">100%</div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <!-- Row 7 — A3 (heavy stroke) -->
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">free_text_field</div>
+        <div class="mapping-row-target">case.demographics.free_text</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h13"/><path d="M13 7l5 5-5 5"/><path d="M19 5L5 19"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ====================================================================== -->
+  <!-- Family E — Alternate negation gestures (X overlay, dotted, etc.)       -->
+  <!-- ====================================================================== -->
+  <section class="section">
+    <h2 class="section-title">Family E — Alternate negation gestures</h2>
+    <p class="section-desc">
+      Same arrow shape, but the negation is drawn differently. Worth comparing in case the diagonal slash
+      doesn't feel right.
+    </p>
+
+    <div class="variant-grid">
+
+      <!-- E1 -->
+      <div class="variant-card">
+        <div class="variant-label">E1 — Dashed arrow (no slash)</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="2 2.5">
+                <path d="M3 12h14"/>
+                <path d="M13 7l5 5-5 5"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--slate-mid">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="2 2.5">
+              <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Dashed arrow = "soft / non-binding flow". No explicit "no" gesture. Subtler.</div>
+      </div>
+
+      <!-- E2 -->
+      <div class="variant-card">
+        <div class="variant-label">E2 — Arrow with X overlay</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14"/>
+                <path d="M13 7l5 5-5 5"/>
+                <path d="M9 8l6 8 M15 8l-6 8"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--slate-mid">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M9 8l6 8 M15 8l-6 8"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Stronger negation. Risk: reads as "error / cancel".</div>
+      </div>
+
+      <!-- E3 -->
+      <div class="variant-card">
+        <div class="variant-label">E3 — Arrow with horizontal bar (block)</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14"/>
+                <path d="M13 7l5 5-5 5"/>
+                <path d="M11 4v16"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--slate-mid">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M11 4v16"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Hard vertical bar — reads as "blocked"; arguably wrong story.</div>
+      </div>
+
+      <!-- E4 -->
+      <div class="variant-card">
+        <div class="variant-label">E4 — Two parallel arrows (no slash)</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 9h14"/>
+                <path d="M13 5l4 4-4 4"/>
+                <path d="M3 15h14"/>
+                <path d="M13 11l4 4-4 4"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--slate-mid">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 9h14"/><path d="M13 5l4 4-4 4"/>
+              <path d="M3 15h14"/><path d="M13 11l4 4-4 4"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">No negation — just "flow continues". Clean alternative if strikethrough feels wrong.</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ====================================================================== -->
+  <!-- Family F — Stronger arrow/slash contrast (fixes the "blends together"   -->
+  <!-- problem: same stroke weight makes slash and arrow visually merge)       -->
+  <!-- ====================================================================== -->
+  <section class="section">
+    <h2 class="section-title">Family F — Stronger arrow / slash contrast</h2>
+    <p class="section-desc">
+      Issue: when arrow and slash share the same stroke weight, they merge into an indistinct
+      tangle and the negation gesture gets lost. These variants push the slash to read as a
+      <strong>distinct mark on top of</strong> the arrow — via thicker stroke, halo cutout,
+      filled bar, or color contrast. Each shows the icon at row scale and at 2.2× scale.
+    </p>
+
+    <div class="variant-grid">
+
+      <!-- F1 — Thicker slash, same color -->
+      <div class="variant-card">
+        <div class="variant-label">F1 — Slash 60% thicker than arrow</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14" stroke-width="1.8"/>
+                <path d="M13 7l5 5-5 5" stroke-width="1.8"/>
+                <path d="M19 5L5 19" stroke-width="3.2"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--slate-mid">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12h14" stroke-width="1.8"/>
+              <path d="M13 7l5 5-5 5" stroke-width="1.8"/>
+              <path d="M19 5L5 19" stroke-width="3.2"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Slash stands forward as the dominant mark; arrow recedes to "subject being negated".</div>
+      </div>
+
+      <!-- F2 — White halo cutout (professional "ban" technique) -->
+      <div class="variant-card">
+        <div class="variant-label">F2 — White-halo cutout slash</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14" stroke="currentColor" stroke-width="2.2"/>
+                <path d="M13 7l5 5-5 5" stroke="currentColor" stroke-width="2.2"/>
+                <!-- White halo first -->
+                <path d="M19 5L5 19" stroke="#fff" stroke-width="5"/>
+                <!-- Slate slash on top -->
+                <path d="M19 5L5 19" stroke="currentColor" stroke-width="2.6"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--slate-mid">
+            <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12h14" stroke="currentColor" stroke-width="2.2"/>
+              <path d="M13 7l5 5-5 5" stroke="currentColor" stroke-width="2.2"/>
+              <path d="M19 5L5 19" stroke="#fff" stroke-width="5"/>
+              <path d="M19 5L5 19" stroke="currentColor" stroke-width="2.6"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Slash visually <em>punches through</em> the arrow with a clean gap. Same technique used by Lucide's "ban" / Heroicons' "no-symbol". Cleanest professional read.</div>
+      </div>
+
+      <!-- F3 — Heavy slash, lighter arrow -->
+      <div class="variant-card">
+        <div class="variant-label">F3 — Heavy slash, light arrow</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14" stroke="var(--gray-400)" stroke-width="1.8"/>
+                <path d="M13 7l5 5-5 5" stroke="var(--gray-400)" stroke-width="1.8"/>
+                <path d="M19 5L5 19" stroke="currentColor" stroke-width="3"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--slate-mid">
+            <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12h14" stroke="var(--gray-400)" stroke-width="1.8"/>
+              <path d="M13 7l5 5-5 5" stroke="var(--gray-400)" stroke-width="1.8"/>
+              <path d="M19 5L5 19" stroke="currentColor" stroke-width="3"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Color contrast separates the two. Arrow becomes a "ghosted" reference; slash carries the meaning.</div>
+      </div>
+
+      <!-- F4 — Slash as filled bar (no stroke) -->
+      <div class="variant-card">
+        <div class="variant-label">F4 — Slash as filled bar</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" stroke-linecap="round" stroke-linejoin="round">
+                <g fill="none" stroke="currentColor" stroke-width="2.0">
+                  <path d="M3 12h14"/>
+                  <path d="M13 7l5 5-5 5"/>
+                </g>
+                <!-- White halo bar -->
+                <rect x="11" y="3" width="2.6" height="18" rx="1.3" transform="rotate(45 12 12)" fill="#fff"/>
+                <!-- Slate filled bar -->
+                <rect x="11.4" y="3.4" width="1.8" height="17.2" rx="0.9" transform="rotate(45 12 12)" fill="currentColor"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--slate-mid">
+            <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+              <g fill="none" stroke="currentColor" stroke-width="2.0">
+                <path d="M3 12h14"/>
+                <path d="M13 7l5 5-5 5"/>
+              </g>
+              <rect x="11" y="3" width="2.6" height="18" rx="1.3" transform="rotate(45 12 12)" fill="#fff"/>
+              <rect x="11.4" y="3.4" width="1.8" height="17.2" rx="0.9" transform="rotate(45 12 12)" fill="currentColor"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Solid bar reads as a deliberate "blocking" stamp. More architectural than F2's stroke approach.</div>
+      </div>
+
+      <!-- F5 — Knockout: arrow drawn in segments with gap where slash crosses -->
+      <div class="variant-card">
+        <div class="variant-label">F5 — True knockout (gap in arrow)</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                <!-- Arrow shaft, broken at the slash crossing -->
+                <path d="M3 12h7" stroke-width="2.2"/>
+                <path d="M14 12h3" stroke-width="2.2"/>
+                <!-- Arrowhead, broken at the slash crossing -->
+                <path d="M13 7l3 3" stroke-width="2.2"/>
+                <path d="M16.5 13.5l-2 2.5-1.5-1.5" stroke-width="2.2"/>
+                <!-- Slash -->
+                <path d="M19 5L5 19" stroke-width="2.6"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--slate-mid">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12h7" stroke-width="2.2"/>
+              <path d="M14 12h3" stroke-width="2.2"/>
+              <path d="M13 7l3 3" stroke-width="2.2"/>
+              <path d="M16.5 13.5l-2 2.5-1.5-1.5" stroke-width="2.2"/>
+              <path d="M19 5L5 19" stroke-width="2.6"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Arrow path is literally cut by the slash — no overlap at all. Most semantically literal "this arrow is broken".</div>
+      </div>
+
+      <!-- F6 — F2 + thicker slash (combined approach) -->
+      <div class="variant-card">
+        <div class="variant-label">F6 — Halo cutout + emphasized slash</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14" stroke="currentColor" stroke-width="2.0"/>
+                <path d="M13 7l5 5-5 5" stroke="currentColor" stroke-width="2.0"/>
+                <path d="M19 5L5 19" stroke="#fff" stroke-width="5.5"/>
+                <path d="M19 5L5 19" stroke="currentColor" stroke-width="3.0"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--slate-mid">
+            <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12h14" stroke="currentColor" stroke-width="2.0"/>
+              <path d="M13 7l5 5-5 5" stroke="currentColor" stroke-width="2.0"/>
+              <path d="M19 5L5 19" stroke="#fff" stroke-width="5.5"/>
+              <path d="M19 5L5 19" stroke="currentColor" stroke-width="3.0"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">F2's halo plus thicker slash. Strongest negation read while still feeling clean.</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ====================================================================== -->
+  <!-- Family G — Family F variants in real Stage 2 row context                -->
+  <!-- ====================================================================== -->
+  <section class="section">
+    <h2 class="section-title">Family G — Family F in real row context</h2>
+    <p class="section-desc">
+      The strongest contrast variants placed in Stage 2 rows beside actual percentage rows for direct comparison.
+    </p>
+
+    <div class="row-mock-block">
+      <div class="mapping-list-head">
+        <div></div>
+        <div>Column</div>
+        <div>Standard</div>
+        <div style="text-align:right;">Value fit</div>
+        <div></div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">primary_site</div>
+        <div class="mapping-row-target">case.diagnoses.primary_site</div>
+        <div class="mapping-row-fit">
+          <div class="mapping-row-fit--ratio">73%</div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">tumor_grade <span style="color:var(--gray-400);font-weight:400;">(F1 — thicker slash)</span></div>
+        <div class="mapping-row-target">case.diagnoses.tumor_grade</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14" stroke-width="1.8"/>
+                <path d="M13 7l5 5-5 5" stroke-width="1.8"/>
+                <path d="M19 5L5 19" stroke-width="3.2"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">specimen_id <span style="color:var(--gray-400);font-weight:400;">(F2 — halo cutout)</span></div>
+        <div class="mapping-row-target">case.specimens.specimen_id</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14" stroke="currentColor" stroke-width="2.2"/>
+                <path d="M13 7l5 5-5 5" stroke="currentColor" stroke-width="2.2"/>
+                <path d="M19 5L5 19" stroke="#fff" stroke-width="5"/>
+                <path d="M19 5L5 19" stroke="currentColor" stroke-width="2.6"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">patient_notes <span style="color:var(--gray-400);font-weight:400;">(F3 — heavy slash, light arrow)</span></div>
+        <div class="mapping-row-target">case.demographics.notes</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14" stroke="var(--gray-400)" stroke-width="1.8"/>
+                <path d="M13 7l5 5-5 5" stroke="var(--gray-400)" stroke-width="1.8"/>
+                <path d="M19 5L5 19" stroke="currentColor" stroke-width="3"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">free_text_field <span style="color:var(--gray-400);font-weight:400;">(F5 — true knockout)</span></div>
+        <div class="mapping-row-target">case.demographics.free_text</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h7" stroke-width="2.2"/>
+                <path d="M14 12h3" stroke-width="2.2"/>
+                <path d="M13 7l3 3" stroke-width="2.2"/>
+                <path d="M16.5 13.5l-2 2.5-1.5-1.5" stroke-width="2.2"/>
+                <path d="M19 5L5 19" stroke-width="2.6"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">disease_type</div>
+        <div class="mapping-row-target">case.diagnoses.disease_type</div>
+        <div class="mapping-row-fit">
+          <div class="mapping-row-fit--ratio">100%</div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">collection_date <span style="color:var(--gray-400);font-weight:400;">(F6 — halo + thick slash)</span></div>
+        <div class="mapping-row-target">case.specimens.collection_date</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h14" stroke="currentColor" stroke-width="2.0"/>
+                <path d="M13 7l5 5-5 5" stroke="currentColor" stroke-width="2.0"/>
+                <path d="M19 5L5 19" stroke="#fff" stroke-width="5.5"/>
+                <path d="M19 5L5 19" stroke="currentColor" stroke-width="3.0"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ====================================================================== -->
+  <!-- Family H — Bigger arrow + smaller X negation mark                      -->
+  <!-- ====================================================================== -->
+  <section class="section">
+    <h2 class="section-title">Family H — Bigger arrow + small X mark</h2>
+    <p class="section-desc">
+      Refined direction: the arrow dominates the icon (spans nearly edge-to-edge), and the negation
+      is a <strong>small X</strong> sitting on the arrow shaft instead of a single slash. The X reads more
+      explicitly as a "no" mark and, being smaller, doesn't fight the arrow for visual weight.
+      Each card shows the icon at row scale (28px container) and 2.2× scale.
+    </p>
+
+    <div class="variant-grid">
+
+      <!-- H1 -->
+      <div class="variant-card">
+        <div class="variant-label">H1 — Big arrow + small X on shaft</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                <!-- Big arrow: edge-to-edge -->
+                <path d="M2 12h17" stroke-width="2.0"/>
+                <path d="M16 7l5 5-5 5" stroke-width="2.0"/>
+                <!-- Small X centered at (9, 12), 4u wide -->
+                <path d="M7 10l4 4" stroke-width="1.8"/>
+                <path d="M11 10l-4 4" stroke-width="1.8"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--slate-mid">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M2 12h17" stroke-width="2.0"/>
+              <path d="M16 7l5 5-5 5" stroke-width="2.0"/>
+              <path d="M7 10l4 4" stroke-width="1.8"/>
+              <path d="M11 10l-4 4" stroke-width="1.8"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">X same weight as arrow but small enough not to compete. Reads as "marked / negated".</div>
+      </div>
+
+      <!-- H2 -->
+      <div class="variant-card">
+        <div class="variant-label">H2 — Big arrow + X with halo cutout</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2 12h17" stroke="currentColor" stroke-width="2.0"/>
+                <path d="M16 7l5 5-5 5" stroke="currentColor" stroke-width="2.0"/>
+                <!-- White halo X -->
+                <path d="M7 10l4 4 M11 10l-4 4" stroke="#fff" stroke-width="4.2"/>
+                <!-- Slate X on top -->
+                <path d="M7 10l4 4 M11 10l-4 4" stroke="currentColor" stroke-width="2.0"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--slate-mid">
+            <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M2 12h17" stroke="currentColor" stroke-width="2.0"/>
+              <path d="M16 7l5 5-5 5" stroke="currentColor" stroke-width="2.0"/>
+              <path d="M7 10l4 4 M11 10l-4 4" stroke="#fff" stroke-width="4.2"/>
+              <path d="M7 10l4 4 M11 10l-4 4" stroke="currentColor" stroke-width="2.0"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">X clearly punches through the arrow shaft with a halo gap. Cleanest read of all H variants.</div>
+      </div>
+
+      <!-- H3 -->
+      <div class="variant-card">
+        <div class="variant-label">H3 — X at midpoint of arrow shaft</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2 12h17" stroke="currentColor" stroke-width="2.0"/>
+                <path d="M16 7l5 5-5 5" stroke="currentColor" stroke-width="2.0"/>
+                <!-- X at midpoint (9.5,12) - very small, 3u wide -->
+                <path d="M8 10.5l3 3 M11 10.5l-3 3" stroke="#fff" stroke-width="3.6"/>
+                <path d="M8 10.5l3 3 M11 10.5l-3 3" stroke="currentColor" stroke-width="1.8"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--slate-mid">
+            <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M2 12h17" stroke="currentColor" stroke-width="2.0"/>
+              <path d="M16 7l5 5-5 5" stroke="currentColor" stroke-width="2.0"/>
+              <path d="M8 10.5l3 3 M11 10.5l-3 3" stroke="#fff" stroke-width="3.6"/>
+              <path d="M8 10.5l3 3 M11 10.5l-3 3" stroke="currentColor" stroke-width="1.8"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Smallest X yet — just a 3u mark. Quieter, more delicate.</div>
+      </div>
+
+      <!-- H4 -->
+      <div class="variant-card">
+        <div class="variant-label">H4 — X above the arrow shaft</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2 14h17" stroke-width="2.0"/>
+                <path d="M16 9l5 5-5 5" stroke-width="2.0"/>
+                <!-- X positioned above shaft -->
+                <path d="M7 5l4 4" stroke-width="2.0"/>
+                <path d="M11 5l-4 4" stroke-width="2.0"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--slate-mid">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M2 14h17" stroke-width="2.0"/>
+              <path d="M16 9l5 5-5 5" stroke-width="2.0"/>
+              <path d="M7 5l4 4" stroke-width="2.0"/>
+              <path d="M11 5l-4 4" stroke-width="2.0"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">X sits above (not on) the arrow — like a labeling mark. Cleaner separation but weaker negation.</div>
+      </div>
+
+      <!-- H5 -->
+      <div class="variant-card">
+        <div class="variant-label">H5 — Bigger arrow, X at arrowhead</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2 12h17" stroke="currentColor" stroke-width="2.0"/>
+                <path d="M16 7l5 5-5 5" stroke="currentColor" stroke-width="2.0"/>
+                <!-- X at arrowhead, halo cutout -->
+                <path d="M16 10l4 4 M20 10l-4 4" stroke="#fff" stroke-width="4.2"/>
+                <path d="M16 10l4 4 M20 10l-4 4" stroke="currentColor" stroke-width="2.0"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--slate-mid">
+            <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M2 12h17" stroke="currentColor" stroke-width="2.0"/>
+              <path d="M16 7l5 5-5 5" stroke="currentColor" stroke-width="2.0"/>
+              <path d="M16 10l4 4 M20 10l-4 4" stroke="#fff" stroke-width="4.2"/>
+              <path d="M16 10l4 4 M20 10l-4 4" stroke="currentColor" stroke-width="2.0"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">X overlays the arrowhead — "the destination is negated". Different story from H1/H2.</div>
+      </div>
+
+      <!-- H6 -->
+      <div class="variant-card">
+        <div class="variant-label">H6 — Largest arrow, mid-sized X with halo</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12h18" stroke="currentColor" stroke-width="2.2"/>
+                <path d="M16 6l6 6-6 6" stroke="currentColor" stroke-width="2.2"/>
+                <!-- Mid-sized X (5u wide), halo cutout -->
+                <path d="M6 9.5l5 5 M11 9.5l-5 5" stroke="#fff" stroke-width="4.6"/>
+                <path d="M6 9.5l5 5 M11 9.5l-5 5" stroke="currentColor" stroke-width="2.2"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--slate-mid">
+            <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 12h18" stroke="currentColor" stroke-width="2.2"/>
+              <path d="M16 6l6 6-6 6" stroke="currentColor" stroke-width="2.2"/>
+              <path d="M6 9.5l5 5 M11 9.5l-5 5" stroke="#fff" stroke-width="4.6"/>
+              <path d="M6 9.5l5 5 M11 9.5l-5 5" stroke="currentColor" stroke-width="2.2"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Maximum arrow + clear X with halo cutout. Boldest read; X is unambiguous.</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ====================================================================== -->
+  <!-- Family I — Family H in real Stage 2 row context                         -->
+  <!-- ====================================================================== -->
+  <section class="section">
+    <h2 class="section-title">Family I — Family H in real row context</h2>
+    <p class="section-desc">
+      Top H candidates placed in actual Stage 2 rows beside real percentage rows.
+      Hover the X-marked cells to test the tooltip.
+    </p>
+
+    <div class="row-mock-block">
+      <div class="mapping-list-head">
+        <div></div>
+        <div>Column</div>
+        <div>Standard</div>
+        <div style="text-align:right;">Value fit</div>
+        <div></div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">primary_site</div>
+        <div class="mapping-row-target">case.diagnoses.primary_site</div>
+        <div class="mapping-row-fit">
+          <div class="mapping-row-fit--ratio">73%</div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">tumor_grade <span style="color:var(--gray-400);font-weight:400;">(H1 — small X same weight)</span></div>
+        <div class="mapping-row-target">case.diagnoses.tumor_grade</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2 12h17" stroke-width="2.0"/>
+                <path d="M16 7l5 5-5 5" stroke-width="2.0"/>
+                <path d="M7 10l4 4" stroke-width="1.8"/>
+                <path d="M11 10l-4 4" stroke-width="1.8"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">specimen_id <span style="color:var(--gray-400);font-weight:400;">(H2 — small X with halo cutout)</span></div>
+        <div class="mapping-row-target">case.specimens.specimen_id</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2 12h17" stroke="currentColor" stroke-width="2.0"/>
+                <path d="M16 7l5 5-5 5" stroke="currentColor" stroke-width="2.0"/>
+                <path d="M7 10l4 4 M11 10l-4 4" stroke="#fff" stroke-width="4.2"/>
+                <path d="M7 10l4 4 M11 10l-4 4" stroke="currentColor" stroke-width="2.0"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">patient_notes <span style="color:var(--gray-400);font-weight:400;">(H3 — tiny X)</span></div>
+        <div class="mapping-row-target">case.demographics.notes</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2 12h17" stroke="currentColor" stroke-width="2.0"/>
+                <path d="M16 7l5 5-5 5" stroke="currentColor" stroke-width="2.0"/>
+                <path d="M8 10.5l3 3 M11 10.5l-3 3" stroke="#fff" stroke-width="3.6"/>
+                <path d="M8 10.5l3 3 M11 10.5l-3 3" stroke="currentColor" stroke-width="1.8"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">disease_type</div>
+        <div class="mapping-row-target">case.diagnoses.disease_type</div>
+        <div class="mapping-row-fit">
+          <div class="mapping-row-fit--ratio">100%</div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">free_text_field <span style="color:var(--gray-400);font-weight:400;">(H6 — biggest arrow, mid X with halo)</span></div>
+        <div class="mapping-row-target">case.demographics.free_text</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12h18" stroke="currentColor" stroke-width="2.2"/>
+                <path d="M16 6l6 6-6 6" stroke="currentColor" stroke-width="2.2"/>
+                <path d="M6 9.5l5 5 M11 9.5l-5 5" stroke="#fff" stroke-width="4.6"/>
+                <path d="M6 9.5l5 5 M11 9.5l-5 5" stroke="currentColor" stroke-width="2.2"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ====================================================================== -->
+  <!-- Family J — H6 baseline, bigger X, color/opacity contrast               -->
+  <!-- ====================================================================== -->
+  <section class="section">
+    <h2 class="section-title">Family J — H6 base, bigger X, color/opacity contrast</h2>
+    <p class="section-desc">
+      Building on H6: keep the big arrow, make the X bigger (~7u wide, was 5u),
+      and introduce explicit visual separation between the two — via opacity ghosting,
+      darker X stroke, or both. The arrow becomes the "subject" and the X is the
+      dominant mark.
+    </p>
+
+    <div class="variant-grid">
+
+      <!-- J1 — arrow ghosted via opacity -->
+      <div class="variant-card">
+        <div class="variant-label">J1 — Arrow at 55% opacity, X full</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <g stroke="var(--gray-700)" stroke-width="2.2" opacity="0.55">
+                  <path d="M1 12h18"/>
+                  <path d="M16 6l6 6-6 6"/>
+                </g>
+                <!-- Bigger X (7u wide), centered at (9,12), halo + dark stroke -->
+                <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="#fff" stroke-width="5.0"/>
+                <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="var(--gray-900)" stroke-width="2.4"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <g stroke="var(--gray-700)" stroke-width="2.2" opacity="0.55">
+                <path d="M1 12h18"/>
+                <path d="M16 6l6 6-6 6"/>
+              </g>
+              <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="#fff" stroke-width="5.0"/>
+              <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="var(--gray-900)" stroke-width="2.4"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Arrow becomes background context; X is unambiguously the main mark.</div>
+      </div>
+
+      <!-- J2 — color contrast, no opacity -->
+      <div class="variant-card">
+        <div class="variant-label">J2 — Arrow gray-400, X gray-900</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <g stroke="var(--gray-400)" stroke-width="2.2">
+                  <path d="M1 12h18"/>
+                  <path d="M16 6l6 6-6 6"/>
+                </g>
+                <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="#fff" stroke-width="5.0"/>
+                <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="var(--gray-900)" stroke-width="2.4"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <g stroke="var(--gray-400)" stroke-width="2.2">
+                <path d="M1 12h18"/>
+                <path d="M16 6l6 6-6 6"/>
+              </g>
+              <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="#fff" stroke-width="5.0"/>
+              <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="var(--gray-900)" stroke-width="2.4"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Hard color contrast — arrow is "ghost-rail", X is decisive black mark.</div>
+      </div>
+
+      <!-- J3 — extreme ghost arrow, dark X -->
+      <div class="variant-card">
+        <div class="variant-label">J3 — Arrow gray-300, X gray-900</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <g stroke="var(--gray-300)" stroke-width="2.2">
+                  <path d="M1 12h18"/>
+                  <path d="M16 6l6 6-6 6"/>
+                </g>
+                <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="#fff" stroke-width="5.0"/>
+                <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="var(--gray-900)" stroke-width="2.4"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <g stroke="var(--gray-300)" stroke-width="2.2">
+                <path d="M1 12h18"/>
+                <path d="M16 6l6 6-6 6"/>
+              </g>
+              <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="#fff" stroke-width="5.0"/>
+              <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="var(--gray-900)" stroke-width="2.4"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Lightest arrow + darkest X — strongest separation. Risk: arrow gets too faint to read.</div>
+      </div>
+
+      <!-- J4 — opacity + color combo -->
+      <div class="variant-card">
+        <div class="variant-label">J4 — Arrow gray-500 @ 65% opacity, X gray-900</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <g stroke="var(--gray-500)" stroke-width="2.2" opacity="0.65">
+                  <path d="M1 12h18"/>
+                  <path d="M16 6l6 6-6 6"/>
+                </g>
+                <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="#fff" stroke-width="5.0"/>
+                <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="var(--gray-900)" stroke-width="2.4"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <g stroke="var(--gray-500)" stroke-width="2.2" opacity="0.65">
+                <path d="M1 12h18"/>
+                <path d="M16 6l6 6-6 6"/>
+              </g>
+              <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="#fff" stroke-width="5.0"/>
+              <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="var(--gray-900)" stroke-width="2.4"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Both color shift and opacity. Arrow stays readable; X clearly dominant.</div>
+      </div>
+
+      <!-- J5 — bigger X, slightly thicker stroke -->
+      <div class="variant-card">
+        <div class="variant-label">J5 — Even bigger X (8u), stronger stroke</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <g stroke="var(--gray-400)" stroke-width="2.2">
+                  <path d="M1 12h18"/>
+                  <path d="M16 6l6 6-6 6"/>
+                </g>
+                <path d="M5 8l8 8 M13 8l-8 8" stroke="#fff" stroke-width="5.6"/>
+                <path d="M5 8l8 8 M13 8l-8 8" stroke="var(--gray-900)" stroke-width="2.8"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <g stroke="var(--gray-400)" stroke-width="2.2">
+                <path d="M1 12h18"/>
+                <path d="M16 6l6 6-6 6"/>
+              </g>
+              <path d="M5 8l8 8 M13 8l-8 8" stroke="#fff" stroke-width="5.6"/>
+              <path d="M5 8l8 8 M13 8l-8 8" stroke="var(--gray-900)" stroke-width="2.8"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">X grows to 8u wide, stroke 2.8 — boldest negation. Arrow still readable in gray-400.</div>
+      </div>
+
+      <!-- J6 — opacity-only contrast (no color shift) -->
+      <div class="variant-card">
+        <div class="variant-label">J6 — Both slate-700, arrow @ 40%, X @ 100%</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <g stroke="var(--gray-700)" stroke-width="2.2" opacity="0.4">
+                  <path d="M1 12h18"/>
+                  <path d="M16 6l6 6-6 6"/>
+                </g>
+                <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="#fff" stroke-width="5.0"/>
+                <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="var(--gray-700)" stroke-width="2.4"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <g stroke="var(--gray-700)" stroke-width="2.2" opacity="0.4">
+                <path d="M1 12h18"/>
+                <path d="M16 6l6 6-6 6"/>
+              </g>
+              <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="#fff" stroke-width="5.0"/>
+              <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="var(--gray-700)" stroke-width="2.4"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Same hue, just opacity — softer, more cohesive feel than the gray-900 X variants.</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ====================================================================== -->
+  <!-- Family K — Family J in real Stage 2 row context                         -->
+  <!-- ====================================================================== -->
+  <section class="section">
+    <h2 class="section-title">Family K — Family J in real row context</h2>
+    <p class="section-desc">
+      All six J variants placed in actual Stage 2 rows, mixed with real percentage rows.
+      Best way to judge whether the contrast is working at the size it'll actually appear.
+    </p>
+
+    <div class="row-mock-block">
+      <div class="mapping-list-head">
+        <div></div>
+        <div>Column</div>
+        <div>Standard</div>
+        <div style="text-align:right;">Value fit</div>
+        <div></div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">primary_site</div>
+        <div class="mapping-row-target">case.diagnoses.primary_site</div>
+        <div class="mapping-row-fit">
+          <div class="mapping-row-fit--ratio">73%</div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">tumor_grade <span style="color:var(--gray-400);font-weight:400;">(J1 — opacity ghost)</span></div>
+        <div class="mapping-row-target">case.diagnoses.tumor_grade</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <g stroke="var(--gray-700)" stroke-width="2.2" opacity="0.55">
+                  <path d="M1 12h18"/>
+                  <path d="M16 6l6 6-6 6"/>
+                </g>
+                <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="#fff" stroke-width="5.0"/>
+                <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="var(--gray-900)" stroke-width="2.4"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">specimen_id <span style="color:var(--gray-400);font-weight:400;">(J2 — color contrast)</span></div>
+        <div class="mapping-row-target">case.specimens.specimen_id</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <g stroke="var(--gray-400)" stroke-width="2.2">
+                  <path d="M1 12h18"/>
+                  <path d="M16 6l6 6-6 6"/>
+                </g>
+                <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="#fff" stroke-width="5.0"/>
+                <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="var(--gray-900)" stroke-width="2.4"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">patient_notes <span style="color:var(--gray-400);font-weight:400;">(J3 — extreme ghost)</span></div>
+        <div class="mapping-row-target">case.demographics.notes</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <g stroke="var(--gray-300)" stroke-width="2.2">
+                  <path d="M1 12h18"/>
+                  <path d="M16 6l6 6-6 6"/>
+                </g>
+                <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="#fff" stroke-width="5.0"/>
+                <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="var(--gray-900)" stroke-width="2.4"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">disease_type</div>
+        <div class="mapping-row-target">case.diagnoses.disease_type</div>
+        <div class="mapping-row-fit">
+          <div class="mapping-row-fit--ratio">100%</div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">collection_date <span style="color:var(--gray-400);font-weight:400;">(J4 — opacity + color combo)</span></div>
+        <div class="mapping-row-target">case.specimens.collection_date</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <g stroke="var(--gray-500)" stroke-width="2.2" opacity="0.65">
+                  <path d="M1 12h18"/>
+                  <path d="M16 6l6 6-6 6"/>
+                </g>
+                <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="#fff" stroke-width="5.0"/>
+                <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="var(--gray-900)" stroke-width="2.4"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">free_text_field <span style="color:var(--gray-400);font-weight:400;">(J5 — biggest X)</span></div>
+        <div class="mapping-row-target">case.demographics.free_text</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <g stroke="var(--gray-400)" stroke-width="2.2">
+                  <path d="M1 12h18"/>
+                  <path d="M16 6l6 6-6 6"/>
+                </g>
+                <path d="M5 8l8 8 M13 8l-8 8" stroke="#fff" stroke-width="5.6"/>
+                <path d="M5 8l8 8 M13 8l-8 8" stroke="var(--gray-900)" stroke-width="2.8"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">consent_text <span style="color:var(--gray-400);font-weight:400;">(J6 — opacity only)</span></div>
+        <div class="mapping-row-target">case.demographics.consent</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <g stroke="var(--gray-700)" stroke-width="2.2" opacity="0.4">
+                  <path d="M1 12h18"/>
+                  <path d="M16 6l6 6-6 6"/>
+                </g>
+                <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="#fff" stroke-width="5.0"/>
+                <path d="M5.5 8.5l7 7 M12.5 8.5l-7 7" stroke="var(--gray-700)" stroke-width="2.4"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ====================================================================== -->
+  <!-- Family L — Fixed arrow join + extreme weight contrast                  -->
+  <!-- ====================================================================== -->
+  <section class="section">
+    <h2 class="section-title">Family L — Fixed arrow + extreme weight contrast</h2>
+    <p class="section-desc">
+      Three fixes from the J4 feedback:
+    </p>
+    <ul style="font-size: 0.85rem; color: var(--gray-600); margin-top: 0;">
+      <li><strong>Arrow join</strong> — arrowhead is now a filled triangle, so the shaft butts cleanly into a solid head (no chevron-mouth gap).</li>
+      <li><strong>Weight contrast</strong> — half the variants are <em>thick arrow + thin X</em>, half are <em>thin arrow + thick X</em>. Both directions tested.</li>
+      <li><strong>Bigger X</strong> — 8-9u wide (was 7u), and positioned squarely on the shaft so the crossout gesture is unambiguous.</li>
+    </ul>
+
+    <div class="variant-grid">
+
+      <!-- L1 — THICK arrow + THIN X (stroked shaft) -->
+      <div class="variant-card">
+        <div class="variant-label">L1 — Thick arrow + thin X (stroked)</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" stroke-linecap="round" stroke-linejoin="round">
+                <!-- Filled triangle head: solid junction with shaft -->
+                <polygon points="14,5 22,12 14,19" fill="var(--gray-500)"/>
+                <!-- Heavy shaft -->
+                <line x1="2" y1="12" x2="14" y2="12" stroke="var(--gray-500)" stroke-width="4"/>
+                <!-- Thin X with halo cutout, big (8u wide), centered on shaft midpoint (7,12) -->
+                <path d="M3 8l8 8 M11 8l-8 8" stroke="#fff" stroke-width="3.5" fill="none"/>
+                <path d="M3 8l8 8 M11 8l-8 8" stroke="var(--gray-900)" stroke-width="1.4" fill="none"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="14,5 22,12 14,19" fill="var(--gray-500)"/>
+              <line x1="2" y1="12" x2="14" y2="12" stroke="var(--gray-500)" stroke-width="4"/>
+              <path d="M3 8l8 8 M11 8l-8 8" stroke="#fff" stroke-width="3.5" fill="none"/>
+              <path d="M3 8l8 8 M11 8l-8 8" stroke="var(--gray-900)" stroke-width="1.4" fill="none"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Heavy-bodied arrow, delicate ink-mark X. Reads as "thick arrow that has been crossed out".</div>
+      </div>
+
+      <!-- L2 — THICK arrow + THIN X (filled silhouette) -->
+      <div class="variant-card">
+        <div class="variant-label">L2 — Filled chunky arrow + thin X</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" stroke-linecap="round" stroke-linejoin="round">
+                <!-- Single filled silhouette: shaft + head as one shape -->
+                <polygon points="2,10 14,10 14,5 22,12 14,19 14,14 2,14" fill="var(--gray-500)"/>
+                <!-- Thin X, big (8u), gray-900 with halo -->
+                <path d="M3 8l8 8 M11 8l-8 8" stroke="#fff" stroke-width="3.5" fill="none"/>
+                <path d="M3 8l8 8 M11 8l-8 8" stroke="var(--gray-900)" stroke-width="1.4" fill="none"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="2,10 14,10 14,5 22,12 14,19 14,14 2,14" fill="var(--gray-500)"/>
+              <path d="M3 8l8 8 M11 8l-8 8" stroke="#fff" stroke-width="3.5" fill="none"/>
+              <path d="M3 8l8 8 M11 8l-8 8" stroke="var(--gray-900)" stroke-width="1.4" fill="none"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Maximum-density arrow as a single filled shape, ultra-thin X on top. Most extreme thickness contrast.</div>
+      </div>
+
+      <!-- L3 — THIN arrow + THICK X -->
+      <div class="variant-card">
+        <div class="variant-label">L3 — Thin arrow + thick X</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" stroke-linecap="round" stroke-linejoin="round">
+                <!-- Thin outlined arrow head -->
+                <polygon points="14,7 21,12 14,17" fill="none" stroke="var(--gray-400)" stroke-width="1.4"/>
+                <!-- Thin shaft -->
+                <line x1="2" y1="12" x2="14" y2="12" stroke="var(--gray-400)" stroke-width="1.4"/>
+                <!-- Thick X, big (8u), gray-900 with halo -->
+                <path d="M3 8l8 8 M11 8l-8 8" stroke="#fff" stroke-width="6" fill="none"/>
+                <path d="M3 8l8 8 M11 8l-8 8" stroke="var(--gray-900)" stroke-width="3.4" fill="none"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="14,7 21,12 14,17" fill="none" stroke="var(--gray-400)" stroke-width="1.4"/>
+              <line x1="2" y1="12" x2="14" y2="12" stroke="var(--gray-400)" stroke-width="1.4"/>
+              <path d="M3 8l8 8 M11 8l-8 8" stroke="#fff" stroke-width="6" fill="none"/>
+              <path d="M3 8l8 8 M11 8l-8 8" stroke="var(--gray-900)" stroke-width="3.4" fill="none"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Faint outlined arrow + dominant heavy X. Reads as "an arrow has been crossed out".</div>
+      </div>
+
+      <!-- L4 — VERY THIN arrow + EXTRA THICK X -->
+      <div class="variant-card">
+        <div class="variant-label">L4 — Wireframe arrow + heavy X</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="14,7 21,12 14,17" fill="none" stroke="var(--gray-300)" stroke-width="1.1"/>
+                <line x1="2" y1="12" x2="14" y2="12" stroke="var(--gray-300)" stroke-width="1.1"/>
+                <path d="M2.5 7.5l9 9 M11.5 7.5l-9 9" stroke="#fff" stroke-width="6.5" fill="none"/>
+                <path d="M2.5 7.5l9 9 M11.5 7.5l-9 9" stroke="var(--gray-900)" stroke-width="4" fill="none"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="14,7 21,12 14,17" fill="none" stroke="var(--gray-300)" stroke-width="1.1"/>
+              <line x1="2" y1="12" x2="14" y2="12" stroke="var(--gray-300)" stroke-width="1.1"/>
+              <path d="M2.5 7.5l9 9 M11.5 7.5l-9 9" stroke="#fff" stroke-width="6.5" fill="none"/>
+              <path d="M2.5 7.5l9 9 M11.5 7.5l-9 9" stroke="var(--gray-900)" stroke-width="4" fill="none"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Most extreme contrast in the L family. Wireframe arrow, X dominates. Risk: arrow might disappear at small sizes.</div>
+      </div>
+
+      <!-- L5 — THICK FILLED arrow + MID-WEIGHT X -->
+      <div class="variant-card">
+        <div class="variant-label">L5 — Thick filled + medium X (compromise)</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="2,10.2 14,10.2 14,5.5 22,12 14,18.5 14,13.8 2,13.8" fill="var(--gray-500)"/>
+                <path d="M3 8l8 8 M11 8l-8 8" stroke="#fff" stroke-width="4.5" fill="none"/>
+                <path d="M3 8l8 8 M11 8l-8 8" stroke="var(--gray-900)" stroke-width="2.0" fill="none"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="2,10.2 14,10.2 14,5.5 22,12 14,18.5 14,13.8 2,13.8" fill="var(--gray-500)"/>
+              <path d="M3 8l8 8 M11 8l-8 8" stroke="#fff" stroke-width="4.5" fill="none"/>
+              <path d="M3 8l8 8 M11 8l-8 8" stroke="var(--gray-900)" stroke-width="2.0" fill="none"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Filled arrow body, mid-weight X — middle ground if both extremes feel wrong.</div>
+      </div>
+
+      <!-- L6 — THIN arrow + BIG X (centered on whole arrow) -->
+      <div class="variant-card">
+        <div class="variant-label">L6 — Thin arrow + huge X across full width</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="14,7 21,12 14,17" fill="none" stroke="var(--gray-400)" stroke-width="1.4"/>
+                <line x1="2" y1="12" x2="14" y2="12" stroke="var(--gray-400)" stroke-width="1.4"/>
+                <!-- X across nearly the whole arrow (10u wide) -->
+                <path d="M5 6l11 11 M16 6l-11 11" stroke="#fff" stroke-width="6" fill="none"/>
+                <path d="M5 6l11 11 M16 6l-11 11" stroke="var(--gray-900)" stroke-width="3.2" fill="none"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="14,7 21,12 14,17" fill="none" stroke="var(--gray-400)" stroke-width="1.4"/>
+              <line x1="2" y1="12" x2="14" y2="12" stroke="var(--gray-400)" stroke-width="1.4"/>
+              <path d="M5 6l11 11 M16 6l-11 11" stroke="#fff" stroke-width="6" fill="none"/>
+              <path d="M5 6l11 11 M16 6l-11 11" stroke="var(--gray-900)" stroke-width="3.2" fill="none"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">X crosses the entire arrow including the head. Most "decisive crossout" — clearly negates the whole shape.</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ====================================================================== -->
+  <!-- Family M — Family L in real Stage 2 row context                         -->
+  <!-- ====================================================================== -->
+  <section class="section">
+    <h2 class="section-title">Family M — Family L in real row context</h2>
+    <p class="section-desc">
+      All six L variants placed in actual Stage 2 rows. Compare side-by-side; the right answer
+      should still read as "an arrow with a crossout" at row scale, not as an abstract glyph.
+    </p>
+
+    <div class="row-mock-block">
+      <div class="mapping-list-head">
+        <div></div>
+        <div>Column</div>
+        <div>Standard</div>
+        <div style="text-align:right;">Value fit</div>
+        <div></div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">primary_site</div>
+        <div class="mapping-row-target">case.diagnoses.primary_site</div>
+        <div class="mapping-row-fit">
+          <div class="mapping-row-fit--ratio">73%</div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">tumor_grade <span style="color:var(--gray-400);font-weight:400;">(L1 — thick stroke, thin X)</span></div>
+        <div class="mapping-row-target">case.diagnoses.tumor_grade</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="14,5 22,12 14,19" fill="var(--gray-500)"/>
+                <line x1="2" y1="12" x2="14" y2="12" stroke="var(--gray-500)" stroke-width="4"/>
+                <path d="M3 8l8 8 M11 8l-8 8" stroke="#fff" stroke-width="3.5" fill="none"/>
+                <path d="M3 8l8 8 M11 8l-8 8" stroke="var(--gray-900)" stroke-width="1.4" fill="none"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">specimen_id <span style="color:var(--gray-400);font-weight:400;">(L2 — filled silhouette + thin X)</span></div>
+        <div class="mapping-row-target">case.specimens.specimen_id</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="2,10 14,10 14,5 22,12 14,19 14,14 2,14" fill="var(--gray-500)"/>
+                <path d="M3 8l8 8 M11 8l-8 8" stroke="#fff" stroke-width="3.5" fill="none"/>
+                <path d="M3 8l8 8 M11 8l-8 8" stroke="var(--gray-900)" stroke-width="1.4" fill="none"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">patient_notes <span style="color:var(--gray-400);font-weight:400;">(L3 — thin arrow + thick X)</span></div>
+        <div class="mapping-row-target">case.demographics.notes</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="14,7 21,12 14,17" fill="none" stroke="var(--gray-400)" stroke-width="1.4"/>
+                <line x1="2" y1="12" x2="14" y2="12" stroke="var(--gray-400)" stroke-width="1.4"/>
+                <path d="M3 8l8 8 M11 8l-8 8" stroke="#fff" stroke-width="6" fill="none"/>
+                <path d="M3 8l8 8 M11 8l-8 8" stroke="var(--gray-900)" stroke-width="3.4" fill="none"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">consent_text <span style="color:var(--gray-400);font-weight:400;">(L4 — wireframe + heavy X)</span></div>
+        <div class="mapping-row-target">case.demographics.consent</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="14,7 21,12 14,17" fill="none" stroke="var(--gray-300)" stroke-width="1.1"/>
+                <line x1="2" y1="12" x2="14" y2="12" stroke="var(--gray-300)" stroke-width="1.1"/>
+                <path d="M2.5 7.5l9 9 M11.5 7.5l-9 9" stroke="#fff" stroke-width="6.5" fill="none"/>
+                <path d="M2.5 7.5l9 9 M11.5 7.5l-9 9" stroke="var(--gray-900)" stroke-width="4" fill="none"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">disease_type</div>
+        <div class="mapping-row-target">case.diagnoses.disease_type</div>
+        <div class="mapping-row-fit">
+          <div class="mapping-row-fit--ratio">100%</div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">collection_date <span style="color:var(--gray-400);font-weight:400;">(L5 — middle ground)</span></div>
+        <div class="mapping-row-target">case.specimens.collection_date</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="2,10.2 14,10.2 14,5.5 22,12 14,18.5 14,13.8 2,13.8" fill="var(--gray-500)"/>
+                <path d="M3 8l8 8 M11 8l-8 8" stroke="#fff" stroke-width="4.5" fill="none"/>
+                <path d="M3 8l8 8 M11 8l-8 8" stroke="var(--gray-900)" stroke-width="2.0" fill="none"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">free_text_field <span style="color:var(--gray-400);font-weight:400;">(L6 — huge X across whole arrow)</span></div>
+        <div class="mapping-row-target">case.demographics.free_text</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="14,7 21,12 14,17" fill="none" stroke="var(--gray-400)" stroke-width="1.4"/>
+                <line x1="2" y1="12" x2="14" y2="12" stroke="var(--gray-400)" stroke-width="1.4"/>
+                <path d="M5 6l11 11 M16 6l-11 11" stroke="#fff" stroke-width="6" fill="none"/>
+                <path d="M5 6l11 11 M16 6l-11 11" stroke="var(--gray-900)" stroke-width="3.2" fill="none"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ====================================================================== -->
+  <!-- Family N — Pivot: circle-with-slash (prohibition shape) + arrow inside -->
+  <!-- ====================================================================== -->
+  <section class="section">
+    <h2 class="section-title">Family N — Circle + arrow + slash (prohibition shape)</h2>
+    <p class="section-desc">
+      New direction: borrow the universal "no [thing]" pictogram — a circle containing the
+      subject, with a diagonal slash through it. Same shape as the no-smoking sign, but in
+      neutral slate (never red) so it reads as <em>informational</em> rather than as a warning.
+      The shape itself does the heavy lifting: every viewer immediately parses "no X happening".
+    </p>
+
+    <div class="variant-grid">
+
+      <!-- N1 — Classic: outlined circle, arrow inside, slash on top -->
+      <div class="variant-card">
+        <div class="variant-label">N1 — Outline circle, arrow, slash</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" stroke-linecap="round" stroke-linejoin="round" fill="none">
+                <circle cx="12" cy="12" r="9.5" stroke="var(--gray-700)" stroke-width="1.8"/>
+                <line x1="6" y1="12" x2="14" y2="12" stroke="var(--gray-700)" stroke-width="1.8"/>
+                <polygon points="14,9 18,12 14,15" fill="var(--gray-700)"/>
+                <line x1="20" y1="4" x2="4" y2="20" stroke="var(--gray-700)" stroke-width="1.8"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" fill="none">
+              <circle cx="12" cy="12" r="9.5" stroke="var(--gray-700)" stroke-width="1.8"/>
+              <line x1="6" y1="12" x2="14" y2="12" stroke="var(--gray-700)" stroke-width="1.8"/>
+              <polygon points="14,9 18,12 14,15" fill="var(--gray-700)"/>
+              <line x1="20" y1="4" x2="4" y2="20" stroke="var(--gray-700)" stroke-width="1.8"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">All elements same weight, slate. The prohibition shape carries the meaning.</div>
+      </div>
+
+      <!-- N2 — Slash with halo cutout (so it punches through the circle and arrow) -->
+      <div class="variant-card">
+        <div class="variant-label">N2 — Slash with halo cutout</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" stroke-linecap="round" stroke-linejoin="round" fill="none">
+                <circle cx="12" cy="12" r="9.5" stroke="var(--gray-700)" stroke-width="1.8"/>
+                <line x1="6" y1="12" x2="14" y2="12" stroke="var(--gray-700)" stroke-width="1.8"/>
+                <polygon points="14,9 18,12 14,15" fill="var(--gray-700)"/>
+                <line x1="20" y1="4" x2="4" y2="20" stroke="#fff" stroke-width="4.5"/>
+                <line x1="20" y1="4" x2="4" y2="20" stroke="var(--gray-900)" stroke-width="2.2"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" fill="none">
+              <circle cx="12" cy="12" r="9.5" stroke="var(--gray-700)" stroke-width="1.8"/>
+              <line x1="6" y1="12" x2="14" y2="12" stroke="var(--gray-700)" stroke-width="1.8"/>
+              <polygon points="14,9 18,12 14,15" fill="var(--gray-700)"/>
+              <line x1="20" y1="4" x2="4" y2="20" stroke="#fff" stroke-width="4.5"/>
+              <line x1="20" y1="4" x2="4" y2="20" stroke="var(--gray-900)" stroke-width="2.2"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Slash punches through the circle and arrow with a clean halo gap. Most legible negation.</div>
+      </div>
+
+      <!-- N3 — Filled circle, knockout arrow, slash on top -->
+      <div class="variant-card">
+        <div class="variant-label">N3 — Filled circle, knockout arrow</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10" fill="var(--gray-700)"/>
+                <line x1="6" y1="12" x2="14" y2="12" stroke="#fff" stroke-width="2"/>
+                <polygon points="14,9 18,12 14,15" fill="#fff"/>
+                <line x1="20" y1="4" x2="4" y2="20" stroke="#fff" stroke-width="4"/>
+                <line x1="20" y1="4" x2="4" y2="20" stroke="var(--gray-700)" stroke-width="2"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10" fill="var(--gray-700)"/>
+              <line x1="6" y1="12" x2="14" y2="12" stroke="#fff" stroke-width="2"/>
+              <polygon points="14,9 18,12 14,15" fill="#fff"/>
+              <line x1="20" y1="4" x2="4" y2="20" stroke="#fff" stroke-width="4"/>
+              <line x1="20" y1="4" x2="4" y2="20" stroke="var(--gray-700)" stroke-width="2"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Stamp-like: solid slate disc with white arrow knocked out, slash carved through. Boldest read.</div>
+      </div>
+
+      <!-- N4 — Heavier circle, lighter arrow, mid slash -->
+      <div class="variant-card">
+        <div class="variant-label">N4 — Heavy circle, lighter arrow</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" stroke-linecap="round" stroke-linejoin="round" fill="none">
+                <circle cx="12" cy="12" r="9.5" stroke="var(--gray-700)" stroke-width="2.4"/>
+                <line x1="6" y1="12" x2="14" y2="12" stroke="var(--gray-500)" stroke-width="1.6"/>
+                <polygon points="14,9.2 17.5,12 14,14.8" fill="var(--gray-500)"/>
+                <line x1="20" y1="4" x2="4" y2="20" stroke="#fff" stroke-width="4.5"/>
+                <line x1="20" y1="4" x2="4" y2="20" stroke="var(--gray-700)" stroke-width="2.4"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" fill="none">
+              <circle cx="12" cy="12" r="9.5" stroke="var(--gray-700)" stroke-width="2.4"/>
+              <line x1="6" y1="12" x2="14" y2="12" stroke="var(--gray-500)" stroke-width="1.6"/>
+              <polygon points="14,9.2 17.5,12 14,14.8" fill="var(--gray-500)"/>
+              <line x1="20" y1="4" x2="4" y2="20" stroke="#fff" stroke-width="4.5"/>
+              <line x1="20" y1="4" x2="4" y2="20" stroke="var(--gray-700)" stroke-width="2.4"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Circle and slash are the structural elements (heavy slate); arrow is the "subject" (lighter). Hierarchy is explicit.</div>
+      </div>
+
+      <!-- N5 — Slash only crosses arrow, not circle (cleaner shape) -->
+      <div class="variant-card">
+        <div class="variant-label">N5 — Slash inside circle only</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" stroke-linecap="round" stroke-linejoin="round" fill="none">
+                <circle cx="12" cy="12" r="9.5" stroke="var(--gray-700)" stroke-width="1.8"/>
+                <line x1="6" y1="12" x2="14" y2="12" stroke="var(--gray-500)" stroke-width="1.6"/>
+                <polygon points="14,9.2 17.5,12 14,14.8" fill="var(--gray-500)"/>
+                <!-- Slash contained within circle, ~6 to 18 -->
+                <line x1="18" y1="6" x2="6" y2="18" stroke="#fff" stroke-width="4.5"/>
+                <line x1="18" y1="6" x2="6" y2="18" stroke="var(--gray-900)" stroke-width="2.4"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" fill="none">
+              <circle cx="12" cy="12" r="9.5" stroke="var(--gray-700)" stroke-width="1.8"/>
+              <line x1="6" y1="12" x2="14" y2="12" stroke="var(--gray-500)" stroke-width="1.6"/>
+              <polygon points="14,9.2 17.5,12 14,14.8" fill="var(--gray-500)"/>
+              <line x1="18" y1="6" x2="6" y2="18" stroke="#fff" stroke-width="4.5"/>
+              <line x1="18" y1="6" x2="6" y2="18" stroke="var(--gray-900)" stroke-width="2.4"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Slash contained inside the circle — softer, less prohibition-y. Reads as "arrow with note attached" more than "forbidden".</div>
+      </div>
+
+      <!-- N6 — Subtle two-tone -->
+      <div class="variant-card">
+        <div class="variant-label">N6 — Two-tone with halo</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" stroke-linecap="round" stroke-linejoin="round" fill="none">
+                <circle cx="12" cy="12" r="9.5" stroke="var(--gray-400)" stroke-width="2"/>
+                <line x1="6" y1="12" x2="14" y2="12" stroke="var(--gray-500)" stroke-width="1.6"/>
+                <polygon points="14,9.2 17.5,12 14,14.8" fill="var(--gray-500)"/>
+                <line x1="20" y1="4" x2="4" y2="20" stroke="#fff" stroke-width="4.5"/>
+                <line x1="20" y1="4" x2="4" y2="20" stroke="var(--gray-900)" stroke-width="2.4"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" fill="none">
+              <circle cx="12" cy="12" r="9.5" stroke="var(--gray-400)" stroke-width="2"/>
+              <line x1="6" y1="12" x2="14" y2="12" stroke="var(--gray-500)" stroke-width="1.6"/>
+              <polygon points="14,9.2 17.5,12 14,14.8" fill="var(--gray-500)"/>
+              <line x1="20" y1="4" x2="4" y2="20" stroke="#fff" stroke-width="4.5"/>
+              <line x1="20" y1="4" x2="4" y2="20" stroke="var(--gray-900)" stroke-width="2.4"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Light circle and arrow recede; slash dominates as the "no" gesture. Quietest informational read.</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ====================================================================== -->
+  <!-- Family O — Family N in real Stage 2 row context                         -->
+  <!-- ====================================================================== -->
+  <section class="section">
+    <h2 class="section-title">Family O — Family N in real row context</h2>
+    <p class="section-desc">
+      All N variants placed in actual Stage 2 rows alongside real percentage rows.
+    </p>
+
+    <div class="row-mock-block">
+      <div class="mapping-list-head">
+        <div></div>
+        <div>Column</div>
+        <div>Standard</div>
+        <div style="text-align:right;">Value fit</div>
+        <div></div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">primary_site</div>
+        <div class="mapping-row-target">case.diagnoses.primary_site</div>
+        <div class="mapping-row-fit">
+          <div class="mapping-row-fit--ratio">73%</div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">tumor_grade <span style="color:var(--gray-400);font-weight:400;">(N1 — classic)</span></div>
+        <div class="mapping-row-target">case.diagnoses.tumor_grade</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" stroke-linecap="round" stroke-linejoin="round" fill="none">
+                <circle cx="12" cy="12" r="9.5" stroke="var(--gray-700)" stroke-width="1.8"/>
+                <line x1="6" y1="12" x2="14" y2="12" stroke="var(--gray-700)" stroke-width="1.8"/>
+                <polygon points="14,9 18,12 14,15" fill="var(--gray-700)"/>
+                <line x1="20" y1="4" x2="4" y2="20" stroke="var(--gray-700)" stroke-width="1.8"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">specimen_id <span style="color:var(--gray-400);font-weight:400;">(N2 — slash with halo)</span></div>
+        <div class="mapping-row-target">case.specimens.specimen_id</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" stroke-linecap="round" stroke-linejoin="round" fill="none">
+                <circle cx="12" cy="12" r="9.5" stroke="var(--gray-700)" stroke-width="1.8"/>
+                <line x1="6" y1="12" x2="14" y2="12" stroke="var(--gray-700)" stroke-width="1.8"/>
+                <polygon points="14,9 18,12 14,15" fill="var(--gray-700)"/>
+                <line x1="20" y1="4" x2="4" y2="20" stroke="#fff" stroke-width="4.5"/>
+                <line x1="20" y1="4" x2="4" y2="20" stroke="var(--gray-900)" stroke-width="2.2"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">patient_notes <span style="color:var(--gray-400);font-weight:400;">(N3 — filled stamp)</span></div>
+        <div class="mapping-row-target">case.demographics.notes</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10" fill="var(--gray-700)"/>
+                <line x1="6" y1="12" x2="14" y2="12" stroke="#fff" stroke-width="2"/>
+                <polygon points="14,9 18,12 14,15" fill="#fff"/>
+                <line x1="20" y1="4" x2="4" y2="20" stroke="#fff" stroke-width="4"/>
+                <line x1="20" y1="4" x2="4" y2="20" stroke="var(--gray-700)" stroke-width="2"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">consent_text <span style="color:var(--gray-400);font-weight:400;">(N4 — heavy circle)</span></div>
+        <div class="mapping-row-target">case.demographics.consent</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" stroke-linecap="round" stroke-linejoin="round" fill="none">
+                <circle cx="12" cy="12" r="9.5" stroke="var(--gray-700)" stroke-width="2.4"/>
+                <line x1="6" y1="12" x2="14" y2="12" stroke="var(--gray-500)" stroke-width="1.6"/>
+                <polygon points="14,9.2 17.5,12 14,14.8" fill="var(--gray-500)"/>
+                <line x1="20" y1="4" x2="4" y2="20" stroke="#fff" stroke-width="4.5"/>
+                <line x1="20" y1="4" x2="4" y2="20" stroke="var(--gray-700)" stroke-width="2.4"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">disease_type</div>
+        <div class="mapping-row-target">case.diagnoses.disease_type</div>
+        <div class="mapping-row-fit">
+          <div class="mapping-row-fit--ratio">100%</div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">collection_date <span style="color:var(--gray-400);font-weight:400;">(N5 — slash inside circle)</span></div>
+        <div class="mapping-row-target">case.specimens.collection_date</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" stroke-linecap="round" stroke-linejoin="round" fill="none">
+                <circle cx="12" cy="12" r="9.5" stroke="var(--gray-700)" stroke-width="1.8"/>
+                <line x1="6" y1="12" x2="14" y2="12" stroke="var(--gray-500)" stroke-width="1.6"/>
+                <polygon points="14,9.2 17.5,12 14,14.8" fill="var(--gray-500)"/>
+                <line x1="18" y1="6" x2="6" y2="18" stroke="#fff" stroke-width="4.5"/>
+                <line x1="18" y1="6" x2="6" y2="18" stroke="var(--gray-900)" stroke-width="2.4"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">free_text_field <span style="color:var(--gray-400);font-weight:400;">(N6 — two-tone)</span></div>
+        <div class="mapping-row-target">case.demographics.free_text</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="30" height="30" stroke-linecap="round" stroke-linejoin="round" fill="none">
+                <circle cx="12" cy="12" r="9.5" stroke="var(--gray-400)" stroke-width="2"/>
+                <line x1="6" y1="12" x2="14" y2="12" stroke="var(--gray-500)" stroke-width="1.6"/>
+                <polygon points="14,9.2 17.5,12 14,14.8" fill="var(--gray-500)"/>
+                <line x1="20" y1="4" x2="4" y2="20" stroke="#fff" stroke-width="4.5"/>
+                <line x1="20" y1="4" x2="4" y2="20" stroke="var(--gray-900)" stroke-width="2.4"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ====================================================================== -->
+  <!-- Family P — Off-the-shelf prohibition icons (raw, MIT-licensed)         -->
+  <!-- ====================================================================== -->
+  <section class="section">
+    <h2 class="section-title">Family P — Off-the-shelf icons (raw, no composition)</h2>
+    <p class="section-desc">
+      Survey of <strong>existing free MIT-licensed icons</strong> we could use without composing.
+      None of the major libraries (Lucide, Heroicons, Tabler, Phosphor, Bootstrap) ship a
+      pre-built "arrow + circle + slash" combined icon — but they all have clean prohibition
+      shapes. Worth considering whether a bare prohibition shape alone is enough in context
+      (the tooltip carries the explanation; the arrow-inside is a nicety, not a necessity).
+      All shown below are the exact unmodified SVGs from each library.
+    </p>
+
+    <div class="variant-grid">
+
+      <!-- P1 — Lucide ban -->
+      <div class="variant-card">
+        <div class="variant-label">P1 — Lucide <code>ban</code></div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M4.929 4.929 19.07 19.071"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--slate-mid">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M4.929 4.929 19.07 19.071"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Classic 45° slash extending outside the circle. The shape every viewer parses instantly. Lucide / MIT.</div>
+      </div>
+
+      <!-- P2 — Tabler ban -->
+      <div class="variant-card">
+        <div class="variant-label">P2 — Tabler <code>ban</code></div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/>
+                <path d="M5.7 5.7l12.6 12.6"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--slate-mid">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/>
+              <path d="M5.7 5.7l12.6 12.6"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Same shape as P1, very slightly different proportions (slash goes nearly corner-to-corner of circle). Tabler / MIT.</div>
+      </div>
+
+      <!-- P3 — Lucide circle-slash -->
+      <div class="variant-card">
+        <div class="variant-label">P3 — Lucide <code>circle-slash</code></div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="9" x2="15" y1="15" y2="9"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--slate-mid">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="9" x2="15" y1="15" y2="9"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Slash <em>contained inside</em> the circle. Softer, less prohibition-y read. Lucide / MIT.</div>
+      </div>
+
+      <!-- P4 — Tabler forbid -->
+      <div class="variant-card">
+        <div class="variant-label">P4 — Tabler <code>forbid</code></div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/>
+                <path d="M9 9l6 6"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--slate-mid">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/>
+              <path d="M9 9l6 6"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Tabler's contained-slash variant. Equivalent to P3, slightly different drawing. Tabler / MIT.</div>
+      </div>
+
+      <!-- P5 — Heroicons no-symbol -->
+      <div class="variant-card">
+        <div class="variant-label">P5 — Heroicons <code>no-symbol</code></div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--slate-mid">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Heroicons' take — slightly thinner stroke (1.5), slash exactly corner-to-corner of circle. Heroicons / MIT.</div>
+      </div>
+
+      <!-- P6 — Phosphor prohibit -->
+      <div class="variant-card">
+        <div class="variant-label">P6 — Phosphor <code>prohibit</code></div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 256 256">
+                <line x1="195.88" y1="195.88" x2="60.12" y2="60.12" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/>
+                <circle cx="128" cy="128" r="96" fill="none" stroke="currentColor" stroke-miterlimit="10" stroke-width="16"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large pt-icon--slate-mid">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+              <line x1="195.88" y1="195.88" x2="60.12" y2="60.12" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/>
+              <circle cx="128" cy="128" r="96" fill="none" stroke="currentColor" stroke-miterlimit="10" stroke-width="16"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Phosphor's prohibit (256-grid). Slightly thicker visual feel. Phosphor / MIT.</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ====================================================================== -->
+  <!-- Family Q — Library base + arrow inside (composed)                       -->
+  <!-- ====================================================================== -->
+  <section class="section">
+    <h2 class="section-title">Family Q — Library prohibition base + arrow inside</h2>
+    <p class="section-desc">
+      No library ships a combined "arrow + ban" icon, so for the
+      compose path we use the library's circle/slash as our base and drop an arrow inside.
+      Below: three of the cleanest library shapes from Family P, each with an arrow added.
+    </p>
+
+    <div class="variant-grid">
+
+      <!-- Q1 — Lucide ban + arrow inside -->
+      <div class="variant-card">
+        <div class="variant-label">Q1 — Lucide <code>ban</code> base + arrow</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <!-- Library base: Lucide ban -->
+                <circle cx="12" cy="12" r="10" stroke="var(--gray-700)" stroke-width="2"/>
+                <!-- Arrow inside circle, sized to fit -->
+                <line x1="6" y1="12" x2="14" y2="12" stroke="var(--gray-500)" stroke-width="1.6"/>
+                <polygon points="14,9.2 17.5,12 14,14.8" fill="var(--gray-500)"/>
+                <!-- Slash with halo cutout, on top -->
+                <path d="M4.929 4.929 19.07 19.071" stroke="#fff" stroke-width="4.5"/>
+                <path d="M4.929 4.929 19.07 19.071" stroke="var(--gray-900)" stroke-width="2"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10" stroke="var(--gray-700)" stroke-width="2"/>
+              <line x1="6" y1="12" x2="14" y2="12" stroke="var(--gray-500)" stroke-width="1.6"/>
+              <polygon points="14,9.2 17.5,12 14,14.8" fill="var(--gray-500)"/>
+              <path d="M4.929 4.929 19.07 19.071" stroke="#fff" stroke-width="4.5"/>
+              <path d="M4.929 4.929 19.07 19.071" stroke="var(--gray-900)" stroke-width="2"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Lucide circle + their classic 45° slash + arrow inside. Slash uses halo cutout for clean separation.</div>
+      </div>
+
+      <!-- Q2 — Tabler forbid base + arrow -->
+      <div class="variant-card">
+        <div class="variant-label">Q2 — Tabler <code>forbid</code> base + arrow</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <!-- Library base: Tabler forbid circle -->
+                <path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" stroke="var(--gray-700)" stroke-width="2"/>
+                <!-- Arrow inside -->
+                <line x1="6" y1="12" x2="14" y2="12" stroke="var(--gray-500)" stroke-width="1.6"/>
+                <polygon points="14,9.2 17.5,12 14,14.8" fill="var(--gray-500)"/>
+                <!-- Tabler-style contained slash with halo -->
+                <path d="M9 9l6 6" stroke="#fff" stroke-width="4.5"/>
+                <path d="M9 9l6 6" stroke="var(--gray-900)" stroke-width="2.4"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" stroke="var(--gray-700)" stroke-width="2"/>
+              <line x1="6" y1="12" x2="14" y2="12" stroke="var(--gray-500)" stroke-width="1.6"/>
+              <polygon points="14,9.2 17.5,12 14,14.8" fill="var(--gray-500)"/>
+              <path d="M9 9l6 6" stroke="#fff" stroke-width="4.5"/>
+              <path d="M9 9l6 6" stroke="var(--gray-900)" stroke-width="2.4"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Tabler base. Contained slash (doesn't extend past circle) — softer informational read.</div>
+      </div>
+
+      <!-- Q3 — Heroicons no-symbol base + arrow -->
+      <div class="variant-card">
+        <div class="variant-label">Q3 — Heroicons base + arrow</div>
+        <div class="variant-display">
+          <div class="pt-cell at-row" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <!-- Heroicons no-symbol shape -->
+                <path d="M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636" stroke="var(--gray-700)" stroke-width="1.5"/>
+                <!-- Arrow -->
+                <line x1="6.5" y1="12" x2="14" y2="12" stroke="var(--gray-500)" stroke-width="1.6"/>
+                <polygon points="14,9.2 17.5,12 14,14.8" fill="var(--gray-500)"/>
+                <!-- Heroicons slash with halo -->
+                <path d="M18.364 18.364L5.636 5.636" stroke="#fff" stroke-width="4.5"/>
+                <path d="M18.364 18.364L5.636 5.636" stroke="var(--gray-900)" stroke-width="2"/>
+              </svg>
+            </span>
+          </div>
+          <div class="at-large">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636" stroke="var(--gray-700)" stroke-width="1.5"/>
+              <line x1="6.5" y1="12" x2="14" y2="12" stroke="var(--gray-500)" stroke-width="1.6"/>
+              <polygon points="14,9.2 17.5,12 14,14.8" fill="var(--gray-500)"/>
+              <path d="M18.364 18.364L5.636 5.636" stroke="#fff" stroke-width="4.5"/>
+              <path d="M18.364 18.364L5.636 5.636" stroke="var(--gray-900)" stroke-width="2"/>
+            </svg>
+          </div>
+        </div>
+        <div class="variant-notes">Heroicons' lighter 1.5 stroke — feels more delicate. Slash spans full diameter of the circle.</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ====================================================================== -->
+  <!-- Family R — Off-the-shelf options in real Stage 2 row context            -->
+  <!-- ====================================================================== -->
+  <section class="section">
+    <h2 class="section-title">Family R — Library options in real row context</h2>
+    <p class="section-desc">
+      The strongest library candidates placed in Stage 2 rows for direct comparison.
+      Some bare prohibition shapes (no arrow), some compositions.
+    </p>
+
+    <div class="row-mock-block">
+      <div class="mapping-list-head">
+        <div></div>
+        <div>Column</div>
+        <div>Standard</div>
+        <div style="text-align:right;">Value fit</div>
+        <div></div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">primary_site</div>
+        <div class="mapping-row-target">case.diagnoses.primary_site</div>
+        <div class="mapping-row-fit">
+          <div class="mapping-row-fit--ratio">73%</div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">tumor_grade <span style="color:var(--gray-400);font-weight:400;">(P1 — Lucide ban, raw)</span></div>
+        <div class="mapping-row-target">case.diagnoses.tumor_grade</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M4.929 4.929 19.07 19.071"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">specimen_id <span style="color:var(--gray-400);font-weight:400;">(P3 — Lucide circle-slash, raw)</span></div>
+        <div class="mapping-row-target">case.specimens.specimen_id</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="9" x2="15" y1="15" y2="9"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">patient_notes <span style="color:var(--gray-400);font-weight:400;">(Q1 — Lucide ban + arrow)</span></div>
+        <div class="mapping-row-target">case.demographics.notes</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10" stroke="var(--gray-700)" stroke-width="2"/>
+                <line x1="6" y1="12" x2="14" y2="12" stroke="var(--gray-500)" stroke-width="1.6"/>
+                <polygon points="14,9.2 17.5,12 14,14.8" fill="var(--gray-500)"/>
+                <path d="M4.929 4.929 19.07 19.071" stroke="#fff" stroke-width="4.5"/>
+                <path d="M4.929 4.929 19.07 19.071" stroke="var(--gray-900)" stroke-width="2"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">consent_text <span style="color:var(--gray-400);font-weight:400;">(Q2 — Tabler forbid + arrow)</span></div>
+        <div class="mapping-row-target">case.demographics.consent</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" stroke="var(--gray-700)" stroke-width="2"/>
+                <line x1="6" y1="12" x2="14" y2="12" stroke="var(--gray-500)" stroke-width="1.6"/>
+                <polygon points="14,9.2 17.5,12 14,14.8" fill="var(--gray-500)"/>
+                <path d="M9 9l6 6" stroke="#fff" stroke-width="4.5"/>
+                <path d="M9 9l6 6" stroke="var(--gray-900)" stroke-width="2.4"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">disease_type</div>
+        <div class="mapping-row-target">case.diagnoses.disease_type</div>
+        <div class="mapping-row-fit">
+          <div class="mapping-row-fit--ratio">100%</div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+      <div class="mapping-row">
+        <div class="mapping-row-status">✦</div>
+        <div class="mapping-row-col">collection_date <span style="color:var(--gray-400);font-weight:400;">(P4 — Tabler forbid, raw)</span></div>
+        <div class="mapping-row-target">case.specimens.collection_date</div>
+        <div class="mapping-row-fit">
+          <div class="pt-cell" data-fast-tooltip="This standard has no permissible value list — values will pass through unchanged.">
+            <span class="pt-icon pt-icon--slate-mid" aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/>
+                <path d="M9 9l6 6"/>
+              </svg>
+            </span>
+          </div>
+        </div>
+        <div class="mapping-row-chev">›</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ====================================================================== -->
+  <!-- Recommendation                                                          -->
+  <!-- ====================================================================== -->
+  <section class="section">
+    <h2 class="section-title">What's actually available off-the-shelf</h2>
+    <p class="section-desc">
+      <strong>Available raw (no composition needed):</strong>
+      Lucide <code>ban</code>, <code>circle-slash</code>, <code>circle-slash-2</code>;
+      Tabler <code>ban</code>, <code>forbid</code>, <code>forbid-2</code>;
+      Heroicons <code>no-symbol</code>; Phosphor <code>prohibit</code>; Bootstrap Icons <code>slash-circle</code>.
+      All MIT-licensed.
+    </p>
+    <p class="section-desc">
+      <strong>Not available pre-built:</strong> a combined "arrow + ban" icon. Tabler has
+      <code>refresh-off</code>, <code>repeat-off</code>, <code>exchange-off</code> which combine
+      arrow loops + slash, but they encode "no recycle / no exchange" — wrong story for our
+      passthrough case.
+    </p>
+    <p class="section-desc">
+      <strong>My pick:</strong>
+      If the bare prohibition shape is enough (and the tooltip carries the explanation),
+      go with <strong>P3 / P4</strong> — Lucide <code>circle-slash</code> or Tabler <code>forbid</code>.
+      The contained-slash variant is softer and more informational than the corner-to-corner ban.
+      If you want the arrow inside, go with <strong>Q2</strong> — Tabler <code>forbid</code> base
+      with an arrow added; the contained slash leaves the arrow more legible than the
+      corner-to-corner versions do. Either way you're using a battle-tested MIT-licensed shape
+      as the foundation rather than hand-rolling.
+    </p>
+  </section>
+
+</body>
+</html>

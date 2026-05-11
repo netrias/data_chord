@@ -55,9 +55,24 @@ function _compareVersions(a, b) {
   return 0;
 }
 
+/**
+ * Sort versions newest-first.
+ * Newest must be index 0 so it appears at the top of the <select> dropdown:
+ * Chrome on macOS aligns the picker on the currently-selected option, so if
+ * the default (latest) sits last in the list the picker opens upward.
+ */
+function _sortVersionsDescending(versions) {
+  return [...versions].sort((a, b) => {
+    const aNumber = Number(a.version_number);
+    const bNumber = Number(b.version_number);
+    if (Number.isFinite(aNumber) && Number.isFinite(bNumber)) return bNumber - aNumber;
+    return _compareVersions(b.version_label, a.version_label);
+  });
+}
+
 function _getLatestVersion(versions) {
   if (!versions || versions.length === 0) return '';
-  return [...versions].sort(_compareVersions).pop();
+  return _sortVersionsDescending(versions)[0];
 }
 
 function _scheduleRetry() {
@@ -114,15 +129,145 @@ function _buildOptionElements(selectEl, items, valueKey, labelKey, selectedValue
   }
 }
 
-function _buildVersionOptions(selectEl, versions, selectedVersion) {
-  selectEl.textContent = '';
-  for (const v of versions) {
-    const option = document.createElement('option');
-    option.value = v;
-    option.textContent = v;
-    if (v === selectedVersion) option.selected = true;
-    selectEl.appendChild(option);
+/**
+ * Build a custom dropdown for versions.
+ * Replaces native <select> because macOS Chrome overlays the picker on the trigger
+ * (centers the selected option on the trigger position). A custom dropdown lets the
+ * panel always render below the trigger without covering it.
+ * Wrap exposes a hidden <input id="versionSelect"> so downstream `.value` reads work unchanged.
+ */
+function _createVersionDropdown(versions, selectedVersion) {
+  const wrap = document.createElement('div');
+  wrap.className = 'data-model-dropdown';
+
+  const trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.id = 'versionDropdownTrigger';
+  trigger.className = 'data-model-dropdown-trigger';
+  trigger.setAttribute('aria-haspopup', 'listbox');
+  trigger.setAttribute('aria-expanded', 'false');
+  const triggerLabel = document.createElement('span');
+  triggerLabel.className = 'data-model-dropdown-label';
+  trigger.appendChild(triggerLabel);
+
+  /* Outer panel clips the rounded corner; inner list holds the scrollbar. */
+  const panel = document.createElement('div');
+  panel.className = 'data-model-dropdown-panel';
+  panel.hidden = true;
+  const list = document.createElement('ul');
+  list.className = 'data-model-dropdown-list';
+  list.setAttribute('role', 'listbox');
+  panel.appendChild(list);
+
+  const hidden = document.createElement('input');
+  hidden.type = 'hidden';
+  hidden.id = 'versionSelect';
+
+  wrap.appendChild(trigger);
+  wrap.appendChild(panel);
+  wrap.appendChild(hidden);
+
+  _populateVersionDropdown(wrap, versions, selectedVersion);
+  _attachDropdownInteractions(wrap);
+  return wrap;
+}
+
+function _populateVersionDropdown(wrap, versions, selectedVersion) {
+  const triggerLabel = wrap.querySelector('.data-model-dropdown-label');
+  const list = wrap.querySelector('.data-model-dropdown-list');
+  const hidden = wrap.querySelector('input[type="hidden"]');
+
+  list.textContent = '';
+  const sorted = _sortVersionsDescending(versions);
+  const wantedNumber = String(selectedVersion?.version_number ?? selectedVersion ?? '');
+  let matched = false;
+
+  for (const v of sorted) {
+    const versionNumber = String(v.version_number);
+    const item = document.createElement('li');
+    item.className = 'data-model-dropdown-item';
+    item.setAttribute('role', 'option');
+    item.dataset.value = versionNumber;
+    item.textContent = _versionDisplayLabel(v);
+    if (versionNumber === wantedNumber) {
+      item.setAttribute('aria-selected', 'true');
+      triggerLabel.textContent = item.textContent;
+      hidden.value = versionNumber;
+      matched = true;
+    }
+    list.appendChild(item);
   }
+
+  /* Fall back to first option when the requested selection isn't present (model swap clears it). */
+  if (!matched && sorted.length > 0) {
+    const first = sorted[0];
+    triggerLabel.textContent = _versionDisplayLabel(first);
+    hidden.value = String(first.version_number);
+    list.firstElementChild?.setAttribute('aria-selected', 'true');
+  } else if (sorted.length === 0) {
+    triggerLabel.textContent = '';
+    hidden.value = '';
+  }
+}
+
+function _attachDropdownInteractions(wrap) {
+  const trigger = wrap.querySelector('.data-model-dropdown-trigger');
+  const panel = wrap.querySelector('.data-model-dropdown-panel');
+  const triggerLabel = wrap.querySelector('.data-model-dropdown-label');
+  const hidden = wrap.querySelector('input[type="hidden"]');
+
+  /* Panel uses position: fixed so it escapes the modal dialog's overflow bounds.
+   * Reposition on open and on viewport changes so it tracks the trigger. */
+  const reposition = () => {
+    const rect = trigger.getBoundingClientRect();
+    panel.style.top = `${rect.bottom + 4}px`;
+    panel.style.left = `${rect.left}px`;
+    panel.style.width = `${rect.width}px`;
+  };
+  const close = () => {
+    panel.hidden = true;
+    trigger.setAttribute('aria-expanded', 'false');
+    window.removeEventListener('resize', reposition);
+    window.removeEventListener('scroll', reposition, true);
+  };
+  const open = () => {
+    reposition();
+    panel.hidden = false;
+    trigger.setAttribute('aria-expanded', 'true');
+    window.addEventListener('resize', reposition);
+    /* Capture phase catches scroll inside the dialog, not just on window. */
+    window.addEventListener('scroll', reposition, true);
+  };
+
+  trigger.addEventListener('click', (event) => {
+    event.stopPropagation();
+    panel.hidden ? open() : close();
+  });
+
+  panel.addEventListener('click', (event) => {
+    const item = event.target.closest('.data-model-dropdown-item');
+    if (!item) return;
+    panel.querySelectorAll('[aria-selected="true"]').forEach((el) => el.removeAttribute('aria-selected'));
+    item.setAttribute('aria-selected', 'true');
+    triggerLabel.textContent = item.textContent;
+    hidden.value = item.dataset.value || '';
+    close();
+  });
+
+  /* Close on outside click or Escape. */
+  document.addEventListener('click', (event) => {
+    if (!wrap.contains(event.target)) close();
+  });
+  trigger.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') close();
+  });
+}
+
+function _versionDisplayLabel(version) {
+  if (version.external_version_number) {
+    return version.external_version_number;
+  }
+  return version.version_label || `v${version.version_number}`;
 }
 
 function _buildDialogDOM(dataModels) {
@@ -163,18 +308,16 @@ function _buildDialogDOM(dataModels) {
   const versionField = document.createElement('div');
   versionField.className = 'data-model-field';
   const versionLabel = document.createElement('label');
-  versionLabel.htmlFor = 'versionSelect';
+  versionLabel.htmlFor = 'versionDropdownTrigger';
   versionLabel.textContent = 'Version';
-  const versionSelect = document.createElement('select');
-  versionSelect.id = 'versionSelect';
 
   const defaultModel = dataModels.find((m) => m.key === DEFAULT_DATA_MODEL) || dataModels[0];
   const versions = defaultModel?.versions ?? [];
   const defaultVersion = _getLatestVersion(versions);
-  _buildVersionOptions(versionSelect, versions, defaultVersion);
+  const versionDropdown = _createVersionDropdown(versions, defaultVersion);
 
   versionField.appendChild(versionLabel);
-  versionField.appendChild(versionSelect);
+  versionField.appendChild(versionDropdown);
   body.appendChild(versionField);
   content.appendChild(body);
 
@@ -225,23 +368,22 @@ function _attachCloseHandlers(dialog, resolve) {
   return { markResolved: () => { resolved = true; } };
 }
 
-/** Wire data model <select> change to update the version <select>. */
+/** Wire data model <select> change to repopulate the version dropdown. */
 function _setupModelChangeHandler(dialog, dataModels) {
   const modelSelect = dialog.querySelector('#dataModelSelect');
-  const versionSelect = dialog.querySelector('#versionSelect');
+  const versionDropdown = dialog.querySelector('.data-model-dropdown');
 
   modelSelect.addEventListener('change', () => {
     const selected = dataModels.find((m) => m.key === modelSelect.value);
     const versions = selected?.versions ?? [];
     const latestVersion = _getLatestVersion(versions);
-    _buildVersionOptions(versionSelect, versions, latestVersion);
-    versionSelect.value = latestVersion;
+    _populateVersionDropdown(versionDropdown, versions, latestVersion);
   });
 }
 
 /**
  * Show the data model selection popup.
- * @returns {Promise<{dataModelKey: string, versionLabel: string} | null>}
+ * @returns {Promise<{dataModelKey: string, versionNumber: number} | null>}
  *   Resolves with selection on confirm, or null on cancel/close.
  * @throws {Error} If data models are unavailable (preload failed).
  */
@@ -268,17 +410,18 @@ export async function showDataModelPopup() {
     const { markResolved } = _attachCloseHandlers(dialog, resolve);
     _setupModelChangeHandler(dialog, dataModels);
 
-    const dataModelSelect = dialog.querySelector('#dataModelSelect');
-    const versionSelect = dialog.querySelector('#versionSelect');
+    const dataModelSelect = /** @type {HTMLSelectElement|null} */ (dialog.querySelector('#dataModelSelect'));
+    const versionSelect = /** @type {HTMLSelectElement|null} */ (dialog.querySelector('#versionSelect'));
     const confirmBtn = dialog.querySelector('.data-model-confirm-btn');
 
-    confirmBtn.addEventListener('click', () => {
+    confirmBtn?.addEventListener('click', () => {
+      if (!dataModelSelect || !versionSelect) return;
       markResolved();
       const dataModelKey = dataModelSelect.value;
-      const versionLabel = versionSelect.value;
+      const versionNumber = Number(versionSelect.value);
       dialog.close();
       dialog.remove();
-      resolve({ dataModelKey, versionLabel });
+      resolve({ dataModelKey, versionNumber });
     });
   });
 }

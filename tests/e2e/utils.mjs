@@ -37,8 +37,10 @@ export const uploadAndAnalyzeSheet = async (page, filePath, sheetName) => {
   await page.locator('#analyzeButton').waitFor({ state: 'attached' });
   await page.locator('#analyzeButton').waitFor({ state: 'visible' });
   await page.waitForFunction(() => !document.querySelector('#analyzeButton')?.disabled);
-  await page.locator('#sheetSelect').waitFor({ state: 'visible' });
-  await page.selectOption('#sheetSelect', sheetName);
+  // Workbook tabs render once upload finishes; click the named tab to select.
+  const sheetTab = page.locator(`.workbook-tab[data-sheet-name="${sheetName}"]`);
+  await sheetTab.waitFor({ state: 'visible' });
+  await sheetTab.click();
   await page.click('#analyzeButton');
   const confirmButton = page.locator('.data-model-confirm-btn');
   await confirmButton.waitFor({ state: 'visible' });
@@ -90,6 +92,9 @@ export const mockAnalyze = async (page) => {
       columns: [
         {
           column_name: 'col_a',
+          column_key: 'col_a',
+          source_index: 0,
+          header: 'col_a',
           inferred_type: 'text',
           sample_values: ['Foo', 'Bar'],
           confidence_bucket: 'high',
@@ -97,6 +102,9 @@ export const mockAnalyze = async (page) => {
         },
       ],
       cde_targets: {},
+      column_summaries: {
+        col_a: { value_overlap_ratio: null },
+      },
       next_stage: 'mapping',
       next_step_hint: 'Review AI-suggested column mappings once ready.',
       manual_overrides: {},
@@ -114,13 +122,73 @@ export const mockAnalyze = async (page) => {
   });
 };
 
+
+export const mockColumnDetail = async (page) => {
+  await page.route('**/stage-2/column-detail/**', async (route) => {
+    const url = new URL(route.request().url());
+    const parts = url.pathname.split('/');
+    const columnKey = decodeURIComponent(parts[parts.length - 1] ?? '');
+    const response = {
+      column_key: columnKey,
+      profile: {
+        column_key: columnKey,
+        total_rows: 3,
+        distinct_values: [
+          { value: 'Foo', count: 2 },
+          { value: 'Bar', count: 1 },
+        ],
+        null_count: 0,
+        total_distinct: 2,
+        null_pct: 0.0,
+        is_all_unique: false,
+      },
+      match_counts: {},
+      overlap_by_cde: {},
+      cde_types: {},
+      selected_pvs: null,
+    };
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(response),
+    });
+  });
+};
+
 export const mockDataModels = async (page) => {
   await page.route('**/stage-1/data-models', async (route) => {
     const models = [
       {
         key: 'test-data-model',
         label: 'Test Data Model',
-        versions: ['v1'],
+        versions: [{ version_label: 'v1', version_number: 1, external_version_number: null, is_default: true }],
+      },
+    ];
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(models),
+    });
+  });
+};
+
+/**
+ * Mock data models with N synthetic versions; latest is the default.
+ * Used to exercise overflow/scroll behavior on the version dropdown panel.
+ */
+export const mockDataModelsWithVersionCount = async (page, count) => {
+  await page.route('**/stage-1/data-models', async (route) => {
+    const versions = Array.from({ length: count }, (_, i) => ({
+      version_label: `v${i + 1}.0`,
+      version_number: i + 1,
+      external_version_number: null,
+      is_default: i === count - 1,
+    }));
+    const models = [
+      {
+        key: 'test-data-model',
+        label: 'Test Data Model',
+        versions,
       },
     ];
     await route.fulfill({

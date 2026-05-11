@@ -1,31 +1,113 @@
-"""Analyze tabular structure and infer column types for upload preview."""
+"""Analyze tabular structure and infer column types for upload preview.
+
+Produces both the small ``ColumnPreview`` list (legacy 5-row sample for the
+upload screen) and a ``ColumnProfile`` per column (full distinct-value tally
+consumed by the Stage 2 takeover left pane).
+"""
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 from netrias_client import TabularColumn, read_tabular
+from openpyxl import load_workbook
+from openpyxl.worksheet.worksheet import Worksheet
 
+from src.domain.column_profile import ColumnProfile, build_column_profile
 from src.domain.manifest import completeness_bucket
 
-from .schemas import ColumnPreview
+from .schemas import ColumnPreview, SheetPreview
+
+DEFAULT_SHEET_PREVIEW_ROWS = 5
+DEFAULT_SHEET_PREVIEW_COLUMNS = 6
 
 
 def analyze_columns(
     csv_path: Path,
     max_preview_rows: int = 5,
     sheet_name: str | None = None,
-) -> tuple[int, list[ColumnPreview]]:
+) -> tuple[int, list[ColumnPreview], dict[str, ColumnProfile]]:
     if not csv_path.exists():
         raise FileNotFoundError(csv_path)
 
     dataset = read_tabular(csv_path, sheet_name=sheet_name)
     sample_rows = dataset.rows[:max_preview_rows]
     columns = [_analyze_single_column(column, sample_rows) for column in dataset.columns]
+    profiles = {
+        column.key: build_column_profile(
+            column.key,
+            (row[column.index] if column.index < len(row) else "" for row in dataset.rows),
+        )
+        for column in dataset.columns
+    }
     total_rows = len(dataset.rows)
-    return total_rows, columns
+    return total_rows, columns, profiles
+
+
+def read_workbook_sheet_previews(
+    path: Path,
+    sheet_names: list[str],
+    *,
+    max_rows: int = DEFAULT_SHEET_PREVIEW_ROWS,
+    max_cols: int = DEFAULT_SHEET_PREVIEW_COLUMNS,
+) -> dict[str, SheetPreview]:
+    """Return small exact-value worksheet previews for the upload response."""
+    if path.suffix.lower() != ".xlsx" or not sheet_names:
+        return {}
+    if not path.exists():
+        raise FileNotFoundError(path)
+
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    try:
+        previews: dict[str, SheetPreview] = {}
+        for sheet_name in sheet_names:
+            worksheet = cast(Worksheet, workbook[sheet_name])
+            previews[sheet_name] = _read_single_sheet_preview(worksheet, max_rows=max_rows, max_cols=max_cols)
+        return previews
+    finally:
+        workbook.close()
+
+
+def _read_single_sheet_preview(worksheet: Worksheet, *, max_rows: int, max_cols: int) -> SheetPreview:
+    if _worksheet_is_empty(worksheet):
+        return SheetPreview()
+
+    visible_columns = min(worksheet.max_column, max_cols)
+    row_limit = max_rows + 2
+    col_limit = max_cols + 1
+    rows = list(worksheet.iter_rows(max_row=row_limit, max_col=col_limit, values_only=True))
+    header_values = list(rows[0] if rows else ())
+    headers = [_cell_to_string(value) for value in header_values[:visible_columns]]
+    preview_rows = [
+        _shape_preview_row(row, width=len(headers))
+        for row in rows[1 : max_rows + 1]
+    ]
+    truncated_rows = len(rows) > max_rows + 1 or worksheet.max_row > max_rows + 1
+    truncated_columns = worksheet.max_column > max_cols
+    return SheetPreview(
+        headers=headers,
+        rows=preview_rows,
+        truncated_rows=truncated_rows,
+        truncated_columns=truncated_columns,
+    )
+
+
+def _worksheet_is_empty(worksheet: Worksheet) -> bool:
+    return worksheet.max_row == 1 and worksheet.max_column == 1 and worksheet["A1"].value is None
+
+
+def _shape_preview_row(row: tuple[object, ...], *, width: int) -> list[str]:
+    values = [_cell_to_string(value) for value in row[:width]]
+    return values + [""] * (width - len(values))
+
+
+def _cell_to_string(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value)
 
 
 def _analyze_single_column(column: TabularColumn, sample_rows: list[list[str]]) -> ColumnPreview:

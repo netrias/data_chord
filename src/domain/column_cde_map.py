@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from src.domain.cde import NO_MAPPING_SENTINEL
+from src.domain.cde import normalize_cde_key
 from src.domain.columns import ColumnKey, column_key_from_string
 
 
@@ -18,12 +18,12 @@ class ColumnCdeMap:
         return cls(mappings={})
 
     @classmethod
-    def from_strings(cls, mappings: Mapping[str, str]) -> ColumnCdeMap:
+    def from_strings(cls, mappings: Mapping[str, str | None]) -> ColumnCdeMap:
         return cls(
             mappings={
-                column_key_from_string(column_key): cde_key
+                column_key_from_string(column_key): normalized_cde_key
                 for column_key, cde_key in mappings.items()
-                if cde_key and cde_key != NO_MAPPING_SENTINEL
+                if (normalized_cde_key := normalize_cde_key(cde_key)) is not None
             }
         )
 
