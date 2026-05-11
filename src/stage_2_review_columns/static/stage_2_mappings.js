@@ -60,6 +60,18 @@ const STATUS_CLASS = {
   [TAG.OVR]: 'mapping-ico--ovr',
   [TAG.NONE]: 'mapping-ico--none',
 };
+const STATUS_TIP = {
+  [TAG.REC]: 'AI recommendation',
+  [TAG.OVR]: 'Manual override',
+  [TAG.NONE]: 'No mapping',
+};
+const FILTER_DESC = {
+  [SOURCE_FILTER.ALL]: 'Show all columns regardless of mapping status.',
+  [SOURCE_FILTER.REC]: 'Columns mapped to a standard suggested by the AI model.',
+  [SOURCE_FILTER.OVR]: 'Columns where you\'ve manually selected a different standard than the AI suggested.',
+  [SOURCE_FILTER.NONE]: 'Columns with no target standard selected. These will be skipped during harmonization.',
+  [SOURCE_FILTER.WILL_CHANGE]: 'Columns mapped to standards with permissible values — only these will have their values rewritten during harmonization.',
+};
 const MATCH_TIP = "Distinct values in your column that exactly match a permissible value of this CDE.";
 const PASSTHROUGH_FIT_TIP = "This standard has no permissible value list — values will pass through unchanged.";
 // Single source of truth for the pass-through glyph — same symbol on the
@@ -92,7 +104,12 @@ const VALUE_FIT_SORT = { NONE: 'none', ASC: 'asc', DESC: 'desc' };
 
 const state = {
   payload: null,                  // Stage 1 analyze payload from session storage
-  sourceFilter: SOURCE_FILTER.ALL,
+  filters: {
+    sources: new Set([TAG.REC, TAG.OVR, TAG.NONE]),
+    willChangeOnly: false,
+    hideEmpty: false,
+  },
+  filterModalOpen: false,
   filterText: '',
   overrides: new Map(),           // columnKey -> cdeKey | null
   takeoverKey: null,              // column key whose takeover is open
@@ -183,10 +200,18 @@ const _isWillChangeValuesColumn = (column) => {
   return !!cde && cdeByKey.get(cde)?.type === 'pv';
 };
 
-const _passesSourceFilter = (column) => {
-  if (state.sourceFilter === SOURCE_FILTER.ALL) return true;
-  if (state.sourceFilter === SOURCE_FILTER.WILL_CHANGE) return _isWillChangeValuesColumn(column);
-  return _effectiveStatus(column) === state.sourceFilter;
+const _hasValues = (column) => {
+  const colKey = column.column_key ?? column.column_name;
+  const profile = state.payload?.column_profiles?.[colKey];
+  if (!profile) return true;
+  return (profile.total_distinct ?? profile.distinct_values?.length ?? 0) > 0;
+};
+
+const _passesFilters = (column) => {
+  if (!state.filters.sources.has(_effectiveStatus(column))) return false;
+  if (state.filters.willChangeOnly && !_isWillChangeValuesColumn(column)) return false;
+  if (state.filters.hideEmpty && !_hasValues(column)) return false;
+  return true;
 };
 
 const _overlapRatioFor = (column) => {
@@ -205,7 +230,7 @@ const _overlapRatioFor = (column) => {
 const _filteredColumns = () => {
   const cols = state.payload?.columns ?? [];
   const filtered = cols.filter((c) => {
-    if (!_passesSourceFilter(c)) return false;
+    if (!_passesFilters(c)) return false;
     if (state.filterText && !(c.header ?? c.column_name ?? '').toLowerCase().includes(state.filterText)) {
       return false;
     }
@@ -228,44 +253,173 @@ const _filteredColumns = () => {
   });
 };
 
-/* ─── Source filter chips and column search ──────────────── */
-const renderSourceFilter = () => {
+/* ─── Filter modal (centered popup, multi-select) ────────── */
+
+const _isDefaultFilters = () =>
+  state.filters.sources.size === 3 && !state.filters.willChangeOnly && !state.filters.hideEmpty;
+
+const _activeFilterCount = () => {
+  let n = 0;
+  if (state.filters.sources.size < 3) n += 1;
+  if (state.filters.willChangeOnly) n += 1;
+  if (state.filters.hideEmpty) n += 1;
+  return n;
+};
+
+const FILTER_ICON_SVG = `<svg class="filter-modal-trigger-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.5 2h13a.5.5 0 01.09.99L14.5 3h-.09L10 8.28V14a.5.5 0 01-.22.42l-2 1.33a.5.5 0 01-.78-.42V8.28L2.59 3H2.5l-.09-.01A.5.5 0 011.5 2z"/></svg>`;
+
+const renderFilterTrigger = () => {
+  const total = (state.payload?.columns ?? []).length;
+  const shown = _filteredColumns().length;
+  const isDefault = _isDefaultFilters();
+  const activeN = _activeFilterCount();
+  sourceFilterEl.innerHTML = isDefault
+    ? `<button class="filter-modal-trigger" id="filterModalTrigger">
+        ${FILTER_ICON_SVG}
+        <span>Filters</span>
+      </button>`
+    : `<button class="filter-modal-trigger filter-modal-trigger--active" id="filterModalTrigger">
+        ${FILTER_ICON_SVG}
+        <span>Filters</span>
+        <span class="filter-modal-trigger-badge">${activeN}</span>
+        <span class="filter-modal-trigger-ratio">${shown} / ${total}</span>
+      </button>`;
+};
+
+const _openFilterModal = () => {
+  state.filterModalOpen = true;
+  _renderFilterModal();
+};
+
+const _closeFilterModal = () => {
+  state.filterModalOpen = false;
+  const el = document.getElementById('filterModal');
+  if (el) el.remove();
+};
+
+const _filterCounts = () => {
   const cols = state.payload?.columns ?? [];
-  // "Will change values" overlaps with REC/OVR (a column can be both an AI
-  // rec and PV-typed) so the counters are tracked independently — the
-  // chip-count contract is per-chip, not summing across chips.
-  const counts = { [TAG.REC]: 0, [TAG.OVR]: 0, [TAG.NONE]: 0, [SOURCE_FILTER.WILL_CHANGE]: 0 };
-  for (const c of cols) {
-    counts[_effectiveStatus(c)] += 1;
-    if (_isWillChangeValuesColumn(c)) counts[SOURCE_FILTER.WILL_CHANGE] += 1;
-  }
-  const items = [
-    { key: SOURCE_FILTER.ALL, label: 'All', icon: null, iconCls: null, count: cols.length },
-    { key: SOURCE_FILTER.REC, label: 'AI Recommendation', icon: STATUS[TAG.REC], iconCls: STATUS_CLASS[TAG.REC], count: counts[TAG.REC] },
-    { key: SOURCE_FILTER.OVR, label: 'Override', icon: STATUS[TAG.OVR], iconCls: STATUS_CLASS[TAG.OVR], count: counts[TAG.OVR] },
-    { key: SOURCE_FILTER.NONE, label: 'No Mapping', icon: STATUS[TAG.NONE], iconCls: STATUS_CLASS[TAG.NONE], count: counts[TAG.NONE] },
-    { key: SOURCE_FILTER.WILL_CHANGE, label: 'Will change values', icon: null, iconCls: null, count: counts[SOURCE_FILTER.WILL_CHANGE] },
-  ];
-  // Filter-chip class uses snake_case key directly; modifier is hyphenated for
-  // CSS readability (mapping-filter-btn--will-change).
-  const cssKey = (k) => k.replaceAll('_', '-');
-  sourceFilterEl.innerHTML = items.map((it) => `
-    <button class="mapping-filter-btn mapping-filter-btn--${cssKey(it.key)} ${state.sourceFilter === it.key ? 'active' : ''}" data-key="${it.key}">
-      ${it.icon ? `<span class="mapping-filter-icon ${it.iconCls}">${it.icon}</span>` : ''}
-      <span>${it.label}</span>
-      <span class="mapping-filter-count">${it.count}</span>
-    </button>
-  `).join('');
+  return {
+    total: cols.length,
+    [TAG.REC]: cols.filter((c) => _effectiveStatus(c) === TAG.REC).length,
+    [TAG.OVR]: cols.filter((c) => _effectiveStatus(c) === TAG.OVR).length,
+    [TAG.NONE]: cols.filter((c) => _effectiveStatus(c) === TAG.NONE).length,
+    willChange: cols.filter(_isWillChangeValuesColumn).length,
+    hasValues: cols.filter(_hasValues).length,
+    empty: cols.filter((c) => !_hasValues(c)).length,
+  };
+};
+
+const _sourceCheckHtml = (tag, label, icon, iconCls, count, desc) => {
+  const checked = state.filters.sources.has(tag) ? 'checked' : '';
+  return `
+    <label class="fm-check" data-source="${tag}">
+      <input type="checkbox" ${checked} />
+      <span class="fm-check-box"></span>
+      <div class="fm-check-content">
+        <div class="fm-check-head">
+          <span class="mapping-filter-icon ${iconCls}">${icon}</span>
+          <span class="fm-check-label">${label}</span>
+          <span class="fm-check-count">${count}</span>
+        </div>
+        <p class="fm-check-desc">${desc}</p>
+      </div>
+    </label>
+  `;
+};
+
+const _toggleCheckHtml = (id, label, checked, count, desc) => `
+  <label class="fm-check" data-toggle="${id}">
+    <input type="checkbox" ${checked ? 'checked' : ''} />
+    <span class="fm-check-box"></span>
+    <div class="fm-check-content">
+      <div class="fm-check-head">
+        <span class="fm-check-label">${label}</span>
+        <span class="fm-check-count">${count}</span>
+      </div>
+      <p class="fm-check-desc">${desc}</p>
+    </div>
+  </label>
+`;
+
+const _renderFilterModal = () => {
+  let el = document.getElementById('filterModal');
+  if (el) el.remove();
+  const counts = _filterCounts();
+  el = document.createElement('div');
+  el.className = 'filter-modal';
+  el.id = 'filterModal';
+  el.innerHTML = `
+    <div class="filter-modal-backdrop"></div>
+    <div class="filter-modal-card">
+      <header class="filter-modal-head">
+        <h2 class="filter-modal-title">Filters</h2>
+        <button class="filter-modal-close" data-action="close-filter" aria-label="Close">✕</button>
+      </header>
+      <div class="filter-modal-body">
+        <section class="fm-section">
+          <h3 class="fm-section-title">Mapping source</h3>
+          ${_sourceCheckHtml(TAG.REC, 'AI Recommendation', STATUS[TAG.REC], STATUS_CLASS[TAG.REC], counts[TAG.REC], FILTER_DESC[SOURCE_FILTER.REC])}
+          ${_sourceCheckHtml(TAG.OVR, 'Override', STATUS[TAG.OVR], STATUS_CLASS[TAG.OVR], counts[TAG.OVR], FILTER_DESC[SOURCE_FILTER.OVR])}
+          ${_sourceCheckHtml(TAG.NONE, 'No Mapping', STATUS[TAG.NONE], STATUS_CLASS[TAG.NONE], counts[TAG.NONE], FILTER_DESC[SOURCE_FILTER.NONE])}
+        </section>
+        <section class="fm-section">
+          <h3 class="fm-section-title">Harmonization</h3>
+          ${_toggleCheckHtml('willChange', 'Only columns that will change values', state.filters.willChangeOnly, counts.willChange, FILTER_DESC[SOURCE_FILTER.WILL_CHANGE])}
+        </section>
+        <section class="fm-section">
+          <h3 class="fm-section-title">Data content</h3>
+          ${_toggleCheckHtml('hideEmpty', 'Hide empty columns', state.filters.hideEmpty, counts.empty, 'Exclude columns where all rows are blank or null — these columns have no data to harmonize.')}
+        </section>
+      </div>
+      <footer class="filter-modal-foot">
+        <button class="filter-modal-reset" data-action="reset-filters" ${_isDefaultFilters() ? 'disabled' : ''}>Reset all</button>
+        <span class="filter-modal-showing">Showing <b>${_filteredColumns().length}</b> of <b>${counts.total}</b> columns</span>
+      </footer>
+    </div>
+  `;
+  document.body.appendChild(el);
+  _bindFilterModalEvents(el);
+};
+
+const _bindFilterModalEvents = (el) => {
+  el.querySelector('.filter-modal-backdrop').addEventListener('click', _closeFilterModal);
+  el.querySelector('[data-action="close-filter"]').addEventListener('click', _closeFilterModal);
+  el.querySelector('[data-action="reset-filters"]').addEventListener('click', () => {
+    state.filters.sources = new Set([TAG.REC, TAG.OVR, TAG.NONE]);
+    state.filters.willChangeOnly = false;
+    state.filters.hideEmpty = false;
+    _refreshAfterFilterChange();
+  });
+  el.querySelectorAll('[data-source]').forEach((label) => {
+    label.querySelector('input').addEventListener('change', (e) => {
+      const tag = label.dataset.source;
+      if (e.target.checked) state.filters.sources.add(tag);
+      else state.filters.sources.delete(tag);
+      _refreshAfterFilterChange();
+    });
+  });
+  el.querySelectorAll('[data-toggle]').forEach((label) => {
+    label.querySelector('input').addEventListener('change', (e) => {
+      const id = label.dataset.toggle;
+      if (id === 'willChange') state.filters.willChangeOnly = e.target.checked;
+      if (id === 'hideEmpty') state.filters.hideEmpty = e.target.checked;
+      _refreshAfterFilterChange();
+    });
+  });
+};
+
+const _refreshAfterFilterChange = () => {
+  renderRows();
+  renderFilterTrigger();
+  if (state.filterModalOpen) _renderFilterModal();
 };
 
 sourceFilterEl.addEventListener('click', (e) => {
-  const btn = e.target.closest('.mapping-filter-btn');
-  if (!btn) return;
-  const key = btn.dataset.key;
-  if (state.sourceFilter === key) return;
-  state.sourceFilter = key;
-  renderSourceFilter();
-  renderRows();
+  if (e.target.closest('#filterModalTrigger')) {
+    if (state.filterModalOpen) _closeFilterModal();
+    else _openFilterModal();
+  }
 });
 
 colSearchEl.addEventListener('input', (e) => {
@@ -340,8 +494,8 @@ const _rowHtml = (col) => {
   const fit = _overlapCellHtml(col);
   return `
     <div class="mapping-row" data-key="${_escAttr(colKey)}">
-      <div class="mapping-row-status ${STATUS_CLASS[status]}" title="${status}">${STATUS[status]}</div>
       <div class="mapping-row-col" title="${_escAttr(col.header ?? col.column_name)}">${_escHtml(col.header ?? col.column_name)}</div>
+      <div class="mapping-row-status ${STATUS_CLASS[status]}" data-fast-tooltip="${_escAttr(STATUS_TIP[status])}">${STATUS[status]}</div>
       ${target}
       ${fit}
       <div class="mapping-row-chev">›</div>
@@ -688,13 +842,13 @@ const _togglePicker = () => {
     _pickOverride(state.takeoverKey, opt.dataset.value);
     _closePicker();
     renderRows();
-    renderSourceFilter();
+    renderFilterTrigger();
     // Re-fetch detail with the new selection so the right-pane PV list updates.
     state.detailByColumn.delete(state.takeoverKey);
     renderTakeover();
     await _ensureColumnDetail(state.takeoverKey);
     renderRows();
-    renderSourceFilter();
+    renderFilterTrigger();
     renderTakeover();
   });
 };
@@ -808,6 +962,7 @@ document.addEventListener('click', (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
+    if (state.filterModalOpen) { _closeFilterModal(); return; }
     if (state.pickerOpen) { _closePicker(); return; }
     if (state.takeoverKey) closeTakeover();
     return;
@@ -927,7 +1082,7 @@ const _ensureOverrideDetails = async () => {
     await _ensureColumnDetail(colKey);
   }));
   if (overriddenValueRows.length) {
-    renderSourceFilter();
+    renderFilterTrigger();
     renderRows();
   }
 };
@@ -950,7 +1105,7 @@ const _init = async () => {
     }
   }
   if (!payload) {
-    renderSourceFilter();
+    renderFilterTrigger();
     renderRows();
     return;
   }
@@ -958,7 +1113,7 @@ const _init = async () => {
   state.overrides = new Map(
     Object.entries(payload.manual_overrides ?? {}).map(([key, value]) => [key, _normalizeOverrideValue(value)])
   );
-  renderSourceFilter();
+  renderFilterTrigger();
   renderRows();
   void _ensureOverrideDetails();
 };

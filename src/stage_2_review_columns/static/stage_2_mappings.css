@@ -20,11 +20,12 @@ body.lock {
 
 .mapping-toolbar {
   display: flex;
-  justify-content: space-between;
+  justify-content: center;
   align-items: center;
   gap: var(--space-4);
   margin-bottom: var(--space-3);
-  flex-wrap: wrap;
+  position: relative;
+  min-height: 40px;
 }
 
 /* Source filter chips. Each chip carries the same status icon used on the row,
@@ -34,6 +35,7 @@ body.lock {
    NONE/ALL=neutral) plus a shape bump (heavier text, thicker border, slight
    padding increase). .mapping-ico--* are also used by row status indicators. */
 .mapping-filter-bar {
+  position: relative;
   display: inline-flex;
   gap: var(--space-2);
   flex-wrap: wrap;
@@ -123,6 +125,311 @@ body.lock {
 .mapping-filter-btn--none.active        .mapping-filter-count { color: var(--gray-700); }
 .mapping-filter-btn--will-change.active .mapping-filter-count { color: var(--netrias-600); }
 
+/* ==========================================================================
+   Filter modal — centered popup with multi-select checkboxes
+   ========================================================================== */
+
+.filter-modal-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-md);
+  background: var(--gray-50);
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--gray-600);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background var(--transition-fast), border-color var(--transition-fast),
+              color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.filter-modal-trigger:hover {
+  border-color: var(--gray-300);
+  background: var(--gray-100);
+  color: var(--gray-800);
+  box-shadow: var(--shadow-sm);
+}
+
+.filter-modal-trigger--active {
+  background: var(--netrias-50);
+  border-color: var(--netrias-200);
+  color: var(--netrias-700);
+}
+
+.filter-modal-trigger--active:hover {
+  background: var(--netrias-100);
+  border-color: var(--netrias-300);
+}
+
+.filter-modal-trigger-icon {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  color: var(--gray-400);
+}
+
+.filter-modal-trigger--active .filter-modal-trigger-icon {
+  color: var(--netrias-500);
+}
+
+.filter-modal-trigger-count {
+  color: var(--gray-400);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+.filter-modal-trigger-ratio {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.82rem;
+}
+
+.filter-modal-trigger--active .filter-modal-trigger-ratio {
+  color: var(--netrias-600);
+  font-weight: 700;
+}
+
+.filter-modal-trigger-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  background: var(--netrias-600);
+  color: var(--white);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* ----- Centered modal overlay ----- */
+
+.filter-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: filter-modal-fade 0.12s ease-out;
+}
+
+@keyframes filter-modal-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.filter-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  backdrop-filter: blur(2px);
+}
+
+.filter-modal-card {
+  position: relative;
+  background: var(--white);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-xl);
+  width: min(460px, 92vw);
+  max-height: min(680px, 88vh);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: filter-modal-card-in 0.15s ease-out;
+}
+
+@keyframes filter-modal-card-in {
+  from { transform: translateY(8px) scale(0.98); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+.filter-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--gray-100);
+  flex-shrink: 0;
+}
+
+.filter-modal-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--gray-900);
+  margin: 0;
+}
+
+.filter-modal-close {
+  background: none;
+  border: none;
+  font-size: 1.1rem;
+  color: var(--gray-400);
+  cursor: pointer;
+  padding: 0.3rem;
+  border-radius: var(--radius-sm);
+  line-height: 1;
+  font-family: inherit;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.filter-modal-close:hover {
+  color: var(--gray-700);
+  background: var(--gray-100);
+}
+
+.filter-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-5) var(--space-4);
+}
+
+.filter-modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--gray-100);
+  flex-shrink: 0;
+}
+
+.filter-modal-reset {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--gray-600);
+  background: none;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-md);
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.filter-modal-reset:hover:not(:disabled) {
+  background: var(--gray-50);
+  border-color: var(--gray-300);
+}
+
+.filter-modal-reset:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.filter-modal-showing {
+  font-size: 0.82rem;
+  color: var(--gray-500);
+}
+
+.filter-modal-showing b {
+  color: var(--gray-700);
+  font-weight: 600;
+}
+
+/* ----- Filter sections and checkboxes ----- */
+
+.fm-section {
+  margin-bottom: var(--space-4);
+}
+
+.fm-section:last-child {
+  margin-bottom: 0;
+}
+
+.fm-section-title {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--gray-400);
+  font-weight: 700;
+  margin: 0 0 var(--space-2);
+}
+
+.fm-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.fm-check:hover {
+  background: var(--gray-50);
+}
+
+.fm-check input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.fm-check-box {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border: 2px solid var(--gray-300);
+  border-radius: 4px;
+  margin-top: 1px;
+  position: relative;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.fm-check input:checked + .fm-check-box {
+  background: var(--netrias-600);
+  border-color: var(--netrias-600);
+}
+
+.fm-check input:checked + .fm-check-box::after {
+  content: '✓';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--white);
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.fm-check-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.fm-check-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.fm-check-label {
+  font-weight: 600;
+  color: var(--gray-900);
+  font-size: 0.88rem;
+}
+
+.fm-check-count {
+  color: var(--gray-400);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+.fm-check-desc {
+  margin: 0.2rem 0 0;
+  padding: 0;
+  font-size: 0.78rem;
+  color: var(--gray-500);
+  line-height: 1.4;
+}
+
 .mapping-ico--rec {
   color: var(--netrias-600);
 }
@@ -136,6 +443,8 @@ body.lock {
 }
 
 .mapping-col-search {
+  position: absolute;
+  right: 0;
   padding: 0.4rem 0.75rem 0.4rem 2rem;
   font-size: 0.83rem;
   border: 1px solid var(--gray-300);
@@ -163,7 +472,7 @@ body.lock {
 .mapping-list-head,
 .mapping-row {
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) minmax(0, 1.4fr) 84px 22px;
+  grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1.4fr) 84px 22px;
   gap: var(--space-4);
   align-items: center;
   padding: 0.65rem 0.85rem;
@@ -239,8 +548,40 @@ body.lock {
 }
 
 .mapping-row-status {
+  position: relative;
   font-size: 1.05rem;
   text-align: center;
+}
+
+/* Fast tooltip on row status icons — appears above the icon so it doesn't
+   overlap adjacent column text. The icon sits between "Your column" and
+   "Target standard", so vertical positioning avoids masking either. */
+.mapping-row-status[data-fast-tooltip]::after {
+  content: attr(data-fast-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  padding: 0.25rem 0.55rem;
+  background: var(--gray-800);
+  color: var(--white);
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.3;
+  white-space: nowrap;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 60ms ease-out, visibility 60ms ease-out;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.mapping-row-status[data-fast-tooltip]:hover::after {
+  opacity: 1;
+  visibility: visible;
 }
 
 .mapping-row-col {
