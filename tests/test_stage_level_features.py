@@ -488,7 +488,17 @@ async def test_stage3_harmonize_uses_stored_manifest_when_payload_missing(
 
     # Then: the stored manifest is used
     assert response.status_code == 200
-    assert stub.received_manifest == stored_manifest
+    assert stub.received_manifest == {
+        "column_mappings": {
+            "col_a": {
+                "column_name": "col_a",
+                "cde_key": "primary_diagnosis",
+                "cde_id": 2,
+                "harmonization": "harmonizable",
+                "alternatives": [],
+            }
+        }
+    }
 
 
 async def test_stage3_harmonize_prefers_payload_manifest(
@@ -535,7 +545,17 @@ async def test_stage3_harmonize_prefers_payload_manifest(
 
     # Then: payload manifest is used instead of the stored one
     assert response.status_code == 200
-    assert stub.received_manifest == payload_manifest
+    assert stub.received_manifest == {
+        "column_mappings": {
+            "col_a": {
+                "column_name": "col_a",
+                "cde_key": "morphology",
+                "cde_id": 3,
+                "harmonization": "harmonizable",
+                "alternatives": [],
+            }
+        }
+    }
     assert stub.received_target_version == "2"
 
 

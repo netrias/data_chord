@@ -192,4 +192,5 @@ def test_harmonize_sends_source_file_and_column_keyed_manifest(tmp_path: Path) -
     sdk_manifest = harmonize_kwargs["manifest"]
     sdk_keys = list(sdk_manifest["column_mappings"].keys())
     assert sdk_keys == ["col_0001"]
+    assert sdk_manifest["column_mappings"]["col_0001"]["alternatives"] == []
     assert harmonize_kwargs["source_path"].name == "dupes.csv"

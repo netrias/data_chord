@@ -10,6 +10,8 @@ from src.domain.column_cde_map import ColumnCdeMap
 from src.domain.columns import ColumnKey, column_key_from_string
 from src.domain.manifest.models import AlternativeEntry, ColumnMappingEntry, ManifestPayload
 
+DEFAULT_HARMONIZATION = "harmonizable"
+
 
 @dataclass(frozen=True)
 class MappingAlternative:
@@ -78,15 +80,15 @@ class ColumnMappingRecord:
         )
 
     def to_payload(self) -> ColumnMappingEntry:
-        payload = ColumnMappingEntry(cde_key=self.cde_key, cde_id=self.cde_id)
-        if self.column_name is not None:
-            payload["column_name"] = self.column_name
-        if self.harmonization is not None:
-            payload["harmonization"] = self.harmonization
+        payload = ColumnMappingEntry(
+            column_name=self.column_name or str(self.column_key),
+            cde_key=self.cde_key,
+            cde_id=self.cde_id,
+            harmonization=self.harmonization or DEFAULT_HARMONIZATION,
+            alternatives=[alternative.to_payload() for alternative in self.alternatives],
+        )
         if self.route is not None:
             payload["route"] = self.route
-        if self.alternatives:
-            payload["alternatives"] = [alternative.to_payload() for alternative in self.alternatives]
         return payload
 
     def suggestions(self) -> list[ModelSuggestion]:

@@ -16,7 +16,13 @@ from netrias_client import NetriasClient
 
 from src.domain.cde import ColumnMapping, ColumnMappingSet
 from src.domain.data_model_cache import SessionCache
-from src.domain.manifest import ColumnMappingManifest, ColumnMappingRecord, ManifestPayload, normalize_manifest
+from src.domain.manifest import (
+    DEFAULT_HARMONIZATION,
+    ColumnMappingManifest,
+    ColumnMappingRecord,
+    ManifestPayload,
+    normalize_manifest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -192,9 +198,10 @@ def _build_mapping_record(
         column_key=mapping.column_key,
         cde_key=mapping.cde_key,
         cde_id=cde_info.cde_id,
-        column_name=existing.column_name if existing else None,
-        harmonization=existing.harmonization if existing else None,
+        column_name=existing.column_name if existing else str(mapping.column_key),
+        harmonization=existing.harmonization if existing else DEFAULT_HARMONIZATION,
         route=existing.route if existing else None,
+        alternatives=existing.alternatives if existing else (),
     )
 
 

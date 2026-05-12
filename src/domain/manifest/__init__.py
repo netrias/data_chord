@@ -5,6 +5,7 @@ Encapsulates manifest structure, reading, and writing; tracks override audit tra
 """
 
 from src.domain.manifest.mapping_manifest import (
+    DEFAULT_HARMONIZATION,
     ColumnMappingManifest,
     ColumnMappingRecord,
     MappingAlternative,
@@ -41,6 +42,7 @@ __all__ = [
     "ColumnMappingManifest",
     "ColumnMappingRecord",
     "ConfidenceBucket",
+    "DEFAULT_HARMONIZATION",
     "HIGH_CONFIDENCE_THRESHOLD",
     "MEDIUM_CONFIDENCE_THRESHOLD",
     "ManifestPayload",

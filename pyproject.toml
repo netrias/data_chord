@@ -9,7 +9,7 @@ dependencies = [
     "jinja2>=3.1.4",
     "python-multipart>=0.0.26",  # CVE remediation
     "uvicorn[standard]>=0.30.0",
-    "netrias_client @ git+https://github.com/netrias/netrias_client.git@81ba58c",
+    "netrias_client @ git+https://github.com/netrias/netrias_client.git@a341c65",
     "openpyxl>=3.1.5",
     "python-dotenv>=1.2.2",
     "pyarrow>=15.0.0",

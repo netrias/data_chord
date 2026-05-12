@@ -416,3 +416,20 @@ def test_normalize_manifest_preserves_sdk_confidence() -> None:
     assert alternatives
     assert alternatives[0]["target"] == "age"
     assert alternatives[0]["confidence"] == 0.91
+
+
+def test_normalize_manifest_emits_sdk_required_empty_alternatives() -> None:
+    """A mapped column without ranked suggestions still carries the SDK-required list."""
+    result = normalize_manifest({
+        "column_mappings": {
+            "col_0000": {
+                "cde_key": "age",
+                "cde_id": 900,
+            },
+        }
+    })
+
+    mapping = result["column_mappings"]["col_0000"]
+    assert mapping.get("column_name") == "col_0000"
+    assert mapping.get("harmonization") == "harmonizable"
+    assert mapping.get("alternatives") == []
