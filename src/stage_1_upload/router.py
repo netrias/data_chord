@@ -127,7 +127,7 @@ async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadRespon
         human_size=meta.human_size,
         content_type=meta.content_type,
         uploaded_at=meta.uploaded_at,
-        tabular_format=meta.tabular_format,
+        tabular_format=meta.tabular_format.value,
         sheet_names=meta.sheet_names,
         selected_sheet=meta.selected_sheet,
         sheet_previews=await run_in_threadpool(_load_sheet_previews_safe, meta),

@@ -19,6 +19,7 @@ from uuid import uuid4
 from fastapi import HTTPException, UploadFile
 from netrias_client import (
     SUPPORTED_TABULAR_SUFFIXES,
+    TabularFormat,
     get_tabular_format,
     is_supported_tabular_content_type,
     list_workbook_sheets,
@@ -55,7 +56,7 @@ class UploadedFileMeta:
     size_bytes: int
     saved_path: Path
     uploaded_at: datetime
-    tabular_format: str
+    tabular_format: TabularFormat
     sheet_names: list[str]
     selected_sheet: str | None = None
 
@@ -171,7 +172,7 @@ class UploadStorage:
             size_bytes=total_bytes,
             saved_path=destination,
             uploaded_at=datetime.now(UTC),
-            tabular_format=file_format.value,
+            tabular_format=file_format,
             sheet_names=sheet_names,
             selected_sheet=selected_sheet,
         )
@@ -192,7 +193,7 @@ class UploadStorage:
             size_bytes=payload["size_bytes"],
             saved_path=self._data_dir / payload["saved_name"],
             uploaded_at=datetime.fromisoformat(payload["uploaded_at"]),
-            tabular_format=payload.get("tabular_format", Path(payload["saved_name"]).suffix.lower().lstrip(".")),
+            tabular_format=_tabular_format_from_metadata(payload),
             sheet_names=payload.get("sheet_names", []),
             selected_sheet=payload.get("selected_sheet"),
         )
@@ -205,7 +206,7 @@ class UploadStorage:
             "size_bytes": meta.size_bytes,
             "saved_name": meta.saved_path.name,
             "uploaded_at": meta.uploaded_at.isoformat(),
-            "tabular_format": meta.tabular_format,
+            "tabular_format": meta.tabular_format.value,
             "sheet_names": meta.sheet_names,
             "selected_sheet": meta.selected_sheet,
         }
@@ -301,6 +302,13 @@ def _sheet_names_for(path: Path) -> list[str]:
         return []
     except Exception as exc:
         raise UnsupportedUploadError(f"Unable to read workbook sheets: {exc}") from exc
+
+
+def _tabular_format_from_metadata(payload: StoredMeta) -> TabularFormat:
+    tabular_format = payload.get("tabular_format")
+    if tabular_format is not None:
+        return TabularFormat(tabular_format)
+    return get_tabular_format(Path(payload["saved_name"]), payload["content_type"])
 
 
 def resolve_harmonized_path(original_path: Path, file_id: str) -> Path | None:
