@@ -37,7 +37,7 @@ For a detailed overview, see [app.md](app.md).
 
 4. Run:
    ```bash
-   uv run uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
+   uv run python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
    ```
    Open http://localhost:8000.
 

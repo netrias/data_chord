@@ -176,10 +176,10 @@ collect manual overrides via PV combobox.
 - `POST /stage-4/row-context` — Fetch original row data by indices
 - `POST /stage-4/term-row-indices` — Fetch full row indices for a term (when truncated in initial response)
 
-**Flow:** Loads original CSV and harmonization manifest. Builds comparison rows
+**Flow:** Loads the original tabular data and harmonization manifest. Builds comparison rows
 with PV conformance indicators. UI displays batches with confidence sorting.
 PV combobox enforces conformant-only selection. Row context popup provides
-original CSV context. State persistence saves review mode, sort, filters,
+original row context. State persistence saves review mode, sort, filters,
 position, and all overrides.
 
 **Two review modes:**
@@ -200,8 +200,8 @@ and download final artifacts.
 `MANUAL_OVERRIDE`. Displays segmented bar visualization per column. Shows
 transformation history (Original → AI → User). Non-conformant banner
 warns of values not in target PVs. Download applies review overrides to the
-harmonized CSV, bundles final CSV and JSON manifest into a ZIP, then clears
-session cache.
+harmonized tabular file, bundles the final data file and JSON manifest into a
+ZIP, then clears session cache.
 
 ---
 
@@ -242,7 +242,7 @@ original-value-to-harmonized-value pair, with:
 
 - Original and harmonized values
 - Confidence scores
-- Row indices (which source CSV rows share this mapping)
+- Row indices (which source rows share this mapping)
 - Manual override audit trail (user, timestamp, value)
 - PV adjustment records (source, adjusted value, timestamp)
 
@@ -351,14 +351,14 @@ Vanilla ES6 modules with direct DOM manipulation. No bundler. Key patterns:
 
 | Method | Used by |
 |---|---|
-| `discover_mapping_from_csv()` | `MappingDiscoveryService` (CDE recommendations) |
+| `discover_mapping_from_tabular()` | `MappingDiscoveryService` (CDE recommendations) |
 | `harmonize()` | `HarmonizeService` |
 | `list_data_models()` | `data_model_adapter` (data model list) |
 | `list_cdes()` | `data_model_adapter` (CDE metadata) |
-| `get_pv_set_async()` | `data_model_adapter` (permissible values) |
+| model-version PV endpoints | `data_model_adapter` (permissible values) |
 
 Configuration: `NETRIAS_API_KEY` environment variable (loaded from `.env`).
-The client is initialized with `Environment.PROD` which resolves all service
+The client is initialized with `Environment.STAGING` which resolves all service
 URLs (harmonization, discovery, Data Model Store) from a built-in registry.
 
 ---
@@ -375,6 +375,7 @@ See `adr/` for architectural decision records:
 - [ADR 006](adr/ADR_006_env_simplification.md) — Environment simplification and SDK migration
 - [ADR 007](adr/ADR_007_ai_whitespace_trimming.md) — AI output whitespace trimming at reader boundary
 - [ADR 008](adr/ADR_008_release_strategy.md) — Release strategy (git tags + GitHub Releases)
+- [ADR 009](adr/ADR_009_tabular_column_identity.md) — Tabular uploads and stable column identity
 
 **Key principles:**
 
