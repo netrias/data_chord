@@ -12,10 +12,10 @@ from .upload_storage import (
     UploadedFileMeta,
     UploadError,
     UploadStorage,
+    UploadStream,
     UploadTooLargeError,
     describe_constraints,
     resolve_harmonized_path,
-    resolve_harmonized_path_or_404,
 )
 
 __all__ = [
@@ -25,11 +25,11 @@ __all__ = [
     "UploadConstraints",
     "UploadedFileMeta",
     "UploadError",
+    "UploadStream",
     "UploadStorage",
     "UploadTooLargeError",
     "UnsupportedUploadError",
     "build_file_name",
     "describe_constraints",
     "resolve_harmonized_path",
-    "resolve_harmonized_path_or_404",
 ]

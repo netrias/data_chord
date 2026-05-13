@@ -30,11 +30,9 @@ src/
 │   │   ├── models.py          # ManifestRow, ManualOverride
 │   │   ├── reader.py          # read_manifest_parquet
 │   │   └── writer.py          # add_manual_overrides_batch, apply_pv_adjustments_batch
-│   └── storage/               # Typed file storage abstraction
+│   └── storage/               # Uploaded files and durable JSON sidecar artifacts
 │       ├── file_types.py      # FileType enum, file naming convention
-│       ├── backends.py        # StorageBackend ABC, LocalStorageBackend
-│       ├── serializers.py     # JSON / Parquet / RawBytes serializers
-│       ├── file_store.py      # FileStore facade (save/load with serialization)
+│       ├── file_store.py      # Local JSON artifact store
 │       └── upload_storage.py  # UploadStorage (file persistence + constraints)
 ├── stage_1_upload/            # File upload and data model selection
 ├── stage_2_review_columns/    # Column-to-CDE mapping review
@@ -212,11 +210,12 @@ CDE mapping artifact into a ZIP, then clears session cache.
 
 ### CDE Metadata (`cde.py`)
 
-`CDEInfo` dataclass holds CDE metadata (cde_id, cde_key, description,
-version_label) fetched dynamically from the Data Model Store API.
-`ColumnMappingSet` is the typed container for all column-to-CDE assignments.
-`ColumnCdeMap` and `ColumnRenameSet` are immutable, column-keyed snapshots used
-when mappings cross stage, cache, or persistence boundaries.
+`CDEInfo` holds CDE metadata (cde_id, cde_key, description, version_label)
+fetched dynamically from the Data Model Store API. `ColumnCdeMap` is the
+effective column-to-CDE mapping used for PV lookup, cache persistence, and
+manifest handoff. `ColumnCdeOverrides` represents Stage 2 user edits, including
+explicit "No Mapping" choices. `ColumnRenameSet` carries user-selected output
+column names separately from source column identity.
 
 ### Data Model Integration (`data_model_adapter.py`, `data_model_cache.py`)
 
@@ -260,25 +259,15 @@ edits via `add_manual_overrides_batch()` and applies PV adjustments via
 
 ### Storage Submodule (`storage/`)
 
-A layered file storage abstraction:
+`FileStore` persists small JSON sidecar artifacts owned by the app: review
+overrides, PV manifests, and CDE mapping audit documents. `FileType` defines the
+semantic artifact names and their `{file_id}_{suffix}.json` naming convention.
 
-```
-FileStore (facade)
-  └─ StorageBackend (ABC)
-       └─ LocalStorageBackend (filesystem)
-  └─ Serializer (ABC)
-       ├─ JSONSerializer
-       ├─ ParquetSerializer
-       └─ RawBytesSerializer
-```
-
-`FileType` enum defines the semantic file types and their naming conventions.
-Files are named `{file_id}_{suffix}.{extension}` (e.g.,
-`abc123_overrides.json`, `abc123_harmonization.parquet`).
-
-`UploadStorage` handles uploaded tabular file persistence, constraints validation
-(file size, type, extension), XLSX worksheet metadata, and metadata tracking via
-`UploadedFileMeta`.
+`UploadStorage` handles uploaded tabular file persistence, constraints
+validation (file size, type, extension), XLSX worksheet metadata, SDK
+harmonization manifest files, and metadata tracking via `UploadedFileMeta`.
+It depends on a minimal `UploadStream` protocol so web framework upload types
+stay at the router boundary.
 
 ### Services
 

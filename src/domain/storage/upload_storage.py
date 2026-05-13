@@ -13,10 +13,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final, NotRequired, TypedDict, cast
+from typing import Final, NotRequired, Protocol, TypedDict, cast
 from uuid import uuid4
 
-from fastapi import HTTPException, UploadFile
 from netrias_client import (
     SUPPORTED_TABULAR_SUFFIXES,
     TabularFormat,
@@ -55,6 +54,17 @@ class StoredMeta(TypedDict):
     tabular_format: NotRequired[str]
     sheet_names: NotRequired[list[str]]
     selected_sheet: NotRequired[str | None]
+
+
+class UploadStream(Protocol):
+    """Minimal async file interface needed by UploadStorage."""
+
+    filename: str | None
+    content_type: str | None
+
+    async def read(self, size: int = -1) -> bytes: ...
+
+    async def close(self) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -139,7 +149,7 @@ class UploadStorage:
         self._manifest_dir.mkdir(parents=True, exist_ok=True)
         self._harmonized_dir.mkdir(parents=True, exist_ok=True)
 
-    async def store(self, upload: UploadFile) -> UploadedFileMeta:
+    async def store(self, upload: UploadStream) -> UploadedFileMeta:
         filename, suffix, content_type = self._extract_upload_info(upload)
         self._validate_upload(suffix, content_type)
 
@@ -157,13 +167,13 @@ class UploadStorage:
             destination.unlink(missing_ok=True)
             raise
 
-    def _extract_upload_info(self, upload: UploadFile) -> tuple[str, str, str]:
+    def _extract_upload_info(self, upload: UploadStream) -> tuple[str, str, str]:
         filename = upload.filename or DEFAULT_UPLOAD_FILENAME
         suffix = Path(filename).suffix.lower() or ".csv"
         content_type = (upload.content_type or DEFAULT_UPLOAD_CONTENT_TYPE).lower()
         return filename, suffix, content_type
 
-    async def _write_upload_chunks(self, upload: UploadFile, destination: Path) -> int:
+    async def _write_upload_chunks(self, upload: UploadStream, destination: Path) -> int:
         """Stream in chunks to avoid loading entire file into memory."""
         total_bytes = 0
         try:
@@ -359,19 +369,10 @@ def resolve_harmonized_path(original_path: Path, file_id: str) -> Path | None:
     return candidate if candidate.exists() else None
 
 
-_ERROR_HARMONIZED_NOT_FOUND = "Harmonized file not found. Please rerun Stage 3."
-
-
-def resolve_harmonized_path_or_404(original_path: Path, file_id: str) -> Path:
-    path = resolve_harmonized_path(original_path, file_id)
-    if path is None:
-        raise HTTPException(status_code=404, detail=_ERROR_HARMONIZED_NOT_FOUND)
-    return path
-
-
 __all__ = [
     "StoredMeta",
     "UploadConstraints",
+    "UploadStream",
     "UploadedFileMeta",
     "UploadError",
     "UnsupportedUploadError",
@@ -379,5 +380,4 @@ __all__ = [
     "UploadStorage",
     "describe_constraints",
     "resolve_harmonized_path",
-    "resolve_harmonized_path_or_404",
 ]

@@ -44,13 +44,14 @@ from src.domain.pv_persistence import ensure_pvs_loaded
 from src.domain.pv_validation import check_value_conformance
 from src.domain.review_overrides import ReviewOverrides
 from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
-from src.domain.storage import UploadStorage, resolve_harmonized_path_or_404
+from src.domain.storage import UploadStorage, resolve_harmonized_path
 
 _MODULE_DIR = Path(__file__).parent
 _TEMPLATE_DIR = _MODULE_DIR / "templates"
 
 _ERROR_UPLOAD_NOT_FOUND = "Upload not found. Please restart the harmonization process."
 _ERROR_DATASET_UNREADABLE = "Unable to read harmonized dataset."
+_ERROR_HARMONIZED_NOT_FOUND = "Harmonized file not found. Please rerun Stage 3."
 _ERROR_MANIFEST_NOT_FOUND = "Harmonization manifest not found. Please rerun Stage 3."
 _ERROR_MANIFEST_UNREADABLE = "Unable to read harmonization manifest."
 
@@ -128,7 +129,7 @@ async def download_harmonized_data(payload: StageFiveRequest) -> StreamingRespon
     if not meta:
         raise HTTPException(status_code=404, detail=_ERROR_UPLOAD_NOT_FOUND)
 
-    harmonized_path = resolve_harmonized_path_or_404(meta.saved_path, payload.file_id)
+    harmonized_path = _resolve_harmonized_path_or_404(meta.saved_path, payload.file_id)
     manifest_path = storage.load_harmonization_manifest_path(payload.file_id)
 
     original_dataset = read_tabular(meta.saved_path, sheet_name=meta.selected_sheet)
@@ -164,6 +165,13 @@ async def download_harmonized_data(payload: StageFiveRequest) -> StreamingRespon
 def _load_review_overrides(file_id: str) -> ReviewOverrides | None:
     store = get_file_store()
     return store.load_review_overrides(file_id)
+
+
+def _resolve_harmonized_path_or_404(original_path: Path, file_id: str) -> Path:
+    path = resolve_harmonized_path(original_path, file_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail=_ERROR_HARMONIZED_NOT_FOUND)
+    return path
 
 
 def _manifest_to_json(manifest_path: Path) -> str | None:
