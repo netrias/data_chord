@@ -2,9 +2,14 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { expect } from '@playwright/test';
 import AdmZip from 'adm-zip';
 
 export const fixturesDir = path.resolve('tests/e2e/fixtures');
+const E2E_TARGET_MODEL = 'gc';
+const E2E_TARGET_VERSION_NUMBER = 2;
+const E2E_TARGET_CDE = 'primary_diagnosis';
+const E2E_TARGET_CDE_ID = 376;
 
 export const fileFixture = (name) => path.join(fixturesDir, name);
 
@@ -26,6 +31,9 @@ export const uploadAndAnalyze = async (page, filePath) => {
   await confirmButton.waitFor({ state: 'visible' });
   await confirmButton.click();
   await page.waitForURL(/\/stage-2/);
+  await expect(page.locator('#mappingRows .mapping-row-target').first()).toContainText(
+    E2E_TARGET_CDE,
+  );
   return getFileIdFromUrl(page);
 };
 
@@ -46,6 +54,9 @@ export const uploadAndAnalyzeSheet = async (page, filePath, sheetName) => {
   await confirmButton.waitFor({ state: 'visible' });
   await confirmButton.click();
   await page.waitForURL(/\/stage-2/);
+  await expect(page.locator('#mappingRows .mapping-row-target').first()).toContainText(
+    E2E_TARGET_CDE,
+  );
   return getFileIdFromUrl(page);
 };
 
@@ -101,16 +112,18 @@ export const mockAnalyze = async (page) => {
           confidence_score: 0.95,
         },
       ],
-      cde_targets: {},
+      cde_targets: {
+        col_a: [{ target: E2E_TARGET_CDE, similarity: 0.95 }],
+      },
       column_summaries: {
-        col_a: { value_overlap_ratio: null },
+        col_a: { value_overlap_ratio: 0.5 },
       },
       next_stage: 'mapping',
       next_step_hint: 'Review AI-suggested column mappings once ready.',
       manual_overrides: {},
       manifest: {
         column_mappings: {
-          col_a: { cde_key: 'col_a', cde_id: 1 },
+          col_a: { cde_key: E2E_TARGET_CDE, cde_id: E2E_TARGET_CDE_ID },
         },
       },
     };
@@ -159,9 +172,16 @@ export const mockDataModels = async (page) => {
   await page.route('**/stage-1/data-models', async (route) => {
     const models = [
       {
-        key: 'test-data-model',
-        label: 'Test Data Model',
-        versions: [{ version_label: 'v1', version_number: 1, external_version_number: null, is_default: true }],
+        key: E2E_TARGET_MODEL,
+        label: 'Genomic Cancer',
+        versions: [
+          {
+            version_label: `v${E2E_TARGET_VERSION_NUMBER}`,
+            version_number: E2E_TARGET_VERSION_NUMBER,
+            external_version_number: null,
+            is_default: true,
+          },
+        ],
       },
     ];
     await route.fulfill({

@@ -18,7 +18,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 import src.domain.dependencies as dependencies
 from src.domain.cde import CDEInfo
-from src.domain.data_model_cache import get_session_cache
+from src.domain.data_model_cache import clear_session_cache, get_session_cache
 from src.domain.harmonize import HarmonizeResult, HarmonizeStatus
 from src.domain.manifest import ManifestPayload
 from src.domain.storage import FileType, UploadStorage
@@ -78,6 +78,46 @@ async def test_stage1_upload_persists_exact_bytes(
     assert meta is not None, "Expected stored metadata for uploaded file"
     assert meta.size_bytes == len(content), "Stored size does not match upload size"
     assert meta.saved_path.read_bytes() == content, "Stored bytes do not match uploaded bytes"
+
+
+async def test_stage1_upload_preserves_other_session_cde_cache(app_client: AsyncClient) -> None:
+    """Uploading a new file must not discard another active session's CDE cache."""
+
+    first_file_id: str | None = None
+    second_file_id: str | None = None
+
+    try:
+        # Given: one uploaded file has session-scoped CDE metadata
+        first_file_id = await upload_content(app_client, create_csv_content([["col_a"], ["alpha"]]), "first.csv")
+        first_cache = get_session_cache(first_file_id)
+        assert not first_cache.has_cdes()
+
+        first_cache.set_cdes(
+            [
+                CDEInfo(
+                    cde_id=1,
+                    cde_key="primary_diagnosis",
+                    description="Primary Diagnosis",
+                    version_label="1",
+                )
+            ],
+            data_model_key=TEST_TARGET_SCHEMA,
+            version_label="1",
+            version_number=1,
+        )
+        assert first_cache.has_cdes()
+
+        # When: another file is uploaded
+        second_file_id = await upload_content(app_client, create_csv_content([["col_b"], ["beta"]]), "second.csv")
+
+        # Then: the first file's cache remains available for Stage 2 and later
+        assert second_file_id != first_file_id
+        assert get_session_cache(first_file_id).get_cde_by_key("primary_diagnosis") is not None
+    finally:
+        if first_file_id is not None:
+            clear_session_cache(first_file_id)
+        if second_file_id is not None:
+            clear_session_cache(second_file_id)
 
 
 async def test_stage1_upload_rejects_mismatched_content_type(

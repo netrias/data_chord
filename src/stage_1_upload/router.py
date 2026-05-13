@@ -22,7 +22,7 @@ from src.domain.data_model_adapter import (
     list_data_model_summaries,
     refine_cde_types_from_pvs,
 )
-from src.domain.data_model_cache import clear_all_session_caches, get_session_cache
+from src.domain.data_model_cache import get_session_cache
 from src.domain.data_model_selection import DataModelSelection
 from src.domain.dependencies import (
     get_mapping_service,
@@ -111,10 +111,6 @@ async def list_data_models() -> list[DataModelSchema]:
     name="stage_one_upload_upload",
 )
 async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadResponse:
-    # Clear stale PV/CDE caches from previous single-user sessions
-    # TODO: scope to specific file_id when multi-user support is added
-    clear_all_session_caches()
-
     try:
         meta = await _storage.store(file)
     except UnsupportedUploadError as exc:
