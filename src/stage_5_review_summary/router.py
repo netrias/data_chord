@@ -132,7 +132,7 @@ async def download_harmonized_data(payload: StageFiveRequest) -> StreamingRespon
 
     original_dataset = read_tabular(meta.saved_path, sheet_name=meta.selected_sheet)
     harmonized_dataset = read_tabular(harmonized_path, sheet_name=meta.selected_sheet)
-    if not original_dataset.columns:
+    if not original_dataset.columns or not harmonized_dataset.columns:
         raise HTTPException(status_code=400, detail=_ERROR_DATASET_UNREADABLE)
 
     overrides = _load_review_overrides(payload.file_id)
@@ -142,10 +142,10 @@ async def download_harmonized_data(payload: StageFiveRequest) -> StreamingRespon
         else harmonized_dataset.rows
     )
     final_dataset = dataset_from_rows(
-        columns=original_dataset.columns,
+        columns=harmonized_dataset.columns,
         rows=final_rows,
-        source_format=original_dataset.source_format,
-        sheet_name=original_dataset.sheet_name,
+        source_format=harmonized_dataset.source_format,
+        sheet_name=harmonized_dataset.sheet_name,
     )
 
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")

@@ -602,6 +602,34 @@ async def test_stage5_download_matches_harmonized_when_no_overrides(
     assert output_rows[1]["col_a"] == "gamma"
 
 
+async def test_stage5_download_preserves_harmonized_headers(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """Download keeps headers produced by harmonization, including Stage 2 column renames."""
+
+    # Given: harmonization wrote a renamed output column
+    rows = [["diagnosis"], ["alpha"]]
+    file_id = await upload_content(app_client, create_csv_content(rows), "renamed.csv")
+    meta = temp_storage.load(file_id)
+    assert meta is not None
+    harmonized_dir = meta.saved_path.parent.parent / "harmonized"
+    harmonized_dir.mkdir(parents=True, exist_ok=True)
+    harmonized_path = harmonized_dir / f"{meta.saved_path.stem}.harmonized.csv"
+    with harmonized_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerows([["Primary Diagnosis"], ["Lung Cancer"]])
+
+    # When: the download endpoint is invoked
+    response = await app_client.post("/stage-5/download", json={"file_id": file_id})
+
+    # Then: the downloaded CSV keeps the harmonized header and value
+    assert response.status_code == 200
+    output_rows = _read_downloaded_csv(response.content)
+    assert list(output_rows[0]) == ["Primary Diagnosis"]
+    assert output_rows[0]["Primary Diagnosis"] == "Lung Cancer"
+
+
 async def test_stage5_download_succeeds_without_manifest(
     app_client: AsyncClient,
     temp_storage: UploadStorage,
