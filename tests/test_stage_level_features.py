@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import zipfile
 from io import BytesIO
 from typing import cast
@@ -15,11 +16,12 @@ from netrias_client import TabularFormat, dataset_from_rows, write_tabular
 from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
+import src.domain.dependencies as dependencies
 from src.domain.cde import CDEInfo
 from src.domain.data_model_cache import get_session_cache
 from src.domain.harmonize import HarmonizeResult, HarmonizeStatus
 from src.domain.manifest import ManifestPayload
-from src.domain.storage import UploadStorage
+from src.domain.storage import FileType, UploadStorage
 from tests.conftest import (
     TEST_TARGET_SCHEMA,
     TEST_TSV_CONTENT_TYPE,
@@ -415,6 +417,60 @@ async def test_stage1_analyze_uses_selected_version_and_primes_reference_cache(
     assert cache.has_any_pvs()
 
 
+async def test_stage3_persists_cde_mapping_download_artifact(
+    app_client: AsyncClient,
+) -> None:
+    """Harmonize saves the column-to-CDE mapping plan for the download bundle."""
+
+    # Given: an uploaded CSV and a manifest with two mapped columns
+    file_id = await upload_content(
+        app_client,
+        create_csv_content([["diagnosis", "drug"], ["Lung", "Agent A"]]),
+        "mapping-plan.csv",
+    )
+    cache = get_session_cache(file_id)
+    cache.set_cdes(
+        [
+            CDEInfo(cde_id=2, cde_key="primary_diagnosis", description="Primary Diagnosis", version_label="1"),
+            CDEInfo(cde_id=1, cde_key="therapeutic_agents", description="Therapeutic Agents", version_label="1"),
+        ],
+        data_model_key=TEST_TARGET_SCHEMA,
+        version_label="1",
+        version_number=1,
+    )
+    manifest: ManifestPayload = {
+        "column_mappings": {
+            "col_0000": {"column_name": "diagnosis", "cde_key": "primary_diagnosis", "cde_id": 2},
+            "col_0001": {"column_name": "drug", "cde_key": "therapeutic_agents", "cde_id": 1},
+        }
+    }
+
+    # When: the user overrides and renames the second column
+    response = await app_client.post(
+        "/stage-3/harmonize",
+        json={
+            "file_id": file_id,
+            "target_schema": TEST_TARGET_SCHEMA,
+            "target_version_number": 1,
+            "manual_overrides": {"col_0001": "primary_diagnosis"},
+            "column_renames": {"col_0001": "Treatment Diagnosis"},
+            "manifest": manifest,
+        },
+    )
+
+    # Then: a mapping artifact records AI mappings, user overrides, and output names by column key
+    assert response.status_code == 200
+    document = dependencies.get_file_store().load(file_id, FileType.COLUMN_MAPPING)
+    assert isinstance(document, dict)
+    mappings = {entry["column_key"]: entry for entry in document["mappings"]}
+    assert mappings["col_0000"]["mapping_source"] == "ai"
+    assert mappings["col_0000"]["cde_key"] == "primary_diagnosis"
+    assert mappings["col_0001"]["mapping_source"] == "user_override"
+    assert mappings["col_0001"]["source_column_name"] == "drug"
+    assert mappings["col_0001"]["output_column_name"] == "Treatment Diagnosis"
+    assert mappings["col_0001"]["cde_description"] == "Primary Diagnosis"
+
+
 async def test_stage2_mapping_page_renders_manual_options(
     app_client: AsyncClient,
 ) -> None:
@@ -653,6 +709,42 @@ async def test_stage5_download_succeeds_without_manifest(
         names = zf.namelist()
     assert any(name.endswith(".csv") for name in names)
     assert not any(name.endswith(".parquet") for name in names)
+
+
+async def test_stage5_download_includes_cde_mapping_artifact(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """Download bundles the saved column-to-CDE mapping plan when available."""
+
+    # Given: an uploaded file with a saved CDE mapping document
+    rows = [["col_a"], ["alpha"]]
+    file_id = await upload_content(app_client, create_csv_content(rows), "with-mapping.csv")
+    meta = temp_storage.load(file_id)
+    assert meta is not None
+    create_harmonized_csv(meta.saved_path, {})
+    dependencies.get_file_store().save(
+        file_id,
+        FileType.COLUMN_MAPPING,
+        {
+            "file_id": file_id,
+            "generated_at": "2026-05-13T00:00:00+00:00",
+            "target_schema": TEST_TARGET_SCHEMA,
+            "target_version": "1",
+            "mappings": [{"column_key": "col_0000", "source_column_name": "col_a"}],
+        },
+    )
+
+    # When: the download endpoint is invoked
+    response = await app_client.post("/stage-5/download", json={"file_id": file_id})
+
+    # Then: the ZIP includes the mapping artifact alongside the data file
+    assert response.status_code == 200
+    with zipfile.ZipFile(BytesIO(response.content), "r") as zf:
+        mapping_name = next(name for name in zf.namelist() if name.endswith("_cde_mapping.json"))
+        mapping_document = json.loads(zf.read(mapping_name).decode("utf-8"))
+    assert mapping_document["file_id"] == file_id
+    assert mapping_document["mappings"][0]["column_key"] == "col_0000"
 
 
 async def test_stage5_download_tsv_input_exports_tsv(

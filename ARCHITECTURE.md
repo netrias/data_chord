@@ -12,6 +12,7 @@ human-in-the-loop workflow. See [app.md](app.md) for the product overview.
 src/
 ├── domain/                    # Shared domain layer (no stage dependencies)
 │   ├── cde.py                 # CDEInfo, column mapping types
+│   ├── cde_mapping_persistence.py # Download audit artifact for column-to-CDE decisions
 │   ├── change.py              # ChangeType, RecommendationType enums
 │   ├── config.py              # Build-level config validation (NETRIAS_API_KEY)
 │   ├── session.py             # Browser sessionStorage key constants, UILabel
@@ -112,9 +113,9 @@ functions (`get_upload_storage()`, `get_file_store()`, `get_mapping_service()`,
 
 1. **Upload** (Stage 1): tabular file → `UploadStorage` → optional worksheet selection → file_id → data model selection
 2. **Mapping** (Stage 2): file_id → `MappingService` → column-to-CDE mappings
-3. **Harmonize** (Stage 3): mappings → `HarmonizeService` → manifest (Parquet) + PV adjustments
+3. **Harmonize** (Stage 3): mappings → `HarmonizeService` → manifest (Parquet) + PV adjustments + CDE mapping artifact
 4. **Review** (Stage 4): manifest + PV combobox overrides → reviewed manifest with audit trail
-5. **Export** (Stage 5): manifest → harmonized tabular file + JSON manifest (human-readable audit trail)
+5. **Export** (Stage 5): manifest → harmonized tabular file + JSON manifest + CDE mapping artifact
 
 ---
 
@@ -160,7 +161,8 @@ This stage is read-only on the server — no files are written.
 target schema. Runs harmonization and PV fetching in parallel. Applies PV
 adjustments to the manifest (preferring original values when already conformant).
 Persists PV manifest to disk for session recovery. Returns column-level
-breakdown metrics.
+breakdown metrics. Also persists the column-keyed CDE mapping plan that Stage 5
+includes in the ZIP download.
 
 ### Stage 4: Review Results
 
@@ -201,8 +203,8 @@ and download final artifacts.
 `MANUAL_OVERRIDE`. Displays segmented bar visualization per column. Shows
 transformation history (Original → AI → User). Non-conformant banner
 warns of values not in target PVs. Download applies review overrides to the
-harmonized tabular file, bundles the final data file and JSON manifest into a
-ZIP, then clears session cache.
+harmonized tabular file, bundles the final data file, JSON manifest, and saved
+CDE mapping artifact into a ZIP, then clears session cache.
 
 ---
 

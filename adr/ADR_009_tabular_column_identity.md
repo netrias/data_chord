@@ -55,6 +55,10 @@ column keys as the internal identity for tabular columns.
    the harmonized dataset using the harmonized file's columns and format so SDK
    output headers and Stage 2 rename choices are preserved.
 
+8. The downloadable CDE mapping artifact is keyed by `column_key`. Source and
+   output headers are recorded as metadata so duplicate headers and user
+   renames remain auditable without becoming identity.
+
 ## Consequences
 
 ### Positive
@@ -81,3 +85,5 @@ column keys as the internal identity for tabular columns.
   methods when a workflow needs to change a mapping.
 - When writing downloads, preserve the harmonized dataset's headers and format;
   use the original dataset only to locate source columns for review overrides.
+- When adding audit artifacts, use `column_key` as the join key and treat
+  source/output header names as derived metadata.

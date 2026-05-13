@@ -27,6 +27,7 @@ from src.domain import (
     HarmonizeResponse,
     ManifestSummarySchema,
 )
+from src.domain.cde_mapping_persistence import save_cde_mapping_document
 from src.domain.column_cde_map import ColumnCdeMap
 from src.domain.data_model_adapter import fetch_all_pvs_async
 from src.domain.data_model_cache import SessionCache, get_session_cache, populate_cde_cache
@@ -99,6 +100,7 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
 
     store = get_file_store()
     store.delete(payload.file_id, FileType.REVIEW_OVERRIDES)
+    store.delete(payload.file_id, FileType.COLUMN_MAPPING)
 
     stored_manifest = _storage.load_manifest(payload.file_id)
     manifest_payload = payload.manifest or stored_manifest
@@ -110,6 +112,7 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
     cache = get_session_cache(payload.file_id)
     column_cde_map = _column_cde_map_for_session(manifest, column_mappings)
     _store_column_mappings_in_cache(cache, column_cde_map)
+    save_cde_mapping_document(payload.file_id, manifest, column_mappings, column_renames, cache, target_selection)
     output_path = _storage.harmonized_path_for(payload.file_id, meta.saved_path)
 
     harmonize_task = asyncio.create_task(

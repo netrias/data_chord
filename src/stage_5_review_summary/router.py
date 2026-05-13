@@ -31,6 +31,7 @@ from netrias_client import (
 from pydantic import BaseModel, Field
 
 from src.domain import ChangeType
+from src.domain.cde_mapping_persistence import load_cde_mapping_json
 from src.domain.data_model_cache import SessionCache, clear_session_cache
 from src.domain.dependencies import get_file_store, get_upload_storage
 from src.domain.manifest import (
@@ -152,7 +153,7 @@ async def download_harmonized_data(payload: StageFiveRequest) -> StreamingRespon
     original_stem = Path(meta.original_name).stem
     base_name = f"{original_stem}_{payload.file_id}_{timestamp}"
 
-    zip_buffer = _create_zip_buffer(base_name, final_dataset, manifest_path, meta.saved_path)
+    zip_buffer = _create_zip_buffer(base_name, final_dataset, manifest_path, meta.saved_path, payload.file_id)
 
     # Session complete: release in-memory cache to prevent unbounded growth
     clear_session_cache(payload.file_id)
@@ -178,6 +179,7 @@ def _create_zip_buffer(
     dataset: TabularDataset,
     manifest_path: Path | None,
     template_path: Path | None = None,
+    file_id: str | None = None,
 ) -> io.BytesIO:
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -188,6 +190,10 @@ def _create_zip_buffer(
             json_content = _manifest_to_json(manifest_path)
             if json_content:
                 zf.writestr(f"{base_name}_manifest.json", json_content)
+        if file_id:
+            mapping_content = load_cde_mapping_json(file_id)
+            if mapping_content:
+                zf.writestr(f"{base_name}_cde_mapping.json", mapping_content)
 
     zip_buffer.seek(0)
     return zip_buffer
