@@ -285,6 +285,30 @@ class TestManualOverridePropagation:
         # Then
         assert request.manual_overrides == {"col": None}
 
+    def test_harmonize_request_accepts_column_renames(self) -> None:
+        """
+        Given: Stage 2 sends selected output column names
+        When: the Stage 3 request model validates the payload
+        Then: the rename map is preserved separately from CDE overrides
+        """
+        from src.domain.schemas import HarmonizeRequest
+
+        # Given
+        payload = {
+            "file_id": "abcdef0123456789",
+            "target_schema": "CCDI",
+            "manual_overrides": {"col_0000": "primary_diagnosis"},
+            "column_renames": {"col_0000": "Primary Diagnosis"},
+        }
+        assert payload["column_renames"]["col_0000"] == "Primary Diagnosis"
+
+        # When
+        request = HarmonizeRequest.model_validate(payload)
+
+        # Then
+        assert request.manual_overrides == {"col_0000": "primary_diagnosis"}
+        assert request.column_renames == {"col_0000": "Primary Diagnosis"}
+
     def test_extract_skips_entries_without_target_field(self) -> None:
         """
         Given: a manifest with one valid and one missing cde_key entry

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from src.domain.cde import ModelSuggestion
 from src.domain.column_cde_map import ColumnCdeMap
@@ -137,6 +137,13 @@ class ColumnMappingManifest:
     def without_column(self, column_key: ColumnKey) -> ColumnMappingManifest:
         records = dict(self.records)
         records.pop(column_key, None)
+        return ColumnMappingManifest(records)
+
+    def with_column_names(self, renames: Mapping[ColumnKey, str]) -> ColumnMappingManifest:
+        records = dict(self.records)
+        for column_key, column_name in renames.items():
+            if column_key in records:
+                records[column_key] = replace(records[column_key], column_name=column_name)
         return ColumnMappingManifest(records)
 
     def column_cde_map(self) -> ColumnCdeMap:

@@ -163,6 +163,10 @@
   box-sizing: border-box;
 }
 
+html {
+  overflow-x: hidden;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -667,7 +671,7 @@ button.linklike {
   left: 0;
   top: calc(100% + 8px);
   width: max-content;
-  max-width: 350px;
+  max-width: 420px;
   padding: var(--space-3) var(--space-4);
   background: var(--gray-800);
   color: var(--white);
@@ -681,6 +685,7 @@ button.linklike {
   z-index: 1000;
   pointer-events: none;
   text-align: left;
+  white-space: pre-line;
 }
 
 .step-instruction-tooltip::before {

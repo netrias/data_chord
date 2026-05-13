@@ -58,7 +58,7 @@ const _stage2Column = (key) => ({
   source_index: 0,
   header: key,
   inferred_type: 'text',
-  sample_values: [],
+  sample_values: ['Sample'],
   confidence_bucket: 'high',
   confidence_score: 0.9,
 });
@@ -86,9 +86,16 @@ const _stage2HarnessHtml = (cdeCatalog) => `
       <div id="stepInstruction"><p class="step-instruction-text"></p><span class="step-instruction-tooltip"></span></div>
     </nav>
     <main>
+      <aside class="filter-sidebar hidden" id="filterSidebar"></aside>
       <div id="sourceFilter"></div>
       <input id="colSearch" />
-      <div class="mapping-list-head"><div></div><div>Your column</div><div>Target standard</div><div>Value fit</div><div></div></div>
+      <div class="mapping-list-head">
+        <button id="columnSortBtn" type="button"><span>Your column</span><span class="mapping-list-head-sort-arrow"></span></button>
+        <div></div>
+        <button id="targetSortBtn" type="button"><span>Target standard</span><span class="mapping-list-head-sort-arrow"></span></button>
+        <button id="valueFitSortBtn" type="button"><span>Value fit</span><span class="mapping-list-head-sort-arrow"></span></button>
+        <div></div>
+      </div>
       <div id="mappingRows"></div>
       <div id="mappingEmptyState" class="hidden"></div>
     </main>
@@ -140,11 +147,11 @@ test('happy path flow: upload → analyze → harmonize → review → summary �
   expect(rows[0].col_a).toBe('Baz');
 });
 
-test('Stage 2 list opens a takeover modal on row click', async ({ page }) => {
+test('Stage 2 list opens a takeover on row click', async ({ page }) => {
   /*
    * Given: a CSV is analyzed and Stage 2 lands on the list view
    * When:  a row is clicked
-   * Then:  the takeover modal opens with "Your column" + "Target standard"
+   * Then:  the takeover opens with "Your column" + "Target standard"
    *        panes; closing the takeover returns to the list.
    */
   await mockColumnDetail(page);
@@ -255,8 +262,8 @@ test('Stage 2 splits picker sections by mapping kind', async ({ page }) => {
   await expect(page.locator('#mappingRows .mapping-row')).toHaveCount(6);
   await expect(page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-fit')).toHaveText('80%');
   await expect(page.locator('.mapping-row', { hasText: 'low_match' }).locator('.mapping-row-fit')).toHaveText('0%');
-  await expect(page.locator('.mapping-row', { hasText: 'notes' }).locator('.mapping-row-fit--passthrough')).toBeVisible();
-  await expect(page.locator('.mapping-row', { hasText: 'age_value' }).locator('.mapping-row-fit')).toHaveText('0%');
+  await expect(page.locator('.mapping-row', { hasText: 'notes' }).locator('.mapping-row-fit--na')).toHaveText('N/A');
+  await expect(page.locator('.mapping-row', { hasText: 'age_value' }).locator('.mapping-row-fit--na')).toHaveText('N/A');
 
   await page.locator('.mapping-row', { hasText: 'diagnosis' }).click();
   await page.locator('#cdePicker').click();
@@ -265,25 +272,22 @@ test('Stage 2 splits picker sections by mapping kind', async ({ page }) => {
   await expect(page.locator('.dd-section-label', { hasText: 'No value harmonization' })).toBeVisible();
   await expect(page.locator('.dd-section--rename-only .dd-opt', { hasText: 'notes_cde' })).toBeVisible();
   await expect(page.locator('.dd-section--rename-only .dd-opt', { hasText: 'notes_cde' })).not.toContainText('5 matches');
-  await expect(page.locator('.dd-section--rename-only .dd-opt', { hasText: 'notes_cde' })).toContainText('0 matches');
+  await expect(page.locator('.dd-section--rename-only .dd-opt', { hasText: 'notes_cde' })).toContainText('N/A');
 
   await page.locator('.dd-section--rename-only .dd-opt', { hasText: 'notes_cde' }).click();
 
-  // After overriding diagnosis to a passthrough CDE, the fit cell shows the
-  // passthrough badge (no permissible-value comparison applies).
-  await expect(page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-fit--passthrough')).toBeVisible();
+  // After overriding diagnosis to a pass-through CDE, the fit cell shows that
+  // no permissible-value comparison applies.
+  await expect(page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-fit--na')).toHaveText('N/A');
 });
 
-test('Stage 2 will-change-values filter chip narrows list by target CDE type', async ({ page }) => {
+test('Stage 2 settings sidebar filters rows by mapping outcome', async ({ page }) => {
   /*
-   * Given: Stage 2 with four columns covering each chip cell — one PV-mapped,
+   * Given: Stage 2 with four columns covering each outcome — one PV-mapped,
    *        one numeric-mapped, one pass-through-mapped, one unmapped.
-   * When:  the user clicks the Will-change-values chip.
-   * Then:  the list narrows to columns whose effective target CDE has
-   *        cde_type === 'pv' (the only type whose values are rewritten by
-   *        harmonization). Overriding the PV-mapped column to a pass-through
-   *        CDE drops the chip count to 0, confirming the filter delegates to
-   *        _effectiveCde (overrides honored), not to the original AI rec.
+   * When:  the user changes visibility from the Settings sidebar.
+   * Then:  the list narrows by effective mapping outcome, and overrides update
+   *        the outcome counts.
    */
   const payload = {
     file_id: 'abcdef0123456789',
@@ -360,21 +364,24 @@ test('Stage 2 will-change-values filter chip narrows list by target CDE type', a
   await expect(page.locator('#takeover')).toHaveClass(/hidden/);
   await expect(page.locator('#mappingRows .mapping-row')).toHaveCount(4);
 
-  // All five chips render with the expected counts. AI Rec=3, Override=0,
-  // No Mapping=1 (junk_col), Will-change-values=1 (only dx_col → dx_cde is PV).
-  await expect(page.locator('.mapping-filter-btn--all .mapping-filter-count')).toHaveText('4');
-  await expect(page.locator('.mapping-filter-btn--rec .mapping-filter-count')).toHaveText('3');
-  await expect(page.locator('.mapping-filter-btn--ovr .mapping-filter-count')).toHaveText('0');
-  await expect(page.locator('.mapping-filter-btn--none .mapping-filter-count')).toHaveText('1');
-  await expect(page.locator('.mapping-filter-btn--will-change .mapping-filter-count')).toHaveText('1');
+  // The sidebar starts closed, then shows rewrite/pass-through/unmapped counts.
+  await expect(page.locator('#filterSidebar')).toHaveClass(/hidden/);
+  await page.locator('#filterSidebarTrigger').click();
+  await expect(page.locator('#filterSidebar')).not.toHaveClass(/hidden/);
+  await expect(page.locator('.fm-check[data-outcome="rewrite"] .fm-check-count')).toHaveText('1 / 4');
+  await expect(page.locator('.fm-check[data-outcome="passthrough"] .fm-check-count')).toHaveText('2 / 4');
+  await expect(page.locator('.fm-check[data-outcome="unchanged"] .fm-check-count')).toHaveText('1 / 4');
 
-  // Activating Will-change-values narrows the list to dx_col only.
-  await page.locator('.mapping-filter-btn--will-change').click();
-  await expect(page.locator('#mappingRows .mapping-row')).toHaveCount(1);
-  await expect(page.locator('#mappingRows .mapping-row').first()).toContainText('dx_col');
+  // Hiding pass-through rows leaves only the PV-mapped and unmapped rows.
+  await page.locator('.fm-check[data-outcome="passthrough"]').click();
+  await expect(page.locator('#mappingRows .mapping-row')).toHaveCount(2);
+  await expect(page.locator('#mappingRows')).toContainText('dx_col');
+  await expect(page.locator('#mappingRows')).toContainText('junk_col');
+  await expect(page.locator('#mappingRows')).not.toContainText('age_col');
+  await expect(page.locator('#mappingRows')).not.toContainText('notes_col');
 
-  // Resetting via All restores all four rows in CSV input order.
-  await page.locator('.mapping-filter-btn--all').click();
+  // Resetting restores all four rows in CSV input order.
+  await page.locator('.fs-reset').click();
   const rowHeaders = page.locator('#mappingRows .mapping-row .mapping-row-col');
   await expect(rowHeaders).toHaveCount(4);
   await expect(rowHeaders.nth(0)).toContainText('dx_col');
@@ -383,17 +390,78 @@ test('Stage 2 will-change-values filter chip narrows list by target CDE type', a
   await expect(rowHeaders.nth(3)).toContainText('junk_col');
 
   // Override dx_col (the only PV-mapped column) to the pass-through CDE.
-  // _isWillChangeValuesColumn must follow the override (via _effectiveCde),
-  // so the chip count drops from 1 to 0 and activating it leaves the list empty.
+  // The outcome counts follow the override through _effectiveCde.
   await page.locator('.mapping-row', { hasText: 'dx_col' }).click();
   await page.locator('#cdePicker').click();
   await page.locator('.dd-section--rename-only .dd-opt', { hasText: 'notes_cde' }).click();
   await page.locator('.takeover-btn--close').click();
   await expect(page.locator('#takeover')).toHaveClass(/hidden/);
 
-  await expect(page.locator('.mapping-filter-btn--will-change .mapping-filter-count')).toHaveText('0');
-  await page.locator('.mapping-filter-btn--will-change').click();
-  await expect(page.locator('#mappingRows .mapping-row')).toHaveCount(0);
+  await expect(page.locator('.fm-check[data-outcome="rewrite"] .fm-check-count')).toHaveText('0 / 4');
+  await expect(page.locator('.fm-check[data-outcome="passthrough"] .fm-check-count')).toHaveText('3 / 4');
+});
+
+test('Stage 2 submits selected column renames for harmonization', async ({ page }) => {
+  /*
+   * Given: Stage 2 has a mapped column whose CDE label differs from the source header.
+   * When:  the user enables rename-to-standard and continues to harmonization.
+   * Then:  the Stage 3 handoff includes column_renames separately from CDE overrides.
+   */
+  const payload = {
+    file_id: 'abcdef0123456789',
+    file_name: 'rename.csv',
+    total_rows: 1,
+    columns: [_stage2Column('diagnosis')],
+    cde_targets: {
+      diagnosis: [{ target: 'primary_diagnosis', similarity: 0.95 }],
+    },
+    column_summaries: {
+      diagnosis: { value_overlap_ratio: 1.0 },
+    },
+    next_stage: 'mapping',
+    next_step_hint: 'Review mappings.',
+    manual_overrides: {},
+    manifest: {
+      column_mappings: {
+        diagnosis: { column_name: 'diagnosis', cde_key: 'primary_diagnosis', cde_id: 101 },
+      },
+    },
+  };
+  const cdeCatalog = [{
+    cde_id: 101,
+    cde_key: 'primary_diagnosis',
+    label: 'Primary Diagnosis',
+    description: 'Diagnosis description',
+    cde_type: 'pv',
+  }];
+
+  await page.addInitScript((stagePayload) => {
+    sessionStorage.setItem('stage2Payload', JSON.stringify(stagePayload));
+    sessionStorage.setItem('maxReachedStage', 'mapping');
+  }, payload);
+  await page.route('**/stage-2?**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/html',
+      body: _stage2HarnessHtml(cdeCatalog),
+    });
+  });
+
+  await page.goto('/stage-2?file_id=abcdef0123456789&schema=gc&version_number=1');
+
+  // Negative: no rename has been handed off yet.
+  const before = await page.evaluate(() => JSON.parse(sessionStorage.getItem('stage2Payload')).column_renames);
+  expect(before).toBeUndefined();
+
+  // Enable renaming and continue.
+  await page.locator('#filterSidebarTrigger').click();
+  await page.locator('.fs-rename-toggle').click();
+  await page.locator('#harmonizeButton').click();
+  await page.waitForURL(/\/stage-3/);
+
+  const handoff = await page.evaluate(() => JSON.parse(sessionStorage.getItem('stage3HarmonizePayload')));
+  expect(handoff.request.manual_overrides).toEqual({});
+  expect(handoff.request.column_renames).toEqual({ diagnosis: 'Primary Diagnosis' });
 });
 
 test('Stage 2 picker surfaces all AI candidates as separate rows', async ({ page }) => {
@@ -403,10 +471,8 @@ test('Stage 2 picker surfaces all AI candidates as separate rows', async ({ page
    * Then:  both candidates render as .dd-opt.ai rows in similarity order
    *        (top first), each with the ✦ AI rec badge, and neither key
    *        appears in the "Harmonize values" / "No value harmonization"
-   *        sections below the divider. Picking any AI candidate keeps the
-   *        row's status as REC — picking the 2nd-ranked one still counts
-   *        as "aligned with the AI." Picking a non-AI catalog CDE flips
-   *        the row to OVR.
+   *        sections below the divider. Picking a candidate updates the row's
+   *        target standard while preserving the rewrite outcome for PV CDEs.
    */
   const payload = {
     file_id: 'abcdef0123456789',
@@ -494,24 +560,33 @@ test('Stage 2 picker surfaces all AI candidates as separate rows', async ({ page
   await expect(page.locator('#pickerDropdown .dd-section .dd-opt[data-value="dx"]')).toHaveCount(0);
   await expect(page.locator('#pickerDropdown .dd-section .dd-opt[data-value="dx_alt"]')).toHaveCount(0);
 
-  // Default state: row reflects the top AI candidate (REC, not OVR).
+  // Default state: row reflects the top AI candidate.
   await expect(
-    page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-status.mapping-ico--rec')
+    page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-target')
+  ).toContainText('dx');
+  await expect(
+    page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-status.mapping-ico--rewrite')
   ).toBeVisible();
 
-  // Picking the 2nd-ranked AI candidate keeps the row REC: it was still the
-  // model's suggestion. The user is aligned with the AI either way.
+  // Picking the 2nd-ranked AI candidate updates the displayed target while the
+  // row remains a rewrite outcome.
   await aiRows.nth(1).click();
   await expect(
-    page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-status.mapping-ico--rec')
+    page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-target')
+  ).toContainText('dx_alt');
+  await expect(
+    page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-status.mapping-ico--rewrite')
   ).toBeVisible();
 
-  // Picking a non-AI catalog CDE flips the row to OVR — the user went
-  // off-script, picking something the AI never suggested.
+  // Picking a non-AI catalog CDE updates the target and still remains a rewrite
+  // outcome because the selected CDE is PV-backed.
   await page.locator('#cdePicker').click();
   await page.locator('#pickerDropdown .dd-opt[data-value="other_dx"]').click();
   await expect(
-    page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-status.mapping-ico--ovr')
+    page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-target')
+  ).toContainText('other_dx');
+  await expect(
+    page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-status.mapping-ico--rewrite')
   ).toBeVisible();
 });
 

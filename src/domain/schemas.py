@@ -20,6 +20,7 @@ class HarmonizeRequest(BaseModel):
     target_schema: str
     target_version_number: int | None = Field(default=None, ge=1)
     manual_overrides: dict[str, str | None] = Field(default_factory=dict)
+    column_renames: dict[str, str] = Field(default_factory=dict)
     manifest: ManifestPayload | None = None
 
 

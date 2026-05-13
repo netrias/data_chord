@@ -1,5 +1,5 @@
 /**
- * Stage 2 — column-mapping list with row-click takeover modal.
+ * Stage 2 — column-mapping list with row-click takeover.
  *
  * The base view is a simple list of columns; clicking any row opens a
  * takeover that shows the column's distinct values on the left and the
@@ -41,43 +41,28 @@ const cdeCatalog = (config.cdeCatalog ?? []).map((c) => ({
 const cdeByKey = new Map(cdeCatalog.map((c) => [c.key, c]));
 
 /* ─── Constants ──────────────────────────────────────────── */
-const TAG = { REC: 'rec', OVR: 'ovr', NONE: 'none' };
 const MAPPING_KIND = { VALUE_MAPPING: 'value_mapping', RENAME_ONLY: 'rename_only', UNMAPPED: 'unmapped' };
-// Source filter is single-select: clicking a chip filters the list to that
-// category, clicking ALL shows everything. The chips themselves serve as the
-// legend, so each category chip carries the same status icon used on the row.
-// Values span two axes — mapping source (REC/OVR/NONE) and target CDE behavior
-// (WILL_CHANGE). REC/OVR/NONE partition the columns by where the mapping came
-// from; WILL_CHANGE cuts across them and surfaces only rows whose values are
-// subject to harmonization (PV-typed targets — pass-through and unmapped rows
-// won't change values, so they fall out). Each chip's count is accurate for
-// "rows shown when selected"; the implicit "counts sum to total" property is
-// broken, and that property was never user-visible.
-const SOURCE_FILTER = { ALL: 'all', REC: TAG.REC, OVR: TAG.OVR, NONE: TAG.NONE, WILL_CHANGE: 'will_change' };
-const STATUS = { [TAG.REC]: '✦', [TAG.OVR]: '✎', [TAG.NONE]: '○' };
-const STATUS_CLASS = {
-  [TAG.REC]: 'mapping-ico--rec',
-  [TAG.OVR]: 'mapping-ico--ovr',
-  [TAG.NONE]: 'mapping-ico--none',
+
+const OUTCOME = { REWRITE: 'rewrite', PASSTHROUGH: 'passthrough', UNCHANGED: 'unchanged' };
+const OUTCOME_ICON = { [OUTCOME.REWRITE]: '✎', [OUTCOME.PASSTHROUGH]: '→', [OUTCOME.UNCHANGED]: '—' };
+const OUTCOME_CLASS = {
+  [OUTCOME.REWRITE]: 'mapping-ico--rewrite',
+  [OUTCOME.PASSTHROUGH]: 'mapping-ico--passthrough',
+  [OUTCOME.UNCHANGED]: 'mapping-ico--unchanged',
 };
-const STATUS_TIP = {
-  [TAG.REC]: 'AI recommendation',
-  [TAG.OVR]: 'Manual override',
-  [TAG.NONE]: 'No mapping',
+const OUTCOME_TIP = {
+  [OUTCOME.REWRITE]: 'Values will be rewritten to match the standard',
+  [OUTCOME.PASSTHROUGH]: 'No permissible values — data will not be changed',
+  [OUTCOME.UNCHANGED]: 'Unmapped — column will be skipped',
 };
-const FILTER_DESC = {
-  [SOURCE_FILTER.ALL]: 'Show all columns regardless of mapping status.',
-  [SOURCE_FILTER.REC]: 'Columns mapped to a standard suggested by the AI model.',
-  [SOURCE_FILTER.OVR]: 'Columns where you\'ve manually selected a different standard than the AI suggested.',
-  [SOURCE_FILTER.NONE]: 'Columns with no target standard selected. These will be skipped during harmonization.',
-  [SOURCE_FILTER.WILL_CHANGE]: 'Columns mapped to standards with permissible values — only these will have their values rewritten during harmonization.',
+const OUTCOME_DESC = {
+  [OUTCOME.REWRITE]: 'Mapped to a standard with permissible values — data will be harmonized during processing.',
+  [OUTCOME.PASSTHROUGH]: 'Mapped to a standard, but the standard has no enumerated permissible values, so your values will stay the same.',
+  [OUTCOME.UNCHANGED]: 'No target standard selected. Column will pass through without any changes.',
 };
 const MATCH_TIP = "Distinct values in your column that exactly match a permissible value of this CDE.";
 const PASSTHROUGH_FIT_TIP = "This standard has no permissible value list — values will pass through unchanged.";
-// Single source of truth for the pass-through glyph — same symbol on the
-// filter chip, the row's fit cell, and the takeover conform pill, so users
-// learn one icon for the concept across surfaces.
-const PASSTHROUGH_GLYPH = '↪';
+const PASSTHROUGH_GLYPH = '→';
 const NO_MAP_DESC = "Skip this column. Values will not be harmonized to any standard.";
 const VALUE_MAPPING_SECTION_LABEL = 'Harmonize values';
 const RENAME_ONLY_SECTION_LABEL = 'No value harmonization';
@@ -100,45 +85,53 @@ const takeoverEl = document.getElementById('takeover');
 const takeoverCardEl = document.getElementById('takeoverCard');
 
 /* ─── State ──────────────────────────────────────────────── */
-const VALUE_FIT_SORT = { NONE: 'none', ASC: 'asc', DESC: 'desc' };
+const SORT = {
+  FILE: 'file', FILE_REV: 'file-reverse',
+  TARGET_ASC: 'target-asc', TARGET_DESC: 'target-desc',
+  FIT_ASC: 'fit-asc', FIT_DESC: 'fit-desc',
+};
 
 const state = {
-  payload: null,                  // Stage 1 analyze payload from session storage
+  payload: null,
   filters: {
-    sources: new Set([TAG.REC, TAG.OVR, TAG.NONE]),
-    willChangeOnly: false,
-    hideEmpty: false,
+    outcomes: new Set([OUTCOME.REWRITE, OUTCOME.PASSTHROUGH, OUTCOME.UNCHANGED]),
+    showEmpty: false,
   },
-  filterModalOpen: false,
+  filterSidebarOpen: false,
   filterText: '',
-  overrides: new Map(),           // columnKey -> cdeKey | null
-  takeoverKey: null,              // column key whose takeover is open
+  overrides: new Map(),
+  takeoverKey: null,
   pickerOpen: false,
-  detailByColumn: new Map(),      // columnKey -> ColumnDetailResponse (cached)
+  detailByColumn: new Map(),
   isSubmitting: false,
-  // Tri-state cycle: NONE (CSV order, default) → ASC (worst fit first) → DESC
-  // → NONE. Sort is opt-in because CSV order is meaningful — users often know
-  // their dataset by column position.
-  valueFitSort: VALUE_FIT_SORT.NONE,
+  activeSort: SORT.FILE,
+  seenColumns: new Set(),
+  renameDefault: false,
+  renameOverrides: new Map(),
+  renameTargets: new Map(),
+  renamePickerOpen: false,
 };
 
 /* ─── Storage helpers ────────────────────────────────────── */
 const _savePayloadToStorage = (payload) => writeToSession(STAGE_2_PAYLOAD_KEY, payload);
 const _readPayloadFromStorage = () => readFromSession(STAGE_2_PAYLOAD_KEY);
 
-const _persistOverrides = () => {
+const _persistReviewChoices = () => {
   if (!state.payload) return;
-  const overrides = {};
-  for (const [k, v] of state.overrides.entries()) {
-    overrides[k] = v;
-  }
-  state.payload = { ...state.payload, manual_overrides: overrides };
+  state.payload = {
+    ...state.payload,
+    manual_overrides: _manualOverridesPayload(),
+    column_renames: _columnRenamesPayload(),
+  };
   _savePayloadToStorage(state.payload);
 };
 
 /* ─── Domain helpers ─────────────────────────────────────── */
+const _columnKey = (column) => column.column_key ?? column.column_name;
+const _columnLabel = (column) => column.header ?? column.column_name;
+
 const _columnSuggestions = (column) => {
-  const key = column.column_key ?? column.column_name;
+  const key = _columnKey(column);
   const targets = state.payload?.cde_targets ?? {};
   const raw = targets[key] || [];
   return raw.filter((s) => cdeByKey.has(s.target));
@@ -160,7 +153,7 @@ const _aiCdeKeys = (column) => _columnSuggestions(column).map((s) => s.target);
 const _topAiCdeKey = (column) => _aiCdeKeys(column)[0] ?? null;
 
 const _effectiveCde = (column) => {
-  const colKey = column.column_key ?? column.column_name;
+  const colKey = _columnKey(column);
   if (state.overrides.has(colKey)) {
     const v = state.overrides.get(colKey);
     if (_isNoMapValue(v) || !cdeByKey.has(v)) return null;
@@ -169,15 +162,12 @@ const _effectiveCde = (column) => {
   return _topAiCdeKey(column);
 };
 
-// REC means the rendered CDE is one the model suggested (top OR any other AI
-// candidate the user picked). OVR means the user chose something the AI did
-// not suggest. Status is derived from the rendered CDE — not from the mere
-// presence of an override — so a deliberate pick of a 2nd-ranked AI candidate
-// reads as "aligned with the AI," not as a divergence.
-const _effectiveStatus = (column) => {
+const _effectiveOutcome = (column) => {
   const cde = _effectiveCde(column);
-  if (!cde) return TAG.NONE;
-  return _aiCdeKeys(column).includes(cde) ? TAG.REC : TAG.OVR;
+  if (!cde) return OUTCOME.UNCHANGED;
+  const meta = cdeByKey.get(cde);
+  if (!meta) return OUTCOME.UNCHANGED;
+  return meta.type === 'pv' ? OUTCOME.REWRITE : OUTCOME.PASSTHROUGH;
 };
 
 const _mappingKindFor = (column) => {
@@ -188,34 +178,29 @@ const _mappingKindFor = (column) => {
   return _isRenameOnly(meta.type) ? MAPPING_KIND.RENAME_ONLY : MAPPING_KIND.VALUE_MAPPING;
 };
 
-// Catalog (cdeByKey) is authoritative for CDE type on the list view, since
-// per-column detail responses are loaded lazily on takeover open and not
-// available for unopened rows. Delegates to _effectiveCde so user overrides
-// (including override-to-NoMapping) are honored without special cases in the
-// predicate. PV is the only type that triggers value-level harmonization;
-// pass-through, numeric, and unmapped columns are all "values flow through
-// unchanged" from the user's standpoint.
-const _isWillChangeValuesColumn = (column) => {
-  const cde = _effectiveCde(column);
-  return !!cde && cdeByKey.get(cde)?.type === 'pv';
-};
-
+// Profiles are loaded lazily (column_profiles is empty in the initial payload),
+// so fall back to sample_values from the column entry, then to detail data.
 const _hasValues = (column) => {
-  const colKey = column.column_key ?? column.column_name;
+  const colKey = _columnKey(column);
+  const detail = state.detailByColumn.get(colKey);
+  if (detail?.profile) {
+    return (detail.profile.distinct_values ?? []).length > 0;
+  }
   const profile = state.payload?.column_profiles?.[colKey];
-  if (!profile) return true;
-  return (profile.total_distinct ?? profile.distinct_values?.length ?? 0) > 0;
+  if (profile) {
+    return (profile.total_distinct ?? profile.distinct_values?.length ?? 0) > 0;
+  }
+  return (column.sample_values ?? []).some((v) => v !== '' && v != null);
 };
 
 const _passesFilters = (column) => {
-  if (!state.filters.sources.has(_effectiveStatus(column))) return false;
-  if (state.filters.willChangeOnly && !_isWillChangeValuesColumn(column)) return false;
-  if (state.filters.hideEmpty && !_hasValues(column)) return false;
+  if (!state.filters.outcomes.has(_effectiveOutcome(column))) return false;
+  if (!state.filters.showEmpty && !_hasValues(column)) return false;
   return true;
 };
 
 const _overlapRatioFor = (column) => {
-  const colKey = column.column_key ?? column.column_name;
+  const colKey = _columnKey(column);
   const cde = _effectiveCde(column);
   if (!cde || !cdeByKey.has(cde)) return null;
   if (state.overrides.has(colKey)) {
@@ -231,96 +216,118 @@ const _filteredColumns = () => {
   const cols = state.payload?.columns ?? [];
   const filtered = cols.filter((c) => {
     if (!_passesFilters(c)) return false;
-    if (state.filterText && !(c.header ?? c.column_name ?? '').toLowerCase().includes(state.filterText)) {
+    if (state.filterText && !_columnLabel(c).toLowerCase().includes(state.filterText)) {
       return false;
     }
     return true;
   });
-  if (state.valueFitSort === VALUE_FIT_SORT.NONE) return filtered;
-  // Stable sort. Rows with no numeric fit (pass-through, unmapped, or missing
-  // ratio) always sink to the bottom regardless of direction so the actionable
-  // ordered group stays at the top.
-  const sign = state.valueFitSort === VALUE_FIT_SORT.ASC ? 1 : -1;
-  return [...filtered].sort((a, b) => {
-    const ka = _overlapRatioFor(a);
-    const kb = _overlapRatioFor(b);
-    const aHas = Number.isFinite(ka);
-    const bHas = Number.isFinite(kb);
-    if (!aHas && !bHas) return 0;
-    if (!aHas) return 1;
-    if (!bHas) return -1;
-    return sign * (ka - kb);
+  if (state.activeSort === SORT.FILE) return filtered;
+  if (state.activeSort === SORT.FILE_REV) return [...filtered].reverse();
+  if (state.activeSort === SORT.TARGET_ASC || state.activeSort === SORT.TARGET_DESC) {
+    return _sortByTarget(filtered, state.activeSort === SORT.TARGET_DESC);
+  }
+  return _sortByFit(filtered, state.activeSort === SORT.FIT_ASC ? 1 : -1);
+};
+
+const OUTCOME_SORT_RANK = { [OUTCOME.REWRITE]: 0, [OUTCOME.PASSTHROUGH]: 1, [OUTCOME.UNCHANGED]: 2 };
+
+const _sortByTarget = (cols, desc) => {
+  const sign = desc ? -1 : 1;
+  return [...cols].sort((a, b) => {
+    const ra = OUTCOME_SORT_RANK[_effectiveOutcome(a)] ?? 9;
+    const rb = OUTCOME_SORT_RANK[_effectiveOutcome(b)] ?? 9;
+    if (ra !== rb) return sign * (ra - rb);
+    const la = (_effectiveCde(a) ?? '').toLowerCase();
+    const lb = (_effectiveCde(b) ?? '').toLowerCase();
+    return sign * la.localeCompare(lb);
   });
 };
 
-/* ─── Filter modal (centered popup, multi-select) ────────── */
+// Unmapped columns (null ratio, no CDE) sink below passthrough (null ratio,
+// has CDE) so "—" and "N/A" don't intermingle when sorting by fit.
+const _sortByFit = (cols, sign) => [...cols].sort((a, b) => {
+  const ka = _overlapRatioFor(a);
+  const kb = _overlapRatioFor(b);
+  const aHas = Number.isFinite(ka);
+  const bHas = Number.isFinite(kb);
+  if (aHas && bHas) return sign * (ka - kb);
+  if (aHas) return -1;
+  if (bHas) return 1;
+  const aCde = _effectiveCde(a);
+  const bCde = _effectiveCde(b);
+  if (aCde && !bCde) return -1;
+  if (!aCde && bCde) return 1;
+  return 0;
+});
+
+/* ─── Filter sidebar (slides in from left, hover-preview) ── */
+const sidebarEl = document.getElementById('filterSidebar');
 
 const _isDefaultFilters = () =>
-  state.filters.sources.size === 3 && !state.filters.willChangeOnly && !state.filters.hideEmpty;
+  state.filters.outcomes.size === 3 && !state.filters.showEmpty;
 
-const _activeFilterCount = () => {
-  let n = 0;
-  if (state.filters.sources.size < 3) n += 1;
-  if (state.filters.willChangeOnly) n += 1;
-  if (state.filters.hideEmpty) n += 1;
-  return n;
+// Eye icon inside filter checkboxes — slash line hides/shows via CSS :checked
+// sibling combinator, so one SVG works for both states.
+const VISIBILITY_EYE_SVG = `<span class="fm-check-eye"><svg viewBox="0 0 16 14" width="16" height="12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M1 7S4 2.5 8 2.5 15 7 15 7s-3 4.5-7 4.5S1 7 1 7z"/><circle cx="8" cy="7" r="2" class="fm-eye-pupil"/><line x1="2.5" y1="1" x2="13.5" y2="13" class="fm-eye-slash"/></svg></span>`;
+
+const _outcomeCounts = () => {
+  const cols = state.payload?.columns ?? [];
+  const counts = { [OUTCOME.REWRITE]: 0, [OUTCOME.PASSTHROUGH]: 0, [OUTCOME.UNCHANGED]: 0 };
+  let empty = 0;
+  for (const col of cols) {
+    counts[_effectiveOutcome(col)]++;
+    if (!_hasValues(col)) empty++;
+  }
+  return { ...counts, empty, total: cols.length };
 };
 
-const FILTER_ICON_SVG = `<svg class="filter-modal-trigger-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.5 2h13a.5.5 0 01.09.99L14.5 3h-.09L10 8.28V14a.5.5 0 01-.22.42l-2 1.33a.5.5 0 01-.78-.42V8.28L2.59 3H2.5l-.09-.01A.5.5 0 011.5 2z"/></svg>`;
+// Horizontal sliders icon — broader than the funnel, fits "settings" framing
+const SETTINGS_ICON_SVG = `<svg class="filter-sidebar-trigger-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="1" y="3" width="14" height="1.5" rx=".75"/><rect x="1" y="7.25" width="14" height="1.5" rx=".75"/><rect x="1" y="11.5" width="14" height="1.5" rx=".75"/><circle cx="5" cy="3.75" r="2" fill="var(--white)" stroke="currentColor" stroke-width="1.2"/><circle cx="11" cy="8" r="2" fill="var(--white)" stroke="currentColor" stroke-width="1.2"/><circle cx="7" cy="12.25" r="2" fill="var(--white)" stroke="currentColor" stroke-width="1.2"/></svg>`;
 
 const renderFilterTrigger = () => {
-  const total = (state.payload?.columns ?? []).length;
-  const shown = _filteredColumns().length;
+  const isOpen = state.filterSidebarOpen;
   const isDefault = _isDefaultFilters();
-  const activeN = _activeFilterCount();
-  sourceFilterEl.innerHTML = isDefault
-    ? `<button class="filter-modal-trigger" id="filterModalTrigger">
-        ${FILTER_ICON_SVG}
-        <span>Filters</span>
-      </button>`
-    : `<button class="filter-modal-trigger filter-modal-trigger--active" id="filterModalTrigger">
-        ${FILTER_ICON_SVG}
-        <span>Filters</span>
-        <span class="filter-modal-trigger-badge">${activeN}</span>
-        <span class="filter-modal-trigger-ratio">${shown} / ${total}</span>
-      </button>`;
+  const cls = isOpen
+    ? 'filter-sidebar-trigger filter-sidebar-trigger--open'
+    : isDefault
+      ? 'filter-sidebar-trigger'
+      : 'filter-sidebar-trigger filter-sidebar-trigger--active';
+  sourceFilterEl.innerHTML = `
+    <button class="${cls}" id="filterSidebarTrigger">
+      ${SETTINGS_ICON_SVG}
+      <span>Settings</span>
+    </button>
+  `;
 };
 
-const _openFilterModal = () => {
-  state.filterModalOpen = true;
-  _renderFilterModal();
+const _openFilterSidebar = () => {
+  state.filterSidebarOpen = true;
+  sidebarEl.classList.remove('hidden');
+  _renderSidebarContent();
+  renderFilterTrigger();
 };
 
-const _closeFilterModal = () => {
-  state.filterModalOpen = false;
-  const el = document.getElementById('filterModal');
-  if (el) el.remove();
+const _closeFilterSidebar = () => {
+  state.filterSidebarOpen = false;
+  sidebarEl.classList.add('hidden');
+  _clearHoverPreview();
+  renderFilterTrigger();
 };
 
-const _filterCounts = () => {
-  const cols = state.payload?.columns ?? [];
-  return {
-    total: cols.length,
-    [TAG.REC]: cols.filter((c) => _effectiveStatus(c) === TAG.REC).length,
-    [TAG.OVR]: cols.filter((c) => _effectiveStatus(c) === TAG.OVR).length,
-    [TAG.NONE]: cols.filter((c) => _effectiveStatus(c) === TAG.NONE).length,
-    willChange: cols.filter(_isWillChangeValuesColumn).length,
-    hasValues: cols.filter(_hasValues).length,
-    empty: cols.filter((c) => !_hasValues(c)).length,
-  };
-};
+const _countBadge = (n, total) =>
+  `<span class="fm-check-count">${n} / ${total}</span>`;
 
-const _sourceCheckHtml = (tag, label, icon, iconCls, count, desc) => {
-  const checked = state.filters.sources.has(tag) ? 'checked' : '';
+const _outcomeCheckHtml = (outcome, label, icon, iconCls, desc, count, total) => {
+  const checked = state.filters.outcomes.has(outcome) ? 'checked' : '';
   return `
-    <label class="fm-check" data-source="${tag}">
+    <label class="fm-check" data-outcome="${outcome}" data-highlight="outcome:${outcome}">
       <input type="checkbox" ${checked} />
-      <span class="fm-check-box"></span>
+      ${VISIBILITY_EYE_SVG}
       <div class="fm-check-content">
         <div class="fm-check-head">
           <span class="mapping-filter-icon ${iconCls}">${icon}</span>
           <span class="fm-check-label">${label}</span>
-          <span class="fm-check-count">${count}</span>
+          ${_countBadge(count, total)}
         </div>
         <p class="fm-check-desc">${desc}</p>
       </div>
@@ -328,97 +335,239 @@ const _sourceCheckHtml = (tag, label, icon, iconCls, count, desc) => {
   `;
 };
 
-const _toggleCheckHtml = (id, label, checked, count, desc) => `
-  <label class="fm-check" data-toggle="${id}">
+const _toggleCheckHtml = (id, label, checked, desc, count, total) => `
+  <label class="fm-check" data-toggle="${id}" data-highlight="${id}">
     <input type="checkbox" ${checked ? 'checked' : ''} />
-    <span class="fm-check-box"></span>
+    ${VISIBILITY_EYE_SVG}
     <div class="fm-check-content">
       <div class="fm-check-head">
         <span class="fm-check-label">${label}</span>
-        <span class="fm-check-count">${count}</span>
+        ${_countBadge(count, total)}
       </div>
       <p class="fm-check-desc">${desc}</p>
     </div>
   </label>
 `;
 
-const _renderFilterModal = () => {
-  let el = document.getElementById('filterModal');
-  if (el) el.remove();
-  const counts = _filterCounts();
-  el = document.createElement('div');
-  el.className = 'filter-modal';
-  el.id = 'filterModal';
-  el.innerHTML = `
-    <div class="filter-modal-backdrop"></div>
-    <div class="filter-modal-card">
-      <header class="filter-modal-head">
-        <h2 class="filter-modal-title">Filters</h2>
-        <button class="filter-modal-close" data-action="close-filter" aria-label="Close">✕</button>
-      </header>
-      <div class="filter-modal-body">
-        <section class="fm-section">
-          <h3 class="fm-section-title">Mapping source</h3>
-          ${_sourceCheckHtml(TAG.REC, 'AI Recommendation', STATUS[TAG.REC], STATUS_CLASS[TAG.REC], counts[TAG.REC], FILTER_DESC[SOURCE_FILTER.REC])}
-          ${_sourceCheckHtml(TAG.OVR, 'Override', STATUS[TAG.OVR], STATUS_CLASS[TAG.OVR], counts[TAG.OVR], FILTER_DESC[SOURCE_FILTER.OVR])}
-          ${_sourceCheckHtml(TAG.NONE, 'No Mapping', STATUS[TAG.NONE], STATUS_CLASS[TAG.NONE], counts[TAG.NONE], FILTER_DESC[SOURCE_FILTER.NONE])}
-        </section>
-        <section class="fm-section">
-          <h3 class="fm-section-title">Harmonization</h3>
-          ${_toggleCheckHtml('willChange', 'Only columns that will change values', state.filters.willChangeOnly, counts.willChange, FILTER_DESC[SOURCE_FILTER.WILL_CHANGE])}
-        </section>
-        <section class="fm-section">
-          <h3 class="fm-section-title">Data content</h3>
-          ${_toggleCheckHtml('hideEmpty', 'Hide empty columns', state.filters.hideEmpty, counts.empty, 'Exclude columns where all rows are blank or null — these columns have no data to harmonize.')}
-        </section>
-      </div>
-      <footer class="filter-modal-foot">
-        <button class="filter-modal-reset" data-action="reset-filters" ${_isDefaultFilters() ? 'disabled' : ''}>Reset all</button>
-        <span class="filter-modal-showing">Showing <b>${_filteredColumns().length}</b> of <b>${counts.total}</b> columns</span>
-      </footer>
-    </div>
-  `;
-  document.body.appendChild(el);
-  _bindFilterModalEvents(el);
+const _isRenameActive = (colKey) => {
+  if (state.renameOverrides.has(colKey)) return state.renameOverrides.get(colKey);
+  return state.renameDefault;
 };
 
-const _bindFilterModalEvents = (el) => {
-  el.querySelector('.filter-modal-backdrop').addEventListener('click', _closeFilterModal);
-  el.querySelector('[data-action="close-filter"]').addEventListener('click', _closeFilterModal);
-  el.querySelector('[data-action="reset-filters"]').addEventListener('click', () => {
-    state.filters.sources = new Set([TAG.REC, TAG.OVR, TAG.NONE]);
-    state.filters.willChangeOnly = false;
-    state.filters.hideEmpty = false;
+const _renderSidebarContent = () => {
+  const counts = _outcomeCounts();
+  sidebarEl.innerHTML = `
+    <div class="fs-head">
+      <h3 class="fs-title">Column settings</h3>
+      <button class="fs-reset" data-action="reset-filters" ${_isDefaultFilters() ? 'disabled' : ''}>Reset</button>
+    </div>
+    <section class="fm-section">
+      <h3 class="fm-section-title">Column visibility</h3>
+      ${_outcomeCheckHtml(OUTCOME.REWRITE, 'Will rewrite', OUTCOME_ICON[OUTCOME.REWRITE], OUTCOME_CLASS[OUTCOME.REWRITE], OUTCOME_DESC[OUTCOME.REWRITE], counts[OUTCOME.REWRITE], counts.total)}
+      ${_outcomeCheckHtml(OUTCOME.PASSTHROUGH, 'Pass-through', OUTCOME_ICON[OUTCOME.PASSTHROUGH], OUTCOME_CLASS[OUTCOME.PASSTHROUGH], OUTCOME_DESC[OUTCOME.PASSTHROUGH], counts[OUTCOME.PASSTHROUGH], counts.total)}
+      ${_outcomeCheckHtml(OUTCOME.UNCHANGED, 'Unmapped', OUTCOME_ICON[OUTCOME.UNCHANGED], OUTCOME_CLASS[OUTCOME.UNCHANGED], OUTCOME_DESC[OUTCOME.UNCHANGED], counts[OUTCOME.UNCHANGED], counts.total)}
+      <hr class="fm-divider" />
+      ${_toggleCheckHtml('showEmpty', 'Show empty columns', state.filters.showEmpty, 'Include columns where all rows are blank or null.', counts.empty, counts.total)}
+    </section>
+    <section class="fm-section">
+      <h3 class="fm-section-title">Column rename</h3>
+      <label class="fs-rename-toggle">
+        <span class="fs-rename-label">Rename to match standard</span>
+        <input type="checkbox" ${state.renameDefault ? 'checked' : ''} />
+        <span class="fs-toggle-track"><span class="fs-toggle-thumb"></span></span>
+      </label>
+      <p class="fm-check-desc fs-rename-desc">When enabled, your column names will be changed to match the names of the targeted standard.</p>
+    </section>
+  `;
+  _bindSidebarEvents();
+};
+
+const _bindSidebarEvents = () => {
+  sidebarEl.querySelector('[data-action="reset-filters"]')?.addEventListener('click', () => {
+    state.filters.outcomes = new Set([OUTCOME.REWRITE, OUTCOME.PASSTHROUGH, OUTCOME.UNCHANGED]);
+    state.filters.showEmpty = false;
     _refreshAfterFilterChange();
   });
-  el.querySelectorAll('[data-source]').forEach((label) => {
+  sidebarEl.querySelectorAll('[data-outcome]').forEach((label) => {
     label.querySelector('input').addEventListener('change', (e) => {
-      const tag = label.dataset.source;
-      if (e.target.checked) state.filters.sources.add(tag);
-      else state.filters.sources.delete(tag);
+      const outcome = label.dataset.outcome;
+      if (e.target.checked) state.filters.outcomes.add(outcome);
+      else state.filters.outcomes.delete(outcome);
       _refreshAfterFilterChange();
     });
+    label.addEventListener('mouseenter', () => _showHoverPreview(label.dataset.highlight));
+    label.addEventListener('mouseleave', _clearHoverPreview);
   });
-  el.querySelectorAll('[data-toggle]').forEach((label) => {
+  sidebarEl.querySelectorAll('[data-toggle]').forEach((label) => {
     label.querySelector('input').addEventListener('change', (e) => {
-      const id = label.dataset.toggle;
-      if (id === 'willChange') state.filters.willChangeOnly = e.target.checked;
-      if (id === 'hideEmpty') state.filters.hideEmpty = e.target.checked;
+      if (label.dataset.toggle === 'showEmpty') state.filters.showEmpty = e.target.checked;
       _refreshAfterFilterChange();
     });
+    label.addEventListener('mouseenter', () => _showHoverPreview(label.dataset.highlight));
+    label.addEventListener('mouseleave', _clearHoverPreview);
   });
+  const renameInput = sidebarEl.querySelector('.fs-rename-toggle input');
+  if (renameInput) {
+    renameInput.addEventListener('change', (e) => {
+      state.renameDefault = e.target.checked;
+      _persistReviewChoices();
+      renderRows();
+    });
+  }
+};
+
+/* Hover preview — bidirectional show/hide indicators.
+   Checked categories: matching rows fade (they'd disappear on uncheck).
+   Unchecked categories: ghost rows appear (they'd materialise on check). */
+const MAX_GHOST_ROWS = 8;
+
+// Sidebar re-renders replace DOM under the cursor, which fires spurious
+// mouseenter events on the new labels. Suppress previews during re-render.
+let _hoverSuppressed = false;
+
+const _isHighlightActive = (highlight) => {
+  if (highlight.startsWith('outcome:')) return state.filters.outcomes.has(highlight.split(':')[1]);
+  if (highlight === 'showEmpty') return state.filters.showEmpty;
+  return false;
+};
+
+const _highlightMatches = (highlight, col) => {
+  if (highlight.startsWith('outcome:')) return _effectiveOutcome(col) === highlight.split(':')[1];
+  if (highlight === 'showEmpty') return !_hasValues(col);
+  return false;
+};
+
+// Only include columns that would actually become visible if this filter were
+// toggled — i.e., they match the highlight AND pass all OTHER active filters.
+const _wouldPassOtherFilters = (highlight, col) => {
+  if (highlight.startsWith('outcome:')) {
+    return state.filters.showEmpty || _hasValues(col);
+  }
+  if (highlight === 'showEmpty') {
+    return state.filters.outcomes.has(_effectiveOutcome(col));
+  }
+  return true;
+};
+
+const _hiddenColumnsForHighlight = (highlight) => {
+  const allCols = state.payload?.columns ?? [];
+  return allCols.filter((col) => {
+    if (!_highlightMatches(highlight, col)) return false;
+    if (!_wouldPassOtherFilters(highlight, col)) return false;
+    return !_passesFilters(col);
+  });
+};
+
+const _ghostRowHtml = (col) => {
+  const outcome = _effectiveOutcome(col);
+  const colKey = _columnKey(col);
+  const cde = _effectiveCde(col);
+  const target = cde
+    ? `<span class="mapping-row-target">${_escHtml(cde)}</span>`
+    : `<span class="mapping-row-target mapping-row-target--empty">—</span>`;
+  return `
+    <div class="mapping-row mapping-row--ghost" data-key="${_escAttr(colKey)}">
+      <div class="mapping-row-col">${_escHtml(_columnLabel(col))}</div>
+      <div class="mapping-row-status ${OUTCOME_CLASS[outcome]}">${OUTCOME_ICON[outcome]}</div>
+      ${target}
+      <div class="mapping-row-fit mapping-row-fit--empty">—</div>
+      <div class="mapping-row-chev"></div>
+    </div>
+  `;
+};
+
+const _insertGhostRows = (cols) => {
+  const capped = cols.slice(0, MAX_GHOST_ROWS);
+  const remaining = cols.length - capped.length;
+  const container = document.createElement('div');
+  container.className = 'ghost-row-container';
+  container.innerHTML =
+    capped.map(_ghostRowHtml).join('') +
+    (remaining > 0 ? `<div class="ghost-row-more">… and ${remaining} more</div>` : '');
+  rowsEl.appendChild(container);
+};
+
+let _ghostFadeOutTimer = null;
+
+// Immediately strip all preview classes and remove ghost containers.
+// Used when transitioning between previews (no animation needed).
+const _clearPreviewImmediate = () => {
+  if (_ghostFadeOutTimer) {
+    clearTimeout(_ghostFadeOutTimer);
+    _ghostFadeOutTimer = null;
+  }
+  rowsEl.querySelectorAll('.mapping-row').forEach((r) => {
+    r.classList.remove('filter-preview-will-hide', 'filter-preview-dim');
+  });
+  const hadGhosts = rowsEl.querySelector('.ghost-row-container');
+  rowsEl.querySelectorAll('.ghost-row-container').forEach((el) => el.remove());
+  if (hadGhosts && !rowsEl.querySelector('.mapping-row')) {
+    emptyState.classList.remove('hidden');
+  }
+};
+
+// Animated clear — ghost rows fade out before removal.
+// Used on mouseleave for a smooth exit transition.
+const _clearHoverPreview = () => {
+  if (_ghostFadeOutTimer) {
+    clearTimeout(_ghostFadeOutTimer);
+    _ghostFadeOutTimer = null;
+  }
+  rowsEl.querySelectorAll('.mapping-row').forEach((r) => {
+    r.classList.remove('filter-preview-will-hide', 'filter-preview-dim');
+  });
+  const ghostContainers = rowsEl.querySelectorAll('.ghost-row-container');
+  if (ghostContainers.length) {
+    ghostContainers.forEach((container) => {
+      container.querySelectorAll('.mapping-row--ghost').forEach((g) => g.classList.add('ghost-row-leaving'));
+    });
+    _ghostFadeOutTimer = setTimeout(() => {
+      ghostContainers.forEach((el) => el.remove());
+      _ghostFadeOutTimer = null;
+      if (!rowsEl.querySelector('.mapping-row')) {
+        emptyState.classList.remove('hidden');
+      }
+    }, 200);
+  }
+};
+
+const _showHoverPreview = (highlight) => {
+  if (_hoverSuppressed) return;
+  _clearPreviewImmediate();
+  const allCols = state.payload?.columns ?? [];
+
+  if (_isHighlightActive(highlight)) {
+    const rows = rowsEl.querySelectorAll('.mapping-row:not(.mapping-row--ghost)');
+    rows.forEach((r) => {
+      const col = allCols.find((c) => _columnKey(c) === r.dataset.key);
+      if (col && _highlightMatches(highlight, col)) {
+        r.classList.add('filter-preview-will-hide');
+      }
+    });
+  } else {
+    const hidden = _hiddenColumnsForHighlight(highlight);
+    if (hidden.length) {
+      _insertGhostRows(hidden);
+      emptyState.classList.add('hidden');
+      rowsEl.querySelectorAll('.mapping-row:not(.mapping-row--ghost)').forEach((r) => {
+        r.classList.add('filter-preview-dim');
+      });
+    }
+  }
 };
 
 const _refreshAfterFilterChange = () => {
+  _hoverSuppressed = true;
   renderRows();
   renderFilterTrigger();
-  if (state.filterModalOpen) _renderFilterModal();
+  if (state.filterSidebarOpen) _renderSidebarContent();
+  requestAnimationFrame(() => { _hoverSuppressed = false; });
 };
 
 sourceFilterEl.addEventListener('click', (e) => {
-  if (e.target.closest('#filterModalTrigger')) {
-    if (state.filterModalOpen) _closeFilterModal();
-    else _openFilterModal();
+  if (e.target.closest('#filterSidebarTrigger')) {
+    if (state.filterSidebarOpen) _closeFilterSidebar();
+    else _openFilterSidebar();
   }
 });
 
@@ -427,35 +576,40 @@ colSearchEl.addEventListener('input', (e) => {
   renderRows();
 });
 
-/* ─── Value-fit sort header ──────────────────────────────── */
-const VALUE_FIT_SORT_GLYPH = {
-  [VALUE_FIT_SORT.NONE]: '⇅',  // both arrows = unsorted, click to sort
-  [VALUE_FIT_SORT.ASC]: '↑',   // ascending = worst fit first (the actionable end)
-  [VALUE_FIT_SORT.DESC]: '↓',
-};
-const sortHeadEl = document.getElementById('valueFitSortBtn');
+/* ─── Sortable column headers ───────────────────────────── */
+const columnSortEl = document.getElementById('columnSortBtn');
+const targetSortEl = document.getElementById('targetSortBtn');
+const fitSortEl = document.getElementById('valueFitSortBtn');
 
-const renderValueFitSortHead = () => {
-  if (!sortHeadEl) return;
-  const arrowEl = sortHeadEl.querySelector('.mapping-list-head-sort-arrow');
-  if (arrowEl) arrowEl.textContent = VALUE_FIT_SORT_GLYPH[state.valueFitSort];
-  sortHeadEl.classList.toggle('mapping-list-head-sort--active', state.valueFitSort !== VALUE_FIT_SORT.NONE);
+const _sortArrow = (active, ascVal, descVal) => {
+  if (active === ascVal) return '↑';
+  if (active === descVal) return '↓';
+  return '⇅';
 };
 
-const _cycleValueFitSort = () => {
-  // None → Asc → Desc → None. Asc is hit first because the productive use of
-  // the sort is to surface the worst fits (the rows most likely to be wrong).
-  const next = {
-    [VALUE_FIT_SORT.NONE]: VALUE_FIT_SORT.ASC,
-    [VALUE_FIT_SORT.ASC]: VALUE_FIT_SORT.DESC,
-    [VALUE_FIT_SORT.DESC]: VALUE_FIT_SORT.NONE,
-  }[state.valueFitSort];
-  state.valueFitSort = next;
-  renderValueFitSortHead();
+const renderSortHeads = () => {
+  const s = state.activeSort;
+  const colArrow = columnSortEl?.querySelector('.mapping-list-head-sort-arrow');
+  const tgtArrow = targetSortEl?.querySelector('.mapping-list-head-sort-arrow');
+  const fitArrow = fitSortEl?.querySelector('.mapping-list-head-sort-arrow');
+  if (colArrow) colArrow.textContent = _sortArrow(s, SORT.FILE, SORT.FILE_REV);
+  if (tgtArrow) tgtArrow.textContent = _sortArrow(s, SORT.TARGET_ASC, SORT.TARGET_DESC);
+  if (fitArrow) fitArrow.textContent = _sortArrow(s, SORT.FIT_ASC, SORT.FIT_DESC);
+  columnSortEl?.classList.toggle('mapping-list-head-sort--active', s === SORT.FILE || s === SORT.FILE_REV);
+  targetSortEl?.classList.toggle('mapping-list-head-sort--active', s === SORT.TARGET_ASC || s === SORT.TARGET_DESC);
+  fitSortEl?.classList.toggle('mapping-list-head-sort--active', s === SORT.FIT_ASC || s === SORT.FIT_DESC);
+};
+
+const _cycleSortPair = (ascVal, descVal) => {
+  if (state.activeSort === ascVal) state.activeSort = descVal;
+  else state.activeSort = ascVal;
+  renderSortHeads();
   renderRows();
 };
 
-if (sortHeadEl) sortHeadEl.addEventListener('click', _cycleValueFitSort);
+columnSortEl?.addEventListener('click', () => _cycleSortPair(SORT.FILE, SORT.FILE_REV));
+targetSortEl?.addEventListener('click', () => _cycleSortPair(SORT.TARGET_ASC, SORT.TARGET_DESC));
+fitSortEl?.addEventListener('click', () => _cycleSortPair(SORT.FIT_ASC, SORT.FIT_DESC));
 
 /* ─── List rows ──────────────────────────────────────────── */
 const renderRows = () => {
@@ -479,8 +633,10 @@ const renderRows = () => {
 };
 
 const _rowHtml = (col) => {
-  const status = _effectiveStatus(col);
-  const colKey = col.column_key ?? col.column_name;
+  const outcome = _effectiveOutcome(col);
+  const colKey = _columnKey(col);
+  const colLabel = _columnLabel(col);
+  const seen = state.seenColumns.has(colKey);
   const override = state.overrides.get(colKey);
   let target;
   if (_isNoMapValue(override)) {
@@ -488,17 +644,17 @@ const _rowHtml = (col) => {
   } else {
     const cde = _effectiveCde(col);
     target = cde
-      ? `<span class="mapping-row-target" title="${_escAttr(cde)}">${_escHtml(cde)}</span>`
-      : `<span class="mapping-row-target mapping-row-target--empty">— no mapping yet</span>`;
+      ? `<span class="mapping-row-target" data-fast-tooltip="${_escAttr(cde)}"><span class="mapping-row-target-text">${_escHtml(cde)}</span></span>`
+      : `<span class="mapping-row-target mapping-row-target--empty"></span>`;
   }
   const fit = _overlapCellHtml(col);
   return `
-    <div class="mapping-row" data-key="${_escAttr(colKey)}">
-      <div class="mapping-row-col" title="${_escAttr(col.header ?? col.column_name)}">${_escHtml(col.header ?? col.column_name)}</div>
-      <div class="mapping-row-status ${STATUS_CLASS[status]}" data-fast-tooltip="${_escAttr(STATUS_TIP[status])}">${STATUS[status]}</div>
+    <div class="mapping-row${seen ? ' mapping-row--seen' : ''}" data-key="${_escAttr(colKey)}" data-outcome="${outcome}" data-has-values="${_hasValues(col) ? '1' : '0'}">
+      <div class="mapping-row-col" data-fast-tooltip="${_escAttr(colLabel)}"><span class="mapping-row-col-text">${_escHtml(colLabel)}</span></div>
+      <div class="mapping-row-status ${OUTCOME_CLASS[outcome]}" data-fast-tooltip="${_escAttr(OUTCOME_TIP[outcome])}">${OUTCOME_ICON[outcome]}</div>
       ${target}
       ${fit}
-      <div class="mapping-row-chev">›</div>
+      <div class="mapping-row-chev"${seen ? ' data-fast-tooltip="Reviewed"' : ''}>${seen ? '✓' : '›'}</div>
     </div>
   `;
 };
@@ -506,24 +662,12 @@ const _rowHtml = (col) => {
 const _overlapCellHtml = (col) => {
   const kind = _mappingKindFor(col);
   if (kind === MAPPING_KIND.RENAME_ONLY) {
-    const cdeType = cdeByKey.get(_effectiveCde(col))?.type;
-    if (cdeType === 'passthrough') {
-      // Passthrough CDEs have no PV list — a 0% match would misleadingly imply
-      // bad fit. Glyph is shared with the filter chip and the takeover conform
-      // pill so the same symbol means "pass-through" across surfaces.
-      return `
-        <div class="mapping-row-fit mapping-row-fit--passthrough" data-fast-tooltip="${_escAttr(PASSTHROUGH_FIT_TIP)}" tabindex="0">
-          <span aria-hidden="true">${PASSTHROUGH_GLYPH}</span>
-          <span class="sr-only">${_escHtml(PASSTHROUGH_FIT_TIP)}</span>
-        </div>
-      `;
-    }
-    return `<div class="mapping-row-fit mapping-row-fit--ratio" title="No permissible values to compare">0%</div>`;
+    return `<div class="mapping-row-fit mapping-row-fit--na" data-fast-tooltip="${_escAttr(PASSTHROUGH_FIT_TIP)}">N/A</div>`;
   }
   if (kind === MAPPING_KIND.VALUE_MAPPING) {
     const ratio = _overlapRatioFor(col);
     if (ratio !== null) {
-      return `<div class="mapping-row-fit mapping-row-fit--ratio" title="Distinct value overlap">${_formatRatio(ratio)}</div>`;
+      return `<div class="mapping-row-fit mapping-row-fit--ratio" data-fast-tooltip="${_escAttr(MATCH_TIP)}">${_formatRatio(ratio)}</div>`;
     }
   }
   return `<div class="mapping-row-fit mapping-row-fit--empty">—</div>`;
@@ -548,28 +692,33 @@ const openTakeover = async (colKey) => {
 };
 
 const closeTakeover = () => {
+  if (state.takeoverKey) state.seenColumns.add(state.takeoverKey);
   state.takeoverKey = null;
   state.pickerOpen = false;
+  _closeRenameDropdown();
   takeoverEl.classList.add('hidden');
   document.body.classList.remove('lock');
+  renderRows();
+  if (state.filterSidebarOpen) _renderSidebarContent();
 };
 
 const navigate = async (delta) => {
   const list = _filteredColumns();
-  const i = list.findIndex((c) => (c.column_key ?? c.column_name) === state.takeoverKey);
+  const i = list.findIndex((c) => _columnKey(c) === state.takeoverKey);
+  if (state.takeoverKey) state.seenColumns.add(state.takeoverKey);
   const ni = i + delta;
   if (ni < 0 || ni >= list.length) return;
   const next = list[ni];
-  state.takeoverKey = next.column_key ?? next.column_name;
+  state.takeoverKey = _columnKey(next);
   state.pickerOpen = false;
   renderTakeover();
   await _ensureColumnDetail(state.takeoverKey);
-  if (state.takeoverKey === (next.column_key ?? next.column_name)) renderTakeover();
+  if (state.takeoverKey === _columnKey(next)) renderTakeover();
 };
 
 const _ensureColumnDetail = async (colKey) => {
   if (state.detailByColumn.has(colKey)) return;
-  const col = (state.payload?.columns ?? []).find((c) => (c.column_key ?? c.column_name) === colKey);
+  const col = (state.payload?.columns ?? []).find((c) => _columnKey(c) === colKey);
   if (!col) return;
   const fileId = state.payload.file_id;
   const selected = _effectiveCde(col);
@@ -588,20 +737,121 @@ const _ensureColumnDetail = async (colKey) => {
   }
 };
 
+const _effectiveRenameTarget = (colKey, cde) => {
+  if (state.renameTargets.has(colKey)) return state.renameTargets.get(colKey);
+  if (!cde) return null;
+  return cdeByKey.get(cde)?.label ?? cde;
+};
+
+const _columnRenamesPayload = () => {
+  const renames = {};
+  for (const col of state.payload?.columns ?? []) {
+    const colKey = _columnKey(col);
+    if (!_isRenameActive(colKey)) continue;
+    const targetName = _effectiveRenameTarget(colKey, _effectiveCde(col));
+    if (targetName && targetName !== _columnLabel(col)) renames[colKey] = targetName;
+  }
+  return renames;
+};
+
+const _manualOverridesPayload = () => {
+  const overrides = {};
+  for (const [k, v] of state.overrides.entries()) overrides[k] = v;
+  return overrides;
+};
+
+const _renameIndicatorHtml = (col, colKey, cde) => {
+  const originalName = _columnLabel(col);
+  const renameActive = _isRenameActive(colKey);
+  const targetName = _effectiveRenameTarget(colKey, cde);
+  const hasCustomTarget = state.renameTargets.has(colKey);
+  if (!renameActive) {
+    if (!cde) return '';
+    const defaultTarget = cdeByKey.get(cde)?.label ?? cde;
+    if (defaultTarget === originalName) return '';
+    return `
+      <button class="takeover-rename-off" data-action="toggle-rename" title="Enable rename for this column">
+        Rename available → ${_escHtml(defaultTarget)}
+      </button>
+    `;
+  }
+  if (!targetName) return '';
+  if (targetName === originalName && !hasCustomTarget) return '';
+  return `
+    <div class="takeover-rename-row">
+      <span class="takeover-rename-arrow">→</span>
+      <button class="takeover-rename-pick" data-action="open-rename-picker" title="Change rename target">
+        <span class="takeover-rename-target">${_escHtml(targetName)}</span>
+        <span class="takeover-rename-caret">▾</span>
+      </button>
+      <button class="takeover-rename-btn" data-action="toggle-rename" title="Disable rename for this column">✕</button>
+    </div>
+  `;
+};
+
+const _openRenameDropdown = (colKey) => {
+  _closePicker();
+  const wrap = takeoverCardEl.querySelector('.takeover-rename-row') ?? takeoverCardEl.querySelector('.takeover-head-names');
+  if (!wrap) return;
+  state.renamePickerOpen = true;
+  const existing = wrap.querySelector('.rename-dropdown');
+  if (existing) existing.remove();
+  const dd = document.createElement('div');
+  dd.className = 'rename-dropdown';
+  dd.id = 'renameDropdown';
+  dd.innerHTML = `
+    <div class="rename-dd-search"><input type="search" placeholder="Filter standards…" autocomplete="off" /></div>
+    <div class="rename-dd-list">${_renameDropdownItemsHtml('')}</div>
+  `;
+  wrap.appendChild(dd);
+  const input = dd.querySelector('input');
+  setTimeout(() => input?.focus(), 0);
+  input?.addEventListener('input', (e) => {
+    dd.querySelector('.rename-dd-list').innerHTML = _renameDropdownItemsHtml(e.target.value);
+  });
+  dd.addEventListener('click', (e) => {
+    const opt = e.target.closest('.rename-dd-opt');
+    if (!opt) return;
+    state.renameTargets.set(colKey, opt.dataset.label);
+    if (!_isRenameActive(colKey)) state.renameOverrides.set(colKey, true);
+    _persistReviewChoices();
+    _closeRenameDropdown();
+    renderTakeover();
+    renderRows();
+  });
+};
+
+const _closeRenameDropdown = () => {
+  state.renamePickerOpen = false;
+  document.getElementById('renameDropdown')?.remove();
+};
+
+const _renameDropdownItemsHtml = (q) => {
+  const lq = q.toLowerCase();
+  const matches = cdeCatalog.filter((c) =>
+    !lq || (c.label || c.key).toLowerCase().includes(lq) || (c.description || '').toLowerCase().includes(lq)
+  );
+  if (!matches.length) return `<div class="rename-dd-empty">No standards match "${_escHtml(q)}"</div>`;
+  return matches.map((c) => `
+    <div class="rename-dd-opt" data-label="${_escAttr(c.label || c.key)}">
+      <span class="rename-dd-name">${_escHtml(c.label || c.key)}</span>
+      ${c.description ? `<span class="rename-dd-desc">${_escHtml(c.description)}</span>` : ''}
+    </div>
+  `).join('');
+};
+
 const renderTakeover = () => {
   const colKey = state.takeoverKey;
   if (!colKey) { closeTakeover(); return; }
-  const col = (state.payload?.columns ?? []).find((c) => (c.column_key ?? c.column_name) === colKey);
+  const col = (state.payload?.columns ?? []).find((c) => _columnKey(c) === colKey);
   if (!col) { closeTakeover(); return; }
 
   const list = _filteredColumns();
-  const idx = list.findIndex((c) => (c.column_key ?? c.column_name) === colKey);
-  const status = _effectiveStatus(col);
+  const idx = list.findIndex((c) => _columnKey(c) === colKey);
+  const outcome = _effectiveOutcome(col);
   const cde = _effectiveCde(col);
   const detail = state.detailByColumn.get(colKey) ?? null;
   const profile = detail?.profile ?? state.payload.column_profiles?.[colKey] ?? null;
-  // Per-value PV match lookup. Strict equality (case/whitespace-sensitive) per the
-  // "all character differences are semantically significant" domain rule.
   const cdeType = detail?.cde_types?.[cde] ?? cdeByKey.get(cde)?.type ?? 'pv';
   const pvSet = (cde && cdeType === 'pv' && Array.isArray(detail?.selected_pvs))
     ? new Set(detail.selected_pvs)
@@ -610,10 +860,12 @@ const renderTakeover = () => {
   takeoverCardEl.innerHTML = `
     <header class="takeover-head">
       <div class="takeover-head-left">
-        <span class="takeover-head-status ${STATUS_CLASS[status]}">${STATUS[status]}</span>
-        <h2 class="takeover-head-name" title="${_escAttr(col.header ?? col.column_name)}">${_escHtml(col.header ?? col.column_name)}</h2>
+        <span class="takeover-head-status ${OUTCOME_CLASS[outcome]}">${OUTCOME_ICON[outcome]}</span>
+        <div class="takeover-head-names">
+          <h2 class="takeover-head-name" data-fast-tooltip="${_escAttr(_columnLabel(col))}">${_escHtml(_columnLabel(col))}</h2>
+          ${_renameIndicatorHtml(col, colKey, cde)}
+        </div>
       </div>
-      <div class="takeover-head-center">${_conformPillHtml(col, cde, detail, profile)}</div>
       <div class="takeover-head-right">
         <span class="takeover-counter">${idx + 1} of ${list.length}</span>
         <button class="takeover-btn" data-action="prev" ${idx <= 0 ? 'disabled' : ''}>← Prev</button>
@@ -623,60 +875,33 @@ const renderTakeover = () => {
     </header>
     <div class="takeover-body">
       <section class="takeover-pane takeover-pane--data">${_dataPaneHtml(col, profile, pvSet)}</section>
-      <section class="takeover-pane takeover-pane--target">${_targetPaneHtml(col, cde, detail)}</section>
+      <section class="takeover-pane takeover-pane--target">${_targetPaneHtml(col, cde, detail, profile)}</section>
     </div>
   `;
   _bindTakeoverEvents(col);
 };
 
-const _conformPillHtml = (col, cde, detail, profile) => {
+const _conformSummaryHtml = (col, cde, detail, profile) => {
   if (!cde) return '';
   const totalDistinct = profile?.total_distinct ?? profile?.distinct_values?.length ?? 0;
   const cdeType = detail?.cde_types?.[cde] ?? cdeByKey.get(cde)?.type ?? 'pv';
   const matchN = detail?.match_counts?.[cde] ?? 0;
 
   if (cdeType === 'passthrough') {
-    // No tooltip / help cursor — the inline label already says everything.
-    return `
-      <div class="conform-pill conform-pill--neutral">
-        <span class="ico">${PASSTHROUGH_GLYPH}</span>
-        <span>Pass-through field — values will not be changed</span>
-      </div>
-    `;
+    return `<span class="conform-summary conform-summary--neutral">${PASSTHROUGH_GLYPH} Pass-through — values unchanged</span>`;
   }
+  const pct = totalDistinct > 0 ? _formatRatio(matchN / totalDistinct) : '0%';
   if (cdeType === 'numeric') {
-    const tip = "Distinct values in your column that parse as numbers.";
     if (matchN > 0) {
-      return `
-        <div class="conform-pill" title="${tip}">
-          <span class="ico">✓</span>
-          <span><b>${matchN.toLocaleString()}</b> of <b>${totalDistinct.toLocaleString()}</b> distinct values are numeric</span>
-        </div>
-      `;
+      return `<span class="conform-summary">${pct} of values numeric</span>`;
     }
-    return `
-      <div class="conform-pill conform-pill--warning" title="${tip}">
-        <span class="ico">⚠</span>
-        <span><b>0</b> of <b>${totalDistinct.toLocaleString()}</b> distinct values are numeric</span>
-      </div>
-    `;
+    return `<span class="conform-summary conform-summary--warning">0% of values numeric</span>`;
   }
   if (matchN > 0) {
-    return `
-      <div class="conform-pill" title="${MATCH_TIP}">
-        <span class="ico">✓</span>
-        <span><b>${matchN.toLocaleString()}</b> of <b>${totalDistinct.toLocaleString()}</b> distinct values match</span>
-      </div>
-    `;
+    return `<span class="conform-summary">${pct} of values fit</span>`;
   }
-  // PV with zero matches — surface as a warning so users notice the bad fit
   if (detail) {
-    return `
-      <div class="conform-pill conform-pill--warning" title="${MATCH_TIP}">
-        <span class="ico">⚠</span>
-        <span><b>0</b> of <b>${totalDistinct.toLocaleString()}</b> distinct values match</span>
-      </div>
-    `;
+    return `<span class="conform-summary conform-summary--warning">0% of values fit</span>`;
   }
   return '';
 };
@@ -716,8 +941,8 @@ const _sampleHtml = (s, pvSet) => {
   return `<li class="${liClass}"><span class="ok">${okGlyph}</span><span class="v" title="${_escAttr(s.value)}">${_escHtml(s.value)}</span><span class="c">${(s.count ?? 0).toLocaleString()}</span></li>`;
 };
 
-const _targetPaneHtml = (col, cde, detail) => {
-  const colKey = col.column_key ?? col.column_name;
+const _targetPaneHtml = (col, cde, detail, profile) => {
+  const colKey = _columnKey(col);
   const override = state.overrides.get(colKey);
   const isAi = cde && cde === _topAiCdeKey(col) && !state.overrides.has(colKey);
   const isNone = _isNoMapValue(override);
@@ -740,13 +965,14 @@ const _targetPaneHtml = (col, cde, detail) => {
       <span class="cde-picker-name" title="${_escAttr(cde)}">${_escHtml(cde)}</span>
       ${typeBadge}
       ${isAi ? `<span class="ai-badge">✦ AI rec</span>` : ''}
-      <span class="cde-picker-caret" style="margin-left:auto">▾</span>
+      <span class="cde-picker-caret cde-picker-caret--end">▾</span>
     `;
   }
 
   const head = `
     <div class="takeover-pane-head">
       <h3 class="takeover-pane-title">Target standard</h3>
+      ${_conformSummaryHtml(col, cde, detail, profile)}
     </div>
     <div class="cde-picker-wrap" id="pickerWrap">
       <button class="cde-picker" id="cdePicker">${pickerInner}</button>
@@ -794,8 +1020,9 @@ const _targetPaneHtml = (col, cde, detail) => {
 /* ─── Picker dropdown (sorted by match count, with descriptions) ─ */
 const _togglePicker = () => {
   if (state.pickerOpen) { _closePicker(); return; }
+  _closeRenameDropdown();
   const colKey = state.takeoverKey;
-  const col = (state.payload?.columns ?? []).find((c) => (c.column_key ?? c.column_name) === colKey);
+  const col = (state.payload?.columns ?? []).find((c) => _columnKey(c) === colKey);
   if (!col) return;
   const detail = state.detailByColumn.get(colKey) ?? null;
   const matchCounts = detail?.match_counts ?? {};
@@ -822,19 +1049,22 @@ const _togglePicker = () => {
     .filter(Boolean)
     .map(_toOption);
 
+  const profile = detail?.profile ?? state.payload?.column_profiles?.[colKey] ?? null;
+  const totalDistinct = profile?.total_distinct ?? profile?.distinct_values?.length ?? 0;
+
   const wrap = document.getElementById('pickerWrap');
   const dd = document.createElement('div');
   dd.className = 'dropdown';
   dd.id = 'pickerDropdown';
   dd.innerHTML = `
     <div class="dd-search"><input type="search" id="ddSearch" placeholder="Filter standards by name or description…" autocomplete="off" /></div>
-    <div class="dd-list" id="ddList">${_renderDropdownItems(aiOptions, opts, '')}</div>
+    <div class="dd-list" id="ddList">${_renderDropdownItems(aiOptions, opts, '', totalDistinct)}</div>
   `;
   wrap.appendChild(dd);
   state.pickerOpen = true;
   setTimeout(() => dd.querySelector('input').focus(), 0);
   dd.querySelector('input').addEventListener('input', (e) => {
-    document.getElementById('ddList').innerHTML = _renderDropdownItems(aiOptions, opts, e.target.value);
+    document.getElementById('ddList').innerHTML = _renderDropdownItems(aiOptions, opts, e.target.value, totalDistinct);
   });
   dd.addEventListener('click', async (e) => {
     const opt = e.target.closest('.dd-opt');
@@ -859,19 +1089,17 @@ const _closePicker = () => {
   if (dd) dd.remove();
 };
 
-const _renderDropdownItems = (aiOptions, opts, q) => {
+const _renderDropdownItems = (aiOptions, opts, q, totalDistinct) => {
   const lq = q.toLowerCase();
   const matches = (c) => !lq
     || (c.label || c.key).toLowerCase().includes(lq)
     || (c.description || '').toLowerCase().includes(lq);
   const topItems = [];
-  // Render every AI candidate as its own ✦ AI rec row, top-first (similarity
-  // order). Search filter still applies — non-matching candidates drop out.
   for (const ai of aiOptions) {
-    if (matches(ai)) topItems.push(_optHtml(ai, 'ai'));
+    if (matches(ai)) topItems.push(_optHtml(ai, 'ai', totalDistinct));
   }
   if (!q) {
-    topItems.push(_optHtml({ key: NO_MAP_OPTION_VALUE, label: NO_MAPPING_OPTION, description: NO_MAP_DESC }, 'none'));
+    topItems.push(_optHtml({ key: NO_MAP_OPTION_VALUE, label: NO_MAPPING_OPTION, description: NO_MAP_DESC }, 'none', totalDistinct));
   }
   const valueOptions = opts.filter((o) => !_isRenameOnly(o.type) && matches(o));
   const renameOnlyOptions = opts.filter((o) => _isRenameOnly(o.type) && matches(o));
@@ -879,8 +1107,8 @@ const _renderDropdownItems = (aiOptions, opts, q) => {
   const sections = [
     ...topItems,
     topItems.length ? `<div class="dd-divider"></div>` : '',
-    _dropdownSectionHtml(VALUE_MAPPING_SECTION_LABEL, valueOptions, 'alt'),
-    _dropdownSectionHtml(RENAME_ONLY_SECTION_LABEL, renameOnlyOptions, 'alt rename-only'),
+    _dropdownSectionHtml(VALUE_MAPPING_SECTION_LABEL, valueOptions, 'alt', totalDistinct),
+    _dropdownSectionHtml(RENAME_ONLY_SECTION_LABEL, renameOnlyOptions, 'alt rename-only', totalDistinct),
   ].filter(Boolean);
   if (!sections.length || (valueOptions.length === 0 && renameOnlyOptions.length === 0 && topItems.length === 0)) {
     return `<div class="dd-empty">No standards match "${_escHtml(q)}"</div>`;
@@ -888,24 +1116,31 @@ const _renderDropdownItems = (aiOptions, opts, q) => {
   return sections.join('');
 };
 
-const _dropdownSectionHtml = (label, options, kind) => {
+const _dropdownSectionHtml = (label, options, kind, totalDistinct) => {
   if (!options.length) return '';
   return `
     <section class="dd-section ${kind.includes('rename-only') ? 'dd-section--rename-only' : ''}">
       <div class="dd-section-label">${_escHtml(label)}</div>
-      ${options.map((o) => _optHtml(o, kind)).join('')}
+      ${options.map((o) => _optHtml(o, kind, totalDistinct)).join('')}
     </section>
   `;
 };
 
-const _optHtml = (c, kind) => {
+const _optHtml = (c, kind, totalDistinct) => {
   const showMatch = kind !== 'none';
   const matchCount = _isRenameOnly(c.type) ? 0 : c.matches ?? 0;
   const matchTip = _isRenameOnly(c.type) ? 'No permissible values to compare.' : MATCH_TIP;
-  const matchHtml = showMatch ? `
-    <span class="count ${matchCount > 0 ? 'high' : 'zero'}" title="${matchTip}">
-      ${matchCount > 0 ? `<b>${matchCount.toLocaleString()}</b> matches` : '0 matches'}
-    </span>` : '';
+  let matchHtml = '';
+  if (showMatch) {
+    if (_isRenameOnly(c.type)) {
+      matchHtml = `<span class="count zero" title="${matchTip}">N/A</span>`;
+    } else if (totalDistinct > 0) {
+      const pct = _formatRatio(matchCount / totalDistinct);
+      matchHtml = `<span class="count ${matchCount > 0 ? 'high' : 'zero'}" title="${matchTip}">${pct} value fit</span>`;
+    } else {
+      matchHtml = `<span class="count zero" title="${matchTip}">0% value fit</span>`;
+    }
+  }
   const aiBadge = kind === 'ai' ? `<span class="ai-badge">✦ AI rec</span>` : '';
   const typeBadge = c.type === 'numeric'
     ? `<span class="type-badge type-badge--numeric">Numeric</span>`
@@ -927,7 +1162,7 @@ const _optHtml = (c, kind) => {
 };
 
 const _pickOverride = (colKey, value) => {
-  const col = (state.payload?.columns ?? []).find((c) => (c.column_key ?? c.column_name) === colKey);
+  const col = (state.payload?.columns ?? []).find((c) => _columnKey(c) === colKey);
   const aiKey = col ? _topAiCdeKey(col) : null;
   const normalizedValue = _normalizeOverrideValue(value);
   if (aiKey && normalizedValue === aiKey) {
@@ -935,17 +1170,30 @@ const _pickOverride = (colKey, value) => {
   } else {
     state.overrides.set(colKey, normalizedValue);
   }
-  _persistOverrides();
+  _persistReviewChoices();
 };
 
 /* ─── Event wiring ───────────────────────────────────────── */
 const _bindTakeoverEvents = (col) => {
+  const colKey = _columnKey(col);
   takeoverCardEl.querySelectorAll('[data-action]').forEach((el) => {
-    el.addEventListener('click', () => {
+    el.addEventListener('click', (e) => {
       const action = el.dataset.action;
       if (action === 'close') closeTakeover();
       else if (action === 'prev') void navigate(-1);
       else if (action === 'next') void navigate(1);
+      else if (action === 'toggle-rename') {
+        const current = _isRenameActive(colKey);
+        state.renameOverrides.set(colKey, !current);
+        _closeRenameDropdown();
+        _persistReviewChoices();
+        renderTakeover();
+        renderRows();
+      } else if (action === 'open-rename-picker') {
+        e.stopPropagation();
+        if (state.renamePickerOpen) _closeRenameDropdown();
+        else _openRenameDropdown(colKey);
+      }
     });
   });
   const picker = document.getElementById('cdePicker');
@@ -958,11 +1206,15 @@ document.addEventListener('click', (e) => {
   if (state.pickerOpen && !e.target.closest('#pickerDropdown') && !e.target.closest('#cdePicker')) {
     _closePicker();
   }
+  if (state.renamePickerOpen && !e.target.closest('#renameDropdown') && !e.target.closest('[data-action="open-rename-picker"]')) {
+    _closeRenameDropdown();
+  }
 });
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    if (state.filterModalOpen) { _closeFilterModal(); return; }
+    if (state.renamePickerOpen) { _closeRenameDropdown(); return; }
+    if (state.filterSidebarOpen) { _closeFilterSidebar(); return; }
     if (state.pickerOpen) { _closePicker(); return; }
     if (state.takeoverKey) closeTakeover();
     return;
@@ -975,7 +1227,7 @@ document.addEventListener('keydown', (e) => {
 
 takeoverEl.querySelector('.takeover-backdrop').addEventListener('click', () => closeTakeover());
 
-/* ─── Harmonize submission (unchanged shape) ─────────────── */
+/* ─── Harmonize submission ───────────────────────────────── */
 const _persistStageThreePayload = (body) => {
   const payloadForStageThree = {
     request: body,
@@ -996,8 +1248,8 @@ const _submitHarmonize = async () => {
   if (harmonizeButton) harmonizeButton.disabled = true;
   if (harmonizeButtonText) harmonizeButtonText.textContent = 'Preparing…';
 
-  const overrides = {};
-  for (const [k, v] of state.overrides.entries()) overrides[k] = v;
+  const overrides = _manualOverridesPayload();
+  const columnRenames = _columnRenamesPayload();
   const manifest = state.payload?.manifest;
   if (!manifest || !manifest.column_mappings) {
     state.isSubmitting = false;
@@ -1019,6 +1271,7 @@ const _submitHarmonize = async () => {
     target_schema: config.targetSchema,
     target_version_number: state.payload?.target_version_number ?? targetVersionNumber,
     manual_overrides: overrides,
+    column_renames: columnRenames,
     manifest,
   };
   removeFromSession(STAGE_3_JOB_KEY);
@@ -1071,15 +1324,14 @@ const _fetchPayload = async (fileId, targetSchema) => {
 const _ensureOverrideDetails = async () => {
   const cols = state.payload?.columns ?? [];
   const overriddenValueRows = cols.filter((col) => {
-    const colKey = col.column_key ?? col.column_name;
+    const colKey = _columnKey(col);
     if (!state.overrides.has(colKey)) return false;
     const cde = _effectiveCde(col);
     const meta = cde ? cdeByKey.get(cde) : null;
     return meta && !_isRenameOnly(meta.type) && !state.detailByColumn.has(colKey);
   });
   await Promise.all(overriddenValueRows.map(async (col) => {
-    const colKey = col.column_key ?? col.column_name;
-    await _ensureColumnDetail(colKey);
+    await _ensureColumnDetail(_columnKey(col));
   }));
   if (overriddenValueRows.length) {
     renderFilterTrigger();
@@ -1113,6 +1365,12 @@ const _init = async () => {
   state.overrides = new Map(
     Object.entries(payload.manual_overrides ?? {}).map(([key, value]) => [key, _normalizeOverrideValue(value)])
   );
+  state.renameOverrides = new Map(
+    Object.entries(payload.column_renames ?? {}).map(([key]) => [key, true])
+  );
+  state.renameTargets = new Map(
+    Object.entries(payload.column_renames ?? {}).filter(([, value]) => typeof value === 'string')
+  );
   renderFilterTrigger();
   renderRows();
   void _ensureOverrideDetails();
@@ -1120,9 +1378,7 @@ const _init = async () => {
 
 /* ─── Utils ──────────────────────────────────────────────── */
 function _formatRatio(ratio) {
-  const pct = ratio * 100;
-  if (Number.isInteger(pct)) return `${pct}%`;
-  return `${pct.toFixed(1)}%`;
+  return `${Math.round(ratio * 100)}%`;
 }
 
 function _escHtml(s) {

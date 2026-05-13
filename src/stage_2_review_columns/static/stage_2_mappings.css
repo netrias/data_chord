@@ -1,4 +1,4 @@
-/* Stage 2 — column-mapping list with row-click takeover modal.
+/* Stage 2 — column-mapping list with row-click takeover.
    Layout adapted from the mocks/stage-2/takeover.html prototype, mapped onto
    tokens.css variables. */
 
@@ -11,29 +11,53 @@ body.lock {
 }
 
 .mapping-card {
+  display: flex;
+  padding: 0;
+  overflow: hidden;
+}
+
+.mapping-content {
+  flex: 1;
+  min-width: 0;
   padding: var(--space-5) var(--space-6) var(--space-6);
 }
 
+/* ----- Filter sidebar (slides in from the left) ----- */
+
+.filter-sidebar {
+  width: 280px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--gray-200);
+  padding: var(--space-5) var(--space-4);
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--gray-50);
+  margin-left: 0;
+  opacity: 1;
+  transition:
+    margin-left 220ms cubic-bezier(0.2, 0, 0, 1),
+    opacity 160ms ease-out;
+}
+
+.filter-sidebar.hidden {
+  margin-left: -280px;
+  opacity: 0;
+  pointer-events: none;
+}
+
 /* ==========================================================================
-   Toolbar — source filter chips (also serve as the legend) and column search
+   Toolbar — settings trigger and column search
    ========================================================================== */
 
 .mapping-toolbar {
   display: flex;
-  justify-content: center;
+  justify-content: space-between;
   align-items: center;
   gap: var(--space-4);
   margin-bottom: var(--space-3);
-  position: relative;
-  min-height: 40px;
+  flex-wrap: wrap;
 }
 
-/* Source filter chips. Each chip carries the same status icon used on the row,
-   so the bar doubles as a legend. Single-select: clicking a chip filters the
-   list to that category. Active treatment stacks two cues so selection survives
-   monochrome viewing: a category-tinted background (REC=netrias, OVR=azure,
-   NONE/ALL=neutral) plus a shape bump (heavier text, thicker border, slight
-   padding increase). .mapping-ico--* are also used by row status indicators. */
 .mapping-filter-bar {
   position: relative;
   display: inline-flex;
@@ -41,95 +65,16 @@ body.lock {
   flex-wrap: wrap;
 }
 
-.mapping-filter-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.55rem 1.1rem;
-  border: 1px solid var(--gray-200);
-  border-radius: var(--radius-full);
-  background: var(--white);
-  font-size: 0.92rem;
-  font-weight: 500;
-  color: var(--gray-700);
-  cursor: pointer;
-  /* Padding and border-width animate so the size bump on activation is smooth
-     rather than snappy — matches the rest of the toolbar's transition feel. */
-  transition: background var(--transition-fast), border-color var(--transition-fast),
-              border-width var(--transition-fast), padding var(--transition-fast),
-              color var(--transition-fast), box-shadow var(--transition-fast);
-  font-family: inherit;
-}
-
-.mapping-filter-btn:hover:not(.active) {
-  border-color: var(--gray-400);
-  background: var(--gray-50);
-}
-
-/* Active state — shape cues only. Color tint is layered per-category below so
-   the active state remains distinguishable in grayscale / for color-blind users. */
-.mapping-filter-btn.active {
-  font-weight: 700;
-  border-width: 2px;
-  padding: 0.6rem 1.25rem;
-  box-shadow: var(--shadow-sm);
-}
-
-/* Per-category active tints — netrias / azure / neutral mirror the row icon
-   colors so the chip bar reads as the legend even at a glance. */
-.mapping-filter-btn--all.active {
-  background: var(--gray-100);
-  border-color: var(--gray-700);
-  color: var(--gray-900);
-}
-.mapping-filter-btn--rec.active {
-  background: var(--netrias-50);
-  border-color: var(--netrias-600);
-  color: var(--netrias-700);
-}
-.mapping-filter-btn--ovr.active {
-  background: var(--azure-50);
-  border-color: var(--azure-600);
-  color: var(--azure-700);
-}
-.mapping-filter-btn--none.active {
-  background: var(--gray-100);
-  border-color: var(--gray-500);
-  color: var(--gray-800);
-}
-
-/* "Will change values" is a type-axis chip (not source like REC/OVR/NONE) —
-   it surfaces only PV-typed targets, the rows whose values harmonization
-   actually rewrites. Uses netrias since this is the productive-work filter,
-   the answer to "where will the tool actually do something". */
-.mapping-filter-btn--will-change.active {
-  background: var(--netrias-50);
-  border-color: var(--netrias-600);
-  color: var(--netrias-700);
-}
-
 .mapping-filter-icon {
   font-size: 1.05rem;
   line-height: 1;
 }
 
-.mapping-filter-count {
-  color: var(--gray-500);
-  font-variant-numeric: tabular-nums;
-  font-size: 0.85rem;
-}
-
-.mapping-filter-btn--all.active         .mapping-filter-count { color: var(--gray-700); }
-.mapping-filter-btn--rec.active         .mapping-filter-count { color: var(--netrias-600); }
-.mapping-filter-btn--ovr.active         .mapping-filter-count { color: var(--azure-600); }
-.mapping-filter-btn--none.active        .mapping-filter-count { color: var(--gray-700); }
-.mapping-filter-btn--will-change.active .mapping-filter-count { color: var(--netrias-600); }
-
 /* ==========================================================================
-   Filter modal — centered popup with multi-select checkboxes
+   Filter sidebar trigger
    ========================================================================== */
 
-.filter-modal-trigger {
+.filter-sidebar-trigger {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
@@ -146,189 +91,236 @@ body.lock {
               color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-.filter-modal-trigger:hover {
+.filter-sidebar-trigger:hover {
   border-color: var(--gray-300);
   background: var(--gray-100);
   color: var(--gray-800);
   box-shadow: var(--shadow-sm);
 }
 
-.filter-modal-trigger--active {
+.filter-sidebar-trigger--open {
+  background: var(--gray-100);
+  border-color: var(--gray-300);
+  color: var(--gray-800);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.filter-sidebar-trigger--active {
   background: var(--netrias-50);
   border-color: var(--netrias-200);
   color: var(--netrias-700);
 }
 
-.filter-modal-trigger--active:hover {
+.filter-sidebar-trigger--active:hover {
   background: var(--netrias-100);
   border-color: var(--netrias-300);
 }
 
-.filter-modal-trigger-icon {
+.filter-sidebar-trigger--active.filter-sidebar-trigger--open {
+  background: var(--netrias-100);
+  border-color: var(--netrias-300);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.filter-sidebar-trigger-icon {
   width: 15px;
   height: 15px;
   flex-shrink: 0;
   color: var(--gray-400);
 }
 
-.filter-modal-trigger--active .filter-modal-trigger-icon {
+.filter-sidebar-trigger--active .filter-sidebar-trigger-icon {
   color: var(--netrias-500);
 }
 
-.filter-modal-trigger-count {
-  color: var(--gray-400);
-  font-variant-numeric: tabular-nums;
-  font-size: 0.82rem;
-  font-weight: 500;
-}
+/* ----- Filter sidebar content ----- */
 
-.filter-modal-trigger-ratio {
-  font-variant-numeric: tabular-nums;
-  font-size: 0.82rem;
-}
-
-.filter-modal-trigger--active .filter-modal-trigger-ratio {
-  color: var(--netrias-600);
-  font-weight: 700;
-}
-
-.filter-modal-trigger-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: var(--radius-full);
-  background: var(--netrias-600);
-  color: var(--white);
-  font-size: 0.68rem;
-  font-weight: 700;
-  line-height: 1;
-}
-
-/* ----- Centered modal overlay ----- */
-
-.filter-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  animation: filter-modal-fade 0.12s ease-out;
-}
-
-@keyframes filter-modal-fade {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-.filter-modal-backdrop {
-  position: absolute;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.35);
-  backdrop-filter: blur(2px);
-}
-
-.filter-modal-card {
-  position: relative;
-  background: var(--white);
-  border-radius: var(--radius-2xl);
-  box-shadow: var(--shadow-xl);
-  width: min(460px, 92vw);
-  max-height: min(680px, 88vh);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  animation: filter-modal-card-in 0.15s ease-out;
-}
-
-@keyframes filter-modal-card-in {
-  from { transform: translateY(8px) scale(0.98); opacity: 0; }
-  to { transform: translateY(0) scale(1); opacity: 1; }
-}
-
-.filter-modal-head {
+.fs-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-4) var(--space-5);
-  border-bottom: 1px solid var(--gray-100);
-  flex-shrink: 0;
+  margin-bottom: var(--space-3);
 }
 
-.filter-modal-title {
-  font-size: 1.1rem;
+.fs-title {
+  font-size: 0.82rem;
   font-weight: 700;
-  color: var(--gray-900);
+  color: var(--gray-700);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   margin: 0;
 }
 
-.filter-modal-close {
+.fs-reset {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--gray-500);
   background: none;
   border: none;
-  font-size: 1.1rem;
-  color: var(--gray-400);
   cursor: pointer;
-  padding: 0.3rem;
+  padding: 0.2rem 0.4rem;
   border-radius: var(--radius-sm);
-  line-height: 1;
   font-family: inherit;
   transition: color var(--transition-fast), background var(--transition-fast);
 }
 
-.filter-modal-close:hover {
+.fs-reset:hover:not(:disabled) {
   color: var(--gray-700);
   background: var(--gray-100);
 }
 
-.filter-modal-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: var(--space-3) var(--space-5) var(--space-4);
-}
-
-.filter-modal-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-3) var(--space-5);
-  border-top: 1px solid var(--gray-100);
-  flex-shrink: 0;
-}
-
-.filter-modal-reset {
-  font-size: 0.82rem;
-  font-weight: 500;
-  color: var(--gray-600);
-  background: none;
-  border: 1px solid var(--gray-200);
-  border-radius: var(--radius-md);
-  padding: 0.35rem 0.75rem;
-  cursor: pointer;
-  font-family: inherit;
-  transition: background var(--transition-fast), border-color var(--transition-fast);
-}
-
-.filter-modal-reset:hover:not(:disabled) {
-  background: var(--gray-50);
-  border-color: var(--gray-300);
-}
-
-.filter-modal-reset:disabled {
-  opacity: 0.35;
+.fs-reset:disabled {
+  opacity: 0.3;
   cursor: not-allowed;
 }
 
-.filter-modal-showing {
-  font-size: 0.82rem;
-  color: var(--gray-500);
+/* ----- Visibility eye toggle (the clickable toggle control) ----- */
+
+.fm-check-eye {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1.5px solid var(--gray-200);
+  background: linear-gradient(180deg, var(--white) 0%, var(--gray-100) 100%);
+  color: var(--gray-400);
+  cursor: pointer;
+  box-shadow:
+    0 2px 0 var(--gray-300),
+    0 3px 6px rgba(0, 0, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 1),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.03);
+  transition:
+    color var(--transition-fast),
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast),
+    filter var(--transition-fast);
 }
 
-.filter-modal-showing b {
-  color: var(--gray-700);
-  font-weight: 600;
+.fm-check:hover .fm-check-eye {
+  border-color: var(--gray-300);
+  filter: brightness(102%);
+  transform: translateY(-2px);
+  box-shadow:
+    0 3px 0 var(--gray-300),
+    0 5px 10px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 1),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.03);
+}
+
+.fm-check:active .fm-check-eye {
+  transform: translateY(1px);
+  box-shadow:
+    0 1px 0 var(--gray-300),
+    0 1px 3px rgba(0, 0, 0, 0.08),
+    inset 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.fm-check-eye .fm-eye-pupil {
+  fill: currentColor;
+  stroke: none;
+}
+
+.fm-check-eye .fm-eye-slash {
+  transition: opacity 0.15s ease-out;
+}
+
+.fm-check input:checked ~ .fm-check-eye {
+  color: var(--azure-500);
+  border-color: var(--azure-300);
+  background: linear-gradient(180deg, var(--azure-50) 0%, var(--azure-100) 100%);
+  box-shadow:
+    0 2px 0 var(--azure-300),
+    0 3px 6px rgba(6, 115, 179, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.05);
+}
+
+.fm-check:hover input:checked ~ .fm-check-eye {
+  border-color: var(--azure-500);
+  filter: brightness(105%);
+  transform: translateY(-2px);
+  box-shadow:
+    0 3px 0 var(--azure-300),
+    0 5px 10px rgba(6, 115, 179, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.05);
+}
+
+.fm-check:active input:checked ~ .fm-check-eye {
+  transform: translateY(1px);
+  box-shadow:
+    0 1px 0 var(--azure-300),
+    0 1px 3px rgba(6, 115, 179, 0.1),
+    inset 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.fm-check input:checked ~ .fm-check-eye .fm-eye-slash {
+  opacity: 0;
+}
+
+/* ----- Hover preview: bidirectional show/hide indicators ----- */
+
+/* Will-hide: rows currently visible that would disappear on click */
+.mapping-row.filter-preview-will-hide {
+  opacity: 0.2;
+  border-color: var(--gray-200);
+  border-style: dashed;
+  transform: scale(0.97);
+  transition: opacity 0.25s ease-out, transform 0.25s ease-out;
+}
+
+.mapping-row.filter-preview-dim {
+  opacity: 0.2;
+  transition: opacity 0.25s ease-out;
+}
+
+/* Ghost rows: columns not currently visible that would appear on click */
+.mapping-row--ghost {
+  opacity: 0;
+  border: 1px dashed var(--gray-300);
+  background: linear-gradient(to right, var(--netrias-50), var(--white));
+  cursor: default;
+  pointer-events: none;
+  animation: ghost-row-in 0.3s ease-out forwards;
+}
+
+.ghost-row-container > :nth-child(2) { animation-delay: 40ms; }
+.ghost-row-container > :nth-child(3) { animation-delay: 80ms; }
+.ghost-row-container > :nth-child(4) { animation-delay: 120ms; }
+.ghost-row-container > :nth-child(5) { animation-delay: 160ms; }
+.ghost-row-container > :nth-child(6) { animation-delay: 200ms; }
+.ghost-row-container > :nth-child(7) { animation-delay: 240ms; }
+.ghost-row-container > :nth-child(8) { animation-delay: 280ms; }
+
+@keyframes ghost-row-in {
+  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+  to { opacity: 0.55; transform: translateY(0) scale(1); }
+}
+
+.mapping-row--ghost.ghost-row-leaving {
+  animation: ghost-row-out 0.2s ease-in forwards;
+}
+
+@keyframes ghost-row-out {
+  from { opacity: 0.55; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(-4px) scale(0.98); }
+}
+
+.ghost-row-more {
+  text-align: center;
+  padding: 0.5rem;
+  color: var(--gray-400);
+  font-size: 0.8rem;
+  font-style: italic;
+  opacity: 0;
+  animation: ghost-row-in 0.3s ease-out 0.32s forwards;
 }
 
 /* ----- Filter sections and checkboxes ----- */
@@ -370,34 +362,6 @@ body.lock {
   pointer-events: none;
 }
 
-.fm-check-box {
-  width: 18px;
-  height: 18px;
-  flex-shrink: 0;
-  border: 2px solid var(--gray-300);
-  border-radius: 4px;
-  margin-top: 1px;
-  position: relative;
-  transition: background var(--transition-fast), border-color var(--transition-fast);
-}
-
-.fm-check input:checked + .fm-check-box {
-  background: var(--netrias-600);
-  border-color: var(--netrias-600);
-}
-
-.fm-check input:checked + .fm-check-box::after {
-  content: '✓';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: var(--white);
-  font-size: 0.7rem;
-  font-weight: 700;
-  line-height: 1;
-}
-
 .fm-check-content {
   flex: 1;
   min-width: 0;
@@ -416,10 +380,16 @@ body.lock {
 }
 
 .fm-check-count {
-  color: var(--gray-400);
-  font-size: 0.8rem;
-  font-variant-numeric: tabular-nums;
   margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--gray-400);
+  background: var(--gray-100);
+  padding: 0.1rem 0.45rem;
+  border-radius: var(--radius-full);
+  line-height: 1.3;
 }
 
 .fm-check-desc {
@@ -430,21 +400,82 @@ body.lock {
   line-height: 1.4;
 }
 
-.mapping-ico--rec {
+hr.fm-divider {
+  border: none;
+  border-top: 1px solid var(--gray-200);
+  margin: var(--space-2) 0.75rem;
+}
+
+.mapping-ico--rewrite {
   color: var(--netrias-600);
 }
 
-.mapping-ico--ovr {
+.mapping-ico--passthrough {
   color: var(--azure-500);
 }
 
-.mapping-ico--none {
+.mapping-ico--unchanged {
   color: var(--gray-400);
 }
 
-.mapping-col-search {
+/* ----- Rename toggle ----- */
+
+.fs-rename-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  gap: 0.75rem;
+}
+
+.fs-rename-label {
+  font-size: 0.85rem;
+  color: var(--gray-700);
+  font-weight: 500;
+}
+
+.fs-rename-desc {
+  padding: 0 0.75rem;
+}
+
+.fs-rename-toggle input[type="checkbox"] {
   position: absolute;
-  right: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.fs-toggle-track {
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--gray-300);
+  position: relative;
+  flex-shrink: 0;
+  transition: background var(--transition-fast);
+}
+
+.fs-rename-toggle input:checked + .fs-toggle-track {
+  background: var(--netrias-600);
+}
+
+.fs-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--white);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  transition: transform var(--transition-fast);
+}
+
+.fs-rename-toggle input:checked + .fs-toggle-track .fs-toggle-thumb {
+  transform: translateX(16px);
+}
+
+.mapping-col-search {
   padding: 0.4rem 0.75rem 0.4rem 2rem;
   font-size: 0.83rem;
   border: 1px solid var(--gray-300);
@@ -490,9 +521,10 @@ body.lock {
   margin-bottom: 0.4rem;
 }
 
-/* Sortable Value-fit header. Inherits the head row's grid cell layout but
-   becomes a button so click + keyboard activate it. justify-self:end aligns
-   the button right-edge with the row's value-fit cell. */
+#columnSortBtn {
+  justify-self: start;
+}
+
 .mapping-list-head-sort {
   justify-self: end;
   display: inline-flex;
@@ -517,6 +549,12 @@ body.lock {
   outline: 2px solid var(--azure-500);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
+}
+
+/* Override justify-self for the target-standard column header — must come after
+   the base .mapping-list-head-sort rule so the override wins at equal specificity. */
+.mapping-list-head-sort--center {
+  justify-self: start;
 }
 
 .mapping-list-head-sort--active {
@@ -545,6 +583,15 @@ body.lock {
 
 .mapping-row:active {
   transform: scale(0.998);
+}
+
+.mapping-row--seen {
+  border-left: 2px solid var(--netrias-300);
+}
+
+.mapping-row--seen .mapping-row-chev {
+  color: var(--netrias-500);
+  font-size: 0.9rem;
 }
 
 .mapping-row-status {
@@ -585,21 +632,57 @@ body.lock {
 }
 
 .mapping-row-col {
+  position: relative;
   font-weight: 600;
   color: var(--gray-900);
   font-size: 0.92rem;
+  font-family: var(--font-family);
+  min-width: 0;
+}
+
+.mapping-row-col-text,
+.mapping-row-target-text {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--font-family);
 }
 
 .mapping-row-target {
+  position: relative;
   color: var(--gray-700);
   font-size: 0.85rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.mapping-row-col[data-fast-tooltip]::after,
+.mapping-row-target[data-fast-tooltip]::after {
+  content: attr(data-fast-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  width: max-content;
+  max-width: 420px;
+  padding: 0.25rem 0.55rem;
+  background: var(--gray-800);
+  color: var(--white);
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.3;
   white-space: nowrap;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 60ms ease-out, visibility 60ms ease-out;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.mapping-row-col[data-fast-tooltip]:hover::after,
+.mapping-row-target[data-fast-tooltip]:hover::after {
+  opacity: 1;
+  visibility: visible;
 }
 
 .mapping-row-target--empty {
@@ -613,66 +696,30 @@ body.lock {
 }
 
 .mapping-row-fit {
+  position: relative;
   justify-self: end;
-  min-width: 64px;
+  width: 3.2rem;
   text-align: right;
   font-size: 0.82rem;
   font-variant-numeric: tabular-nums;
 }
 
-.mapping-row-fit--ratio {
-  color: var(--netrias-700);
-  font-weight: 700;
-}
-
-.mapping-row-fit--rename {
-  color: var(--gray-500);
-  font-size: 1rem;
-}
-
-.mapping-row-fit--empty {
-  color: var(--gray-400);
-}
-
-/* Passthrough fit indicator: reuses the ↪ glyph from the takeover conform pill so the
-   same symbol means "pass-through" across surfaces. Slate (not brand green) signals
-   that no harmonization happens here. */
-.mapping-row-fit--passthrough {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  font-size: 1.2rem;
-  line-height: 1;
-  color: var(--gray-700);
-  cursor: help;
-  outline: none;
-  transition: color var(--transition-fast);
-}
-
-.mapping-row-fit--passthrough:hover,
-.mapping-row-fit--passthrough:focus-visible {
-  color: var(--gray-900);
-}
-
-.mapping-row-fit--passthrough[data-fast-tooltip]::after {
+.mapping-row-fit[data-fast-tooltip]::after {
   content: attr(data-fast-tooltip);
   position: absolute;
-  top: 50%;
-  right: calc(100% + 8px);
-  transform: translateY(-50%);
+  bottom: calc(100% + 6px);
+  right: 0;
   width: max-content;
   max-width: 260px;
-  padding: var(--space-2) var(--space-3);
+  padding: 0.25rem 0.55rem;
   background: var(--gray-800);
   color: var(--white);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: 400;
-  line-height: 1.4;
-  text-align: left;
+  line-height: 1.3;
   white-space: normal;
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
   opacity: 0;
   visibility: hidden;
   transition: opacity 60ms ease-out, visibility 60ms ease-out;
@@ -680,18 +727,61 @@ body.lock {
   z-index: 10;
 }
 
-.mapping-row-fit--passthrough[data-fast-tooltip]:hover::after,
-.mapping-row-fit--passthrough[data-fast-tooltip]:focus-visible::after {
+.mapping-row-fit[data-fast-tooltip]:hover::after {
   opacity: 1;
   visibility: visible;
 }
 
+.mapping-row-fit--ratio {
+  color: var(--netrias-700);
+  font-weight: 700;
+}
+
+.mapping-row-fit--na {
+  color: var(--gray-400);
+  font-size: 0.82rem;
+  font-style: italic;
+}
+
+.mapping-row-fit--empty {
+  color: var(--gray-400);
+}
+
 .mapping-row-chev {
+  position: relative;
   color: var(--gray-500);
   text-align: center;
   font-size: 1.15rem;
   font-weight: 500;
   transition: transform 0.15s, color 0.15s;
+}
+
+.mapping-row-chev[data-fast-tooltip]::after {
+  content: attr(data-fast-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  padding: 0.25rem 0.55rem;
+  background: var(--gray-800);
+  color: var(--white);
+  font-size: 0.72rem;
+  font-weight: 400;
+  line-height: 1.3;
+  white-space: nowrap;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 60ms ease-out, visibility 60ms ease-out;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.mapping-row-chev[data-fast-tooltip]:hover::after {
+  opacity: 1;
+  visibility: visible;
 }
 
 .mapping-row:hover .mapping-row-chev {
@@ -710,7 +800,7 @@ body.lock {
 }
 
 /* ==========================================================================
-   Takeover modal — opens on row click, covers most of the viewport
+   Takeover — opens on row click, covers most of the viewport
    ========================================================================== */
 
 .takeover {
@@ -757,7 +847,7 @@ body.lock {
   to { transform: translateY(0) scale(1); opacity: 1; }
 }
 
-/* ----- Takeover head: identity left, conform pill centered, nav right ----- */
+/* ----- Takeover head: identity left, nav right ----- */
 
 .takeover-head {
   display: flex;
@@ -773,15 +863,7 @@ body.lock {
   align-items: center;
   gap: 0.7rem;
   min-width: 0;
-  flex: 0 0 auto;
-  max-width: 32%;
-}
-
-.takeover-head-center {
   flex: 1 1 auto;
-  display: flex;
-  justify-content: center;
-  min-width: 0;
 }
 
 .takeover-head-right {
@@ -796,7 +878,12 @@ body.lock {
   flex-shrink: 0;
 }
 
+.takeover-head-names {
+  min-width: 0;
+}
+
 .takeover-head-name {
+  position: relative;
   font-size: 1.25rem;
   font-weight: 700;
   color: var(--gray-900);
@@ -804,6 +891,197 @@ body.lock {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.takeover-head-name[data-fast-tooltip]::after {
+  content: attr(data-fast-tooltip);
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: max-content;
+  max-width: 500px;
+  padding: 0.3rem 0.65rem;
+  background: var(--gray-800);
+  color: var(--white);
+  font-size: 0.8rem;
+  font-weight: 400;
+  line-height: 1.3;
+  white-space: nowrap;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 60ms ease-out, visibility 60ms ease-out;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.takeover-head-name[data-fast-tooltip]:hover::after {
+  opacity: 1;
+  visibility: visible;
+}
+
+.takeover-rename-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.15rem;
+}
+
+.takeover-rename-arrow {
+  color: var(--gray-400);
+  font-size: 0.82rem;
+}
+
+.takeover-rename-target {
+  font-size: 0.82rem;
+  color: var(--azure-600);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.takeover-rename-btn {
+  background: none;
+  border: none;
+  color: var(--gray-400);
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0.1rem 0.3rem;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  line-height: 1;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.takeover-rename-btn:hover {
+  color: var(--gray-700);
+  background: var(--gray-100);
+}
+
+.takeover-rename-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: none;
+  border: 1px solid transparent;
+  padding: 0.1rem 0.35rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.takeover-rename-pick:hover {
+  background: var(--azure-50);
+  border-color: var(--azure-200);
+}
+
+.takeover-rename-caret {
+  font-size: 0.6rem;
+  color: var(--gray-400);
+}
+
+.takeover-rename-off {
+  background: none;
+  border: 1px dashed var(--gray-300);
+  color: var(--gray-400);
+  font-size: 0.78rem;
+  cursor: pointer;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  margin-top: 0.15rem;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.takeover-rename-off:hover {
+  color: var(--azure-600);
+  border-color: var(--azure-300);
+}
+
+/* ----- Rename dropdown ----- */
+
+.rename-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 320px;
+  background: var(--white);
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  z-index: 70;
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.rename-dd-search {
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--gray-100);
+}
+
+.rename-dd-search input {
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.82rem;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+}
+
+.rename-dd-search input:focus {
+  outline: none;
+  border-color: var(--azure-500);
+}
+
+.rename-dd-list {
+  overflow-y: auto;
+  flex: 1;
+  padding: 0.2rem 0;
+}
+
+.rename-dd-opt {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.4rem 0.7rem;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.rename-dd-opt:hover {
+  background: var(--azure-50);
+}
+
+.rename-dd-name {
+  font-size: 0.84rem;
+  font-weight: 500;
+  color: var(--gray-900);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rename-dd-desc {
+  font-size: 0.72rem;
+  color: var(--gray-400);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.rename-dd-empty {
+  padding: var(--space-3);
+  text-align: center;
+  color: var(--gray-500);
+  font-size: 0.82rem;
 }
 
 .takeover-counter {
@@ -844,55 +1122,20 @@ body.lock {
   border-color: transparent;
 }
 
-/* Conform pill: green check, neutral azure pass-through, amber zero-match warning */
-.conform-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.4rem 0.85rem;
-  background: var(--netrias-50);
-  border: 1px solid var(--netrias-100);
-  border-radius: var(--radius-full);
-  font-size: 0.83rem;
-  color: var(--netrias-700);
-  cursor: help;
+.conform-summary {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--gray-400);
   white-space: nowrap;
 }
 
-.conform-pill .ico {
-  color: var(--netrias-600);
-  font-weight: 700;
-}
-
-.conform-pill b {
-  color: var(--netrias-700);
-  font-weight: 700;
-}
-
-.conform-pill--neutral {
-  background: var(--azure-50);
-  border-color: var(--azure-100);
-  color: var(--azure-600);
-  /* No tooltip on this variant — the inline label is self-explanatory. */
-  cursor: default;
-}
-
-.conform-pill--neutral .ico {
+.conform-summary--neutral {
   color: var(--azure-500);
 }
 
-.conform-pill--warning {
-  background: var(--warning-100);
-  border-color: var(--warning-200);
-  color: var(--warning-700);
-}
-
-.conform-pill--warning .ico {
-  color: var(--warning-700);
-}
-
-.conform-pill--warning b {
-  color: var(--warning-700);
+.conform-summary--warning {
+  color: var(--warning-600);
 }
 
 /* ----- Takeover body: two panes ----- */
@@ -1080,6 +1323,10 @@ body.lock {
   color: var(--gray-400);
   font-size: 0.7rem;
   flex-shrink: 0;
+}
+
+.cde-picker-caret--end {
+  margin-left: auto;
 }
 
 .ai-badge {

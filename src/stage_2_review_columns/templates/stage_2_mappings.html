@@ -53,25 +53,34 @@
 
     <main class="stage-shell stage-shell--mapping">
       <section class="stage-card mapping-card">
-        <div class="mapping-toolbar">
-          <div class="mapping-filter-bar" id="sourceFilter"></div>
-          <input type="search" class="mapping-col-search" id="colSearch" placeholder="Filter columns…" autocomplete="off" />
-        </div>
-
-        <div class="mapping-list">
-          <div class="mapping-list-head">
-            <div>Your column</div>
-            <div></div>
-            <div>Target standard</div>
-            <button id="valueFitSortBtn" class="mapping-list-head-sort" type="button" aria-label="Sort by value fit">
-              <span>Value fit</span>
-              <span class="mapping-list-head-sort-arrow" aria-hidden="true">⇅</span>
-            </button>
-            <div></div>
+        <aside class="filter-sidebar hidden" id="filterSidebar"></aside>
+        <div class="mapping-content">
+          <div class="mapping-toolbar">
+            <div class="mapping-filter-bar" id="sourceFilter"></div>
+            <input type="search" class="mapping-col-search" id="colSearch" placeholder="Filter columns…" autocomplete="off" />
           </div>
-          <div id="mappingRows"></div>
+
+          <div class="mapping-list">
+            <div class="mapping-list-head">
+              <button id="columnSortBtn" class="mapping-list-head-sort" type="button" aria-label="Sort by column name">
+                <span>Your column</span>
+                <span class="mapping-list-head-sort-arrow" aria-hidden="true">⇅</span>
+              </button>
+              <div></div>
+              <button id="targetSortBtn" class="mapping-list-head-sort mapping-list-head-sort--center" type="button" aria-label="Sort by target standard">
+                <span>Target standard</span>
+                <span class="mapping-list-head-sort-arrow" aria-hidden="true">⇅</span>
+              </button>
+              <button id="valueFitSortBtn" class="mapping-list-head-sort" type="button" aria-label="Sort by value fit">
+                <span>Value fit</span>
+                <span class="mapping-list-head-sort-arrow" aria-hidden="true">⇅</span>
+              </button>
+              <div></div>
+            </div>
+            <div id="mappingRows"></div>
+          </div>
+          <div id="mappingEmptyState" class="mapping-empty hidden"></div>
         </div>
-        <div id="mappingEmptyState" class="mapping-empty hidden"></div>
       </section>
     </main>
 

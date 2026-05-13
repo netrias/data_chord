@@ -14,7 +14,7 @@ export const STEP_INSTRUCTIONS = {
   },
   mapping: {
     short: "Review and confirm which ontologies your data columns should map to.",
-    long: "The AI has suggested mappings for each column in your dataset. Review these recommendations and adjust if needed. Confirm all mappings before proceeding to harmonization."
+    long: "Each row is one column from your file, with an AI-suggested target standard and a value-fit score.\n\nColumns fall into three categories:\n  ✎ Rewrite — values will be harmonized to match the standard\n  → Pass-through — mapped, but no permissible values to enforce\n  — Unmapped — column will pass through unchanged\n\nUse the Settings sidebar to toggle category visibility, show empty columns, and control column renaming. Hover a category to preview which rows would appear or disappear.\n\nClick any row to open its detail view where you can change the target or review individual value mappings."
   },
   harmonize: {
     short: "Your data is being transformed to match the target ontology.",

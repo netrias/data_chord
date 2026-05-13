@@ -21,6 +21,7 @@ from fastapi.templating import Jinja2Templates
 from src.domain import (
     ColumnBreakdownSchema,
     ColumnMappingSet,
+    ColumnRenameSet,
     ConfidenceBucketSchema,
     HarmonizeRequest,
     HarmonizeResponse,
@@ -107,6 +108,7 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
     manifest_payload = payload.manifest or stored_manifest
     manifest = ColumnMappingManifest.from_payload(manifest_payload)
     column_mappings = ColumnMappingSet.from_dict(payload.manual_overrides)
+    column_renames = ColumnRenameSet.from_dict(payload.column_renames)
 
     cache = get_session_cache(payload.file_id)
     column_cde_map = _column_cde_map_for_session(manifest, column_mappings)
@@ -120,6 +122,7 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
             payload.target_schema,
             _target_version_from_number(payload.target_version_number),
             column_mappings,
+            column_renames,
             manifest.to_payload(),
             output_path,
             meta.selected_sheet,
@@ -193,6 +196,7 @@ async def _run_harmonization(
     target_schema: str,
     target_version: str,
     column_mappings: ColumnMappingSet,
+    column_renames: ColumnRenameSet,
     manifest: ManifestPayload | None,
     output_path: Path,
     sheet_name: str | None,
@@ -204,6 +208,7 @@ async def _run_harmonization(
         file_path=file_path,
         target_schema=target_schema,
         column_mappings=column_mappings,
+        column_renames=column_renames,
         cache=cache,
         target_version=target_version,
         manifest=manifest,

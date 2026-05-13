@@ -12,6 +12,7 @@ from src.domain.change import ChangeType as ChangeType
 from src.domain.change import ConfidenceThresholds as ConfidenceThresholds
 from src.domain.change import RecommendationType as RecommendationType
 from src.domain.column_cde_map import ColumnCdeMap as ColumnCdeMap
+from src.domain.column_renames import ColumnRenameSet as ColumnRenameSet
 from src.domain.columns import ColumnIdentity as ColumnIdentity
 from src.domain.columns import ColumnKey as ColumnKey
 from src.domain.columns import column_key_for_index as column_key_for_index

@@ -461,7 +461,17 @@ async def test_stage3_harmonize_uses_stored_manifest_when_payload_missing(
             self.received_manifest = None
 
         def run(  # type: ignore[no-untyped-def]
-            self, *, file_path, target_schema, column_mappings, cache, target_version, manifest, output_path, sheet_name
+            self,
+            *,
+            file_path,
+            target_schema,
+            column_mappings,
+            column_renames,
+            cache,
+            target_version,
+            manifest,
+            output_path,
+            sheet_name,
         ):
             self.received_manifest = manifest
             return HarmonizeResult(job_id="job-1", status=HarmonizeStatus.SUCCEEDED, detail="ok")
@@ -513,7 +523,17 @@ async def test_stage3_harmonize_prefers_payload_manifest(
             self.received_target_version = None
 
         def run(  # type: ignore[no-untyped-def]
-            self, *, file_path, target_schema, column_mappings, cache, target_version, manifest, output_path, sheet_name
+            self,
+            *,
+            file_path,
+            target_schema,
+            column_mappings,
+            column_renames,
+            cache,
+            target_version,
+            manifest,
+            output_path,
+            sheet_name,
         ):
             self.received_manifest = manifest
             self.received_target_version = target_version

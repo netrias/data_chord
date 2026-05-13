@@ -15,6 +15,7 @@ from uuid import uuid4
 from netrias_client import NetriasClient
 
 from src.domain.cde import ColumnMapping, ColumnMappingSet
+from src.domain.column_renames import ColumnRenameSet
 from src.domain.data_model_cache import SessionCache
 from src.domain.manifest import (
     DEFAULT_HARMONIZATION,
@@ -54,6 +55,7 @@ class HarmonizeService:
         file_path: Path,
         target_schema: str,
         column_mappings: ColumnMappingSet,
+        column_renames: ColumnRenameSet,
         cache: SessionCache,
         target_version: str = "latest",
         manifest: ManifestPayload | None = None,
@@ -68,7 +70,7 @@ class HarmonizeService:
 
         try:
             cde_map = self._prepare_cde_map(file_path, target_schema, target_version, manifest, sheet_name)
-            cde_map = _apply_column_mappings(cde_map, column_mappings, cache)
+            cde_map = _apply_column_updates(cde_map, column_mappings, column_renames, cache)
             return self._execute_harmonization(file_path, cde_map, job_id, target_schema, output_path, sheet_name)
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception("Harmonize call failed; falling back to stub", exc_info=exc)
@@ -161,12 +163,13 @@ class HarmonizeService:
         )
 
 
-def _apply_column_mappings(
+def _apply_column_updates(
     manifest: ColumnMappingManifest,
     mappings: ColumnMappingSet,
+    renames: ColumnRenameSet,
     cache: SessionCache,
 ) -> ColumnMappingManifest:
-    if not mappings.mappings:
+    if not mappings.mappings and not renames.renames:
         return manifest
 
     applied = mappings.get_applied()
@@ -179,7 +182,8 @@ def _apply_column_mappings(
     for column_key in skipped:
         updated = updated.without_column(column_key)
 
-    _log_mapping_results(applied, [str(column_key) for column_key in skipped])
+    updated = updated.with_column_names(renames.renames)
+    _log_mapping_results(applied, [str(column_key) for column_key in skipped], renames)
     return updated
 
 
@@ -205,7 +209,7 @@ def _build_mapping_record(
     )
 
 
-def _log_mapping_results(applied: list[ColumnMapping], skipped: list[str]) -> None:
+def _log_mapping_results(applied: list[ColumnMapping], skipped: list[str], renames: ColumnRenameSet) -> None:
     if applied:
         logger.info(
             "Applied column mappings",
@@ -213,6 +217,8 @@ def _log_mapping_results(applied: list[ColumnMapping], skipped: list[str]) -> No
         )
     if skipped:
         logger.info("Skipped column mappings via 'No Mapping'", extra={"columns": skipped})
+    if renames.renames:
+        logger.info("Applied column renames", extra={"renames": renames.to_strings()})
 
 
 def _extract_manifest_path(netrias_result: object) -> Path | None:
