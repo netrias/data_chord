@@ -1,6 +1,4 @@
-/* Stage 2 — column-mapping list with row-click takeover.
-   Layout adapted from the mocks/stage-2/takeover.html prototype, mapped onto
-   tokens.css variables. */
+/* Stage 2 — column-mapping list with row-click takeover. */
 
 body.lock {
   overflow: hidden;

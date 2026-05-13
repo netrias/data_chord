@@ -3,7 +3,7 @@
  *
  * The base view is a simple list of columns; clicking any row opens a
  * takeover that shows the column's distinct values on the left and the
- * target standard on the right. Adapted from mocks/stage-2/takeover.html.
+ * target standard on the right.
  */
 import {
   initStepInstruction,

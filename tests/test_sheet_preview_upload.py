@@ -68,7 +68,13 @@ def test_read_workbook_sheet_previews_sets_truncation_flags(tmp_path: Path) -> N
             }
         )
     )
-    assert read_workbook_sheet_previews(workbook_path, ["WideTall"], max_rows=3, max_cols=3)["WideTall"].truncated_rows is False
+    full_preview = read_workbook_sheet_previews(
+        workbook_path,
+        ["WideTall"],
+        max_rows=3,
+        max_cols=3,
+    )["WideTall"]
+    assert full_preview.truncated_rows is False
 
     # When: lower preview caps are used
     preview = read_workbook_sheet_previews(workbook_path, ["WideTall"], max_rows=2, max_cols=2)["WideTall"]
