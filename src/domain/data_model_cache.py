@@ -16,7 +16,8 @@ from netrias_client import DataModelStoreError, NetriasAPIUnavailable
 from src.domain.cde import CDEInfo
 from src.domain.column_cde_map import ColumnCdeMap
 from src.domain.column_profile import ColumnProfile
-from src.domain.columns import ColumnKey
+from src.domain.columns import ColumnKey, column_key_from_string
+from src.domain.data_model_selection import DataModelSelection, version_number_from_label
 
 _logger = logging.getLogger(__name__)
 
@@ -26,9 +27,7 @@ class SessionCache:
     """Thread-safe for concurrent access during async operations."""
 
     # Data model metadata
-    data_model_key: str = ""
-    version_label: str = ""
-    version_number: int | None = None
+    data_model_selection: DataModelSelection | None = None
 
     # CDE list (fetched in Stage 2)
     cdes: list[CDEInfo] = field(default_factory=list)
@@ -43,7 +42,7 @@ class SessionCache:
 
     # Per-column distinct-value profiles (computed in Stage 1 analyze, read by
     # the Stage 2 takeover via the column-detail endpoint).
-    column_profiles: dict[str, ColumnProfile] = field(default_factory=dict)
+    column_profiles: dict[ColumnKey, ColumnProfile] = field(default_factory=dict)
 
     # Thread safety
     _lock: threading.Lock = field(default_factory=threading.Lock)
@@ -56,10 +55,12 @@ class SessionCache:
         version_number: int | None = None,
     ) -> None:
         with self._lock:
-            self.data_model_key = data_model_key
-            self.version_label = version_label
-            self.version_number = (
-                version_number if version_number is not None else _version_number_from_label(version_label)
+            selected_version_number = (
+                version_number if version_number is not None else version_number_from_label(version_label)
+            )
+            self.data_model_selection = DataModelSelection(
+                key=data_model_key,
+                version_number=selected_version_number,
             )
             self.cdes = list(cdes)
             self.cde_by_id = {c.cde_id: c for c in cdes}
@@ -97,7 +98,7 @@ class SessionCache:
 
     def get_column_cde_key(self, column_key: ColumnKey | str) -> str | None:
         with self._lock:
-            return self.column_to_cde_key.mappings.get(ColumnKey(str(column_key)))
+            return self.column_to_cde_key.mappings.get(column_key_from_string(str(column_key)))
 
     def get_column_mappings(self) -> ColumnCdeMap:
         """Thread-safe copy of column-to-CDE mappings for serialization."""
@@ -118,7 +119,7 @@ class SessionCache:
 
     def get_pvs_for_column(self, column_key: ColumnKey | str) -> frozenset[str] | None:
         with self._lock:
-            cde_key = self.column_to_cde_key.mappings.get(ColumnKey(str(column_key)))
+            cde_key = self.column_to_cde_key.mappings.get(column_key_from_string(str(column_key)))
             if cde_key is None:
                 return None
             return self.pvs.get(cde_key)
@@ -140,16 +141,18 @@ class SessionCache:
     def set_column_profiles(self, profiles: dict[str, ColumnProfile]) -> None:
         """Full replacement: a re-analyze always supersedes prior profiles."""
         with self._lock:
-            self.column_profiles = dict(profiles)
+            self.column_profiles = {
+                column_key_from_string(column_key): profile for column_key, profile in profiles.items()
+            }
 
     def set_column_profile(self, profile: ColumnProfile) -> None:
         """Add or replace one profile, used when Stage 2 rebuilds after restart."""
         with self._lock:
             self.column_profiles[profile.column_key] = profile
 
-    def get_column_profile(self, column_key: str) -> ColumnProfile | None:
+    def get_column_profile(self, column_key: ColumnKey | str) -> ColumnProfile | None:
         with self._lock:
-            return self.column_profiles.get(column_key)
+            return self.column_profiles.get(column_key_from_string(str(column_key)))
 
     def replace_cdes(self, cdes: list[CDEInfo]) -> None:
         """Swap the CDE list in place — used to apply post-PV-fetch type refinement."""
@@ -158,31 +161,31 @@ class SessionCache:
             self.cde_by_id = {c.cde_id: c for c in cdes}
             self.cde_by_key = {c.cde_key: c for c in cdes}
 
-    def get_model_info(self) -> tuple[str, str]:
+    def get_model_selection(self) -> DataModelSelection | None:
         with self._lock:
-            return self.data_model_key, self.version_label
+            return self.data_model_selection
 
 
-def populate_cde_cache(file_id: str, data_model_key: str, version_number: int | None = None) -> None:
+def populate_cde_cache(file_id: str, selection: DataModelSelection) -> None:
     """PV validation in Stage 3+ requires model key and version; must run before PV fetch."""
     from src.domain.data_model_adapter import fetch_cdes, get_latest_version
 
-    if version_number is None:
+    if selection.version_number is None:
         try:
-            version_label = get_latest_version(data_model_key)
+            version_label = get_latest_version(selection.key)
         except (DataModelStoreError, NetriasAPIUnavailable):
             _logger.warning("Data Model Store API unavailable; defaulting to version 1")
             version_label = "1"
     else:
-        version_label = str(version_number)
+        version_label = selection.version_label
 
-    cdes = fetch_cdes(data_model_key, version_label)
+    cdes = fetch_cdes(selection.key, version_label)
     cache = get_session_cache(file_id)
     cache.set_cdes(
         cdes,
-        data_model_key=data_model_key,
+        data_model_key=selection.key,
         version_label=version_label,
-        version_number=version_number,
+        version_number=selection.version_number,
     )
 
     _logger.info(
@@ -190,7 +193,7 @@ def populate_cde_cache(file_id: str, data_model_key: str, version_number: int | 
         extra={
             "file_id": file_id,
             "cde_count": len(cdes),
-            "data_model": data_model_key,
+            "data_model": selection.key,
             "version": version_label,
         },
     )
@@ -224,11 +227,6 @@ def clear_all_session_caches() -> None:
 def has_session_cache(file_id: str) -> bool:
     with _global_lock:
         return file_id in _session_caches
-
-
-def _version_number_from_label(version_label: str) -> int | None:
-    cleaned = version_label.removeprefix("v")
-    return int(cleaned) if cleaned.isdigit() else None
 
 
 __all__ = [

@@ -4,13 +4,17 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 
 from src.domain.columns import ColumnKey, column_key_from_string
 
 
 @dataclass(frozen=True)
 class ColumnRenameSet:
-    renames: dict[ColumnKey, str]
+    renames: Mapping[ColumnKey, str]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "renames", MappingProxyType(dict(self.renames)))
 
     @classmethod
     def empty(cls) -> ColumnRenameSet:

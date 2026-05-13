@@ -24,11 +24,56 @@ declare module '/assets/shared/row-state.js' {
   export function createRowState(): unknown;
 }
 
+type StageConfig = Record<string, any>;
+
+interface ClusterizeOptions {
+  rows?: string[];
+  scrollId?: string;
+  contentId?: string;
+  callbacks?: Record<string, Function>;
+  [key: string]: any;
+}
+
+declare class Clusterize {
+  constructor(options: ClusterizeOptions);
+  update(rows: string[]): void;
+  destroy(clean?: boolean): void;
+}
+
+interface Element {
+  checked?: boolean;
+  dataset: DOMStringMap;
+  disabled?: boolean;
+  files?: FileList | null;
+  focus?: () => void;
+  showModal?: () => void;
+  close?: () => void;
+  style: CSSStyleDeclaration;
+  tabIndex: number;
+  tagName?: string;
+  value?: any;
+  destroy?: () => void;
+  setValue?: (value: string) => void;
+}
+
+interface EventTarget {
+  checked?: boolean;
+  closest?: (selectors: string) => Element | null;
+  files?: FileList | null;
+  tagName?: string;
+  value?: any;
+}
+
+interface HTMLDivElement {
+  destroy?: () => void;
+  setValue?: (value: string) => void;
+}
+
 /* Stage config objects injected into window by server templates */
 interface Window {
-  stageOneUploadConfig?: Record<string, unknown>;
-  stageTwoConfig?: Record<string, unknown>;
-  stageThreeConfig?: Record<string, unknown>;
-  stageFourConfig?: Record<string, unknown>;
-  stageFiveConfig?: Record<string, unknown>;
+  stageOneUploadConfig?: StageConfig;
+  stageTwoConfig?: StageConfig;
+  stageThreeConfig?: StageConfig;
+  stageFourConfig?: StageConfig;
+  stageFiveConfig?: StageConfig;
 }

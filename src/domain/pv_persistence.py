@@ -46,11 +46,14 @@ def ensure_pvs_loaded(file_id: str) -> SessionCache:
 
 def save_pv_manifest_to_disk(file_id: str, cache: SessionCache, pv_map: dict[str, frozenset[str]]) -> None:
     """Persists PVs so Stage 4/5 can recover after server restart without re-running harmonization."""
-    data_model_key, version_label = cache.get_model_info()
+    selection = cache.get_model_selection()
+    if selection is None:
+        _logger.warning("Cannot save PV manifest without data model selection", extra={"file_id": file_id})
+        return
     store = get_file_store()
     manifest = PVManifest(
-        data_model_key=data_model_key,
-        version_label=version_label,
+        data_model_key=selection.key,
+        version_label=selection.version_label,
         column_to_cde_key=cache.get_column_mappings(),
         pvs=pv_map,
     )

@@ -44,10 +44,14 @@ column keys as the internal identity for tabular columns.
    Stage 3 applies those names to the manifest output metadata while preserving
    the stable key for all internal lookups.
 
-5. Stage 4 review overrides and PV lookup use `column_key`. The UI can show the
+5. Column-to-CDE and column-rename maps are immutable domain snapshots once
+   parsed from browser payloads. Callers create replacement maps rather than
+   mutating shared dictionaries.
+
+6. Stage 4 review overrides and PV lookup use `column_key`. The UI can show the
    visible header separately.
 
-6. Stage 5 applies manual review overrides by original column key, then writes
+7. Stage 5 applies manual review overrides by original column key, then writes
    the harmonized dataset using the harmonized file's columns and format so SDK
    output headers and Stage 2 rename choices are preserved.
 
@@ -73,5 +77,7 @@ column keys as the internal identity for tabular columns.
 - New cross-stage contracts should use `ColumnKey` or serialized `column_key`
   for identity.
 - Use visible headers only for UI labels and exported output names.
+- Treat column-keyed mapping objects as immutable snapshots; use replacement
+  methods when a workflow needs to change a mapping.
 - When writing downloads, preserve the harmonized dataset's headers and format;
   use the original dataset only to locate source columns for review overrides.

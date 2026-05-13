@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 
 from src.domain.cde import normalize_cde_key
 from src.domain.columns import ColumnKey, column_key_from_string
@@ -11,7 +12,10 @@ from src.domain.columns import ColumnKey, column_key_from_string
 
 @dataclass(frozen=True)
 class ColumnCdeMap:
-    mappings: dict[ColumnKey, str]
+    mappings: Mapping[ColumnKey, str]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "mappings", MappingProxyType(dict(self.mappings)))
 
     @classmethod
     def empty(cls) -> ColumnCdeMap:

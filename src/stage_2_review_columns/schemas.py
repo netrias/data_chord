@@ -12,6 +12,16 @@ from pydantic import BaseModel, Field
 from src.domain.column_profile import ColumnProfilePayload
 
 
+class CdeCatalogItem(BaseModel):
+    """CDE option sent to the Stage 2 browser picker."""
+
+    cde_id: int
+    cde_key: str
+    label: str
+    description: str
+    cde_type: str
+
+
 class ColumnDetailResponse(BaseModel):
     """Combined payload for one column's takeover view.
 

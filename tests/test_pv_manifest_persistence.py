@@ -7,7 +7,10 @@ warnings when they return to Stage 4 or Stage 5.
 
 from __future__ import annotations
 
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.domain.columns import column_key_from_string
 from src.domain.data_model_cache import (
@@ -148,7 +151,7 @@ class TestSessionCacheThreadSafety:
     """Cache operations are thread-safe for concurrent async access."""
 
     def test_get_column_mappings_returns_copy(self) -> None:
-        """Thread-safe accessor returns a copy, not the internal dict."""
+        """Thread-safe accessor returns an immutable snapshot, not the internal dict."""
         # Given: A cache with column mappings
         cache = SessionCache()
         cache.set_column_mappings({"col1": "cde1", "col2": "cde2"})
@@ -156,8 +159,10 @@ class TestSessionCacheThreadSafety:
         # When: Getting column mappings
         mappings = cache.get_column_mappings()
 
-        # Then: Returned map is a copy (modifying it doesn't affect cache)
-        mappings.mappings[column_key_from_string("col3")] = "cde3"
+        # Then: Returned map cannot be mutated and the cache is unchanged
+        immutable_mappings = cast(Any, mappings.mappings)
+        with pytest.raises(TypeError):
+            immutable_mappings[column_key_from_string("col3")] = "cde3"
         assert cache.get_column_cde_key("col3") is None, "Cache should not be modified"
 
     def test_pvs_stored_as_frozenset(self) -> None:

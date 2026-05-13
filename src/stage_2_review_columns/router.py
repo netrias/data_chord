@@ -18,9 +18,10 @@ from netrias_client import DataModelStoreError, NetriasAPIUnavailable
 
 from src.domain import UILabel
 from src.domain.data_model_cache import get_session_cache, populate_cde_cache
+from src.domain.data_model_selection import DataModelSelection
 from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
 
-from .schemas import ColumnDetailResponse
+from .schemas import CdeCatalogItem, ColumnDetailResponse
 from .services import ColumnDetailNotFound, compute_column_detail
 
 MODULE_DIR = _Path(__file__).parent
@@ -39,7 +40,7 @@ async def render_stage_two(
     schema: Annotated[str | None, Query(min_length=1)] = None,
     version_number: Annotated[int | None, Query(ge=1)] = None,
 ) -> HTMLResponse:
-    cde_catalog: list[dict[str, object]] = []
+    cde_catalog: list[CdeCatalogItem] = []
 
     if file_id and schema:
         cde_catalog = await _get_cde_options_for_session(file_id, schema, version_number)
@@ -48,7 +49,7 @@ async def render_stage_two(
         "request": request,
         "default_schema": schema or "",
         "default_version_number": version_number,
-        "cde_catalog": cde_catalog,
+        "cde_catalog": [item.model_dump() for item in cde_catalog],
         "no_mapping_label": UILabel.NO_MAPPING.value,
     }
     return _templates.TemplateResponse("stage_2_mappings.html", context)
@@ -58,24 +59,25 @@ async def _get_cde_options_for_session(
     file_id: str,
     target_schema: str,
     version_number: int | None,
-) -> list[dict[str, object]]:
+) -> list[CdeCatalogItem]:
     """Returns empty list on API failure (graceful degradation)."""
     cache = get_session_cache(file_id)
 
     if not cache.has_cdes():
         try:
-            await run_in_threadpool(populate_cde_cache, file_id, target_schema, version_number)
+            selection = DataModelSelection.from_version_number(target_schema, version_number)
+            await run_in_threadpool(populate_cde_cache, file_id, selection)
         except (DataModelStoreError, NetriasAPIUnavailable):
             logger.warning("Data Model Store API unavailable; CDE options will be empty", extra={"file_id": file_id})
 
     return [
-        {
-            "cde_id": cde.cde_id,
-            "cde_key": cde.cde_key,
-            "label": cde.cde_key,
-            "description": cde.description or "",
-            "cde_type": cde.cde_type.value,
-        }
+        CdeCatalogItem(
+            cde_id=cde.cde_id,
+            cde_key=cde.cde_key,
+            label=cde.cde_key,
+            description=cde.description or "",
+            cde_type=cde.cde_type.value,
+        )
         for cde in cache.get_all_cdes()
     ]
 

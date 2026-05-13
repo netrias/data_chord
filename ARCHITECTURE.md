@@ -19,6 +19,7 @@ src/
 │   ├── harmonize.py           # HarmonizeService (Netrias client wrapper)
 │   ├── mapping_service.py     # MappingDiscoveryService (CDE suggestion)
 │   ├── data_model_adapter.py  # Adapter: SDK types → domain types (CDEs, PVs, data models)
+│   ├── data_model_selection.py # Canonical target data model/version selection
 │   ├── data_model_cache.py    # Session-scoped CDE/PV caching
 │   ├── pv_validation.py       # Permissible value conformance checking
 │   ├── pv_persistence.py      # PV manifest disk persistence
@@ -212,6 +213,8 @@ ZIP, then clears session cache.
 `CDEInfo` dataclass holds CDE metadata (cde_id, cde_key, description,
 version_label) fetched dynamically from the Data Model Store API.
 `ColumnMappingSet` is the typed container for all column-to-CDE assignments.
+`ColumnCdeMap` and `ColumnRenameSet` are immutable, column-keyed snapshots used
+when mappings cross stage, cache, or persistence boundaries.
 
 ### Data Model Integration (`data_model_adapter.py`, `data_model_cache.py`)
 
@@ -220,7 +223,10 @@ to domain types (`DataModelSummary`, `CDEInfo`, PV frozensets). It uses the
 shared `NetriasClient` singleton from `dependencies.py`. `SessionCache` provides
 session-scoped, thread-safe caching of CDEs and PV sets (frozenset for O(1)
 membership testing), with disk persistence via `pv_persistence.py` for server
-restart recovery.
+restart recovery. `DataModelSelection` is the canonical domain object for the
+target model key plus optional numeric version; callers derive SDK
+`target_version` strings from it instead of rebuilding `"latest"`/numbered
+version logic in each stage.
 
 ### PV Validation (`pv_validation.py`)
 

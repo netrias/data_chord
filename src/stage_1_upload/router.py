@@ -23,6 +23,7 @@ from src.domain.data_model_adapter import (
     refine_cde_types_from_pvs,
 )
 from src.domain.data_model_cache import clear_all_session_caches, get_session_cache
+from src.domain.data_model_selection import DataModelSelection
 from src.domain.dependencies import (
     get_mapping_service,
     get_upload_constraints,
@@ -145,7 +146,7 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please upload again.")
 
     meta = _select_sheet_safe(payload.file_id, payload.sheet_name)
-    target_version = _target_version(payload.target_version_number)
+    target_selection = DataModelSelection.from_version_number(payload.target_schema, payload.target_version_number)
     analysis_task = asyncio.create_task(
         run_in_threadpool(
             _analyze_columns_safe,
@@ -157,16 +158,14 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     discovery_task = asyncio.create_task(
         _discover_mappings(
             meta.saved_path,
-            payload.target_schema,
-            target_version,
+            target_selection,
             meta.selected_sheet,
         )
     )
     reference_task = asyncio.create_task(
         _prime_data_model_cache(
             payload.file_id,
-            payload.target_schema,
-            payload.target_version_number,
+            target_selection,
         )
     )
     try:
@@ -244,8 +243,7 @@ def _load_sheet_previews_safe(meta: UploadedFileMeta) -> dict[str, SheetPreview]
 
 async def _discover_mappings(
     csv_path: Path,
-    target_schema: str,
-    target_version: str,
+    target_selection: DataModelSelection,
     sheet_name: str | None,
 ) -> tuple[dict[str, list[ModelSuggestion]], dict[str, str], ManifestPayload]:
     mapping_service = get_mapping_service()
@@ -253,8 +251,8 @@ async def _discover_mappings(
         cde_targets, manual_overrides, manifest = await run_in_threadpool(
             mapping_service.discover,
             csv_path=csv_path,
-            target_schema=target_schema,
-            target_version=target_version,
+            target_schema=target_selection.key,
+            target_version=target_selection.target_version,
             sheet_name=sheet_name,
         )
         return cde_targets, manual_overrides, manifest
@@ -272,12 +270,13 @@ async def _discover_mappings(
         ) from exc
 
 
-async def _prime_data_model_cache(file_id: str, data_model_key: str, version_number: int | None) -> None:
+async def _prime_data_model_cache(file_id: str, target_selection: DataModelSelection) -> None:
     """Warm CDEs and all PVs while mapping discovery is running."""
-    version = _target_version(version_number)
     try:
-        cdes_task = asyncio.create_task(run_in_threadpool(fetch_cdes, data_model_key, version))
-        pvs_task = asyncio.create_task(fetch_all_pvs_async(data_model_key, version))
+        cdes_task = asyncio.create_task(
+            run_in_threadpool(fetch_cdes, target_selection.key, target_selection.target_version)
+        )
+        pvs_task = asyncio.create_task(fetch_all_pvs_async(target_selection.key, target_selection.target_version))
         cdes, raw_pv_map = await asyncio.gather(cdes_task, pvs_task)
     except (DataModelStoreError, NetriasAPIUnavailable):
         _router_logger.warning("Data Model Store API unavailable during cache warmup", extra={"file_id": file_id})
@@ -286,7 +285,12 @@ async def _prime_data_model_cache(file_id: str, data_model_key: str, version_num
     cache = get_session_cache(file_id)
     pv_map = {cde.cde_key: raw_pv_map.get(cde.cde_key, frozenset()) for cde in cdes}
     refined = refine_cde_types_from_pvs(cdes, pv_map)
-    cache.set_cdes(refined, data_model_key=data_model_key, version_label=version, version_number=version_number)
+    cache.set_cdes(
+        refined,
+        data_model_key=target_selection.key,
+        version_label=target_selection.version_label,
+        version_number=target_selection.version_number,
+    )
     cache.set_pvs_batch(pv_map)
 
 
@@ -320,10 +324,6 @@ def _top_catalog_cde(
         if cde := cde_by_key.get(suggestion.target):
             return cde
     return None
-
-
-def _target_version(version_number: int | None) -> str:
-    return str(version_number) if version_number is not None else "latest"
 
 
 async def _cancel_pending_tasks(*tasks: asyncio.Task[object]) -> None:

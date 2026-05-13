@@ -18,6 +18,8 @@ from pathlib import Path
 from netrias_client import read_tabular
 from pydantic import BaseModel
 
+from src.domain.columns import ColumnKey, column_key_from_string
+
 
 @dataclass(frozen=True)
 class DistinctValue:
@@ -25,12 +27,24 @@ class DistinctValue:
     count: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class ColumnProfile:
-    column_key: str
+    column_key: ColumnKey
     total_rows: int
     distinct_values: tuple[DistinctValue, ...]
     null_count: int
+
+    def __init__(
+        self,
+        column_key: ColumnKey | str,
+        total_rows: int,
+        distinct_values: tuple[DistinctValue, ...],
+        null_count: int,
+    ) -> None:
+        object.__setattr__(self, "column_key", column_key_from_string(str(column_key)))
+        object.__setattr__(self, "total_rows", total_rows)
+        object.__setattr__(self, "distinct_values", distinct_values)
+        object.__setattr__(self, "null_count", null_count)
 
     @property
     def total_distinct(self) -> int:
@@ -65,7 +79,7 @@ class ColumnProfilePayload(BaseModel):
     is_all_unique: bool
 
 
-def build_column_profile(column_key: str, values: Iterable[str | None]) -> ColumnProfile:
+def build_column_profile(column_key: ColumnKey | str, values: Iterable[str | None]) -> ColumnProfile:
     """Tally an iterable of values into a ``ColumnProfile``.
 
     Treats ``None`` and the empty string as null; everything else is counted
@@ -89,7 +103,7 @@ def build_column_profile(column_key: str, values: Iterable[str | None]) -> Colum
         DistinctValue(value=v, count=c) for v, c in counter.most_common()
     )
     return ColumnProfile(
-        column_key=column_key,
+        column_key=column_key_from_string(str(column_key)),
         total_rows=total_rows,
         distinct_values=distinct_values,
         null_count=null_count,
@@ -113,12 +127,12 @@ def build_column_profiles_from_tabular(
 
 def build_column_profile_from_tabular(
     tabular_path: Path,
-    column_key: str,
+    column_key: ColumnKey | str,
     sheet_name: str | None = None,
 ) -> ColumnProfile | None:
     """Build one column profile without requiring the analyze response cache."""
     dataset = read_tabular(tabular_path, sheet_name=sheet_name)
-    column = next((candidate for candidate in dataset.columns if candidate.key == column_key), None)
+    column = next((candidate for candidate in dataset.columns if candidate.key == str(column_key)), None)
     if column is None:
         return None
     return build_column_profile(
@@ -130,7 +144,7 @@ def build_column_profile_from_tabular(
 def column_profile_to_payload(profile: ColumnProfile) -> ColumnProfilePayload:
     """Boundary conversion: domain dataclass to API model with derived fields."""
     return ColumnProfilePayload(
-        column_key=profile.column_key,
+        column_key=str(profile.column_key),
         total_rows=profile.total_rows,
         distinct_values=[
             DistinctValuePayload(value=dv.value, count=dv.count)

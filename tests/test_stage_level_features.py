@@ -407,9 +407,10 @@ async def test_stage1_analyze_uses_selected_version_and_primes_reference_cache(
     assert response.status_code == 200
     assert response.json()["target_version_number"] == 2
     assert mock_netrias_client.discover_mapping_from_tabular.call_args.kwargs["target_version"] == "2"
-    data_model_key, version_label = cache.get_model_info()
-    assert data_model_key == "gc"
-    assert version_label == "2"
+    selection = cache.get_model_selection()
+    assert selection is not None
+    assert selection.key == "gc"
+    assert selection.version_label == "2"
     assert cache.has_cdes()
     assert cache.has_any_pvs()
 

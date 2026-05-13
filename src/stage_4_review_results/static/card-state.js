@@ -43,7 +43,6 @@ export const isEffectiveOverride = (overrideValue, aiSuggestedValue) =>
  */
 export const determineCardState = (input) => {
   const {
-    originalValue,
     aiSuggestedValue,
     overrideValue,
     hasPVs,

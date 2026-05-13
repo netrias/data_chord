@@ -22,6 +22,7 @@ from src.domain.column_profile import (
     build_column_profile_from_tabular,
     column_profile_to_payload,
 )
+from src.domain.columns import ColumnKey, column_key_from_string
 from src.domain.data_model_adapter import (
     fetch_all_pvs_async,
     refine_cde_types_from_pvs,
@@ -76,20 +77,21 @@ async def compute_column_detail(
             selected_pvs=["Adenocarcinoma", "Breast Cancer", ...],
         )
     """
+    source_column_key = column_key_from_string(column_key)
     cache = get_session_cache(file_id)
-    profile = await _get_or_build_column_profile(cache, file_id, column_key)
+    profile = await _get_or_build_column_profile(cache, file_id, source_column_key)
     catalog = await _get_cde_catalog_snapshot(cache)
     if not catalog.cdes:
         # CDEs not yet populated by the Stage 2 page. Return an empty match
         # map; the frontend can retry once the page-load completes.
         return ColumnDetailResponse(
-            column_key=column_key,
+            column_key=str(source_column_key),
             profile=column_profile_to_payload(profile),
         )
 
     distinct = frozenset(dv.value for dv in profile.distinct_values)
     return ColumnDetailResponse(
-        column_key=column_key,
+        column_key=str(source_column_key),
         profile=column_profile_to_payload(profile),
         match_counts=compute_match_counts(distinct, catalog.cdes, catalog.pv_sets),
         overlap_by_cde=compute_column_overlap_by_cde(distinct, catalog.cdes, catalog.pv_sets),
@@ -101,7 +103,7 @@ async def compute_column_detail(
 async def _get_or_build_column_profile(
     cache: SessionCache,
     file_id: str,
-    column_key: str,
+    column_key: ColumnKey,
 ) -> ColumnProfile:
     profile = cache.get_column_profile(column_key)
     if profile is not None:
@@ -141,10 +143,10 @@ async def _ensure_pv_sets_fetched(cache: SessionCache) -> None:
     missing_keys = cache.cde_keys_missing_pvs()
     if not missing_keys:
         return
-    data_model_key, version_label = cache.get_model_info()
-    if not data_model_key:
+    selection = cache.get_model_selection()
+    if selection is None:
         return
-    all_pvs = await fetch_all_pvs_async(data_model_key, version_label)
+    all_pvs = await fetch_all_pvs_async(selection.key, selection.version_label)
     cache.set_pvs_batch({key: all_pvs.get(key, frozenset()) for key in missing_keys})
 
 

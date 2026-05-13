@@ -10,6 +10,7 @@ from netrias_client import CDE as SdkCDE
 from netrias_client import DataModel, DataModelStoreError, DataModelVersion
 
 from src.domain.data_model_cache import clear_session_cache, get_session_cache, populate_cde_cache
+from src.domain.data_model_selection import DataModelSelection
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -69,7 +70,7 @@ def test_populate_cde_cache_stores_real_cdes(
     assert not cache.has_cdes()
 
     # When
-    populate_cde_cache("test-file-id", "gc")
+    populate_cde_cache("test-file-id", DataModelSelection.from_version_number("gc", None))
 
     # Then
     assert cache.has_cdes()
@@ -78,9 +79,10 @@ def test_populate_cde_cache_stores_real_cdes(
     assert cache.get_cde_by_key("sex") is not None
     assert cache.get_cde_by_key("race") is not None
 
-    data_model_key, version_label = cache.get_model_info()
-    assert data_model_key == "gc"
-    assert version_label == "2"
+    selection = cache.get_model_selection()
+    assert selection is not None
+    assert selection.key == "gc"
+    assert selection.version_label == "2"
 
     mock_netrias.list_cdes.assert_called_once_with("gc", "2", include_description=True)
 
@@ -109,11 +111,12 @@ def test_populate_cde_cache_falls_back_on_version_error(
     assert not cache.has_cdes()
 
     # When
-    populate_cde_cache("test-file-id", "gc")
+    populate_cde_cache("test-file-id", DataModelSelection.from_version_number("gc", None))
 
     # Then: fallback version "1" was used
     mock_netrias.list_cdes.assert_called_once_with("gc", "1", include_description=True)
     assert cache.has_cdes()
 
-    _, version_label = cache.get_model_info()
-    assert version_label == "1"
+    selection = cache.get_model_selection()
+    assert selection is not None
+    assert selection.version_label == "1"
