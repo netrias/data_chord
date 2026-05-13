@@ -14,7 +14,7 @@ from src.domain.config import get_netrias_api_key
 from src.domain.harmonize import HarmonizeService
 from src.domain.mapping_service import MappingDiscoveryService
 from src.domain.paths import PROJECT_ROOT
-from src.domain.storage import FileStore, LocalStorageBackend, UploadConstraints, UploadStorage
+from src.domain.storage import FileStore, UploadConstraints, UploadStorage
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +50,7 @@ def get_file_store() -> FileStore:
     global _file_store  # noqa: PLW0603 - intentional singleton
     if _file_store is None:
         logger.info("Initializing file store")
-        backend = LocalStorageBackend(UPLOAD_BASE_DIR / "manifests")
-        _file_store = FileStore(backend)
+        _file_store = FileStore(UPLOAD_BASE_DIR / "manifests")
     return _file_store
 
 

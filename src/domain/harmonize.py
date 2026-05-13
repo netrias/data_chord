@@ -14,8 +14,9 @@ from uuid import uuid4
 
 from netrias_client import NetriasClient
 
-from src.domain.cde import ColumnMapping, ColumnMappingSet
+from src.domain.column_cde_map import ColumnCdeOverrides
 from src.domain.column_renames import ColumnRenameSet
+from src.domain.columns import ColumnKey
 from src.domain.data_model_cache import SessionCache
 from src.domain.manifest import (
     DEFAULT_HARMONIZATION,
@@ -54,7 +55,7 @@ class HarmonizeService:
         *,
         file_path: Path,
         target_schema: str,
-        column_mappings: ColumnMappingSet,
+        column_overrides: ColumnCdeOverrides,
         column_renames: ColumnRenameSet,
         cache: SessionCache,
         target_version: str = "latest",
@@ -70,7 +71,7 @@ class HarmonizeService:
 
         try:
             cde_map = self._prepare_cde_map(file_path, target_schema, target_version, manifest, sheet_name)
-            cde_map = _apply_column_updates(cde_map, column_mappings, column_renames, cache)
+            cde_map = _apply_column_updates(cde_map, column_overrides, column_renames, cache)
             return self._execute_harmonization(file_path, cde_map, job_id, target_schema, output_path, sheet_name)
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception("Harmonize call failed; falling back to stub", exc_info=exc)
@@ -165,19 +166,21 @@ class HarmonizeService:
 
 def _apply_column_updates(
     manifest: ColumnMappingManifest,
-    mappings: ColumnMappingSet,
+    overrides: ColumnCdeOverrides,
     renames: ColumnRenameSet,
     cache: SessionCache,
 ) -> ColumnMappingManifest:
-    if not mappings.mappings and not renames.renames:
+    if overrides.is_empty and not renames.renames:
         return manifest
 
-    applied = mappings.get_applied()
-    skipped = mappings.get_skipped()
+    applied = overrides.applied_items()
+    skipped = overrides.skipped_columns()
     updated = manifest
 
-    for mapping in applied:
-        updated = updated.with_record(_build_mapping_record(updated.records.get(mapping.column_key), mapping, cache))
+    for column_key, cde_key in applied:
+        updated = updated.with_record(
+            _build_mapping_record(updated.records.get(column_key), column_key, cde_key, cache)
+        )
 
     for column_key in skipped:
         updated = updated.without_column(column_key)
@@ -189,31 +192,34 @@ def _apply_column_updates(
 
 def _build_mapping_record(
     existing: ColumnMappingRecord | None,
-    mapping: ColumnMapping,
+    column_key: ColumnKey,
+    cde_key: str,
     cache: SessionCache,
 ) -> ColumnMappingRecord:
     """Look up cde_id from session cache (populated in Stage 2)."""
-    if mapping.cde_key is None:
-        raise ValueError("Cannot build a mapping record without a CDE key")
-    cde_info = cache.get_cde_by_key(mapping.cde_key)
+    cde_info = cache.get_cde_by_key(cde_key)
     if cde_info is None:
-        raise ValueError(f"Unknown CDE key: {mapping.cde_key}")
+        raise ValueError(f"Unknown CDE key: {cde_key}")
     return ColumnMappingRecord(
-        column_key=mapping.column_key,
-        cde_key=mapping.cde_key,
+        column_key=column_key,
+        cde_key=cde_key,
         cde_id=cde_info.cde_id,
-        column_name=existing.column_name if existing else str(mapping.column_key),
+        column_name=existing.column_name if existing else str(column_key),
         harmonization=existing.harmonization if existing else DEFAULT_HARMONIZATION,
         route=existing.route if existing else None,
         alternatives=existing.alternatives if existing else (),
     )
 
 
-def _log_mapping_results(applied: list[ColumnMapping], skipped: list[str], renames: ColumnRenameSet) -> None:
+def _log_mapping_results(
+    applied: list[tuple[ColumnKey, str]],
+    skipped: list[str],
+    renames: ColumnRenameSet,
+) -> None:
     if applied:
         logger.info(
             "Applied column mappings",
-            extra={"mappings": {str(m.column_key): m.cde_key for m in applied if m.cde_key}},
+            extra={"mappings": {str(column_key): cde_key for column_key, cde_key in applied}},
         )
     if skipped:
         logger.info("Skipped column mappings via 'No Mapping'", extra={"columns": skipped})

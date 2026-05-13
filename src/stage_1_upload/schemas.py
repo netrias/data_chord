@@ -49,21 +49,6 @@ class ColumnPreview(BaseModel):
     confidence_score: float = Field(ge=0.0, le=1.0)
 
 
-class DataModelVersionSchema(BaseModel):
-    version_label: str
-    version_number: int
-    external_version_number: str | None = None
-    is_default: bool = False
-
-
-class DataModelSchema(BaseModel):
-    """Response model for /data-models endpoint — documents the API contract for frontend."""
-
-    key: str
-    label: str
-    versions: list[DataModelVersionSchema]
-
-
 class ColumnOverlapRatio(BaseModel):
     """Precomputed AI-rec PV overlap; None means the ratio is undefined."""
 

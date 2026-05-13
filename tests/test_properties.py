@@ -8,10 +8,8 @@ Complements existing unit tests by exploring edge cases automatically.
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
-from src.domain.cde import (
-    ColumnMappingSet,
-    normalize_cde_key,
-)
+from src.domain.cde import normalize_cde_key
+from src.domain.column_cde_map import ColumnCdeOverrides
 from src.domain.manifest import normalize_manifest
 from src.domain.manifest.models import is_value_changed
 from src.domain.pv_validation import (
@@ -258,7 +256,7 @@ def test_normalize_cde_key_no_mapping_sentinel_returns_none() -> None:
 
 
 # =============================================================================
-# ColumnMappingSet Roundtrip Properties
+# ColumnCdeOverrides Roundtrip Properties
 # =============================================================================
 
 
@@ -269,9 +267,9 @@ def test_normalize_cde_key_no_mapping_sentinel_returns_none() -> None:
     max_size=10,
 ))
 def test_column_mapping_roundtrip_preserves_columns(overrides: dict[str, str]) -> None:
-    """from_dict preserves column names through to_dict."""
-    mapping_set = ColumnMappingSet.from_dict(overrides)
-    result = mapping_set.to_dict()
+    """from_strings preserves column names through to_strings."""
+    mapping_set = ColumnCdeOverrides.from_strings(overrides)
+    result = mapping_set.to_strings()
 
     # All original columns should be present
     assert set(result.keys()) == set(overrides.keys())
@@ -285,8 +283,8 @@ def test_column_mapping_roundtrip_preserves_columns(overrides: dict[str, str]) -
 ))
 def test_column_mapping_values_are_cleaned(overrides: dict[str, str]) -> None:
     """All values are cleaned (stripped) strings."""
-    mapping_set = ColumnMappingSet.from_dict(overrides)
-    result = mapping_set.to_dict()
+    mapping_set = ColumnCdeOverrides.from_strings(overrides)
+    result = mapping_set.to_strings()
 
     for key, value in result.items():
         if value is not None:
@@ -302,8 +300,8 @@ def test_column_mapping_values_are_cleaned(overrides: dict[str, str]) -> None:
 ))
 def test_column_mapping_empty_values_become_none(overrides: dict[str, str]) -> None:
     """Empty or whitespace-only CDE selections normalize to None (skipped columns)."""
-    mapping_set = ColumnMappingSet.from_dict(overrides)
-    result = mapping_set.to_dict()
+    mapping_set = ColumnCdeOverrides.from_strings(overrides)
+    result = mapping_set.to_strings()
 
     # All empty/whitespace values should become None
     for value in result.values():
@@ -322,14 +320,14 @@ def test_column_mapping_empty_values_become_none(overrides: dict[str, str]) -> N
 ))
 def test_column_mapping_applied_plus_skipped_equals_total(overrides: dict[str, str]) -> None:
     """Applied mappings + skipped columns = total columns."""
-    mapping_set = ColumnMappingSet.from_dict(overrides)
+    mapping_set = ColumnCdeOverrides.from_strings(overrides)
 
-    applied = mapping_set.get_applied()
-    skipped = mapping_set.get_skipped()
+    applied = mapping_set.applied_items()
+    skipped = mapping_set.skipped_columns()
 
     # No overlap
-    applied_cols = {str(m.column_key) for m in applied}
-    skipped_cols = set(skipped)
+    applied_cols = {str(column_key) for column_key, _ in applied}
+    skipped_cols = {str(column_key) for column_key in skipped}
     assert applied_cols.isdisjoint(skipped_cols)
 
     # Together they cover all input columns

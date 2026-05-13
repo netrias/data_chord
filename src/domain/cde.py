@@ -1,18 +1,9 @@
-"""
-Common Data Element definitions and column-to-CDE mapping types.
-
-Axis of change: CDE metadata shapes and column-mapping serialization.
-"""
+"""Common Data Element metadata and normalization helpers."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
-
-from pydantic import BaseModel
-
-from src.domain.columns import ColumnKey, column_key_from_string
 
 NO_MAPPING_SENTINEL = "No Mapping"
 
@@ -61,7 +52,10 @@ class CDEInfo:
     cde_type: CdeType = field(default=CdeType.PV)
 
 
-class ModelSuggestion(BaseModel):
+@dataclass(frozen=True)
+class ModelSuggestion:
+    """One CDE candidate returned by mapping discovery for a source column."""
+
     target: str
     similarity: float
 
@@ -74,34 +68,3 @@ def normalize_cde_key(selection: str | None) -> str | None:
     if not cleaned or cleaned == NO_MAPPING_SENTINEL:
         return None
     return cleaned
-
-
-@dataclass(frozen=True)
-class ColumnMapping:
-    column_key: ColumnKey
-    cde_key: str | None  # None means "No Mapping" selected
-
-
-@dataclass(frozen=True)
-class ColumnMappingSet:
-    mappings: tuple[ColumnMapping, ...]
-
-    @classmethod
-    def from_dict(cls, overrides: Mapping[str, str | None]) -> ColumnMappingSet:
-        mappings: list[ColumnMapping] = []
-        for column_key, selection in overrides.items():
-            cde_key = normalize_cde_key(selection)
-            mappings.append(ColumnMapping(column_key=column_key_from_string(column_key), cde_key=cde_key))
-        return cls(mappings=tuple(mappings))
-
-    def to_dict(self) -> dict[str, str | None]:
-        return {str(m.column_key): m.cde_key for m in self.mappings}
-
-    def to_override_map(self) -> dict[ColumnKey, str | None]:
-        return {m.column_key: m.cde_key for m in self.mappings}
-
-    def get_applied(self) -> list[ColumnMapping]:
-        return [m for m in self.mappings if m.cde_key is not None]
-
-    def get_skipped(self) -> list[ColumnKey]:
-        return [m.column_key for m in self.mappings if m.cde_key is None]

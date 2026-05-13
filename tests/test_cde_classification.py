@@ -1,7 +1,7 @@
 """Tests for CdeType enum and the cde_type_overrides classifier.
 
-The classifier owns CDE type assignment: PV (default), NUMERIC (overridden or
-heuristic), PASSTHROUGH (no PVs after fetch).
+The classifier owns CDE type assignment: PV (default), NUMERIC (curated
+override), PASSTHROUGH (no PVs after fetch).
 """
 
 from __future__ import annotations
@@ -89,7 +89,7 @@ def test_is_rename_only_collapses_numeric_and_passthrough() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test: classify_cde branches by precedence — override > pv-presence > heuristic
+# Test: classify_cde branches by precedence — override > pv-presence > PV default
 # ---------------------------------------------------------------------------
 
 
@@ -109,7 +109,7 @@ def test_classify_cde_returns_numeric_when_key_in_overrides(
     )
 
     # When
-    result = classify_cde("patient_age_yrs", has_pvs=True, sample_is_numeric=False)
+    result = classify_cde("patient_age_yrs", has_pvs=True)
 
     # Then: override > everything else
     assert result == CdeType.NUMERIC
@@ -125,7 +125,7 @@ def test_classify_cde_returns_passthrough_when_pvs_known_empty() -> None:
     assert "free_notes" not in NUMERIC_CDE_KEYS
 
     # When
-    result = classify_cde("free_notes", has_pvs=False, sample_is_numeric=False)
+    result = classify_cde("free_notes", has_pvs=False)
 
     # Then
     assert result == CdeType.PASSTHROUGH
@@ -138,34 +138,20 @@ def test_classify_cde_returns_pv_when_pvs_present() -> None:
     Then: PV (the default "must match a permissible value" type)
     """
     # When
-    result = classify_cde("diagnosis", has_pvs=True, sample_is_numeric=False)
+    result = classify_cde("diagnosis", has_pvs=True)
 
     # Then
     assert result == CdeType.PV
 
 
-def test_classify_cde_uses_numeric_heuristic_when_pvs_unknown() -> None:
+def test_classify_cde_defaults_to_pv_when_pvs_unknown() -> None:
     """
-    Given: PVs not yet fetched (has_pvs=None) and the column data parses as numeric
+    Given: PVs not yet fetched (has_pvs=None)
     When: classify_cde is called
-    Then: NUMERIC — pre-fetch heuristic kicks in so the takeover renders correctly
-    """
-    # Given: PVs not yet fetched
-    # When
-    result = classify_cde("unknown_cde", has_pvs=None, sample_is_numeric=True)
-
-    # Then
-    assert result == CdeType.NUMERIC
-
-
-def test_classify_cde_defaults_to_pv_when_pvs_unknown_and_non_numeric() -> None:
-    """
-    Given: PVs not yet fetched (has_pvs=None) and the column is non-numeric
-    When: classify_cde is called
-    Then: PV — best guess until the adapter refines after a fetch
+    Then: PV — best guess until the adapter refines after PV lookup
     """
     # When
-    result = classify_cde("unknown_cde", has_pvs=None, sample_is_numeric=False)
+    result = classify_cde("unknown_cde", has_pvs=None)
 
     # Then
     assert result == CdeType.PV

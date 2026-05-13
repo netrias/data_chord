@@ -14,7 +14,7 @@ from fastapi.templating import Jinja2Templates
 from netrias_client import DataModelStoreError, NetriasAPIUnavailable
 
 from src.domain import ModelSuggestion
-from src.domain.cde import CDEInfo
+from src.domain.cde import CDEInfo, DataModelSummary
 from src.domain.column_profile import ColumnProfile
 from src.domain.data_model_adapter import (
     fetch_all_pvs_async,
@@ -43,8 +43,6 @@ from .schemas import (
     AnalyzeResponse,
     ColumnOverlapRatio,
     ColumnPreview,
-    DataModelSchema,
-    DataModelVersionSchema,
     SheetPreview,
     UploadResponse,
 )
@@ -73,35 +71,19 @@ async def render_stage_one(request: Request) -> HTMLResponse:
 
 @stage_one_router.get(
     "/data-models",
-    response_model=list[DataModelSchema],
+    response_model=list[DataModelSummary],
     name="stage_one_data_models",
 )
-async def list_data_models() -> list[DataModelSchema]:
+async def list_data_models() -> list[DataModelSummary]:
     """Decouples frontend from model list changes; labels may vary by deployment."""
     try:
-        models = await run_in_threadpool(list_data_model_summaries)
+        return await run_in_threadpool(list_data_model_summaries)
     except (DataModelStoreError, NetriasAPIUnavailable):
         _router_logger.warning("Data Model Store API unavailable")
         raise HTTPException(
             status_code=503,
             detail="Data models are currently unavailable. Please try again later.",
         ) from None
-    return [
-        DataModelSchema(
-            key=m.key,
-            label=m.label,
-            versions=[
-                DataModelVersionSchema(
-                    version_label=v.version_label,
-                    version_number=v.version_number,
-                    external_version_number=v.external_version_number,
-                    is_default=v.is_default,
-                )
-                for v in m.versions
-            ],
-        )
-        for m in models
-    ]
 
 
 @stage_one_router.post(

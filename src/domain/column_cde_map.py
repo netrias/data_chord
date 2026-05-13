@@ -12,6 +12,13 @@ from src.domain.columns import ColumnKey, column_key_from_string
 
 @dataclass(frozen=True)
 class ColumnCdeMap:
+    """Immutable source-column to selected-CDE mapping.
+
+    This is the value object passed between Stage 2 selection, Stage 3 PV
+    fetching, and cache persistence. The keys are stable ``ColumnKey`` values,
+    not display headers, so duplicate source headers stay distinct.
+    """
+
     mappings: Mapping[ColumnKey, str]
 
     def __post_init__(self) -> None:
@@ -31,9 +38,9 @@ class ColumnCdeMap:
             }
         )
 
-    def with_overrides(self, overrides: Mapping[ColumnKey, str | None]) -> ColumnCdeMap:
+    def with_overrides(self, overrides: ColumnCdeOverrides) -> ColumnCdeMap:
         merged = dict(self.mappings)
-        for column_key, cde_key in overrides.items():
+        for column_key, cde_key in overrides.overrides.items():
             if cde_key is None:
                 merged.pop(column_key, None)
             else:
@@ -47,4 +54,46 @@ class ColumnCdeMap:
         return {str(column_key): cde_key for column_key, cde_key in self.mappings.items()}
 
 
-__all__ = ["ColumnCdeMap"]
+@dataclass(frozen=True)
+class ColumnCdeOverrides:
+    """User edits to a column-to-CDE map.
+
+    This is the canonical representation for Stage 2 manual mapping choices.
+    A string value means the user selected that CDE. ``None`` means the user
+    explicitly selected "No Mapping", so downstream code should remove any AI
+    mapping for that column.
+    """
+
+    overrides: Mapping[ColumnKey, str | None]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "overrides", MappingProxyType(dict(self.overrides)))
+
+    @classmethod
+    def empty(cls) -> ColumnCdeOverrides:
+        return cls(overrides={})
+
+    @classmethod
+    def from_strings(cls, overrides: Mapping[str, str | None]) -> ColumnCdeOverrides:
+        return cls(
+            overrides={
+                column_key_from_string(column_key): normalize_cde_key(selection)
+                for column_key, selection in overrides.items()
+            }
+        )
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.overrides
+
+    def applied_items(self) -> list[tuple[ColumnKey, str]]:
+        return [(column_key, cde_key) for column_key, cde_key in self.overrides.items() if cde_key is not None]
+
+    def skipped_columns(self) -> list[ColumnKey]:
+        return [column_key for column_key, cde_key in self.overrides.items() if cde_key is None]
+
+    def to_strings(self) -> dict[str, str | None]:
+        return {str(column_key): cde_key for column_key, cde_key in self.overrides.items()}
+
+
+__all__ = ["ColumnCdeMap", "ColumnCdeOverrides"]

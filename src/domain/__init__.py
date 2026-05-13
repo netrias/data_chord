@@ -2,8 +2,6 @@
 
 from src.domain.cde import NO_MAPPING_SENTINEL as NO_MAPPING_SENTINEL
 from src.domain.cde import CDEInfo as CDEInfo
-from src.domain.cde import ColumnMapping as ColumnMapping
-from src.domain.cde import ColumnMappingSet as ColumnMappingSet
 from src.domain.cde import DataModelSummary as DataModelSummary
 from src.domain.cde import ModelSuggestion as ModelSuggestion
 from src.domain.cde import normalize_cde_key as normalize_cde_key
@@ -12,6 +10,7 @@ from src.domain.change import ChangeType as ChangeType
 from src.domain.change import ConfidenceThresholds as ConfidenceThresholds
 from src.domain.change import RecommendationType as RecommendationType
 from src.domain.column_cde_map import ColumnCdeMap as ColumnCdeMap
+from src.domain.column_cde_map import ColumnCdeOverrides as ColumnCdeOverrides
 from src.domain.column_renames import ColumnRenameSet as ColumnRenameSet
 from src.domain.columns import ColumnIdentity as ColumnIdentity
 from src.domain.columns import ColumnKey as ColumnKey

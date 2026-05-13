@@ -20,7 +20,7 @@ from fastapi.templating import Jinja2Templates
 
 from src.domain import (
     ColumnBreakdownSchema,
-    ColumnMappingSet,
+    ColumnCdeOverrides,
     ColumnRenameSet,
     ConfidenceBucketSchema,
     HarmonizeRequest,
@@ -105,14 +105,14 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
     stored_manifest = _storage.load_manifest(payload.file_id)
     manifest_payload = payload.manifest or stored_manifest
     manifest = ColumnMappingManifest.from_payload(manifest_payload)
-    column_mappings = ColumnMappingSet.from_dict(payload.manual_overrides)
+    column_overrides = ColumnCdeOverrides.from_strings(payload.manual_overrides)
     column_renames = ColumnRenameSet.from_dict(payload.column_renames)
     target_selection = DataModelSelection.from_version_number(payload.target_schema, payload.target_version_number)
 
     cache = get_session_cache(payload.file_id)
-    column_cde_map = _column_cde_map_for_session(manifest, column_mappings)
+    column_cde_map = _column_cde_map_for_session(manifest, column_overrides)
     _store_column_mappings_in_cache(cache, column_cde_map)
-    save_cde_mapping_document(payload.file_id, manifest, column_mappings, column_renames, cache, target_selection)
+    save_cde_mapping_document(payload.file_id, manifest, column_overrides, column_renames, cache, target_selection)
     output_path = _storage.harmonized_path_for(payload.file_id, meta.saved_path)
 
     harmonize_task = asyncio.create_task(
@@ -120,7 +120,7 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
             cache,
             meta.saved_path,
             target_selection,
-            column_mappings,
+            column_overrides,
             column_renames,
             manifest.to_payload(),
             output_path,
@@ -174,8 +174,8 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
     )
 
 
-def _column_cde_map_for_session(manifest: ColumnMappingManifest, column_mappings: ColumnMappingSet) -> ColumnCdeMap:
-    return manifest.column_cde_map().with_overrides(column_mappings.to_override_map())
+def _column_cde_map_for_session(manifest: ColumnMappingManifest, column_overrides: ColumnCdeOverrides) -> ColumnCdeMap:
+    return manifest.column_cde_map().with_overrides(column_overrides)
 
 
 def _store_column_mappings_in_cache(cache: SessionCache, column_cde_map: ColumnCdeMap) -> None:
@@ -188,7 +188,7 @@ async def _run_harmonization(
     cache: SessionCache,
     file_path: Path,
     target_selection: DataModelSelection,
-    column_mappings: ColumnMappingSet,
+    column_overrides: ColumnCdeOverrides,
     column_renames: ColumnRenameSet,
     manifest: ManifestPayload | None,
     output_path: Path,
@@ -200,7 +200,7 @@ async def _run_harmonization(
         harmonizer.run,
         file_path=file_path,
         target_schema=target_selection.key,
-        column_mappings=column_mappings,
+        column_overrides=column_overrides,
         column_renames=column_renames,
         cache=cache,
         target_version=target_selection.target_version,

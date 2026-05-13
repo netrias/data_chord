@@ -211,7 +211,7 @@ async def app_client(
     import src.stage_3_harmonize.router as stage3_router
     import src.stage_4_review_results.router as stage4_router
     import src.stage_5_review_summary.router as stage5_router
-    from src.domain.storage import FileStore, LocalStorageBackend
+    from src.domain.storage import FileStore
 
     original_storage = deps_module._storage
     original_router_storage = router_module._storage
@@ -222,7 +222,7 @@ async def app_client(
     deps_module.get_upload_storage = lambda: temp_storage
 
     original_get_file_store = deps_module.get_file_store
-    test_store = FileStore(LocalStorageBackend(temp_storage._base_dir / "manifests"))
+    test_store = FileStore(temp_storage._base_dir / "manifests")
     deps_module.get_file_store = lambda: test_store
 
     original_stage3_storage = stage3_router._storage

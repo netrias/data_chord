@@ -1,38 +1,53 @@
-"""FileStore facade with typed artifact accessors."""
+"""Local JSON store for durable app-authored artifacts."""
 
 from __future__ import annotations
+
+import json
+import logging
+from pathlib import Path
 
 from src.domain.pv_manifest import PVManifest
 from src.domain.review_overrides import ReviewOverrides
 
-from .backends import StorageBackend
-from .file_types import FileType
-from .serializers import get_serializer
+from .file_types import FileType, build_file_name
+
+logger = logging.getLogger(__name__)
 
 
 class FileStore:
-    """Unified interface for typed file storage.
+    """Persist small JSON artifacts by file id and semantic artifact type.
 
-    Callers only need to specify file_id and FileType.
-    Serialization is handled automatically based on file type.
+    The app currently needs one local store for column mapping artifacts, review
+    overrides, and PV manifests. Keeping JSON persistence here avoids extra
+    backend and serializer objects that were not used anywhere else.
     """
 
-    def __init__(self, backend: StorageBackend) -> None:
-        self._backend = backend
+    def __init__(self, base_dir: Path) -> None:
+        self._base_dir = base_dir
+        self._base_dir.mkdir(parents=True, exist_ok=True)
+
+    def _path_for(self, file_id: str, file_type: FileType) -> Path:
+        name = build_file_name(file_id, file_type)
+        path = (self._base_dir / name).resolve()
+        if not path.is_relative_to(self._base_dir.resolve()):
+            raise ValueError(f"Path traversal attempt detected: {file_id}")
+        return path
 
     def save(self, file_id: str, file_type: FileType, data: object) -> None:
-        """Save data with automatic serialization."""
-        serializer = get_serializer(file_type)
-        raw = serializer.serialize(data)
-        self._backend.write(file_id, file_type, raw)
+        """Save a JSON-serializable artifact."""
+        path = self._path_for(file_id, file_type)
+        path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+        logger.info(
+            "Wrote file store artifact",
+            extra={"file_id": file_id, "file_type": file_type.name, "path": str(path)},
+        )
 
     def load(self, file_id: str, file_type: FileType) -> object | None:
-        """Load data with automatic deserialization."""
-        raw = self._backend.read(file_id, file_type)
-        if raw is None:
+        """Load a JSON artifact. Returns None when the artifact does not exist."""
+        path = self._path_for(file_id, file_type)
+        if not path.exists():
             return None
-        serializer = get_serializer(file_type)
-        return serializer.deserialize(raw)
+        return json.loads(path.read_text(encoding="utf-8"))
 
     def save_review_overrides(self, overrides: ReviewOverrides) -> None:
         self.save(overrides.file_id, FileType.REVIEW_OVERRIDES, overrides.to_store())
@@ -48,11 +63,16 @@ class FileStore:
 
     def delete(self, file_id: str, file_type: FileType) -> None:
         """Delete a file."""
-        self._backend.delete(file_id, file_type)
+        path = self._path_for(file_id, file_type)
+        path.unlink(missing_ok=True)
+        logger.info(
+            "Deleted file store artifact",
+            extra={"file_id": file_id, "file_type": file_type.name, "path": str(path)},
+        )
 
     def exists(self, file_id: str, file_type: FileType) -> bool:
         """Check if a file exists."""
-        return self._backend.exists(file_id, file_type)
+        return self._path_for(file_id, file_type).exists()
 
 
 __all__ = ["FileStore"]

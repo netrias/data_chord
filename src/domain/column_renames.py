@@ -11,6 +11,8 @@ from src.domain.columns import ColumnKey, column_key_from_string
 
 @dataclass(frozen=True)
 class ColumnRenameSet:
+    """Immutable user-selected output names keyed by source column identity."""
+
     renames: Mapping[ColumnKey, str]
 
     def __post_init__(self) -> None:

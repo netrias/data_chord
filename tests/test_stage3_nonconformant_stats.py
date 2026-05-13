@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import cast
 
-from src.domain import ColumnMappingSet
+from src.domain import ColumnCdeOverrides
 from src.domain.data_model_cache import SessionCache
 from src.domain.manifest import ColumnMappingManifest, ManifestPayload, ManifestRow, ManifestSummary
 from src.stage_3_harmonize.router import (
@@ -200,7 +200,7 @@ class TestManualOverridePropagation:
         # When
         column_cde_map = _column_cde_map_for_session(
             ColumnMappingManifest.from_payload(manifest),
-            ColumnMappingSet.from_dict(manual_overrides),
+            ColumnCdeOverrides.from_strings(manual_overrides),
         )
         _store_column_mappings_in_cache(cache, column_cde_map)
 
@@ -227,7 +227,7 @@ class TestManualOverridePropagation:
         # When
         column_cde_map = _column_cde_map_for_session(
             ColumnMappingManifest.from_payload(manifest),
-            ColumnMappingSet.from_dict(manual_overrides),
+            ColumnCdeOverrides.from_strings(manual_overrides),
         )
         _store_column_mappings_in_cache(cache, column_cde_map)
 
@@ -255,7 +255,7 @@ class TestManualOverridePropagation:
         # When
         column_cde_map = _column_cde_map_for_session(
             ColumnMappingManifest.from_payload(manifest),
-            ColumnMappingSet.from_dict(manual_overrides),
+            ColumnCdeOverrides.from_strings(manual_overrides),
         )
         _store_column_mappings_in_cache(cache, column_cde_map)
 

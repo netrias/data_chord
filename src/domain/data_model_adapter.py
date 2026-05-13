@@ -29,6 +29,8 @@ _PREFERRED_MODEL_KEY = "gc"
 
 @dataclass(frozen=True)
 class _DataModelStoreConfig:
+    """HTTP settings needed for direct Data Model Store requests."""
+
     base_url: str
     api_key: str
     timeout: float
@@ -148,7 +150,7 @@ def fetch_cdes(data_model_key: str, version: str) -> list[CDEInfo]:
             cde_key=c.cde_key,
             description=c.description,
             version_label=version,
-            cde_type=classify_cde(c.cde_key, has_pvs=None, sample_is_numeric=False),
+            cde_type=classify_cde(c.cde_key, has_pvs=None),
         )
         for c in sdk_cdes
     ]
@@ -171,7 +173,7 @@ def refine_cde_types_from_pvs(
             refined.append(cde)
             continue
         has_pvs = bool(pv_sets[cde.cde_key])
-        new_type = classify_cde(cde.cde_key, has_pvs=has_pvs, sample_is_numeric=False)
+        new_type = classify_cde(cde.cde_key, has_pvs=has_pvs)
         if new_type == cde.cde_type:
             refined.append(cde)
         else:

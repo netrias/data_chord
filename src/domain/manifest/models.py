@@ -30,6 +30,8 @@ MEDIUM_CONFIDENCE_THRESHOLD: float = 0.45
 
 
 class AlternativeEntry(TypedDict):
+    """SDK candidate shape nested under one column mapping."""
+
     target: str
     confidence: float
     cde_id: NotRequired[int]
@@ -37,6 +39,8 @@ class AlternativeEntry(TypedDict):
 
 
 class ColumnMappingEntry(TypedDict):
+    """SDK column-mapping shape stored in JSON before harmonization."""
+
     cde_key: str
     cde_id: int
     column_name: NotRequired[str]
@@ -46,11 +50,15 @@ class ColumnMappingEntry(TypedDict):
 
 
 class ManifestPayload(TypedDict):
+    """Top-level SDK mapping manifest keyed by stable source column keys."""
+
     column_mappings: dict[str, ColumnMappingEntry]
 
 
 @dataclass(frozen=True)
 class ManualOverride:
+    """Audit entry for a human replacement of one harmonized value."""
+
     user_id: str | None
     timestamp: str
     value: str
@@ -58,6 +66,8 @@ class ManualOverride:
 
 @dataclass(frozen=True)
 class ManifestRow:
+    """One unique source term from the harmonization parquet manifest."""
+
     job_id: str
     column_id: int
     column_name: str
@@ -77,6 +87,8 @@ class ManifestRow:
 
 @dataclass(frozen=True)
 class ManifestSummary:
+    """Aggregate counts plus parsed rows for review and summary screens."""
+
     total_terms: int
     changed_terms: int
     high_confidence_count: int

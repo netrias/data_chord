@@ -1,12 +1,7 @@
 """Type classification for CDEs.
 
-Axis of change: how a CDE's type is decided when the data model store does not
-yet expose type metadata. Owns ``classify_cde`` — the single function that
-assigns ``CdeType`` to a CDE. The data model adapter calls it twice: once when
-wrapping SDK rows (PVs unknown) and once after PV sets resolve.
-
-Invariant: the precedence order — override > known PV presence > heuristic —
-is encoded here and nowhere else. Other layers read ``CDEInfo.cde_type`` and
+Axis of change: how a CDE's type is decided while the data model store does not
+yet expose explicit type metadata. Other layers read ``CDEInfo.cde_type`` and
 trust it.
 """
 
@@ -22,13 +17,12 @@ NUMERIC_CDE_KEYS: frozenset[str] = frozenset()
 def classify_cde(
     cde_key: str,
     has_pvs: bool | None,
-    sample_is_numeric: bool,
 ) -> CdeType:
-    """Resolve a CDE's type using override > PV presence > heuristic.
+    """Resolve a CDE's type using override > known PV presence > PV default.
 
     ``has_pvs=None`` means PVs have not been fetched yet — used when the
-    adapter wraps SDK rows initially. The adapter calls back with a concrete
-    bool after PV lookup resolves.
+    adapter wraps SDK rows initially. In that state we keep the conservative PV
+    default until PV lookup confirms the CDE is passthrough.
     """
     if cde_key in NUMERIC_CDE_KEYS:
         return CdeType.NUMERIC
@@ -36,7 +30,4 @@ def classify_cde(
         return CdeType.PV
     if has_pvs is False:
         return CdeType.PASSTHROUGH
-    # PVs unknown: trust the column-data heuristic before defaulting to PV.
-    if sample_is_numeric:
-        return CdeType.NUMERIC
     return CdeType.PV

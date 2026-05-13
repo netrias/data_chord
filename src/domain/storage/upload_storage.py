@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import NotRequired, TypedDict, cast
+from typing import Final, NotRequired, TypedDict, cast
 from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile
@@ -29,8 +29,23 @@ from src.domain.manifest import ManifestPayload, normalize_manifest
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_UPLOAD_FILENAME: Final = "dataset.csv"
+DEFAULT_UPLOAD_CONTENT_TYPE: Final = "text/csv"
+
+_META_FILE_ID: Final = "file_id"
+_META_ORIGINAL_NAME: Final = "original_name"
+_META_CONTENT_TYPE: Final = "content_type"
+_META_SIZE_BYTES: Final = "size_bytes"
+_META_SAVED_NAME: Final = "saved_name"
+_META_UPLOADED_AT: Final = "uploaded_at"
+_META_TABULAR_FORMAT: Final = "tabular_format"
+_META_SHEET_NAMES: Final = "sheet_names"
+_META_SELECTED_SHEET: Final = "selected_sheet"
+
 
 class StoredMeta(TypedDict):
+    """JSON metadata persisted next to the uploaded dataset."""
+
     file_id: str
     original_name: str
     content_type: str
@@ -44,12 +59,16 @@ class StoredMeta(TypedDict):
 
 @dataclass(frozen=True)
 class UploadConstraints:
+    """Upload limits enforced while streaming incoming files to disk."""
+
     max_bytes: int
     chunk_size: int = 1024 * 1024
 
 
 @dataclass(frozen=True)
 class UploadedFileMeta:
+    """Canonical metadata for one uploaded dataset in managed storage."""
+
     file_id: str
     original_name: str
     content_type: str
@@ -73,14 +92,20 @@ class UploadedFileMeta:
 
 
 class UploadError(RuntimeError):
+    """Base error for validation or storage failures while accepting uploads."""
+
     pass
 
 
 class UnsupportedUploadError(UploadError):
+    """Raised when the uploaded file type cannot be parsed as supported tabular data."""
+
     pass
 
 
 class UploadTooLargeError(UploadError):
+    """Raised as soon as streamed bytes exceed the configured upload limit."""
+
     pass
 
 
@@ -133,9 +158,9 @@ class UploadStorage:
             raise
 
     def _extract_upload_info(self, upload: UploadFile) -> tuple[str, str, str]:
-        filename = upload.filename or "dataset.csv"
+        filename = upload.filename or DEFAULT_UPLOAD_FILENAME
         suffix = Path(filename).suffix.lower() or ".csv"
-        content_type = (upload.content_type or "text/csv").lower()
+        content_type = (upload.content_type or DEFAULT_UPLOAD_CONTENT_TYPE).lower()
         return filename, suffix, content_type
 
     async def _write_upload_chunks(self, upload: UploadFile, destination: Path) -> int:
@@ -188,27 +213,27 @@ class UploadStorage:
         payload = cast(StoredMeta, json.loads(meta_path.read_text()))
         return UploadedFileMeta(
             file_id=file_id,
-            original_name=payload["original_name"],
-            content_type=payload["content_type"],
-            size_bytes=payload["size_bytes"],
-            saved_path=self._data_dir / payload["saved_name"],
-            uploaded_at=datetime.fromisoformat(payload["uploaded_at"]),
+            original_name=payload[_META_ORIGINAL_NAME],
+            content_type=payload[_META_CONTENT_TYPE],
+            size_bytes=payload[_META_SIZE_BYTES],
+            saved_path=self._data_dir / payload[_META_SAVED_NAME],
+            uploaded_at=datetime.fromisoformat(payload[_META_UPLOADED_AT]),
             tabular_format=_tabular_format_from_metadata(payload),
-            sheet_names=payload.get("sheet_names", []),
-            selected_sheet=payload.get("selected_sheet"),
+            sheet_names=payload.get(_META_SHEET_NAMES, []),
+            selected_sheet=payload.get(_META_SELECTED_SHEET),
         )
 
     def _write_metadata(self, meta: UploadedFileMeta) -> None:
         meta_payload = {
-            "file_id": meta.file_id,
-            "original_name": meta.original_name,
-            "content_type": meta.content_type,
-            "size_bytes": meta.size_bytes,
-            "saved_name": meta.saved_path.name,
-            "uploaded_at": meta.uploaded_at.isoformat(),
-            "tabular_format": meta.tabular_format.value,
-            "sheet_names": meta.sheet_names,
-            "selected_sheet": meta.selected_sheet,
+            _META_FILE_ID: meta.file_id,
+            _META_ORIGINAL_NAME: meta.original_name,
+            _META_CONTENT_TYPE: meta.content_type,
+            _META_SIZE_BYTES: meta.size_bytes,
+            _META_SAVED_NAME: meta.saved_path.name,
+            _META_UPLOADED_AT: meta.uploaded_at.isoformat(),
+            _META_TABULAR_FORMAT: meta.tabular_format.value,
+            _META_SHEET_NAMES: meta.sheet_names,
+            _META_SELECTED_SHEET: meta.selected_sheet,
         }
         meta_path = self._meta_dir / f"{meta.file_id}.json"
         meta_path.write_text(json.dumps(meta_payload, indent=2))
@@ -217,23 +242,10 @@ class UploadStorage:
         meta = self.load(file_id)
         if meta is None:
             raise FileNotFoundError(file_id)
-        if not meta.sheet_names:
+        selected_sheet = _resolve_selected_sheet(meta, sheet_name)
+        if selected_sheet is None:
             return meta
-        selected_sheet = sheet_name or meta.sheet_names[0]
-        if selected_sheet not in meta.sheet_names:
-            available = ", ".join(meta.sheet_names)
-            raise ValueError(f"Unknown worksheet: {selected_sheet}. Available worksheets: {available}")
-        updated = UploadedFileMeta(
-            file_id=meta.file_id,
-            original_name=meta.original_name,
-            content_type=meta.content_type,
-            size_bytes=meta.size_bytes,
-            saved_path=meta.saved_path,
-            uploaded_at=meta.uploaded_at,
-            tabular_format=meta.tabular_format,
-            sheet_names=meta.sheet_names,
-            selected_sheet=selected_sheet,
-        )
+        updated = _with_selected_sheet(meta, selected_sheet)
         self._write_metadata(updated)
         return updated
 
@@ -296,6 +308,11 @@ def describe_constraints(constraints: UploadConstraints) -> dict[str, str | int]
 
 
 def _sheet_names_for(path: Path) -> list[str]:
+    """Return workbook sheet names, or [] for non-workbooks.
+
+    Raises ``UnsupportedUploadError`` when a workbook-like file exists but its
+    sheets cannot be read.
+    """
     try:
         return [sheet.name for sheet in list_workbook_sheets(path)]
     except ValueError:
@@ -305,10 +322,35 @@ def _sheet_names_for(path: Path) -> list[str]:
 
 
 def _tabular_format_from_metadata(payload: StoredMeta) -> TabularFormat:
-    tabular_format = payload.get("tabular_format")
+    tabular_format = payload.get(_META_TABULAR_FORMAT)
     if tabular_format is not None:
         return TabularFormat(tabular_format)
-    return get_tabular_format(Path(payload["saved_name"]), payload["content_type"])
+    return get_tabular_format(Path(payload[_META_SAVED_NAME]), payload[_META_CONTENT_TYPE])
+
+
+def _resolve_selected_sheet(meta: UploadedFileMeta, requested_sheet: str | None) -> str | None:
+    """Return the worksheet to persist, or None when the upload has no sheets."""
+    if not meta.sheet_names:
+        return None
+    selected_sheet = requested_sheet or meta.sheet_names[0]
+    if selected_sheet not in meta.sheet_names:
+        available = ", ".join(meta.sheet_names)
+        raise ValueError(f"Unknown worksheet: {selected_sheet}. Available worksheets: {available}")
+    return selected_sheet
+
+
+def _with_selected_sheet(meta: UploadedFileMeta, selected_sheet: str) -> UploadedFileMeta:
+    return UploadedFileMeta(
+        file_id=meta.file_id,
+        original_name=meta.original_name,
+        content_type=meta.content_type,
+        size_bytes=meta.size_bytes,
+        saved_path=meta.saved_path,
+        uploaded_at=meta.uploaded_at,
+        tabular_format=meta.tabular_format,
+        sheet_names=meta.sheet_names,
+        selected_sheet=selected_sheet,
+    )
 
 
 def resolve_harmonized_path(original_path: Path, file_id: str) -> Path | None:
