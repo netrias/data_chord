@@ -23,6 +23,12 @@ from .schemas import ColumnPreview, SheetPreview
 
 DEFAULT_SHEET_PREVIEW_ROWS = 5
 DEFAULT_SHEET_PREVIEW_COLUMNS = 6
+_HEADER_ROW_COUNT = 1
+_HEADER_ROW_INDEX = 0
+_FIRST_DATA_ROW_INDEX = _HEADER_ROW_INDEX + _HEADER_ROW_COUNT
+_TRUNCATION_PROBE_ROW_COUNT = 1
+_OPENPYXL_EMPTY_SHEET_SIZE = 1
+_OPENPYXL_FIRST_CELL = "A1"
 
 
 def analyze_columns(
@@ -76,16 +82,16 @@ def _read_single_sheet_preview(worksheet: Worksheet, *, max_rows: int, max_cols:
         return SheetPreview()
 
     visible_columns = min(worksheet.max_column, max_cols)
-    row_limit = max_rows + 2
-    col_limit = max_cols + 1
-    rows = list(worksheet.iter_rows(max_row=row_limit, max_col=col_limit, values_only=True))
-    header_values = list(rows[0] if rows else ())
+    visible_row_count = _HEADER_ROW_COUNT + max_rows
+    row_limit = visible_row_count + _TRUNCATION_PROBE_ROW_COUNT
+    rows = list(worksheet.iter_rows(max_row=row_limit, max_col=visible_columns, values_only=True))
+    header_values = list(rows[_HEADER_ROW_INDEX] if rows else ())
     headers = [_cell_to_string(value) for value in header_values[:visible_columns]]
     preview_rows = [
         _shape_preview_row(row, width=len(headers))
-        for row in rows[1 : max_rows + 1]
+        for row in rows[_FIRST_DATA_ROW_INDEX:visible_row_count]
     ]
-    truncated_rows = len(rows) > max_rows + 1 or worksheet.max_row > max_rows + 1
+    truncated_rows = worksheet.max_row > visible_row_count
     truncated_columns = worksheet.max_column > max_cols
     return SheetPreview(
         headers=headers,
@@ -96,7 +102,11 @@ def _read_single_sheet_preview(worksheet: Worksheet, *, max_rows: int, max_cols:
 
 
 def _worksheet_is_empty(worksheet: Worksheet) -> bool:
-    return worksheet.max_row == 1 and worksheet.max_column == 1 and worksheet["A1"].value is None
+    return (
+        worksheet.max_row == _OPENPYXL_EMPTY_SHEET_SIZE
+        and worksheet.max_column == _OPENPYXL_EMPTY_SHEET_SIZE
+        and worksheet[_OPENPYXL_FIRST_CELL].value is None
+    )
 
 
 def _shape_preview_row(row: tuple[object, ...], *, width: int) -> list[str]:
