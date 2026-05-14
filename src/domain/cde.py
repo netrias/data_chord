@@ -13,16 +13,15 @@ class CdeType(StrEnum):
 
     The Stage 2 takeover branches on this in three places: the picker badge,
     the conform pill wording, and the right-pane content (PV list vs. type
-    explanatory card). Owner of assignment: ``cde_type_overrides.classify_cde``.
+    explanatory card). Owner of assignment: ``cde_type_classification.classify_cde``.
     """
 
     PV = "pv"                  # value must equal one of the CDE's permissible values
-    NUMERIC = "numeric"        # value must parse as a number; no PV list
     PASSTHROUGH = "passthrough"  # value is stored as-is; no validation
 
 
 def is_rename_only(cde_type: CdeType) -> bool:
-    """Numeric and pass-through CDEs only rename columns; they do not map values."""
+    """Pass-through CDEs only rename columns; they do not map values."""
     return cde_type != CdeType.PV
 
 

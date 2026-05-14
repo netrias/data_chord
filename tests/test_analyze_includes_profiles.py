@@ -154,7 +154,7 @@ def test_build_column_summaries_reports_ai_rec_overlap_ratios() -> None:
     cdes = [
         CDEInfo(cde_id=1, cde_key="dx", description=None, version_label="1", cde_type=CdeType.PV),
         CDEInfo(cde_id=2, cde_key="notes_cde", description=None, version_label="1", cde_type=CdeType.PASSTHROUGH),
-        CDEInfo(cde_id=3, cde_key="age_cde", description=None, version_label="1", cde_type=CdeType.NUMERIC),
+        CDEInfo(cde_id=3, cde_key="age_cde", description=None, version_label="1", cde_type=CdeType.PASSTHROUGH),
         CDEInfo(cde_id=4, cde_key="empty_dx", description=None, version_label="1", cde_type=CdeType.PV),
     ]
     pv_sets = {

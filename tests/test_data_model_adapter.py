@@ -334,35 +334,6 @@ def test_refine_cde_types_downgrades_to_passthrough_for_empty_pvs() -> None:
     assert by_key["free_notes"].cde_type == CdeType.PASSTHROUGH
 
 
-def test_refine_cde_types_preserves_numeric_overrides(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """
-    Given: a CDE flagged as NUMERIC by override; PV fetch returns empty for it
-    When: refine_cde_types_from_pvs is called
-    Then: NUMERIC is preserved (override beats has_pvs=False)
-    """
-    # Given
-    monkeypatch.setattr(
-        "src.domain.cde_type_overrides.NUMERIC_CDE_KEYS",
-        frozenset({"patient_age_yrs"}),
-    )
-    cdes = [
-        CDEInfo(
-            cde_id=1, cde_key="patient_age_yrs",
-            description=None, version_label="1",
-            cde_type=CdeType.NUMERIC,
-        ),
-    ]
-    pv_sets = {"patient_age_yrs": frozenset()}
-
-    # When
-    refined = refine_cde_types_from_pvs(cdes, pv_sets)
-
-    # Then
-    assert refined[0].cde_type == CdeType.NUMERIC
-
-
 def test_refine_cde_types_skips_unfetched_cdes() -> None:
     """
     Given: two CDEs, but PVs were fetched for only one
@@ -406,34 +377,6 @@ def test_refine_does_not_downgrade_when_fetch_failure_omits_key() -> None:
 
     # Then: type is PRESERVED at PV; no PASSTHROUGH downgrade
     assert refined[0].cde_type == CdeType.PV
-
-
-def test_fetch_cdes_applies_numeric_override_at_initial_fetch(
-    mock_netrias: MagicMock,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """
-    Given: a CDE key that the team has flagged as numeric in the override list
-    When: fetch_cdes wraps it into CDEInfo (PVs not yet fetched)
-    Then: cde_type is NUMERIC immediately — override beats the PV default
-    """
-    # Given: override entry for "patient_age_yrs"
-    monkeypatch.setattr(
-        "src.domain.cde_type_overrides.NUMERIC_CDE_KEYS",
-        frozenset({"patient_age_yrs"}),
-    )
-    mock_netrias.list_cdes.return_value = [
-        SimpleNamespace(cde_id=1, cde_key="patient_age_yrs", description="age"),
-        SimpleNamespace(cde_id=2, cde_key="diagnosis", description="dx"),
-    ]
-
-    # When
-    fetched = fetch_cdes("gc", "1")
-    by_key = {c.cde_key: c for c in fetched}
-
-    # Then
-    assert by_key["patient_age_yrs"].cde_type == CdeType.NUMERIC
-    assert by_key["diagnosis"].cde_type == CdeType.PV
 
 
 # ---------------------------------------------------------------------------

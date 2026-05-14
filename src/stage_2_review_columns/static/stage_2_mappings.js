@@ -887,16 +887,10 @@ const _conformSummaryHtml = (col, cde, detail, profile) => {
   const cdeType = detail?.cde_types?.[cde] ?? cdeByKey.get(cde)?.type ?? 'pv';
   const matchN = detail?.match_counts?.[cde] ?? 0;
 
-  if (cdeType === 'passthrough') {
+  if (_isRenameOnly(cdeType)) {
     return `<span class="conform-summary conform-summary--neutral">${PASSTHROUGH_GLYPH} Pass-through — values unchanged</span>`;
   }
   const pct = totalDistinct > 0 ? _formatRatio(matchN / totalDistinct) : '0%';
-  if (cdeType === 'numeric') {
-    if (matchN > 0) {
-      return `<span class="conform-summary">${pct} of values numeric</span>`;
-    }
-    return `<span class="conform-summary conform-summary--warning">0% of values numeric</span>`;
-  }
   if (matchN > 0) {
     return `<span class="conform-summary">${pct} of values fit</span>`;
   }
@@ -934,7 +928,7 @@ const _dataPaneHtml = (col, profile, pvSet) => {
 const _sampleHtml = (s, pvSet) => {
   // Strict equality against the selected CDE's PV set — case- and whitespace-
   // sensitive per the "all character differences are semantically significant"
-  // domain rule. pvSet is null for non-PV CDEs (numeric / pass-through).
+  // domain rule. pvSet is null for pass-through CDEs.
   const isMatch = pvSet ? pvSet.has(s.value) : false;
   const liClass = isMatch ? 'match' : '';
   const okGlyph = isMatch ? '✓' : '';
@@ -956,11 +950,9 @@ const _targetPaneHtml = (col, cde, detail, profile) => {
   } else if (!cde) {
     pickerInner = `<span class="cde-picker-name cde-picker-name--placeholder">Select a target standard…</span><span class="cde-picker-caret">▾</span>`;
   } else {
-    const typeBadge = cdeType === 'numeric'
-      ? `<span class="type-badge type-badge--numeric">Numeric</span>`
-      : cdeType === 'passthrough'
-        ? `<span class="type-badge type-badge--passthrough">Pass-through</span>`
-        : '';
+    const typeBadge = _isRenameOnly(cdeType)
+      ? `<span class="type-badge type-badge--passthrough">Pass-through</span>`
+      : '';
     pickerInner = `
       <span class="cde-picker-name" title="${_escAttr(cde)}">${_escHtml(cde)}</span>
       ${typeBadge}
@@ -999,15 +991,6 @@ const _targetPaneHtml = (col, cde, detail, profile) => {
   }
 
   const infoHtml = descHtml;
-  if (cdeType === 'numeric') {
-    return head + infoHtml + `
-      <div class="type-card">
-        <div class="type-icon">123</div>
-        <div class="type-name">Numeric field</div>
-        <div class="type-desc">Values are validated as numbers, not against a fixed list of permissible values.</div>
-      </div>
-    `;
-  }
   return head + infoHtml + `
     <div class="type-card passthrough">
       <div class="type-icon">${PASSTHROUGH_GLYPH}</div>
@@ -1142,11 +1125,9 @@ const _optHtml = (c, kind, totalDistinct) => {
     }
   }
   const aiBadge = kind === 'ai' ? `<span class="ai-badge">✦ AI rec</span>` : '';
-  const typeBadge = c.type === 'numeric'
-    ? `<span class="type-badge type-badge--numeric">Numeric</span>`
-    : c.type === 'passthrough'
-      ? `<span class="type-badge type-badge--passthrough">Pass-through</span>`
-      : '';
+  const typeBadge = _isRenameOnly(c.type)
+    ? `<span class="type-badge type-badge--passthrough">Pass-through</span>`
+    : '';
   const desc = c.description ? `<div class="dd-desc">${_escHtml(c.description)}</div>` : '';
   return `
     <div class="dd-opt ${kind}" data-value="${_escAttr(c.key)}">

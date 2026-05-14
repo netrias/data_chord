@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.domain.cde import CDEInfo, CdeType
+from src.domain.cde import CDEInfo
 from src.domain.column_profile import ColumnProfile, DistinctValue
 from src.domain.data_model_cache import (
     clear_all_session_caches,
@@ -154,70 +154,6 @@ async def test_compute_column_detail_downgrades_to_passthrough_on_empty_pvs(
     # Then: PASSTHROUGH counts everything
     assert detail.cde_types == {"notes": "passthrough"}
     assert detail.match_counts == {"notes": 2}
-    assert detail.overlap_by_cde == {}
-    assert detail.selected_pvs is None
-
-
-# ---------------------------------------------------------------------------
-# Test: numeric override is preserved and match_counts comes from numeric branch
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_compute_column_detail_handles_numeric_override(
-    mock_netrias: MagicMock,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """
-    Given: a CDE flagged numeric in the override list, and a column whose
-           values are numeric strings
-    When: compute_column_detail is called with the numeric CDE selected
-    Then: cde_types reports numeric, match counts equal the parseable count,
-          and selected_pvs is None (numeric has no PV list)
-    """
-    # Given
-    monkeypatch.setattr(
-        "src.domain.cde_type_overrides.NUMERIC_CDE_KEYS",
-        frozenset({"age"}),
-    )
-    file_id = "abcdef0123456789"
-    cache = get_session_cache(file_id)
-    cache.set_column_profiles({
-        "age_col": ColumnProfile(
-            column_key="age_col",
-            total_rows=4,
-            distinct_values=(
-                DistinctValue("57", 2),
-                DistinctValue("62", 1),
-                DistinctValue("not a number", 1),
-            ),
-            null_count=0,
-        )
-    })
-    cache.set_cdes(
-        [
-            CDEInfo(
-                cde_id=3, cde_key="age",
-                description=None, version_label="1",
-                cde_type=CdeType.NUMERIC,
-            ),
-        ],
-        data_model_key="gc",
-        version_label="1",
-    )
-    # PVs irrelevant for numeric — return empty so the refinement does not
-    # accidentally downgrade to PASSTHROUGH.
-    monkeypatch.setattr(
-        "src.stage_2_review_columns.services.fetch_all_pvs_async",
-        AsyncMock(return_value={"age": frozenset()}),
-    )
-
-    # When
-    detail = await compute_column_detail(file_id, "age_col", selected_cde_key="age")
-
-    # Then
-    assert detail.cde_types == {"age": "numeric"}
-    assert detail.match_counts == {"age": 2}  # "57" and "62" parse; "not a number" doesn't
     assert detail.overlap_by_cde == {}
     assert detail.selected_pvs is None
 

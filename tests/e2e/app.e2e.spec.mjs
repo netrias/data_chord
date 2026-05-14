@@ -212,7 +212,7 @@ test('Stage 2 splits picker sections by mapping kind', async ({ page }) => {
     _stage2Cde('empty_dx', 'pv'),
     _stage2Cde('low_dx', 'pv'),
     _stage2Cde('notes_cde', 'passthrough'),
-    _stage2Cde('age_cde', 'numeric'),
+    _stage2Cde('age_cde', 'passthrough'),
   ];
 
   await page.addInitScript((stagePayload) => {
@@ -251,7 +251,7 @@ test('Stage 2 splits picker sections by mapping kind', async ({ page }) => {
         },
         match_counts: { dx: 4, empty_dx: 0, low_dx: 0 },
         overlap_by_cde: { dx: 0.8, empty_dx: 0.0, low_dx: 0.0 },
-        cde_types: { dx: 'pv', empty_dx: 'pv', low_dx: 'pv', notes_cde: 'passthrough', age_cde: 'numeric' },
+        cde_types: { dx: 'pv', empty_dx: 'pv', low_dx: 'pv', notes_cde: 'passthrough', age_cde: 'passthrough' },
         selected_pvs: ['Breast', 'Glioma', 'Lung', 'Other'],
       }),
     });
@@ -284,7 +284,7 @@ test('Stage 2 splits picker sections by mapping kind', async ({ page }) => {
 test('Stage 2 settings sidebar filters rows by mapping outcome', async ({ page }) => {
   /*
    * Given: Stage 2 with four columns covering each outcome — one PV-mapped,
-   *        one numeric-mapped, one pass-through-mapped, one unmapped.
+   *        two pass-through-mapped, and one unmapped.
    * When:  the user changes visibility from the Settings sidebar.
    * Then:  the list narrows by effective mapping outcome, and overrides update
    *        the outcome counts.
@@ -318,7 +318,7 @@ test('Stage 2 settings sidebar filters rows by mapping outcome', async ({ page }
   };
   const cdeCatalog = [
     _stage2Cde('dx_cde', 'pv'),
-    _stage2Cde('age_cde', 'numeric'),
+    _stage2Cde('age_cde', 'passthrough'),
     _stage2Cde('notes_cde', 'passthrough'),
   ];
 
@@ -352,7 +352,7 @@ test('Stage 2 settings sidebar filters rows by mapping outcome', async ({ page }
         },
         match_counts: { dx_cde: 0, age_cde: 0 },
         overlap_by_cde: { dx_cde: 0.0, age_cde: 0.0 },
-        cde_types: { dx_cde: 'pv', age_cde: 'numeric', notes_cde: 'passthrough' },
+        cde_types: { dx_cde: 'pv', age_cde: 'passthrough', notes_cde: 'passthrough' },
         selected_pvs: [],
       }),
     });

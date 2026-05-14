@@ -39,28 +39,6 @@ def test_pv_type_counts_set_intersection() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test: NUMERIC type counts values that parse as float
-# ---------------------------------------------------------------------------
-
-
-def test_numeric_type_counts_parseable_values() -> None:
-    """
-    Given: a NUMERIC-typed CDE and distinct values that mix numeric and non-numeric
-    When: compute_match_counts runs
-    Then: count == number of values that parse as float
-    """
-    # Given
-    cdes = [_make_cde("age", CdeType.NUMERIC)]
-    distinct = frozenset({"57", "62", "twenty", "29.5", "n/a"})
-
-    # When
-    counts = compute_match_counts(distinct, cdes, pv_sets={})
-
-    # Then: "57", "62", "29.5" are numeric
-    assert counts == {"age": 3}
-
-
-# ---------------------------------------------------------------------------
 # Test: PASSTHROUGH type counts every distinct value
 # ---------------------------------------------------------------------------
 
@@ -89,15 +67,12 @@ def test_passthrough_type_counts_all_distinct_values() -> None:
 
 def test_zero_count_entries_omitted_from_output() -> None:
     """
-    Given: a PV-typed CDE with no overlap and a NUMERIC-typed CDE with non-numeric data
+    Given: a PV-typed CDE with no overlap
     When: compute_match_counts runs
-    Then: neither key appears in the output (sparse map)
+    Then: the key is omitted from the output (sparse map)
     """
     # Given
-    cdes = [
-        _make_cde("diagnosis", CdeType.PV),
-        _make_cde("age", CdeType.NUMERIC),
-    ]
+    cdes = [_make_cde("diagnosis", CdeType.PV)]
     pv_sets = {"diagnosis": frozenset({"X", "Y"})}
     distinct = frozenset({"foo", "bar"})
 
@@ -156,7 +131,6 @@ def test_column_value_overlap_ratio_returns_none_when_undefined() -> None:
     undefined_inputs = [
         (frozenset(), CdeType.PV, frozenset({"1"})),
         (distinct, CdeType.PV, None),
-        (distinct, CdeType.NUMERIC, None),
         (distinct, CdeType.PASSTHROUGH, None),
     ]
     assert all(args[0] == frozenset() or args[1] != CdeType.PV or args[2] is None for args in undefined_inputs)
@@ -165,7 +139,7 @@ def test_column_value_overlap_ratio_returns_none_when_undefined() -> None:
     ratios = [column_value_overlap_ratio(*args) for args in undefined_inputs]
 
     # Then
-    assert ratios == [None, None, None, None]
+    assert ratios == [None, None, None]
 
 
 def test_compute_column_overlap_by_cde_includes_zero_pv_and_omits_undefined() -> None:
@@ -179,7 +153,6 @@ def test_compute_column_overlap_by_cde_includes_zero_pv_and_omits_undefined() ->
         _make_cde("dx", CdeType.PV),
         _make_cde("zero", CdeType.PV),
         _make_cde("missing", CdeType.PV),
-        _make_cde("age", CdeType.NUMERIC),
         _make_cde("notes", CdeType.PASSTHROUGH),
     ]
     distinct = frozenset({"Lung", "Unknown"})

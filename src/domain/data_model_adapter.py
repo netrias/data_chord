@@ -17,7 +17,7 @@ import httpx
 from netrias_client import DataModelStoreError, NetriasAPIUnavailable, NetriasClient
 
 from src.domain.cde import CDEInfo, DataModelSummary, DataModelVersionInfo
-from src.domain.cde_type_overrides import classify_cde
+from src.domain.cde_type_classification import classify_cde
 from src.domain.dependencies import get_netrias_client
 
 _logger = logging.getLogger(__name__)
@@ -137,8 +137,8 @@ def fetch_cdes(data_model_key: str, version: str) -> list[CDEInfo]:
     """Why: converts SDK CDE tuples to domain CDEInfo list.
 
     Initial cde_type is decided by classify_cde with has_pvs=None (PVs not
-    fetched yet); the override list takes effect now, while PV / PASSTHROUGH
-    refinement happens later via ``refine_cde_types_from_pvs``.
+    fetched yet); PV / PASSTHROUGH refinement happens later via
+    ``refine_cde_types_from_pvs``.
     """
     client = get_netrias_client()
     if client is None:
@@ -150,7 +150,7 @@ def fetch_cdes(data_model_key: str, version: str) -> list[CDEInfo]:
             cde_key=c.cde_key,
             description=c.description,
             version_label=version,
-            cde_type=classify_cde(c.cde_key, has_pvs=None),
+            cde_type=classify_cde(has_pvs=None),
         )
         for c in sdk_cdes
     ]
@@ -163,8 +163,7 @@ def refine_cde_types_from_pvs(
     """Re-classify CDEs once PVs are known.
 
     For every CDE whose PV set has been fetched, the type is now decidable:
-    non-empty PVs → ``PV``; empty → ``PASSTHROUGH``. Numeric overrides set
-    at the initial fetch are preserved (they take precedence in classify_cde).
+    non-empty PVs → ``PV``; empty → ``PASSTHROUGH``.
     Returns a new list — domain types are frozen.
     """
     refined: list[CDEInfo] = []
@@ -173,7 +172,7 @@ def refine_cde_types_from_pvs(
             refined.append(cde)
             continue
         has_pvs = bool(pv_sets[cde.cde_key])
-        new_type = classify_cde(cde.cde_key, has_pvs=has_pvs)
+        new_type = classify_cde(has_pvs=has_pvs)
         if new_type == cde.cde_type:
             refined.append(cde)
         else:

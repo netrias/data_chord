@@ -1352,11 +1352,6 @@ hr.fm-divider {
   flex-shrink: 0;
 }
 
-.type-badge--numeric {
-  background: var(--azure-100);
-  color: var(--azure-600);
-}
-
 .type-badge--passthrough {
   background: var(--gray-200);
   color: var(--gray-700);

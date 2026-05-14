@@ -8,38 +8,201 @@ human-in-the-loop workflow. See [app.md](app.md) for the product overview.
 
 ## Directory Structure
 
+This map shows the major directories, the module responsibility, and the main
+data shapes each area is allowed to own.
+
 ```
-src/
-├── domain/                    # Shared domain layer (no stage dependencies)
-│   ├── cde.py                 # CDEInfo, column mapping types
-│   ├── cde_mapping_persistence.py # Download audit artifact for column-to-CDE decisions
-│   ├── change.py              # ChangeType, RecommendationType enums
-│   ├── config.py              # Build-level config validation (NETRIAS_API_KEY)
-│   ├── session.py             # Browser sessionStorage key constants, UILabel
-│   ├── schemas.py             # Cross-stage API request/response models
-│   ├── harmonize.py           # HarmonizeService (Netrias client wrapper)
-│   ├── mapping_service.py     # MappingDiscoveryService (CDE suggestion)
-│   ├── data_model_adapter.py  # Adapter: SDK types → domain types (CDEs, PVs, data models)
-│   ├── data_model_selection.py # Canonical target data model/version selection
-│   ├── data_model_cache.py    # Session-scoped CDE/PV caching
-│   ├── pv_validation.py       # Permissible value conformance checking
-│   ├── pv_persistence.py      # PV manifest disk persistence
-│   ├── paths.py               # Centralized project path resolution
-│   ├── dependencies.py        # Lazy-initialized service singletons
-│   ├── manifest/              # Harmonization manifest I/O
-│   │   ├── models.py          # ManifestRow, ManualOverride
-│   │   ├── reader.py          # read_manifest_parquet
-│   │   └── writer.py          # add_manual_overrides_batch, apply_pv_adjustments_batch
-│   └── storage/               # Uploaded files and durable JSON sidecar artifacts
-│       ├── file_types.py      # FileType enum, file naming convention
-│       ├── file_store.py      # Local JSON artifact store
-│       └── upload_storage.py  # UploadStorage (file persistence + constraints)
-├── stage_1_upload/            # File upload and data model selection
-├── stage_2_review_columns/    # Column-to-CDE mapping review
-├── stage_3_harmonize/         # Harmonization execution via Netrias SDK
-├── stage_4_review_results/    # Batch review and manual overrides
-├── stage_5_review_summary/    # Summary metrics and export/download
-└── shared/                    # Shared static assets (CSS tokens, JS modules)
+data_chord/
+|
+|-- backend/app/
+|   `-- main.py
+|       Responsibility:
+|         FastAPI app factory, lifespan cleanup, CORS, root redirect,
+|         static mounts, and stage router registration.
+|       Shapes owned here:
+|         No domain shapes. This layer only wires application edges.
+|
+|-- src/
+|   |
+|   |-- domain/
+|   |   Responsibility:
+|   |     Shared application language, pure rules, Netrias SDK adapters,
+|   |     service singletons, and durable storage boundaries.
+|   |   Dependency rule:
+|   |     May not import stage modules.
+|   |   Shapes owned here:
+|   |     CDEInfo, CdeType, ModelSuggestion, DataModelSummary,
+|   |     DataModelSelection, ColumnKey, ColumnIdentity, ColumnCdeMap,
+|   |     ColumnCdeOverrides, ColumnRenameSet, HarmonizeRequest,
+|   |     HarmonizeResponse, SessionCache, PVManifest, ReviewOverrides,
+|   |     CellOverride, ChangeType, RecommendationType.
+|   |
+|   |   |-- manifest/
+|   |   |   Responsibility:
+|   |   |     Canonical harmonization manifest model plus parquet read/write.
+|   |   |   Shapes owned here:
+|   |   |     ManifestRow, ManualOverride, ManifestSummary,
+|   |   |     ConfidenceBucket, ManifestPayload, ColumnMappingManifest,
+|   |   |     ColumnMappingRecord, MappingAlternative.
+|   |   |   Storage shape:
+|   |   |     uploads/manifests/{file_id}_harmonization.parquet.
+|   |   |
+|   |   `-- storage/
+|   |       Responsibility:
+|   |         Managed file workspace for uploads, generated files, metadata,
+|   |         and small JSON sidecar artifacts.
+|   |       Shapes owned here:
+|   |         UploadStorage, UploadConstraints, UploadedFileMeta,
+|   |         UploadStream, StoredMeta, FileStore, FileType.
+|   |       Storage shapes:
+|   |         files/{file_id}.{csv|tsv|xlsx}
+|   |         harmonized/{file_id}.harmonized.{csv|tsv|xlsx}
+|   |         meta/{file_id}.json
+|   |         manifests/{file_id}_{mapping|overrides|pv_manifest}.json
+|   |
+|   |-- stage_1_upload/
+|   |   Responsibility:
+|   |     Accept a tabular upload, inspect worksheets and columns, select
+|   |     a target data model, and ask discovery for CDE candidates.
+|   |   Shapes owned here:
+|   |     UploadResponse, AnalyzeRequest, AnalyzeResponse, SheetPreview,
+|   |     ColumnPreview, ColumnOverlapRatio.
+|   |   Handoff:
+|   |     Persists UploadedFileMeta and passes AnalyzeResponse through
+|   |     browser sessionStorage to Stage 2.
+|   |
+|   |-- stage_2_review_columns/
+|   |   Responsibility:
+|   |     Let the user review AI column-to-CDE suggestions, inspect one
+|   |     selected column at a time, and choose CDE overrides or No Mapping.
+|   |   Shapes owned here:
+|   |     ColumnDetailResponse and CdeCatalogSnapshot.
+|   |   Handoff:
+|   |     Browser builds ColumnCdeOverrides, ColumnRenameSet, and an optional
+|   |     ColumnMappingManifest payload for Stage 3.
+|   |
+|   |-- stage_3_harmonize/
+|   |   Responsibility:
+|   |     Run Netrias harmonization, fetch PV sets, apply PV adjustments,
+|   |     save the manifest, save PV recovery data, and return metrics.
+|   |   Shapes owned here:
+|   |     PVAdjustmentRecord and ColumnStats.
+|   |   Handoff:
+|   |     Writes harmonized tabular output, parquet manifest, PV manifest,
+|   |     and CDE mapping audit JSON for Stages 4 and 5.
+|   |
+|   |-- stage_4_review_results/
+|   |   Responsibility:
+|   |     Present manifest rows for human review, expose PV-conformant
+|   |     choices, show source row context, and persist review progress.
+|   |   Shapes owned here:
+|   |     StageFourResultsRequest, StageFourResultsResponse,
+|   |     ColumnReviewData, Transformation, SuggestionInfo,
+|   |     ReviewStateSchema, ReviewModeStateSchema, SaveOverridesRequest,
+|   |     NonConformantResponse, RowContextResponse.
+|   |   Handoff:
+|   |     Saves ReviewOverrides JSON and appends manual override audit rows
+|   |     to the parquet manifest.
+|   |
+|   |-- stage_5_review_summary/
+|   |   Responsibility:
+|   |     Summarize final transformations, apply review overrides to the
+|   |     harmonized dataset, package download artifacts, and clear cache.
+|   |   Shapes owned here:
+|   |     StageFiveRequest, StageFiveSummaryResponse, ColumnSummary,
+|   |     TermMapping, TransformationStep.
+|   |   Handoff:
+|   |     Streams a ZIP with final tabular output, JSON manifest, parquet
+|   |     manifest, and CDE mapping audit document.
+|   |
+|   `-- shared/
+|       Responsibility:
+|         Static browser assets shared by more than one stage.
+|       Shapes owned here:
+|         Browser-only state helpers and constants in ES modules:
+|         storage-keys.js, row-state.js, combobox.js,
+|         step-instructions.js, step-instruction-ui.js.
+|
+|-- tests/
+|   Responsibility:
+|     Feature, contract, property, integration, JS, and E2E checks.
+|   Shapes handled:
+|     Public request/response contracts, manifest parquet behavior,
+|     PV conformance, review overrides, upload formats, and browser flows.
+|
+|-- adr/
+|   Responsibility:
+|     Durable records for architecture decisions that explain why the
+|     current boundaries and invariants exist.
+|
+`-- uploads/
+    Responsibility:
+      Local runtime workspace. Configurable through UPLOAD_BASE_DIR.
+    Shapes handled:
+      User uploads, generated harmonized files, parquet manifests,
+      metadata JSON, review override JSON, PV manifest JSON, and mapping JSON.
+```
+
+### Runtime Shape Flow
+
+```
+                 +-------------------------------------------+
+                 | backend/app/main.py                       |
+                 | create_app(): wires routers and assets    |
+                 +---------------------+---------------------+
+                                       |
+                                       v
++------------------+     +------------------+     +------------------+
+| Stage 1 Upload   | --> | Stage 2 Mapping  | --> | Stage 3 Run      |
+|                  |     | Review           |     | Harmonization    |
+| UploadResponse   |     | ColumnDetail     |     | HarmonizeRequest |
+| AnalyzeResponse  |     | ColumnCde...     |     | HarmonizeResponse|
+| SheetPreview     |     | ColumnRenameSet  |     | PVAdjustment...  |
++---------+--------+     +---------+--------+     +---------+--------+
+          |                        |                        |
+          |                        |                        v
+          |                        |              +------------------+
+          |                        |              | uploads/         |
+          |                        |              |                  |
+          |                        |              | uploaded file    |
+          |                        |              | harmonized file  |
+          |                        |              | parquet manifest |
+          |                        |              | sidecar JSON     |
+          |                        |              +---------+--------+
+          |                        |                        |
+          v                        v                        v
+   sessionStorage            ManifestPayload          ManifestRow
+   analysis payload          ColumnMapping...         PVManifest
+                                                        CDE mapping JSON
+                                                        ReviewOverrides
+                                                        |
+                                                        v
+                                      +-----------------+-----------------+
+                                      | Stage 4 Review                    |
+                                      | StageFourResultsResponse          |
+                                      | ColumnReviewData, Transformation  |
+                                      | ReviewStateSchema, CellOverride   |
+                                      +-----------------+-----------------+
+                                                        |
+                                                        v
+                                      +-----------------+-----------------+
+                                      | Stage 5 Summary/Export            |
+                                      | StageFiveSummaryResponse          |
+                                      | ColumnSummary, TermMapping        |
+                                      | ZIP download artifacts            |
+                                      +-----------------------------------+
+
+Shared rules and adapters used by every stage:
+
+  src/domain/cde.py                 CDE metadata and CDE type classification input
+  src/domain/columns.py             Stable ColumnKey and ColumnIdentity
+  src/domain/column_cde_map.py      User mapping decisions keyed by ColumnKey
+  src/domain/column_renames.py      Output names keyed by ColumnKey
+  src/domain/data_model_*.py        Data model/version/CDE/PV lookup and cache
+  src/domain/pv_validation.py       PV conformance and adjustment selection
+  src/domain/change.py              Change and recommendation classification
+  src/domain/schemas.py             Cross-stage API contracts
+  src/domain/dependencies.py        Lazy service and storage construction
 ```
 
 ---
@@ -49,17 +212,17 @@ src/
 **Stages depend on `domain/`, never on each other.**
 
 ```
-                    ┌─────────────────┐
-                    │     DOMAIN      │
-                    │                 │
-                    │  - models       │
-                    │  - schemas      │
-                    │  - services     │
-                    │  - storage      │
-                    └────────┬────────┘
-                             │
-         ┌───────┬───────┬───┴───┬───────┬───────┐
-         │       │       │       │       │       │
+                    +-----------------+
+                    |     DOMAIN      |
+                    |                 |
+                    |  - models       |
+                    |  - schemas      |
+                    |  - services     |
+                    |  - storage      |
+                    +--------+--------+
+                             |
+         +-------+-------+---+---+-------+-------+
+         |       |       |       |       |       |
       Stage 1  Stage 2  Stage 3  Stage 4  Stage 5
 ```
 

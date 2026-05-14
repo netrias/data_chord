@@ -57,14 +57,12 @@ def compute_match_counts(
     """For each CDE, count the column's distinct values that conform under its type.
 
     PV          → ``|distinct_values & pv_sets[cde_key]|``
-    NUMERIC     → number of distinct values that parse as float
     PASSTHROUGH → ``len(distinct_values)`` (everything passes through)
 
     ``pv_sets`` only needs entries for PV-typed CDEs; missing keys for PV CDEs
     contribute zero (and are dropped from the sparse output). This lets callers
     avoid fetching PVs for non-PV CDEs.
     """
-    numeric_count = sum(1 for v in distinct_values if _is_numeric(v))
     passthrough_count = len(distinct_values)
     out: dict[str, int] = {}
     for cde in cdes:
@@ -72,21 +70,8 @@ def compute_match_counts(
             case CdeType.PV:
                 pv_set = pv_sets.get(cde.cde_key)
                 count = len(distinct_values & pv_set) if pv_set else 0
-            case CdeType.NUMERIC:
-                count = numeric_count
             case CdeType.PASSTHROUGH:
                 count = passthrough_count
         if count > 0:
             out[cde.cde_key] = count
     return out
-
-
-def _is_numeric(value: str) -> bool:
-    """A value counts as numeric if Python's ``float()`` parses it."""
-    if not value:
-        return False
-    try:
-        float(value)
-        return True
-    except ValueError:
-        return False
