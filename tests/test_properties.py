@@ -8,11 +8,9 @@ Complements existing unit tests by exploring edge cases automatically.
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
-from src.domain.cde import (
-    ColumnMappingSet,
-    normalize_cde_key,
-)
-from src.domain.harmonize import normalize_manifest
+from src.domain.cde import normalize_cde_key
+from src.domain.column_cde_map import ColumnCdeOverrides
+from src.domain.manifest import normalize_manifest
 from src.domain.manifest.models import is_value_changed
 from src.domain.pv_validation import (
     AdjustmentSource,
@@ -258,7 +256,7 @@ def test_normalize_cde_key_no_mapping_sentinel_returns_none() -> None:
 
 
 # =============================================================================
-# ColumnMappingSet Roundtrip Properties
+# ColumnCdeOverrides Roundtrip Properties
 # =============================================================================
 
 
@@ -269,9 +267,9 @@ def test_normalize_cde_key_no_mapping_sentinel_returns_none() -> None:
     max_size=10,
 ))
 def test_column_mapping_roundtrip_preserves_columns(overrides: dict[str, str]) -> None:
-    """from_dict preserves column names through to_dict."""
-    mapping_set = ColumnMappingSet.from_dict(overrides)
-    result = mapping_set.to_dict()
+    """from_strings preserves column names through to_strings."""
+    mapping_set = ColumnCdeOverrides.from_strings(overrides)
+    result = mapping_set.to_strings()
 
     # All original columns should be present
     assert set(result.keys()) == set(overrides.keys())
@@ -285,8 +283,8 @@ def test_column_mapping_roundtrip_preserves_columns(overrides: dict[str, str]) -
 ))
 def test_column_mapping_values_are_cleaned(overrides: dict[str, str]) -> None:
     """All values are cleaned (stripped) strings."""
-    mapping_set = ColumnMappingSet.from_dict(overrides)
-    result = mapping_set.to_dict()
+    mapping_set = ColumnCdeOverrides.from_strings(overrides)
+    result = mapping_set.to_strings()
 
     for key, value in result.items():
         if value is not None:
@@ -302,8 +300,8 @@ def test_column_mapping_values_are_cleaned(overrides: dict[str, str]) -> None:
 ))
 def test_column_mapping_empty_values_become_none(overrides: dict[str, str]) -> None:
     """Empty or whitespace-only CDE selections normalize to None (skipped columns)."""
-    mapping_set = ColumnMappingSet.from_dict(overrides)
-    result = mapping_set.to_dict()
+    mapping_set = ColumnCdeOverrides.from_strings(overrides)
+    result = mapping_set.to_strings()
 
     # All empty/whitespace values should become None
     for value in result.values():
@@ -322,14 +320,14 @@ def test_column_mapping_empty_values_become_none(overrides: dict[str, str]) -> N
 ))
 def test_column_mapping_applied_plus_skipped_equals_total(overrides: dict[str, str]) -> None:
     """Applied mappings + skipped columns = total columns."""
-    mapping_set = ColumnMappingSet.from_dict(overrides)
+    mapping_set = ColumnCdeOverrides.from_strings(overrides)
 
-    applied = mapping_set.get_applied()
-    skipped = mapping_set.get_skipped()
+    applied = mapping_set.applied_items()
+    skipped = mapping_set.skipped_columns()
 
     # No overlap
-    applied_cols = {m.column_name for m in applied}
-    skipped_cols = set(skipped)
+    applied_cols = {str(column_key) for column_key, _ in applied}
+    skipped_cols = {str(column_key) for column_key in skipped}
     assert applied_cols.isdisjoint(skipped_cols)
 
     # Together they cover all input columns
@@ -341,11 +339,11 @@ def test_column_mapping_applied_plus_skipped_equals_total(overrides: dict[str, s
 # =============================================================================
 
 
-def _valid_column_entry() -> st.SearchStrategy[dict[str, str]]:
-    """Entries with required ColumnMappingEntry fields survive _filter_valid_columns."""
+def _valid_column_entry() -> st.SearchStrategy[dict[str, object]]:
+    """SDK-style entries with cde_key and cde_id survive normalization."""
     return st.fixed_dictionaries({
-        "cde_id": st.text(min_size=1, max_size=10),
-        "targetField": st.text(min_size=1, max_size=20),
+        "cde_id": st.integers(min_value=0, max_value=1_000_000),
+        "cde_key": st.text(min_size=1, max_size=20),
     })
 
 
@@ -355,20 +353,21 @@ def _valid_column_entry() -> st.SearchStrategy[dict[str, str]]:
     min_size=1,
     max_size=5,
 ))
-def test_normalize_manifest_preserves_valid_entries(column_mappings: dict[str, dict[str, str]]) -> None:
-    """Entries with cde_id and targetField survive normalization."""
+def test_normalize_manifest_preserves_valid_entries(column_mappings: dict[str, dict[str, object]]) -> None:
+    """Entries with cde_id and cde_key survive as SDK-shaped manifest entries."""
     manifest = {"column_mappings": column_mappings}
     result = normalize_manifest(manifest)
     result_mappings = result.get("column_mappings", {})
 
     for key in column_mappings:
         assert key in result_mappings, f"Valid entry '{key}' was dropped"
+        assert result_mappings[key]["cde_key"] == column_mappings[key]["cde_key"]
 
 
 @given(st.dictionaries(
     keys=st.text(min_size=1, max_size=30),
     values=st.dictionaries(
-        keys=st.text(min_size=1, max_size=20).filter(lambda k: k not in ("cde_id", "targetField")),
+        keys=st.text(min_size=1, max_size=20).filter(lambda k: k not in ("cde_id", "cde_key")),
         values=st.text(max_size=30),
         min_size=1,
         max_size=3,
@@ -377,7 +376,7 @@ def test_normalize_manifest_preserves_valid_entries(column_mappings: dict[str, d
     max_size=5,
 ))
 def test_normalize_manifest_drops_incomplete_entries(column_mappings: dict[str, dict[str, str]]) -> None:
-    """Entries missing cde_id or targetField are filtered out."""
+    """Entries missing cde_id or a target key are filtered out."""
     manifest = {"column_mappings": column_mappings}
     result = normalize_manifest(manifest)
     result_mappings = result.get("column_mappings", {})
@@ -395,3 +394,40 @@ def test_normalize_manifest_rejects_non_mapping(bad_input: object) -> None:
     """Non-Mapping inputs produce empty column_mappings."""
     result = normalize_manifest(bad_input)
     assert result.get("column_mappings", {}) == {}
+
+
+def test_normalize_manifest_preserves_sdk_confidence() -> None:
+    """The canonical manifest uses the SDK confidence key."""
+    result = normalize_manifest({
+        "column_mappings": {
+            "col_0000": {
+                "cde_key": "age",
+                "cde_id": 900,
+                "alternatives": [
+                    {"target": "age", "confidence": 0.91, "cde_id": 900},
+                ],
+            },
+        }
+    })
+
+    alternatives = result["column_mappings"]["col_0000"].get("alternatives", [])
+    assert alternatives
+    assert alternatives[0]["target"] == "age"
+    assert alternatives[0]["confidence"] == 0.91
+
+
+def test_normalize_manifest_emits_sdk_required_empty_alternatives() -> None:
+    """A mapped column without ranked suggestions still carries the SDK-required list."""
+    result = normalize_manifest({
+        "column_mappings": {
+            "col_0000": {
+                "cde_key": "age",
+                "cde_id": 900,
+            },
+        }
+    })
+
+    mapping = result["column_mappings"]["col_0000"]
+    assert mapping.get("column_name") == "col_0000"
+    assert mapping.get("harmonization") == "harmonizable"
+    assert mapping.get("alternatives") == []

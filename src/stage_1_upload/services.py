@@ -1,80 +1,126 @@
-"""
-Analyze CSV structure and infer column types for upload preview.
+"""Analyze tabular structure and infer column types for upload preview.
 
-Re-exports storage classes from domain for backward compatibility.
+Produces both the small ``ColumnPreview`` list (legacy 5-row sample for the
+upload screen) and a ``ColumnProfile`` per column (full distinct-value tally
+consumed by the Stage 2 takeover left pane).
 """
 
 from __future__ import annotations
 
-import csv
-import logging
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
+from netrias_client import TabularColumn, read_tabular
+from openpyxl import load_workbook
+from openpyxl.worksheet.worksheet import Worksheet
+
+from src.domain.column_profile import ColumnProfile, build_column_profile
 from src.domain.manifest import completeness_bucket
-from src.domain.storage import (
-    UnsupportedUploadError,
-    UploadConstraints,
-    UploadedFileMeta,
-    UploadError,
-    UploadStorage,
-    UploadTooLargeError,
-    describe_constraints,
-)
 
-from .schemas import ColumnPreview
+from .schemas import ColumnPreview, SheetPreview
 
-logger = logging.getLogger(__name__)
-DEFAULT_CDE_SAMPLE_LIMIT = 50
-CSVRow = dict[str, str | None]
-
-__all__ = [
-    "UploadConstraints",
-    "UploadedFileMeta",
-    "UploadError",
-    "UploadStorage",
-    "UploadTooLargeError",
-    "UnsupportedUploadError",
-    "describe_constraints",
-    "analyze_columns",
-    "build_cde_payload",
-]
+DEFAULT_SHEET_PREVIEW_ROWS = 5
+DEFAULT_SHEET_PREVIEW_COLUMNS = 6
 
 
-def analyze_columns(csv_path: Path, max_preview_rows: int = 5) -> tuple[int, list[ColumnPreview]]:
+def analyze_columns(
+    csv_path: Path,
+    max_preview_rows: int = 5,
+    sheet_name: str | None = None,
+) -> tuple[int, list[ColumnPreview], dict[str, ColumnProfile]]:
     if not csv_path.exists():
         raise FileNotFoundError(csv_path)
 
-    total_rows, headers, sample_rows = _read_csv_sample(csv_path, max_preview_rows)
-    columns = [_analyze_single_column(header, sample_rows) for header in headers]
-    return total_rows, columns
+    dataset = read_tabular(csv_path, sheet_name=sheet_name)
+    sample_rows = dataset.rows[:max_preview_rows]
+    columns = [_analyze_single_column(column, sample_rows) for column in dataset.columns]
+    profiles = {
+        column.key: build_column_profile(
+            column.key,
+            (row[column.index] if column.index < len(row) else "" for row in dataset.rows),
+        )
+        for column in dataset.columns
+    }
+    total_rows = len(dataset.rows)
+    return total_rows, columns, profiles
 
 
-def _read_csv_sample(csv_path: Path, max_rows: int) -> tuple[int, list[str], list[dict[str, str]]]:
-    with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
-        reader = csv.DictReader(handle)
-        headers = list(reader.fieldnames or [])
-        duplicates = {name for name in headers if headers.count(name) > 1}
-        if duplicates:
-            raise ValueError(f"Duplicate headers found: {', '.join(sorted(duplicates))}")
-        total_rows = 0
-        sample_rows: list[dict[str, str]] = []
-        for row in reader:
-            total_rows += 1
-            if len(sample_rows) < max_rows:
-                sample_rows.append(row)
-    return total_rows, headers, sample_rows
+def read_workbook_sheet_previews(
+    path: Path,
+    sheet_names: list[str],
+    *,
+    max_rows: int = DEFAULT_SHEET_PREVIEW_ROWS,
+    max_cols: int = DEFAULT_SHEET_PREVIEW_COLUMNS,
+) -> dict[str, SheetPreview]:
+    """Return small exact-value worksheet previews for the upload response."""
+    if path.suffix.lower() != ".xlsx" or not sheet_names:
+        return {}
+    if not path.exists():
+        raise FileNotFoundError(path)
+
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    try:
+        previews: dict[str, SheetPreview] = {}
+        for sheet_name in sheet_names:
+            worksheet = cast(Worksheet, workbook[sheet_name])
+            previews[sheet_name] = _read_single_sheet_preview(worksheet, max_rows=max_rows, max_cols=max_cols)
+        return previews
+    finally:
+        workbook.close()
 
 
-def _analyze_single_column(header: str, sample_rows: list[dict[str, str]]) -> ColumnPreview:
-    samples = [_normalize_sample(row.get(header, "")) for row in sample_rows]
+def _read_single_sheet_preview(worksheet: Worksheet, *, max_rows: int, max_cols: int) -> SheetPreview:
+    if _worksheet_is_empty(worksheet):
+        return SheetPreview()
+
+    visible_columns = min(worksheet.max_column, max_cols)
+    row_limit = max_rows + 2
+    col_limit = max_cols + 1
+    rows = list(worksheet.iter_rows(max_row=row_limit, max_col=col_limit, values_only=True))
+    header_values = list(rows[0] if rows else ())
+    headers = [_cell_to_string(value) for value in header_values[:visible_columns]]
+    preview_rows = [
+        _shape_preview_row(row, width=len(headers))
+        for row in rows[1 : max_rows + 1]
+    ]
+    truncated_rows = len(rows) > max_rows + 1 or worksheet.max_row > max_rows + 1
+    truncated_columns = worksheet.max_column > max_cols
+    return SheetPreview(
+        headers=headers,
+        rows=preview_rows,
+        truncated_rows=truncated_rows,
+        truncated_columns=truncated_columns,
+    )
+
+
+def _worksheet_is_empty(worksheet: Worksheet) -> bool:
+    return worksheet.max_row == 1 and worksheet.max_column == 1 and worksheet["A1"].value is None
+
+
+def _shape_preview_row(row: tuple[object, ...], *, width: int) -> list[str]:
+    values = [_cell_to_string(value) for value in row[:width]]
+    return values + [""] * (width - len(values))
+
+
+def _cell_to_string(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _analyze_single_column(column: TabularColumn, sample_rows: list[list[str]]) -> ColumnPreview:
+    samples = [_normalize_sample(row[column.index] if column.index < len(row) else "") for row in sample_rows]
     non_empty_values = [value for value in samples if value]
     non_empty_count = len(non_empty_values)
     sample_size = max(len(samples), 1)
 
     return ColumnPreview(
-        column_name=header,
+        column_name=column.header,
+        column_key=column.key,
+        source_index=column.index,
+        header=column.header,
         inferred_type=_infer_type(non_empty_values),
         sample_values=samples,
         confidence_bucket=completeness_bucket(non_empty_count, sample_size),
@@ -125,31 +171,3 @@ def _matches_any_date_format(value: str, formats: list[str]) -> bool:
         except ValueError:
             continue
     return False
-
-
-def build_cde_payload(
-    csv_path: Path,
-    headers: list[str],
-    limit: int = DEFAULT_CDE_SAMPLE_LIMIT,
-) -> dict[str, list[str]]:
-    if not headers:
-        return {}
-
-    payload: dict[str, list[str]] = {header: [] for header in headers}
-    with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
-        reader = csv.DictReader(handle)
-        total = 0
-        for row_raw in reader:
-            row: CSVRow = row_raw
-            for header in headers:
-                payload[header].append(_normalize_sample(row.get(header, "")))
-            total += 1
-            if total >= limit:
-                break
-
-    max_length = max((len(values) for values in payload.values()), default=0)
-    for values in payload.values():
-        if len(values) < max_length:
-            values.extend([""] * (max_length - len(values)))
-
-    return payload

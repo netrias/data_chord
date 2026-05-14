@@ -11,8 +11,11 @@ from src.domain.storage import UploadStorage
 from tests.conftest import (
     TEST_CSV_CONTENT_TYPE,
     TEST_TARGET_SCHEMA,
+    TEST_TSV_CONTENT_TYPE,
+    TEST_XLSX_CONTENT_TYPE,
     create_harmonized_csv,
     create_manifest_for_file,
+    create_xlsx_content,
     upload_file,
 )
 
@@ -71,7 +74,8 @@ class TestUploadContract:
         [
             ("test.csv", "text/csv", 201),
             ("test.csv", "application/csv", 201),
-            ("test.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 415),
+            ("test.tsv", TEST_TSV_CONTENT_TYPE, 201),
+            ("test.xlsx", TEST_XLSX_CONTENT_TYPE, 415),
             ("test.json", "application/json", 415),
         ],
     )
@@ -94,6 +98,31 @@ class TestUploadContract:
 
         # Then: Response status matches expected (201 for CSV, 415 for others)
         assert response.status_code == expected_status
+
+    async def test_xlsx_upload_returns_sheet_metadata(
+        self,
+        app_client: AsyncClient,
+    ) -> None:
+        """XLSX uploads expose workbook sheets and default to the first sheet."""
+
+        # Given: a workbook with two sheets ready for upload
+        content = create_xlsx_content({
+            "First": [["ignored"], ["nope"]],
+            "Patients": [["col_a"], ["alpha"]],
+        })
+
+        # When: the workbook is uploaded
+        response = await app_client.post(
+            "/stage-1/upload",
+            files={"file": ("workbook.xlsx", content, TEST_XLSX_CONTENT_TYPE)},
+        )
+
+        # Then: upload succeeds and reports sheet selection metadata
+        assert response.status_code == 201
+        data = response.json()
+        assert data["tabular_format"] == "xlsx"
+        assert data["sheet_names"] == ["First", "Patients"]
+        assert data["selected_sheet"] == "First"
 
 
 class TestAnalyzeContract:
@@ -147,6 +176,9 @@ class TestAnalyzeContract:
         assert len(columns) > 0
         for col in columns:
             assert "column_name" in col
+            assert "column_key" in col
+            assert "source_index" in col
+            assert "header" in col
             assert "inferred_type" in col
             assert "sample_values" in col
             assert "confidence_bucket" in col

@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from netrias_client import DataModel, DataModelStoreError, DataModelVersion
 
+from src.domain.cde import CDEInfo, CdeType
 from src.domain.data_model_adapter import (
+    _pv_map_from_all_pvs_response,
+    fetch_cdes,
     fetch_pvs_batch_async,
     get_latest_version,
     list_data_model_summaries,
+    refine_cde_types_from_pvs,
 )
 
 # ---------------------------------------------------------------------------
@@ -80,7 +85,8 @@ def test_list_summaries_returns_preferred_model_first(
     assert len(summaries) == 2, f"Expected 2 summaries, got {len(summaries)}"
     assert summaries[0].key == "gc"
     assert summaries[0].label == "Genomic Commons"
-    assert summaries[0].versions == ["1", "2"]
+    assert [v.version_number for v in summaries[0].versions] == [1, 2]
+    assert [v.version_label for v in summaries[0].versions] == ["1", "2"]
     assert summaries[1].key == "alpha"
 
 
@@ -173,6 +179,33 @@ def test_get_latest_version_returns_default_when_client_unavailable() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_all_pvs_response_groups_values_by_cde_key() -> None:
+    """
+    Given: the model-version PV endpoint returns rows for several CDEs
+    When: the adapter parses the response
+    Then: PV values are grouped as immutable sets keyed by CDE key
+    """
+    # Given
+    response_body = {
+        "items": [
+            {"cde_key": "diagnosis", "pv_value": "Lung"},
+            {"cde_key": "diagnosis", "pv_value": "Breast"},
+            {"cde_key": "sex", "pv_value": "Female"},
+        ]
+    }
+    parsed: dict[str, frozenset[str]] = {}
+    assert parsed == {}
+
+    # When
+    parsed = _pv_map_from_all_pvs_response(response_body)
+
+    # Then
+    assert parsed == {
+        "diagnosis": frozenset({"Lung", "Breast"}),
+        "sex": frozenset({"Female"}),
+    }
+
+
 @pytest.mark.asyncio
 async def test_fetch_pvs_batch_returns_pv_sets_for_multiple_keys(
     mock_netrias: MagicMock,
@@ -212,13 +245,14 @@ async def test_fetch_pvs_batch_returns_pv_sets_for_multiple_keys(
 
 
 @pytest.mark.asyncio
-async def test_fetch_pvs_batch_degrades_on_per_key_failure(
+async def test_fetch_pvs_batch_drops_failed_keys(
     mock_netrias: MagicMock,
 ) -> None:
     """
     Given: a mock client where "age" succeeds but "bad_key" raises DataModelStoreError
     When: fetch_pvs_batch_async() is called with both keys
-    Then: "age" has its PVs and "bad_key" degrades to empty frozenset
+    Then: "age" is in the result; "bad_key" is absent so callers don't
+          confuse a fetch failure with a legitimately-empty PV set
     """
     # Given
     age_pvs = frozenset({"0-18", "19-40"})
@@ -235,15 +269,118 @@ async def test_fetch_pvs_batch_degrades_on_per_key_failure(
     # When
     result = await fetch_pvs_batch_async("gc", "2", ["age", "bad_key"])
 
-    # Then: successful key has PVs, failed key degrades to empty
+    # Then: successful key has PVs, failed key is absent (will retry next call)
     assert result["age"] == age_pvs, f"age PVs mismatch: {result['age']}"
-    assert result["bad_key"] == frozenset(), (
-        f"Expected empty frozenset for bad_key, got {result['bad_key']}"
-    )
+    assert "bad_key" not in result, f"bad_key should be absent, got {result.get('bad_key')!r}"
 
 
 # ---------------------------------------------------------------------------
 # Test: fetch_pvs_batch_async returns {} when client is None
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Test: fetch_cdes assigns the default PV cde_type pre-fetch
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_cdes_defaults_cde_type_to_pv(mock_netrias: MagicMock) -> None:
+    """
+    Given: SDK returns CDEs but PVs have not been fetched yet
+    When: fetch_cdes wraps them into CDEInfo
+    Then: cde_type defaults to PV — adapter refines after PVs resolve
+    """
+    # Given: SDK CDEs (use SimpleNamespace to avoid coupling to SDK class shape)
+    mock_netrias.list_cdes.return_value = [
+        SimpleNamespace(cde_id=1, cde_key="diagnosis", description="dx"),
+        SimpleNamespace(cde_id=2, cde_key="age", description="age"),
+    ]
+    # negative assertion: no fetched CDEs yet
+    fetched: list = []
+    assert fetched == []
+
+    # When
+    fetched = fetch_cdes("gc", "1")
+
+    # Then: every CDE starts as PV (refinement happens later)
+    assert {c.cde_type for c in fetched} == {CdeType.PV}
+
+
+def test_refine_cde_types_downgrades_to_passthrough_for_empty_pvs() -> None:
+    """
+    Given: two CDEs both initially typed as PV; PV fetch returned an empty
+           frozenset for one of them
+    When: refine_cde_types_from_pvs is called
+    Then: the empty-PV CDE becomes PASSTHROUGH; the populated one stays PV
+    """
+    # Given
+    cdes = [
+        CDEInfo(cde_id=1, cde_key="diagnosis", description=None, version_label="1"),
+        CDEInfo(cde_id=2, cde_key="free_notes", description=None, version_label="1"),
+    ]
+    pv_sets = {
+        "diagnosis": frozenset({"A", "B"}),
+        "free_notes": frozenset(),
+    }
+    # negative assertion: types start as PV
+    assert all(c.cde_type == CdeType.PV for c in cdes)
+
+    # When
+    refined = refine_cde_types_from_pvs(cdes, pv_sets)
+    by_key = {c.cde_key: c for c in refined}
+
+    # Then
+    assert by_key["diagnosis"].cde_type == CdeType.PV
+    assert by_key["free_notes"].cde_type == CdeType.PASSTHROUGH
+
+
+def test_refine_cde_types_skips_unfetched_cdes() -> None:
+    """
+    Given: two CDEs, but PVs were fetched for only one
+    When: refine_cde_types_from_pvs is called
+    Then: the un-fetched CDE keeps its original type unchanged
+    """
+    # Given
+    cdes = [
+        CDEInfo(cde_id=1, cde_key="diagnosis", description=None, version_label="1"),
+        CDEInfo(cde_id=2, cde_key="other", description=None, version_label="1"),
+    ]
+    pv_sets = {"diagnosis": frozenset({"A"})}
+
+    # When
+    refined = refine_cde_types_from_pvs(cdes, pv_sets)
+    by_key = {c.cde_key: c for c in refined}
+
+    # Then: untouched CDE remains as it was
+    assert by_key["other"].cde_type == CdeType.PV
+
+
+def test_refine_does_not_downgrade_when_fetch_failure_omits_key() -> None:
+    """
+    Given: a CDE that genuinely has PVs but its PV fetch failed and is therefore
+           absent from the pv_sets dict (per fetch_pvs_batch_async's contract)
+    When: refine_cde_types_from_pvs is called
+    Then: the CDE stays at its initial type (PV) — it is NOT downgraded to
+          PASSTHROUGH, which would happen if absent-key were treated the same
+          as known-empty-set. This is the regression that hid primary_diagnosis
+          behind PASSTHROUGH when batch fetches hit the rate limit.
+    """
+    # Given
+    cdes = [
+        CDEInfo(cde_id=1, cde_key="primary_diagnosis", description=None, version_label="1"),
+    ]
+    # PV sets dict is empty — the fetch failed for primary_diagnosis
+    pv_sets: dict[str, frozenset[str]] = {}
+
+    # When
+    refined = refine_cde_types_from_pvs(cdes, pv_sets)
+
+    # Then: type is PRESERVED at PV; no PASSTHROUGH downgrade
+    assert refined[0].cde_type == CdeType.PV
+
+
+# ---------------------------------------------------------------------------
+# Test: fetch_pvs_batch_async returns PVs (existing test header)
 # ---------------------------------------------------------------------------
 
 

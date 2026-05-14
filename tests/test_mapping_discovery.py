@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
 
-from src.domain.manifest import ManifestPayload
-from src.domain.mapping_service import MappingDiscoveryService, _cde_targets_from_manifest
+from src.domain.manifest import ColumnMappingManifest, ManifestPayload
+from src.domain.mapping_service import MappingDiscoveryService
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -41,15 +42,15 @@ def test_discover_returns_manifest_from_client(
     """
     Given: a mocked NetriasClient returning a manifest with two column mappings
     When: MappingDiscoveryService.discover() is called
-    Then: the manifest is returned with column_mappings for both columns
+    Then: the manifest is returned with stable column-key mappings for both columns
     """
     svc, mock_client = service_with_mock_client
 
     # Given: client returns a manifest with two mapped columns
-    mock_client.discover_mapping_from_csv.return_value = {
+    mock_client.discover_mapping_from_tabular.return_value = {
         "column_mappings": {
-            "breed": {"targetField": "organism_species", "cde_id": 131},
-            "diagnosis": {"targetField": "primary_diagnosis", "cde_id": 2},
+            "col_0000": {"cde_key": "organism_species", "cde_id": 131},
+            "col_0001": {"cde_key": "primary_diagnosis", "cde_id": 2},
         }
     }
     csv_path = tmp_path / "test.csv"
@@ -60,10 +61,38 @@ def test_discover_returns_manifest_from_client(
 
     # Then: manifest contains both columns
     column_mappings = manifest.get("column_mappings", {})
-    assert "breed" in column_mappings
-    assert "diagnosis" in column_mappings
-    assert column_mappings["breed"]["targetField"] == "organism_species"
-    assert column_mappings["diagnosis"]["targetField"] == "primary_diagnosis"
+    assert "col_0000" in column_mappings
+    assert "col_0001" in column_mappings
+    assert column_mappings["col_0000"]["cde_key"] == "organism_species"
+    assert column_mappings["col_0001"]["cde_key"] == "primary_diagnosis"
+    mock_client.discover_mapping_from_tabular.assert_called_once()
+    assert mock_client.discover_mapping_from_tabular.call_args.kwargs["target_version"] == "latest"
+
+
+def test_discover_passes_selected_target_version(
+    service_with_mock_client: tuple[MappingDiscoveryService, MagicMock],
+    tmp_path: Path,
+) -> None:
+    """
+    Given: a selected model version from the Stage 1 popup
+    When: MappingDiscoveryService.discover() is called with that version
+    Then: the discovery API receives the same target_version
+    """
+    svc, mock_client = service_with_mock_client
+
+    # Given
+    mock_client.discover_mapping_from_tabular.return_value = {
+        "column_mappings": {"col_0000": {"cde_key": "organism_species", "cde_id": 131}}
+    }
+    csv_path = tmp_path / "test.csv"
+    csv_path.write_text("breed\nLabrador\n")
+    assert mock_client.discover_mapping_from_tabular.call_count == 0
+
+    # When
+    svc.discover(csv_path=csv_path, target_schema="ccdi", target_version="2")
+
+    # Then
+    assert mock_client.discover_mapping_from_tabular.call_args.kwargs["target_version"] == "2"
 
 
 # ---------------------------------------------------------------------------
@@ -78,15 +107,15 @@ def test_discover_builds_cde_targets_from_manifest(
     """
     Given: a manifest with columns "breed" and "diagnosis" mapped to CDEs
     When: discover() processes it
-    Then: cde_targets has ModelSuggestion entries for both columns
+    Then: cde_targets has ModelSuggestion entries for both column keys
     """
     svc, mock_client = service_with_mock_client
 
     # Given
-    mock_client.discover_mapping_from_csv.return_value = {
+    mock_client.discover_mapping_from_tabular.return_value = {
         "column_mappings": {
-            "breed": {"targetField": "organism_species", "cde_id": 131},
-            "diagnosis": {"targetField": "primary_diagnosis", "cde_id": 2},
+            "col_0000": {"cde_key": "organism_species", "cde_id": 131},
+            "col_0001": {"cde_key": "primary_diagnosis", "cde_id": 2},
         }
     }
     csv_path = tmp_path / "test.csv"
@@ -96,10 +125,10 @@ def test_discover_builds_cde_targets_from_manifest(
     cde_targets, _, _ = svc.discover(csv_path=csv_path, target_schema="ccdi")
 
     # Then: cde_targets has entries for both columns
-    assert "breed" in cde_targets
-    assert "diagnosis" in cde_targets
-    assert cde_targets["breed"][0].target == "organism_species"
-    assert cde_targets["diagnosis"][0].target == "primary_diagnosis"
+    assert "col_0000" in cde_targets
+    assert "col_0001" in cde_targets
+    assert cde_targets["col_0000"][0].target == "organism_species"
+    assert cde_targets["col_0001"][0].target == "primary_diagnosis"
 
 
 # ---------------------------------------------------------------------------
@@ -109,20 +138,20 @@ def test_discover_builds_cde_targets_from_manifest(
 
 def test_discover_skips_empty_target_fields() -> None:
     """
-    Given: a manifest where one column has targetField="" and another is valid
-    When: _cde_targets_from_manifest processes it
+    Given: a manifest where one column has cde_key="" and another is valid
+    When: ColumnMappingManifest processes it
     Then: only the valid column appears in cde_targets
     """
     # Given
     manifest: ManifestPayload = {
         "column_mappings": {
-            "breed": {"targetField": "organism_species", "cde_id": 131},
-            "empty_col": {"targetField": "", "cde_id": 0},
+            "breed": {"cde_key": "organism_species", "cde_id": 131},
+            "empty_col": {"cde_key": "", "cde_id": 0},
         }
     }
 
     # When
-    targets = _cde_targets_from_manifest(manifest)
+    targets = ColumnMappingManifest.from_payload(manifest).suggestions_by_column()
 
     # Then: only breed appears
     assert "breed" in targets
@@ -157,32 +186,32 @@ def test_discover_raises_when_client_unavailable() -> None:
 def test_cde_targets_reads_alternatives_from_manifest() -> None:
     """
     Given: a manifest with alternatives (ranked suggestions) from the updated SDK
-    When: _cde_targets_from_manifest processes it
+    When: ColumnMappingManifest processes it
     Then: cde_targets contains multiple ModelSuggestions per column, sorted by confidence
     """
     # Given
     manifest: ManifestPayload = {
         "column_mappings": {
             "age_col": {
-                "targetField": "age",
+                "cde_key": "age",
                 "cde_id": 900,
                 "alternatives": [
-                    {"target": "age", "similarity": 1.0, "cde_id": 900},
-                    {"target": "ageUnit", "similarity": 0.3, "cde_id": 904},
+                    {"target": "age", "confidence": 1.0, "cde_id": 900},
+                    {"target": "ageUnit", "confidence": 0.3, "cde_id": 904},
                 ],
             },
             "sex_col": {
-                "targetField": "sex",
+                "cde_key": "sex",
                 "cde_id": 901,
                 "alternatives": [
-                    {"target": "sex", "similarity": 0.95, "cde_id": 901},
+                    {"target": "sex", "confidence": 0.95, "cde_id": 901},
                 ],
             },
         }
     }
 
     # When
-    targets = _cde_targets_from_manifest(manifest)
+    targets = ColumnMappingManifest.from_payload(manifest).suggestions_by_column()
 
     # Then: age_col has two suggestions
     assert len(targets["age_col"]) == 2
@@ -197,31 +226,31 @@ def test_cde_targets_reads_alternatives_from_manifest() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 6: empty alternatives falls back to targetField
+# Test 6: empty alternatives falls back to cde_key
 # ---------------------------------------------------------------------------
 
 
 def test_cde_targets_falls_back_to_target_field_when_alternatives_empty() -> None:
     """
     Given: a manifest where alternatives is present but all entries fail validation
-    When: _cde_targets_from_manifest processes it
-    Then: falls back to targetField as a single suggestion
+    When: ColumnMappingManifest processes it
+    Then: falls back to cde_key as a single suggestion
     """
     # Given: alternatives list has no valid entries (missing target key)
-    manifest: ManifestPayload = {
+    manifest = cast(ManifestPayload, {
         "column_mappings": {
             "age_col": {
-                "targetField": "age",
+                "cde_key": "age",
                 "cde_id": 900,
-                "alternatives": [{"similarity": 0.9}],  # no "target" key
+                "alternatives": [{"confidence": 0.9}],  # no "target" key
             },
         }
-    }
+    })
 
     # When
-    targets = _cde_targets_from_manifest(manifest)
+    targets = ColumnMappingManifest.from_payload(manifest).suggestions_by_column()
 
-    # Then: falls back to targetField
+    # Then: falls back to cde_key
     assert len(targets["age_col"]) == 1
     assert targets["age_col"][0].target == "age"
     assert targets["age_col"][0].similarity == 1.0
@@ -244,10 +273,52 @@ def test_discover_wraps_sdk_errors_as_runtime_error(
     svc, mock_client = service_with_mock_client
 
     # Given: client raises
-    mock_client.discover_mapping_from_csv.side_effect = Exception("connection refused")
+    mock_client.discover_mapping_from_tabular.side_effect = Exception("connection refused")
     csv_path = tmp_path / "test.csv"
     csv_path.write_text("a,b\n1,2\n")
 
     # When/Then
     with pytest.raises(RuntimeError, match="CDE discovery failed.*connection refused"):
         svc.discover(csv_path=csv_path, target_schema="ccdi")
+
+
+def test_discover_preserves_duplicate_headers_with_column_keys(
+    service_with_mock_client: tuple[MappingDiscoveryService, MagicMock],
+    tmp_path: Path,
+) -> None:
+    """
+    Given: duplicate source headers and a Netrias response keyed by column keys
+    When: discover() processes the response
+    Then: returned mappings are keyed by stable source column keys
+    """
+    svc, mock_client = service_with_mock_client
+
+    def _discover_mapping_from_tabular(
+        *,
+        source_path: Path,
+        target_schema: str,
+        target_version: str,
+        confidence_threshold: float,
+        sheet_name: str | None = None,
+    ) -> dict[str, object]:
+        assert source_path.name == "dupes.csv"
+        assert target_version == "latest"
+        assert sheet_name is None
+        return {
+            "column_mappings": {
+                "col_0000": {"cde_key": "first_name", "cde_id": 10},
+                "col_0001": {"cde_key": "last_name", "cde_id": 11},
+            }
+        }
+
+    mock_client.discover_mapping_from_tabular.side_effect = _discover_mapping_from_tabular
+    csv_path = tmp_path / "dupes.csv"
+    csv_path.write_text("name,name\nAlice,Smith\n")
+
+    cde_targets, _, manifest = svc.discover(csv_path=csv_path, target_schema="ccdi")
+
+    column_mappings = manifest.get("column_mappings", {})
+    assert column_mappings["col_0000"]["cde_key"] == "first_name"
+    assert column_mappings["col_0001"]["cde_key"] == "last_name"
+    assert cde_targets["col_0000"][0].target == "first_name"
+    assert cde_targets["col_0001"][0].target == "last_name"

@@ -10,7 +10,7 @@ import asyncio
 import logging
 from collections import defaultdict
 from pathlib import Path
-from typing import NamedTuple, cast
+from typing import NamedTuple
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -19,16 +19,19 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from src.domain import (
-    NO_MAPPING_SENTINEL,
     ColumnBreakdownSchema,
-    ColumnMappingSet,
+    ColumnCdeOverrides,
+    ColumnRenameSet,
     ConfidenceBucketSchema,
     HarmonizeRequest,
     HarmonizeResponse,
     ManifestSummarySchema,
 )
-from src.domain.data_model_adapter import fetch_pvs_batch_async
+from src.domain.cde_mapping_persistence import save_cde_mapping_document
+from src.domain.column_cde_map import ColumnCdeMap
+from src.domain.data_model_adapter import fetch_all_pvs_async
 from src.domain.data_model_cache import SessionCache, get_session_cache, populate_cde_cache
+from src.domain.data_model_selection import DataModelSelection
 from src.domain.dependencies import (
     get_file_store,
     get_harmonize_service,
@@ -36,6 +39,7 @@ from src.domain.dependencies import (
 )
 from src.domain.harmonize import HarmonizeResult
 from src.domain.manifest import (
+    ColumnMappingManifest,
     ConfidenceBucket,
     ManifestPayload,
     ManifestRow,
@@ -60,13 +64,8 @@ _router_logger = logging.getLogger(__name__)
 stage_three_router = APIRouter(prefix="/stage-3", tags=["Stage 3 Harmonize"])
 
 
-class ModelInfo(NamedTuple):
-    data_model_key: str
-    version_label: str
-
-
 class PVAdjustmentRecord(NamedTuple):
-    column_name: str
+    column_key: str
     to_harmonize: str
     adjusted_value: str
     source: str
@@ -101,21 +100,39 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
 
     store = get_file_store()
     store.delete(payload.file_id, FileType.REVIEW_OVERRIDES)
+    store.delete(payload.file_id, FileType.COLUMN_MAPPING)
 
     stored_manifest = _storage.load_manifest(payload.file_id)
-    manifest_payload = payload.manifest or cast(ManifestPayload | None, stored_manifest)
-    column_mappings = ColumnMappingSet.from_dict(payload.manual_overrides)
+    manifest_payload = payload.manifest or stored_manifest
+    manifest = ColumnMappingManifest.from_payload(manifest_payload)
+    column_overrides = ColumnCdeOverrides.from_strings(payload.manual_overrides)
+    column_renames = ColumnRenameSet.from_dict(payload.column_renames)
+    target_selection = DataModelSelection.from_version_number(payload.target_schema, payload.target_version_number)
 
-    # Store column->CDE key mappings in cache for PV lookup
     cache = get_session_cache(payload.file_id)
-    _store_column_mappings_in_cache(cache, manifest_payload, payload.manual_overrides)
+    column_cde_map = _column_cde_map_for_session(manifest, column_overrides)
+    _store_column_mappings_in_cache(cache, column_cde_map)
+    save_cde_mapping_document(payload.file_id, manifest, column_overrides, column_renames, cache, target_selection)
+    output_path = _storage.harmonized_path_for(payload.file_id, meta.saved_path)
 
-    # Launch harmonization and PV fetch in parallel
     harmonize_task = asyncio.create_task(
-        _run_harmonization(cache, meta.saved_path, payload.target_schema, column_mappings, manifest_payload)
+        _run_harmonization(
+            cache,
+            meta.saved_path,
+            target_selection,
+            column_overrides,
+            column_renames,
+            manifest.to_payload(),
+            output_path,
+            meta.selected_sheet,
+        )
     )
     pv_fetch_task = asyncio.create_task(
-        _fetch_pvs_for_session(payload.file_id, manifest_payload, payload.manual_overrides, payload.target_schema)
+        _fetch_pvs_for_session(
+            payload.file_id,
+            column_cde_map,
+            target_selection,
+        )
     )
 
     # Wait for both to complete
@@ -132,10 +149,6 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
         },
     )
 
-    # Relocate harmonized CSV from CWD into managed storage
-    _storage.relocate_harmonized_output(payload.file_id, meta.saved_path)
-
-    # Store manifest and apply PV adjustments
     manifest_summary = await _read_store_and_adjust_manifest(
         payload.file_id, result.manifest_path
     )
@@ -161,73 +174,56 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
     )
 
 
-def _get_target_field(entry: object) -> str | None:
-    """targetField may be absent or non-string in externally produced manifests."""
-    if not isinstance(entry, dict):
-        return None
-    target = entry.get("targetField")
-    return target if isinstance(target, str) else None
+def _column_cde_map_for_session(manifest: ColumnMappingManifest, column_overrides: ColumnCdeOverrides) -> ColumnCdeMap:
+    return manifest.column_cde_map().with_overrides(column_overrides)
 
 
-def _extract_column_cde_mappings(manifest: ManifestPayload | None) -> dict[str, str]:
-    """PV validation and cache storage both need column→CDE key lookups."""
-    if manifest is None:
-        return {}
-    column_mappings = manifest.get("column_mappings", {})
-    return {col: target for col, entry in column_mappings.items() if (target := _get_target_field(entry))}
-
-
-def _effective_column_cde_map(
-    manifest: ManifestPayload | None, manual_overrides: dict[str, str]
-) -> dict[str, str]:
-    """Merge AI mappings with user overrides, filtering out explicit "No Mapping" selections."""
-    mappings = _extract_column_cde_mappings(manifest)
-    mappings.update(manual_overrides)
-    return {k: v for k, v in mappings.items() if v != NO_MAPPING_SENTINEL}
-
-
-def _store_column_mappings_in_cache(
-    cache: SessionCache, manifest: ManifestPayload | None, manual_overrides: dict[str, str]
-) -> None:
+def _store_column_mappings_in_cache(cache: SessionCache, column_cde_map: ColumnCdeMap) -> None:
     """PV validation needs to know which CDE each column maps to."""
-    mappings = _effective_column_cde_map(manifest, manual_overrides)
-    cache.set_column_mappings(mappings)
-    _router_logger.info("Stored column→CDE mappings", extra={"mappings": mappings})
+    cache.set_column_mappings(column_cde_map)
+    _router_logger.info("Stored column→CDE mappings", extra={"mappings": column_cde_map.to_strings()})
 
 
 async def _run_harmonization(
     cache: SessionCache,
     file_path: Path,
-    target_schema: str,
-    column_mappings: ColumnMappingSet,
+    target_selection: DataModelSelection,
+    column_overrides: ColumnCdeOverrides,
+    column_renames: ColumnRenameSet,
     manifest: ManifestPayload | None,
+    output_path: Path,
+    sheet_name: str | None,
 ) -> HarmonizeResult:
     """Netrias client is sync; run in threadpool to avoid blocking the event loop."""
     harmonizer = get_harmonize_service()
     return await run_in_threadpool(
         harmonizer.run,
         file_path=file_path,
-        target_schema=target_schema,
-        column_mappings=column_mappings,
+        target_schema=target_selection.key,
+        column_overrides=column_overrides,
+        column_renames=column_renames,
         cache=cache,
+        target_version=target_selection.target_version,
         manifest=manifest,
+        output_path=output_path,
+        sheet_name=sheet_name,
     )
 
 
 def _validate_pv_fetch_preconditions(
     cache: SessionCache, cde_keys: list[str], file_id: str
-) -> ModelInfo | None:
+) -> DataModelSelection | None:
     """Early-exit checks consolidated here to keep the main fetch function simple."""
     if not cache.has_cdes():
         _router_logger.warning("No CDEs in cache for PV fetch", extra={"file_id": file_id})
         return None
     if not cde_keys:
         return None
-    data_model_key, version_label = cache.get_model_info()
-    if not data_model_key or not version_label:
+    selection = cache.get_model_selection()
+    if selection is None:
         _router_logger.warning("Missing model info for PV fetch", extra={"file_id": file_id})
         return None
-    return ModelInfo(data_model_key, version_label)
+    return selection
 
 
 async def _fetch_and_cache_pvs(
@@ -242,7 +238,8 @@ async def _fetch_and_cache_pvs(
             "cde_keys": cde_keys,
         },
     )
-    pv_map = await fetch_pvs_batch_async(data_model_key, version_label, cde_keys)
+    raw_pv_map = await fetch_all_pvs_async(data_model_key, version_label)
+    pv_map = {cde_key: raw_pv_map.get(cde_key, frozenset()) for cde_key in cde_keys}
     cache.set_pvs_batch(pv_map)
     pv_counts = {k: len(v) for k, v in pv_map.items()}
     total_pvs = sum(pv_counts.values())
@@ -270,24 +267,26 @@ async def _fetch_and_cache_pvs(
 
 
 async def _fetch_pvs_for_session(
-    file_id: str, manifest: ManifestPayload | None, manual_overrides: dict[str, str], target_schema: str
+    file_id: str, column_cde_map: ColumnCdeMap, target_selection: DataModelSelection
 ) -> None:
     """Runs in parallel with harmonization to hide PV fetch latency."""
     cache = get_session_cache(file_id)
-    column_cde_map = _effective_column_cde_map(manifest, manual_overrides)
-    cde_keys = list(set(column_cde_map.values()))
+    cde_keys = column_cde_map.cde_keys()
 
     # Server restart between Stage 2 and Stage 3 clears in-memory CDEs; re-fetch.
     if not cache.has_cdes():
         _router_logger.info("CDEs missing from cache; re-fetching from Data Model Store", extra={"file_id": file_id})
-        await run_in_threadpool(populate_cde_cache, file_id, target_schema)
+        await run_in_threadpool(populate_cde_cache, file_id, target_selection)
 
     model_info = _validate_pv_fetch_preconditions(cache, cde_keys, file_id)
     if model_info is None:
         return
 
     try:
-        await _fetch_and_cache_pvs(cache, model_info.data_model_key, model_info.version_label, cde_keys, file_id)
+        if cache.has_any_pvs():
+            save_pv_manifest_to_disk(file_id, cache, cache.get_all_pvs())
+            return
+        await _fetch_and_cache_pvs(cache, model_info.key, model_info.version_label, cde_keys, file_id)
     except Exception:
         _router_logger.exception("Failed to fetch PVs for session", extra={"file_id": file_id})
 
@@ -325,8 +324,8 @@ async def _read_store_and_adjust_manifest(
     final_data = await _store_and_adjust_manifest(file_id, manifest_path, manifest_data)
     cache = get_session_cache(file_id)
     column_pv_map = {
-        name: cache.get_pvs_for_column(name)
-        for name in {r.column_name for r in final_data.rows}
+        str(row.column_key): cache.get_pvs_for_column(row.column_key)
+        for row in final_data.rows
     }
     return _convert_to_schema(final_data, column_pv_map)
 
@@ -344,14 +343,19 @@ def _compute_row_adjustment(
         return None
     if result.adjusted_value == row.top_harmonization:
         return None
-    return PVAdjustmentRecord(row.column_name, row.to_harmonize, result.adjusted_value, result.adjustment_source.value)
+    return PVAdjustmentRecord(
+        str(row.column_key),
+        row.to_harmonize,
+        result.adjusted_value,
+        result.adjustment_source.value,
+    )
 
 
 def _process_row_for_adjustment(
     row: ManifestRow, cache: SessionCache
 ) -> PVAdjustmentRecord | None:
     """Skips columns without PVs — those don't need conformance adjustment."""
-    pv_set = cache.get_pvs_for_column(row.column_name)
+    pv_set = cache.get_pvs_for_column(row.column_key)
     if not pv_set:
         return None
     return _compute_row_adjustment(row, pv_set)
@@ -379,13 +383,13 @@ def _log_non_conformant_samples(rows: list[ManifestRow], cache: SessionCache) ->
 
 def _is_top_harmonization_non_conformant(row: ManifestRow, cache: SessionCache) -> bool:
     """Logging-only check; the adjustment path in _compute_row_adjustment handles the actual fix."""
-    pv_set = cache.get_pvs_for_column(row.column_name)
+    pv_set = cache.get_pvs_for_column(row.column_key)
     return pv_set is not None and row.top_harmonization not in pv_set
 
 
 def _records_to_tuples(records: list[PVAdjustmentRecord]) -> list[tuple[str, str, str, str]]:
     """Writer API expects plain tuples; convert from typed records."""
-    return [(r.column_name, r.to_harmonize, r.adjusted_value, r.source) for r in records]
+    return [(r.column_key, r.to_harmonize, r.adjusted_value, r.source) for r in records]
 
 
 async def _apply_pv_adjustments(file_id: str, manifest_path: Path) -> int:
@@ -461,11 +465,15 @@ def _build_column_breakdowns(
 ) -> list[ColumnBreakdownSchema]:
     column_rows: dict[str, list[ManifestRow]] = defaultdict(list)
     for row in rows:
-        column_rows[row.column_name].append(row)
+        column_rows[str(row.column_key)].append(row)
 
     breakdowns = [
-        _create_breakdown_schema(name, col_rows, column_pv_map.get(name))
-        for name, col_rows in column_rows.items()
+        _create_breakdown_schema(
+            col_rows[0].column_name,
+            col_rows,
+            column_pv_map.get(key, column_pv_map.get(col_rows[0].column_name)),
+        )
+        for key, col_rows in column_rows.items()
     ]
     # Columns needing attention (changes OR non-conformant) sort first
     breakdowns.sort(key=lambda b: (b.changed_rows == 0 and b.non_conformant_terms == 0, -b.total_rows))

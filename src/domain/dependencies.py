@@ -14,15 +14,13 @@ from src.domain.config import get_netrias_api_key
 from src.domain.harmonize import HarmonizeService
 from src.domain.mapping_service import MappingDiscoveryService
 from src.domain.paths import PROJECT_ROOT
-from src.domain.storage import FileStore, LocalStorageBackend, UploadConstraints, UploadStorage
+from src.domain.storage import FileStore, UploadConstraints, UploadStorage
 
 logger = logging.getLogger(__name__)
 
 UPLOAD_BASE_DIR = PROJECT_ROOT / "uploads"
 
 MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024
-ALLOWED_SUFFIXES: tuple[str, ...] = (".csv",)
-ALLOWED_CONTENT_TYPES: tuple[str, ...] = ("text/csv", "application/csv", "application/vnd.ms-excel")
 
 _upload_constraints: UploadConstraints | None = None
 _storage: UploadStorage | None = None
@@ -36,11 +34,7 @@ _netrias_client_initialized: bool = False
 def get_upload_constraints() -> UploadConstraints:
     global _upload_constraints  # noqa: PLW0603 - intentional singleton
     if _upload_constraints is None:
-        _upload_constraints = UploadConstraints(
-            allowed_suffixes=ALLOWED_SUFFIXES,
-            allowed_content_types=ALLOWED_CONTENT_TYPES,
-            max_bytes=MAX_UPLOAD_BYTES,
-        )
+        _upload_constraints = UploadConstraints(max_bytes=MAX_UPLOAD_BYTES)
     return _upload_constraints
 
 
@@ -56,8 +50,7 @@ def get_file_store() -> FileStore:
     global _file_store  # noqa: PLW0603 - intentional singleton
     if _file_store is None:
         logger.info("Initializing file store")
-        backend = LocalStorageBackend(UPLOAD_BASE_DIR / "manifests")
-        _file_store = FileStore(backend)
+        _file_store = FileStore(UPLOAD_BASE_DIR / "manifests")
     return _file_store
 
 
@@ -68,7 +61,7 @@ def get_netrias_client() -> NetriasClient | None:
         api_key = get_netrias_api_key()
         if api_key:
             try:
-                _netrias_client = NetriasClient(api_key=api_key, environment=Environment.PROD)
+                _netrias_client = NetriasClient(api_key=api_key, environment=Environment.STAGING)
             except Exception:
                 logger.exception("Failed to initialize NetriasClient")
         else:
@@ -101,8 +94,6 @@ def cleanup_services() -> None:
 
 
 __all__ = [
-    "ALLOWED_CONTENT_TYPES",
-    "ALLOWED_SUFFIXES",
     "MAX_UPLOAD_BYTES",
     "UPLOAD_BASE_DIR",
     "cleanup_services",

@@ -1,9 +1,8 @@
-"""Seed harmonized CSV and manifest parquet for Playwright E2E tests."""
+"""Seed harmonized tabular output and manifest parquet for Playwright E2E tests."""
 
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import sys
 from pathlib import Path
@@ -11,6 +10,7 @@ from typing import Any
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+from netrias_client import TabularDataset, dataset_from_rows, read_tabular, write_tabular
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
 if str(ROOT_DIR) not in sys.path:
@@ -36,44 +36,54 @@ def _find_original_path(file_id: str, upload_base_dir: Path) -> Path:
     return matches[0]
 
 
-def _read_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
-    with path.open("r", encoding="utf-8-sig", newline="") as handle:
-        reader = csv.DictReader(handle)
-        rows = list(reader)
-        headers = list(reader.fieldnames or [])
-    return headers, rows
+def _selected_sheet_for(file_id: str, upload_base_dir: Path) -> str | None:
+    meta_path = upload_base_dir / "meta" / f"{file_id}.json"
+    if not meta_path.exists():
+        return None
+    payload = json.loads(meta_path.read_text())
+    selected_sheet = payload.get("selected_sheet")
+    return selected_sheet if isinstance(selected_sheet, str) else None
 
 
-def _write_harmonized(path: Path, headers: list[str], rows: list[dict[str, str]]) -> Path:
-    harmonized_path = path.with_name(f"{path.stem}.harmonized.csv")
-    with harmonized_path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=headers)
-        writer.writeheader()
-        writer.writerows(rows)
+def _write_harmonized(
+    file_id: str,
+    original_path: Path,
+    dataset: TabularDataset,
+    upload_base_dir: Path,
+) -> Path:
+    harmonized_path = upload_base_dir / "harmonized" / f"{file_id}.harmonized{original_path.suffix.lower()}"
+    harmonized_path.parent.mkdir(parents=True, exist_ok=True)
+    template_path = original_path if dataset.source_format.value == "xlsx" else None
+    write_tabular(harmonized_path, dataset, template_path=template_path)
     return harmonized_path
 
 
 def _build_manifest_rows(
-    headers: list[str],
-    original_rows: list[dict[str, str]],
-    harmonized_rows: list[dict[str, str]],
+    original_dataset: TabularDataset,
+    harmonized_dataset: TabularDataset,
     changes: dict[int, dict[str, str]],
     file_id: str,
 ) -> list[dict[str, Any]]:
-    columns_with_changes = {col for row in changes.values() for col in row.keys()}
+    headers = original_dataset.headers
+    header_by_index = {column.header: column for column in original_dataset.columns}
+    columns_with_changes = {col for row in changes.values() for col in row}
     if not columns_with_changes:
         columns_with_changes = set(headers[:2]) if len(headers) >= 2 else set(headers)
 
     manifest_rows: list[dict[str, Any]] = []
     for col_name in columns_with_changes:
+        column = header_by_index.get(col_name)
+        if column is None:
+            continue
         grouped: dict[str, dict[str, Any]] = {}
-        for row_idx, original_row in enumerate(original_rows):
-            original_value = original_row.get(col_name, "")
-            harmonized_value = harmonized_rows[row_idx].get(col_name, original_value)
+        for row_idx, original_row in enumerate(original_dataset.rows):
+            original_value = original_row[column.index] if column.index < len(original_row) else ""
+            harmonized_row = harmonized_dataset.rows[row_idx] if row_idx < len(harmonized_dataset.rows) else []
+            harmonized_value = harmonized_row[column.index] if column.index < len(harmonized_row) else original_value
             if original_value not in grouped:
                 grouped[original_value] = {
                     "job_id": f"e2e-job-{file_id}",
-                    "column_id": headers.index(col_name) if col_name in headers else 0,
+                    "column_id": column.index,
                     "column_name": col_name,
                     "to_harmonize": original_value,
                     "top_harmonization": harmonized_value,
@@ -129,18 +139,30 @@ def main() -> None:
 
     upload_base_dir = _resolve_upload_base_dir(args.upload_base_dir)
     original_path = _find_original_path(args.file_id, upload_base_dir)
-    headers, original_rows = _read_csv(original_path)
-    harmonized_rows = [row.copy() for row in original_rows]
+    selected_sheet = _selected_sheet_for(args.file_id, upload_base_dir)
+    original_dataset = read_tabular(original_path, sheet_name=selected_sheet)
+    harmonized_rows = [row.copy() for row in original_dataset.rows]
     changes = _parse_changes(args.changes)
+    header_by_index = {column.header: column for column in original_dataset.columns}
 
     for row_idx, column_changes in changes.items():
         if row_idx < len(harmonized_rows):
-            harmonized_rows[row_idx].update(column_changes)
+            for header, value in column_changes.items():
+                column = header_by_index.get(header)
+                if column is not None and column.index < len(harmonized_rows[row_idx]):
+                    harmonized_rows[row_idx][column.index] = value
 
-    _write_harmonized(original_path, headers, harmonized_rows)
+    harmonized_dataset = dataset_from_rows(
+        columns=original_dataset.columns,
+        rows=harmonized_rows,
+        source_format=original_dataset.source_format,
+        sheet_name=original_dataset.sheet_name,
+    )
+
+    _write_harmonized(args.file_id, original_path, harmonized_dataset, upload_base_dir)
 
     if not args.no_manifest:
-        manifest_rows = _build_manifest_rows(headers, original_rows, harmonized_rows, changes, args.file_id)
+        manifest_rows = _build_manifest_rows(original_dataset, harmonized_dataset, changes, args.file_id)
         _write_manifest(args.file_id, manifest_rows, upload_base_dir)
 
 

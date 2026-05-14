@@ -1,45 +1,208 @@
 # Data Chord Architecture
 
 Data Chord is a web-based data harmonization application that transforms tabular
-CSV data into standardized Common Data Element (CDE) formats through a guided,
+data into standardized Common Data Element (CDE) formats through a guided,
 human-in-the-loop workflow. See [app.md](app.md) for the product overview.
 
 ---
 
 ## Directory Structure
 
+This map shows the major directories, the module responsibility, and the main
+data shapes each area is allowed to own.
+
 ```
-src/
-├── domain/                    # Shared domain layer (no stage dependencies)
-│   ├── cde.py                 # CDEInfo, column mapping types
-│   ├── change.py              # ChangeType, RecommendationType enums
-│   ├── config.py              # Build-level config validation (NETRIAS_API_KEY)
-│   ├── session.py             # Browser sessionStorage key constants, UILabel
-│   ├── schemas.py             # Cross-stage API request/response models
-│   ├── harmonize.py           # HarmonizeService (Netrias client wrapper)
-│   ├── mapping_service.py     # MappingDiscoveryService (CDE suggestion)
-│   ├── data_model_adapter.py  # Adapter: SDK types → domain types (CDEs, PVs, data models)
-│   ├── data_model_cache.py    # Session-scoped CDE/PV caching
-│   ├── pv_validation.py       # Permissible value conformance checking
-│   ├── pv_persistence.py      # PV manifest disk persistence
-│   ├── paths.py               # Centralized project path resolution
-│   ├── dependencies.py        # Lazy-initialized service singletons
-│   ├── manifest/              # Harmonization manifest I/O
-│   │   ├── models.py          # ManifestRow, ManualOverride
-│   │   ├── reader.py          # read_manifest_parquet
-│   │   └── writer.py          # add_manual_overrides_batch, apply_pv_adjustments_batch
-│   └── storage/               # Typed file storage abstraction
-│       ├── file_types.py      # FileType enum, file naming convention
-│       ├── backends.py        # StorageBackend ABC, LocalStorageBackend
-│       ├── serializers.py     # JSON / Parquet / RawBytes serializers
-│       ├── file_store.py      # FileStore facade (save/load with serialization)
-│       └── upload_storage.py  # UploadStorage (file persistence + constraints)
-├── stage_1_upload/            # File upload and data model selection
-├── stage_2_review_columns/    # Column-to-CDE mapping review
-├── stage_3_harmonize/         # Harmonization execution via Netrias SDK
-├── stage_4_review_results/    # Batch review and manual overrides
-├── stage_5_review_summary/    # Summary metrics and export/download
-└── shared/                    # Shared static assets (CSS tokens, JS modules)
+data_chord/
+|
+|-- backend/app/
+|   `-- main.py
+|       Responsibility:
+|         FastAPI app factory, lifespan cleanup, CORS, root redirect,
+|         static mounts, and stage router registration.
+|       Shapes owned here:
+|         No domain shapes. This layer only wires application edges.
+|
+|-- src/
+|   |
+|   |-- domain/
+|   |   Responsibility:
+|   |     Shared application language, pure rules, Netrias SDK adapters,
+|   |     service singletons, and durable storage boundaries.
+|   |   Dependency rule:
+|   |     May not import stage modules.
+|   |   Shapes owned here:
+|   |     CDEInfo, CdeType, ModelSuggestion, DataModelSummary,
+|   |     DataModelSelection, ColumnKey, ColumnIdentity, ColumnCdeMap,
+|   |     ColumnCdeOverrides, ColumnRenameSet, HarmonizeRequest,
+|   |     HarmonizeResponse, SessionCache, PVManifest, ReviewOverrides,
+|   |     CellOverride, ChangeType, RecommendationType.
+|   |
+|   |   |-- manifest/
+|   |   |   Responsibility:
+|   |   |     Canonical harmonization manifest model plus parquet read/write.
+|   |   |   Shapes owned here:
+|   |   |     ManifestRow, ManualOverride, ManifestSummary,
+|   |   |     ConfidenceBucket, ManifestPayload, ColumnMappingManifest,
+|   |   |     ColumnMappingRecord, MappingAlternative.
+|   |   |   Storage shape:
+|   |   |     uploads/manifests/{file_id}_harmonization.parquet.
+|   |   |
+|   |   `-- storage/
+|   |       Responsibility:
+|   |         Managed file workspace for uploads, generated files, metadata,
+|   |         and small JSON sidecar artifacts.
+|   |       Shapes owned here:
+|   |         UploadStorage, UploadConstraints, UploadedFileMeta,
+|   |         UploadStream, StoredMeta, FileStore, FileType.
+|   |       Storage shapes:
+|   |         files/{file_id}.{csv|tsv|xlsx}
+|   |         harmonized/{file_id}.harmonized.{csv|tsv|xlsx}
+|   |         meta/{file_id}.json
+|   |         manifests/{file_id}_{mapping|overrides|pv_manifest}.json
+|   |
+|   |-- stage_1_upload/
+|   |   Responsibility:
+|   |     Accept a tabular upload, inspect worksheets and columns, select
+|   |     a target data model, and ask discovery for CDE candidates.
+|   |   Shapes owned here:
+|   |     UploadResponse, AnalyzeRequest, AnalyzeResponse, SheetPreview,
+|   |     ColumnPreview, ColumnOverlapRatio.
+|   |   Handoff:
+|   |     Persists UploadedFileMeta and passes AnalyzeResponse through
+|   |     browser sessionStorage to Stage 2.
+|   |
+|   |-- stage_2_review_columns/
+|   |   Responsibility:
+|   |     Let the user review AI column-to-CDE suggestions, inspect one
+|   |     selected column at a time, and choose CDE overrides or No Mapping.
+|   |   Shapes owned here:
+|   |     ColumnDetailResponse and CdeCatalogSnapshot.
+|   |   Handoff:
+|   |     Browser builds ColumnCdeOverrides, ColumnRenameSet, and an optional
+|   |     ColumnMappingManifest payload for Stage 3.
+|   |
+|   |-- stage_3_harmonize/
+|   |   Responsibility:
+|   |     Run Netrias harmonization, fetch PV sets, apply PV adjustments,
+|   |     save the manifest, save PV recovery data, and return metrics.
+|   |   Shapes owned here:
+|   |     PVAdjustmentRecord and ColumnStats.
+|   |   Handoff:
+|   |     Writes harmonized tabular output, parquet manifest, PV manifest,
+|   |     and CDE mapping audit JSON for Stages 4 and 5.
+|   |
+|   |-- stage_4_review_results/
+|   |   Responsibility:
+|   |     Present manifest rows for human review, expose PV-conformant
+|   |     choices, show source row context, and persist review progress.
+|   |   Shapes owned here:
+|   |     StageFourResultsRequest, StageFourResultsResponse,
+|   |     ColumnReviewData, Transformation, SuggestionInfo,
+|   |     ReviewStateSchema, ReviewModeStateSchema, SaveOverridesRequest,
+|   |     NonConformantResponse, RowContextResponse.
+|   |   Handoff:
+|   |     Saves ReviewOverrides JSON and appends manual override audit rows
+|   |     to the parquet manifest.
+|   |
+|   |-- stage_5_review_summary/
+|   |   Responsibility:
+|   |     Summarize final transformations, apply review overrides to the
+|   |     harmonized dataset, package download artifacts, and clear cache.
+|   |   Shapes owned here:
+|   |     StageFiveRequest, StageFiveSummaryResponse, ColumnSummary,
+|   |     TermMapping, TransformationStep.
+|   |   Handoff:
+|   |     Streams a ZIP with final tabular output, JSON manifest, parquet
+|   |     manifest, and CDE mapping audit document.
+|   |
+|   `-- shared/
+|       Responsibility:
+|         Static browser assets shared by more than one stage.
+|       Shapes owned here:
+|         Browser-only state helpers and constants in ES modules:
+|         storage-keys.js, row-state.js, combobox.js,
+|         step-instructions.js, step-instruction-ui.js.
+|
+|-- tests/
+|   Responsibility:
+|     Feature, contract, property, integration, JS, and E2E checks.
+|   Shapes handled:
+|     Public request/response contracts, manifest parquet behavior,
+|     PV conformance, review overrides, upload formats, and browser flows.
+|
+|-- adr/
+|   Responsibility:
+|     Durable records for architecture decisions that explain why the
+|     current boundaries and invariants exist.
+|
+`-- uploads/
+    Responsibility:
+      Local runtime workspace. Configurable through UPLOAD_BASE_DIR.
+    Shapes handled:
+      User uploads, generated harmonized files, parquet manifests,
+      metadata JSON, review override JSON, PV manifest JSON, and mapping JSON.
+```
+
+### Runtime Shape Flow
+
+```
+                 +-------------------------------------------+
+                 | backend/app/main.py                       |
+                 | create_app(): wires routers and assets    |
+                 +---------------------+---------------------+
+                                       |
+                                       v
++------------------+     +------------------+     +------------------+
+| Stage 1 Upload   | --> | Stage 2 Mapping  | --> | Stage 3 Run      |
+|                  |     | Review           |     | Harmonization    |
+| UploadResponse   |     | ColumnDetail     |     | HarmonizeRequest |
+| AnalyzeResponse  |     | ColumnCde...     |     | HarmonizeResponse|
+| SheetPreview     |     | ColumnRenameSet  |     | PVAdjustment...  |
++---------+--------+     +---------+--------+     +---------+--------+
+          |                        |                        |
+          |                        |                        v
+          |                        |              +------------------+
+          |                        |              | uploads/         |
+          |                        |              |                  |
+          |                        |              | uploaded file    |
+          |                        |              | harmonized file  |
+          |                        |              | parquet manifest |
+          |                        |              | sidecar JSON     |
+          |                        |              +---------+--------+
+          |                        |                        |
+          v                        v                        v
+   sessionStorage            ManifestPayload          ManifestRow
+   analysis payload          ColumnMapping...         PVManifest
+                                                        CDE mapping JSON
+                                                        ReviewOverrides
+                                                        |
+                                                        v
+                                      +-----------------+-----------------+
+                                      | Stage 4 Review                    |
+                                      | StageFourResultsResponse          |
+                                      | ColumnReviewData, Transformation  |
+                                      | ReviewStateSchema, CellOverride   |
+                                      +-----------------+-----------------+
+                                                        |
+                                                        v
+                                      +-----------------+-----------------+
+                                      | Stage 5 Summary/Export            |
+                                      | StageFiveSummaryResponse          |
+                                      | ColumnSummary, TermMapping        |
+                                      | ZIP download artifacts            |
+                                      +-----------------------------------+
+
+Shared rules and adapters used by every stage:
+
+  src/domain/cde.py                 CDE metadata and CDE type classification input
+  src/domain/columns.py             Stable ColumnKey and ColumnIdentity
+  src/domain/column_cde_map.py      User mapping decisions keyed by ColumnKey
+  src/domain/column_renames.py      Output names keyed by ColumnKey
+  src/domain/data_model_*.py        Data model/version/CDE/PV lookup and cache
+  src/domain/pv_validation.py       PV conformance and adjustment selection
+  src/domain/change.py              Change and recommendation classification
+  src/domain/schemas.py             Cross-stage API contracts
+  src/domain/dependencies.py        Lazy service and storage construction
 ```
 
 ---
@@ -49,17 +212,17 @@ src/
 **Stages depend on `domain/`, never on each other.**
 
 ```
-                    ┌─────────────────┐
-                    │     DOMAIN      │
-                    │                 │
-                    │  - models       │
-                    │  - schemas      │
-                    │  - services     │
-                    │  - storage      │
-                    └────────┬────────┘
-                             │
-         ┌───────┬───────┬───┴───┬───────┬───────┐
-         │       │       │       │       │       │
+                    +-----------------+
+                    |     DOMAIN      |
+                    |                 |
+                    |  - models       |
+                    |  - schemas      |
+                    |  - services     |
+                    |  - storage      |
+                    +--------+--------+
+                             |
+         +-------+-------+---+---+-------+-------+
+         |       |       |       |       |       |
       Stage 1  Stage 2  Stage 3  Stage 4  Stage 5
 ```
 
@@ -109,11 +272,11 @@ functions (`get_upload_storage()`, `get_file_store()`, `get_mapping_service()`,
 
 ## Data Flow
 
-1. **Upload** (Stage 1): CSV → `UploadStorage` → file_id → data model selection
+1. **Upload** (Stage 1): tabular file → `UploadStorage` → optional worksheet selection → file_id → data model selection
 2. **Mapping** (Stage 2): file_id → `MappingService` → column-to-CDE mappings
-3. **Harmonize** (Stage 3): mappings → `HarmonizeService` → manifest (Parquet) + PV adjustments
+3. **Harmonize** (Stage 3): mappings → `HarmonizeService` → manifest (Parquet) + PV adjustments + CDE mapping artifact
 4. **Review** (Stage 4): manifest + PV combobox overrides → reviewed manifest with audit trail
-5. **Export** (Stage 5): manifest → harmonized CSV + JSON manifest (human-readable audit trail)
+5. **Export** (Stage 5): manifest → harmonized tabular file + JSON manifest + CDE mapping artifact
 
 ---
 
@@ -121,7 +284,7 @@ functions (`get_upload_storage()`, `get_file_store()`, `get_mapping_service()`,
 
 ### Stage 1: Upload
 
-**Purpose:** Accept a CSV file, select data model, and discover CDE column mappings.
+**Purpose:** Accept a CSV, TSV, or XLSX file, select data model, and discover CDE column mappings.
 
 **Endpoints:**
 - `GET /stage-1` — Render upload page
@@ -129,8 +292,9 @@ functions (`get_upload_storage()`, `get_file_store()`, `get_mapping_service()`,
 - `POST /stage-1/analyze` — Profile columns, call `MappingDiscoveryService.discover()`
 - `GET /stage-1/data-models` — Fetch available data models from Data Model Store API
 
-**Flow:** User drops CSV → file stored to disk → user selects data model and
-version in modal → navigates to Stage 2 with `file_id` query parameter.
+**Flow:** User drops a tabular file → file stored to disk → XLSX uploads default
+to the first worksheet and may choose another worksheet → user selects data
+model and version in modal → navigates to Stage 2 with `file_id` query parameter.
 
 ### Stage 2: Review Column Mappings
 
@@ -158,7 +322,8 @@ This stage is read-only on the server — no files are written.
 target schema. Runs harmonization and PV fetching in parallel. Applies PV
 adjustments to the manifest (preferring original values when already conformant).
 Persists PV manifest to disk for session recovery. Returns column-level
-breakdown metrics.
+breakdown metrics. Also persists the column-keyed CDE mapping plan that Stage 5
+includes in the ZIP download.
 
 ### Stage 4: Review Results
 
@@ -175,10 +340,10 @@ collect manual overrides via PV combobox.
 - `POST /stage-4/row-context` — Fetch original row data by indices
 - `POST /stage-4/term-row-indices` — Fetch full row indices for a term (when truncated in initial response)
 
-**Flow:** Loads original CSV and harmonization manifest. Builds comparison rows
+**Flow:** Loads the original tabular data and harmonization manifest. Builds comparison rows
 with PV conformance indicators. UI displays batches with confidence sorting.
 PV combobox enforces conformant-only selection. Row context popup provides
-original CSV context. State persistence saves review mode, sort, filters,
+original row context. State persistence saves review mode, sort, filters,
 position, and all overrides.
 
 **Two review modes:**
@@ -199,8 +364,8 @@ and download final artifacts.
 `MANUAL_OVERRIDE`. Displays segmented bar visualization per column. Shows
 transformation history (Original → AI → User). Non-conformant banner
 warns of values not in target PVs. Download applies review overrides to the
-harmonized CSV, bundles final CSV and JSON manifest into a ZIP, then clears
-session cache.
+harmonized tabular file, bundles the final data file, JSON manifest, and saved
+CDE mapping artifact into a ZIP, then clears session cache.
 
 ---
 
@@ -208,9 +373,12 @@ session cache.
 
 ### CDE Metadata (`cde.py`)
 
-`CDEInfo` dataclass holds CDE metadata (cde_id, cde_key, description,
-version_label) fetched dynamically from the Data Model Store API.
-`ColumnMappingSet` is the typed container for all column-to-CDE assignments.
+`CDEInfo` holds CDE metadata (cde_id, cde_key, description, version_label)
+fetched dynamically from the Data Model Store API. `ColumnCdeMap` is the
+effective column-to-CDE mapping used for PV lookup, cache persistence, and
+manifest handoff. `ColumnCdeOverrides` represents Stage 2 user edits, including
+explicit "No Mapping" choices. `ColumnRenameSet` carries user-selected output
+column names separately from source column identity.
 
 ### Data Model Integration (`data_model_adapter.py`, `data_model_cache.py`)
 
@@ -219,7 +387,10 @@ to domain types (`DataModelSummary`, `CDEInfo`, PV frozensets). It uses the
 shared `NetriasClient` singleton from `dependencies.py`. `SessionCache` provides
 session-scoped, thread-safe caching of CDEs and PV sets (frozenset for O(1)
 membership testing), with disk persistence via `pv_persistence.py` for server
-restart recovery.
+restart recovery. `DataModelSelection` is the canonical domain object for the
+target model key plus optional numeric version; callers derive SDK
+`target_version` strings from it instead of rebuilding `"latest"`/numbered
+version logic in each stage.
 
 ### PV Validation (`pv_validation.py`)
 
@@ -241,7 +412,7 @@ original-value-to-harmonized-value pair, with:
 
 - Original and harmonized values
 - Confidence scores
-- Row indices (which source CSV rows share this mapping)
+- Row indices (which source rows share this mapping)
 - Manual override audit trail (user, timestamp, value)
 - PV adjustment records (source, adjusted value, timestamp)
 
@@ -251,31 +422,22 @@ edits via `add_manual_overrides_batch()` and applies PV adjustments via
 
 ### Storage Submodule (`storage/`)
 
-A layered file storage abstraction:
+`FileStore` persists small JSON sidecar artifacts owned by the app: review
+overrides, PV manifests, and CDE mapping audit documents. `FileType` defines the
+semantic artifact names and their `{file_id}_{suffix}.json` naming convention.
 
-```
-FileStore (facade)
-  └─ StorageBackend (ABC)
-       └─ LocalStorageBackend (filesystem)
-  └─ Serializer (ABC)
-       ├─ JSONSerializer
-       ├─ ParquetSerializer
-       └─ RawBytesSerializer
-```
-
-`FileType` enum defines the semantic file types and their naming conventions.
-Files are named `{file_id}_{suffix}.{extension}` (e.g.,
-`abc123_overrides.json`, `abc123_harmonization.parquet`).
-
-`UploadStorage` handles uploaded CSV persistence, constraints validation
-(file size, type, extension), and metadata tracking via `UploadedFileMeta`.
+`UploadStorage` handles uploaded tabular file persistence, constraints
+validation (file size, type, extension), XLSX worksheet metadata, SDK
+harmonization manifest files, and metadata tracking via `UploadedFileMeta`.
+It depends on a minimal `UploadStream` protocol so web framework upload types
+stay at the router boundary.
 
 ### Services
 
 | Service | Responsibility |
 |---|---|
 | `HarmonizeService` | Wraps `NetriasClient.harmonize()` with manifest merging and error handling |
-| `MappingDiscoveryService` | Wraps `NetriasClient.discover_mapping_from_csv()` (confidence threshold 0.7) |
+| `MappingDiscoveryService` | Wraps `NetriasClient.discover_mapping_from_tabular()` (confidence threshold 0.7) |
 | `data_model_adapter` | Thin adapter: SDK types → domain types (data model list, CDEs, PVs) |
 
 Services degrade gracefully: missing API keys or client init failures are
@@ -298,10 +460,11 @@ All persistent data lives under a single base directory (configurable via
 ```
 uploads/
 ├── files/
-│   ├── {file_id}.csv                    # Original uploaded CSV
-│   └── {file_id}_harmonized.csv         # Harmonized CSV from Netrias
+│   └── {file_id}.{csv|tsv|xlsx}         # Original uploaded tabular file
+├── harmonized/
+│   └── {file_id}.harmonized.{csv|tsv|xlsx}
 ├── meta/
-│   └── {file_id}.json                   # UploadedFileMeta (name, size, timestamp)
+│   └── {file_id}.json                   # UploadedFileMeta (name, size, timestamp, worksheet)
 └── manifests/
     ├── {file_id}.json                   # Stored manifest payload (JSON)
     ├── {file_id}_harmonization.parquet  # Harmonization manifest (Parquet)
@@ -348,14 +511,14 @@ Vanilla ES6 modules with direct DOM manipulation. No bundler. Key patterns:
 
 | Method | Used by |
 |---|---|
-| `discover_mapping_from_csv()` | `MappingDiscoveryService` (CDE recommendations) |
+| `discover_mapping_from_tabular()` | `MappingDiscoveryService` (CDE recommendations) |
 | `harmonize()` | `HarmonizeService` |
 | `list_data_models()` | `data_model_adapter` (data model list) |
 | `list_cdes()` | `data_model_adapter` (CDE metadata) |
-| `get_pv_set_async()` | `data_model_adapter` (permissible values) |
+| model-version PV endpoints | `data_model_adapter` (permissible values) |
 
 Configuration: `NETRIAS_API_KEY` environment variable (loaded from `.env`).
-The client is initialized with `Environment.PROD` which resolves all service
+The client is initialized with `Environment.STAGING` which resolves all service
 URLs (harmonization, discovery, Data Model Store) from a built-in registry.
 
 ---
@@ -372,6 +535,7 @@ See `adr/` for architectural decision records:
 - [ADR 006](adr/ADR_006_env_simplification.md) — Environment simplification and SDK migration
 - [ADR 007](adr/ADR_007_ai_whitespace_trimming.md) — AI output whitespace trimming at reader boundary
 - [ADR 008](adr/ADR_008_release_strategy.md) — Release strategy (git tags + GitHub Releases)
+- [ADR 009](adr/ADR_009_tabular_column_identity.md) — Tabular uploads and stable column identity
 
 **Key principles:**
 
@@ -467,4 +631,3 @@ Examples:
 | Interactivity | HTMX |
 | Data Processing | PyArrow |
 | Package Management | uv |
-

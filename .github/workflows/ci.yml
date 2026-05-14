@@ -123,6 +123,8 @@ jobs:
   # E2E tests using Playwright with Chromium for browser automation.
   e2e:
     runs-on: ubuntu-latest
+    env:
+      NETRIAS_API_KEY: ${{ secrets.NETRIAS_API_KEY }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 

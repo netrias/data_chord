@@ -12,6 +12,8 @@ from typing import NotRequired, TypedDict
 
 import pyarrow as pa
 
+from src.domain.columns import ColumnKey, column_key_for_index
+
 
 class ConfidenceBucket(str, Enum):
     HIGH = "high"
@@ -27,25 +29,36 @@ HIGH_CONFIDENCE_THRESHOLD: float = 0.8
 MEDIUM_CONFIDENCE_THRESHOLD: float = 0.45
 
 
-class AlternativeEntry(TypedDict, total=False):
+class AlternativeEntry(TypedDict):
+    """SDK candidate shape nested under one column mapping."""
+
     target: str
-    similarity: float
-    cde_id: int
+    confidence: float
+    cde_id: NotRequired[int]
+    harmonization: NotRequired[str]
 
 
 class ColumnMappingEntry(TypedDict):
-    targetField: str
+    """SDK column-mapping shape stored in JSON before harmonization."""
+
+    cde_key: str
     cde_id: int
+    column_name: NotRequired[str]
+    harmonization: NotRequired[str]
     route: NotRequired[str]
     alternatives: NotRequired[list[AlternativeEntry]]
 
 
-class ManifestPayload(TypedDict, total=False):
+class ManifestPayload(TypedDict):
+    """Top-level SDK mapping manifest keyed by stable source column keys."""
+
     column_mappings: dict[str, ColumnMappingEntry]
 
 
 @dataclass(frozen=True)
 class ManualOverride:
+    """Audit entry for a human replacement of one harmonized value."""
+
     user_id: str | None
     timestamp: str
     value: str
@@ -53,6 +66,8 @@ class ManualOverride:
 
 @dataclass(frozen=True)
 class ManifestRow:
+    """One unique source term from the harmonization parquet manifest."""
+
     job_id: str
     column_id: int
     column_name: str
@@ -65,9 +80,15 @@ class ManifestRow:
     row_indices: list[int]
     manual_overrides: list[ManualOverride]
 
+    @property
+    def column_key(self) -> ColumnKey:
+        return column_key_for_index(self.column_id)
+
 
 @dataclass(frozen=True)
 class ManifestSummary:
+    """Aggregate counts plus parsed rows for review and summary screens."""
+
     total_terms: int
     changed_terms: int
     high_confidence_count: int

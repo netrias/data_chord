@@ -4,21 +4,32 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import zipfile
 from io import BytesIO
+from typing import cast
+from unittest.mock import MagicMock
 
 import pytest
 from httpx import AsyncClient
+from netrias_client import TabularFormat, dataset_from_rows, write_tabular
+from openpyxl import load_workbook
+from openpyxl.worksheet.worksheet import Worksheet
 
+import src.domain.dependencies as dependencies
 from src.domain.cde import CDEInfo
-from src.domain.data_model_cache import get_session_cache
-from src.domain.harmonize import HarmonizeResult
-from src.domain.storage import UploadStorage
+from src.domain.data_model_cache import clear_session_cache, get_session_cache
+from src.domain.harmonize import HarmonizeResult, HarmonizeStatus
+from src.domain.manifest import ManifestPayload
+from src.domain.storage import FileType, UploadStorage
 from tests.conftest import (
     TEST_TARGET_SCHEMA,
+    TEST_TSV_CONTENT_TYPE,
+    TEST_XLSX_CONTENT_TYPE,
     create_csv_content,
     create_harmonized_csv,
     create_manifest_for_file,
+    create_xlsx_content,
     review_state_payload,
     upload_content,
 )
@@ -31,6 +42,22 @@ def _read_downloaded_csv(response_bytes: bytes) -> list[dict[str, str]]:
         csv_name = next(name for name in zf.namelist() if name.endswith(".csv"))
         csv_content = zf.read(csv_name).decode("utf-8")
     return list(csv.DictReader(io.StringIO(csv_content)))
+
+
+def _read_downloaded_tabular(response_bytes: bytes, suffix: str, delimiter: str) -> list[list[str]]:
+    with zipfile.ZipFile(BytesIO(response_bytes), "r") as zf:
+        data_name = next(name for name in zf.namelist() if name.endswith(suffix))
+        content = zf.read(data_name).decode("utf-8")
+    return list(csv.reader(io.StringIO(content), delimiter=delimiter))
+
+
+def _read_downloaded_xlsx(response_bytes: bytes, sheet_name: str) -> list[list[str]]:
+    with zipfile.ZipFile(BytesIO(response_bytes), "r") as zf:
+        workbook_name = next(name for name in zf.namelist() if name.endswith(".xlsx"))
+        workbook_bytes = BytesIO(zf.read(workbook_name))
+    workbook = load_workbook(workbook_bytes, data_only=True)
+    sheet = cast(Worksheet, workbook[sheet_name])
+    return [[str(value) if value is not None else "" for value in row] for row in sheet.iter_rows(values_only=True)]
 
 
 async def test_stage1_upload_persists_exact_bytes(
@@ -51,6 +78,46 @@ async def test_stage1_upload_persists_exact_bytes(
     assert meta is not None, "Expected stored metadata for uploaded file"
     assert meta.size_bytes == len(content), "Stored size does not match upload size"
     assert meta.saved_path.read_bytes() == content, "Stored bytes do not match uploaded bytes"
+
+
+async def test_stage1_upload_preserves_other_session_cde_cache(app_client: AsyncClient) -> None:
+    """Uploading a new file must not discard another active session's CDE cache."""
+
+    first_file_id: str | None = None
+    second_file_id: str | None = None
+
+    try:
+        # Given: one uploaded file has session-scoped CDE metadata
+        first_file_id = await upload_content(app_client, create_csv_content([["col_a"], ["alpha"]]), "first.csv")
+        first_cache = get_session_cache(first_file_id)
+        assert not first_cache.has_cdes()
+
+        first_cache.set_cdes(
+            [
+                CDEInfo(
+                    cde_id=1,
+                    cde_key="primary_diagnosis",
+                    description="Primary Diagnosis",
+                    version_label="1",
+                )
+            ],
+            data_model_key=TEST_TARGET_SCHEMA,
+            version_label="1",
+            version_number=1,
+        )
+        assert first_cache.has_cdes()
+
+        # When: another file is uploaded
+        second_file_id = await upload_content(app_client, create_csv_content([["col_b"], ["beta"]]), "second.csv")
+
+        # Then: the first file's cache remains available for Stage 2 and later
+        assert second_file_id != first_file_id
+        assert get_session_cache(first_file_id).get_cde_by_key("primary_diagnosis") is not None
+    finally:
+        if first_file_id is not None:
+            clear_session_cache(first_file_id)
+        if second_file_id is not None:
+            clear_session_cache(second_file_id)
 
 
 async def test_stage1_upload_rejects_mismatched_content_type(
@@ -141,11 +208,11 @@ async def test_stage1_analyze_handles_ragged_rows(
     assert col_b_samples[1] == ""
 
 
-async def test_stage1_analyze_rejects_duplicate_headers(
+async def test_stage1_analyze_accepts_duplicate_headers_with_distinct_column_keys(
     app_client: AsyncClient,
     temp_storage: UploadStorage,
 ) -> None:
-    """Analyze rejects CSVs with duplicate headers."""
+    """Analyze preserves duplicate headers by assigning distinct column keys."""
 
     # Given: a CSV with duplicate header names
     content = b"col_a,col_a\nalpha,beta\n"
@@ -158,9 +225,93 @@ async def test_stage1_analyze_rejects_duplicate_headers(
         json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
     )
 
-    # Then: bad request indicates duplicate headers
-    assert response.status_code == 400
-    assert "Duplicate headers" in response.text
+    # Then: both duplicate columns are present and independently addressable
+    assert response.status_code == 200
+    columns = response.json()["columns"]
+    assert [column["column_name"] for column in columns] == ["col_a", "col_a"]
+    assert [column["column_key"] for column in columns] == ["col_0000", "col_0001"]
+    assert columns[0]["sample_values"] == ["alpha"]
+    assert columns[1]["sample_values"] == ["beta"]
+
+
+async def test_stage1_analyze_accepts_tsv(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """Analyze treats tabs as column delimiters for TSV uploads."""
+
+    # Given: a TSV with commas inside values and no manifest stored yet
+    content = b"col_a\tcol_b\nalpha, beta\tgamma\n"
+    file_id = await upload_content(app_client, content, "data.tsv", TEST_TSV_CONTENT_TYPE)
+    assert temp_storage.load_manifest(file_id) is None
+
+    # When: analyze is requested
+    response = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
+    )
+
+    # Then: tab-separated columns are parsed and comma text is preserved
+    assert response.status_code == 200
+    columns = response.json()["columns"]
+    assert [column["column_name"] for column in columns] == ["col_a", "col_b"]
+    assert columns[0]["sample_values"] == ["alpha, beta"]
+
+
+async def test_stage1_analyze_xlsx_defaults_to_first_sheet(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """Analyze reads the first worksheet by default for XLSX uploads."""
+
+    # Given: an XLSX workbook with distinct values on each sheet
+    content = create_xlsx_content({
+        "First": [["col_a"], ["first-value"]],
+        "Second": [["col_a"], ["second-value"]],
+    })
+    file_id = await upload_content(app_client, content, "data.xlsx", TEST_XLSX_CONTENT_TYPE)
+    assert temp_storage.load_manifest(file_id) is None
+
+    # When: analyze is requested without a sheet override
+    response = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
+    )
+
+    # Then: samples come from the first sheet
+    assert response.status_code == 200
+    columns = response.json()["columns"]
+    assert columns[0]["sample_values"] == ["first-value"]
+
+
+async def test_stage1_analyze_xlsx_uses_selected_sheet(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """Analyze uses the sheet selected in Stage 1 for XLSX uploads."""
+
+    # Given: an XLSX workbook with duplicate headers on the second sheet
+    content = create_xlsx_content({
+        "First": [["ignored"], ["nope"]],
+        "Patients": [["col_a", "col_a"], ["alpha", "beta"]],
+    })
+    file_id = await upload_content(app_client, content, "data.xlsx", TEST_XLSX_CONTENT_TYPE)
+    assert temp_storage.load_manifest(file_id) is None
+
+    # When: analyze is requested for the second sheet
+    response = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "sheet_name": "Patients"},
+    )
+
+    # Then: selected-sheet columns are parsed without collapsing duplicate headers
+    assert response.status_code == 200
+    columns = response.json()["columns"]
+    assert [column["column_name"] for column in columns] == ["col_a", "col_a"]
+    assert [column["column_key"] for column in columns] == ["col_0000", "col_0001"]
+    meta = temp_storage.load(file_id)
+    assert meta is not None
+    assert meta.selected_sheet == "Patients"
 
 
 async def test_stage1_analyze_truncates_preview_only(
@@ -270,6 +421,96 @@ async def test_stage1_analyze_is_idempotent(
     assert manifest_one == manifest_two, "Manifest changed between analyses"
 
 
+async def test_stage1_analyze_uses_selected_version_and_primes_reference_cache(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+    mock_netrias_client: MagicMock,
+) -> None:
+    """Analyze passes the selected model version and warms CDE/PV cache."""
+
+    # Given: an uploaded CSV and an empty session cache
+    content = create_csv_content([["diagnosis"], ["Lung"], ["Breast"]])
+    file_id = await upload_content(app_client, content, "versioned.csv")
+    cache = get_session_cache(file_id)
+    assert not cache.has_cdes()
+    assert not cache.has_any_pvs()
+
+    # When: analysis is requested for GC version 2
+    response = await app_client.post(
+        "/stage-1/analyze",
+        json={
+            "file_id": file_id,
+            "target_schema": "gc",
+            "target_version_number": 2,
+        },
+    )
+
+    # Then: discovery and the session cache use the selected version number
+    assert response.status_code == 200
+    assert response.json()["target_version_number"] == 2
+    assert mock_netrias_client.discover_mapping_from_tabular.call_args.kwargs["target_version"] == "2"
+    selection = cache.get_model_selection()
+    assert selection is not None
+    assert selection.key == "gc"
+    assert selection.version_label == "2"
+    assert cache.has_cdes()
+    assert cache.has_any_pvs()
+
+
+async def test_stage3_persists_cde_mapping_download_artifact(
+    app_client: AsyncClient,
+) -> None:
+    """Harmonize saves the column-to-CDE mapping plan for the download bundle."""
+
+    # Given: an uploaded CSV and a manifest with two mapped columns
+    file_id = await upload_content(
+        app_client,
+        create_csv_content([["diagnosis", "drug"], ["Lung", "Agent A"]]),
+        "mapping-plan.csv",
+    )
+    cache = get_session_cache(file_id)
+    cache.set_cdes(
+        [
+            CDEInfo(cde_id=2, cde_key="primary_diagnosis", description="Primary Diagnosis", version_label="1"),
+            CDEInfo(cde_id=1, cde_key="therapeutic_agents", description="Therapeutic Agents", version_label="1"),
+        ],
+        data_model_key=TEST_TARGET_SCHEMA,
+        version_label="1",
+        version_number=1,
+    )
+    manifest: ManifestPayload = {
+        "column_mappings": {
+            "col_0000": {"column_name": "diagnosis", "cde_key": "primary_diagnosis", "cde_id": 2},
+            "col_0001": {"column_name": "drug", "cde_key": "therapeutic_agents", "cde_id": 1},
+        }
+    }
+
+    # When: the user overrides and renames the second column
+    response = await app_client.post(
+        "/stage-3/harmonize",
+        json={
+            "file_id": file_id,
+            "target_schema": TEST_TARGET_SCHEMA,
+            "target_version_number": 1,
+            "manual_overrides": {"col_0001": "primary_diagnosis"},
+            "column_renames": {"col_0001": "Treatment Diagnosis"},
+            "manifest": manifest,
+        },
+    )
+
+    # Then: a mapping artifact records AI mappings, user overrides, and output names by column key
+    assert response.status_code == 200
+    document = dependencies.get_file_store().load(file_id, FileType.COLUMN_MAPPING)
+    assert isinstance(document, dict)
+    mappings = {entry["column_key"]: entry for entry in document["mappings"]}
+    assert mappings["col_0000"]["mapping_source"] == "ai"
+    assert mappings["col_0000"]["cde_key"] == "primary_diagnosis"
+    assert mappings["col_0001"]["mapping_source"] == "user_override"
+    assert mappings["col_0001"]["source_column_name"] == "drug"
+    assert mappings["col_0001"]["output_column_name"] == "Treatment Diagnosis"
+    assert mappings["col_0001"]["cde_description"] == "Primary Diagnosis"
+
+
 async def test_stage2_mapping_page_renders_manual_options(
     app_client: AsyncClient,
 ) -> None:
@@ -316,13 +557,25 @@ async def test_stage3_harmonize_uses_stored_manifest_when_payload_missing(
         def __init__(self) -> None:
             self.received_manifest = None
 
-        def run(self, *, file_path, target_schema, column_mappings, cache, manifest):  # type: ignore[no-untyped-def]
+        def run(  # type: ignore[no-untyped-def]
+            self,
+            *,
+            file_path,
+            target_schema,
+            column_overrides,
+            column_renames,
+            cache,
+            target_version,
+            manifest,
+            output_path,
+            sheet_name,
+        ):
             self.received_manifest = manifest
-            return HarmonizeResult(job_id="job-1", status="succeeded", detail="ok")
+            return HarmonizeResult(job_id="job-1", status=HarmonizeStatus.SUCCEEDED, detail="ok")
 
     # Given: an uploaded file with a stored manifest
     file_id = await upload_content(app_client, create_csv_content([["col_a"], ["alpha"]]), "manifest.csv")
-    stored_manifest = {"column_mappings": {"col_a": {"targetField": "primary_diagnosis", "cde_id": 2}}}
+    stored_manifest: ManifestPayload = {"column_mappings": {"col_a": {"cde_key": "primary_diagnosis", "cde_id": 2}}}
     temp_storage.save_manifest(file_id, stored_manifest)
     stub = StubHarmonizer()
     assert stub.received_manifest is None
@@ -342,7 +595,17 @@ async def test_stage3_harmonize_uses_stored_manifest_when_payload_missing(
 
     # Then: the stored manifest is used
     assert response.status_code == 200
-    assert stub.received_manifest == stored_manifest
+    assert stub.received_manifest == {
+        "column_mappings": {
+            "col_a": {
+                "column_name": "col_a",
+                "cde_key": "primary_diagnosis",
+                "cde_id": 2,
+                "harmonization": "harmonizable",
+                "alternatives": [],
+            }
+        }
+    }
 
 
 async def test_stage3_harmonize_prefers_payload_manifest(
@@ -354,18 +617,32 @@ async def test_stage3_harmonize_prefers_payload_manifest(
     class StubHarmonizer:
         def __init__(self) -> None:
             self.received_manifest = None
+            self.received_target_version = None
 
-        def run(self, *, file_path, target_schema, column_mappings, cache, manifest):  # type: ignore[no-untyped-def]
+        def run(  # type: ignore[no-untyped-def]
+            self,
+            *,
+            file_path,
+            target_schema,
+            column_overrides,
+            column_renames,
+            cache,
+            target_version,
+            manifest,
+            output_path,
+            sheet_name,
+        ):
             self.received_manifest = manifest
-            return HarmonizeResult(job_id="job-2", status="succeeded", detail="ok")
+            self.received_target_version = target_version
+            return HarmonizeResult(job_id="job-2", status=HarmonizeStatus.SUCCEEDED, detail="ok")
 
     # Given: an uploaded file with a stored manifest
     file_id = await upload_content(app_client, create_csv_content([["col_a"], ["alpha"]]), "payload.csv")
     temp_storage.save_manifest(
         file_id,
-        {"column_mappings": {"col_a": {"targetField": "primary_diagnosis", "cde_id": 2}}},
+        {"column_mappings": {"col_a": {"cde_key": "primary_diagnosis", "cde_id": 2}}},
     )
-    payload_manifest = {"column_mappings": {"col_a": {"targetField": "morphology", "cde_id": 3}}}
+    payload_manifest: ManifestPayload = {"column_mappings": {"col_a": {"cde_key": "morphology", "cde_id": 3}}}
     stub = StubHarmonizer()
 
     # When: harmonize is triggered with a manifest payload
@@ -377,6 +654,7 @@ async def test_stage3_harmonize_prefers_payload_manifest(
             json={
                 "file_id": file_id,
                 "target_schema": TEST_TARGET_SCHEMA,
+                "target_version_number": 2,
                 "manual_overrides": {},
                 "manifest": payload_manifest,
             },
@@ -384,7 +662,18 @@ async def test_stage3_harmonize_prefers_payload_manifest(
 
     # Then: payload manifest is used instead of the stored one
     assert response.status_code == 200
-    assert stub.received_manifest == payload_manifest
+    assert stub.received_manifest == {
+        "column_mappings": {
+            "col_a": {
+                "column_name": "col_a",
+                "cde_key": "morphology",
+                "cde_id": 3,
+                "harmonization": "harmonizable",
+                "alternatives": [],
+            }
+        }
+    }
+    assert stub.received_target_version == "2"
 
 
 async def test_stage5_download_matches_harmonized_when_no_overrides(
@@ -408,6 +697,34 @@ async def test_stage5_download_matches_harmonized_when_no_overrides(
     assert response.status_code == 200
     output_rows = _read_downloaded_csv(response.content)
     assert output_rows[1]["col_a"] == "gamma"
+
+
+async def test_stage5_download_preserves_harmonized_headers(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """Download keeps headers produced by harmonization, including Stage 2 column renames."""
+
+    # Given: harmonization wrote a renamed output column
+    rows = [["diagnosis"], ["alpha"]]
+    file_id = await upload_content(app_client, create_csv_content(rows), "renamed.csv")
+    meta = temp_storage.load(file_id)
+    assert meta is not None
+    harmonized_dir = meta.saved_path.parent.parent / "harmonized"
+    harmonized_dir.mkdir(parents=True, exist_ok=True)
+    harmonized_path = harmonized_dir / f"{meta.saved_path.stem}.harmonized.csv"
+    with harmonized_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerows([["Primary Diagnosis"], ["Lung Cancer"]])
+
+    # When: the download endpoint is invoked
+    response = await app_client.post("/stage-5/download", json={"file_id": file_id})
+
+    # Then: the downloaded CSV keeps the harmonized header and value
+    assert response.status_code == 200
+    output_rows = _read_downloaded_csv(response.content)
+    assert list(output_rows[0]) == ["Primary Diagnosis"]
+    assert output_rows[0]["Primary Diagnosis"] == "Lung Cancer"
 
 
 async def test_stage5_download_succeeds_without_manifest(
@@ -434,6 +751,116 @@ async def test_stage5_download_succeeds_without_manifest(
     assert not any(name.endswith(".parquet") for name in names)
 
 
+async def test_stage5_download_includes_cde_mapping_artifact(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """Download bundles the saved column-to-CDE mapping plan when available."""
+
+    # Given: an uploaded file with a saved CDE mapping document
+    rows = [["col_a"], ["alpha"]]
+    file_id = await upload_content(app_client, create_csv_content(rows), "with-mapping.csv")
+    meta = temp_storage.load(file_id)
+    assert meta is not None
+    create_harmonized_csv(meta.saved_path, {})
+    dependencies.get_file_store().save(
+        file_id,
+        FileType.COLUMN_MAPPING,
+        {
+            "file_id": file_id,
+            "generated_at": "2026-05-13T00:00:00+00:00",
+            "target_schema": TEST_TARGET_SCHEMA,
+            "target_version": "1",
+            "mappings": [{"column_key": "col_0000", "source_column_name": "col_a"}],
+        },
+    )
+
+    # When: the download endpoint is invoked
+    response = await app_client.post("/stage-5/download", json={"file_id": file_id})
+
+    # Then: the ZIP includes the mapping artifact alongside the data file
+    assert response.status_code == 200
+    with zipfile.ZipFile(BytesIO(response.content), "r") as zf:
+        mapping_name = next(name for name in zf.namelist() if name.endswith("_cde_mapping.json"))
+        mapping_document = json.loads(zf.read(mapping_name).decode("utf-8"))
+    assert mapping_document["file_id"] == file_id
+    assert mapping_document["mappings"][0]["column_key"] == "col_0000"
+
+
+async def test_stage5_download_tsv_input_exports_tsv(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """A TSV upload downloads a TSV data file, with comma text preserved."""
+
+    # Given: a TSV input and a TSV-shaped harmonized intermediate
+    content = b"col_a\tcol_b\nalpha, beta\tgamma\n"
+    file_id = await upload_content(app_client, content, "download.tsv", TEST_TSV_CONTENT_TYPE)
+    meta = temp_storage.load(file_id)
+    assert meta is not None
+    harmonized_dir = meta.saved_path.parent.parent / "harmonized"
+    harmonized_dir.mkdir(parents=True, exist_ok=True)
+    harmonized_path = harmonized_dir / f"{meta.saved_path.stem}.harmonized.tsv"
+    with harmonized_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle, delimiter="\t")
+        writer.writerows([["col_a", "col_b"], ["delta, epsilon", "gamma"]])
+
+    # When: the download endpoint is invoked
+    response = await app_client.post("/stage-5/download", json={"file_id": file_id})
+
+    # Then: the zip contains TSV output and values are tab-delimited
+    assert response.status_code == 200
+    with zipfile.ZipFile(BytesIO(response.content), "r") as zf:
+        names = zf.namelist()
+    assert any(name.endswith(".tsv") for name in names)
+    assert not any(name.endswith(".csv") for name in names)
+    output_rows = _read_downloaded_tabular(response.content, ".tsv", "\t")
+    assert output_rows == [["col_a", "col_b"], ["delta, epsilon", "gamma"]]
+
+
+async def test_stage5_download_xlsx_input_exports_xlsx_selected_sheet(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """An XLSX upload downloads XLSX output while updating only the selected sheet."""
+
+    # Given: an XLSX input where Stage 1 selected the second sheet
+    content = create_xlsx_content({
+        "Keep": [["status"], ["unchanged"]],
+        "Patients": [["col_a", "col_b"], ["alpha", "gamma"]],
+    })
+    file_id = await upload_content(app_client, content, "download.xlsx", TEST_XLSX_CONTENT_TYPE)
+    analyze_response = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "sheet_name": "Patients"},
+    )
+    assert analyze_response.status_code == 200
+    meta = temp_storage.load(file_id)
+    assert meta is not None
+    harmonized_dir = meta.saved_path.parent.parent / "harmonized"
+    harmonized_dir.mkdir(parents=True, exist_ok=True)
+    harmonized_path = harmonized_dir / f"{meta.saved_path.stem}.harmonized.xlsx"
+    harmonized_dataset = dataset_from_rows(
+        headers=["col_a", "col_b"],
+        rows=[["delta", "gamma"]],
+        source_format=TabularFormat.XLSX,
+        sheet_name="Patients",
+    )
+    write_tabular(harmonized_path, harmonized_dataset, template_path=meta.saved_path)
+
+    # When: the download endpoint is invoked
+    response = await app_client.post("/stage-5/download", json={"file_id": file_id})
+
+    # Then: the zip contains XLSX output, and non-selected sheets are preserved
+    assert response.status_code == 200
+    with zipfile.ZipFile(BytesIO(response.content), "r") as zf:
+        names = zf.namelist()
+    assert any(name.endswith(".xlsx") for name in names)
+    assert not any(name.endswith(".csv") for name in names)
+    assert _read_downloaded_xlsx(response.content, "Keep") == [["status"], ["unchanged"]]
+    assert _read_downloaded_xlsx(response.content, "Patients") == [["col_a", "col_b"], ["delta", "gamma"]]
+
+
 async def test_stage5_download_ignores_invalid_row_keys(
     app_client: AsyncClient,
     temp_storage: UploadStorage,
@@ -452,7 +879,7 @@ async def test_stage5_download_ignores_invalid_row_keys(
         json={
             "file_id": file_id,
             "overrides": {
-                "99": {"col_a": {"ai_value": "alpha", "human_value": "gamma", "original_value": "alpha"}},
+                "99": {"col_0000": {"ai_value": "alpha", "human_value": "gamma", "original_value": "alpha"}},
             },
             "review_state": review_state_payload(),
         },

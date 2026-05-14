@@ -2,7 +2,7 @@
 
 ## What It Is
 
-Data Chord is a web-based data harmonization tool that transforms tabular data (CSV files) into standardized formats through a guided, human-in-the-loop workflow. It bridges raw research data and the Common Data Elements (CDEs) required by data repositories.
+Data Chord is a web-based data harmonization tool that transforms tabular data into standardized formats through a guided, human-in-the-loop workflow. It supports CSV, TSV, and XLSX uploads, and bridges raw research data with the Common Data Elements (CDEs) required by data repositories.
 
 ## The Problem
 
@@ -12,7 +12,7 @@ Manual curation is accurate but slow. Automated normalization is fast but opaque
 
 ## Workflow Stages
 
-1. **Upload** — User uploads a CSV. Data Chord profiles columns and calls the CDE Recommendation API to suggest column-to-schema mappings.
+1. **Upload** — User uploads a tabular file. Data Chord profiles columns and calls the CDE Recommendation API to suggest column-to-schema mappings.
 2. **Review Column Mappings** — Users accept, override, or skip the AI's column-to-CDE suggestions, with sample data shown for verification.
 3. **Harmonize** — The Netrias client SDK transforms each cell value to its standardized equivalent, producing harmonized values, confidence scores, and alternatives.
 4. **Review Results** — Batch-oriented review sorted by confidence (lowest first). Users approve high-confidence batches in bulk and manually review uncertain mappings.

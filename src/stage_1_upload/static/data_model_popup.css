@@ -115,6 +115,78 @@
   cursor: not-allowed;
 }
 
+/* Custom version dropdown — replaces native <select> so the picker can render below
+ * the trigger instead of overlaying it (macOS native behavior we cannot override). */
+.data-model-dropdown {
+  position: relative;
+}
+
+.data-model-dropdown-trigger {
+  width: 100%;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-md);
+  padding: 0.625rem 2.5rem 0.625rem 0.875rem;
+  font-size: 0.9375rem;
+  font-family: inherit;
+  color: var(--gray-800);
+  background: var(--white) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2364748b' d='M2.5 4.5L6 8l3.5-3.5'/%3E%3C/svg%3E") no-repeat right 0.75rem center;
+  background-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.data-model-dropdown-trigger:hover {
+  border-color: var(--gray-300);
+}
+
+.data-model-dropdown-trigger:focus,
+.data-model-dropdown-trigger[aria-expanded="true"] {
+  outline: none;
+  border-color: var(--netrias-500);
+  box-shadow: 0 0 0 2px var(--netrias-glow-light);
+}
+
+/* Fixed positioning anchors the panel to the viewport so it escapes the dialog's
+ * `max-height: 90vh` overflow region instead of stretching the dialog when many
+ * versions are present. JS sets top/left/width relative to the trigger on open. */
+.data-model-dropdown-panel {
+  position: fixed;
+  z-index: 10000;
+  background: var(--white);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  /* `overflow: hidden` on the rounded outer wrapper clips the inner scrollbar's
+   * square track so it doesn't poke past the rounded corner. */
+  overflow: hidden;
+}
+
+.data-model-dropdown-list {
+  margin: 0;
+  padding: 0.25rem 0;
+  list-style: none;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.data-model-dropdown-item {
+  padding: 0.5rem 0.875rem;
+  font-size: 0.9375rem;
+  color: var(--gray-800);
+  cursor: pointer;
+}
+
+.data-model-dropdown-item:hover {
+  background: var(--gray-50);
+}
+
+.data-model-dropdown-item[aria-selected="true"] {
+  background: var(--netrias-glow-light);
+  color: var(--netrias-700);
+  font-weight: 500;
+}
+
 /* Footer */
 .data-model-dialog-footer {
   padding: var(--space-4) var(--space-5);

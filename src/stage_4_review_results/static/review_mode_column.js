@@ -190,7 +190,7 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
 
   const wrapper = document.createElement('div');
   wrapper.className = 'column-mode-grid';
-  wrapper.style.setProperty('--grid-columns', gridSize);
+  wrapper.style.setProperty('--grid-columns', String(gridSize));
 
   const fileId = getFileIdFromUrl();
 

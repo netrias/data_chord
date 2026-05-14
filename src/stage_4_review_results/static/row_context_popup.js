@@ -95,13 +95,22 @@ function _normalizeForComparison(str) {
   return str.replace(/^\uFEFF/, '').trim();
 }
 
+function _columnIndexFromKey(columnKey) {
+  const match = /^col_(\d+)$/.exec(columnKey);
+  if (!match) return null;
+  return Number.parseInt(match[1], 10);
+}
+
 /**
  * Build the table header row HTML.
  */
 function _buildTableHeader(headers, columnKey) {
   const normalizedColumnKey = _normalizeForComparison(columnKey);
-  const headerCells = headers.map((h) => {
-    const isHighlight = _normalizeForComparison(h) === normalizedColumnKey;
+  const targetIndex = _columnIndexFromKey(columnKey);
+  const headerCells = headers.map((h, idx) => {
+    const isHighlight = targetIndex === null
+      ? _normalizeForComparison(h) === normalizedColumnKey
+      : idx === targetIndex;
     const classes = isHighlight ? 'row-context-highlight' : '';
     const dataAttr = isHighlight ? ' data-target-column="true"' : '';
     return `<th class="${classes}"${dataAttr}>${escapeHtml(h)}</th>`;
@@ -116,7 +125,10 @@ function _buildTableHeader(headers, columnKey) {
  */
 function _buildTableRowsArray(rows, rowIndices, headers, columnKey) {
   const normalizedColumnKey = _normalizeForComparison(columnKey);
-  const highlightColIdx = headers.findIndex((h) => _normalizeForComparison(h) === normalizedColumnKey);
+  const targetIndex = _columnIndexFromKey(columnKey);
+  const highlightColIdx = targetIndex === null
+    ? headers.findIndex((h) => _normalizeForComparison(h) === normalizedColumnKey)
+    : targetIndex;
 
   return rows.map((row, i) => {
     const excelRowNum = toExcelRowNumber(rowIndices[i] + 1);

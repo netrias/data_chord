@@ -8,12 +8,13 @@ from __future__ import annotations
 
 from typing import cast
 
+from src.domain import ColumnCdeOverrides
 from src.domain.data_model_cache import SessionCache
-from src.domain.manifest import ManifestPayload, ManifestRow, ManifestSummary
+from src.domain.manifest import ColumnMappingManifest, ManifestPayload, ManifestRow, ManifestSummary
 from src.stage_3_harmonize.router import (
+    _column_cde_map_for_session,
     _compute_column_stats,
     _convert_to_schema,
-    _extract_column_cde_mappings,
     _store_column_mappings_in_cache,
 )
 
@@ -23,10 +24,11 @@ def _make_row(
     original: str,
     harmonized: str,
     row_indices: list[int] | None = None,
+    column_id: int = 0,
 ) -> ManifestRow:
     return ManifestRow(
         job_id="test-job",
-        column_id=0,
+        column_id=column_id,
         column_name=column_name,
         to_harmonize=original,
         top_harmonization=harmonized,
@@ -132,8 +134,8 @@ class TestSummaryAggregation:
             _make_row("col_a", "Bad1", "Bad1"),
             _make_row("col_a", "Bad2", "Bad2"),
             _make_row("col_a", "Bad3", "Bad3"),
-            _make_row("col_b", "BadX", "BadX"),
-            _make_row("col_b", "BadY", "BadY"),
+            _make_row("col_b", "BadX", "BadX", column_id=1),
+            _make_row("col_b", "BadY", "BadY", column_id=1),
         ]
         manifest = ManifestSummary(
             total_terms=5,
@@ -155,7 +157,7 @@ class TestSummaryAggregation:
     def test_columns_without_pvs_contribute_zero(self) -> None:
         rows = [
             _make_row("with_pvs", "Bad", "Bad"),
-            _make_row("no_pvs", "Anything", "Anything"),
+            _make_row("no_pvs", "Anything", "Anything", column_id=1),
         ]
         manifest = ManifestSummary(
             total_terms=2,
@@ -189,14 +191,18 @@ class TestManualOverridePropagation:
         cache = SessionCache()
         manifest = cast(ManifestPayload, {
             "column_mappings": {
-                "breed": {"targetField": "organism_species", "cde_id": 131},
+                "breed": {"cde_key": "organism_species", "cde_id": 131},
             }
         })
         manual_overrides = {"diagnosis": "primary_diagnosis"}
         assert cache.get_column_cde_key("diagnosis") is None
 
         # When
-        _store_column_mappings_in_cache(cache, manifest, manual_overrides)
+        column_cde_map = _column_cde_map_for_session(
+            ColumnMappingManifest.from_payload(manifest),
+            ColumnCdeOverrides.from_strings(manual_overrides),
+        )
+        _store_column_mappings_in_cache(cache, column_cde_map)
 
         # Then: both mappings present
         assert cache.get_column_cde_key("breed") == "organism_species"
@@ -213,33 +219,112 @@ class TestManualOverridePropagation:
         cache = SessionCache()
         manifest = cast(ManifestPayload, {
             "column_mappings": {
-                "col": {"targetField": "auto_target", "cde_id": 1},
+                "col": {"cde_key": "auto_target", "cde_id": 1},
             }
         })
         manual_overrides = {"col": "manual_target"}
 
         # When
-        _store_column_mappings_in_cache(cache, manifest, manual_overrides)
+        column_cde_map = _column_cde_map_for_session(
+            ColumnMappingManifest.from_payload(manifest),
+            ColumnCdeOverrides.from_strings(manual_overrides),
+        )
+        _store_column_mappings_in_cache(cache, column_cde_map)
 
         # Then: manual override wins
         assert cache.get_column_cde_key("col") == "manual_target"
 
+    def test_null_manual_override_removes_manifest_mapping(self) -> None:
+        """
+        Given: a manifest mapping "col" to "auto_target" and the user selected
+               No Mapping in Stage 2
+        When: the Stage 3 column map is built from a null manual override
+        Then: the manifest mapping is removed instead of treating a UI sentinel
+              as a real CDE key
+        """
+        # Given
+        cache = SessionCache()
+        manifest = cast(ManifestPayload, {
+            "column_mappings": {
+                "col": {"cde_key": "auto_target", "cde_id": 1},
+            }
+        })
+        manual_overrides = {"col": None}
+        assert cache.get_column_cde_key("col") is None
+
+        # When
+        column_cde_map = _column_cde_map_for_session(
+            ColumnMappingManifest.from_payload(manifest),
+            ColumnCdeOverrides.from_strings(manual_overrides),
+        )
+        _store_column_mappings_in_cache(cache, column_cde_map)
+
+        # Then
+        assert cache.get_column_cde_key("col") is None
+
+    def test_harmonize_request_accepts_null_manual_override(self) -> None:
+        """
+        Given: Stage 2 sends null for an explicit No Mapping choice
+        When: the Stage 3 request model validates the payload
+        Then: the null is preserved for the domain normalizer to remove the
+              manifest mapping
+        """
+        from src.domain.schemas import HarmonizeRequest
+
+        # Given
+        payload = {
+            "file_id": "abcdef0123456789",
+            "target_schema": "CCDI",
+            "manual_overrides": {"col": None},
+        }
+        assert payload["manual_overrides"]["col"] is None
+
+        # When
+        request = HarmonizeRequest.model_validate(payload)
+
+        # Then
+        assert request.manual_overrides == {"col": None}
+
+    def test_harmonize_request_accepts_column_renames(self) -> None:
+        """
+        Given: Stage 2 sends selected output column names
+        When: the Stage 3 request model validates the payload
+        Then: the rename map is preserved separately from CDE overrides
+        """
+        from src.domain.schemas import HarmonizeRequest
+
+        # Given
+        payload = {
+            "file_id": "abcdef0123456789",
+            "target_schema": "CCDI",
+            "manual_overrides": {"col_0000": "primary_diagnosis"},
+            "column_renames": {"col_0000": "Primary Diagnosis"},
+        }
+        assert payload["column_renames"]["col_0000"] == "Primary Diagnosis"
+
+        # When
+        request = HarmonizeRequest.model_validate(payload)
+
+        # Then
+        assert request.manual_overrides == {"col_0000": "primary_diagnosis"}
+        assert request.column_renames == {"col_0000": "Primary Diagnosis"}
+
     def test_extract_skips_entries_without_target_field(self) -> None:
         """
-        Given: a manifest with one valid and one missing targetField entry
-        When: _extract_column_cde_mappings is called
+        Given: a manifest with one valid and one missing cde_key entry
+        When: the manifest domain model extracts column-CDE mappings
         Then: only the valid entry is returned
         """
         # Given
         manifest = cast(ManifestPayload, {
             "column_mappings": {
-                "good": {"targetField": "age", "cde_id": 1},
+                "good": {"cde_key": "age", "cde_id": 1},
                 "bad": {"cde_id": 2},
             }
         })
 
         # When
-        result = _extract_column_cde_mappings(manifest)
+        result = ColumnMappingManifest.from_payload(manifest).column_cde_map().to_strings()
 
         # Then
         assert "good" in result

@@ -16,6 +16,7 @@ from tests.conftest import (
     create_csv_content,
     create_harmonized_csv,
     create_manifest_for_file,
+    create_test_manifest_parquet,
     review_state_payload,
     upload_content,
 )
@@ -28,6 +29,13 @@ def _read_downloaded_csv(response_bytes: bytes) -> list[dict[str, str]]:
         csv_name = next(name for name in zf.namelist() if name.endswith(".csv"))
         csv_content = zf.read(csv_name).decode("utf-8")
     return list(csv.DictReader(io.StringIO(csv_content)))
+
+
+def _read_downloaded_csv_rows(response_bytes: bytes) -> list[list[str]]:
+    with zipfile.ZipFile(BytesIO(response_bytes), "r") as zf:
+        csv_name = next(name for name in zf.namelist() if name.endswith(".csv"))
+        csv_content = zf.read(csv_name).decode("utf-8")
+    return list(csv.reader(io.StringIO(csv_content)))
 
 
 async def test_full_flow_no_changes_produces_zero_summary(
@@ -104,8 +112,10 @@ async def test_full_flow_overrides_propagate_within_column(
 
     # Find transformations for col_a where originalValue is "Foo"
     row_indices: list[int] = []
+    col_a_key = ""
     for col in columns_data:
-        if col["columnKey"] == "col_a":
+        if col["columnLabel"] == "col_a":
+            col_a_key = col["columnKey"]
             for t in col["transformations"]:
                 if t["originalValue"] == "Foo":
                     row_indices.extend(t["rowIndices"])
@@ -114,7 +124,7 @@ async def test_full_flow_overrides_propagate_within_column(
     overrides_payload = {
         "file_id": file_id,
         "overrides": {
-            str(index): {"col_a": {"ai_value": "Foo", "human_value": "Baz", "original_value": "Foo"}}
+            str(index): {col_a_key: {"ai_value": "Foo", "human_value": "Baz", "original_value": "Foo"}}
             for index in row_indices
         },
         "review_state": review_state_payload(),
@@ -167,7 +177,7 @@ async def test_full_flow_two_files_isolated_overrides(
         json={
             "file_id": file_one,
             "overrides": {
-                "1": {"col_a": {"ai_value": "alpha", "human_value": "gamma", "original_value": "alpha"}},
+                "1": {"col_0000": {"ai_value": "alpha", "human_value": "gamma", "original_value": "alpha"}},
             },
             "review_state": review_state_payload(),
         },
@@ -214,7 +224,7 @@ async def test_full_flow_reharmonize_clears_overrides(
         json={
             "file_id": file_id,
             "overrides": {
-                "1": {"col_a": {"ai_value": "alpha", "human_value": "gamma", "original_value": "alpha"}},
+                "1": {"col_0000": {"ai_value": "alpha", "human_value": "gamma", "original_value": "alpha"}},
             },
             "review_state": review_state_payload(),
         },
@@ -266,8 +276,10 @@ async def test_full_flow_bom_overrides_apply(
 
     # Find transformations for col_a where originalValue is "Foo"
     row_indices: list[int] = []
+    col_a_key = ""
     for col in columns_data:
-        if col["columnKey"] == "col_a":
+        if col["columnLabel"] == "col_a":
+            col_a_key = col["columnKey"]
             for t in col["transformations"]:
                 if t["originalValue"] == "Foo":
                     row_indices.extend(t["rowIndices"])
@@ -278,9 +290,9 @@ async def test_full_flow_bom_overrides_apply(
         json={
             "file_id": file_id,
             "overrides": {
-                str(index): {"col_a": {"ai_value": "Foo", "human_value": "Bar", "original_value": "Foo"}}
-                for index in row_indices
-            },
+                    str(index): {col_a_key: {"ai_value": "Foo", "human_value": "Bar", "original_value": "Foo"}}
+                    for index in row_indices
+                },
             "review_state": review_state_payload(),
         },
     )
@@ -292,3 +304,76 @@ async def test_full_flow_bom_overrides_apply(
     output_rows = _read_downloaded_csv(download_response.content)
     assert output_rows[0]["col_a"] == "Bar"
     assert output_rows[1]["col_a"] == "Bar"
+
+
+async def test_full_flow_duplicate_headers_keep_columns_separate(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """Duplicate headers use column keys so one duplicate can be changed without touching the other."""
+
+    # Given: a CSV with duplicate headers and distinct values in each duplicate column
+    rows = [["name", "name"], ["Alice", "Smith"]]
+    file_id = await upload_content(app_client, create_csv_content(rows), "duplicate-headers.csv")
+    analyze_response = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
+    )
+    assert analyze_response.status_code == 200
+    analyzed_columns = analyze_response.json()["columns"]
+    assert [col["column_key"] for col in analyzed_columns] == ["col_0000", "col_0001"]
+
+    meta = temp_storage.load(file_id)
+    assert meta is not None
+    harmonized_dir = meta.saved_path.parent.parent / "harmonized"
+    harmonized_dir.mkdir(parents=True, exist_ok=True)
+    harmonized_path = harmonized_dir / f"{meta.saved_path.stem}.harmonized.csv"
+    with harmonized_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerows(rows)
+
+    manifest_path = temp_storage.manifest_dir / f"{file_id}_harmonization.parquet"
+    create_test_manifest_parquet(
+        manifest_path,
+        [
+            {
+                "job_id": f"test-job-{file_id}",
+                "column_id": 0,
+                "column_name": "name",
+                "to_harmonize": "Alice",
+                "top_harmonization": "Alice",
+                "row_indices": [0],
+            },
+            {
+                "job_id": f"test-job-{file_id}",
+                "column_id": 1,
+                "column_name": "name",
+                "to_harmonize": "Smith",
+                "top_harmonization": "Smith",
+                "row_indices": [0],
+            },
+        ],
+    )
+
+    # When: the second duplicate column is overridden
+    rows_response = await app_client.post("/stage-4/rows", json={"file_id": file_id, "manual_columns": []})
+    assert rows_response.status_code == 200
+    review_columns = rows_response.json()["columns"]
+    assert [col["columnKey"] for col in review_columns] == ["col_0000", "col_0001"]
+    save_response = await app_client.post(
+        "/stage-4/overrides",
+        json={
+            "file_id": file_id,
+            "overrides": {
+                "1": {"col_0001": {"ai_value": "Smith", "human_value": "Jones", "original_value": "Smith"}},
+            },
+            "review_state": review_state_payload(),
+        },
+    )
+    assert save_response.status_code == 200
+
+    # Then: export keeps duplicate headers and changes only the targeted duplicate column
+    download_response = await app_client.post("/stage-5/download", json={"file_id": file_id})
+    assert download_response.status_code == 200
+    output_rows = _read_downloaded_csv_rows(download_response.content)
+    assert output_rows == [["name", "name"], ["Alice", "Jones"]]

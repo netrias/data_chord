@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 from httpx import AsyncClient
 
+from src.domain.manifest import ManifestPayload
 from tests.conftest import TEST_TARGET_SCHEMA, upload_and_analyze
 
 
@@ -140,7 +141,7 @@ async def test_harmonize_without_client_returns_stubbed_job(
     # Given: An uploaded file, but Netrias client is unavailable
     _ = await upload_and_analyze(app_client, sample_csv_path)
 
-    from src.domain import ColumnMappingSet
+    from src.domain import ColumnCdeOverrides, ColumnRenameSet
     from src.domain.harmonize import HarmonizeService, HarmonizeStatus
 
     service = HarmonizeService(client=None)
@@ -151,7 +152,8 @@ async def test_harmonize_without_client_returns_stubbed_job(
     result = service.run(
         file_path=Path("/tmp/test.csv"),
         target_schema=TEST_TARGET_SCHEMA,
-        column_mappings=ColumnMappingSet.from_dict({}),
+        column_overrides=ColumnCdeOverrides.from_strings({}),
+        column_renames=ColumnRenameSet.empty(),
         cache=SessionCache(),
         manifest=None,
     )
@@ -159,3 +161,78 @@ async def test_harmonize_without_client_returns_stubbed_job(
     # Then: Returns a stubbed/queued job indicating service unavailability
     assert result.status == HarmonizeStatus.QUEUED
     assert "stubbed" in result.detail.lower() or "unavailable" in result.detail.lower()
+
+
+def test_harmonize_sends_source_file_and_column_keyed_manifest(tmp_path: Path) -> None:
+    """Harmonize lets the SDK handle tabular format details directly."""
+
+    # Given: a duplicate-header CSV and a manifest keyed by source column key
+    from src.domain import ColumnCdeOverrides, ColumnRenameSet
+    from src.domain.data_model_cache import SessionCache
+    from src.domain.harmonize import HarmonizeService
+
+    csv_path = tmp_path / "dupes.csv"
+    csv_path.write_text("name,name\nAlice,Smith\n", encoding="utf-8")
+    mock_client = MagicMock()
+    mock_client.harmonize.return_value = MagicMock(status="succeeded", description="ok", job_id="job-1")
+    service = HarmonizeService(mock_client)
+    manifest: ManifestPayload = {"column_mappings": {"col_0001": {"cde_key": "last_name", "cde_id": 11}}}
+
+    # When: harmonization is run
+    result = service.run(
+        file_path=csv_path,
+        target_schema=TEST_TARGET_SCHEMA,
+        column_overrides=ColumnCdeOverrides.from_strings({}),
+        column_renames=ColumnRenameSet.empty(),
+        cache=SessionCache(),
+        manifest=manifest,
+    )
+
+    # Then: the SDK sees the original file and column-keyed manifest directly
+    assert result.job_id == "job-1"
+    harmonize_kwargs = mock_client.harmonize.call_args.kwargs
+    sdk_manifest = harmonize_kwargs["manifest"]
+    sdk_keys = list(sdk_manifest["column_mappings"].keys())
+    assert sdk_keys == ["col_0001"]
+    assert sdk_manifest["column_mappings"]["col_0001"]["alternatives"] == []
+    assert harmonize_kwargs["source_path"].name == "dupes.csv"
+
+
+def test_harmonize_applies_column_renames_to_manifest(tmp_path: Path) -> None:
+    """
+    Given: Stage 2 submits a column rename for an existing mapped column
+    When: harmonization is run
+    Then: the SDK manifest uses the renamed column_name while keeping the column key stable
+    """
+    from src.domain import ColumnCdeOverrides, ColumnRenameSet
+    from src.domain.data_model_cache import SessionCache
+    from src.domain.harmonize import HarmonizeService
+
+    # Given
+    csv_path = tmp_path / "source.csv"
+    csv_path.write_text("diagnosis\nLung\n", encoding="utf-8")
+    mock_client = MagicMock()
+    mock_client.harmonize.return_value = MagicMock(status="succeeded", description="ok", job_id="job-1")
+    service = HarmonizeService(mock_client)
+    manifest: ManifestPayload = {
+        "column_mappings": {
+            "col_0000": {"column_name": "diagnosis", "cde_key": "primary_diagnosis", "cde_id": 11}
+        }
+    }
+    assert manifest["column_mappings"]["col_0000"].get("column_name") == "diagnosis"
+
+    # When
+    result = service.run(
+        file_path=csv_path,
+        target_schema=TEST_TARGET_SCHEMA,
+        column_overrides=ColumnCdeOverrides.from_strings({}),
+        column_renames=ColumnRenameSet.from_dict({"col_0000": "Primary Diagnosis"}),
+        cache=SessionCache(),
+        manifest=manifest,
+    )
+
+    # Then
+    assert result.job_id == "job-1"
+    sdk_manifest = mock_client.harmonize.call_args.kwargs["manifest"]
+    assert list(sdk_manifest["column_mappings"].keys()) == ["col_0000"]
+    assert sdk_manifest["column_mappings"]["col_0000"]["column_name"] == "Primary Diagnosis"

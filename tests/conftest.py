@@ -14,14 +14,19 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 from httpx import ASGITransport, AsyncClient
+from openpyxl import Workbook
+from openpyxl.worksheet.worksheet import Worksheet
 
-from src.domain.storage import HARMONIZED_SUFFIX, UploadConstraints, UploadStorage
+from src.domain.storage import UploadConstraints, UploadStorage
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 # Test constants
 TEST_CSV_CONTENT_TYPE = "text/csv"
+TEST_TSV_CONTENT_TYPE = "text/tab-separated-values"
+TEST_XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 TEST_TARGET_SCHEMA = "CCDI"
+TEST_HARMONIZED_CSV_SUFFIX = ".harmonized.csv"
 SAMPLE_CSV_ROW_COUNT = 10
 SAMPLE_CSV_COLUMN_COUNT = 6
 MAX_EXAMPLES_LIMIT = 20
@@ -86,11 +91,7 @@ class MockHarmonizeResult:
 @pytest.fixture
 def test_constraints() -> UploadConstraints:
     """why: provide smaller limits for faster test execution."""
-    return UploadConstraints(
-        allowed_suffixes=(".csv",),
-        allowed_content_types=(TEST_CSV_CONTENT_TYPE, "application/csv", "application/vnd.ms-excel"),
-        max_bytes=25 * 1024 * 1024,
-    )
+    return UploadConstraints(max_bytes=25 * 1024 * 1024)
 
 
 @pytest.fixture
@@ -108,12 +109,12 @@ def mock_netrias_client() -> Generator[MagicMock]:
 
     _cde_manifest = {
         "column_mappings": {
-            "primary_diagnosis": {
-                "targetField": "primary_diagnosis",
+            "col_0000": {
+                "cde_key": "primary_diagnosis",
                 "cde_id": 2,
             },
-            "therapeutic_agents": {
-                "targetField": "therapeutic_agents",
+            "col_0001": {
+                "cde_key": "therapeutic_agents",
                 "cde_id": 1,
             },
         },
@@ -134,7 +135,7 @@ def mock_netrias_client() -> Generator[MagicMock]:
     )
 
     # MappingDiscoveryService.discover() calls this after demo_bypass removal
-    mock_client.discover_mapping_from_csv.return_value = _cde_manifest
+    mock_client.discover_mapping_from_tabular.return_value = _cde_manifest
     mock_client.configure.return_value = None
 
     mock_client.harmonize.return_value = MockHarmonizeResult(
@@ -210,7 +211,7 @@ async def app_client(
     import src.stage_3_harmonize.router as stage3_router
     import src.stage_4_review_results.router as stage4_router
     import src.stage_5_review_summary.router as stage5_router
-    from src.domain.storage import FileStore, LocalStorageBackend
+    from src.domain.storage import FileStore
 
     original_storage = deps_module._storage
     original_router_storage = router_module._storage
@@ -221,7 +222,7 @@ async def app_client(
     deps_module.get_upload_storage = lambda: temp_storage
 
     original_get_file_store = deps_module.get_file_store
-    test_store = FileStore(LocalStorageBackend(temp_storage._base_dir / "manifests"))
+    test_store = FileStore(temp_storage._base_dir / "manifests")
     deps_module.get_file_store = lambda: test_store
 
     original_stage3_storage = stage3_router._storage
@@ -263,6 +264,23 @@ def create_csv_content(rows: list[list[str]]) -> bytes:
     return "\n".join(lines).encode("utf-8")
 
 
+def create_xlsx_content(sheets: dict[str, list[list[object]]]) -> bytes:
+    """why: dynamically generate XLSX content for workbook selection tests."""
+    from io import BytesIO
+    from typing import cast
+
+    workbook = Workbook()
+    default_sheet = cast(Worksheet, workbook.active)
+    for index, (sheet_name, rows) in enumerate(sheets.items()):
+        sheet = default_sheet if index == 0 else cast(Worksheet, workbook.create_sheet(sheet_name))
+        sheet.title = sheet_name
+        for row in rows:
+            sheet.append(row)
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()
+
+
 async def upload_file(client: AsyncClient, csv_path: Path) -> str:
     """why: upload a file and return its file_id for use in subsequent test steps."""
     response = await client.post(
@@ -273,11 +291,16 @@ async def upload_file(client: AsyncClient, csv_path: Path) -> str:
     return response.json()["file_id"]
 
 
-async def upload_content(client: AsyncClient, content: bytes, filename: str = "test.csv") -> str:
+async def upload_content(
+    client: AsyncClient,
+    content: bytes,
+    filename: str = "test.csv",
+    content_type: str = TEST_CSV_CONTENT_TYPE,
+) -> str:
     """why: upload raw content and return its file_id for dynamic test scenarios."""
     response = await client.post(
         "/stage-1/upload",
-        files={"file": (filename, content, TEST_CSV_CONTENT_TYPE)},
+        files={"file": (filename, content, content_type)},
     )
     assert response.status_code == 201, f"Upload failed: {response.status_code} {response.text}"
     return response.json()["file_id"]
@@ -294,7 +317,7 @@ async def upload_and_analyze(client: AsyncClient, csv_path: Path) -> str:
 
 
 def create_harmonized_csv(original_path: Path, changes: dict[int, dict[str, str]]) -> Path:
-    """why: create a .harmonized.csv alongside the original with specified changes."""
+    """why: create a managed harmonized CSV with specified changes."""
     with original_path.open("r", newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         rows = list(reader)
@@ -304,7 +327,9 @@ def create_harmonized_csv(original_path: Path, changes: dict[int, dict[str, str]
         if row_idx < len(rows):
             rows[row_idx].update(column_changes)
 
-    harmonized_path = original_path.with_name(f"{original_path.stem}{HARMONIZED_SUFFIX}")
+    harmonized_dir = original_path.parent.parent / "harmonized"
+    harmonized_dir.mkdir(parents=True, exist_ok=True)
+    harmonized_path = harmonized_dir / f"{original_path.stem}{TEST_HARMONIZED_CSV_SUFFIX}"
     with harmonized_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=headers)
         writer.writeheader()

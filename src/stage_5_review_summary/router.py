@@ -9,21 +9,29 @@ from __future__ import annotations
 import csv
 import io
 import json
-import logging
+import tempfile
 import zipfile
 from collections import defaultdict
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import NamedTuple
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from netrias_client import (
+    TabularDataset,
+    TabularFormat,
+    dataset_from_rows,
+    read_tabular,
+    write_tabular,
+)
 from pydantic import BaseModel, Field
 
 from src.domain import ChangeType
+from src.domain.cde_mapping_persistence import load_cde_mapping_json
 from src.domain.data_model_cache import SessionCache, clear_session_cache
 from src.domain.dependencies import get_file_store, get_upload_storage
 from src.domain.manifest import (
@@ -34,16 +42,16 @@ from src.domain.manifest import (
 )
 from src.domain.pv_persistence import ensure_pvs_loaded
 from src.domain.pv_validation import check_value_conformance
+from src.domain.review_overrides import ReviewOverrides
 from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
-from src.domain.storage import FileType, UploadStorage, load_csv, resolve_harmonized_path_or_404
-
-_logger = logging.getLogger(__name__)
+from src.domain.storage import UploadStorage, resolve_harmonized_path
 
 _MODULE_DIR = Path(__file__).parent
 _TEMPLATE_DIR = _MODULE_DIR / "templates"
 
 _ERROR_UPLOAD_NOT_FOUND = "Upload not found. Please restart the harmonization process."
 _ERROR_DATASET_UNREADABLE = "Unable to read harmonized dataset."
+_ERROR_HARMONIZED_NOT_FOUND = "Harmonized file not found. Please rerun Stage 3."
 _ERROR_MANIFEST_NOT_FOUND = "Harmonization manifest not found. Please rerun Stage 3."
 _ERROR_MANIFEST_UNREADABLE = "Unable to read harmonization manifest."
 
@@ -88,7 +96,7 @@ class StageFiveSummaryResponse(BaseModel):
 
 @stage_five_router.get("", response_class=HTMLResponse, name="stage_five_review_page")
 async def render_stage_five(request: Request) -> HTMLResponse:
-    context: dict[str, Any] = {
+    context: dict[str, object] = {
         "request": request,
         "stage_one_url": request.url_for("stage_one_upload_page"),
         "stage_two_url": request.url_for("stage_two_mapping_page"),
@@ -121,21 +129,32 @@ async def download_harmonized_data(payload: StageFiveRequest) -> StreamingRespon
     if not meta:
         raise HTTPException(status_code=404, detail=_ERROR_UPLOAD_NOT_FOUND)
 
-    harmonized_path = resolve_harmonized_path_or_404(meta.saved_path, payload.file_id)
+    harmonized_path = _resolve_harmonized_path_or_404(meta.saved_path, payload.file_id)
     manifest_path = storage.load_harmonization_manifest_path(payload.file_id)
 
-    headers, harmonized_rows = load_csv(harmonized_path)
-    if not headers:
+    original_dataset = read_tabular(meta.saved_path, sheet_name=meta.selected_sheet)
+    harmonized_dataset = read_tabular(harmonized_path, sheet_name=meta.selected_sheet)
+    if not original_dataset.columns or not harmonized_dataset.columns:
         raise HTTPException(status_code=400, detail=_ERROR_DATASET_UNREADABLE)
 
     overrides = _load_review_overrides(payload.file_id)
-    final_rows = _apply_overrides(harmonized_rows, overrides)
+    final_rows = (
+        overrides.apply_to_rows(harmonized_dataset.rows, original_dataset)
+        if overrides
+        else harmonized_dataset.rows
+    )
+    final_dataset = dataset_from_rows(
+        columns=harmonized_dataset.columns,
+        rows=final_rows,
+        source_format=harmonized_dataset.source_format,
+        sheet_name=harmonized_dataset.sheet_name,
+    )
 
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     original_stem = Path(meta.original_name).stem
     base_name = f"{original_stem}_{payload.file_id}_{timestamp}"
 
-    zip_buffer = _create_zip_buffer(base_name, headers, final_rows, manifest_path)
+    zip_buffer = _create_zip_buffer(base_name, final_dataset, manifest_path, meta.saved_path, payload.file_id)
 
     # Session complete: release in-memory cache to prevent unbounded growth
     clear_session_cache(payload.file_id)
@@ -143,55 +162,16 @@ async def download_harmonized_data(payload: StageFiveRequest) -> StreamingRespon
     return _create_streaming_response(base_name, zip_buffer)
 
 
-def _load_review_overrides(file_id: str) -> dict[str, dict[str, str]]:
+def _load_review_overrides(file_id: str) -> ReviewOverrides | None:
     store = get_file_store()
-    data = store.load(file_id, FileType.REVIEW_OVERRIDES)
-    if data is None:
-        return {}
-
-    result: dict[str, dict[str, str]] = {}
-    overrides_data: dict[str, Any] = data.get("overrides", {})
-    for row_key, columns in overrides_data.items():
-        result[row_key] = {
-            col: info["human_value"]
-            for col, info in columns.items()
-            if info.get("human_value") is not None
-        }
-    return result
+    return store.load_review_overrides(file_id)
 
 
-def _apply_row_overrides(row: dict[str, str], row_key: str, row_overrides: dict[str, str]) -> dict[str, str]:
-    invalid_columns = {k for k in row_overrides if k not in row}
-    if invalid_columns:
-        _logger.warning("Row %s has overrides for non-existent columns: %s", row_key, invalid_columns)
-    valid_overrides = {k: v for k, v in row_overrides.items() if k in row}
-    return {**row, **valid_overrides}
-
-
-def _apply_overrides(
-    rows: list[dict[str, str]],
-    overrides: dict[str, dict[str, str]],
-) -> list[dict[str, str]]:
-    """Row keys are 1-indexed to match Stage 4 UI numbering."""
-    if not overrides:
-        return rows
-
-    result: list[dict[str, str]] = []
-    for idx, row in enumerate(rows):
-        row_key = str(idx + 1)
-        if row_key in overrides:
-            result.append(_apply_row_overrides(row, row_key, overrides[row_key]))
-        else:
-            result.append(row)
-    return result
-
-
-def _rows_to_csv_string(headers: list[str], rows: list[dict[str, str]]) -> str:
-    csv_output = io.StringIO()
-    writer = csv.DictWriter(csv_output, fieldnames=headers, lineterminator="\n")
-    writer.writeheader()
-    writer.writerows(rows)
-    return csv_output.getvalue()
+def _resolve_harmonized_path_or_404(original_path: Path, file_id: str) -> Path:
+    path = resolve_harmonized_path(original_path, file_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail=_ERROR_HARMONIZED_NOT_FOUND)
+    return path
 
 
 def _manifest_to_json(manifest_path: Path) -> str | None:
@@ -204,22 +184,41 @@ def _manifest_to_json(manifest_path: Path) -> str | None:
 
 def _create_zip_buffer(
     base_name: str,
-    headers: list[str],
-    rows: list[dict[str, str]],
+    dataset: TabularDataset,
     manifest_path: Path | None,
+    template_path: Path | None = None,
+    file_id: str | None = None,
 ) -> io.BytesIO:
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        csv_content = _rows_to_csv_string(headers, rows)
-        zf.writestr(f"{base_name}.csv", csv_content)
+        temp_path = Path(f"{base_name}{dataset.source_format.suffix}")
+        zf.writestr(temp_path.name, _tabular_bytes(dataset, template_path))
 
         if manifest_path:
             json_content = _manifest_to_json(manifest_path)
             if json_content:
                 zf.writestr(f"{base_name}_manifest.json", json_content)
+        if file_id:
+            mapping_content = load_cde_mapping_json(file_id)
+            if mapping_content:
+                zf.writestr(f"{base_name}_cde_mapping.json", mapping_content)
 
     zip_buffer.seek(0)
     return zip_buffer
+
+
+def _tabular_bytes(dataset: TabularDataset, template_path: Path | None) -> bytes | str:
+    if dataset.source_format == TabularFormat.XLSX:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / f"output{dataset.source_format.suffix}"
+            write_tabular(output_path, dataset, template_path=template_path)
+            return output_path.read_bytes()
+
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=dataset.source_format.delimiter, lineterminator="\n")
+    writer.writerow(dataset.headers)
+    writer.writerows(dataset.rows)
+    return output.getvalue()
 
 
 def _create_streaming_response(base_name: str, zip_buffer: io.BytesIO) -> StreamingResponse:
@@ -346,7 +345,7 @@ def _process_manifest_row(
     ai_counts: dict[int, int],
     manual_counts: dict[int, int],
     unchanged_counts: dict[int, int],
-    unique_mappings: dict[tuple[str, str, str], _MappingInfo],
+    unique_mappings: dict[tuple[str, str, str, str], _MappingInfo],
     cache: SessionCache,
     upload_timestamp: datetime | None,
 ) -> None:
@@ -376,7 +375,7 @@ def _build_summary_from_manifest(summary: ManifestSummary, file_id: str) -> Stag
     unchanged_counts: dict[int, int] = defaultdict(int)
     distinct_terms: dict[int, int] = defaultdict(int)
     column_names: dict[int, str] = {}
-    unique_mappings: dict[tuple[str, str, str], _MappingInfo] = {}
+    unique_mappings: dict[tuple[str, str, str, str], _MappingInfo] = {}
 
     for row in summary.rows:
         distinct_terms[row.column_id] += 1
@@ -393,7 +392,7 @@ def _build_summary_from_manifest(summary: ManifestSummary, file_id: str) -> Stag
             is_pv_conformant=info.is_conformant,
             history=info.history,
         )
-        for (col, orig, final), info in sorted_mappings
+        for (_col_key, col, orig, final), info in sorted_mappings
     ]
 
     return StageFiveSummaryResponse(
@@ -413,7 +412,7 @@ def _build_summary_from_manifest(summary: ManifestSummary, file_id: str) -> Stag
 
 
 def _track_mapping(
-    mappings: dict[tuple[str, str, str], _MappingInfo],
+    mappings: dict[tuple[str, str, str, str], _MappingInfo],
     row: ManifestRow,
     cache: SessionCache,
     upload_timestamp: datetime | None,
@@ -423,10 +422,11 @@ def _track_mapping(
     if not row.to_harmonize:
         return
     final = _get_final_value(row)
-    key = (row.column_name, row.to_harmonize, final)
+    col_key = str(row.column_key)
+    key = (col_key, row.column_name, row.to_harmonize, final)
     if key in mappings:
         return
-    pv_set = cache.get_pvs_for_column(row.column_name)
+    pv_set = cache.get_pvs_for_column(col_key)
     is_conformant = check_value_conformance(final, pv_set)
     history = _build_history(row, upload_timestamp, pv_set)
     mappings[key] = _MappingInfo(is_conformant, history)

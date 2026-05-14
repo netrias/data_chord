@@ -148,10 +148,10 @@ class TestDataModelServiceErrors:
 class TestUploadValidationErrors:
     """Upload endpoint validates file type and size."""
 
-    async def test_unsupported_extension_rejected(self, app_client: AsyncClient) -> None:
-        """Upload rejects files with unsupported extensions."""
+    async def test_invalid_xlsx_rejected(self, app_client: AsyncClient) -> None:
+        """Upload rejects invalid workbook bytes even with an XLSX extension."""
 
-        # Given: A file with .xlsx extension (not supported)
+        # Given: A file with .xlsx extension but invalid workbook bytes
 
         # When: The file is uploaded
         response = await app_client.post(
@@ -167,7 +167,7 @@ class TestUploadValidationErrors:
 
         # Then: 415 Unsupported Media Type response
         assert response.status_code == 415
-        assert "unsupported" in response.json()["detail"].lower()
+        assert "workbook" in response.json()["detail"].lower()
 
     async def test_unsupported_content_type_rejected(self, app_client: AsyncClient) -> None:
         """Upload rejects files with unsupported content types."""

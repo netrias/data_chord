@@ -325,8 +325,7 @@ const _buildCardHTML = (params) => {
  * In the compact design, the input shows the effective value directly.
  * @param {Object} params
  * @param {HTMLElement} params.card - The card element
- * @param {HTMLElement} params.inputEl - The target value input element
- * @param {HTMLElement|null} params.originalContextEl - Element displaying "was: X"
+ * @param {HTMLElement|null} params.inputEl - The target value input element
  * @param {string} params.originalValue - Original value from source data
  * @param {string} params.aiSuggestedValue - AI harmonized value
  * @param {string} params.overrideValue - User's override (empty string = no override)
@@ -339,7 +338,6 @@ const _applyCardState = (params) => {
   const {
     card,
     inputEl,
-    originalContextEl,
     originalValue,
     aiSuggestedValue,
     overrideValue,
@@ -410,10 +408,6 @@ const _attachInputListener = (card, entry, onOverrideChange) => {
 
   const originalValue = entry.originalValue ?? '';
   const aiSuggestedValue = entry.harmonizedValue ?? entry.originalValue ?? '—';
-  // No PVs for this card (text input mode)
-  const hasPVs = false;
-  const pvSet = null;
-  const aiIsConformant = false;
 
   // Helper to update revert button visibility based on current effective value
   const updateRevertState = (currentValue) => {
@@ -573,7 +567,6 @@ const _attachRevertClickHandlers = (card, entry, triggerChange) => {
  */
 const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange) => {
   const inputWrapper = card.querySelector('.target-value-input-wrapper');
-  const originalContextEl = card.querySelector('.original-context-value');
   if (!inputWrapper) return null;
 
   const originalValue = entry.originalValue ?? '';
@@ -607,7 +600,6 @@ const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange
     _applyCardState({
       card,
       inputEl: null,  // Combobox manages its own input
-      originalContextEl,
       originalValue,
       aiSuggestedValue,
       overrideValue: effectiveOverride,
@@ -643,7 +635,6 @@ const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange
   _applyCardState({
     card,
     inputEl: null,
-    originalContextEl,
     originalValue,
     aiSuggestedValue,
     overrideValue: initialOverride,

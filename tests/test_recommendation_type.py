@@ -153,7 +153,7 @@ class TestRecommendationTypeEnum:
 def _find_changed_transformation(columns: list[dict], column_key: str) -> dict | None:
     """Find first transformation where original != harmonized for given column."""
     for col in columns:
-        if col["columnKey"] == column_key:
+        if col["columnKey"] == column_key or col.get("columnLabel") == column_key:
             for t in col["transformations"]:
                 if t["originalValue"] != t["harmonizedValue"]:
                     return t

@@ -7,13 +7,18 @@ warnings when they return to Stage 4 or Stage 5.
 
 from __future__ import annotations
 
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from src.domain.columns import column_key_from_string
 from src.domain.data_model_cache import (
     SessionCache,
     clear_all_session_caches,
     get_session_cache,
 )
+from src.domain.pv_manifest import PVManifest
 from src.domain.pv_persistence import ensure_pvs_loaded, load_pv_manifest_from_disk
 
 
@@ -50,7 +55,7 @@ class TestPVManifestPersistenceFeature:
         # When: Stage 4/5 lazy-loads PVs from disk
         with patch("src.domain.pv_persistence.get_file_store") as mock_get_store:
             mock_store = MagicMock()
-            mock_store.load.return_value = pv_manifest_data
+            mock_store.load_pv_manifest.return_value = PVManifest.from_store(pv_manifest_data)
             mock_get_store.return_value = mock_store
 
             load_pv_manifest_from_disk(file_id, cache)
@@ -86,7 +91,7 @@ class TestPVManifestPersistenceFeature:
         # When: Attempting to load from non-existent manifest
         with patch("src.domain.pv_persistence.get_file_store") as mock_get_store:
             mock_store = MagicMock()
-            mock_store.load.return_value = None  # No manifest found
+            mock_store.load_pv_manifest.return_value = None  # No manifest found
             mock_get_store.return_value = mock_store
 
             # Then: No exception raised, cache remains empty
@@ -132,7 +137,7 @@ class TestPVManifestPersistenceFeature:
         # When: ensure_pvs_loaded is called
         with patch("src.domain.pv_persistence.get_file_store") as mock_get_store:
             mock_store = MagicMock()
-            mock_store.load.return_value = pv_manifest_data
+            mock_store.load_pv_manifest.return_value = PVManifest.from_store(pv_manifest_data)
             mock_get_store.return_value = mock_store
 
             cache = ensure_pvs_loaded(file_id)
@@ -146,7 +151,7 @@ class TestSessionCacheThreadSafety:
     """Cache operations are thread-safe for concurrent async access."""
 
     def test_get_column_mappings_returns_copy(self) -> None:
-        """Thread-safe accessor returns a copy, not the internal dict."""
+        """Thread-safe accessor returns an immutable snapshot, not the internal dict."""
         # Given: A cache with column mappings
         cache = SessionCache()
         cache.set_column_mappings({"col1": "cde1", "col2": "cde2"})
@@ -154,8 +159,10 @@ class TestSessionCacheThreadSafety:
         # When: Getting column mappings
         mappings = cache.get_column_mappings()
 
-        # Then: Returned dict is a copy (modifying it doesn't affect cache)
-        mappings["col3"] = "cde3"
+        # Then: Returned map cannot be mutated and the cache is unchanged
+        immutable_mappings = cast(Any, mappings.mappings)
+        with pytest.raises(TypeError):
+            immutable_mappings[column_key_from_string("col3")] = "cde3"
         assert cache.get_column_cde_key("col3") is None, "Cache should not be modified"
 
     def test_pvs_stored_as_frozenset(self) -> None:

@@ -9,12 +9,12 @@ export const STAGE_ORDER = ['upload', 'mapping', 'harmonize', 'verify', 'review'
 
 export const STEP_INSTRUCTIONS = {
   upload: {
-    short: "Upload your CSV dataset to begin the harmonization workflow.",
-    long: "Select a CSV file from your computer to upload. The system will analyze your file's columns and prepare them for mapping to standard ontologies."
+    short: "Upload your CSV or TSV dataset to begin the harmonization workflow.",
+    long: "Select a CSV or TSV file from your computer to upload. The system will analyze your file's columns and prepare them for mapping to standard ontologies."
   },
   mapping: {
     short: "Review and confirm which ontologies your data columns should map to.",
-    long: "The AI has suggested mappings for each column in your dataset. Review these recommendations and adjust if needed. Confirm all mappings before proceeding to harmonization."
+    long: "Each row is one column from your file, with an AI-suggested target standard and a value-fit score.\n\nColumns fall into three categories:\n  ✎ Rewrite — values will be harmonized to match the standard\n  → Pass-through — mapped, but no permissible values to enforce\n  — Unmapped — column will pass through unchanged\n\nUse the Settings sidebar to toggle category visibility, show empty columns, and control column renaming. Hover a category to preview which rows would appear or disappear.\n\nClick any row to open its detail view where you can change the target or review individual value mappings."
   },
   harmonize: {
     short: "Your data is being transformed to match the target ontology.",
@@ -30,6 +30,6 @@ export const STEP_INSTRUCTIONS = {
   },
   review: {
     short: "Download your harmonized dataset and review the change summary.",
-    long: "Your harmonization is complete. Review the summary statistics showing AI changes vs manual overrides per column. Download the final harmonized dataset in CSV format. You can also start a new harmonization workflow from here."
+    long: "Your harmonization is complete. Review the summary statistics showing AI changes vs manual overrides per column. Download the final harmonized dataset in the same file format you uploaded. You can also start a new harmonization workflow from here."
   }
 };

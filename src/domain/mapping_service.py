@@ -12,8 +12,7 @@ from pathlib import Path
 from netrias_client import NetriasClient
 
 from src.domain.cde import ModelSuggestion
-from src.domain.harmonize import normalize_manifest
-from src.domain.manifest import AlternativeEntry, ManifestPayload
+from src.domain.manifest import ColumnMappingManifest, ManifestPayload
 
 logger = logging.getLogger(__name__)
 
@@ -30,54 +29,23 @@ class MappingDiscoveryService:
         *,
         csv_path: Path,
         target_schema: str,
+        target_version: str = "latest",
+        sheet_name: str | None = None,
     ) -> tuple[dict[str, list[ModelSuggestion]], dict[str, str], ManifestPayload]:
         """manual_overrides (pos 2) always empty — preserved for caller interface compatibility."""
         if not self._client:
             raise RuntimeError("NetriasClient unavailable (missing NETRIAS_API_KEY)")
 
         try:
-            raw_manifest = self._client.discover_mapping_from_csv(
-                source_csv=csv_path,
+            raw_manifest = self._client.discover_mapping_from_tabular(
+                source_path=csv_path,
                 target_schema=target_schema,
+                target_version=target_version,
                 confidence_threshold=0.7,
+                sheet_name=sheet_name,
             )
         except Exception as exc:
             raise RuntimeError(f"CDE discovery failed: {exc}") from exc
 
-        manifest = normalize_manifest(raw_manifest)
-        cde_targets = _cde_targets_from_manifest(manifest)
-        return cde_targets, {}, manifest
-
-
-def _cde_targets_from_manifest(
-    manifest: ManifestPayload,
-) -> dict[str, list[ModelSuggestion]]:
-    """AnalyzeResponse needs per-column suggestions for frontend display."""
-    column_mappings = manifest.get("column_mappings", {})
-    targets: dict[str, list[ModelSuggestion]] = {}
-    for column_name, entry in column_mappings.items():
-        alternatives = entry.get("alternatives")
-        if isinstance(alternatives, list) and alternatives:
-            suggestions = _suggestions_from_alternatives(alternatives)
-            if suggestions:
-                targets[column_name] = suggestions
-                continue
-        target_field = entry.get("targetField")
-        if target_field:
-            targets[column_name] = [ModelSuggestion(target=target_field, similarity=1.0)]
-    return targets
-
-
-def _suggestions_from_alternatives(
-    alternatives: list[AlternativeEntry],
-) -> list[ModelSuggestion]:
-    """External payload uses loose dicts; validate and convert to typed domain objects."""
-    suggestions: list[ModelSuggestion] = []
-    for alt in alternatives:
-        target = alt.get("target")
-        if not isinstance(target, str) or not target:
-            continue
-        similarity = alt.get("similarity")
-        score = float(similarity) if isinstance(similarity, (int, float)) else 0.0
-        suggestions.append(ModelSuggestion(target=target, similarity=score))
-    return suggestions
+        manifest = ColumnMappingManifest.from_payload(raw_manifest)
+        return manifest.suggestions_by_column(), {}, manifest.to_payload()

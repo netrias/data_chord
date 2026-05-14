@@ -1,8 +1,15 @@
 import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { expect } from '@playwright/test';
 import AdmZip from 'adm-zip';
 
 export const fixturesDir = path.resolve('tests/e2e/fixtures');
+const E2E_TARGET_MODEL = 'gc';
+const E2E_TARGET_VERSION_NUMBER = 2;
+const E2E_TARGET_CDE = 'primary_diagnosis';
+const E2E_TARGET_CDE_ID = 376;
 
 export const fileFixture = (name) => path.join(fixturesDir, name);
 
@@ -24,6 +31,32 @@ export const uploadAndAnalyze = async (page, filePath) => {
   await confirmButton.waitFor({ state: 'visible' });
   await confirmButton.click();
   await page.waitForURL(/\/stage-2/);
+  await expect(page.locator('#mappingRows .mapping-row-target').first()).toContainText(
+    E2E_TARGET_CDE,
+  );
+  return getFileIdFromUrl(page);
+};
+
+export const uploadAndAnalyzeSheet = async (page, filePath, sheetName) => {
+  await mockDataModels(page);
+  await mockAnalyze(page);
+  await page.goto('/stage-1');
+  await page.setInputFiles('#fileInput', filePath);
+  await page.locator('#analyzeButton').waitFor({ state: 'attached' });
+  await page.locator('#analyzeButton').waitFor({ state: 'visible' });
+  await page.waitForFunction(() => !document.querySelector('#analyzeButton')?.disabled);
+  // Workbook tabs render once upload finishes; click the named tab to select.
+  const sheetTab = page.locator(`.workbook-tab[data-sheet-name="${sheetName}"]`);
+  await sheetTab.waitFor({ state: 'visible' });
+  await sheetTab.click();
+  await page.click('#analyzeButton');
+  const confirmButton = page.locator('.data-model-confirm-btn');
+  await confirmButton.waitFor({ state: 'visible' });
+  await confirmButton.click();
+  await page.waitForURL(/\/stage-2/);
+  await expect(page.locator('#mappingRows .mapping-row-target').first()).toContainText(
+    E2E_TARGET_CDE,
+  );
   return getFileIdFromUrl(page);
 };
 
@@ -60,6 +93,9 @@ export const mockAnalyze = async (page) => {
   await page.route('**/stage-1/analyze', async (route) => {
     const payload = route.request().postDataJSON?.() ?? {};
     const fileId = payload.file_id ?? '';
+    if (fileId && payload.sheet_name) {
+      persistSelectedSheet(fileId, payload.sheet_name);
+    }
     const response = {
       file_id: fileId,
       file_name: 'test.csv',
@@ -67,21 +103,62 @@ export const mockAnalyze = async (page) => {
       columns: [
         {
           column_name: 'col_a',
+          column_key: 'col_a',
+          source_index: 0,
+          header: 'col_a',
           inferred_type: 'text',
           sample_values: ['Foo', 'Bar'],
           confidence_bucket: 'high',
           confidence_score: 0.95,
         },
       ],
-      cde_targets: {},
+      cde_targets: {
+        col_a: [{ target: E2E_TARGET_CDE, similarity: 0.95 }],
+      },
+      column_summaries: {
+        col_a: { value_overlap_ratio: 0.5 },
+      },
       next_stage: 'mapping',
       next_step_hint: 'Review AI-suggested column mappings once ready.',
       manual_overrides: {},
       manifest: {
         column_mappings: {
-          col_a: { targetField: 'col_a', cde_id: 1 },
+          col_a: { cde_key: E2E_TARGET_CDE, cde_id: E2E_TARGET_CDE_ID },
         },
       },
+    };
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(response),
+    });
+  });
+};
+
+
+export const mockColumnDetail = async (page) => {
+  await page.route('**/stage-2/column-detail/**', async (route) => {
+    const url = new URL(route.request().url());
+    const parts = url.pathname.split('/');
+    const columnKey = decodeURIComponent(parts[parts.length - 1] ?? '');
+    const response = {
+      column_key: columnKey,
+      profile: {
+        column_key: columnKey,
+        total_rows: 3,
+        distinct_values: [
+          { value: 'Foo', count: 2 },
+          { value: 'Bar', count: 1 },
+        ],
+        null_count: 0,
+        total_distinct: 2,
+        null_pct: 0.0,
+        is_all_unique: false,
+      },
+      match_counts: {},
+      overlap_by_cde: {},
+      cde_types: {},
+      selected_pvs: null,
     };
     await route.fulfill({
       status: 200,
@@ -95,9 +172,43 @@ export const mockDataModels = async (page) => {
   await page.route('**/stage-1/data-models', async (route) => {
     const models = [
       {
+        key: E2E_TARGET_MODEL,
+        label: 'Genomic Cancer',
+        versions: [
+          {
+            version_label: `v${E2E_TARGET_VERSION_NUMBER}`,
+            version_number: E2E_TARGET_VERSION_NUMBER,
+            external_version_number: null,
+            is_default: true,
+          },
+        ],
+      },
+    ];
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(models),
+    });
+  });
+};
+
+/**
+ * Mock data models with N synthetic versions; latest is the default.
+ * Used to exercise overflow/scroll behavior on the version dropdown panel.
+ */
+export const mockDataModelsWithVersionCount = async (page, count) => {
+  await page.route('**/stage-1/data-models', async (route) => {
+    const versions = Array.from({ length: count }, (_, i) => ({
+      version_label: `v${i + 1}.0`,
+      version_number: i + 1,
+      external_version_number: null,
+      is_default: i === count - 1,
+    }));
+    const models = [
+      {
         key: 'test-data-model',
         label: 'Test Data Model',
-        versions: ['v1'],
+        versions,
       },
     ];
     await route.fulfill({
@@ -136,12 +247,59 @@ export const seedHarmonization = (fileId, changes = {}, options = {}) => {
   execFileSync('uv', args, { stdio: 'inherit' });
 };
 
+export const createWorkbookFixture = () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'data-chord-e2e-xlsx-'));
+  const workbookPath = path.join(tmpDir, 'workbook.xlsx');
+  execFileSync('uv', [
+    'run',
+    'python',
+    path.resolve('tests/e2e/support/create_workbook_fixture.py'),
+    '--output',
+    workbookPath,
+  ], { stdio: 'inherit' });
+  return workbookPath;
+};
+
+export const parseDownloadedWorkbook = async (response, sheetName) => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'data-chord-e2e-download-'));
+  const zipPath = path.join(tmpDir, 'download.zip');
+  fs.writeFileSync(zipPath, Buffer.from(await response.body()));
+  const output = execFileSync('uv', [
+    'run',
+    'python',
+    path.resolve('tests/e2e/support/read_downloaded_workbook.py'),
+    '--zip-path',
+    zipPath,
+    '--sheet-name',
+    sheetName,
+  ], { encoding: 'utf-8' });
+  return JSON.parse(output);
+};
+
+const persistSelectedSheet = (fileId, sheetName) => {
+  execFileSync('uv', [
+    'run',
+    'python',
+    path.resolve('tests/e2e/support/select_sheet.py'),
+    '--file-id',
+    fileId,
+    '--sheet-name',
+    sheetName,
+  ], { stdio: 'inherit' });
+};
+
 export const parseDownloadedCsv = async (response) => {
+  return parseDownloadedTabular(response, '.csv', ',');
+};
+
+export const parseDownloadedTabular = async (response, suffix, delimiter) => {
   const buffer = await response.body();
   const zip = new AdmZip(Buffer.from(buffer));
-  const entry = zip.getEntries().find((item) => item.entryName.endsWith('.csv'));
+  const entries = zip.getEntries();
+  const entry = entries.find((item) => item.entryName.endsWith(suffix));
   if (!entry) {
-    throw new Error('No CSV found in download zip.');
+    const entryNames = entries.map((item) => item.entryName).join(', ');
+    throw new Error(`No ${suffix} found in download zip. Entries: ${entryNames}`);
   }
   const content = entry.getData().toString('utf-8');
   const lines = content.split(/\r?\n/);
@@ -152,14 +310,14 @@ export const parseDownloadedCsv = async (response) => {
   if (!headerLine) {
     return [];
   }
-  const headers = parseCsvLine(headerLine);
+  const headers = parseDelimitedLine(headerLine, delimiter);
   return lines.map((line) => {
-    const values = parseCsvLine(line);
+    const values = parseDelimitedLine(line, delimiter);
     return Object.fromEntries(headers.map((header, idx) => [header, values[idx] ?? '']));
   });
 };
 
-const parseCsvLine = (line) => {
+const parseDelimitedLine = (line, delimiter) => {
   const values = [];
   let current = '';
   let inQuotes = false;
@@ -173,7 +331,7 @@ const parseCsvLine = (line) => {
       } else {
         inQuotes = !inQuotes;
       }
-    } else if (char === ',' && !inQuotes) {
+    } else if (char === delimiter && !inQuotes) {
       values.push(current);
       current = '';
     } else {
