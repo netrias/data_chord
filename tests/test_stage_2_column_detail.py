@@ -1,4 +1,4 @@
-"""Tests for the Stage 2 column-detail service and endpoint."""
+"""Tests for the Stage 2 column-detail use case and endpoint."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from src.domain.data_model_cache import (
     clear_all_session_caches,
     get_session_cache,
 )
-from src.stage_2_review_columns.services import (
+from src.stage_2_review_columns.use_cases import (
     ColumnDetailNotFound,
     compute_column_detail,
 )
@@ -97,7 +97,7 @@ async def test_compute_column_detail_returns_pv_match_and_sorted_pvs(
     )
 
     monkeypatch.setattr(
-        "src.stage_2_review_columns.services.fetch_all_pvs_async",
+        "src.stage_2_review_columns.use_cases.fetch_all_pvs_async",
         AsyncMock(return_value={"dx": frozenset({"Lung", "Breast", "Glioma"})}),
     )
 
@@ -144,7 +144,7 @@ async def test_compute_column_detail_downgrades_to_passthrough_on_empty_pvs(
         version_label="1",
     )
     monkeypatch.setattr(
-        "src.stage_2_review_columns.services.fetch_all_pvs_async",
+        "src.stage_2_review_columns.use_cases.fetch_all_pvs_async",
         AsyncMock(return_value={"notes": frozenset()}),
     )
 
@@ -209,10 +209,10 @@ async def test_compute_column_detail_rebuilds_profile_when_cache_lost(
     Given: browser/session state survived but the server's in-memory column
            profile cache was cleared
     When: compute_column_detail is called for a stored upload
-    Then: the service rebuilds that column's profile from the uploaded file and
+    Then: the use case rebuilds that column's profile from the uploaded file and
           returns it with the detail payload
     """
-    import src.stage_2_review_columns.services as services
+    import src.stage_2_review_columns.use_cases as use_cases
     from src.domain.storage import UploadConstraints, UploadStorage
 
     # Given
@@ -236,7 +236,7 @@ async def test_compute_column_detail_rebuilds_profile_when_cache_lost(
         """,
         encoding="utf-8",
     )
-    monkeypatch.setattr(services.dependencies, "get_upload_storage", lambda: storage)
+    monkeypatch.setattr(use_cases.dependencies, "get_upload_storage", lambda: storage)
 
     file_id = "abcdef0123456789"
     cache = get_session_cache(file_id)
@@ -247,7 +247,7 @@ async def test_compute_column_detail_rebuilds_profile_when_cache_lost(
     )
     assert cache.get_column_profile("col_0000") is None
     monkeypatch.setattr(
-        "src.stage_2_review_columns.services.fetch_all_pvs_async",
+        "src.stage_2_review_columns.use_cases.fetch_all_pvs_async",
         AsyncMock(return_value={"dx": frozenset({"Lung", "Breast"})}),
     )
 

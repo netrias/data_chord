@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ if str(ROOT_DIR) not in sys.path:
 
 # noqa: E402 - ensure repo root is on sys.path before importing application modules.
 from src.domain.manifest import get_manifest_schema  # noqa: E402
+from src.domain.storage import UploadConstraints, UploadStorage  # noqa: E402
 
 
 def _resolve_upload_base_dir(raw: str | None) -> Path:
@@ -28,31 +30,19 @@ def _resolve_upload_base_dir(raw: str | None) -> Path:
     return UPLOAD_BASE_DIR
 
 
-def _find_original_path(file_id: str, upload_base_dir: Path) -> Path:
-    files_dir = upload_base_dir / "files"
-    matches = sorted(files_dir.glob(f"{file_id}.*"))
-    if not matches:
-        raise FileNotFoundError(f"No uploaded file found for {file_id}")
-    return matches[0]
+def _upload_storage_for(upload_base_dir: Path) -> UploadStorage:
+    from src.domain.dependencies import MAX_UPLOAD_BYTES
 
-
-def _selected_sheet_for(file_id: str, upload_base_dir: Path) -> str | None:
-    meta_path = upload_base_dir / "meta" / f"{file_id}.json"
-    if not meta_path.exists():
-        return None
-    payload = json.loads(meta_path.read_text())
-    selected_sheet = payload.get("selected_sheet")
-    return selected_sheet if isinstance(selected_sheet, str) else None
+    return UploadStorage(upload_base_dir, UploadConstraints(max_bytes=MAX_UPLOAD_BYTES))
 
 
 def _write_harmonized(
     file_id: str,
     original_path: Path,
     dataset: TabularDataset,
-    upload_base_dir: Path,
+    storage: UploadStorage,
 ) -> Path:
-    harmonized_path = upload_base_dir / "harmonized" / f"{file_id}.harmonized{original_path.suffix.lower()}"
-    harmonized_path.parent.mkdir(parents=True, exist_ok=True)
+    harmonized_path = storage.harmonized_path_for(file_id, original_path)
     template_path = original_path if dataset.source_format.value == "xlsx" else None
     write_tabular(harmonized_path, dataset, template_path=template_path)
     return harmonized_path
@@ -100,26 +90,25 @@ def _build_manifest_rows(
     return manifest_rows
 
 
-def _write_manifest(file_id: str, manifest_rows: list[dict[str, Any]], upload_base_dir: Path) -> Path:
-    manifest_dir = upload_base_dir / "manifests"
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = manifest_dir / f"{file_id}_harmonization.parquet"
+def _write_manifest(file_id: str, manifest_rows: list[dict[str, Any]], storage: UploadStorage) -> Path:
     schema = get_manifest_schema()
-    table = pa.table({
-        "job_id": [row.get("job_id", "e2e-job") for row in manifest_rows],
-        "column_id": [row.get("column_id", 0) for row in manifest_rows],
-        "column_name": [row.get("column_name", "") for row in manifest_rows],
-        "to_harmonize": [row.get("to_harmonize", "") for row in manifest_rows],
-        "top_harmonization": [row.get("top_harmonization", "") for row in manifest_rows],
-        "ontology_id": [row.get("ontology_id") for row in manifest_rows],
-        "top_harmonizations": [row.get("top_harmonizations", []) for row in manifest_rows],
-        "confidence_score": [row.get("confidence_score") for row in manifest_rows],
-        "error": [row.get("error") for row in manifest_rows],
-        "row_indices": [row.get("row_indices", []) for row in manifest_rows],
-        "manual_overrides": [row.get("manual_overrides", []) for row in manifest_rows],
-    }, schema=schema)
-    pq.write_table(table, manifest_path)
-    return manifest_path
+    with tempfile.TemporaryDirectory() as temp_dir:
+        manifest_path = Path(temp_dir) / f"{file_id}_harmonization.parquet"
+        table = pa.table({
+            "job_id": [row.get("job_id", "e2e-job") for row in manifest_rows],
+            "column_id": [row.get("column_id", 0) for row in manifest_rows],
+            "column_name": [row.get("column_name", "") for row in manifest_rows],
+            "to_harmonize": [row.get("to_harmonize", "") for row in manifest_rows],
+            "top_harmonization": [row.get("top_harmonization", "") for row in manifest_rows],
+            "ontology_id": [row.get("ontology_id") for row in manifest_rows],
+            "top_harmonizations": [row.get("top_harmonizations", []) for row in manifest_rows],
+            "confidence_score": [row.get("confidence_score") for row in manifest_rows],
+            "error": [row.get("error") for row in manifest_rows],
+            "row_indices": [row.get("row_indices", []) for row in manifest_rows],
+            "manual_overrides": [row.get("manual_overrides", []) for row in manifest_rows],
+        }, schema=schema)
+        pq.write_table(table, manifest_path)
+        return storage.save_harmonization_manifest(file_id, manifest_path)
 
 
 def _parse_changes(raw: str | None) -> dict[int, dict[str, str]]:
@@ -138,9 +127,11 @@ def main() -> None:
     args = parser.parse_args()
 
     upload_base_dir = _resolve_upload_base_dir(args.upload_base_dir)
-    original_path = _find_original_path(args.file_id, upload_base_dir)
-    selected_sheet = _selected_sheet_for(args.file_id, upload_base_dir)
-    original_dataset = read_tabular(original_path, sheet_name=selected_sheet)
+    storage = _upload_storage_for(upload_base_dir)
+    meta = storage.load(args.file_id)
+    if meta is None:
+        raise FileNotFoundError(f"No uploaded file found for {args.file_id}")
+    original_dataset = read_tabular(meta.saved_path, sheet_name=meta.selected_sheet)
     harmonized_rows = [row.copy() for row in original_dataset.rows]
     changes = _parse_changes(args.changes)
     header_by_index = {column.header: column for column in original_dataset.columns}
@@ -159,11 +150,11 @@ def main() -> None:
         sheet_name=original_dataset.sheet_name,
     )
 
-    _write_harmonized(args.file_id, original_path, harmonized_dataset, upload_base_dir)
+    _write_harmonized(args.file_id, meta.saved_path, harmonized_dataset, storage)
 
     if not args.no_manifest:
         manifest_rows = _build_manifest_rows(original_dataset, harmonized_dataset, changes, args.file_id)
-        _write_manifest(args.file_id, manifest_rows, upload_base_dir)
+        _write_manifest(args.file_id, manifest_rows, storage)
 
 
 if __name__ == "__main__":

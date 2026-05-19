@@ -19,7 +19,7 @@ from src.domain.columns import ColumnKey
 from src.domain.data_model_cache import SessionCache
 from src.domain.data_model_selection import DataModelSelection
 from src.domain.manifest import ColumnMappingManifest, ColumnMappingRecord
-from src.domain.storage import FileType
+from src.domain.storage import FileStore
 
 MAPPING_SOURCE_AI: Final = "ai"
 MAPPING_SOURCE_USER_OVERRIDE: Final = "user_override"
@@ -77,12 +77,13 @@ def save_cde_mapping_document(
         target_version=target_selection.target_version,
         mappings=_build_entries(manifest, column_overrides, column_renames, cache),
     )
-    dependencies.get_file_store().save(file_id, FileType.COLUMN_MAPPING, document)
+    dependencies.get_file_store().save_column_mapping(file_id, document)
 
 
-def load_cde_mapping_json(file_id: str) -> str | None:
+def load_cde_mapping_json(file_id: str, file_store: FileStore | None = None) -> str | None:
     """Return a pretty JSON mapping artifact for the download bundle."""
-    payload = dependencies.get_file_store().load(file_id, FileType.COLUMN_MAPPING)
+    store = file_store if file_store is not None else dependencies.get_file_store()
+    payload = store.load_column_mapping(file_id)
     if payload is None:
         return None
     return json.dumps(payload, indent=2)

@@ -16,14 +16,20 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from netrias_client import DataModelStoreError, NetriasAPIUnavailable
 
+import src.domain.dependencies as dependencies
 from src.domain import UILabel
 from src.domain.cde import CDEInfo
 from src.domain.data_model_cache import get_session_cache, populate_cde_cache
 from src.domain.data_model_selection import DataModelSelection
 from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
 
-from .schemas import ColumnDetailResponse
-from .services import ColumnDetailNotFound, compute_column_detail
+from .schemas import ColumnDetailResponse, SaveMappingChoicesRequest, SaveMappingChoicesResponse
+from .use_cases import (
+    ColumnDetailNotFound,
+    MappingWorkflowStateNotFoundError,
+    compute_column_detail,
+    save_confirmed_mapping_choices,
+)
 
 MODULE_DIR = _Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"
@@ -42,31 +48,44 @@ async def render_stage_two(
     version_number: Annotated[int | None, Query(ge=1)] = None,
 ) -> HTMLResponse:
     cde_catalog: list[CDEInfo] = []
+    selection = _data_model_selection_for_request(file_id, schema, version_number)
 
-    if file_id and schema:
-        cde_catalog = await _get_cde_options_for_session(file_id, schema, version_number)
+    if file_id and selection:
+        cde_catalog = await _get_cde_options_for_session(file_id, selection)
 
     context = {
         "request": request,
-        "default_schema": schema or "",
-        "default_version_number": version_number,
+        "default_schema": selection.key if selection else schema or "",
+        "default_version_number": selection.version_number if selection else version_number,
         "cde_catalog": [_cde_catalog_item(cde) for cde in cde_catalog],
         "no_mapping_label": UILabel.NO_MAPPING.value,
     }
     return _templates.TemplateResponse("stage_2_mappings.html", context)
 
 
+def _data_model_selection_for_request(
+    file_id: str | None,
+    target_schema: str | None,
+    version_number: int | None,
+) -> DataModelSelection | None:
+    if file_id:
+        state = dependencies.get_file_store().load_workflow_state(file_id)
+        if state is not None:
+            return state.data_model_selection
+    if target_schema is None:
+        return None
+    return DataModelSelection.from_version_number(target_schema, version_number)
+
+
 async def _get_cde_options_for_session(
     file_id: str,
-    target_schema: str,
-    version_number: int | None,
+    selection: DataModelSelection,
 ) -> list[CDEInfo]:
     """Returns empty list on API failure (graceful degradation)."""
     cache = get_session_cache(file_id)
 
     if not cache.has_cdes():
         try:
-            selection = DataModelSelection.from_version_number(target_schema, version_number)
             await run_in_threadpool(populate_cde_cache, file_id, selection)
         except (DataModelStoreError, NetriasAPIUnavailable):
             logger.warning("Data Model Store API unavailable; CDE options will be empty", extra={"file_id": file_id})
@@ -101,4 +120,20 @@ async def get_column_detail(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
+        ) from exc
+
+
+@stage_two_router.post(
+    "/stage-2/choices",
+    response_model=SaveMappingChoicesResponse,
+    name="stage_two_save_mapping_choices",
+)
+async def save_mapping_choices(payload: SaveMappingChoicesRequest) -> SaveMappingChoicesResponse:
+    store = dependencies.get_file_store()
+    try:
+        return save_confirmed_mapping_choices(file_store=store, payload=payload)
+    except MappingWorkflowStateNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workflow state not found. Please rerun analysis.",
         ) from exc

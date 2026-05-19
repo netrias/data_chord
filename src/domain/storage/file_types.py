@@ -16,6 +16,7 @@ class FileType(Enum):
     COLUMN_MAPPING = "mapping"
     REVIEW_OVERRIDES = "overrides"
     PV_MANIFEST = "pv_manifest"
+    WORKFLOW_STATE = "workflow_state"
 
     @property
     def suffix(self) -> str:

@@ -1,15 +1,7 @@
-"""Stage 2 orchestration: assemble column-detail payloads for the takeover.
-
-Axis of change: how the backend bundles column profile + match counts +
-selected PVs into one response. Pulls cached state (CDEs, profiles, PVs),
-fetches missing PV sets, refines CDE types from the now-known PV presence, and
-computes match counts. Domain primitives live elsewhere; this module is the
-imperative shell.
-"""
+"""Stage 2 use cases for mapping review and confirmed workflow state."""
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -29,14 +21,18 @@ from src.domain.data_model_adapter import (
 )
 from src.domain.data_model_cache import SessionCache, get_session_cache
 from src.domain.match_counts import compute_column_overlap_by_cde, compute_match_counts
+from src.domain.storage import FileStore
+from src.domain.workflow_state import ConfirmedMappingChoices
 
-from .schemas import ColumnDetailResponse
-
-_logger = logging.getLogger(__name__)
+from .schemas import ColumnDetailResponse, SaveMappingChoicesRequest, SaveMappingChoicesResponse
 
 
 class ColumnDetailNotFound(Exception):
     """Raised when no profile exists for the requested file_id / column_key."""
+
+
+class MappingWorkflowStateNotFoundError(Exception):
+    """Raised when Stage 2 choices are saved before Stage 1 creates workflow state."""
 
 
 @dataclass(frozen=True)
@@ -56,27 +52,7 @@ async def compute_column_detail(
     column_key: str,
     selected_cde_key: str | None,
 ) -> ColumnDetailResponse:
-    """Build the takeover's column-detail payload.
-
-    ``selected_cde_key`` is the CDE the user currently has chosen for this
-    column (AI rec by default, or their override). The response includes the
-    PV list for that selection so the right pane can render immediately.
-
-    Logically a query, but it memoizes two pieces of state on the cache:
-    fetched PV sets and refined CDE types. Both are idempotent — repeated
-    calls produce identical caches — so the CQS-violation cost is bounded.
-
-    Example response::
-
-        ColumnDetailResponse(
-            column_key="diagnosis",
-            profile=ColumnProfilePayload(...),
-            match_counts={"tumor_diagnosis": 487, "icd10_diagnosis": 312},
-            overlap_by_cde={"tumor_diagnosis": 0.82, "icd10_diagnosis": 0.53},
-            cde_types={"tumor_diagnosis": "pv", "free_notes": "passthrough"},
-            selected_pvs=["Adenocarcinoma", "Breast Cancer", ...],
-        )
-    """
+    """Build the takeover's column-detail payload."""
     source_column_key = column_key_from_string(column_key)
     cache = get_session_cache(file_id)
     profile = await _get_or_build_column_profile(cache, file_id, source_column_key)
@@ -98,6 +74,21 @@ async def compute_column_detail(
         cde_types=catalog.cde_types,
         selected_pvs=_selected_pvs(selected_cde_key, catalog.cdes, catalog.pv_sets),
     )
+
+
+def save_confirmed_mapping_choices(
+    *,
+    file_store: FileStore,
+    payload: SaveMappingChoicesRequest,
+) -> SaveMappingChoicesResponse:
+    """Persist confirmed Stage 2 choices as durable workflow state."""
+    state = file_store.load_workflow_state(payload.file_id)
+    if state is None:
+        raise MappingWorkflowStateNotFoundError()
+
+    choices = ConfirmedMappingChoices.from_raw(payload.manual_overrides, payload.column_renames)
+    file_store.save_workflow_state(state.with_mapping_choices(choices))
+    return SaveMappingChoicesResponse(file_id=payload.file_id)
 
 
 async def _get_or_build_column_profile(
@@ -165,3 +156,11 @@ def _selected_pvs(
     if not pvs:
         return None
     return sorted(pvs)
+
+
+__all__ = [
+    "ColumnDetailNotFound",
+    "MappingWorkflowStateNotFoundError",
+    "compute_column_detail",
+    "save_confirmed_mapping_choices",
+]

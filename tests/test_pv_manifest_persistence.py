@@ -53,7 +53,7 @@ class TestPVManifestPersistenceFeature:
         assert not cache.has_any_pvs(), "Cache should be empty after clear"
 
         # When: Stage 4/5 lazy-loads PVs from disk
-        with patch("src.domain.pv_persistence.get_file_store") as mock_get_store:
+        with patch("src.domain.dependencies.get_file_store") as mock_get_store:
             mock_store = MagicMock()
             mock_store.load_pv_manifest.return_value = PVManifest.from_store(pv_manifest_data)
             mock_get_store.return_value = mock_store
@@ -91,7 +91,7 @@ class TestPVManifestPersistenceFeature:
         cache = get_session_cache(file_id)
 
         # When: Attempting to load from non-existent manifest
-        with patch("src.domain.pv_persistence.get_file_store") as mock_get_store:
+        with patch("src.domain.dependencies.get_file_store") as mock_get_store:
             mock_store = MagicMock()
             mock_store.load_pv_manifest.return_value = None  # No manifest found
             mock_get_store.return_value = mock_store
@@ -137,7 +137,7 @@ class TestPVManifestPersistenceFeature:
         clear_all_session_caches()
 
         # When: ensure_pvs_loaded is called
-        with patch("src.domain.pv_persistence.get_file_store") as mock_get_store:
+        with patch("src.domain.dependencies.get_file_store") as mock_get_store:
             mock_store = MagicMock()
             mock_store.load_pv_manifest.return_value = PVManifest.from_store(pv_manifest_data)
             mock_get_store.return_value = mock_store

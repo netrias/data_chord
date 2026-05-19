@@ -24,3 +24,5 @@ from src.domain.schemas import HarmonizeResponse as HarmonizeResponse
 from src.domain.schemas import ManifestSummarySchema as ManifestSummarySchema
 from src.domain.session import SessionKey as SessionKey
 from src.domain.session import UILabel as UILabel
+from src.domain.workflow_state import ConfirmedMappingChoices as ConfirmedMappingChoices
+from src.domain.workflow_state import WorkflowState as WorkflowState

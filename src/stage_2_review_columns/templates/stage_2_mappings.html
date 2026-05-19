@@ -93,6 +93,7 @@
     <script>
       window.stageTwoConfig = {
         analyzeEndpoint: "{{ request.url_for('stage_one_upload_analyze') }}",
+        mappingChoicesEndpoint: "{{ request.url_for('stage_two_save_mapping_choices') }}",
         columnDetailBase: "/stage-2/column-detail",
         targetSchema: "{{ default_schema }}",
         targetVersionNumber: {{ default_version_number|tojson }},

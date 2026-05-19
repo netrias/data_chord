@@ -8,6 +8,7 @@ from pathlib import Path
 
 from src.domain.pv_manifest import PVManifest
 from src.domain.review_overrides import ReviewOverrides
+from src.domain.workflow_state import WorkflowState
 
 from .file_types import FileType, build_file_name
 
@@ -49,17 +50,39 @@ class FileStore:
             return None
         return json.loads(path.read_text(encoding="utf-8"))
 
+    def save_column_mapping(self, file_id: str, document: object) -> None:
+        self.save(file_id, FileType.COLUMN_MAPPING, document)
+
+    def load_column_mapping(self, file_id: str) -> object | None:
+        return self.load(file_id, FileType.COLUMN_MAPPING)
+
+    def delete_column_mapping(self, file_id: str) -> bool:
+        existed = self.exists(file_id, FileType.COLUMN_MAPPING)
+        self.delete(file_id, FileType.COLUMN_MAPPING)
+        return existed
+
     def save_review_overrides(self, overrides: ReviewOverrides) -> None:
         self.save(overrides.file_id, FileType.REVIEW_OVERRIDES, overrides.to_store())
 
     def load_review_overrides(self, file_id: str) -> ReviewOverrides | None:
         return ReviewOverrides.from_store(self.load(file_id, FileType.REVIEW_OVERRIDES), file_id)
 
+    def delete_review_overrides(self, file_id: str) -> bool:
+        existed = self.exists(file_id, FileType.REVIEW_OVERRIDES)
+        self.delete(file_id, FileType.REVIEW_OVERRIDES)
+        return existed
+
     def save_pv_manifest(self, file_id: str, manifest: PVManifest) -> None:
         self.save(file_id, FileType.PV_MANIFEST, manifest.to_store())
 
     def load_pv_manifest(self, file_id: str) -> PVManifest | None:
         return PVManifest.from_store(self.load(file_id, FileType.PV_MANIFEST))
+
+    def save_workflow_state(self, state: WorkflowState) -> None:
+        self.save(state.file_id, FileType.WORKFLOW_STATE, state.to_store())
+
+    def load_workflow_state(self, file_id: str) -> WorkflowState | None:
+        return WorkflowState.from_store(self.load(file_id, FileType.WORKFLOW_STATE), file_id)
 
     def delete(self, file_id: str, file_type: FileType) -> None:
         """Delete a file."""

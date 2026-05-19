@@ -58,7 +58,7 @@ class TestTransformationHistoryContract:
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
-        create_harmonized_csv(meta.saved_path, {0: {"therapeutic_agents": "Harmonized Agent"}})
+        create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"therapeutic_agents": "Harmonized Agent"}})
         _create_manifest_with_history(
             storage=temp_storage,
             file_id=file_id,
@@ -94,7 +94,7 @@ class TestTransformationHistoryContract:
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
-        create_harmonized_csv(meta.saved_path, {0: {"therapeutic_agents": "AI Suggestion"}})
+        create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"therapeutic_agents": "AI Suggestion"}})
         _create_manifest_with_history(
             storage=temp_storage,
             file_id=file_id,
@@ -131,7 +131,7 @@ class TestTransformationHistoryContract:
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
-        create_harmonized_csv(meta.saved_path, {0: {"therapeutic_agents": "User Override"}})
+        create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"therapeutic_agents": "User Override"}})
         _create_manifest_with_history(
             storage=temp_storage,
             file_id=file_id,
@@ -175,7 +175,7 @@ class TestTransformationHistoryContract:
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
-        create_harmonized_csv(meta.saved_path, {0: {"therapeutic_agents": "Same Value"}})
+        create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"therapeutic_agents": "Same Value"}})
         _create_manifest_with_history(
             storage=temp_storage,
             file_id=file_id,
@@ -214,7 +214,7 @@ class TestTransformationHistoryContract:
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
-        create_harmonized_csv(meta.saved_path, {0: {"therapeutic_agents": "Final Value"}})
+        create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"therapeutic_agents": "Final Value"}})
         _create_manifest_with_history(
             storage=temp_storage,
             file_id=file_id,
@@ -256,7 +256,7 @@ class TestTransformationHistoryContract:
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
-        create_harmonized_csv(meta.saved_path, {0: {"therapeutic_agents": "Changed"}})
+        create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"therapeutic_agents": "Changed"}})
         _create_manifest_with_history(
             storage=temp_storage,
             file_id=file_id,
@@ -294,7 +294,7 @@ class TestTransformationHistoryContract:
         meta = temp_storage.load(file_id)
         assert meta is not None
         same_value = "Unchanged Value"
-        create_harmonized_csv(meta.saved_path, {0: {"therapeutic_agents": same_value}})
+        create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"therapeutic_agents": same_value}})
         _create_manifest_with_history(
             storage=temp_storage,
             file_id=file_id,
@@ -331,7 +331,7 @@ class TestTransformationHistoryContract:
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
-        create_harmonized_csv(meta.saved_path, {0: {"therapeutic_agents": "Changed Value"}})
+        create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"therapeutic_agents": "Changed Value"}})
         _create_manifest_with_history(
             storage=temp_storage,
             file_id=file_id,
@@ -367,7 +367,7 @@ class TestTransformationHistoryContract:
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
-        create_harmonized_csv(meta.saved_path, {0: {"therapeutic_agents": "User Override"}})
+        create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"therapeutic_agents": "User Override"}})
         _create_manifest_with_history(
             storage=temp_storage,
             file_id=file_id,
@@ -407,7 +407,7 @@ class TestTransformationHistoryContract:
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
-        create_harmonized_csv(meta.saved_path, {0: {"therapeutic_agents": "Conformant Value"}})
+        create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"therapeutic_agents": "Conformant Value"}})
         _create_manifest_with_history(
             storage=temp_storage,
             file_id=file_id,
@@ -417,10 +417,8 @@ class TestTransformationHistoryContract:
         )
 
         # When: Summary is requested with a mocked PV set containing the value
-        with patch("src.stage_5_review_summary.router.ensure_pvs_loaded") as mock_ensure:
-            mock_cache = mock_ensure.return_value
-            mock_cache.get_pvs_for_column.return_value = frozenset({"Conformant Value"})
-
+        with patch("src.stage_5_review_summary.use_cases.column_pv_sets") as mock_column_pvs:
+            mock_column_pvs.return_value = {"col_0000": frozenset({"Conformant Value"})}
             response = await app_client.post(
                 "/stage-5/summary",
                 json={"file_id": file_id},
@@ -446,7 +444,7 @@ class TestTransformationHistoryContract:
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
-        create_harmonized_csv(meta.saved_path, {0: {"therapeutic_agents": "Non Conformant"}})
+        create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"therapeutic_agents": "Non Conformant"}})
         _create_manifest_with_history(
             storage=temp_storage,
             file_id=file_id,
@@ -456,10 +454,8 @@ class TestTransformationHistoryContract:
         )
 
         # When: Summary is requested with a mocked PV set NOT containing the values
-        with patch("src.stage_5_review_summary.router.ensure_pvs_loaded") as mock_ensure:
-            mock_cache = mock_ensure.return_value
-            mock_cache.get_pvs_for_column.return_value = frozenset({"Other Value"})
-
+        with patch("src.stage_5_review_summary.use_cases.column_pv_sets") as mock_column_pvs:
+            mock_column_pvs.return_value = {"col_0000": frozenset({"Other Value"})}
             response = await app_client.post(
                 "/stage-5/summary",
                 json={"file_id": file_id},
@@ -485,7 +481,7 @@ class TestTransformationHistoryContract:
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
-        create_harmonized_csv(meta.saved_path, {0: {"therapeutic_agents": "Any Value"}})
+        create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"therapeutic_agents": "Any Value"}})
         _create_manifest_with_history(
             storage=temp_storage,
             file_id=file_id,
@@ -495,10 +491,8 @@ class TestTransformationHistoryContract:
         )
 
         # When: Summary is requested with no PV set (returns None)
-        with patch("src.stage_5_review_summary.router.ensure_pvs_loaded") as mock_ensure:
-            mock_cache = mock_ensure.return_value
-            mock_cache.get_pvs_for_column.return_value = None
-
+        with patch("src.stage_5_review_summary.use_cases.column_pv_sets") as mock_column_pvs:
+            mock_column_pvs.return_value = {"col_0000": None}
             response = await app_client.post(
                 "/stage-5/summary",
                 json={"file_id": file_id},

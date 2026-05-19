@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from netrias_client import DataModelStoreError, NetriasAPIUnavailable
 
+import src.domain.dependencies as dependencies
 from src.domain import ModelSuggestion
 from src.domain.cde import CDEInfo, DataModelSummary
 from src.domain.column_profile import ColumnProfile
@@ -27,16 +28,17 @@ from src.domain.data_model_selection import DataModelSelection
 from src.domain.dependencies import (
     get_mapping_service,
     get_upload_constraints,
-    get_upload_storage,
 )
 from src.domain.manifest import ManifestPayload
 from src.domain.match_counts import column_value_overlap_ratio
 from src.domain.storage import (
     UnsupportedUploadError,
     UploadedFileMeta,
+    UploadStorage,
     UploadTooLargeError,
     describe_constraints,
 )
+from src.domain.workflow_state import WorkflowState
 
 from .schemas import (
     AnalyzeRequest,
@@ -52,7 +54,6 @@ MODULE_DIR = Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"
 
 _upload_constraints = get_upload_constraints()
-_storage = get_upload_storage()
 _templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 _router_logger = logging.getLogger(__name__)
 
@@ -93,8 +94,9 @@ async def list_data_models() -> list[DataModelSummary]:
     name="stage_one_upload_upload",
 )
 async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadResponse:
+    storage = dependencies.get_upload_storage()
     try:
-        meta = await _storage.store(file)
+        meta = await storage.store(file)
     except UnsupportedUploadError as exc:
         raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(exc)) from exc
     except UploadTooLargeError as exc:
@@ -119,11 +121,12 @@ async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadRespon
     name="stage_one_upload_analyze",
 )
 async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
-    meta = _storage.load(payload.file_id)
+    storage = dependencies.get_upload_storage()
+    meta = storage.load(payload.file_id)
     if not meta:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please upload again.")
 
-    meta = _select_sheet_safe(payload.file_id, payload.sheet_name)
+    meta = _select_sheet_safe(storage, payload.file_id, payload.sheet_name)
     target_selection = DataModelSelection.from_version_number(payload.target_schema, payload.target_version_number)
     analysis_task = asyncio.create_task(
         run_in_threadpool(
@@ -153,7 +156,10 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     except Exception:
         await _cancel_pending_tasks(discovery_task, reference_task)
         raise
-    _storage.save_manifest(meta.file_id, manifest)
+    storage.save_manifest(meta.file_id, manifest)
+    dependencies.get_file_store().save_workflow_state(
+        WorkflowState.from_selection(meta.file_id, target_selection)
+    )
     # Stash profiles in the session cache so the Stage 2 column-detail endpoint
     # can serve them without re-reading the file.
     cache = get_session_cache(meta.file_id)
@@ -181,9 +187,9 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     )
 
 
-def _select_sheet_safe(file_id: str, sheet_name: str | None) -> UploadedFileMeta:
+def _select_sheet_safe(storage: UploadStorage, file_id: str, sheet_name: str | None) -> UploadedFileMeta:
     try:
-        return _storage.select_sheet(file_id, sheet_name)
+        return storage.select_sheet(file_id, sheet_name)
     except FileNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

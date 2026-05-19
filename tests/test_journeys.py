@@ -109,7 +109,7 @@ async def test_harmonize_to_review_journey(
     meta = temp_storage.load(file_id)
     assert meta is not None
     changes = {0: {"primary_diagnosis": "Harmonized Value"}}
-    create_harmonized_csv(meta.saved_path, changes)
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, changes)
     create_manifest_for_file(temp_storage, file_id, meta.saved_path, changes)
 
     # When: User fetches review rows to compare original vs harmonized
@@ -149,7 +149,7 @@ async def test_review_to_summary_journey(
         0: {"primary_diagnosis": "Changed1"},
         1: {"therapeutic_agents": "Changed2"},
     }
-    create_harmonized_csv(meta.saved_path, changes)
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, changes)
     create_manifest_for_file(temp_storage, file_id, meta.saved_path, changes)
 
     # When: User requests summary of all changes
@@ -215,7 +215,7 @@ async def test_full_pipeline_journey(
         0: {"primary_diagnosis": "Standardized Diagnosis"},
         1: {"therapeutic_agents": "Standardized Agent"},
     }
-    create_harmonized_csv(meta.saved_path, changes)
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, changes)
     create_manifest_for_file(temp_storage, file_id, meta.saved_path, changes)
 
     # Stage 4: Review columns
@@ -258,7 +258,7 @@ async def test_manual_overrides_counted_in_summary(
 
     meta = temp_storage.load(file_id)
     assert meta is not None
-    create_harmonized_csv(meta.saved_path, {0: {"primary_diagnosis": "User Manual Override"}})
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"primary_diagnosis": "User Manual Override"}})
     create_manifest_with_manual_override(temp_storage, file_id, meta.saved_path)
 
     # When: Summary is requested
@@ -291,7 +291,7 @@ async def test_download_returns_zip_with_csv(
     file_id = upload_response.json()["file_id"]
     meta = temp_storage.load(file_id)
     assert meta is not None
-    create_harmonized_csv(meta.saved_path, {
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {
         0: {"primary_diagnosis": "Harmonized Value"},
     })
 

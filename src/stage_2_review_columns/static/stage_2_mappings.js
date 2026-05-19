@@ -30,6 +30,7 @@ const NO_MAP = null;
 const NO_MAP_OPTION_VALUE = '__none__';
 const stageThreeUrl = config.stageThreeUrl ?? '/stage-3';
 const columnDetailBase = config.columnDetailBase ?? '/stage-2/column-detail';
+const mappingChoicesEndpoint = config.mappingChoicesEndpoint ?? '/stage-2/choices';
 const targetVersionNumber = config.targetVersionNumber ?? null;
 
 const cdeCatalog = (config.cdeCatalog ?? []).map((c) => ({
@@ -70,7 +71,6 @@ const RENAME_ONLY_SECTION_LABEL = 'No value harmonization';
 /* User-facing messages */
 const MSG_NO_ANALYSIS_DATA = 'No analysis data found. Upload a file on Stage 1 to begin.';
 const MSG_NO_COLUMNS = 'No columns to display.';
-const MSG_MANIFEST_MISSING = 'Manifest missing. Please rerun analysis before harmonizing.';
 const MSG_INVALID_FILE = 'Invalid file reference. Please restart the upload process.';
 const MSG_STORAGE_ERROR = 'Unable to prepare harmonization request. Please enable browser storage and retry.';
 const MSG_LOCKED_MAPPING =
@@ -1261,7 +1261,6 @@ const _persistStageThreePayload = (body) => {
       targetSchema: config.targetSchema,
       targetVersionNumber: state.payload?.target_version_number ?? targetVersionNumber,
     },
-    manifest: state.payload?.manifest || null,
   };
   return writeToSession(STAGE_3_PAYLOAD_KEY, payloadForStageThree);
 };
@@ -1279,6 +1278,25 @@ const _returnToCompletedHarmonization = () => {
   window.location.assign(_verificationUrlForCompletedJob());
 };
 
+const _saveConfirmedMappingChoices = async (body) => {
+  try {
+    const response = await fetch(mappingChoicesEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        file_id: body.file_id,
+        manual_overrides: body.manual_overrides,
+        column_renames: body.column_renames,
+      }),
+    });
+    if (!response.ok) {
+      console.warn('Unable to save mapping choices before harmonization', response.status);
+    }
+  } catch (error) {
+    console.warn('Unable to save mapping choices before harmonization', error);
+  }
+};
+
 const _submitHarmonize = async () => {
   if (!state.payload || state.isSubmitting) return;
   if (_isLocked()) {
@@ -1291,14 +1309,6 @@ const _submitHarmonize = async () => {
 
   const overrides = _manualOverridesPayload();
   const columnRenames = _columnRenamesPayload();
-  const manifest = state.payload?.manifest;
-  if (!manifest || !manifest.column_mappings) {
-    state.isSubmitting = false;
-    if (harmonizeButton) harmonizeButton.disabled = false;
-    if (harmonizeButtonText) harmonizeButtonText.textContent = HARMONIZE_BUTTON_LABEL;
-    console.warn(MSG_MANIFEST_MISSING);
-    return;
-  }
   const fileId = state.payload.file_id;
   if (!isValidFileId(fileId)) {
     state.isSubmitting = false;
@@ -1313,8 +1323,8 @@ const _submitHarmonize = async () => {
     target_version_number: state.payload?.target_version_number ?? targetVersionNumber,
     manual_overrides: overrides,
     column_renames: columnRenames,
-    manifest,
   };
+  await _saveConfirmedMappingChoices(body);
   removeFromSession(STAGE_3_JOB_KEY);
   const ok = _persistStageThreePayload({ ...body });
   if (!ok) {
