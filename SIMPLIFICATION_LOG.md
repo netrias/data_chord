@@ -509,3 +509,25 @@ behavior was protected, and what proof ran.
    `uv run basedpyright src/stage_3_harmonize/router.py
    src/domain/cde_mapping_persistence.py src/domain/storage/file_store.py
    tests/test_stage_level_features.py tests/test_full_flow_features.py`.
+
+24. Stage 2 use-case consolidation
+
+   Moved the column-detail orchestration from `services.py` into
+   `use_cases.py`, next to `save_confirmed_mapping_choices`, and removed the
+   old Stage 2 services module. Stage 2 now has one backend orchestration
+   module: the router owns HTTP wiring, the schemas module owns contracts, and
+   the use-case module owns column-detail and confirmed-choice workflows.
+
+   Behavior protected: column-detail still raises `ColumnDetailNotFound` when a
+   profile cannot be found, still rebuilds missing profiles from uploaded files,
+   still returns sorted PVs and match counts, still downgrades CDEs with empty
+   PV sets to passthrough, and confirmed choices still save to workflow state.
+
+   Proof: `uv run pytest tests/test_stage_2_column_detail.py
+   tests/test_stage_level_features.py::test_stage2_saves_confirmed_mapping_choices_to_workflow_state
+   tests/test_stage_level_features.py::test_stage2_save_mapping_choices_requires_workflow_state
+   -q`, `uv run ruff check src/stage_2_review_columns/router.py
+   src/stage_2_review_columns/use_cases.py tests/test_stage_2_column_detail.py
+   tests/test_stage_level_features.py`, and `uv run basedpyright
+   src/stage_2_review_columns/router.py src/stage_2_review_columns/use_cases.py
+   tests/test_stage_2_column_detail.py tests/test_stage_level_features.py`.

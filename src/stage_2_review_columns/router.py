@@ -24,8 +24,12 @@ from src.domain.data_model_selection import DataModelSelection
 from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
 
 from .schemas import ColumnDetailResponse, SaveMappingChoicesRequest, SaveMappingChoicesResponse
-from .services import ColumnDetailNotFound, compute_column_detail
-from .use_cases import MappingWorkflowStateNotFoundError, save_confirmed_mapping_choices
+from .use_cases import (
+    ColumnDetailNotFound,
+    MappingWorkflowStateNotFoundError,
+    compute_column_detail,
+    save_confirmed_mapping_choices,
+)
 
 MODULE_DIR = _Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"
