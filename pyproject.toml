@@ -18,6 +18,7 @@ dependencies = [
     "pygments>=2.20.0",   # CVE-2026-4539 (via rich/pytest)
     "requests>=2.33.0",   # CVE-2026-25645 (via boto3)
     "urllib3>=2.6.0",     # CVE-2025-66418, CVE-2025-66471 (via requests/boto3)
+    "idna>=3.15",         # CVE-2026-45409 (via requests/httpx)
 ]
 
 [project.optional-dependencies]
