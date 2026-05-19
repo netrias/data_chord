@@ -462,6 +462,8 @@ test('Stage 2 submits selected column renames for harmonization', async ({ page 
   const handoff = await page.evaluate(() => JSON.parse(sessionStorage.getItem('stage3HarmonizePayload')));
   expect(handoff.request.manual_overrides).toEqual({});
   expect(handoff.request.column_renames).toEqual({ diagnosis: 'Primary Diagnosis' });
+  expect(handoff.request).not.toHaveProperty('manifest');
+  expect(handoff).not.toHaveProperty('manifest');
 });
 
 test('Stage 2 picker surfaces all AI candidates as separate rows', async ({ page }) => {

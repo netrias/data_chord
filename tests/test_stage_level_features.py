@@ -457,6 +457,228 @@ async def test_stage1_analyze_uses_selected_version_and_primes_reference_cache(
     assert cache.has_any_pvs()
 
 
+async def test_stage1_analyze_persists_selected_data_model_version(
+    app_client: AsyncClient,
+) -> None:
+    """Analyze saves the selected model/version as durable workflow state."""
+
+    # Given: an uploaded CSV with no workflow selection saved yet
+    file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "selection.csv")
+    assert dependencies.get_file_store().load_workflow_state(file_id) is None
+
+    # When: analysis is requested for a specific model version
+    response = await app_client.post(
+        "/stage-1/analyze",
+        json={
+            "file_id": file_id,
+            "target_schema": "gc",
+            "target_version_number": 2,
+        },
+    )
+
+    # Then: the selected model/version is available from durable workflow state
+    assert response.status_code == 200
+    state = dependencies.get_file_store().load_workflow_state(file_id)
+    assert state is not None
+    assert state.file_id == file_id
+    assert state.data_model_selection.key == "gc"
+    assert state.data_model_selection.version_number == 2
+
+
+async def test_stage2_mapping_page_recovers_selected_model_from_workflow_state(
+    app_client: AsyncClient,
+    mock_netrias_client: MagicMock,
+) -> None:
+    """Stage 2 can reload after cache loss using the durable selected model/version."""
+
+    # Given: analysis saved GC version 2, then the in-memory CDE cache was lost
+    file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "stage2-selection.csv")
+    analyze_response = await app_client.post(
+        "/stage-1/analyze",
+        json={
+            "file_id": file_id,
+            "target_schema": "gc",
+            "target_version_number": 2,
+        },
+    )
+    assert analyze_response.status_code == 200
+    clear_session_cache(file_id)
+    mock_netrias_client.list_cdes.reset_mock()
+
+    # When: Stage 2 is loaded with only the file id in the URL
+    response = await app_client.get(f"/stage-2?file_id={file_id}")
+
+    # Then: the page uses the stored selection to rebuild CDE options
+    assert response.status_code == 200
+    assert 'targetSchema: "gc"' in response.text
+    assert "targetVersionNumber: 2" in response.text
+    mock_netrias_client.list_cdes.assert_called_with("gc", "2", include_description=True)
+
+
+async def test_stage3_harmonize_prefers_stored_selection_over_stale_request(
+    app_client: AsyncClient,
+) -> None:
+    """The durable selected model/version is backend truth during harmonization."""
+
+    class StubHarmonizer:
+        def __init__(self) -> None:
+            self.received_target_schema = None
+            self.received_target_version = None
+
+        def run(  # type: ignore[no-untyped-def]
+            self,
+            *,
+            file_path,
+            target_schema,
+            column_overrides,
+            column_renames,
+            cache,
+            target_version,
+            manifest,
+            output_path,
+            sheet_name,
+        ):
+            self.received_target_schema = target_schema
+            self.received_target_version = target_version
+            return HarmonizeResult(job_id="job-selection", status=HarmonizeStatus.SUCCEEDED, detail="ok")
+
+    # Given: analysis saved GC version 2, but the browser later sends stale request selection
+    file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "stage3-selection.csv")
+    analyze_response = await app_client.post(
+        "/stage-1/analyze",
+        json={
+            "file_id": file_id,
+            "target_schema": "gc",
+            "target_version_number": 2,
+        },
+    )
+    assert analyze_response.status_code == 200
+    stub = StubHarmonizer()
+
+    # When: harmonization is triggered with stale model/version fields
+    import unittest.mock
+
+    with unittest.mock.patch("src.stage_3_harmonize.router.get_harmonize_service", return_value=stub):
+        response = await app_client.post(
+            "/stage-3/harmonize",
+            json={
+                "file_id": file_id,
+                "target_schema": "stale-model",
+                "target_version_number": 9,
+                "manual_overrides": {},
+            },
+        )
+
+    # Then: the harmonization service receives the stored selection instead
+    assert response.status_code == 200
+    assert stub.received_target_schema == "gc"
+    assert stub.received_target_version == "2"
+
+
+async def test_stage2_saves_confirmed_mapping_choices_to_workflow_state(
+    app_client: AsyncClient,
+) -> None:
+    """Stage 2 persists user mapping and rename choices before Stage 3."""
+
+    # Given: analysis has created workflow state for an uploaded file
+    file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "mapping-choices.csv")
+    analyze_response = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "target_schema": "gc", "target_version_number": 2},
+    )
+    assert analyze_response.status_code == 200
+    state = dependencies.get_file_store().load_workflow_state(file_id)
+    assert state is not None
+    assert state.mapping_choices is None
+
+    # When: Stage 2 saves confirmed choices
+    response = await app_client.post(
+        "/stage-2/choices",
+        json={
+            "file_id": file_id,
+            "manual_overrides": {"col_0000": "primary_diagnosis", "col_0001": None},
+            "column_renames": {"col_0000": "Primary Diagnosis"},
+        },
+    )
+
+    # Then: the choices are durable workflow state
+    assert response.status_code == 200
+    updated = dependencies.get_file_store().load_workflow_state(file_id)
+    assert updated is not None
+    assert updated.mapping_choices is not None
+    assert updated.mapping_choices.column_overrides.to_strings() == {
+        "col_0000": "primary_diagnosis",
+        "col_0001": None,
+    }
+    assert updated.mapping_choices.column_renames.to_strings() == {"col_0000": "Primary Diagnosis"}
+
+
+async def test_stage3_harmonize_prefers_stored_mapping_choices_over_stale_request(
+    app_client: AsyncClient,
+) -> None:
+    """The confirmed Stage 2 choices are backend truth during harmonization."""
+
+    class StubHarmonizer:
+        def __init__(self) -> None:
+            self.received_overrides = None
+            self.received_renames = None
+
+        def run(  # type: ignore[no-untyped-def]
+            self,
+            *,
+            file_path,
+            target_schema,
+            column_overrides,
+            column_renames,
+            cache,
+            target_version,
+            manifest,
+            output_path,
+            sheet_name,
+        ):
+            self.received_overrides = column_overrides.to_strings()
+            self.received_renames = column_renames.to_strings()
+            return HarmonizeResult(job_id="job-choices", status=HarmonizeStatus.SUCCEEDED, detail="ok")
+
+    # Given: Stage 2 saved confirmed mapping choices
+    file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "stage3-choices.csv")
+    analyze_response = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "target_schema": "gc", "target_version_number": 2},
+    )
+    assert analyze_response.status_code == 200
+    choices_response = await app_client.post(
+        "/stage-2/choices",
+        json={
+            "file_id": file_id,
+            "manual_overrides": {"col_0000": "primary_diagnosis", "col_0001": None},
+            "column_renames": {"col_0000": "Primary Diagnosis"},
+        },
+    )
+    assert choices_response.status_code == 200
+    stub = StubHarmonizer()
+
+    # When: the browser sends stale choices in the harmonize request
+    import unittest.mock
+
+    with unittest.mock.patch("src.stage_3_harmonize.router.get_harmonize_service", return_value=stub):
+        response = await app_client.post(
+            "/stage-3/harmonize",
+            json={
+                "file_id": file_id,
+                "target_schema": "stale-model",
+                "target_version_number": 9,
+                "manual_overrides": {"col_0000": "therapeutic_agents"},
+                "column_renames": {"col_0000": "Stale Name"},
+            },
+        )
+
+    # Then: Stage 3 uses the confirmed choices from workflow state
+    assert response.status_code == 200
+    assert stub.received_overrides == {"col_0000": "primary_diagnosis", "col_0001": None}
+    assert stub.received_renames == {"col_0000": "Primary Diagnosis"}
+
+
 async def test_stage3_persists_cde_mapping_download_artifact(
     app_client: AsyncClient,
 ) -> None:
@@ -608,11 +830,11 @@ async def test_stage3_harmonize_uses_stored_manifest_when_payload_missing(
     }
 
 
-async def test_stage3_harmonize_prefers_payload_manifest(
+async def test_stage3_harmonize_prefers_stored_manifest_over_payload_manifest(
     app_client: AsyncClient,
     temp_storage: UploadStorage,
 ) -> None:
-    """Payload manifest overrides any stored manifest."""
+    """The stored manifest is the backend source of truth when both copies exist."""
 
     class StubHarmonizer:
         def __init__(self) -> None:
@@ -636,7 +858,7 @@ async def test_stage3_harmonize_prefers_payload_manifest(
             self.received_target_version = target_version
             return HarmonizeResult(job_id="job-2", status=HarmonizeStatus.SUCCEEDED, detail="ok")
 
-    # Given: an uploaded file with a stored manifest
+    # Given: an uploaded file with a stored manifest and a stale request manifest
     file_id = await upload_content(app_client, create_csv_content([["col_a"], ["alpha"]]), "payload.csv")
     temp_storage.save_manifest(
         file_id,
@@ -645,7 +867,7 @@ async def test_stage3_harmonize_prefers_payload_manifest(
     payload_manifest: ManifestPayload = {"column_mappings": {"col_a": {"cde_key": "morphology", "cde_id": 3}}}
     stub = StubHarmonizer()
 
-    # When: harmonize is triggered with a manifest payload
+    # When: harmonize is triggered with the stale manifest payload
     import unittest.mock
 
     with unittest.mock.patch("src.stage_3_harmonize.router.get_harmonize_service", return_value=stub):
@@ -660,14 +882,14 @@ async def test_stage3_harmonize_prefers_payload_manifest(
             },
         )
 
-    # Then: payload manifest is used instead of the stored one
+    # Then: the stored manifest is used instead of the stale request copy
     assert response.status_code == 200
     assert stub.received_manifest == {
         "column_mappings": {
             "col_a": {
                 "column_name": "col_a",
-                "cde_key": "morphology",
-                "cde_id": 3,
+                "cde_key": "primary_diagnosis",
+                "cde_id": 2,
                 "harmonization": "harmonizable",
                 "alternatives": [],
             }
@@ -687,7 +909,7 @@ async def test_stage5_download_matches_harmonized_when_no_overrides(
     file_id = await upload_content(app_client, create_csv_content(rows), "download.csv")
     meta = temp_storage.load(file_id)
     assert meta is not None
-    create_harmonized_csv(meta.saved_path, {1: {"col_a": "gamma"}})
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {1: {"col_a": "gamma"}})
     create_manifest_for_file(temp_storage, file_id, meta.saved_path, {1: {"col_a": "gamma"}})
 
     # When: the download endpoint is invoked
@@ -697,6 +919,26 @@ async def test_stage5_download_matches_harmonized_when_no_overrides(
     assert response.status_code == 200
     output_rows = _read_downloaded_csv(response.content)
     assert output_rows[1]["col_a"] == "gamma"
+
+
+async def test_upload_storage_loads_managed_harmonized_output_path(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """UploadStorage owns harmonized output lookup by file id."""
+
+    # Given: an uploaded file with no harmonized output yet
+    file_id = await upload_content(app_client, create_csv_content([["col_a"], ["alpha"]]), "managed.csv")
+    assert temp_storage.load_harmonized_path(file_id) is None
+
+    # When: harmonized output is written to the managed storage location
+    meta = temp_storage.load(file_id)
+    assert meta is not None
+    harmonized_path = temp_storage.harmonized_path_for(file_id, meta.saved_path)
+    harmonized_path.write_text("col_a\nbeta\n", encoding="utf-8")
+
+    # Then: callers can load it without knowing the storage layout
+    assert temp_storage.load_harmonized_path(file_id) == harmonized_path
 
 
 async def test_stage5_download_preserves_harmonized_headers(
@@ -710,9 +952,7 @@ async def test_stage5_download_preserves_harmonized_headers(
     file_id = await upload_content(app_client, create_csv_content(rows), "renamed.csv")
     meta = temp_storage.load(file_id)
     assert meta is not None
-    harmonized_dir = meta.saved_path.parent.parent / "harmonized"
-    harmonized_dir.mkdir(parents=True, exist_ok=True)
-    harmonized_path = harmonized_dir / f"{meta.saved_path.stem}.harmonized.csv"
+    harmonized_path = temp_storage.harmonized_path_for(file_id, meta.saved_path)
     with harmonized_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerows([["Primary Diagnosis"], ["Lung Cancer"]])
@@ -738,7 +978,7 @@ async def test_stage5_download_succeeds_without_manifest(
     file_id = await upload_content(app_client, create_csv_content(rows), "no-manifest.csv")
     meta = temp_storage.load(file_id)
     assert meta is not None
-    create_harmonized_csv(meta.saved_path, {})
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
 
     # When: the download endpoint is invoked
     response = await app_client.post("/stage-5/download", json={"file_id": file_id})
@@ -749,6 +989,33 @@ async def test_stage5_download_succeeds_without_manifest(
         names = zf.namelist()
     assert any(name.endswith(".csv") for name in names)
     assert not any(name.endswith(".parquet") for name in names)
+
+
+async def test_stage5_download_includes_manifest_json_when_available(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """Download bundles the harmonization manifest as inspectable JSON."""
+
+    # Given: an uploaded file with harmonized output and a stored manifest
+    rows = [["col_a"], ["alpha"]]
+    file_id = await upload_content(app_client, create_csv_content(rows), "with-manifest.csv")
+    meta = temp_storage.load(file_id)
+    assert meta is not None
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"col_a": "beta"}})
+    create_manifest_for_file(temp_storage, file_id, meta.saved_path, {0: {"col_a": "beta"}})
+
+    # When: the download endpoint is invoked
+    response = await app_client.post("/stage-5/download", json={"file_id": file_id})
+
+    # Then: the ZIP includes a JSON copy of the manifest rows
+    assert response.status_code == 200
+    with zipfile.ZipFile(BytesIO(response.content), "r") as zf:
+        manifest_name = next(name for name in zf.namelist() if name.endswith("_manifest.json"))
+        manifest_rows = json.loads(zf.read(manifest_name).decode("utf-8"))
+    assert manifest_rows[0]["column_name"] == "col_a"
+    assert manifest_rows[0]["to_harmonize"] == "alpha"
+    assert manifest_rows[0]["top_harmonization"] == "beta"
 
 
 async def test_stage5_download_includes_cde_mapping_artifact(
@@ -762,7 +1029,7 @@ async def test_stage5_download_includes_cde_mapping_artifact(
     file_id = await upload_content(app_client, create_csv_content(rows), "with-mapping.csv")
     meta = temp_storage.load(file_id)
     assert meta is not None
-    create_harmonized_csv(meta.saved_path, {})
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
     dependencies.get_file_store().save(
         file_id,
         FileType.COLUMN_MAPPING,
@@ -798,9 +1065,7 @@ async def test_stage5_download_tsv_input_exports_tsv(
     file_id = await upload_content(app_client, content, "download.tsv", TEST_TSV_CONTENT_TYPE)
     meta = temp_storage.load(file_id)
     assert meta is not None
-    harmonized_dir = meta.saved_path.parent.parent / "harmonized"
-    harmonized_dir.mkdir(parents=True, exist_ok=True)
-    harmonized_path = harmonized_dir / f"{meta.saved_path.stem}.harmonized.tsv"
+    harmonized_path = temp_storage.harmonized_path_for(file_id, meta.saved_path)
     with harmonized_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle, delimiter="\t")
         writer.writerows([["col_a", "col_b"], ["delta, epsilon", "gamma"]])
@@ -837,9 +1102,7 @@ async def test_stage5_download_xlsx_input_exports_xlsx_selected_sheet(
     assert analyze_response.status_code == 200
     meta = temp_storage.load(file_id)
     assert meta is not None
-    harmonized_dir = meta.saved_path.parent.parent / "harmonized"
-    harmonized_dir.mkdir(parents=True, exist_ok=True)
-    harmonized_path = harmonized_dir / f"{meta.saved_path.stem}.harmonized.xlsx"
+    harmonized_path = temp_storage.harmonized_path_for(file_id, meta.saved_path)
     harmonized_dataset = dataset_from_rows(
         headers=["col_a", "col_b"],
         rows=[["delta", "gamma"]],
@@ -872,7 +1135,7 @@ async def test_stage5_download_ignores_invalid_row_keys(
     file_id = await upload_content(app_client, create_csv_content(rows), "invalid-rows.csv")
     meta = temp_storage.load(file_id)
     assert meta is not None
-    create_harmonized_csv(meta.saved_path, {})
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
     create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
     await app_client.post(
         "/stage-4/overrides",
@@ -905,7 +1168,7 @@ async def test_stage5_summary_zero_changes_when_terms_equal(
     file_id = await upload_content(app_client, create_csv_content(rows), "summary.csv")
     meta = temp_storage.load(file_id)
     assert meta is not None
-    create_harmonized_csv(meta.saved_path, {})
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
     create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
 
     # When: summary is requested

@@ -289,9 +289,12 @@ class UploadStorage:
     def harmonized_path_for(self, file_id: str, original_path: Path) -> Path:
         return self._harmonized_dir / f"{file_id}{_harmonized_suffix_for(original_path)}"
 
-    @property
-    def harmonized_dir(self) -> Path:
-        return self._harmonized_dir
+    def load_harmonized_path(self, file_id: str) -> Path | None:
+        meta = self.load(file_id)
+        if meta is None:
+            return None
+        path = self.harmonized_path_for(file_id, meta.saved_path)
+        return path if path.exists() else None
 
     def _validate_upload(self, suffix: str, content_type: str) -> None:
         if suffix not in SUPPORTED_TABULAR_SUFFIXES:
@@ -359,12 +362,6 @@ def _with_selected_sheet(meta: UploadedFileMeta, selected_sheet: str) -> Uploade
     )
 
 
-def resolve_harmonized_path(original_path: Path, file_id: str) -> Path | None:
-    harmonized_dir = original_path.parent.parent / "harmonized"
-    candidate = harmonized_dir / f"{file_id}{_harmonized_suffix_for(original_path)}"
-    return candidate if candidate.exists() else None
-
-
 __all__ = [
     "StoredMeta",
     "UploadConstraints",
@@ -375,5 +372,4 @@ __all__ = [
     "UploadTooLargeError",
     "UploadStorage",
     "describe_constraints",
-    "resolve_harmonized_path",
 ]

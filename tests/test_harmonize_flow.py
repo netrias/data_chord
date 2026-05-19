@@ -87,6 +87,68 @@ async def test_harmonize_with_manual_overrides(
     assert response.status_code == 200
 
 
+async def test_harmonize_uses_stored_mapping_manifest_when_request_omits_manifest(
+    app_client: AsyncClient,
+    sample_csv_path: Path,
+    mock_netrias_client: MagicMock,
+) -> None:
+    """Stage 3 can harmonize from the manifest saved by Stage 1 analysis."""
+
+    # Given: Stage 1 has analyzed a file and saved its mapping manifest server-side
+    file_id = await upload_and_analyze(app_client, sample_csv_path)
+    assert not mock_netrias_client.harmonize.called
+
+    # When: the browser triggers harmonization without carrying the manifest body
+    response = await app_client.post(
+        "/stage-3/harmonize",
+        json={
+            "file_id": file_id,
+            "target_schema": TEST_TARGET_SCHEMA,
+            "manual_overrides": {},
+        },
+    )
+
+    # Then: harmonization uses the stored column-keyed manifest
+    assert response.status_code == 200
+    sdk_manifest = mock_netrias_client.harmonize.call_args.kwargs["manifest"]
+    assert sdk_manifest["column_mappings"]["col_0000"]["cde_key"] == "primary_diagnosis"
+    assert sdk_manifest["column_mappings"]["col_0001"]["cde_key"] == "therapeutic_agents"
+
+
+async def test_harmonize_prefers_stored_mapping_manifest_over_stale_request_manifest(
+    app_client: AsyncClient,
+    sample_csv_path: Path,
+    mock_netrias_client: MagicMock,
+) -> None:
+    """The durable analysis result is the backend source of truth for mappings."""
+
+    # Given: Stage 1 has saved the current mapping manifest, and the request carries stale browser data
+    file_id = await upload_and_analyze(app_client, sample_csv_path)
+    stale_manifest: ManifestPayload = {
+        "column_mappings": {
+            "col_0000": {"column_name": "primary_diagnosis", "cde_key": "therapeutic_agents", "cde_id": 1},
+        },
+    }
+    assert not mock_netrias_client.harmonize.called
+
+    # When: harmonization is triggered with the stale manifest still present in the request
+    response = await app_client.post(
+        "/stage-3/harmonize",
+        json={
+            "file_id": file_id,
+            "target_schema": TEST_TARGET_SCHEMA,
+            "manual_overrides": {},
+            "manifest": stale_manifest,
+        },
+    )
+
+    # Then: Stage 3 ignores the stale copy and uses the manifest saved after analysis
+    assert response.status_code == 200
+    sdk_manifest = mock_netrias_client.harmonize.call_args.kwargs["manifest"]
+    assert sdk_manifest["column_mappings"]["col_0000"]["cde_key"] == "primary_diagnosis"
+    assert sdk_manifest["column_mappings"]["col_0001"]["cde_key"] == "therapeutic_agents"
+
+
 async def test_harmonize_file_not_found(app_client: AsyncClient) -> None:
     """Harmonize with non-existent file_id returns 404."""
 

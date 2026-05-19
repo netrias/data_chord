@@ -6,45 +6,27 @@ Computes change statistics and packages final CSV with manifest for export.
 
 from __future__ import annotations
 
-import csv
-import io
-import json
-import tempfile
-import zipfile
-from collections import defaultdict
-from dataclasses import asdict
-from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
-from typing import NamedTuple
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
-from netrias_client import (
-    TabularDataset,
-    TabularFormat,
-    dataset_from_rows,
-    read_tabular,
-    write_tabular,
-)
-from pydantic import BaseModel, Field
 
-from src.domain import ChangeType
-from src.domain.cde_mapping_persistence import load_cde_mapping_json
-from src.domain.data_model_cache import SessionCache, clear_session_cache
-from src.domain.dependencies import get_file_store, get_upload_storage
-from src.domain.manifest import (
-    ManifestRow,
-    ManifestSummary,
-    get_latest_override_value,
-    read_manifest_parquet,
+import src.domain.dependencies as dependencies
+from src.domain.storage import FileStore, UploadStorage
+from src.stage_5_review_summary.schemas import StageFiveRequest, StageFiveSummaryResponse
+from src.stage_5_review_summary.use_cases import (
+    DownloadDatasetUnreadableError,
+    DownloadPackage,
+    HarmonizedOutputNotFoundError,
+    SummaryManifestNotFoundError,
+    SummaryManifestUnreadableError,
+    UploadNotFoundError,
+    build_download_package,
+    build_summary,
 )
-from src.domain.pv_persistence import ensure_pvs_loaded
-from src.domain.pv_validation import check_value_conformance
-from src.domain.review_overrides import ReviewOverrides
-from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
-from src.domain.storage import UploadStorage, resolve_harmonized_path
 
 _MODULE_DIR = Path(__file__).parent
 _TEMPLATE_DIR = _MODULE_DIR / "templates"
@@ -58,40 +40,6 @@ _ERROR_MANIFEST_UNREADABLE = "Unable to read harmonization manifest."
 _templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 
 stage_five_router = APIRouter(prefix="/stage-5", tags=["Stage 5 Download"])
-
-
-class StageFiveRequest(BaseModel):
-    file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_PATTERN)
-
-
-class ColumnSummary(BaseModel):
-    column: str
-    distinct_terms: int
-    ai_changes: int
-    manual_changes: int
-    unchanged: int
-
-
-class TransformationStep(BaseModel):
-    value: str
-    source: str  # "original", "ai", "user"
-    timestamp: str | None = None
-    user_id: str | None = None
-    is_pv_conformant: bool = True
-
-
-class TermMapping(BaseModel):
-    column: str
-    original_value: str
-    final_value: str
-    is_pv_conformant: bool = True
-    history: list[TransformationStep] = []
-
-
-class StageFiveSummaryResponse(BaseModel):
-    column_summaries: list[ColumnSummary]
-    term_mappings: list[TermMapping]
-    non_conformant_count: int = 0
 
 
 @stage_five_router.get("", response_class=HTMLResponse, name="stage_five_review_page")
@@ -110,323 +58,55 @@ async def render_stage_five(request: Request) -> HTMLResponse:
 
 @stage_five_router.post("/summary", response_model=StageFiveSummaryResponse, name="stage_five_summary")
 async def summarize_harmonized_results(payload: StageFiveRequest) -> StageFiveSummaryResponse:
-    storage: UploadStorage = get_upload_storage()
-    manifest_path = storage.load_harmonization_manifest_path(payload.file_id)
-    if manifest_path is None:
-        raise HTTPException(status_code=404, detail=_ERROR_MANIFEST_NOT_FOUND)
-
-    manifest_summary = read_manifest_parquet(manifest_path)
-    if manifest_summary is None:
-        raise HTTPException(status_code=400, detail=_ERROR_MANIFEST_UNREADABLE)
-
-    return _build_summary_from_manifest(manifest_summary, payload.file_id)
+    storage: UploadStorage = dependencies.get_upload_storage()
+    return _build_summary_or_raise(file_id=payload.file_id, storage=storage)
 
 
 @stage_five_router.post("/download", name="stage_five_download")
 async def download_harmonized_data(payload: StageFiveRequest) -> StreamingResponse:
-    storage: UploadStorage = get_upload_storage()
-    meta = storage.load(payload.file_id)
-    if not meta:
-        raise HTTPException(status_code=404, detail=_ERROR_UPLOAD_NOT_FOUND)
-
-    harmonized_path = _resolve_harmonized_path_or_404(meta.saved_path, payload.file_id)
-    manifest_path = storage.load_harmonization_manifest_path(payload.file_id)
-
-    original_dataset = read_tabular(meta.saved_path, sheet_name=meta.selected_sheet)
-    harmonized_dataset = read_tabular(harmonized_path, sheet_name=meta.selected_sheet)
-    if not original_dataset.columns or not harmonized_dataset.columns:
-        raise HTTPException(status_code=400, detail=_ERROR_DATASET_UNREADABLE)
-
-    overrides = _load_review_overrides(payload.file_id)
-    final_rows = (
-        overrides.apply_to_rows(harmonized_dataset.rows, original_dataset)
-        if overrides
-        else harmonized_dataset.rows
+    storage: UploadStorage = dependencies.get_upload_storage()
+    file_store = dependencies.get_file_store()
+    download = _build_download_or_raise(
+        file_id=payload.file_id,
+        storage=storage,
+        file_store=file_store,
     )
-    final_dataset = dataset_from_rows(
-        columns=harmonized_dataset.columns,
-        rows=final_rows,
-        source_format=harmonized_dataset.source_format,
-        sheet_name=harmonized_dataset.sheet_name,
-    )
-
-    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-    original_stem = Path(meta.original_name).stem
-    base_name = f"{original_stem}_{payload.file_id}_{timestamp}"
-
-    zip_buffer = _create_zip_buffer(base_name, final_dataset, manifest_path, meta.saved_path, payload.file_id)
-
-    # Session complete: release in-memory cache to prevent unbounded growth
-    clear_session_cache(payload.file_id)
-
-    return _create_streaming_response(base_name, zip_buffer)
+    return _create_streaming_response(download.base_name, download.content)
 
 
-def _load_review_overrides(file_id: str) -> ReviewOverrides | None:
-    store = get_file_store()
-    return store.load_review_overrides(file_id)
+def _build_download_or_raise(
+    *,
+    file_id: str,
+    storage: UploadStorage,
+    file_store: FileStore,
+) -> DownloadPackage:
+    try:
+        return build_download_package(file_id=file_id, upload_storage=storage, file_store=file_store)
+    except UploadNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_ERROR_UPLOAD_NOT_FOUND) from exc
+    except HarmonizedOutputNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_ERROR_HARMONIZED_NOT_FOUND) from exc
+    except DownloadDatasetUnreadableError as exc:
+        raise HTTPException(status_code=400, detail=_ERROR_DATASET_UNREADABLE) from exc
 
 
-def _resolve_harmonized_path_or_404(original_path: Path, file_id: str) -> Path:
-    path = resolve_harmonized_path(original_path, file_id)
-    if path is None:
-        raise HTTPException(status_code=404, detail=_ERROR_HARMONIZED_NOT_FOUND)
-    return path
+def _build_summary_or_raise(
+    *,
+    file_id: str,
+    storage: UploadStorage,
+) -> StageFiveSummaryResponse:
+    try:
+        return build_summary(file_id=file_id, upload_storage=storage)
+    except SummaryManifestNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_ERROR_MANIFEST_NOT_FOUND) from exc
+    except SummaryManifestUnreadableError as exc:
+        raise HTTPException(status_code=400, detail=_ERROR_MANIFEST_UNREADABLE) from exc
 
 
-def _manifest_to_json(manifest_path: Path) -> str | None:
-    """JSON enables human inspection of transformation history in the download."""
-    summary = read_manifest_parquet(manifest_path)
-    if summary is None:
-        return None
-    return json.dumps([asdict(row) for row in summary.rows], indent=2)
-
-
-def _create_zip_buffer(
-    base_name: str,
-    dataset: TabularDataset,
-    manifest_path: Path | None,
-    template_path: Path | None = None,
-    file_id: str | None = None,
-) -> io.BytesIO:
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        temp_path = Path(f"{base_name}{dataset.source_format.suffix}")
-        zf.writestr(temp_path.name, _tabular_bytes(dataset, template_path))
-
-        if manifest_path:
-            json_content = _manifest_to_json(manifest_path)
-            if json_content:
-                zf.writestr(f"{base_name}_manifest.json", json_content)
-        if file_id:
-            mapping_content = load_cde_mapping_json(file_id)
-            if mapping_content:
-                zf.writestr(f"{base_name}_cde_mapping.json", mapping_content)
-
-    zip_buffer.seek(0)
-    return zip_buffer
-
-
-def _tabular_bytes(dataset: TabularDataset, template_path: Path | None) -> bytes | str:
-    if dataset.source_format == TabularFormat.XLSX:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            output_path = Path(tmpdir) / f"output{dataset.source_format.suffix}"
-            write_tabular(output_path, dataset, template_path=template_path)
-            return output_path.read_bytes()
-
-    output = io.StringIO()
-    writer = csv.writer(output, delimiter=dataset.source_format.delimiter, lineterminator="\n")
-    writer.writerow(dataset.headers)
-    writer.writerows(dataset.rows)
-    return output.getvalue()
-
-
-def _create_streaming_response(base_name: str, zip_buffer: io.BytesIO) -> StreamingResponse:
+def _create_streaming_response(base_name: str, zip_buffer: BytesIO) -> StreamingResponse:
     safe_filename = quote(f"{base_name}.zip", safe="")
     return StreamingResponse(
         zip_buffer,
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}"},
     )
-
-
-def _normalize_for_metrics(value: str | None) -> str:
-    """Collapse cosmetic variations for summary counts only.
-
-    Unlike PV conformance checks (which are character-exact per domain rules),
-    summary metrics group case/whitespace variants to avoid inflating change
-    counts in the UI. The actual exported data preserves exact values.
-    """
-    if value is None:
-        return ""
-    return value.strip().lower()
-
-
-def _classify_change(row: ManifestRow) -> ChangeType:
-    original = row.to_harmonize
-    ai_value = row.top_harmonization
-    latest_override = get_latest_override_value(row.manual_overrides)
-
-    original_norm = _normalize_for_metrics(original)
-    ai_norm = _normalize_for_metrics(ai_value)
-    override_norm = _normalize_for_metrics(latest_override) if latest_override is not None else None
-    final_norm = override_norm if latest_override is not None else ai_norm
-
-    if original_norm == final_norm:
-        return ChangeType.UNCHANGED
-
-    if latest_override is not None and override_norm != ai_norm:
-        return ChangeType.MANUAL_OVERRIDE
-
-    return ChangeType.AI_HARMONIZED
-
-
-def _get_final_value(row: ManifestRow) -> str:
-    override = get_latest_override_value(row.manual_overrides)
-    return override if override is not None else row.top_harmonization
-
-
-def _build_history(
-    row: ManifestRow,
-    upload_timestamp: datetime | None,
-    pv_set: frozenset[str] | None,
-) -> list[TransformationStep]:
-    """Build chronologically-sorted transformation history.
-
-    top_harmonization already includes any PV adjustments from Stage 3.
-    """
-    upload_ts_str = upload_timestamp.isoformat() if upload_timestamp else None
-    steps: list[TransformationStep] = []
-
-    steps.append(TransformationStep(
-        value=row.to_harmonize,
-        source="original",
-        timestamp=upload_ts_str,
-        is_pv_conformant=check_value_conformance(row.to_harmonize, pv_set),
-    ))
-
-    if row.top_harmonization != row.to_harmonize:
-        steps.append(TransformationStep(
-            value=row.top_harmonization,
-            source="ai",
-            timestamp=upload_ts_str,
-            is_pv_conformant=check_value_conformance(row.top_harmonization, pv_set),
-        ))
-
-    last_override_value: str | None = None
-    for override in row.manual_overrides:
-        if override.value == last_override_value:
-            continue
-        last_override_value = override.value
-        steps.append(
-            TransformationStep(
-                value=override.value,
-                source="user",
-                timestamp=override.timestamp,
-                user_id=override.user_id,
-                is_pv_conformant=check_value_conformance(override.value, pv_set),
-            )
-        )
-
-    return _sort_steps_chronologically(steps)
-
-
-def _sort_steps_chronologically(steps: list[TransformationStep]) -> list[TransformationStep]:
-    """Sort steps by timestamp, keeping original first and preserving order for ties."""
-    if len(steps) <= 1:
-        return steps
-
-    original = steps[0]
-    rest = steps[1:]
-
-    def sort_key(step: TransformationStep) -> tuple[int, int]:
-        # Parse timestamp for sorting; original stays first via separate handling
-        if step.timestamp is None:
-            return (0, 0)
-        try:
-            dt = datetime.fromisoformat(step.timestamp)
-            return (1, int(dt.timestamp() * 1000))
-        except (ValueError, TypeError):
-            return (0, 0)
-
-    sorted_rest = sorted(rest, key=sort_key)
-    return [original, *sorted_rest]
-
-
-class _MappingInfo(NamedTuple):
-    """Immutable container for conformance result and transformation history."""
-
-    is_conformant: bool
-    history: list[TransformationStep]
-
-
-def _process_manifest_row(
-    row: ManifestRow,
-    ai_counts: dict[int, int],
-    manual_counts: dict[int, int],
-    unchanged_counts: dict[int, int],
-    unique_mappings: dict[tuple[str, str, str, str], _MappingInfo],
-    cache: SessionCache,
-    upload_timestamp: datetime | None,
-) -> None:
-    col_id = row.column_id
-    change_type = _classify_change(row)
-
-    match change_type:
-        case ChangeType.AI_HARMONIZED:
-            ai_counts[col_id] += 1
-        case ChangeType.MANUAL_OVERRIDE:
-            manual_counts[col_id] += 1
-        case ChangeType.UNCHANGED:
-            unchanged_counts[col_id] += 1
-
-    # Track all rows for conformance checking, not just changed ones
-    _track_mapping(unique_mappings, row, cache, upload_timestamp)
-
-
-def _build_summary_from_manifest(summary: ManifestSummary, file_id: str) -> StageFiveSummaryResponse:
-    cache = ensure_pvs_loaded(file_id)
-    storage = get_upload_storage()
-    meta = storage.load(file_id)
-    upload_timestamp = meta.uploaded_at if meta else None
-
-    ai_counts: dict[int, int] = defaultdict(int)
-    manual_counts: dict[int, int] = defaultdict(int)
-    unchanged_counts: dict[int, int] = defaultdict(int)
-    distinct_terms: dict[int, int] = defaultdict(int)
-    column_names: dict[int, str] = {}
-    unique_mappings: dict[tuple[str, str, str, str], _MappingInfo] = {}
-
-    for row in summary.rows:
-        distinct_terms[row.column_id] += 1
-        column_names[row.column_id] = row.column_name
-        _process_manifest_row(row, ai_counts, manual_counts, unchanged_counts, unique_mappings, cache, upload_timestamp)
-
-    column_ids = sorted(distinct_terms.keys())
-    sorted_mappings = sorted(unique_mappings.items(), key=lambda x: x[0])
-    term_mappings = [
-        TermMapping(
-            column=col,
-            original_value=orig,
-            final_value=final,
-            is_pv_conformant=info.is_conformant,
-            history=info.history,
-        )
-        for (_col_key, col, orig, final), info in sorted_mappings
-    ]
-
-    return StageFiveSummaryResponse(
-        column_summaries=[
-            ColumnSummary(
-                column=column_names[col_id],
-                distinct_terms=distinct_terms[col_id],
-                ai_changes=ai_counts[col_id],
-                manual_changes=manual_counts[col_id],
-                unchanged=unchanged_counts[col_id],
-            )
-            for col_id in column_ids
-        ],
-        term_mappings=term_mappings,
-        non_conformant_count=sum(1 for info in unique_mappings.values() if not info.is_conformant),
-    )
-
-
-def _track_mapping(
-    mappings: dict[tuple[str, str, str, str], _MappingInfo],
-    row: ManifestRow,
-    cache: SessionCache,
-    upload_timestamp: datetime | None,
-) -> None:
-    """Deduplicates by (column, original, final) so we check conformance once per unique mapping."""
-    # Empty string means no data; whitespace-only values pass through as semantically significant
-    if not row.to_harmonize:
-        return
-    final = _get_final_value(row)
-    col_key = str(row.column_key)
-    key = (col_key, row.column_name, row.to_harmonize, final)
-    if key in mappings:
-        return
-    pv_set = cache.get_pvs_for_column(col_key)
-    is_conformant = check_value_conformance(final, pv_set)
-    history = _build_history(row, upload_timestamp, pv_set)
-    mappings[key] = _MappingInfo(is_conformant, history)

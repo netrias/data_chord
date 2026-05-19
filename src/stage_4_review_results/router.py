@@ -1,13 +1,11 @@
 """
 HTTP routes for reviewing harmonized results and applying manual overrides.
 
-Manages review state and coordinates manifest updates with PV validation.
+Maps review HTTP requests onto Stage 4 use cases and lightweight lookup endpoints.
 """
 
 from __future__ import annotations
 
-import logging
-from datetime import UTC, datetime
 from pathlib import Path as FilePath
 from typing import Annotated
 
@@ -17,27 +15,17 @@ from fastapi.templating import Jinja2Templates
 from netrias_client import read_tabular
 from pydantic import BaseModel, Field
 
-from src.domain import CONFIDENCE, RecommendationType
-from src.domain.columns import ColumnIdentity
-from src.domain.data_model_cache import SessionCache, get_session_cache
-from src.domain.dependencies import get_file_store, get_upload_storage
+import src.domain.dependencies as dependencies
 from src.domain.manifest import (
-    ConfidenceBucket,
-    ManifestRow,
     ManifestSummary,
-    add_manual_overrides_batch,
-    confidence_bucket,
     get_latest_override_value,
-    is_value_changed,
     read_manifest_parquet,
 )
-from src.domain.pv_persistence import ensure_pvs_loaded
+from src.domain.pv_persistence import column_pv_sets
 from src.domain.pv_validation import check_value_conformance
-from src.domain.review_overrides import ReviewOverrides
 from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
 from src.domain.storage import FileType, UploadStorage
 from src.stage_4_review_results.schemas import (
-    ColumnReviewData,
     DeleteOverridesResponse,
     NonConformantItem,
     NonConformantResponse,
@@ -47,11 +35,13 @@ from src.stage_4_review_results.schemas import (
     SaveOverridesRequest,
     SaveOverridesResponse,
     StageFourResultsResponse,
-    SuggestionInfo,
-    Transformation,
 )
-
-logger = logging.getLogger(__name__)
+from src.stage_4_review_results.use_cases import (
+    StageFourRowsManifestNotFoundError,
+    StageFourRowsUploadNotFoundError,
+    build_stage_four_rows,
+    save_review_overrides,
+)
 
 _MODULE_DIR = FilePath(__file__).parent
 _TEMPLATE_DIR = _MODULE_DIR / "templates"
@@ -78,192 +68,13 @@ async def render_stage_four(request: Request) -> HTMLResponse:
 
 @stage_four_router.post("/rows", response_model=StageFourResultsResponse, name="stage_four_harmonized_rows")
 async def fetch_stage_four_rows(payload: StageFourResultsRequest) -> StageFourResultsResponse:
-    storage: UploadStorage = get_upload_storage()
-    meta = storage.load(payload.file_id)
-    if not meta:
-        raise HTTPException(status_code=404, detail="Upload not found. Please rerun harmonization.")
-
-    original_dataset = read_tabular(meta.saved_path, sheet_name=meta.selected_sheet)
-
-    manifest = _load_manifest(storage, payload.file_id)
-    if manifest is None:
-        raise HTTPException(status_code=404, detail="Harmonization manifest not found. Please rerun Stage 3.")
-
-    column_info = _extract_columns_from_manifest(manifest)
-
-    # Load PVs before building transformations so pvSetAvailable/isPVConformant are populated
-    column_pvs = _build_column_pvs(column_info, payload.file_id)
-
-    columns = _build_columns_from_manifest(manifest, payload.file_id)
-
-    return StageFourResultsResponse(
-        columns=columns,
-        columnPVs=column_pvs,
-        totalOriginalRows=len(original_dataset.rows),
-    )
-
-
-def _extract_columns_from_manifest(manifest: ManifestSummary) -> list[ColumnIdentity]:
-    """Extract unique columns with their source index for ordering."""
-    seen: set[str] = set()
-    columns: list[ColumnIdentity] = []
-    for row in manifest.rows:
-        col_key = str(row.column_key)
-        if col_key not in seen:
-            seen.add(col_key)
-            columns.append(ColumnIdentity(key=row.column_key, index=row.column_id, header=row.column_name))
-    return columns
-
-
-def _build_columns_from_manifest(manifest: ManifestSummary, file_id: str) -> list[ColumnReviewData]:
-    """Build column-centric data structure grouped by column name."""
-    cache = get_session_cache(file_id)
-
-    # Group manifest rows by column, track source index for ordering
-    columns_map: dict[str, list[ManifestRow]] = {}
-    column_indices: dict[str, int] = {}
-    column_labels: dict[str, str] = {}
-
-    for row in manifest.rows:
-        col_key = str(row.column_key)
-        if col_key not in columns_map:
-            columns_map[col_key] = []
-            column_indices[col_key] = row.column_id
-            column_labels[col_key] = row.column_name
-        columns_map[col_key].append(row)
-
-    # Build columns ordered by source spreadsheet position
-    columns: list[ColumnReviewData] = []
-    for col_key in sorted(columns_map.keys(), key=lambda c: column_indices[c]):
-        manifest_rows = columns_map[col_key]
-        transformations = [
-            _build_transformation(r, col_key, cache) for r in manifest_rows
-        ]
-
-        terms_with_changes = sum(1 for t in transformations if t.isChanged)
-
-        columns.append(ColumnReviewData(
-            columnKey=col_key,
-            columnLabel=column_labels[col_key] or "Unknown",
-            sourceColumnIndex=column_indices[col_key],
-            termCount=len(transformations),
-            termsWithChanges=terms_with_changes,
-            transformations=transformations,
-        ))
-
-    return columns
-
-
-def _build_transformation(
-    row: ManifestRow,
-    col_key: str,
-    cache: SessionCache,
-) -> Transformation:
-    """Build a Transformation from a manifest row."""
-    original_value = row.to_harmonize or ""
-    harmonized_value = row.top_harmonization or None
-    confidence = row.confidence_score
-    is_changed = is_value_changed(original_value, harmonized_value)
-
-    recommendation_type = _compute_recommendation_type(original_value, harmonized_value)
-
-    if confidence is not None:
-        bucket = confidence_bucket(confidence)
-    else:
-        bucket = ConfidenceBucket.LOW if is_changed else ConfidenceBucket.HIGH
-        confidence = CONFIDENCE.HIGH if bucket == ConfidenceBucket.HIGH else CONFIDENCE.LOW
-
-    manual_override = get_latest_override_value(row.manual_overrides)
-    current_value = manual_override if manual_override is not None else harmonized_value
-
-    pv_set = cache.get_pvs_for_column(col_key)
-    pv_available = pv_set is not None and len(pv_set) > 0
-    is_conformant = check_value_conformance(current_value, pv_set)
-
-    top_suggestions = _build_suggestions_with_conformance(row.top_harmonizations, pv_set)
-
-    # Convert 0-based manifest indices to 1-based for frontend
-    manifest_indices_full = [idx + 1 for idx in row.row_indices]
-    row_count = len(manifest_indices_full)
-    manifest_indices = manifest_indices_full if row_count <= 50 else manifest_indices_full[:10]
-
-    return Transformation(
-        originalValue=original_value,
-        harmonizedValue=harmonized_value,
-        bucket=bucket.value,
-        confidence=confidence,
-        isChanged=is_changed,
-        recommendationType=recommendation_type.value,
-        manualOverride=manual_override,
-        isPVConformant=is_conformant,
-        pvSetAvailable=pv_available,
-        topSuggestions=top_suggestions,
-        rowIndices=manifest_indices,
-        rowCount=row_count,
-    )
-
-
-def _build_column_pvs(columns: list[ColumnIdentity], file_id: str) -> dict[str, list[str]]:
-    """Alphabetical sort ensures predictable dropdown ordering across page loads."""
-    cache = ensure_pvs_loaded(file_id)
-    column_pvs: dict[str, list[str]] = {}
-    columns_without_pvs: list[str] = []
-
-    for col_info in columns:
-        pv_set = cache.get_pvs_for_column(col_info.key)
-        if pv_set:
-            column_pvs[str(col_info.key)] = sorted(pv_set)
-        else:
-            columns_without_pvs.append(col_info.header)
-
-    # Surface PV availability for debugging
-    pv_summary = {k: len(v) for k, v in column_pvs.items()}
-    logger.info(
-        "Built column PVs",
-        extra={
-            "file_id": file_id,
-            "columns_with_pvs": len(column_pvs),
-            "columns_without_pvs": columns_without_pvs[:5] if columns_without_pvs else [],
-            "pv_counts": pv_summary,
-        },
-    )
-
-    if not column_pvs and columns:
-        logger.warning(
-            "No PVs available for any column. PV combobox will not appear in Stage 4.",
-            extra={"file_id": file_id, "column_count": len(columns)},
-        )
-
-    return column_pvs
-
-
-def _build_suggestions_with_conformance(
-    suggestions: list[str],
-    pv_set: frozenset[str] | None,
-) -> list[SuggestionInfo]:
-    """Flag each suggestion's PV conformance for UI indicator display."""
-    if not suggestions:
-        return []
-    return [
-        SuggestionInfo(value=s, isPVConformant=check_value_conformance(s, pv_set))
-        for s in suggestions
-    ]
-
-
-def _compute_recommendation_type(
-    original_value: str | None,
-    harmonized_value: str | None,
-) -> RecommendationType:
-    """Whitespace-only values mean no useful recommendation; comparisons preserve whitespace."""
-    if not harmonized_value or not harmonized_value.strip():
-        return RecommendationType.NO_RECOMMENDATION
-
-    # Compare as-is (whitespace significant per domain rules)
-    original = original_value or ""
-    if original != harmonized_value:
-        return RecommendationType.AI_CHANGED
-
-    return RecommendationType.AI_UNCHANGED
+    storage: UploadStorage = dependencies.get_upload_storage()
+    try:
+        return build_stage_four_rows(file_id=payload.file_id, upload_storage=storage)
+    except StageFourRowsUploadNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Upload not found. Please rerun harmonization.") from exc
+    except StageFourRowsManifestNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Harmonization manifest not found. Please rerun Stage 3.") from exc
 
 
 def _load_manifest(storage: UploadStorage, file_id: str) -> ManifestSummary | None:
@@ -282,7 +93,7 @@ FileIdPath = Annotated[str, Path(min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_
     name="stage_four_get_overrides",
 )
 async def get_overrides(file_id: FileIdPath) -> ReviewOverridesSchema | None:
-    store = get_file_store()
+    store = dependencies.get_file_store()
     saved = store.load_review_overrides(file_id)
     if saved is None:
         return None
@@ -291,45 +102,16 @@ async def get_overrides(file_id: FileIdPath) -> ReviewOverridesSchema | None:
 
 @stage_four_router.post("/overrides", response_model=SaveOverridesResponse, name="stage_four_save_overrides")
 async def save_overrides(payload: SaveOverridesRequest) -> SaveOverridesResponse:
-    store = get_file_store()
-    storage = get_upload_storage()
-    now = datetime.now(UTC)
-
-    existing = store.load_review_overrides(payload.file_id)
-    saved = ReviewOverrides.create(
+    store = dependencies.get_file_store()
+    storage = dependencies.get_upload_storage()
+    result = save_review_overrides(
+        file_store=store,
+        upload_storage=storage,
         file_id=payload.file_id,
-        created_at=existing.created_at if existing else now,
-        updated_at=now,
-        overrides={
-            row_key: {column_key: override.model_dump() for column_key, override in columns.items()}
-            for row_key, columns in payload.overrides.items()
-        },
-        review_state=payload.review_state.model_dump(),
+        overrides=payload.overrides,
+        review_state=payload.review_state,
     )
-    store.save_review_overrides(saved)
-
-    _sync_overrides_to_manifest(storage, saved)
-
-    return SaveOverridesResponse(file_id=payload.file_id, updated_at=now)
-
-
-def _sync_overrides_to_manifest(storage: UploadStorage, overrides: ReviewOverrides) -> None:
-    manifest_path = storage.load_harmonization_manifest_path(overrides.file_id)
-    if manifest_path is None:
-        logger.warning("Cannot sync overrides: manifest path not found", extra={"file_id": overrides.file_id})
-        return
-
-    overrides_batch = overrides.manual_override_batch()
-    if not overrides_batch:
-        return
-
-    success = add_manual_overrides_batch(
-        manifest_path=manifest_path,
-        overrides=overrides_batch,
-        user_id=None,
-    )
-    if not success:
-        logger.error("Failed to sync overrides to manifest parquet", extra={"file_id": overrides.file_id})
+    return SaveOverridesResponse(file_id=result.file_id, updated_at=result.updated_at)
 
 
 @stage_four_router.delete(
@@ -338,7 +120,7 @@ def _sync_overrides_to_manifest(storage: UploadStorage, overrides: ReviewOverrid
     name="stage_four_delete_overrides",
 )
 async def delete_overrides(file_id: FileIdPath) -> DeleteOverridesResponse:
-    store = get_file_store()
+    store = dependencies.get_file_store()
     existed = store.exists(file_id, FileType.REVIEW_OVERRIDES)
     store.delete(file_id, FileType.REVIEW_OVERRIDES)
     return DeleteOverridesResponse(file_id=file_id, deleted=existed)
@@ -351,12 +133,13 @@ async def delete_overrides(file_id: FileIdPath) -> DeleteOverridesResponse:
 )
 async def get_non_conformant_values(file_id: FileIdPath) -> NonConformantResponse:
     """Deduplicate by (column, original, final) to match Stage 5's unique mapping logic."""
-    storage = get_upload_storage()
-    cache = ensure_pvs_loaded(file_id)
+    storage = dependencies.get_upload_storage()
     manifest = _load_manifest(storage, file_id)
 
     if manifest is None:
         return NonConformantResponse(count=0, items=[])
+
+    column_pv_map = column_pv_sets(file_id, [row.column_key for row in manifest.rows])
 
     # Track unique (column, original, final) tuples to avoid counting duplicates
     seen: set[tuple[str, str, str]] = set()
@@ -375,7 +158,7 @@ async def get_non_conformant_values(file_id: FileIdPath) -> NonConformantRespons
         seen.add(key)
 
         # Check PV conformance using shared function for consistent behavior
-        pv_set = cache.get_pvs_for_column(col_key)
+        pv_set = column_pv_map.get(col_key)
         if pv_set and current_value and not check_value_conformance(current_value, pv_set):
             non_conformant.append(NonConformantItem(
                 column=row.column_name,
@@ -396,7 +179,7 @@ async def get_non_conformant_values(file_id: FileIdPath) -> NonConformantRespons
 )
 async def get_row_context(payload: RowContextRequest) -> RowContextResponse:
     """On-demand fetch avoids loading full spreadsheet into review state."""
-    storage = get_upload_storage()
+    storage = dependencies.get_upload_storage()
     meta = storage.load(payload.file_id)
     if not meta:
         raise HTTPException(status_code=404, detail="Upload not found")
@@ -428,7 +211,7 @@ class TermRowIndicesResponse(BaseModel):
 )
 async def get_term_row_indices(payload: TermRowIndicesRequest) -> TermRowIndicesResponse:
     """Fetch full row indices for a term when truncated in initial response."""
-    storage = get_upload_storage()
+    storage = dependencies.get_upload_storage()
     manifest = _load_manifest(storage, payload.file_id)
     if manifest is None:
         raise HTTPException(status_code=404, detail="Manifest not found")

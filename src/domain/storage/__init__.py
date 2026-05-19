@@ -15,7 +15,6 @@ from .upload_storage import (
     UploadStream,
     UploadTooLargeError,
     describe_constraints,
-    resolve_harmonized_path,
 )
 
 __all__ = [
@@ -31,5 +30,4 @@ __all__ = [
     "UnsupportedUploadError",
     "build_file_name",
     "describe_constraints",
-    "resolve_harmonized_path",
 ]

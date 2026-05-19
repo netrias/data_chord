@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import os
+import tempfile
 from collections.abc import AsyncGenerator, Generator
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,7 +27,6 @@ TEST_CSV_CONTENT_TYPE = "text/csv"
 TEST_TSV_CONTENT_TYPE = "text/tab-separated-values"
 TEST_XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 TEST_TARGET_SCHEMA = "CCDI"
-TEST_HARMONIZED_CSV_SUFFIX = ".harmonized.csv"
 SAMPLE_CSV_ROW_COUNT = 10
 SAMPLE_CSV_COLUMN_COUNT = 6
 MAX_EXAMPLES_LIMIT = 20
@@ -204,16 +204,10 @@ async def app_client(
 ) -> AsyncGenerator[AsyncClient]:
     """why: provide an async HTTP client for testing the full API."""
     import src.domain.dependencies as deps_module
-    import src.stage_1_upload.router as router_module
-    import src.stage_3_harmonize.router as stage3_router
-    import src.stage_4_review_results.router as stage4_router
-    import src.stage_5_review_summary.router as stage5_router
     from src.domain.storage import FileStore
 
     original_storage = deps_module._storage
-    original_router_storage = router_module._storage
     deps_module._storage = temp_storage
-    router_module._storage = temp_storage
 
     original_get_storage = deps_module.get_upload_storage
     deps_module.get_upload_storage = lambda: temp_storage
@@ -221,16 +215,6 @@ async def app_client(
     original_get_file_store = deps_module.get_file_store
     test_store = FileStore(temp_storage._base_dir / "manifests")
     deps_module.get_file_store = lambda: test_store
-
-    original_stage3_storage = stage3_router._storage
-    stage3_router._storage = temp_storage
-
-    # Patch stage 4 and 5 to use test storage via get_upload_storage
-    original_stage4_get_storage = stage4_router.get_upload_storage
-    stage4_router.get_upload_storage = lambda: temp_storage
-
-    original_stage5_get_storage = stage5_router.get_upload_storage
-    stage5_router.get_upload_storage = lambda: temp_storage
 
     try:
         from backend.app.main import create_app
@@ -241,12 +225,8 @@ async def app_client(
             yield client
     finally:
         deps_module._storage = original_storage
-        router_module._storage = original_router_storage
         deps_module.get_upload_storage = original_get_storage
         deps_module.get_file_store = original_get_file_store
-        stage3_router._storage = original_stage3_storage
-        stage4_router.get_upload_storage = original_stage4_get_storage
-        stage5_router.get_upload_storage = original_stage5_get_storage
 
 
 @pytest.fixture
@@ -313,7 +293,12 @@ async def upload_and_analyze(client: AsyncClient, csv_path: Path) -> str:
     return file_id
 
 
-def create_harmonized_csv(original_path: Path, changes: dict[int, dict[str, str]]) -> Path:
+def create_harmonized_csv(
+    storage: UploadStorage,
+    file_id: str,
+    original_path: Path,
+    changes: dict[int, dict[str, str]],
+) -> Path:
     """why: create a managed harmonized CSV with specified changes."""
     with original_path.open("r", newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
@@ -324,9 +309,7 @@ def create_harmonized_csv(original_path: Path, changes: dict[int, dict[str, str]
         if row_idx < len(rows):
             rows[row_idx].update(column_changes)
 
-    harmonized_dir = original_path.parent.parent / "harmonized"
-    harmonized_dir.mkdir(parents=True, exist_ok=True)
-    harmonized_path = harmonized_dir / f"{original_path.stem}{TEST_HARMONIZED_CSV_SUFFIX}"
+    harmonized_path = storage.harmonized_path_for(file_id, original_path)
     with harmonized_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=headers)
         writer.writeheader()
@@ -369,9 +352,10 @@ def store_test_harmonization_manifest(
     rows: list[dict[str, Any]],
 ) -> Path:
     """Create a test manifest through the same storage API production uses."""
-    temp_path = storage.harmonized_dir / f"{file_id}_test_manifest.parquet"
-    create_test_manifest_parquet(temp_path, rows)
-    return storage.save_harmonization_manifest(file_id, temp_path)
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir) / f"{file_id}_test_manifest.parquet"
+        create_test_manifest_parquet(temp_path, rows)
+        return storage.save_harmonization_manifest(file_id, temp_path)
 
 
 def _get_columns_with_changes(changes: dict[int, dict[str, str]], headers: list[str]) -> set[str]:

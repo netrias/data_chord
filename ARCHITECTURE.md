@@ -33,9 +33,10 @@ data_chord/
 |   |   Shapes owned here:
 |   |     CDEInfo, CdeType, ModelSuggestion, DataModelSummary,
 |   |     DataModelSelection, ColumnKey, ColumnIdentity, ColumnCdeMap,
-|   |     ColumnCdeOverrides, ColumnRenameSet, HarmonizeRequest,
-|   |     HarmonizeResponse, SessionCache, PVManifest, ReviewOverrides,
-|   |     CellOverride, ChangeType, RecommendationType.
+|   |     ColumnCdeOverrides, ColumnRenameSet, ConfirmedMappingChoices,
+|   |     HarmonizeRequest, HarmonizeResponse, SessionCache, PVManifest,
+|   |     ReviewOverrides, WorkflowState, CellOverride, ChangeType,
+|   |     RecommendationType.
 |   |
 |   |   |-- manifest/
 |   |   |   Responsibility:
@@ -58,7 +59,7 @@ data_chord/
 |   |         files/{file_id}.{csv|tsv|xlsx}
 |   |         harmonized/{file_id}.harmonized.{csv|tsv|xlsx}
 |   |         meta/{file_id}.json
-|   |         manifests/{file_id}_{mapping|overrides|pv_manifest}.json
+|   |         manifests/{file_id}_{mapping|overrides|pv_manifest|workflow_state}.json
 |   |
 |   |-- stage_1_upload/
 |   |   Responsibility:
@@ -68,8 +69,9 @@ data_chord/
 |   |     UploadResponse, AnalyzeRequest, AnalyzeResponse, SheetPreview,
 |   |     ColumnPreview, ColumnOverlapRatio.
 |   |   Handoff:
-|   |     Persists UploadedFileMeta and passes AnalyzeResponse through
-|   |     browser sessionStorage to Stage 2.
+|   |     Persists UploadedFileMeta, saves WorkflowState for selected
+|   |     model/version, and passes AnalyzeResponse through browser sessionStorage
+|   |     to Stage 2.
 |   |
 |   |-- stage_2_review_columns/
 |   |   Responsibility:
@@ -79,7 +81,8 @@ data_chord/
 |   |     ColumnDetailResponse and CdeCatalogSnapshot.
 |   |   Handoff:
 |   |     Browser builds ColumnCdeOverrides, ColumnRenameSet, and an optional
-|   |     ColumnMappingManifest payload for Stage 3.
+|   |     ColumnMappingManifest payload for Stage 3. Server saves confirmed mapping
+|   |     choices into WorkflowState and can recover selected model/version from it.
 |   |
 |   |-- stage_3_harmonize/
 |   |   Responsibility:
@@ -89,7 +92,9 @@ data_chord/
 |   |     PVAdjustmentRecord and ColumnStats.
 |   |   Handoff:
 |   |     Writes harmonized tabular output, parquet manifest, PV manifest,
-|   |     and CDE mapping audit JSON for Stages 4 and 5.
+|   |     and CDE mapping audit JSON for Stages 4 and 5. Reads WorkflowState as
+|   |     the durable selected model/version and confirmed mapping-choice owner
+|   |     when present.
 |   |
 |   |-- stage_4_review_results/
 |   |   Responsibility:
@@ -102,7 +107,8 @@ data_chord/
 |   |     NonConformantResponse, RowContextResponse.
 |   |   Handoff:
 |   |     Saves ReviewOverrides JSON and appends manual override audit rows
-|   |     to the parquet manifest.
+|   |     to the parquet manifest. Reads PVs through the domain PV lookup query;
+|   |     SessionCache is only the internal acceleration path.
 |   |
 |   |-- stage_5_review_summary/
 |   |   Responsibility:
@@ -113,7 +119,9 @@ data_chord/
 |   |     TermMapping, TransformationStep.
 |   |   Handoff:
 |   |     Streams a ZIP with final tabular output, JSON manifest, parquet
-|   |     manifest, and CDE mapping audit document.
+|   |     manifest, and CDE mapping audit document. Reads PVs through the domain
+|   |     PV lookup query for summary/history conformance, and asks UploadStorage
+|   |     to resolve harmonized output paths.
 |   |
 |   `-- shared/
 |       Responsibility:
@@ -199,6 +207,8 @@ Shared rules and adapters used by every stage:
   src/domain/column_cde_map.py      User mapping decisions keyed by ColumnKey
   src/domain/column_renames.py      Output names keyed by ColumnKey
   src/domain/data_model_*.py        Data model/version/CDE/PV lookup and cache
+  src/domain/workflow_state.py      Durable selected model/version and confirmed mapping choices per upload
+  src/domain/pv_persistence.py      PV manifest recovery and column-keyed PV lookup
   src/domain/pv_validation.py       PV conformance and adjustment selection
   src/domain/change.py              Change and recommendation classification
   src/domain/schemas.py             Cross-stage API contracts

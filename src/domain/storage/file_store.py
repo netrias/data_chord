@@ -8,6 +8,7 @@ from pathlib import Path
 
 from src.domain.pv_manifest import PVManifest
 from src.domain.review_overrides import ReviewOverrides
+from src.domain.workflow_state import WorkflowState
 
 from .file_types import FileType, build_file_name
 
@@ -60,6 +61,12 @@ class FileStore:
 
     def load_pv_manifest(self, file_id: str) -> PVManifest | None:
         return PVManifest.from_store(self.load(file_id, FileType.PV_MANIFEST))
+
+    def save_workflow_state(self, state: WorkflowState) -> None:
+        self.save(state.file_id, FileType.WORKFLOW_STATE, state.to_store())
+
+    def load_workflow_state(self, file_id: str) -> WorkflowState | None:
+        return WorkflowState.from_store(self.load(file_id, FileType.WORKFLOW_STATE), file_id)
 
     def delete(self, file_id: str, file_type: FileType) -> None:
         """Delete a file."""

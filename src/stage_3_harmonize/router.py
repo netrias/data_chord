@@ -18,6 +18,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+import src.domain.dependencies as dependencies
 from src.domain import (
     ColumnBreakdownSchema,
     ColumnCdeOverrides,
@@ -33,9 +34,7 @@ from src.domain.data_model_adapter import fetch_all_pvs_async
 from src.domain.data_model_cache import SessionCache, get_session_cache, populate_cde_cache
 from src.domain.data_model_selection import DataModelSelection
 from src.domain.dependencies import (
-    get_file_store,
     get_harmonize_service,
-    get_upload_storage,
 )
 from src.domain.harmonize import HarmonizeResult
 from src.domain.manifest import (
@@ -51,14 +50,14 @@ from src.domain.manifest import (
 from src.domain.manifest.writer import apply_pv_adjustments_batch
 from src.domain.pv_persistence import save_pv_manifest_to_disk
 from src.domain.pv_validation import check_value_conformance, compute_pv_adjustment
-from src.domain.storage import FileType
+from src.domain.storage import FileType, UploadStorage
+from src.domain.workflow_state import ConfirmedMappingChoices, WorkflowState
 
 MODULE_DIR = Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"
 NEXT_STAGE_PATH = "/stage-4"
 
 _templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
-_storage = get_upload_storage()
 _router_logger = logging.getLogger(__name__)
 
 stage_three_router = APIRouter(prefix="/stage-3", tags=["Stage 3 Harmonize"])
@@ -94,26 +93,29 @@ async def render_stage_three(request: Request) -> HTMLResponse:
     name="stage_three_harmonize",
 )
 async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
-    meta = _storage.load(payload.file_id)
+    storage = dependencies.get_upload_storage()
+    meta = storage.load(payload.file_id)
     if not meta:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please rerun analysis.")
 
-    store = get_file_store()
+    store = dependencies.get_file_store()
     store.delete(payload.file_id, FileType.REVIEW_OVERRIDES)
     store.delete(payload.file_id, FileType.COLUMN_MAPPING)
+    workflow_state = store.load_workflow_state(payload.file_id)
 
-    stored_manifest = _storage.load_manifest(payload.file_id)
-    manifest_payload = payload.manifest or stored_manifest
+    stored_manifest = storage.load_manifest(payload.file_id)
+    manifest_payload = stored_manifest or payload.manifest
     manifest = ColumnMappingManifest.from_payload(manifest_payload)
-    column_overrides = ColumnCdeOverrides.from_strings(payload.manual_overrides)
-    column_renames = ColumnRenameSet.from_dict(payload.column_renames)
-    target_selection = DataModelSelection.from_version_number(payload.target_schema, payload.target_version_number)
+    mapping_choices = _mapping_choices_for_harmonize(workflow_state, payload)
+    column_overrides = mapping_choices.column_overrides
+    column_renames = mapping_choices.column_renames
+    target_selection = _data_model_selection_for_harmonize(workflow_state, payload)
 
     cache = get_session_cache(payload.file_id)
     column_cde_map = _column_cde_map_for_session(manifest, column_overrides)
     _store_column_mappings_in_cache(cache, column_cde_map)
     save_cde_mapping_document(payload.file_id, manifest, column_overrides, column_renames, cache, target_selection)
-    output_path = _storage.harmonized_path_for(payload.file_id, meta.saved_path)
+    output_path = storage.harmonized_path_for(payload.file_id, meta.saved_path)
 
     harmonize_task = asyncio.create_task(
         _run_harmonization(
@@ -150,7 +152,7 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
     )
 
     manifest_summary = await _read_store_and_adjust_manifest(
-        payload.file_id, result.manifest_path
+        payload.file_id, result.manifest_path, storage
     )
     _router_logger.info(
         "Manifest summary result",
@@ -176,6 +178,24 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
 
 def _column_cde_map_for_session(manifest: ColumnMappingManifest, column_overrides: ColumnCdeOverrides) -> ColumnCdeMap:
     return manifest.column_cde_map().with_overrides(column_overrides)
+
+
+def _data_model_selection_for_harmonize(
+    workflow_state: WorkflowState | None,
+    payload: HarmonizeRequest,
+) -> DataModelSelection:
+    if workflow_state is not None:
+        return workflow_state.data_model_selection
+    return DataModelSelection.from_version_number(payload.target_schema, payload.target_version_number)
+
+
+def _mapping_choices_for_harmonize(
+    workflow_state: WorkflowState | None,
+    payload: HarmonizeRequest,
+) -> ConfirmedMappingChoices:
+    if workflow_state is not None and workflow_state.mapping_choices is not None:
+        return workflow_state.mapping_choices
+    return ConfirmedMappingChoices.from_raw(payload.manual_overrides, payload.column_renames)
 
 
 def _store_column_mappings_in_cache(cache: SessionCache, column_cde_map: ColumnCdeMap) -> None:
@@ -298,10 +318,10 @@ def _read_manifest_if_exists(manifest_path: Path | None) -> ManifestSummary | No
 
 
 async def _store_and_adjust_manifest(
-    file_id: str, manifest_path: Path, manifest_data: ManifestSummary
+    file_id: str, manifest_path: Path, manifest_data: ManifestSummary, storage: UploadStorage
 ) -> ManifestSummary:
     """Must store before adjusting so later stages read the adjusted version."""
-    stored_path = _storage.save_harmonization_manifest(file_id, manifest_path)
+    stored_path = storage.save_harmonization_manifest(file_id, manifest_path)
     if stored_path is None:
         _router_logger.warning("Failed to store manifest", extra={"file_id": file_id})
         return manifest_data
@@ -315,13 +335,13 @@ async def _store_and_adjust_manifest(
 
 
 async def _read_store_and_adjust_manifest(
-    file_id: str, manifest_path: Path | None
+    file_id: str, manifest_path: Path | None, storage: UploadStorage
 ) -> ManifestSummarySchema | None:
     manifest_data = _read_manifest_if_exists(manifest_path)
     if manifest_data is None or manifest_path is None:
         return None
 
-    final_data = await _store_and_adjust_manifest(file_id, manifest_path, manifest_data)
+    final_data = await _store_and_adjust_manifest(file_id, manifest_path, manifest_data, storage)
     cache = get_session_cache(file_id)
     column_pv_map = {
         str(row.column_key): cache.get_pvs_for_column(row.column_key)

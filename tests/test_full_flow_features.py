@@ -10,6 +10,10 @@ from io import BytesIO
 import pytest
 from httpx import AsyncClient
 
+import src.domain.dependencies as dependencies
+from src.domain.column_cde_map import ColumnCdeMap
+from src.domain.data_model_cache import clear_all_session_caches
+from src.domain.pv_manifest import PVManifest
 from src.domain.storage import UploadStorage
 from tests.conftest import (
     TEST_TARGET_SCHEMA,
@@ -38,6 +42,18 @@ def _read_downloaded_csv_rows(response_bytes: bytes) -> list[list[str]]:
     return list(csv.reader(io.StringIO(csv_content)))
 
 
+def _save_test_pv_manifest(file_id: str, column_key: str, cde_key: str, pvs: list[str]) -> None:
+    dependencies.get_file_store().save_pv_manifest(
+        file_id,
+        PVManifest(
+            data_model_key=TEST_TARGET_SCHEMA,
+            version_label="1",
+            column_to_cde_key=ColumnCdeMap.from_strings({column_key: cde_key}),
+            pvs={cde_key: frozenset(pvs)},
+        ),
+    )
+
+
 async def test_full_flow_no_changes_produces_zero_summary(
     app_client: AsyncClient,
     temp_storage: UploadStorage,
@@ -62,7 +78,7 @@ async def test_full_flow_no_changes_produces_zero_summary(
     assert harmonize_response.status_code == 200
     meta = temp_storage.load(file_id)
     assert meta is not None
-    create_harmonized_csv(meta.saved_path, {})
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
     create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
 
     # Then: summary reports zero AI changes
@@ -102,7 +118,7 @@ async def test_full_flow_overrides_propagate_within_column(
     assert harmonize_response.status_code == 200
     meta = temp_storage.load(file_id)
     assert meta is not None
-    create_harmonized_csv(meta.saved_path, {})
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
     create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
 
     rows_response = await app_client.post("/stage-4/rows", json={"file_id": file_id, "manual_columns": []})
@@ -168,7 +184,7 @@ async def test_full_flow_two_files_isolated_overrides(
         assert harmonize_response.status_code == 200
         meta = temp_storage.load(file_id)
         assert meta is not None
-        create_harmonized_csv(meta.saved_path, {})
+        create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
         create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
 
     # When: overrides are saved for the first file only
@@ -217,7 +233,7 @@ async def test_full_flow_reharmonize_clears_overrides(
     assert harmonize_response.status_code == 200
     meta = temp_storage.load(file_id)
     assert meta is not None
-    create_harmonized_csv(meta.saved_path, {})
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
     create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
     save_response = await app_client.post(
         "/stage-4/overrides",
@@ -244,6 +260,65 @@ async def test_full_flow_reharmonize_clears_overrides(
     assert overrides_response.json() is None
 
 
+async def test_stage4_recovers_pvs_after_session_cache_loss(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """Stage 4 review uses durable PV manifest data after cache loss."""
+
+    # Given: harmonization artifacts and a durable PV manifest exist, but cache is empty
+    rows = [["col_a"], ["alpha"]]
+    file_id = await upload_content(app_client, create_csv_content(rows), "stage4-pvs.csv")
+    meta = temp_storage.load(file_id)
+    assert meta is not None
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"col_a": "Denied"}})
+    create_manifest_for_file(temp_storage, file_id, meta.saved_path, {0: {"col_a": "Denied"}})
+    _save_test_pv_manifest(file_id, "col_0000", "diagnosis_cde", ["Allowed"])
+    clear_all_session_caches()
+
+    # When: Stage 4 loads review rows and non-conformant values
+    rows_response = await app_client.post("/stage-4/rows", json={"file_id": file_id})
+    non_conformant_response = await app_client.get(f"/stage-4/non-conformant/{file_id}")
+
+    # Then: PV availability and non-conformance are recovered from durable state
+    assert rows_response.status_code == 200
+    data = rows_response.json()
+    assert data["columnPVs"] == {"col_0000": ["Allowed"]}
+    transformation = data["columns"][0]["transformations"][0]
+    assert transformation["pvSetAvailable"] is True
+    assert transformation["isPVConformant"] is False
+    assert non_conformant_response.status_code == 200
+    assert non_conformant_response.json()["count"] == 1
+
+
+async def test_stage5_summary_recovers_pvs_after_session_cache_loss(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """Stage 5 summary uses durable PV manifest data after cache loss."""
+
+    # Given: a changed harmonization manifest has PV recovery data on disk
+    rows = [["col_a"], ["alpha"]]
+    file_id = await upload_content(app_client, create_csv_content(rows), "stage5-pvs.csv")
+    meta = temp_storage.load(file_id)
+    assert meta is not None
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"col_a": "Denied"}})
+    create_manifest_for_file(temp_storage, file_id, meta.saved_path, {0: {"col_a": "Denied"}})
+    _save_test_pv_manifest(file_id, "col_0000", "diagnosis_cde", ["Allowed"])
+    clear_all_session_caches()
+
+    # When: Stage 5 builds the final summary
+    response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
+
+    # Then: non-conformance and history conformance use the durable PV manifest
+    assert response.status_code == 200
+    summary = response.json()
+    assert summary["non_conformant_count"] == 1
+    assert summary["term_mappings"][0]["is_pv_conformant"] is False
+    ai_step = next(step for step in summary["term_mappings"][0]["history"] if step["source"] == "ai")
+    assert ai_step["is_pv_conformant"] is False
+
+
 async def test_full_flow_bom_overrides_apply(
     app_client: AsyncClient,
     temp_storage: UploadStorage,
@@ -266,7 +341,7 @@ async def test_full_flow_bom_overrides_apply(
     assert harmonize_response.status_code == 200
     meta = temp_storage.load(file_id)
     assert meta is not None
-    create_harmonized_csv(meta.saved_path, {})
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
     create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
 
     rows_response = await app_client.post("/stage-4/rows", json={"file_id": file_id, "manual_columns": []})
@@ -325,9 +400,7 @@ async def test_full_flow_duplicate_headers_keep_columns_separate(
 
     meta = temp_storage.load(file_id)
     assert meta is not None
-    harmonized_dir = meta.saved_path.parent.parent / "harmonized"
-    harmonized_dir.mkdir(parents=True, exist_ok=True)
-    harmonized_path = harmonized_dir / f"{meta.saved_path.stem}.harmonized.csv"
+    harmonized_path = temp_storage.harmonized_path_for(file_id, meta.saved_path)
     with harmonized_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerows(rows)

@@ -326,7 +326,7 @@ class TestRowsContract:
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
-        create_harmonized_csv(meta.saved_path, {})
+        create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
         create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
 
         # When: Rows are requested for review
@@ -355,7 +355,7 @@ class TestRowsContract:
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
-        create_harmonized_csv(meta.saved_path, {})
+        create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
         create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
 
         # When: Rows are requested for review
@@ -387,7 +387,7 @@ class TestRowsContract:
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
-        create_harmonized_csv(meta.saved_path, {})
+        create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
         create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
 
         # When: Rows are requested for review
@@ -541,7 +541,7 @@ class TestSummaryContract:
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
-        create_harmonized_csv(meta.saved_path, {})
+        create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
         create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
 
         # When: Summary is requested
@@ -568,7 +568,7 @@ class TestSummaryContract:
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
-        create_harmonized_csv(meta.saved_path, {})
+        create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
         create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
 
         # When: Summary is requested
