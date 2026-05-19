@@ -91,7 +91,6 @@ const _persistJob = (job) => {
 const _handleContinue = () => {
   const serverUrl = state.job?.next_stage_url;
   const nextUrl = isSafeRelativeUrl(serverUrl) ? serverUrl : nextStageUrl;
-  advanceMaxReachedStage('review');
   window.location.assign(nextUrl);
 };
 
@@ -117,6 +116,11 @@ const _persistJobMeta = (job) => {
     removeFromSession(STAGE_3_JOB_KEY);
   }
 };
+
+const _jobWithCurrentFile = (job) => ({
+  ...job,
+  file_id: job.file_id ?? state.requestBody?.file_id ?? null,
+});
 
 /* why: update page title to reflect current job status. */
 const _updateTitleForStatus = (status) => {
@@ -150,12 +154,13 @@ const _renderJob = (job) => {
   if (!job) {
     return;
   }
-  state.job = job;
-  _persistJobMeta(job);
-  _showJobId(job.job_id);
+  const jobForSession = _jobWithCurrentFile(job);
+  state.job = jobForSession;
+  _persistJobMeta(jobForSession);
+  _showJobId(jobForSession.job_id);
 
   /* Default to 'running' when status is missing - job is in progress. */
-  const status = job.status ?? 'running';
+  const status = jobForSession.status ?? 'running';
   const normalized = _normalizeStatus(status);
   _updateTitleForStatus(status);
   _clearError();
@@ -164,12 +169,14 @@ const _renderJob = (job) => {
     _toggleLoadingState(true);
     _toggleAnimation(false);
     _hideMetricsDashboard();
-    _showError(job.detail || 'Harmonization failed. Please retry.');
+    _showError(jobForSession.detail || 'Harmonization failed. Please retry.');
     reviewButton.disabled = true;
     retryButton.classList.remove('hidden');
   } else if (_isCompleteStatus(normalized)) {
+    advanceMaxReachedStage('review');
+    setActiveStage('harmonize');
     _toggleLoadingState(false);
-    _renderMetricsDashboard(job);
+    _renderMetricsDashboard(jobForSession);
     reviewButton.disabled = false;
     retryButton.classList.add('hidden');
     updateStepInstruction('harmonize_complete');

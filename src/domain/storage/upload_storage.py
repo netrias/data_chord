@@ -293,10 +293,6 @@ class UploadStorage:
     def harmonized_dir(self) -> Path:
         return self._harmonized_dir
 
-    @property
-    def manifest_dir(self) -> Path:
-        return self._manifest_dir
-
     def _validate_upload(self, suffix: str, content_type: str) -> None:
         if suffix not in SUPPORTED_TABULAR_SUFFIXES:
             raise UnsupportedUploadError(f"Unsupported file extension: {suffix}")

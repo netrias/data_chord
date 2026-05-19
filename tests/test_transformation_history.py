@@ -11,7 +11,7 @@ from httpx import AsyncClient
 from src.domain.storage import UploadStorage
 from tests.conftest import (
     create_harmonized_csv,
-    create_test_manifest_parquet,
+    store_test_harmonization_manifest,
     upload_file,
 )
 
@@ -40,10 +40,7 @@ def _create_manifest_with_history(
         "manual_overrides": manual_overrides,
     }]
 
-    manifest_dir = storage.manifest_dir
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = manifest_dir / f"{file_id}_harmonization.parquet"
-    return create_test_manifest_parquet(manifest_path, manifest_rows)
+    return store_test_harmonization_manifest(storage, file_id, manifest_rows)
 
 
 class TestTransformationHistoryContract:

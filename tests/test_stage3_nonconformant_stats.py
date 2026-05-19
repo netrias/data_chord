@@ -195,7 +195,7 @@ class TestManualOverridePropagation:
             }
         })
         manual_overrides = {"diagnosis": "primary_diagnosis"}
-        assert cache.get_column_cde_key("diagnosis") is None
+        assert "diagnosis" not in cache.get_column_mappings().to_strings()
 
         # When
         column_cde_map = _column_cde_map_for_session(
@@ -205,8 +205,10 @@ class TestManualOverridePropagation:
         _store_column_mappings_in_cache(cache, column_cde_map)
 
         # Then: both mappings present
-        assert cache.get_column_cde_key("breed") == "organism_species"
-        assert cache.get_column_cde_key("diagnosis") == "primary_diagnosis"
+        assert cache.get_column_mappings().to_strings() == {
+            "breed": "organism_species",
+            "diagnosis": "primary_diagnosis",
+        }
 
     def test_manual_override_takes_precedence_over_manifest(self) -> None:
         """
@@ -232,7 +234,7 @@ class TestManualOverridePropagation:
         _store_column_mappings_in_cache(cache, column_cde_map)
 
         # Then: manual override wins
-        assert cache.get_column_cde_key("col") == "manual_target"
+        assert cache.get_column_mappings().to_strings() == {"col": "manual_target"}
 
     def test_null_manual_override_removes_manifest_mapping(self) -> None:
         """
@@ -250,7 +252,7 @@ class TestManualOverridePropagation:
             }
         })
         manual_overrides = {"col": None}
-        assert cache.get_column_cde_key("col") is None
+        assert "col" not in cache.get_column_mappings().to_strings()
 
         # When
         column_cde_map = _column_cde_map_for_session(
@@ -260,7 +262,7 @@ class TestManualOverridePropagation:
         _store_column_mappings_in_cache(cache, column_cde_map)
 
         # Then
-        assert cache.get_column_cde_key("col") is None
+        assert "col" not in cache.get_column_mappings().to_strings()
 
     def test_harmonize_request_accepts_null_manual_override(self) -> None:
         """

@@ -3,7 +3,11 @@
  * Shows short instruction text for active step, with hover tooltip for longer description.
  */
 import { STEP_INSTRUCTIONS, STAGE_ORDER } from './step-instructions.js';
-import { CURRENT_FILE_SESSION_KEY, MAX_REACHED_STAGE_KEY } from './storage-keys.js';
+import {
+  CURRENT_FILE_SESSION_KEY,
+  MAX_REACHED_STAGE_KEY,
+  STAGE_3_PAYLOAD_KEY,
+} from './storage-keys.js';
 
 /**
  * Update progress tracker UI to reflect the active stage.
@@ -65,11 +69,44 @@ function _getFileIdForNavigation() {
 /* why: append file_id to navigation URLs so stages can access the active session. */
 function _buildNavUrl(baseUrl) {
   const fileId = _getFileIdForNavigation();
-  if (!fileId) return baseUrl;
-
   const url = new URL(baseUrl, window.location.origin);
-  url.searchParams.set('file_id', fileId);
+  if (fileId) url.searchParams.set('file_id', fileId);
+  _addMappingContext(url);
   return url.pathname + url.search;
+}
+
+function _addMappingContext(url) {
+  if (url.pathname !== '/stage-2' && url.pathname !== '/stage-3') return;
+
+  const context = _getTargetContextForNavigation();
+  if (!context.schema) return;
+
+  const schemaParam = url.pathname === '/stage-3' ? 'target_schema' : 'schema';
+  url.searchParams.set(schemaParam, context.schema);
+  if (context.versionNumber) {
+    url.searchParams.set('version_number', String(context.versionNumber));
+  }
+}
+
+function _getTargetContextForNavigation() {
+  const params = new URLSearchParams(window.location.search);
+  const schema = params.get('schema') || params.get('target_schema');
+  const versionNumber = params.get('version_number');
+  if (schema) {
+    return { schema, versionNumber };
+  }
+
+  try {
+    const stored = sessionStorage.getItem(STAGE_3_PAYLOAD_KEY);
+    if (!stored) return {};
+    const parsed = JSON.parse(stored);
+    return {
+      schema: parsed.context?.targetSchema || parsed.request?.target_schema || null,
+      versionNumber: parsed.context?.targetVersionNumber || parsed.request?.target_version_number || null,
+    };
+  } catch {
+    return {};
+  }
 }
 
 /**

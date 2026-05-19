@@ -905,6 +905,78 @@ test('stage navigation links go to correct stages', async ({ page }) => {
   await page.waitForURL(/\/stage-1/);
 });
 
+test('Stage 2 locks and Stage 5 is reachable after Stage 3 completes', async ({ page }) => {
+  let harmonizeRequests = 0;
+  await page.route('**/stage-3/harmonize', async (route) => {
+    harmonizeRequests += 1;
+    const payload = route.request().postDataJSON?.() ?? {};
+    const fileId = payload.file_id ?? '';
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        job_id: 'e2e-job-locked',
+        status: 'succeeded',
+        detail: 'Harmonization completed.',
+        next_stage_url: `/stage-4?file_id=${fileId}&job_id=e2e-job-locked&status=succeeded`,
+        job_id_available: true,
+        manifest_summary: null,
+      }),
+    });
+  });
+
+  // Given: Stage 3 has completed, but the user has not clicked Verify yet
+  const fileId = await uploadAndAnalyze(page, fileFixture('basic.csv'));
+  await clickHarmonize(page);
+  await expect(page.locator('#reviewButton')).toBeEnabled();
+  expect(harmonizeRequests).toBe(1);
+
+  seedHarmonization(fileId, {});
+
+  // Then: Stage 4 and Stage 5 are both reachable
+  await expect(page.locator('.progress-track .step[data-stage="verify"]')).not.toHaveClass(/unreachable/);
+  await expect(page.locator('.progress-track .step[data-stage="review"]')).not.toHaveClass(/unreachable/);
+
+  // And: the user can skip straight to the final review summary
+  await page.click('.progress-track .step[data-stage="review"]');
+  await page.waitForURL(/\/stage-5/);
+  const stageFiveUrl = new URL(page.url());
+  expect(stageFiveUrl.searchParams.get('file_id')).toBe(fileId);
+  await page.locator('#summaryGrid').waitFor({ state: 'visible' });
+
+  // And: Stage 5 can load from the URL alone
+  const savedStageThreePayload = await page.evaluate(() => sessionStorage.getItem('stage3HarmonizePayload'));
+  await page.evaluate(() => sessionStorage.removeItem('stage3HarmonizePayload'));
+  await page.reload();
+  await expect(page.locator('#summaryGrid')).not.toContainText('Unable to locate harmonization context.');
+  await page.evaluate((payload) => {
+    if (payload) sessionStorage.setItem('stage3HarmonizePayload', payload);
+  }, savedStageThreePayload);
+
+  // When: the user goes back to Stage 2
+  await page.click('.progress-track .step[data-stage="mapping"]');
+  await page.waitForURL(/\/stage-2/);
+
+  // Then: mapping is inspection-only for the completed harmonization
+  const stageTwoUrl = new URL(page.url());
+  expect(stageTwoUrl.searchParams.get('file_id')).toBe(fileId);
+  expect(stageTwoUrl.searchParams.get('schema')).toBe('gc');
+  expect(stageTwoUrl.searchParams.get('version_number')).toBe('2');
+  await expect(page.locator('#mappingLockBanner')).toBeVisible();
+  await expect(page.locator('#harmonizeButton')).toContainText('Verify');
+
+  await page.locator('.mapping-row', { hasText: 'col_a' }).click();
+  await expect(page.locator('#cdePicker')).toBeDisabled();
+  await page.evaluate(() => document.querySelector('#cdePicker')?.click());
+  await expect(page.locator('#pickerDropdown')).toHaveCount(0);
+  await page.locator('.takeover-btn--close').click();
+
+  // And: continuing returns to verification without rerunning harmonization
+  await page.locator('#harmonizeButton').click();
+  await page.waitForURL(/\/stage-4/);
+  expect(harmonizeRequests).toBe(1);
+});
+
 test('multiple columns with changes show as separate tabs', async ({ page }) => {
   await mockHarmonizeSuccess(page);
 

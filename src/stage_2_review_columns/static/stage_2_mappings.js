@@ -73,6 +73,9 @@ const MSG_NO_COLUMNS = 'No columns to display.';
 const MSG_MANIFEST_MISSING = 'Manifest missing. Please rerun analysis before harmonizing.';
 const MSG_INVALID_FILE = 'Invalid file reference. Please restart the upload process.';
 const MSG_STORAGE_ERROR = 'Unable to prepare harmonization request. Please enable browser storage and retry.';
+const MSG_LOCKED_MAPPING =
+  'These mappings created the current harmonized dataset. To change mappings, start over from upload.';
+const COMPLETE_STATUSES = new Set(['completed', 'succeeded', 'success', 'done']);
 
 /* ─── DOM ────────────────────────────────────────────────── */
 const sourceFilterEl = document.getElementById('sourceFilter');
@@ -83,6 +86,7 @@ const harmonizeButton = document.getElementById('harmonizeButton');
 const harmonizeButtonText = harmonizeButton?.querySelector('.btn-3d-front');
 const takeoverEl = document.getElementById('takeover');
 const takeoverCardEl = document.getElementById('takeoverCard');
+const lockBanner = document.getElementById('mappingLockBanner');
 
 /* ─── State ──────────────────────────────────────────────── */
 const SORT = {
@@ -106,6 +110,7 @@ const state = {
   isSubmitting: false,
   activeSort: SORT.FILE,
   seenColumns: new Set(),
+  completedJob: null,
   renameDefault: false,
   renameOverrides: new Map(),
   renameTargets: new Map(),
@@ -116,8 +121,23 @@ const state = {
 const _savePayloadToStorage = (payload) => writeToSession(STAGE_2_PAYLOAD_KEY, payload);
 const _readPayloadFromStorage = () => readFromSession(STAGE_2_PAYLOAD_KEY);
 
+const _isCompleteStatus = (status) => COMPLETE_STATUSES.has((status ?? '').toString().trim().toLowerCase());
+
+const _isLocked = () => state.completedJob !== null;
+
+const _completedJobForFile = (fileId) => {
+  if (!fileId) return null;
+  const job = readFromSession(STAGE_3_JOB_KEY);
+  if (!job || !_isCompleteStatus(job.status)) return null;
+
+  const stageThreePayload = readFromSession(STAGE_3_PAYLOAD_KEY);
+  const jobFileId = job.file_id ?? stageThreePayload?.request?.file_id ?? null;
+  return jobFileId === fileId ? job : null;
+};
+
 const _persistReviewChoices = () => {
   if (!state.payload) return;
+  if (_isLocked()) return;
   state.payload = {
     ...state.payload,
     manual_overrides: _manualOverridesPayload(),
@@ -266,6 +286,12 @@ const sidebarEl = document.getElementById('filterSidebar');
 const _isDefaultFilters = () =>
   state.filters.outcomes.size === 3 && !state.filters.showEmpty;
 
+const _renderLockBanner = () => {
+  if (!lockBanner) return;
+  lockBanner.classList.toggle('hidden', !_isLocked());
+  lockBanner.textContent = _isLocked() ? MSG_LOCKED_MAPPING : '';
+};
+
 // Eye icon inside filter checkboxes — slash line hides/shows via CSS :checked
 // sibling combinator, so one SVG works for both states.
 const VISIBILITY_EYE_SVG = `<span class="fm-check-eye"><svg viewBox="0 0 16 14" width="16" height="12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M1 7S4 2.5 8 2.5 15 7 15 7s-3 4.5-7 4.5S1 7 1 7z"/><circle cx="8" cy="7" r="2" class="fm-eye-pupil"/><line x1="2.5" y1="1" x2="13.5" y2="13" class="fm-eye-slash"/></svg></span>`;
@@ -373,7 +399,7 @@ const _renderSidebarContent = () => {
       <h3 class="fm-section-title">Column rename</h3>
       <label class="fs-rename-toggle">
         <span class="fs-rename-label">Rename to match standard</span>
-        <input type="checkbox" ${state.renameDefault ? 'checked' : ''} />
+        <input type="checkbox" ${state.renameDefault ? 'checked' : ''} ${_isLocked() ? 'disabled' : ''} />
         <span class="fs-toggle-track"><span class="fs-toggle-thumb"></span></span>
       </label>
       <p class="fm-check-desc fs-rename-desc">When enabled, your column names will be changed to match the names of the targeted standard.</p>
@@ -409,6 +435,10 @@ const _bindSidebarEvents = () => {
   const renameInput = sidebarEl.querySelector('.fs-rename-toggle input');
   if (renameInput) {
     renameInput.addEventListener('change', (e) => {
+      if (_isLocked()) {
+        e.target.checked = state.renameDefault;
+        return;
+      }
       state.renameDefault = e.target.checked;
       _persistReviewChoices();
       renderRows();
@@ -630,6 +660,7 @@ const renderRows = () => {
     rowsEl.innerHTML = filtered.map(_rowHtml).join('');
   }
   if (harmonizeButton) harmonizeButton.disabled = !state.payload;
+  if (harmonizeButtonText) harmonizeButtonText.textContent = _isLocked() ? 'Verify →' : HARMONIZE_BUTTON_LABEL;
 };
 
 const _rowHtml = (col) => {
@@ -769,6 +800,13 @@ const _renameIndicatorHtml = (col, colKey, cde) => {
     if (!cde) return '';
     const defaultTarget = cdeByKey.get(cde)?.label ?? cde;
     if (defaultTarget === originalName) return '';
+    if (_isLocked()) {
+      return `
+        <span class="takeover-rename-off takeover-rename-off--locked">
+          Rename available → ${_escHtml(defaultTarget)}
+        </span>
+      `;
+    }
     return `
       <button class="takeover-rename-off" data-action="toggle-rename" title="Enable rename for this column">
         Rename available → ${_escHtml(defaultTarget)}
@@ -780,16 +818,17 @@ const _renameIndicatorHtml = (col, colKey, cde) => {
   return `
     <div class="takeover-rename-row">
       <span class="takeover-rename-arrow">→</span>
-      <button class="takeover-rename-pick" data-action="open-rename-picker" title="Change rename target">
+      <button class="takeover-rename-pick" data-action="open-rename-picker" title="Change rename target" ${_isLocked() ? 'disabled' : ''}>
         <span class="takeover-rename-target">${_escHtml(targetName)}</span>
         <span class="takeover-rename-caret">▾</span>
       </button>
-      <button class="takeover-rename-btn" data-action="toggle-rename" title="Disable rename for this column">✕</button>
+      <button class="takeover-rename-btn" data-action="toggle-rename" title="Disable rename for this column" ${_isLocked() ? 'disabled' : ''}>✕</button>
     </div>
   `;
 };
 
 const _openRenameDropdown = (colKey) => {
+  if (_isLocked()) return;
   _closePicker();
   const wrap = takeoverCardEl.querySelector('.takeover-rename-row') ?? takeoverCardEl.querySelector('.takeover-head-names');
   if (!wrap) return;
@@ -967,7 +1006,7 @@ const _targetPaneHtml = (col, cde, detail, profile) => {
       ${_conformSummaryHtml(col, cde, detail, profile)}
     </div>
     <div class="cde-picker-wrap" id="pickerWrap">
-      <button class="cde-picker" id="cdePicker">${pickerInner}</button>
+      <button class="cde-picker" id="cdePicker" ${_isLocked() ? 'disabled' : ''}>${pickerInner}</button>
     </div>
   `;
 
@@ -1002,6 +1041,7 @@ const _targetPaneHtml = (col, cde, detail, profile) => {
 
 /* ─── Picker dropdown (sorted by match count, with descriptions) ─ */
 const _togglePicker = () => {
+  if (_isLocked()) return;
   if (state.pickerOpen) { _closePicker(); return; }
   _closeRenameDropdown();
   const colKey = state.takeoverKey;
@@ -1143,6 +1183,7 @@ const _optHtml = (c, kind, totalDistinct) => {
 };
 
 const _pickOverride = (colKey, value) => {
+  if (_isLocked()) return;
   const col = (state.payload?.columns ?? []).find((c) => _columnKey(c) === colKey);
   const aiKey = col ? _topAiCdeKey(col) : null;
   const normalizedValue = _normalizeOverrideValue(value);
@@ -1164,6 +1205,7 @@ const _bindTakeoverEvents = (col) => {
       else if (action === 'prev') void navigate(-1);
       else if (action === 'next') void navigate(1);
       else if (action === 'toggle-rename') {
+        if (_isLocked()) return;
         const current = _isRenameActive(colKey);
         state.renameOverrides.set(colKey, !current);
         _closeRenameDropdown();
@@ -1171,6 +1213,7 @@ const _bindTakeoverEvents = (col) => {
         renderTakeover();
         renderRows();
       } else if (action === 'open-rename-picker') {
+        if (_isLocked()) return;
         e.stopPropagation();
         if (state.renamePickerOpen) _closeRenameDropdown();
         else _openRenameDropdown(colKey);
@@ -1223,8 +1266,25 @@ const _persistStageThreePayload = (body) => {
   return writeToSession(STAGE_3_PAYLOAD_KEY, payloadForStageThree);
 };
 
+const _verificationUrlForCompletedJob = () => {
+  const serverUrl = state.completedJob?.next_stage_url;
+  if (isSafeRelativeUrl(serverUrl)) return serverUrl;
+
+  const fileId = state.payload?.file_id;
+  return fileId ? `/stage-4?file_id=${encodeURIComponent(fileId)}` : '/stage-4';
+};
+
+const _returnToCompletedHarmonization = () => {
+  advanceMaxReachedStage('verify');
+  window.location.assign(_verificationUrlForCompletedJob());
+};
+
 const _submitHarmonize = async () => {
   if (!state.payload || state.isSubmitting) return;
+  if (_isLocked()) {
+    _returnToCompletedHarmonization();
+    return;
+  }
   state.isSubmitting = true;
   if (harmonizeButton) harmonizeButton.disabled = true;
   if (harmonizeButtonText) harmonizeButtonText.textContent = 'Preparing…';
@@ -1338,11 +1398,13 @@ const _init = async () => {
     }
   }
   if (!payload) {
+    _renderLockBanner();
     renderFilterTrigger();
     renderRows();
     return;
   }
   state.payload = payload;
+  state.completedJob = _completedJobForFile(payload.file_id);
   state.overrides = new Map(
     Object.entries(payload.manual_overrides ?? {}).map(([key, value]) => [key, _normalizeOverrideValue(value)])
   );
@@ -1352,6 +1414,7 @@ const _init = async () => {
   state.renameTargets = new Map(
     Object.entries(payload.column_renames ?? {}).filter(([, value]) => typeof value === 'string')
   );
+  _renderLockBanner();
   renderFilterTrigger();
   renderRows();
   void _ensureOverrideDetails();

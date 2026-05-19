@@ -347,29 +347,25 @@
   background-color: var(--warning-100);
 }
 
-/* Reserve space for warning icon to keep text alignment consistent */
-.changes-table tbody tr td:last-child::before {
-  content: "";
-  display: inline-block;
-  width: 1rem;
-  margin-right: var(--space-2);
+/* Reserve a fixed icon gutter via padding so wrapped lines align with the first line.
+   Keeps the cell as a table-cell — using display:flex here would pull the cell out
+   of the table's row layout and misalign row borders when other cells wrap. */
+.changes-table tbody tr td:last-child {
+  position: relative;
+  padding-left: calc(var(--space-4) + 1rem + var(--space-2));
 }
 
-.changes-table tbody tr.non-conformant td:last-child::before {
-  display: none;
-}
-
-/* PV non-conformant warning icon with tooltip */
+/* PV non-conformant warning icon with tooltip. Absolutely positioned in the
+   gutter reserved by the cell's padding so it never affects text flow. */
 .pv-warning-icon {
   color: var(--warning-500);
   font-size: 0.9rem;
   cursor: help;
-  position: relative;
-  display: inline-block;
+  position: absolute;
+  left: var(--space-4);
+  top: var(--space-3);
   width: 1rem;
-  margin-right: var(--space-2);
   text-align: center;
-  vertical-align: middle;
 }
 
 .pv-warning-icon:hover::after {

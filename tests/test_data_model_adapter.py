@@ -4,16 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
-from netrias_client import DataModel, DataModelStoreError, DataModelVersion
+from netrias_client import DataModel, DataModelVersion
 
 from src.domain.cde import CDEInfo, CdeType
 from src.domain.data_model_adapter import (
     _pv_map_from_all_pvs_response,
     fetch_cdes,
-    fetch_pvs_batch_async,
     get_latest_version,
     list_data_model_summaries,
     refine_cde_types_from_pvs,
@@ -175,7 +174,7 @@ def test_get_latest_version_returns_default_when_client_unavailable() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test: fetch_pvs_batch_async returns PV sets for multiple CDE keys
+# Test: all-PV response parser groups PV sets by CDE key
 # ---------------------------------------------------------------------------
 
 
@@ -204,80 +203,6 @@ def test_all_pvs_response_groups_values_by_cde_key() -> None:
         "diagnosis": frozenset({"Lung", "Breast"}),
         "sex": frozenset({"Female"}),
     }
-
-
-@pytest.mark.asyncio
-async def test_fetch_pvs_batch_returns_pv_sets_for_multiple_keys(
-    mock_netrias: MagicMock,
-) -> None:
-    """
-    Given: a mock client that returns distinct PV frozensets per CDE key
-           and no PVs have been fetched yet
-    When: fetch_pvs_batch_async() is called with two keys
-    Then: dict maps each key to its PV frozenset
-    """
-    # Given
-    age_pvs = frozenset({"0-18", "19-40", "41-65", "66+"})
-    sex_pvs = frozenset({"Male", "Female", "Unknown"})
-
-    async def _fake_get_pv_set(
-        _data_model_key: str, _version: str, cde_key: str,
-    ) -> frozenset[str]:
-        return {"age": age_pvs, "sex": sex_pvs}[cde_key]
-
-    mock_netrias.get_pv_set_async = AsyncMock(side_effect=_fake_get_pv_set)
-
-    result = {}  # negative assertion: nothing fetched yet
-    assert result == {}
-
-    # When
-    result = await fetch_pvs_batch_async("gc", "2", ["age", "sex"])
-
-    # Then
-    assert result["age"] == age_pvs, f"age PVs mismatch: {result['age']}"
-    assert result["sex"] == sex_pvs, f"sex PVs mismatch: {result['sex']}"
-    assert len(result) == 2
-
-
-# ---------------------------------------------------------------------------
-# Test: fetch_pvs_batch_async per-key failure degrades to empty frozenset
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_fetch_pvs_batch_drops_failed_keys(
-    mock_netrias: MagicMock,
-) -> None:
-    """
-    Given: a mock client where "age" succeeds but "bad_key" raises DataModelStoreError
-    When: fetch_pvs_batch_async() is called with both keys
-    Then: "age" is in the result; "bad_key" is absent so callers don't
-          confuse a fetch failure with a legitimately-empty PV set
-    """
-    # Given
-    age_pvs = frozenset({"0-18", "19-40"})
-
-    async def _fake_get_pv_set(
-        _data_model_key: str, _version: str, cde_key: str,
-    ) -> frozenset[str]:
-        if cde_key == "bad_key":
-            raise DataModelStoreError("not found")
-        return age_pvs
-
-    mock_netrias.get_pv_set_async = AsyncMock(side_effect=_fake_get_pv_set)
-
-    # When
-    result = await fetch_pvs_batch_async("gc", "2", ["age", "bad_key"])
-
-    # Then: successful key has PVs, failed key is absent (will retry next call)
-    assert result["age"] == age_pvs, f"age PVs mismatch: {result['age']}"
-    assert "bad_key" not in result, f"bad_key should be absent, got {result.get('bad_key')!r}"
-
-
-# ---------------------------------------------------------------------------
-# Test: fetch_pvs_batch_async returns {} when client is None
-# ---------------------------------------------------------------------------
-
 
 # ---------------------------------------------------------------------------
 # Test: fetch_cdes assigns the default PV cde_type pre-fetch
@@ -358,12 +283,11 @@ def test_refine_cde_types_skips_unfetched_cdes() -> None:
 def test_refine_does_not_downgrade_when_fetch_failure_omits_key() -> None:
     """
     Given: a CDE that genuinely has PVs but its PV fetch failed and is therefore
-           absent from the pv_sets dict (per fetch_pvs_batch_async's contract)
+           absent from the pv_sets dict
     When: refine_cde_types_from_pvs is called
     Then: the CDE stays at its initial type (PV) — it is NOT downgraded to
           PASSTHROUGH, which would happen if absent-key were treated the same
-          as known-empty-set. This is the regression that hid primary_diagnosis
-          behind PASSTHROUGH when batch fetches hit the rate limit.
+          as known-empty-set.
     """
     # Given
     cdes = [
@@ -377,28 +301,3 @@ def test_refine_does_not_downgrade_when_fetch_failure_omits_key() -> None:
 
     # Then: type is PRESERVED at PV; no PASSTHROUGH downgrade
     assert refined[0].cde_type == CdeType.PV
-
-
-# ---------------------------------------------------------------------------
-# Test: fetch_pvs_batch_async returns PVs (existing test header)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_fetch_pvs_batch_returns_empty_when_client_unavailable() -> None:
-    """
-    Given: no NetriasClient (API key missing)
-    When: fetch_pvs_batch_async() is called
-    Then: returns empty dict (graceful degradation)
-    """
-    import src.domain.dependencies as deps
-
-    # Given
-    deps._netrias_client = None
-    deps._netrias_client_initialized = True
-
-    # When
-    result = await fetch_pvs_batch_async("gc", "2", ["age", "sex"])
-
-    # Then
-    assert result == {}, f"Expected empty dict, got {result}"

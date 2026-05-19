@@ -64,8 +64,10 @@ class TestPVManifestPersistenceFeature:
         assert cache.has_any_pvs(), "Cache should have PVs after loading"
 
         # Column mappings are restored
-        assert cache.get_column_cde_key("primary_diagnosis") == "primary_diagnosis_cde"
-        assert cache.get_column_cde_key("tissue_type") == "tissue_or_organ_of_origin"
+        assert cache.get_column_mappings().to_strings() == {
+            "primary_diagnosis": "primary_diagnosis_cde",
+            "tissue_type": "tissue_or_organ_of_origin",
+        }
 
         # PV sets are restored as frozensets
         primary_pvs = cache.get_pvs_for_column("primary_diagnosis")
@@ -108,7 +110,7 @@ class TestPVManifestPersistenceFeature:
         # Given: A previous session has PVs in cache
         old_file_id = "old_file_abc"
         old_cache = get_session_cache(old_file_id)
-        old_cache.set_pvs("some_cde", frozenset(["Old Value 1", "Old Value 2"]))
+        old_cache.set_pvs_batch({"some_cde": frozenset(["Old Value 1", "Old Value 2"])})
         assert old_cache.has_any_pvs()
 
         # When: User uploads a new file (Stage 1 clears caches)
@@ -163,7 +165,7 @@ class TestSessionCacheThreadSafety:
         immutable_mappings = cast(Any, mappings.mappings)
         with pytest.raises(TypeError):
             immutable_mappings[column_key_from_string("col3")] = "cde3"
-        assert cache.get_column_cde_key("col3") is None, "Cache should not be modified"
+        assert "col3" not in cache.get_column_mappings().to_strings(), "Cache should not be modified"
 
     def test_pvs_stored_as_frozenset(self) -> None:
         """PVs are stored as frozensets for immutability and O(1) lookup."""
@@ -172,11 +174,10 @@ class TestSessionCacheThreadSafety:
 
         # When: Setting PVs
         pv_list = ["Value A", "Value B", "Value C"]
-        cache.set_pvs("test_cde", frozenset(pv_list))
+        cache.set_pvs_batch({"test_cde": frozenset(pv_list)})
 
         # Then: PVs are retrievable and membership check is O(1)
-        pvs = cache.get_pvs_for_cde("test_cde")
-        assert pvs is not None
+        pvs = cache.get_all_pvs()["test_cde"]
         assert isinstance(pvs, frozenset)
         assert "Value A" in pvs
         assert "Unknown" not in pvs
@@ -194,8 +195,7 @@ class TestSessionCacheThreadSafety:
         cache.set_pvs_batch(pv_map)
 
         # Then: All PVs are available
-        assert cache.get_pvs_for_cde("cde1") == frozenset(["A", "B"])
-        assert cache.get_pvs_for_cde("cde2") == frozenset(["X", "Y", "Z"])
+        assert cache.get_all_pvs() == pv_map
         assert cache.has_any_pvs()
 
 
@@ -207,7 +207,7 @@ class TestPVLookupByColumn:
         # Given: A cache with column mappings and PVs
         cache = SessionCache()
         cache.set_column_mappings({"diagnosis_col": "primary_diagnosis_cde"})
-        cache.set_pvs("primary_diagnosis_cde", frozenset(["Cancer", "Normal"]))
+        cache.set_pvs_batch({"primary_diagnosis_cde": frozenset(["Cancer", "Normal"])})
 
         # When: Looking up PVs by column name
         pvs = cache.get_pvs_for_column("diagnosis_col")
@@ -222,7 +222,7 @@ class TestPVLookupByColumn:
         # Given: A cache with some mappings but not for all columns
         cache = SessionCache()
         cache.set_column_mappings({"mapped_col": "some_cde"})
-        cache.set_pvs("some_cde", frozenset(["Value"]))
+        cache.set_pvs_batch({"some_cde": frozenset(["Value"])})
 
         # When: Looking up PVs for an unmapped column
         pvs = cache.get_pvs_for_column("unmapped_col")

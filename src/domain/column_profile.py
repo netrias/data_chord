@@ -110,21 +110,6 @@ def build_column_profile(column_key: ColumnKey | str, values: Iterable[str | Non
     )
 
 
-def build_column_profiles_from_tabular(
-    tabular_path: Path,
-    sheet_name: str | None = None,
-) -> dict[str, ColumnProfile]:
-    """Build profiles for every column in a stored tabular file."""
-    dataset = read_tabular(tabular_path, sheet_name=sheet_name)
-    return {
-        column.key: build_column_profile(
-            column.key,
-            (row[column.index] if column.index < len(row) else "" for row in dataset.rows),
-        )
-        for column in dataset.columns
-    }
-
-
 def build_column_profile_from_tabular(
     tabular_path: Path,
     column_key: ColumnKey | str,
