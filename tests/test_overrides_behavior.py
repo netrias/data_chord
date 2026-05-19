@@ -16,8 +16,8 @@ from tests.conftest import (
     create_csv_content,
     create_harmonized_csv,
     create_manifest_for_file,
-    create_test_manifest_parquet,
     review_state_payload,
+    store_test_harmonization_manifest,
     upload_content,
 )
 
@@ -163,11 +163,9 @@ async def test_summary_ignores_case_whitespace_changes(
     ]
     file_id = await upload_content(app_client, create_csv_content(rows), "metrics.csv")
 
-    manifest_dir = temp_storage._base_dir / "manifests"
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = manifest_dir / f"{file_id}_harmonization.parquet"
-    create_test_manifest_parquet(
-        manifest_path,
+    store_test_harmonization_manifest(
+        temp_storage,
+        file_id,
         [{
             "job_id": f"test-job-{file_id}",
             "column_id": 0,

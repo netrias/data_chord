@@ -31,7 +31,6 @@ class SessionCache:
 
     # CDE list (fetched in Stage 2)
     cdes: list[CDEInfo] = field(default_factory=list)
-    cde_by_id: dict[int, CDEInfo] = field(default_factory=dict)
     cde_by_key: dict[str, CDEInfo] = field(default_factory=dict)
 
     # Column -> CDE mappings (set in Stage 2/3, used for PV lookup)
@@ -63,12 +62,7 @@ class SessionCache:
                 version_number=selected_version_number,
             )
             self.cdes = list(cdes)
-            self.cde_by_id = {c.cde_id: c for c in cdes}
             self.cde_by_key = {c.cde_key: c for c in cdes}
-
-    def get_cde_by_id(self, cde_id: int) -> CDEInfo | None:
-        with self._lock:
-            return self.cde_by_id.get(cde_id)
 
     def get_cde_by_key(self, cde_key: str) -> CDEInfo | None:
         with self._lock:
@@ -82,12 +76,6 @@ class SessionCache:
         with self._lock:
             return len(self.cdes) > 0
 
-    def set_column_mapping(self, column_key: ColumnKey | str, cde_key: str) -> None:
-        with self._lock:
-            mappings = self.column_to_cde_key.to_strings()
-            mappings[str(column_key)] = cde_key
-            self.column_to_cde_key = ColumnCdeMap.from_strings(mappings)
-
     def set_column_mappings(self, mappings: ColumnCdeMap | dict[str, str]) -> None:
         """Full replacement prevents stale keys from previous mapping passes."""
         with self._lock:
@@ -96,26 +84,14 @@ class SessionCache:
                 return
             self.column_to_cde_key = ColumnCdeMap.from_strings(mappings)
 
-    def get_column_cde_key(self, column_key: ColumnKey | str) -> str | None:
-        with self._lock:
-            return self.column_to_cde_key.mappings.get(column_key_from_string(str(column_key)))
-
     def get_column_mappings(self) -> ColumnCdeMap:
         """Thread-safe copy of column-to-CDE mappings for serialization."""
         with self._lock:
             return ColumnCdeMap(dict(self.column_to_cde_key.mappings))
 
-    def set_pvs(self, cde_key: str, values: frozenset[str]) -> None:
-        with self._lock:
-            self.pvs[cde_key] = values
-
     def set_pvs_batch(self, pv_map: dict[str, frozenset[str]]) -> None:
         with self._lock:
             self.pvs.update(pv_map)
-
-    def get_pvs_for_cde(self, cde_key: str) -> frozenset[str] | None:
-        with self._lock:
-            return self.pvs.get(cde_key)
 
     def get_pvs_for_column(self, column_key: ColumnKey | str) -> frozenset[str] | None:
         with self._lock:
@@ -158,7 +134,6 @@ class SessionCache:
         """Swap the CDE list in place — used to apply post-PV-fetch type refinement."""
         with self._lock:
             self.cdes = list(cdes)
-            self.cde_by_id = {c.cde_id: c for c in cdes}
             self.cde_by_key = {c.cde_key: c for c in cdes}
 
     def get_model_selection(self) -> DataModelSelection | None:

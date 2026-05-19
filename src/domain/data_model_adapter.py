@@ -6,7 +6,6 @@ Axis of change: SDK response shapes. Callers get stable domain types.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -186,46 +185,6 @@ def refine_cde_types_from_pvs(
                 )
             )
     return refined
-
-
-# Concurrency cap for PV batch fetching. The data model store rate-limits at
-# higher fan-out, and failures previously surfaced as empty PV sets (which the
-# type refinement misreads as PASSTHROUGH). Capped, parallel fetches sidestep
-# the rate limit while keeping the wall-clock cost bounded. Tuned at 5 against
-# the production data model store; raise cautiously and watch for 429s.
-_PV_FETCH_CONCURRENCY = 5
-
-
-async def fetch_pvs_batch_async(
-    data_model_key: str,
-    version: str,
-    cde_keys: list[str],
-) -> dict[str, frozenset[str]]:
-    """Fetch PV sets in parallel, capped at ``_PV_FETCH_CONCURRENCY``.
-
-    Failed fetches are dropped from the result (not returned as ``frozenset()``)
-    so callers can distinguish "no PVs known yet" (key absent) from "CDE
-    legitimately has no PVs" (key present, empty set). The caller decides how
-    to handle absent keys — typically: don't downgrade the CDE's type to
-    PASSTHROUGH, retry on a later request.
-    """
-    client = get_netrias_client()
-    if client is None or not cde_keys:
-        return {}
-
-    semaphore = asyncio.Semaphore(_PV_FETCH_CONCURRENCY)
-
-    async def _fetch_one(key: str) -> tuple[str, frozenset[str] | None]:
-        async with semaphore:
-            try:
-                pv_set = await client.get_pv_set_async(data_model_key, version, key)
-                return key, pv_set
-            except (DataModelStoreError, NetriasAPIUnavailable):
-                _logger.warning("PV fetch failed for %s; will retry on next request", key)
-                return key, None
-
-    results = await asyncio.gather(*[_fetch_one(k) for k in cde_keys])
-    return {key: pv_set for key, pv_set in results if pv_set is not None}
 
 
 async def fetch_all_pvs_async(data_model_key: str, version: str) -> dict[str, frozenset[str]]:

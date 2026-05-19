@@ -159,9 +159,6 @@ def mock_netrias_client() -> Generator[MagicMock]:
         SdkCDE(cde_key="primary_diagnosis", cde_id=2, cde_version_id=1, description="Primary Diagnosis"),
         SdkCDE(cde_key="therapeutic_agents", cde_id=1, cde_version_id=1, description="Therapeutic Agents"),
     )
-    mock_client.get_pv_set.return_value = frozenset()
-    mock_client.get_pv_set_async.return_value = frozenset()
-
     # Reset dependency singletons so the mock is injected
     saved_client = deps._netrias_client
     saved_init = deps._netrias_client_initialized
@@ -366,6 +363,17 @@ def create_test_manifest_parquet(
     return output_path
 
 
+def store_test_harmonization_manifest(
+    storage: UploadStorage,
+    file_id: str,
+    rows: list[dict[str, Any]],
+) -> Path:
+    """Create a test manifest through the same storage API production uses."""
+    temp_path = storage.harmonized_dir / f"{file_id}_test_manifest.parquet"
+    create_test_manifest_parquet(temp_path, rows)
+    return storage.save_harmonization_manifest(file_id, temp_path)
+
+
 def _get_columns_with_changes(changes: dict[int, dict[str, str]], headers: list[str]) -> set[str]:
     """Extract column names that have changes, or default to first two columns."""
     columns = {col for col_changes in changes.values() for col in col_changes}
@@ -439,10 +447,7 @@ def create_manifest_for_file(
 
         manifest_rows.extend(grouped.values())
 
-    manifest_dir = storage.manifest_dir
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = manifest_dir / f"{file_id}_harmonization.parquet"
-    return create_test_manifest_parquet(manifest_path, manifest_rows)
+    return store_test_harmonization_manifest(storage, file_id, manifest_rows)
 
 
 def create_manifest_with_manual_override(
@@ -480,7 +485,4 @@ def create_manifest_with_manual_override(
         ],
     }]
 
-    manifest_dir = storage.manifest_dir
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = manifest_dir / f"{file_id}_harmonization.parquet"
-    return create_test_manifest_parquet(manifest_path, manifest_rows)
+    return store_test_harmonization_manifest(storage, file_id, manifest_rows)

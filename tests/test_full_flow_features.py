@@ -16,8 +16,8 @@ from tests.conftest import (
     create_csv_content,
     create_harmonized_csv,
     create_manifest_for_file,
-    create_test_manifest_parquet,
     review_state_payload,
+    store_test_harmonization_manifest,
     upload_content,
 )
 
@@ -332,9 +332,9 @@ async def test_full_flow_duplicate_headers_keep_columns_separate(
         writer = csv.writer(handle)
         writer.writerows(rows)
 
-    manifest_path = temp_storage.manifest_dir / f"{file_id}_harmonization.parquet"
-    create_test_manifest_parquet(
-        manifest_path,
+    store_test_harmonization_manifest(
+        temp_storage,
+        file_id,
         [
             {
                 "job_id": f"test-job-{file_id}",

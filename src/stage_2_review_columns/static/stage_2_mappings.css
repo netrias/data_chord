@@ -20,6 +20,21 @@ body.lock {
   padding: var(--space-5) var(--space-6) var(--space-6);
 }
 
+.mapping-lock-banner {
+  margin-bottom: var(--space-3);
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--warning-200);
+  border-radius: var(--radius-md);
+  background: var(--warning-50);
+  color: var(--gray-800);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.mapping-lock-banner.hidden {
+  display: none;
+}
+
 /* ----- Filter sidebar (slides in from the left) ----- */
 
 .filter-sidebar {
@@ -471,6 +486,11 @@ hr.fm-divider {
 
 .fs-rename-toggle input:checked + .fs-toggle-track .fs-toggle-thumb {
   transform: translateX(16px);
+}
+
+.fs-rename-toggle:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.65;
 }
 
 .mapping-col-search {
@@ -977,6 +997,12 @@ hr.fm-divider {
   border-color: var(--azure-200);
 }
 
+.takeover-rename-pick:disabled,
+.takeover-rename-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .takeover-rename-caret {
   font-size: 0.6rem;
   color: var(--gray-400);
@@ -998,6 +1024,15 @@ hr.fm-divider {
 .takeover-rename-off:hover {
   color: var(--azure-600);
   border-color: var(--azure-300);
+}
+
+.takeover-rename-off--locked {
+  cursor: default;
+}
+
+.takeover-rename-off--locked:hover {
+  color: var(--gray-400);
+  border-color: var(--gray-300);
 }
 
 /* ----- Rename dropdown ----- */
@@ -1292,6 +1327,16 @@ hr.fm-divider {
 
 .cde-picker:hover {
   border-color: var(--gray-400);
+}
+
+.cde-picker:disabled {
+  cursor: not-allowed;
+  color: inherit;
+  background: var(--gray-50);
+}
+
+.cde-picker:disabled:hover {
+  border-color: var(--gray-300);
 }
 
 .cde-picker-name {

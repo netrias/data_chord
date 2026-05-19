@@ -96,6 +96,12 @@ const _hideError = () => {
 };
 
 const _loadSourceContext = () => {
+  const params = new URLSearchParams(window.location.search);
+  const fromUrl = params.get('file_id');
+  if (isValidFileId(fromUrl)) {
+    return { fileId: fromUrl };
+  }
+
   const stored = readFromSession(STAGE_3_PAYLOAD_KEY);
   if (!stored) return null;
   const id = stored?.request?.file_id;
