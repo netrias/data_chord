@@ -377,3 +377,135 @@ behavior was protected, and what proof ran.
    Full proof also passed with `uv run pytest -q`, `uv run ruff check src
    tests`, `uv run basedpyright`, `npm run typecheck`, `just js-check`, and
    `npm run test:e2e`.
+
+18. Stage 4 non-conformant values use case
+
+   Replaced the old `tests/test_nonconformant_count.py` helper tests, which
+   copied Stage 4 and Stage 5 counting logic, with endpoint-level
+   characterization tests for `/stage-4/non-conformant/{file_id}` and
+   `/stage-5/summary`. The tests now prove the browser-visible behavior:
+   missing manifests return an empty list, unchanged bad values are counted,
+   AI bad values are counted, manual overrides are counted, duplicate mappings
+   count once, columns without PVs are ignored, empty current values are
+   ignored, and Stage 4 and Stage 5 report the same count.
+
+   After pinning that behavior, moved the non-conformant counting workflow into
+   `build_non_conformant_values`. The Stage 4 route now gets configured storage
+   and delegates the manifest/PV/current-value rules to the use-case layer.
+
+   Proof: `uv run pytest tests/test_nonconformant_count.py
+   tests/test_full_flow_features.py::test_stage4_recovers_pvs_after_session_cache_loss
+   tests/test_full_flow_features.py::test_stage5_summary_recovers_pvs_after_session_cache_loss
+   -q`, `uv run ruff check src/stage_4_review_results/router.py
+   src/stage_4_review_results/use_cases.py tests/test_nonconformant_count.py`,
+   and `uv run basedpyright src/stage_4_review_results/router.py
+   src/stage_4_review_results/use_cases.py tests/test_nonconformant_count.py`.
+
+19. Stage 4 lookup use cases
+
+   Added endpoint-level contract tests for `/stage-4/term-row-indices`, covering
+   matching terms, unknown terms, and the existing missing-manifest 404. The
+   existing row-context contract tests already covered response shape, missing
+   uploads, validation errors, and out-of-bounds row filtering.
+
+   Moved row-context loading and term-row-index lookup into
+   `build_row_context` and `find_term_row_indices`. The Stage 4 router now
+   maps HTTP errors and delegates original-file reading, manifest loading,
+   selected-sheet handling, row filtering, and manifest term lookup to the
+   use-case layer. The term row index request/response schemas now live with
+   the rest of the Stage 4 schemas instead of inside the router.
+
+   Proof: `uv run pytest tests/test_contracts.py::TestRowContextContract
+   tests/test_contracts.py::TestTermRowIndicesContract -q`,
+   `uv run ruff check src/stage_4_review_results/router.py
+   src/stage_4_review_results/use_cases.py src/stage_4_review_results/schemas.py
+   tests/test_contracts.py`, and `uv run basedpyright
+   src/stage_4_review_results/router.py src/stage_4_review_results/use_cases.py
+   src/stage_4_review_results/schemas.py tests/test_contracts.py`.
+
+20. Stage 4 review override read/delete use cases
+
+   Moved the remaining review-override persistence logic out of the Stage 4
+   route. The route no longer imports `FileType` or calls review override
+   storage methods directly; it delegates to `get_review_overrides` and
+   `delete_review_overrides`. `FileStore` now exposes a semantic
+   `delete_review_overrides` adapter method so callers do not need to know the
+   underlying sidecar artifact type.
+
+   Behavior protected: loading saved overrides still returns the persisted
+   review state, deleting overrides still returns `deleted: true` when state
+   existed, export returns to harmonized data after delete, and Stage 5 summary
+   still preserves the manifest audit history.
+
+   Proof: `uv run pytest
+   tests/test_overrides_behavior.py::test_stage4_delete_clears_export_overrides_but_preserves_summary_audit
+   tests/test_full_flow_features.py::test_full_flow_reharmonize_clears_overrides
+   -q`, `uv run ruff check src/stage_4_review_results/router.py
+   src/stage_4_review_results/use_cases.py src/domain/storage/file_store.py
+   tests/test_overrides_behavior.py tests/test_full_flow_features.py`, and
+   `uv run basedpyright src/stage_4_review_results/router.py
+   src/stage_4_review_results/use_cases.py src/domain/storage/file_store.py
+   tests/test_overrides_behavior.py tests/test_full_flow_features.py`.
+
+21. Stage 4 request schema consolidation
+
+   Moved the remaining inline `StageFourResultsRequest` model from the Stage 4
+   route into `src.stage_4_review_results.schemas`. All Stage 4 request and
+   response models now live in the schema module instead of being split between
+   the route and schema files.
+
+   Behavior protected: `/stage-4/rows` still accepts the same file-id payload
+   and returns the same column-centric review response.
+
+   Proof: `uv run pytest tests/test_contracts.py::TestRowsContract -q`,
+   `uv run ruff check src/stage_4_review_results/router.py
+   src/stage_4_review_results/schemas.py tests/test_contracts.py`, and
+   `uv run basedpyright src/stage_4_review_results/router.py
+   src/stage_4_review_results/schemas.py tests/test_contracts.py`.
+
+22. Stage 2 confirmed mapping choices use case
+
+   Added characterization coverage for the `/stage-2/choices` missing workflow
+   state path, then moved confirmed mapping-choice persistence out of the route
+   and into `save_confirmed_mapping_choices`. The Stage 2 route now maps the
+   missing-workflow-state domain error to the same 404 response, while the use
+   case owns loading workflow state, building `ConfirmedMappingChoices`, and
+   saving the updated workflow state.
+
+   Behavior protected: Stage 2 still persists manual CDE overrides and column
+   renames to durable workflow state, Stage 3 still prefers those stored choices
+   over stale request payloads, and saving choices before analysis still returns
+   `Workflow state not found. Please rerun analysis.`
+
+   Proof: `uv run pytest
+   tests/test_stage_level_features.py::test_stage2_saves_confirmed_mapping_choices_to_workflow_state
+   tests/test_stage_level_features.py::test_stage2_save_mapping_choices_requires_workflow_state
+   tests/test_stage_level_features.py::test_stage3_harmonize_prefers_stored_mapping_choices_over_stale_request
+   -q`, `uv run ruff check src/stage_2_review_columns/router.py
+   src/stage_2_review_columns/use_cases.py tests/test_stage_level_features.py`,
+   and `uv run basedpyright src/stage_2_review_columns/router.py
+   src/stage_2_review_columns/use_cases.py tests/test_stage_level_features.py`.
+
+23. Column mapping storage adapter
+
+   Added semantic `FileStore` methods for the CDE mapping download artifact:
+   `save_column_mapping`, `load_column_mapping`, and `delete_column_mapping`.
+   Stage 3 now clears stale review overrides and stale mapping artifacts through
+   semantic store methods instead of raw `FileType` values. The CDE mapping
+   persistence module also saves and loads through those adapter methods, and
+   tests seed/read mapping artifacts through the same storage contract.
+
+   Behavior protected: re-running harmonization still clears stale review
+   overrides, harmonization still saves the column-to-CDE mapping artifact, and
+   Stage 5 downloads still include the saved mapping JSON when available.
+
+   Proof: `uv run pytest
+   tests/test_full_flow_features.py::test_full_flow_reharmonize_clears_overrides
+   tests/test_stage_level_features.py::test_stage3_persists_cde_mapping_download_artifact
+   tests/test_stage_level_features.py::test_stage5_download_includes_cde_mapping_artifact
+   -q`, `uv run ruff check src/stage_3_harmonize/router.py
+   src/domain/cde_mapping_persistence.py src/domain/storage/file_store.py
+   tests/test_stage_level_features.py tests/test_full_flow_features.py`, and
+   `uv run basedpyright src/stage_3_harmonize/router.py
+   src/domain/cde_mapping_persistence.py src/domain/storage/file_store.py
+   tests/test_stage_level_features.py tests/test_full_flow_features.py`.

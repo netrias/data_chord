@@ -28,9 +28,15 @@ from src.domain.storage import FileStore, UploadStorage
 from src.stage_4_review_results.schemas import (
     CellOverrideSchema,
     ColumnReviewData,
+    DeleteOverridesResponse,
+    NonConformantItem,
+    NonConformantResponse,
+    ReviewOverridesSchema,
     ReviewStateSchema,
+    RowContextResponse,
     StageFourResultsResponse,
     SuggestionInfo,
+    TermRowIndicesResponse,
     Transformation,
 )
 
@@ -51,6 +57,14 @@ class StageFourRowsUploadNotFoundError(Exception):
 
 class StageFourRowsManifestNotFoundError(Exception):
     """Raised when Stage 4 rows are requested before Stage 3 stores a manifest."""
+
+
+class RowContextUploadNotFoundError(Exception):
+    """Raised when row context is requested for an unknown upload."""
+
+
+class TermRowIndicesManifestNotFoundError(Exception):
+    """Raised when term row indices are requested before Stage 3 stores a manifest."""
 
 
 def build_stage_four_rows(*, file_id: str, upload_storage: UploadStorage) -> StageFourResultsResponse:
@@ -74,6 +88,68 @@ def build_stage_four_rows(*, file_id: str, upload_storage: UploadStorage) -> Sta
         columnPVs=column_pvs,
         totalOriginalRows=len(original_dataset.rows),
     )
+
+
+def build_non_conformant_values(*, file_id: str, upload_storage: UploadStorage) -> NonConformantResponse:
+    """Build the Stage 4 gating list from the current manifest values and durable PV state."""
+    manifest = _load_manifest(upload_storage, file_id)
+    if manifest is None:
+        return NonConformantResponse(count=0, items=[])
+
+    column_pv_map = column_pv_sets(file_id, [row.column_key for row in manifest.rows])
+    non_conformant = _find_unique_non_conformant_values(manifest, column_pv_map)
+    return NonConformantResponse(count=len(non_conformant), items=non_conformant)
+
+
+def build_row_context(
+    *,
+    file_id: str,
+    row_indices: list[int],
+    upload_storage: UploadStorage,
+) -> RowContextResponse:
+    """Load original spreadsheet rows for the on-demand review context popup."""
+    meta = upload_storage.load(file_id)
+    if meta is None:
+        raise RowContextUploadNotFoundError()
+
+    dataset = read_tabular(meta.saved_path, sheet_name=meta.selected_sheet)
+    selected_rows = [
+        dataset.rows[index]
+        for index in row_indices
+        if 0 <= index < len(dataset.rows)
+    ]
+    return RowContextResponse(headers=dataset.headers, rows=selected_rows)
+
+
+def find_term_row_indices(
+    *,
+    file_id: str,
+    column_key: str,
+    original_value: str,
+    upload_storage: UploadStorage,
+) -> TermRowIndicesResponse:
+    """Look up full 0-based source row indices for a manifest term."""
+    manifest = _load_manifest(upload_storage, file_id)
+    if manifest is None:
+        raise TermRowIndicesManifestNotFoundError()
+
+    for row in manifest.rows:
+        if str(row.column_key) == column_key and row.to_harmonize == original_value:
+            return TermRowIndicesResponse(row_indices=row.row_indices)
+
+    return TermRowIndicesResponse(row_indices=[])
+
+
+def get_review_overrides(*, file_store: FileStore, file_id: str) -> ReviewOverridesSchema | None:
+    saved = file_store.load_review_overrides(file_id)
+    if saved is None:
+        return None
+    return ReviewOverridesSchema.model_validate(saved.to_store())
+
+
+def delete_review_overrides(*, file_store: FileStore, file_id: str) -> DeleteOverridesResponse:
+    existed = file_store.delete_review_overrides(file_id)
+    return DeleteOverridesResponse(file_id=file_id, deleted=existed)
 
 
 def save_review_overrides(
@@ -115,6 +191,37 @@ def _extract_columns_from_manifest(manifest: ManifestSummary) -> list[ColumnIden
             seen.add(col_key)
             columns.append(ColumnIdentity(key=row.column_key, index=row.column_id, header=row.column_name))
     return columns
+
+
+def _find_unique_non_conformant_values(
+    manifest: ManifestSummary,
+    column_pv_map: dict[str, frozenset[str] | None],
+) -> list[NonConformantItem]:
+    seen: set[tuple[str, str, str]] = set()
+    non_conformant: list[NonConformantItem] = []
+
+    for row in manifest.rows:
+        current_value = _current_value_for_row(row)
+        col_key = str(row.column_key)
+        key = (col_key, row.to_harmonize, current_value or "")
+        if key in seen:
+            continue
+        seen.add(key)
+
+        pv_set = column_pv_map.get(col_key)
+        if pv_set and current_value and not check_value_conformance(current_value, pv_set):
+            non_conformant.append(NonConformantItem(
+                column=row.column_name,
+                value=current_value,
+                original=row.to_harmonize,
+            ))
+
+    return non_conformant
+
+
+def _current_value_for_row(row: ManifestRow) -> str:
+    latest_override = get_latest_override_value(row.manual_overrides)
+    return latest_override if latest_override is not None else row.top_harmonization
 
 
 def _build_columns_from_manifest(
@@ -283,8 +390,15 @@ def _sync_override_audit(storage: UploadStorage, overrides: ReviewOverrides) -> 
 
 __all__ = [
     "SaveReviewOverridesResult",
+    "RowContextUploadNotFoundError",
     "StageFourRowsManifestNotFoundError",
     "StageFourRowsUploadNotFoundError",
+    "TermRowIndicesManifestNotFoundError",
+    "build_non_conformant_values",
+    "build_row_context",
     "build_stage_four_rows",
+    "delete_review_overrides",
+    "find_term_row_indices",
+    "get_review_overrides",
     "save_review_overrides",
 ]

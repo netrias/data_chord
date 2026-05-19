@@ -50,11 +50,27 @@ class FileStore:
             return None
         return json.loads(path.read_text(encoding="utf-8"))
 
+    def save_column_mapping(self, file_id: str, document: object) -> None:
+        self.save(file_id, FileType.COLUMN_MAPPING, document)
+
+    def load_column_mapping(self, file_id: str) -> object | None:
+        return self.load(file_id, FileType.COLUMN_MAPPING)
+
+    def delete_column_mapping(self, file_id: str) -> bool:
+        existed = self.exists(file_id, FileType.COLUMN_MAPPING)
+        self.delete(file_id, FileType.COLUMN_MAPPING)
+        return existed
+
     def save_review_overrides(self, overrides: ReviewOverrides) -> None:
         self.save(overrides.file_id, FileType.REVIEW_OVERRIDES, overrides.to_store())
 
     def load_review_overrides(self, file_id: str) -> ReviewOverrides | None:
         return ReviewOverrides.from_store(self.load(file_id, FileType.REVIEW_OVERRIDES), file_id)
+
+    def delete_review_overrides(self, file_id: str) -> bool:
+        existed = self.exists(file_id, FileType.REVIEW_OVERRIDES)
+        self.delete(file_id, FileType.REVIEW_OVERRIDES)
+        return existed
 
     def save_pv_manifest(self, file_id: str, manifest: PVManifest) -> None:
         self.save(file_id, FileType.PV_MANIFEST, manifest.to_store())

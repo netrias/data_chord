@@ -50,7 +50,7 @@ from src.domain.manifest import (
 from src.domain.manifest.writer import apply_pv_adjustments_batch
 from src.domain.pv_persistence import save_pv_manifest_to_disk
 from src.domain.pv_validation import check_value_conformance, compute_pv_adjustment
-from src.domain.storage import FileType, UploadStorage
+from src.domain.storage import UploadStorage
 from src.domain.workflow_state import ConfirmedMappingChoices, WorkflowState
 
 MODULE_DIR = Path(__file__).parent
@@ -99,8 +99,8 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please rerun analysis.")
 
     store = dependencies.get_file_store()
-    store.delete(payload.file_id, FileType.REVIEW_OVERRIDES)
-    store.delete(payload.file_id, FileType.COLUMN_MAPPING)
+    store.delete_review_overrides(payload.file_id)
+    store.delete_column_mapping(payload.file_id)
     workflow_state = store.load_workflow_state(payload.file_id)
 
     stored_manifest = storage.load_manifest(payload.file_id)

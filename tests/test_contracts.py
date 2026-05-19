@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from httpx import AsyncClient
 
+import src.domain.dependencies as dependencies
 from src.domain.storage import UploadStorage
 from tests.conftest import (
     TEST_CSV_CONTENT_TYPE,
@@ -16,6 +17,7 @@ from tests.conftest import (
     create_harmonized_csv,
     create_manifest_for_file,
     create_xlsx_content,
+    store_test_harmonization_manifest,
     upload_file,
 )
 
@@ -524,6 +526,97 @@ class TestRowContextContract:
         assert response.status_code == 200
         data = response.json()
         assert len(data["rows"]) == 2
+
+
+class TestTermRowIndicesContract:
+    """POST /stage-4/term-row-indices returns all manifest row indices for one term."""
+
+    async def test_matching_term_returns_manifest_row_indices(
+        self,
+        app_client: AsyncClient,
+        temp_storage: UploadStorage,
+        sample_csv_path: Path,
+    ) -> None:
+        """Term row indices preserve the 0-based manifest contract used by the browser."""
+
+        # Given: A manifest has grouped source rows for one original term
+        file_id = await upload_file(app_client, sample_csv_path)
+        assert temp_storage.load_harmonization_manifest_path(file_id) is None
+        store_test_harmonization_manifest(
+            temp_storage,
+            file_id,
+            [{
+                "column_id": 0,
+                "column_name": "diagnosis",
+                "to_harmonize": "Bad",
+                "top_harmonization": "Allowed",
+                "row_indices": [0, 5, 8],
+            }],
+        )
+
+        # When: the browser asks for full row indices for that term
+        response = await app_client.post(
+            "/stage-4/term-row-indices",
+            json={"file_id": file_id, "column_key": "col_0000", "original_value": "Bad"},
+        )
+
+        # Then: the exact 0-based manifest row indices are returned
+        assert response.status_code == 200
+        assert response.json() == {"row_indices": [0, 5, 8]}
+
+    async def test_unknown_term_returns_empty_indices(
+        self,
+        app_client: AsyncClient,
+        temp_storage: UploadStorage,
+        sample_csv_path: Path,
+    ) -> None:
+        """A valid manifest with no matching term returns an empty list."""
+
+        # Given: A manifest exists for a different original term
+        file_id = await upload_file(app_client, sample_csv_path)
+        assert temp_storage.load_harmonization_manifest_path(file_id) is None
+        store_test_harmonization_manifest(
+            temp_storage,
+            file_id,
+            [{
+                "column_id": 0,
+                "column_name": "diagnosis",
+                "to_harmonize": "Different",
+                "top_harmonization": "Allowed",
+                "row_indices": [1],
+            }],
+        )
+
+        # When: the browser asks for an unknown term
+        response = await app_client.post(
+            "/stage-4/term-row-indices",
+            json={"file_id": file_id, "column_key": "col_0000", "original_value": "Bad"},
+        )
+
+        # Then: the endpoint returns an empty list rather than an error
+        assert response.status_code == 200
+        assert response.json() == {"row_indices": []}
+
+    async def test_missing_manifest_returns_404(
+        self,
+        app_client: AsyncClient,
+        sample_csv_path: Path,
+    ) -> None:
+        """The endpoint preserves the current 404 when Stage 3 has not stored a manifest."""
+
+        # Given: An uploaded file has no harmonization manifest yet
+        file_id = await upload_file(app_client, sample_csv_path)
+        assert dependencies.get_upload_storage().load_harmonization_manifest_path(file_id) is None
+
+        # When: the browser asks for term row indices
+        response = await app_client.post(
+            "/stage-4/term-row-indices",
+            json={"file_id": file_id, "column_key": "col_0000", "original_value": "Bad"},
+        )
+
+        # Then: the endpoint reports the missing manifest
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Manifest not found"
 
 
 class TestSummaryContract:

@@ -104,6 +104,12 @@ class DeleteOverridesResponse(BaseModel):
     deleted: bool
 
 
+class StageFourResultsRequest(BaseModel):
+    """Request payload for loading Stage 4 harmonized review rows."""
+
+    file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_PATTERN)
+
+
 class NonConformantItem(BaseModel):
     """A single non-conformant value for the gating dialog."""
 
@@ -131,6 +137,20 @@ class RowContextResponse(BaseModel):
 
     headers: list[str]
     rows: list[list[str]]
+
+
+class TermRowIndicesRequest(BaseModel):
+    """Request payload for fetching all source rows for one manifest term."""
+
+    file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_PATTERN)
+    column_key: str
+    original_value: str
+
+
+class TermRowIndicesResponse(BaseModel):
+    """0-based original spreadsheet row indices for one manifest term."""
+
+    row_indices: list[int]
 
 
 class SuggestionInfo(BaseModel):
@@ -188,7 +208,10 @@ __all__ = [
     "RowContextResponse",
     "SaveOverridesRequest",
     "SaveOverridesResponse",
+    "StageFourResultsRequest",
     "StageFourResultsResponse",
     "SuggestionInfo",
+    "TermRowIndicesRequest",
+    "TermRowIndicesResponse",
     "Transformation",
 ]

@@ -21,7 +21,7 @@ from src.domain.cde import CDEInfo
 from src.domain.data_model_cache import clear_session_cache, get_session_cache
 from src.domain.harmonize import HarmonizeResult, HarmonizeStatus
 from src.domain.manifest import ManifestPayload
-from src.domain.storage import FileType, UploadStorage
+from src.domain.storage import UploadStorage
 from tests.conftest import (
     TEST_TARGET_SCHEMA,
     TEST_TSV_CONTENT_TYPE,
@@ -613,6 +613,30 @@ async def test_stage2_saves_confirmed_mapping_choices_to_workflow_state(
     assert updated.mapping_choices.column_renames.to_strings() == {"col_0000": "Primary Diagnosis"}
 
 
+async def test_stage2_save_mapping_choices_requires_workflow_state(
+    app_client: AsyncClient,
+) -> None:
+    """Stage 2 reports a clear error when choices are saved before analysis."""
+
+    # Given: a file was uploaded, but Stage 1 analysis has not created workflow state
+    file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "no-state.csv")
+    assert dependencies.get_file_store().load_workflow_state(file_id) is None
+
+    # When: Stage 2 tries to persist confirmed choices
+    response = await app_client.post(
+        "/stage-2/choices",
+        json={
+            "file_id": file_id,
+            "manual_overrides": {"col_0000": "primary_diagnosis"},
+            "column_renames": {"col_0000": "Primary Diagnosis"},
+        },
+    )
+
+    # Then: the endpoint preserves the existing missing-workflow-state contract
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Workflow state not found. Please rerun analysis."
+
+
 async def test_stage3_harmonize_prefers_stored_mapping_choices_over_stale_request(
     app_client: AsyncClient,
 ) -> None:
@@ -722,7 +746,7 @@ async def test_stage3_persists_cde_mapping_download_artifact(
 
     # Then: a mapping artifact records AI mappings, user overrides, and output names by column key
     assert response.status_code == 200
-    document = dependencies.get_file_store().load(file_id, FileType.COLUMN_MAPPING)
+    document = dependencies.get_file_store().load_column_mapping(file_id)
     assert isinstance(document, dict)
     mappings = {entry["column_key"]: entry for entry in document["mappings"]}
     assert mappings["col_0000"]["mapping_source"] == "ai"
@@ -1030,9 +1054,8 @@ async def test_stage5_download_includes_cde_mapping_artifact(
     meta = temp_storage.load(file_id)
     assert meta is not None
     create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
-    dependencies.get_file_store().save(
+    dependencies.get_file_store().save_column_mapping(
         file_id,
-        FileType.COLUMN_MAPPING,
         {
             "file_id": file_id,
             "generated_at": "2026-05-13T00:00:00+00:00",

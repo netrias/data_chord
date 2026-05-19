@@ -22,10 +22,10 @@ from src.domain.cde import CDEInfo
 from src.domain.data_model_cache import get_session_cache, populate_cde_cache
 from src.domain.data_model_selection import DataModelSelection
 from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
-from src.domain.workflow_state import ConfirmedMappingChoices
 
 from .schemas import ColumnDetailResponse, SaveMappingChoicesRequest, SaveMappingChoicesResponse
 from .services import ColumnDetailNotFound, compute_column_detail
+from .use_cases import MappingWorkflowStateNotFoundError, save_confirmed_mapping_choices
 
 MODULE_DIR = _Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"
@@ -125,15 +125,11 @@ async def get_column_detail(
     name="stage_two_save_mapping_choices",
 )
 async def save_mapping_choices(payload: SaveMappingChoicesRequest) -> SaveMappingChoicesResponse:
-    """Persist confirmed Stage 2 choices as durable workflow state."""
     store = dependencies.get_file_store()
-    state = store.load_workflow_state(payload.file_id)
-    if state is None:
+    try:
+        return save_confirmed_mapping_choices(file_store=store, payload=payload)
+    except MappingWorkflowStateNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Workflow state not found. Please rerun analysis.",
-        )
-
-    choices = ConfirmedMappingChoices.from_raw(payload.manual_overrides, payload.column_renames)
-    store.save_workflow_state(state.with_mapping_choices(choices))
-    return SaveMappingChoicesResponse(file_id=payload.file_id)
+        ) from exc

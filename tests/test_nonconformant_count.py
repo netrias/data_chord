@@ -1,249 +1,258 @@
-"""Tests for non-conformant value counting consistency between Stage 4 and Stage 5.
-
-The gating dialog (Stage 4) and summary page (Stage 5) must report the same count
-of non-conformant values. This test exercises the specific failure case where
-an unchanged row has a non-conformant value.
-"""
+"""Feature tests for Stage 4 non-conformant PV counting."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
+import pytest
+from httpx import AsyncClient
 
-from src.domain.manifest import ManifestRow, ManualOverride, get_latest_override_value
-from src.domain.pv_validation import check_value_conformance
+import src.domain.dependencies as dependencies
+from src.domain.column_cde_map import ColumnCdeMap
+from src.domain.pv_manifest import PVManifest
+from src.domain.storage import UploadStorage
+from tests.conftest import (
+    TEST_TARGET_SCHEMA,
+    create_csv_content,
+    store_test_harmonization_manifest,
+    upload_content,
+)
 
-
-@dataclass
-class MockSessionCache:
-    """Mock session cache with configurable PV sets per column."""
-
-    pvs_by_column: dict[str, frozenset[str]]
-
-    def get_pvs_for_column(self, column_name: str) -> frozenset[str] | None:
-        return self.pvs_by_column.get(column_name)
-
-
-def _count_non_conformant_stage4(rows: list[ManifestRow], cache: MockSessionCache) -> int:
-    """Stage 4's logic: deduplicate by (column, original, final)."""
-    seen: set[tuple[str, str, str]] = set()
-    count = 0
-
-    for row in rows:
-        # Get the current value (latest override > AI harmonization)
-        latest_override = get_latest_override_value(row.manual_overrides)
-        current_value = latest_override if latest_override else row.top_harmonization
-
-        # Skip if we've already processed this exact mapping
-        key = (row.column_name, row.to_harmonize, current_value or "")
-        if key in seen:
-            continue
-        seen.add(key)
-
-        # Check PV conformance using shared function for consistency with router
-        pv_set = cache.get_pvs_for_column(row.column_name)
-        if pv_set and current_value and not check_value_conformance(current_value, pv_set):
-            count += 1
-
-    return count
+pytestmark = pytest.mark.asyncio
 
 
-def _count_non_conformant_stage5(rows: list[ManifestRow], cache: MockSessionCache) -> int:
-    """Stage 5's logic: track all rows for conformance checking."""
-    unique_mappings: dict[tuple[str, str, str], bool] = {}
-
-    for row in rows:
-        final = get_latest_override_value(row.manual_overrides) or row.top_harmonization
-        key = (row.column_name, row.to_harmonize, final)
-        if key in unique_mappings:
-            continue
-        pv_set = cache.get_pvs_for_column(row.column_name)
-        is_conformant = check_value_conformance(final, pv_set)
-        unique_mappings[key] = is_conformant
-
-    return sum(1 for is_conformant in unique_mappings.values() if not is_conformant)
-
-
-def _make_row(
+def _manifest_row(
+    *,
+    column_id: int,
     column_name: str,
     original: str,
     harmonized: str,
-    overrides: list[dict[str, Any]] | None = None,
-) -> ManifestRow:
-    """Helper to create a ManifestRow for testing."""
-    manual_overrides = [
-        ManualOverride(
-            user_id=o.get("user_id", "test"),
-            timestamp=o.get("timestamp", "2024-01-01T00:00:00Z"),
-            value=o["value"],
-        )
-        for o in (overrides or [])
-    ]
-    return ManifestRow(
-        job_id="test-job",
-        column_id=0,
-        column_name=column_name,
-        to_harmonize=original,
-        top_harmonization=harmonized,
-        ontology_id=None,
-        top_harmonizations=[harmonized] if harmonized else [],
-        confidence_score=0.9,
-        error=None,
-        row_indices=[0],
-        manual_overrides=manual_overrides,
+    row_index: int = 0,
+    manual_overrides: list[dict[str, str | None]] | None = None,
+) -> dict[str, object]:
+    return {
+        "job_id": "test-job",
+        "column_id": column_id,
+        "column_name": column_name,
+        "to_harmonize": original,
+        "top_harmonization": harmonized,
+        "ontology_id": None,
+        "top_harmonizations": [harmonized] if harmonized else [],
+        "confidence_score": 0.95,
+        "error": None,
+        "row_indices": [row_index],
+        "manual_overrides": manual_overrides or [],
+    }
+
+
+def _save_pv_manifest(file_id: str, pvs_by_column_key: dict[str, frozenset[str]]) -> None:
+    column_to_cde_key = {
+        column_key: f"cde_{index}"
+        for index, column_key in enumerate(pvs_by_column_key)
+    }
+    pvs = {
+        cde_key: pvs_by_column_key[column_key]
+        for column_key, cde_key in column_to_cde_key.items()
+    }
+    dependencies.get_file_store().save_pv_manifest(
+        file_id,
+        PVManifest(
+            data_model_key=TEST_TARGET_SCHEMA,
+            version_label="1",
+            column_to_cde_key=ColumnCdeMap.from_strings(column_to_cde_key),
+            pvs=pvs,
+        ),
     )
 
 
-class TestNonConformantCountConsistency:
-    """Stage 4 and Stage 5 must report the same non-conformant count."""
+async def _upload_file_with_manifest(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+    manifest_rows: list[dict[str, object]],
+    pvs_by_column_key: dict[str, frozenset[str]],
+) -> str:
+    file_id = await upload_content(
+        app_client,
+        create_csv_content([["diagnosis", "tissue"], ["Original", "Fresh"]]),
+        "non-conformant.csv",
+    )
+    store_test_harmonization_manifest(temp_storage, file_id, manifest_rows)
+    _save_pv_manifest(file_id, pvs_by_column_key)
+    return file_id
 
-    def test_unchanged_non_conformant_row_is_counted(self) -> None:
-        """FAILURE CASE: An unchanged row with non-conformant value must be counted.
 
-        Before the fix, Stage 5 only tracked changed rows, so unchanged non-conformant
-        values were not counted. This caused Stage 4 to show 25 but Stage 5 to show 24.
-        """
-        # Given: A row where original == harmonized (unchanged) but both are non-conformant
-        pv_set = frozenset(["Adenocarcinoma", "Squamous Cell Carcinoma"])
-        cache = MockSessionCache(pvs_by_column={"primary_diagnosis": pv_set})
+async def test_non_conformant_endpoint_reports_zero_without_manifest(
+    app_client: AsyncClient,
+) -> None:
+    """Missing manifest behaves as an empty non-conformant list."""
 
-        # "Bad Value" is not in the PV set, and AI didn't change it
-        rows = [_make_row("primary_diagnosis", "Bad Value", "Bad Value")]
+    # Given: a file has been uploaded but Stage 3 has not stored a manifest
+    file_id = await upload_content(
+        app_client,
+        create_csv_content([["diagnosis"], ["Bad Value"]]),
+        "missing-manifest.csv",
+    )
+    assert dependencies.get_upload_storage().load_harmonization_manifest_path(file_id) is None
 
-        # When: Both stages count non-conformant values
-        stage4_count = _count_non_conformant_stage4(rows, cache)
-        stage5_count = _count_non_conformant_stage5(rows, cache)
+    # When: Stage 4 asks for the non-conformant values
+    response = await app_client.get(f"/stage-4/non-conformant/{file_id}")
 
-        # Then: Both stages report the same count
-        assert stage4_count == 1, "Stage 4 should count unchanged non-conformant row"
-        assert stage5_count == 1, "Stage 5 should count unchanged non-conformant row"
-        assert stage4_count == stage5_count
+    # Then: the browser receives an empty result instead of an error
+    assert response.status_code == 200
+    assert response.json() == {"count": 0, "items": []}
 
-    def test_changed_non_conformant_row_is_counted(self) -> None:
-        """A row changed by AI to a non-conformant value is counted by both stages."""
-        pv_set = frozenset(["Adenocarcinoma", "Squamous Cell Carcinoma"])
-        cache = MockSessionCache(pvs_by_column={"primary_diagnosis": pv_set})
 
-        # AI changed "Original" to "Bad Harmonization" which is not in PV set
-        rows = [_make_row("primary_diagnosis", "Original", "Bad Harmonization")]
+async def test_non_conformant_endpoint_counts_current_unique_bad_values(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """Stage 4 counts the current unique values that are outside their column PV set."""
 
-        stage4_count = _count_non_conformant_stage4(rows, cache)
-        stage5_count = _count_non_conformant_stage5(rows, cache)
+    # Given: a manifest has unchanged, AI-changed, and manually-overridden bad values
+    manifest_rows = [
+        _manifest_row(column_id=0, column_name="diagnosis", original="Bad", harmonized="Bad", row_index=0),
+        _manifest_row(
+            column_id=0,
+            column_name="diagnosis",
+            original="Source",
+            harmonized="Bad AI",
+            row_index=1,
+        ),
+        _manifest_row(
+            column_id=0,
+            column_name="diagnosis",
+            original="Manual Source",
+            harmonized="Allowed Diagnosis",
+            row_index=2,
+            manual_overrides=[{
+                "user_id": "reviewer",
+                "timestamp": "2026-05-19T12:00:00+00:00",
+                "value": "Bad Manual",
+            }],
+        ),
+        _manifest_row(
+            column_id=0,
+            column_name="diagnosis",
+            original="Conformant Source",
+            harmonized="Allowed Diagnosis",
+            row_index=3,
+        ),
+    ]
+    file_id = await _upload_file_with_manifest(
+        app_client,
+        temp_storage,
+        manifest_rows,
+        {"col_0000": frozenset({"Allowed Diagnosis"})},
+    )
+    assert dependencies.get_upload_storage().load_harmonization_manifest_path(file_id) is not None
 
-        assert stage4_count == 1
-        assert stage5_count == 1
-        assert stage4_count == stage5_count
+    # When: Stage 4 asks for the non-conformant values
+    response = await app_client.get(f"/stage-4/non-conformant/{file_id}")
 
-    def test_manual_override_to_non_conformant_is_counted(self) -> None:
-        """A manual override to a non-conformant value is counted by both stages."""
-        pv_set = frozenset(["Adenocarcinoma", "Squamous Cell Carcinoma"])
-        cache = MockSessionCache(pvs_by_column={"primary_diagnosis": pv_set})
+    # Then: only the three current bad values are shown
+    assert response.status_code == 200
+    data = response.json()
+    assert data["count"] == 3
+    assert data["items"] == [
+        {"column": "diagnosis", "value": "Bad", "original": "Bad"},
+        {"column": "diagnosis", "value": "Bad AI", "original": "Source"},
+        {"column": "diagnosis", "value": "Bad Manual", "original": "Manual Source"},
+    ]
 
-        # AI harmonized to conformant, but user overrode to non-conformant
-        rows = [
-            _make_row(
-                "primary_diagnosis",
-                "Original",
-                "Adenocarcinoma",  # AI chose conformant
-                overrides=[{"value": "User Non-Conformant Value"}],  # User overrode to non-conformant
-            )
-        ]
 
-        stage4_count = _count_non_conformant_stage4(rows, cache)
-        stage5_count = _count_non_conformant_stage5(rows, cache)
+async def test_stage4_and_stage5_report_same_non_conformant_count(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """The review gate and final summary count the same unique bad mappings."""
 
-        assert stage4_count == 1
-        assert stage5_count == 1
-        assert stage4_count == stage5_count
+    # Given: Stage 3 stored a manifest with one repeated bad mapping and one unique bad mapping
+    manifest_rows = [
+        _manifest_row(column_id=0, column_name="diagnosis", original="Bad", harmonized="Bad", row_index=0),
+        _manifest_row(column_id=0, column_name="diagnosis", original="Bad", harmonized="Bad", row_index=1),
+        _manifest_row(column_id=0, column_name="diagnosis", original="Original", harmonized="Bad AI", row_index=2),
+        _manifest_row(
+            column_id=0,
+            column_name="diagnosis",
+            original="Good",
+            harmonized="Allowed Diagnosis",
+            row_index=3,
+        ),
+    ]
+    file_id = await _upload_file_with_manifest(
+        app_client,
+        temp_storage,
+        manifest_rows,
+        {"col_0000": frozenset({"Allowed Diagnosis"})},
+    )
+    assert dependencies.get_upload_storage().load_harmonization_manifest_path(file_id) is not None
 
-    def test_conformant_values_not_counted(self) -> None:
-        """Values that match the PV set are not counted as non-conformant."""
-        pv_set = frozenset(["Adenocarcinoma", "Squamous Cell Carcinoma"])
-        cache = MockSessionCache(pvs_by_column={"primary_diagnosis": pv_set})
+    # When: Stage 4 and Stage 5 both summarize non-conformant values
+    stage4_response = await app_client.get(f"/stage-4/non-conformant/{file_id}")
+    stage5_response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
 
-        rows = [
-            _make_row("primary_diagnosis", "Original", "Adenocarcinoma"),  # Conformant
-            _make_row("primary_diagnosis", "Squamous", "Squamous Cell Carcinoma"),  # Conformant
-        ]
+    # Then: both user-facing stages report the same deduplicated count
+    assert stage4_response.status_code == 200
+    assert stage5_response.status_code == 200
+    assert stage4_response.json()["count"] == 2
+    assert stage5_response.json()["non_conformant_count"] == 2
 
-        stage4_count = _count_non_conformant_stage4(rows, cache)
-        stage5_count = _count_non_conformant_stage5(rows, cache)
 
-        assert stage4_count == 0
-        assert stage5_count == 0
+async def test_non_conformant_endpoint_deduplicates_by_column_original_and_final(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """Repeated manifest rows for the same mapping count once."""
 
-    def test_deduplication_by_column_original_final(self) -> None:
-        """Duplicate mappings (same column, original, final) are counted once."""
-        pv_set = frozenset(["Adenocarcinoma"])
-        cache = MockSessionCache(pvs_by_column={"primary_diagnosis": pv_set})
+    # Given: the same non-conformant mapping appears in multiple manifest rows
+    manifest_rows = [
+        _manifest_row(column_id=0, column_name="diagnosis", original="Bad", harmonized="Bad", row_index=0),
+        _manifest_row(column_id=0, column_name="diagnosis", original="Bad", harmonized="Bad", row_index=1),
+        _manifest_row(column_id=0, column_name="diagnosis", original="Bad", harmonized="Bad", row_index=2),
+    ]
+    file_id = await _upload_file_with_manifest(
+        app_client,
+        temp_storage,
+        manifest_rows,
+        {"col_0000": frozenset({"Allowed Diagnosis"})},
+    )
+    assert dependencies.get_upload_storage().load_harmonization_manifest_path(file_id) is not None
 
-        # Same mapping appears in multiple rows (e.g., same value in multiple spreadsheet rows)
-        rows = [
-            _make_row("primary_diagnosis", "Bad Value", "Bad Value"),
-            _make_row("primary_diagnosis", "Bad Value", "Bad Value"),
-            _make_row("primary_diagnosis", "Bad Value", "Bad Value"),
-        ]
+    # When: Stage 4 asks for the non-conformant values
+    response = await app_client.get(f"/stage-4/non-conformant/{file_id}")
 
-        stage4_count = _count_non_conformant_stage4(rows, cache)
-        stage5_count = _count_non_conformant_stage5(rows, cache)
+    # Then: the repeated mapping is counted once
+    assert response.status_code == 200
+    assert response.json() == {
+        "count": 1,
+        "items": [{"column": "diagnosis", "value": "Bad", "original": "Bad"}],
+    }
 
-        # Should only count once despite appearing 3 times
-        assert stage4_count == 1
-        assert stage5_count == 1
 
-    def test_multiple_columns_counted_correctly(self) -> None:
-        """Non-conformant values across multiple columns are all counted."""
-        cache = MockSessionCache(
-            pvs_by_column={
-                "primary_diagnosis": frozenset(["Adenocarcinoma"]),
-                "tissue_type": frozenset(["Frozen", "FFPE"]),
-            }
-        )
+async def test_non_conformant_endpoint_ignores_columns_without_pvs_and_empty_values(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """Only columns with PVs and non-empty current values can be non-conformant."""
 
-        rows = [
-            _make_row("primary_diagnosis", "Bad Diagnosis", "Bad Diagnosis"),
-            _make_row("tissue_type", "Bad Tissue", "Bad Tissue"),
-        ]
+    # Given: one column has PVs, another has none, and one mapped value is empty
+    manifest_rows = [
+        _manifest_row(column_id=0, column_name="diagnosis", original="Bad", harmonized="Bad", row_index=0),
+        _manifest_row(column_id=0, column_name="diagnosis", original="Blank", harmonized="", row_index=1),
+        _manifest_row(column_id=1, column_name="free_text", original="Anything", harmonized="Anything", row_index=2),
+    ]
+    file_id = await _upload_file_with_manifest(
+        app_client,
+        temp_storage,
+        manifest_rows,
+        {"col_0000": frozenset({"Allowed Diagnosis"})},
+    )
+    assert dependencies.get_upload_storage().load_harmonization_manifest_path(file_id) is not None
 
-        stage4_count = _count_non_conformant_stage4(rows, cache)
-        stage5_count = _count_non_conformant_stage5(rows, cache)
+    # When: Stage 4 asks for the non-conformant values
+    response = await app_client.get(f"/stage-4/non-conformant/{file_id}")
 
-        assert stage4_count == 2
-        assert stage5_count == 2
-
-    def test_column_without_pvs_not_counted(self) -> None:
-        """Columns without a PV set are not counted as non-conformant."""
-        # Only primary_diagnosis has PVs; other_column does not
-        cache = MockSessionCache(
-            pvs_by_column={
-                "primary_diagnosis": frozenset(["Adenocarcinoma"]),
-                # "other_column" intentionally missing - no PV set
-            }
-        )
-
-        rows = [
-            _make_row("primary_diagnosis", "Bad", "Bad"),  # Has PVs, non-conformant
-            _make_row("other_column", "Anything", "Anything"),  # No PVs, not counted
-        ]
-
-        stage4_count = _count_non_conformant_stage4(rows, cache)
-        stage5_count = _count_non_conformant_stage5(rows, cache)
-
-        assert stage4_count == 1
-        assert stage5_count == 1
-
-    def test_empty_value_not_counted(self) -> None:
-        """Empty/None values are not counted as non-conformant (graceful degradation)."""
-        pv_set = frozenset(["Adenocarcinoma"])
-        cache = MockSessionCache(pvs_by_column={"primary_diagnosis": pv_set})
-
-        rows = [
-            _make_row("primary_diagnosis", "", ""),  # Empty original and harmonized
-            _make_row("primary_diagnosis", "Something", ""),  # Empty harmonized
-        ]
-
-        stage4_count = _count_non_conformant_stage4(rows, cache)
-        stage5_count = _count_non_conformant_stage5(rows, cache)
-
-        assert stage4_count == 0
-        assert stage5_count == 0
+    # Then: only the non-empty value from the PV-backed column is counted
+    assert response.status_code == 200
+    assert response.json() == {
+        "count": 1,
+        "items": [{"column": "diagnosis", "value": "Bad", "original": "Bad"}],
+    }
