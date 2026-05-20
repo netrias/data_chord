@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Stage 2 — Value-first (Prototype)</title>
+  <link rel="stylesheet" href="../../src/shared/static/tokens.css" />
+  <link rel="stylesheet" href="./shared/prototype.css" />
+</head>
+<body class="guided-body">
+
+  <div id="tracker-mount"></div>
+
+  <!-- ──────────────────────────────────────────────────────────────
+       Pared back: two thin rows above the card and the card itself.
+       Bottom action bar is gone. Confirm = Next → in the card head.
+       Sign-off lives in the section tab row.
+       ────────────────────────────────────────────────────────────── -->
+  <section id="screen-vf" class="vf-screen">
+
+    <!-- Single grouped chip strip: every column in every section visible
+         and directly clickable. Section labels float above each group. -->
+    <div class="vf-strip" id="vf-strip"><!-- renderVfTrack fills this --></div>
+
+    <main class="vf-stage" id="vf-stage"><!-- renderVfCard fills this --></main>
+  </section>
+
+
+
+
+  <script type="module">
+    import { initValueFirst } from './shared/prototype.js';
+    initValueFirst();
+  </script>
+</body>
+</html>

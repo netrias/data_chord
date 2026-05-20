@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Stage 2 — Concierge (Prototype)</title>
+  <link rel="stylesheet" href="../../src/shared/static/tokens.css" />
+  <link rel="stylesheet" href="./shared/prototype.css" />
+</head>
+<body class="guided-body">
+
+  <!-- Shared progress tracker is injected here by prototype.js -->
+  <div id="tracker-mount"></div>
+
+  <!-- ──────────────────────────────────────────────────────────────
+       Welcome / triage screen
+       Shown once before user enters the walkthrough so they know
+       what's coming and how much work the app has already done.
+       ────────────────────────────────────────────────────────────── -->
+  <section id="screen-welcome" class="guided-screen">
+    <div class="guided-card guided-card--narrow">
+      <h1 class="welcome-title">Let's check your column mappings.</h1>
+      <p class="welcome-sub">
+        We're aligning <strong id="welcome-filename">patient_cohort_dec2026.xlsx</strong>
+        to <strong id="welcome-standard">CCDI v2.1</strong>.
+      </p>
+
+      <div class="welcome-triage">
+        <div class="triage-row triage-row--safe">
+          <span class="triage-ico">✓</span>
+          <div class="triage-text">
+            <div class="triage-headline"><span id="count-auto">18</span> columns ready to go</div>
+            <div class="triage-sub">High match. We've picked a standard for each and you don't need to touch them.</div>
+          </div>
+          <button class="ghost-btn ghost-btn--sm" data-action="audit-safe">Audit these</button>
+        </div>
+        <div class="triage-row triage-row--empty">
+          <span class="triage-ico">—</span>
+          <div class="triage-text">
+            <div class="triage-headline"><span id="count-empty">3</span> empty columns skipped</div>
+            <div class="triage-sub">No values to map. These won't be included in your submission.</div>
+          </div>
+          <button class="ghost-btn ghost-btn--sm" data-action="audit-empty">View list</button>
+        </div>
+        <div class="triage-row triage-row--review">
+          <span class="triage-ico">!</span>
+          <div class="triage-text">
+            <div class="triage-headline"><span id="count-review">6</span> columns need your eyes</div>
+            <div class="triage-sub">Low value overlap, ambiguous matches, or rewrites we want you to see.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="welcome-actions">
+        <button class="netrias-btn netrias-btn--lg" data-action="start">
+          Start review <span class="key-hint">⏎</span>
+        </button>
+        <button class="linklike" data-action="trust-everything">Trust everything and continue →</button>
+      </div>
+      <div class="welcome-foot">
+        About 2 minutes. You can step back at any time.
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ──────────────────────────────────────────────────────────────
+       Walkthrough screen — the heart of the concierge flow.
+       Rendered per-card by JS into #card-host.
+       ────────────────────────────────────────────────────────────── -->
+  <section id="screen-walkthrough" class="guided-screen hidden">
+    <header class="walkthrough-bar">
+      <div class="walk-progress">
+        <div class="walk-pips" id="walk-pips"><!-- one pip per review item --></div>
+        <div class="walk-counter">
+          <span id="walk-counter-text">Reviewing 1 of 6</span>
+          <span class="walk-counter-sep">·</span>
+          <span class="walk-counter-meta"><span id="walk-meta-auto">18 auto-confirmed</span>, <span id="walk-meta-empty">3 empty</span></span>
+        </div>
+      </div>
+      <button class="ghost-btn ghost-btn--sm" data-action="exit-walkthrough">Back to summary</button>
+    </header>
+
+    <main class="walkthrough-stage">
+      <div id="card-host"><!-- renderCard fills this --></div>
+    </main>
+
+    <footer class="walkthrough-foot">
+      <div class="foot-left">
+        <button class="ghost-btn" data-action="prev">← Previous</button>
+      </div>
+      <div class="foot-center">
+        <div class="key-hints">
+          <span><kbd>⏎</kbd> Confirm</span>
+          <span><kbd>←</kbd> <kbd>→</kbd> Navigate</span>
+          <span><kbd>C</kbd> Change mapping</span>
+          <span><kbd>R</kbd> Rename column</span>
+          <span><kbd>S</kbd> Skip</span>
+        </div>
+      </div>
+      <div class="foot-right">
+        <button class="ghost-btn" data-action="skip">Skip for now</button>
+        <button class="netrias-btn netrias-btn--md" data-action="confirm" id="btn-confirm">
+          <span id="btn-confirm-text">Confirm & next</span> →
+        </button>
+      </div>
+    </footer>
+  </section>
+
+
+  <!-- ──────────────────────────────────────────────────────────────
+       Completion screen
+       ────────────────────────────────────────────────────────────── -->
+  <section id="screen-done" class="guided-screen hidden">
+    <div class="guided-card guided-card--narrow">
+      <div class="done-mark">✓</div>
+      <h1 class="welcome-title">All set.</h1>
+      <p class="welcome-sub">
+        <strong id="done-reviewed-count">6</strong> reviewed,
+        <strong id="done-auto-count">18</strong> auto-confirmed,
+        <strong id="done-empty-count">3</strong> empty columns skipped.
+      </p>
+      <div class="done-summary" id="done-summary"><!-- list of all decisions --></div>
+      <div class="welcome-actions">
+        <button class="netrias-btn netrias-btn--lg" data-action="harmonize">
+          Harmonize → <span class="key-hint">⏎</span>
+        </button>
+        <button class="linklike" data-action="restart">Start over</button>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- Audit dialog (shown when user clicks "Audit these" on the welcome screen) -->
+  <div id="audit-dialog" class="audit-dialog hidden">
+    <div class="audit-backdrop" data-action="close-audit"></div>
+    <div class="audit-card">
+      <header class="audit-head">
+        <h2 id="audit-title">Auto-confirmed columns</h2>
+        <button class="audit-close" data-action="close-audit">✕</button>
+      </header>
+      <div class="audit-body" id="audit-body"></div>
+    </div>
+  </div>
+
+
+  <!-- Picker dialog for "change mapping" -->
+  <div id="picker-dialog" class="picker-dialog hidden">
+    <div class="picker-backdrop" data-action="close-picker"></div>
+    <div class="picker-card">
+      <header class="picker-head">
+        <h2>Change target standard</h2>
+        <button class="picker-close" data-action="close-picker">✕</button>
+      </header>
+      <input type="search" class="picker-search" id="picker-search" placeholder="Search standards…" autocomplete="off" />
+      <div class="picker-body" id="picker-body"></div>
+    </div>
+  </div>
+
+
+  <script type="module">
+    import { initConcierge } from './shared/prototype.js';
+    initConcierge();
+  </script>
+</body>
+</html>

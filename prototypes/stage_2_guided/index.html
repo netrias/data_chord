@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Stage 2 Guided Prototypes</title>
+  <link rel="stylesheet" href="../../src/shared/static/tokens.css" />
+  <link rel="stylesheet" href="./shared/prototype.css" />
+</head>
+<body class="guided-body">
+  <div id="tracker-mount"></div>
+  <div class="guided-card guided-card--narrow" style="margin-top: 4vh;">
+    <h1 class="welcome-title">Stage 2 — guided mapping prototypes</h1>
+    <p class="welcome-sub">
+      Two takes on a more guided Stage 2, sharing the same seed data
+      (a 25-column oncology cohort with realistic AI-rec ambiguity).
+    </p>
+
+    <div class="welcome-triage">
+      <a href="./01_concierge.html" class="triage-row triage-row--review" style="text-decoration:none; color:inherit;">
+        <span class="triage-ico">1</span>
+        <div class="triage-text">
+          <div class="triage-headline">Concierge — maximum lock-in</div>
+          <div class="triage-sub">
+            App triages everything. User walks through only the columns that need attention.
+            No queue, no jumping, one decision at a time. Strong rewrite warnings.
+            End-of-flow summary lets users audit auto-confirmed columns.
+          </div>
+        </div>
+        <span class="alt-card-swap">Open →</span>
+      </a>
+
+      <a href="./02_walkthrough.html" class="triage-row triage-row--safe" style="text-decoration:none; color:inherit;">
+        <span class="triage-ico">2</span>
+        <div class="triage-text">
+          <div class="triage-headline">Walkthrough — guided with flexibility</div>
+          <div class="triage-sub">
+            Same per-column card, plus a queue sidebar. Users can jump to any row,
+            flag for follow-up, and toggle auto-safe columns into the queue if they want.
+            More escape hatches without losing the funnel.
+          </div>
+        </div>
+        <span class="alt-card-swap">Open →</span>
+      </a>
+
+      <a href="./03_value_first.html" class="triage-row triage-row--empty" style="text-decoration:none; color:inherit; border-color: var(--info-200); background: var(--info-50);">
+        <span class="triage-ico" style="background: var(--info-500);">3</span>
+        <div class="triage-text">
+          <div class="triage-headline">Value-first — two-card, sorted by impact</div>
+          <div class="triage-sub">
+            Two large cards (your column ↔ target standard) with a giant value-match hero.
+            Columns sorted into four sections: <em>will rewrite</em> (worst overlap first),
+            <em>already matches</em>, <em>pass-through</em>, <em>empty</em>. Sign off after
+            section one if you're satisfied — no need to click through 86 columns.
+          </div>
+        </div>
+        <span class="alt-card-swap">Open →</span>
+      </a>
+    </div>
+
+    <div class="welcome-foot">
+      Both prototypes use the existing tokens.css design system and keep
+      the real progress tracker. Seed data lives in
+      <code>shared/sample_payload.js</code>.
+    </div>
+  </div>
+
+  <script>
+    // Same partial-load pattern as the prototypes themselves.
+    fetch('./shared/_progress_tracker.html')
+      .then(r => r.text())
+      .then(html => { document.getElementById('tracker-mount').outerHTML = html; });
+  </script>
+</body>
+</html>

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Stage 2 — Walkthrough (Prototype)</title>
+  <link rel="stylesheet" href="../../src/shared/static/tokens.css" />
+  <link rel="stylesheet" href="./shared/prototype.css" />
+</head>
+<body class="guided-body">
+
+  <!-- Shared progress tracker is injected here by prototype.js -->
+  <div id="tracker-mount"></div>
+
+  <!-- ──────────────────────────────────────────────────────────────
+       Walkthrough variant: same per-column card, but with a queue
+       rail on the left. User can jump, flag for later, and bulk
+       confirm — escape hatches without losing the guided shell.
+       ────────────────────────────────────────────────────────────── -->
+  <section id="screen-walkthrough" class="guided-screen walk-with-rail">
+    <aside id="queue-rail" class="queue-rail"><!-- rendered by JS --></aside>
+
+    <div class="walk-main" style="display:flex; flex-direction:column; min-height:0;">
+      <header class="walkthrough-bar walkthrough-bar--slim">
+        <div class="walk-progress">
+          <div class="walk-counter">
+            <span id="walk-counter-text">Reviewing 1 of 6</span>
+            <span class="walk-counter-sep">·</span>
+            <span class="walk-counter-meta">Patient cohort · CCDI v2.1</span>
+          </div>
+        </div>
+      </header>
+
+      <main class="walkthrough-stage">
+        <div id="card-host"><!-- renderCard fills this --></div>
+      </main>
+
+      <footer class="walkthrough-foot">
+        <div class="foot-left">
+          <button class="ghost-btn" data-action="prev">← Previous</button>
+        </div>
+        <div class="foot-center">
+          <div class="key-hints">
+            <span><kbd>⏎</kbd> Confirm</span>
+            <span><kbd>←</kbd> <kbd>→</kbd> Navigate</span>
+            <span><kbd>C</kbd> Change</span>
+            <span><kbd>R</kbd> Rename</span>
+            <span><kbd>S</kbd> Skip</span>
+          </div>
+        </div>
+        <div class="foot-right">
+          <button class="ghost-btn" data-action="skip">Skip for now</button>
+          <button class="netrias-btn netrias-btn--md" data-action="confirm" id="btn-confirm">
+            <span id="btn-confirm-text">Confirm & next</span> →
+          </button>
+        </div>
+      </footer>
+    </div>
+  </section>
+
+
+  <!-- Picker dialog for "change mapping" -->
+  <div id="picker-dialog" class="picker-dialog hidden">
+    <div class="picker-backdrop" data-action="close-picker"></div>
+    <div class="picker-card">
+      <header class="picker-head">
+        <h2>Change target standard</h2>
+        <button class="picker-close" data-action="close-picker">✕</button>
+      </header>
+      <input type="search" class="picker-search" id="picker-search" placeholder="Search standards…" autocomplete="off" />
+      <div class="picker-body" id="picker-body"></div>
+    </div>
+  </div>
+
+
+  <script type="module">
+    import { initWalkthrough } from './shared/prototype.js';
+    initWalkthrough();
+  </script>
+</body>
+</html>

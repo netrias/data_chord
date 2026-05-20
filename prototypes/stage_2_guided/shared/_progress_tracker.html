@@ -1,0 +1,47 @@
+<!-- ────────────────────────────────────────────────────────────
+     Shared progress tracker — copied from the real Stage 2
+     template so prototypes preserve the existing top chrome.
+     This is the structural constraint the guided flow must
+     fit beneath.
+     ──────────────────────────────────────────────────────────── -->
+<nav class="progress-tracker">
+  <div class="progress-tracker-row">
+    <ol class="progress-track">
+      <li class="step complete" data-stage="upload">
+        <span class="step-index">1</span>
+        <span class="step-label">Upload</span>
+      </li>
+      <li class="connector complete"></li>
+      <li class="step active" data-stage="mapping">
+        <span class="step-index">2</span>
+        <span class="step-label">Map</span>
+      </li>
+      <li class="connector"></li>
+      <li class="step" data-stage="harmonize">
+        <span class="step-index">3</span>
+        <span class="step-label">Harmonize</span>
+      </li>
+      <li class="connector"></li>
+      <li class="step" data-stage="verify">
+        <span class="step-index">4</span>
+        <span class="step-label">Verify</span>
+      </li>
+      <li class="connector"></li>
+      <li class="step" data-stage="review">
+        <span class="step-index">5</span>
+        <span class="step-label">Review</span>
+      </li>
+    </ol>
+    <div class="progress-tracker-action">
+      <button id="harmonizeButton" class="btn-3d" type="button" data-action="harmonize-real">
+        <span class="btn-3d-shadow" aria-hidden="true"></span>
+        <span class="btn-3d-edge" aria-hidden="true"></span>
+        <span class="btn-3d-front">Harmonize →</span>
+      </button>
+    </div>
+  </div>
+  <div class="step-instruction">
+    <p class="step-instruction-text">Review and confirm which standards your data columns should map to.</p>
+    <span class="step-instruction-tooltip" aria-hidden="true"></span>
+  </div>
+</nav>
