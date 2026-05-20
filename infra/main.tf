@@ -84,6 +84,43 @@ resource "aws_security_group" "task" {
   tags = local.common_tags
 }
 
+resource "aws_security_group" "secrets_endpoint" {
+  name        = "${local.name_prefix}-secrets-endpoint"
+  description = "Secrets Manager VPC endpoint access from Data Chord tasks"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    description     = "Secrets Manager HTTPS from app tasks"
+    from_port       = 443
+    to_port         = 443
+    protocol        = "tcp"
+    security_groups = [aws_security_group.task.id]
+  }
+
+  egress {
+    description = "Outbound"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_vpc_endpoint" "secretsmanager" {
+  vpc_id              = var.vpc_id
+  service_name        = "com.amazonaws.${var.aws_region}.secretsmanager"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = var.public_subnet_ids
+  security_group_ids  = [aws_security_group.secrets_endpoint.id]
+  private_dns_enabled = true
+
+  tags = merge(local.common_tags, {
+    Name = "${local.name_prefix}-secretsmanager"
+  })
+}
+
 resource "aws_s3_bucket" "workflow" {
   bucket = "${local.name_prefix}-workflow-${data.aws_caller_identity.current.account_id}-${var.aws_region}"
 
