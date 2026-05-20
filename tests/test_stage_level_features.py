@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import json
+import time
 import zipfile
 from io import BytesIO
 from typing import cast
@@ -77,6 +79,17 @@ def _read_downloaded_xlsx(response_bytes: bytes, sheet_name: str) -> list[list[s
     workbook = load_workbook(workbook_bytes, data_only=True)
     sheet = cast(Worksheet, workbook[sheet_name])
     return [[str(value) if value is not None else "" for value in row] for row in sheet.iter_rows(values_only=True)]
+
+
+async def _wait_for_stage_three_job(app_client: AsyncClient, job_id: str) -> dict[str, object]:
+    for _ in range(50):
+        response = await app_client.get(f"/stage-3/jobs/{job_id}")
+        assert response.status_code == 200
+        body = response.json()
+        if body["status"] in {"succeeded", "failed"}:
+            return cast(dict[str, object], body)
+        await asyncio.sleep(0.02)
+    raise AssertionError(f"Stage 3 job did not finish: {job_id}")
 
 
 async def test_stage1_upload_persists_exact_bytes(
@@ -592,6 +605,62 @@ async def test_stage3_harmonize_prefers_stored_selection_over_stale_request(
     assert response.status_code == 200
     assert stub.received_target_schema == "gc"
     assert stub.received_target_version == "2"
+
+
+async def test_stage3_harmonize_returns_queued_while_long_job_finishes(
+    app_client: AsyncClient,
+) -> None:
+    """Stage 3 does not keep the browser request open for slow harmonization jobs."""
+
+    class SlowStubHarmonizer:
+        def run(  # type: ignore[no-untyped-def]
+            self,
+            *,
+            file_path,
+            target_schema,
+            column_overrides,
+            column_renames,
+            cache,
+            target_version,
+            manifest,
+            output_path,
+            sheet_name,
+        ):
+            time.sleep(0.5)
+            return HarmonizeResult(job_id="job-slow", status=HarmonizeStatus.SUCCEEDED, detail="ok")
+
+    # Given: an analyzed upload has no completed Stage 3 job yet
+    file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "slow-stage3.csv")
+    analyze_response = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "target_schema": "gc", "target_version_number": 2},
+    )
+    assert analyze_response.status_code == 200
+
+    # When: harmonization is triggered and the harmonizer is still running
+    import unittest.mock
+
+    with unittest.mock.patch("src.stage_3_harmonize.router.get_harmonize_service", return_value=SlowStubHarmonizer()):
+        response = await app_client.post(
+            "/stage-3/harmonize",
+            json={
+                "file_id": file_id,
+                "target_schema": "gc",
+                "target_version_number": 2,
+                "manual_overrides": {},
+            },
+        )
+
+        # Then: the browser gets a queued job promptly and can poll it to completion
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "queued"
+        assert body["manifest_summary"] is None
+
+        finished = await _wait_for_stage_three_job(app_client, body["job_id"])
+
+    assert finished["status"] == "succeeded"
+    assert finished["job_id"] == "job-slow"
 
 
 async def test_stage2_saves_confirmed_mapping_choices_to_workflow_state(

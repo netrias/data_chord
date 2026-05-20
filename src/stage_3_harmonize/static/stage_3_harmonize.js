@@ -7,6 +7,7 @@ const config = window.stageThreeConfig ?? {};
 const harmonizeEndpoint = config.harmonizeEndpoint ?? '/stage-3/harmonize';
 const nextStageUrl = config.nextStageUrl ?? '/stage-4';
 const stageTwoUrl = config.stageTwoUrl ?? '/stage-2';
+const JOB_POLL_INTERVAL_MS = 3000;
 
 const loadingState = document.getElementById('loadingState');
 const jobIdDisplay = document.getElementById('jobIdDisplay');
@@ -25,6 +26,7 @@ const state = {
   requestBody: null,
   job: null,
   isProcessing: false,
+  pollTimer: null,
 };
 
 /* why: keep dashboard orchestration isolated from the job rendering logic. */
@@ -142,6 +144,13 @@ const _hideJobMeta = () => {
   }
 };
 
+const _clearPollTimer = () => {
+  if (state.pollTimer) {
+    window.clearTimeout(state.pollTimer);
+    state.pollTimer = null;
+  }
+};
+
 const _showJobId = (jobId) => {
   if (jobIdDisplay && jobId) {
     jobIdDisplay.textContent = `Job ID: ${jobId}`;
@@ -154,6 +163,7 @@ const _renderJob = (job) => {
   if (!job) {
     return;
   }
+  _clearPollTimer();
   const jobForSession = _jobWithCurrentFile(job);
   state.job = jobForSession;
   _persistJobMeta(jobForSession);
@@ -186,6 +196,33 @@ const _renderJob = (job) => {
     _hideMetricsDashboard();
     reviewButton.disabled = true;
     retryButton.classList.add('hidden');
+    _scheduleJobPoll(jobForSession.job_id);
+  }
+};
+
+const _jobStatusEndpoint = (jobId) => `${harmonizeEndpoint.replace(/\/harmonize$/, '')}/jobs/${encodeURIComponent(jobId)}`;
+
+const _scheduleJobPoll = (jobId) => {
+  if (!jobId) {
+    return;
+  }
+  state.pollTimer = window.setTimeout(() => {
+    _pollJob(jobId);
+  }, JOB_POLL_INTERVAL_MS);
+};
+
+const _pollJob = async (jobId) => {
+  try {
+    const response = await fetch(_jobStatusEndpoint(jobId));
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(body.detail || 'Unable to check harmonization status.');
+    }
+    _renderJob(body);
+  } catch (error) {
+    console.error(error);
+    _showError(error.message || 'Unable to check harmonization status.');
+    _scheduleJobPoll(jobId);
   }
 };
 

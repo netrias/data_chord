@@ -9,9 +9,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import urlencode
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
@@ -36,7 +38,7 @@ from src.domain.data_model_selection import DataModelSelection
 from src.domain.dependencies import (
     get_harmonize_service,
 )
-from src.domain.harmonize import HarmonizeResult
+from src.domain.harmonize import HarmonizeResult, HarmonizeStatus
 from src.domain.manifest import (
     ColumnMappingManifest,
     ConfidenceBucket,
@@ -63,11 +65,27 @@ from src.domain.workflow_state_store import load_workflow_state
 MODULE_DIR = Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"
 NEXT_STAGE_PATH = "/stage-4"
+JOB_START_GRACE_SECONDS = 0.25
 
 _templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 _router_logger = logging.getLogger(__name__)
 
 stage_three_router = APIRouter(prefix="/stage-3", tags=["Stage 3 Harmonize"])
+
+
+@dataclass
+class StageThreeJob:
+    job_id: str
+    file_id: str
+    status: HarmonizeStatus
+    detail: str
+    next_stage_url: str
+    job_id_available: bool = False
+    manifest_summary: ManifestSummarySchema | None = None
+
+
+_stage_three_jobs: dict[str, StageThreeJob] = {}
+_stage_three_tasks: dict[str, asyncio.Task[None]] = {}
 
 
 class PVAdjustmentRecord(NamedTuple):
@@ -100,6 +118,93 @@ async def render_stage_three(request: Request) -> HTMLResponse:
     name="stage_three_harmonize",
 )
 async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
+    storage = dependencies.get_upload_storage()
+    workflow_storage = dependencies.get_workflow_storage()
+    user = dependencies.get_user_context()
+    meta = load_upload_artifact(storage, workflow_storage, user, payload.file_id)
+    if not meta:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please rerun analysis.")
+
+    job = _create_stage_three_job(payload.file_id)
+    task = asyncio.create_task(_run_stage_three_job(job.job_id, payload))
+    _stage_three_tasks[job.job_id] = task
+    task.add_done_callback(lambda _task: _stage_three_tasks.pop(job.job_id, None))
+    try:
+        await asyncio.wait_for(asyncio.shield(task), timeout=JOB_START_GRACE_SECONDS)
+    except TimeoutError:
+        pass
+    return _response_from_job(_stage_three_jobs[job.job_id])
+
+
+@stage_three_router.get(
+    "/jobs/{job_id}",
+    response_model=HarmonizeResponse,
+    name="stage_three_harmonize_job",
+)
+async def get_harmonize_job(job_id: str) -> HarmonizeResponse:
+    job = _stage_three_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Harmonization job not found.")
+    return _response_from_job(job)
+
+
+def _create_stage_three_job(file_id: str) -> StageThreeJob:
+    job_id = uuid4().hex
+    next_stage_url = _next_stage_url(file_id=file_id, job_id=job_id, job_status=HarmonizeStatus.QUEUED, detail="")
+    job = StageThreeJob(
+        job_id=job_id,
+        file_id=file_id,
+        status=HarmonizeStatus.QUEUED,
+        detail="Harmonization job accepted.",
+        next_stage_url=next_stage_url,
+        job_id_available=False,
+    )
+    _stage_three_jobs[job_id] = job
+    return job
+
+
+async def _run_stage_three_job(job_id: str, payload: HarmonizeRequest) -> None:
+    try:
+        response = await _run_harmonization_workflow(payload)
+    except Exception as exc:  # pragma: no cover - defensive job boundary
+        _router_logger.exception("Stage 3 background harmonization failed", extra={"file_id": payload.file_id})
+        _stage_three_jobs[job_id] = StageThreeJob(
+            job_id=job_id,
+            file_id=payload.file_id,
+            status=HarmonizeStatus.FAILED,
+            detail=str(exc),
+            next_stage_url=_next_stage_url(
+                file_id=payload.file_id,
+                job_id=job_id,
+                job_status=HarmonizeStatus.FAILED,
+                detail=str(exc),
+            ),
+        )
+        return
+
+    _stage_three_jobs[job_id] = StageThreeJob(
+        job_id=response.job_id,
+        file_id=payload.file_id,
+        status=response.status,
+        detail=response.detail,
+        next_stage_url=response.next_stage_url,
+        job_id_available=response.job_id_available,
+        manifest_summary=response.manifest_summary,
+    )
+
+
+def _response_from_job(job: StageThreeJob) -> HarmonizeResponse:
+    return HarmonizeResponse(
+        job_id=job.job_id,
+        status=job.status,
+        detail=job.detail,
+        next_stage_url=job.next_stage_url,
+        job_id_available=job.job_id_available,
+        manifest_summary=job.manifest_summary,
+    )
+
+
+async def _run_harmonization_workflow(payload: HarmonizeRequest) -> HarmonizeResponse:
     storage = dependencies.get_upload_storage()
     workflow_storage = dependencies.get_workflow_storage()
     user = dependencies.get_user_context()
@@ -190,21 +295,29 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
         extra={"file_id": payload.file_id, "has_summary": manifest_summary is not None},
     )
 
-    query_params = urlencode({
-        "file_id": payload.file_id,
-        "job_id": result.job_id,
-        "status": result.status,
-        "detail": result.detail or "",
-    })
-    next_stage_url = f"{NEXT_STAGE_PATH}?{query_params}"
     return HarmonizeResponse(
         job_id=result.job_id,
         status=result.status,
         detail=result.detail,
-        next_stage_url=next_stage_url,
+        next_stage_url=_next_stage_url(
+            file_id=payload.file_id,
+            job_id=result.job_id,
+            job_status=result.status,
+            detail=result.detail,
+        ),
         job_id_available=result.job_id_available,
         manifest_summary=manifest_summary,
     )
+
+
+def _next_stage_url(*, file_id: str, job_id: str, job_status: HarmonizeStatus, detail: str) -> str:
+    query_params = urlencode({
+        "file_id": file_id,
+        "job_id": job_id,
+        "status": job_status,
+        "detail": detail or "",
+    })
+    return f"{NEXT_STAGE_PATH}?{query_params}"
 
 
 def _column_cde_map_for_session(manifest: ColumnMappingManifest, column_overrides: ColumnCdeOverrides) -> ColumnCdeMap:
