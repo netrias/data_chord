@@ -23,6 +23,14 @@ frontend/dist
 # Stage 1 runtime files
 src/stage_1_upload/uploads/
 uploads/
+workflow_storage/
+
+# OpenTofu / Terraform local state and secrets
+.terraform/
+*.tfstate
+*.tfstate.*
+infra/terraform.tfvars
+infra/generated/
 
 # Harmonization outputs
 outputs/

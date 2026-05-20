@@ -21,8 +21,12 @@ from src.domain.data_model_adapter import (
 )
 from src.domain.data_model_cache import SessionCache, get_session_cache
 from src.domain.match_counts import compute_column_overlap_by_cde, compute_match_counts
-from src.domain.storage import FileStore
-from src.domain.workflow_state import ConfirmedMappingChoices
+from src.domain.storage import UserContext, WorkflowStorage
+from src.domain.workflow_state_store import (
+    WorkflowStateConflictError,
+    WorkflowStateNotFoundError,
+    save_confirmed_mapping_choices_to_state,
+)
 
 from .schemas import ColumnDetailResponse, SaveMappingChoicesRequest, SaveMappingChoicesResponse
 
@@ -33,6 +37,10 @@ class ColumnDetailNotFound(Exception):
 
 class MappingWorkflowStateNotFoundError(Exception):
     """Raised when Stage 2 choices are saved before Stage 1 creates workflow state."""
+
+
+class MappingWorkflowStateConflictError(Exception):
+    """Raised when Stage 2 choices race with another workflow state update."""
 
 
 @dataclass(frozen=True)
@@ -78,16 +86,23 @@ async def compute_column_detail(
 
 def save_confirmed_mapping_choices(
     *,
-    file_store: FileStore,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
     payload: SaveMappingChoicesRequest,
 ) -> SaveMappingChoicesResponse:
     """Persist confirmed Stage 2 choices as durable workflow state."""
-    state = file_store.load_workflow_state(payload.file_id)
-    if state is None:
-        raise MappingWorkflowStateNotFoundError()
-
-    choices = ConfirmedMappingChoices.from_raw(payload.manual_overrides, payload.column_renames)
-    file_store.save_workflow_state(state.with_mapping_choices(choices))
+    try:
+        save_confirmed_mapping_choices_to_state(
+            workflow_storage,
+            user,
+            payload.file_id,
+            payload.manual_overrides,
+            payload.column_renames,
+        )
+    except WorkflowStateNotFoundError as exc:
+        raise MappingWorkflowStateNotFoundError() from exc
+    except WorkflowStateConflictError as exc:
+        raise MappingWorkflowStateConflictError() from exc
     return SaveMappingChoicesResponse(file_id=payload.file_id)
 
 
@@ -160,6 +175,7 @@ def _selected_pvs(
 
 __all__ = [
     "ColumnDetailNotFound",
+    "MappingWorkflowStateConflictError",
     "MappingWorkflowStateNotFoundError",
     "compute_column_detail",
     "save_confirmed_mapping_choices",

@@ -66,7 +66,12 @@ async def render_stage_four(request: Request) -> HTMLResponse:
 async def fetch_stage_four_rows(payload: StageFourResultsRequest) -> StageFourResultsResponse:
     storage: UploadStorage = dependencies.get_upload_storage()
     try:
-        return build_stage_four_rows(file_id=payload.file_id, upload_storage=storage)
+        return build_stage_four_rows(
+            file_id=payload.file_id,
+            upload_storage=storage,
+            workflow_storage=dependencies.get_workflow_storage(),
+            user=dependencies.get_user_context(),
+        )
     except StageFourRowsUploadNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Upload not found. Please rerun harmonization.") from exc
     except StageFourRowsManifestNotFoundError as exc:
@@ -82,16 +87,19 @@ FileIdPath = Annotated[str, Path(min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_
     name="stage_four_get_overrides",
 )
 async def get_overrides(file_id: FileIdPath) -> ReviewOverridesSchema | None:
-    store = dependencies.get_file_store()
-    return get_review_overrides(file_store=store, file_id=file_id)
+    return get_review_overrides(
+        workflow_storage=dependencies.get_workflow_storage(),
+        user=dependencies.get_user_context(),
+        file_id=file_id,
+    )
 
 
 @stage_four_router.post("/overrides", response_model=SaveOverridesResponse, name="stage_four_save_overrides")
 async def save_overrides(payload: SaveOverridesRequest) -> SaveOverridesResponse:
-    store = dependencies.get_file_store()
     storage = dependencies.get_upload_storage()
     result = save_review_overrides(
-        file_store=store,
+        workflow_storage=dependencies.get_workflow_storage(),
+        user=dependencies.get_user_context(),
         upload_storage=storage,
         file_id=payload.file_id,
         overrides=payload.overrides,
@@ -106,8 +114,11 @@ async def save_overrides(payload: SaveOverridesRequest) -> SaveOverridesResponse
     name="stage_four_delete_overrides",
 )
 async def delete_overrides(file_id: FileIdPath) -> DeleteOverridesResponse:
-    store = dependencies.get_file_store()
-    return delete_review_overrides(file_store=store, file_id=file_id)
+    return delete_review_overrides(
+        workflow_storage=dependencies.get_workflow_storage(),
+        user=dependencies.get_user_context(),
+        file_id=file_id,
+    )
 
 
 @stage_four_router.get(
@@ -118,7 +129,12 @@ async def delete_overrides(file_id: FileIdPath) -> DeleteOverridesResponse:
 async def get_non_conformant_values(file_id: FileIdPath) -> NonConformantResponse:
     """Deduplicate by (column, original, final) to match Stage 5's unique mapping logic."""
     storage = dependencies.get_upload_storage()
-    return build_non_conformant_values(file_id=file_id, upload_storage=storage)
+    return build_non_conformant_values(
+        file_id=file_id,
+        upload_storage=storage,
+        workflow_storage=dependencies.get_workflow_storage(),
+        user=dependencies.get_user_context(),
+    )
 
 
 @stage_four_router.post(
@@ -134,6 +150,8 @@ async def get_row_context(payload: RowContextRequest) -> RowContextResponse:
             file_id=payload.file_id,
             row_indices=payload.row_indices,
             upload_storage=storage,
+            workflow_storage=dependencies.get_workflow_storage(),
+            user=dependencies.get_user_context(),
         )
     except RowContextUploadNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Upload not found") from exc
@@ -153,6 +171,8 @@ async def get_term_row_indices(payload: TermRowIndicesRequest) -> TermRowIndices
             column_key=payload.column_key,
             original_value=payload.original_value,
             upload_storage=storage,
+            workflow_storage=dependencies.get_workflow_storage(),
+            user=dependencies.get_user_context(),
         )
     except TermRowIndicesManifestNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Manifest not found") from exc

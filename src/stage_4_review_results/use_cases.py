@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 
 from netrias_client import read_tabular
 
@@ -23,8 +23,17 @@ from src.domain.manifest import (
 )
 from src.domain.pv_persistence import column_pv_sets
 from src.domain.pv_validation import check_value_conformance
+from src.domain.review_override_store import (
+    delete_review_overrides_state,
+    load_review_overrides,
+    save_review_overrides_state,
+)
 from src.domain.review_overrides import ReviewOverrides
-from src.domain.storage import FileStore, UploadStorage
+from src.domain.storage import UploadStorage, UserContext, WorkflowFile, WorkflowStorage
+from src.domain.workflow_artifact_store import (
+    load_harmonization_manifest_path,
+    load_upload_artifact,
+)
 from src.stage_4_review_results.schemas import (
     CellOverrideSchema,
     ColumnReviewData,
@@ -67,14 +76,20 @@ class TermRowIndicesManifestNotFoundError(Exception):
     """Raised when term row indices are requested before Stage 3 stores a manifest."""
 
 
-def build_stage_four_rows(*, file_id: str, upload_storage: UploadStorage) -> StageFourResultsResponse:
-    meta = upload_storage.load(file_id)
+def build_stage_four_rows(
+    *,
+    file_id: str,
+    upload_storage: UploadStorage,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+) -> StageFourResultsResponse:
+    meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
     if not meta:
         raise StageFourRowsUploadNotFoundError()
 
     original_dataset = read_tabular(meta.saved_path, sheet_name=meta.selected_sheet)
 
-    manifest = _load_manifest(upload_storage, file_id)
+    manifest = _load_manifest(upload_storage, workflow_storage, user, file_id)
     if manifest is None:
         raise StageFourRowsManifestNotFoundError()
 
@@ -90,9 +105,15 @@ def build_stage_four_rows(*, file_id: str, upload_storage: UploadStorage) -> Sta
     )
 
 
-def build_non_conformant_values(*, file_id: str, upload_storage: UploadStorage) -> NonConformantResponse:
+def build_non_conformant_values(
+    *,
+    file_id: str,
+    upload_storage: UploadStorage,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+) -> NonConformantResponse:
     """Build the Stage 4 gating list from the current manifest values and durable PV state."""
-    manifest = _load_manifest(upload_storage, file_id)
+    manifest = _load_manifest(upload_storage, workflow_storage, user, file_id)
     if manifest is None:
         return NonConformantResponse(count=0, items=[])
 
@@ -106,9 +127,11 @@ def build_row_context(
     file_id: str,
     row_indices: list[int],
     upload_storage: UploadStorage,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
 ) -> RowContextResponse:
     """Load original spreadsheet rows for the on-demand review context popup."""
-    meta = upload_storage.load(file_id)
+    meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
     if meta is None:
         raise RowContextUploadNotFoundError()
 
@@ -127,9 +150,11 @@ def find_term_row_indices(
     column_key: str,
     original_value: str,
     upload_storage: UploadStorage,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
 ) -> TermRowIndicesResponse:
     """Look up full 0-based source row indices for a manifest term."""
-    manifest = _load_manifest(upload_storage, file_id)
+    manifest = _load_manifest(upload_storage, workflow_storage, user, file_id)
     if manifest is None:
         raise TermRowIndicesManifestNotFoundError()
 
@@ -140,43 +165,56 @@ def find_term_row_indices(
     return TermRowIndicesResponse(row_indices=[])
 
 
-def get_review_overrides(*, file_store: FileStore, file_id: str) -> ReviewOverridesSchema | None:
-    saved = file_store.load_review_overrides(file_id)
+def get_review_overrides(
+    *,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+    file_id: str,
+) -> ReviewOverridesSchema | None:
+    saved = load_review_overrides(workflow_storage, user, file_id)
     if saved is None:
         return None
     return ReviewOverridesSchema.model_validate(saved.to_store())
 
 
-def delete_review_overrides(*, file_store: FileStore, file_id: str) -> DeleteOverridesResponse:
-    existed = file_store.delete_review_overrides(file_id)
+def delete_review_overrides(
+    *,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+    file_id: str,
+) -> DeleteOverridesResponse:
+    existed = delete_review_overrides_state(workflow_storage, user, file_id)
     return DeleteOverridesResponse(file_id=file_id, deleted=existed)
 
 
 def save_review_overrides(
     *,
-    file_store: FileStore,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
     upload_storage: UploadStorage,
     file_id: str,
     overrides: ReviewOverridePayload,
     review_state: ReviewStateSchema,
 ) -> SaveReviewOverridesResult:
     """Persist export overrides and append the matching manifest audit rows."""
-    now = datetime.now(UTC)
-    existing = file_store.load_review_overrides(file_id)
-    saved = ReviewOverrides.create(
+    saved = save_review_overrides_state(
+        workflow_storage,
+        user,
         file_id=file_id,
-        created_at=existing.created_at if existing else now,
-        updated_at=now,
         overrides=_override_payload_to_store(overrides),
         review_state=review_state.model_dump(),
     )
-    file_store.save_review_overrides(saved)
-    _sync_override_audit(upload_storage, saved)
-    return SaveReviewOverridesResult(file_id=file_id, updated_at=now)
+    _sync_override_audit(upload_storage, workflow_storage, user, saved)
+    return SaveReviewOverridesResult(file_id=file_id, updated_at=saved.updated_at)
 
 
-def _load_manifest(storage: UploadStorage, file_id: str) -> ManifestSummary | None:
-    manifest_path = storage.load_harmonization_manifest_path(file_id)
+def _load_manifest(
+    storage: UploadStorage,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+    file_id: str,
+) -> ManifestSummary | None:
+    manifest_path = load_harmonization_manifest_path(storage, workflow_storage, user, file_id)
     if manifest_path is None:
         return None
     return read_manifest_parquet(manifest_path)
@@ -369,8 +407,13 @@ def _override_payload_to_store(
     }
 
 
-def _sync_override_audit(storage: UploadStorage, overrides: ReviewOverrides) -> None:
-    manifest_path = storage.load_harmonization_manifest_path(overrides.file_id)
+def _sync_override_audit(
+    storage: UploadStorage,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+    overrides: ReviewOverrides,
+) -> None:
+    manifest_path = load_harmonization_manifest_path(storage, workflow_storage, user, overrides.file_id)
     if manifest_path is None:
         logger.warning("Cannot sync overrides: manifest path not found", extra={"file_id": overrides.file_id})
         return
@@ -386,6 +429,9 @@ def _sync_override_audit(storage: UploadStorage, overrides: ReviewOverrides) -> 
     )
     if not success:
         logger.error("Failed to sync overrides to manifest parquet", extra={"file_id": overrides.file_id})
+        return
+
+    workflow_storage.write_artifact(user, overrides.file_id, WorkflowFile.HARMONIZATION_MANIFEST_BASE, manifest_path)
 
 
 __all__ = [

@@ -50,8 +50,15 @@ from src.domain.manifest import (
 from src.domain.manifest.writer import apply_pv_adjustments_batch
 from src.domain.pv_persistence import save_pv_manifest_to_disk
 from src.domain.pv_validation import check_value_conformance, compute_pv_adjustment
-from src.domain.storage import UploadStorage
+from src.domain.review_override_store import delete_review_overrides_state
+from src.domain.storage import UploadStorage, WorkflowFile, WorkflowNotFoundError
+from src.domain.workflow_artifact_store import (
+    load_mapping_manifest,
+    load_upload_artifact,
+    save_harmonized_artifacts,
+)
 from src.domain.workflow_state import ConfirmedMappingChoices, WorkflowState
+from src.domain.workflow_state_store import load_workflow_state
 
 MODULE_DIR = Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"
@@ -94,16 +101,32 @@ async def render_stage_three(request: Request) -> HTMLResponse:
 )
 async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
     storage = dependencies.get_upload_storage()
-    meta = storage.load(payload.file_id)
+    workflow_storage = dependencies.get_workflow_storage()
+    user = dependencies.get_user_context()
+    meta = load_upload_artifact(storage, workflow_storage, user, payload.file_id)
     if not meta:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please rerun analysis.")
 
-    store = dependencies.get_file_store()
-    store.delete_review_overrides(payload.file_id)
-    store.delete_column_mapping(payload.file_id)
-    workflow_state = store.load_workflow_state(payload.file_id)
+    delete_review_overrides_state(
+        workflow_storage,
+        user,
+        payload.file_id,
+    )
+    try:
+        workflow_storage.delete_json(
+            user,
+            payload.file_id,
+            WorkflowFile.CDE_MAPPING,
+        )
+    except WorkflowNotFoundError:
+        pass
+    workflow_state = load_workflow_state(
+        workflow_storage,
+        user,
+        payload.file_id,
+    )
 
-    stored_manifest = storage.load_manifest(payload.file_id)
+    stored_manifest = load_mapping_manifest(storage, workflow_storage, user, payload.file_id)
     manifest_payload = stored_manifest or payload.manifest
     manifest = ColumnMappingManifest.from_payload(manifest_payload)
     mapping_choices = _mapping_choices_for_harmonize(workflow_state, payload)
@@ -154,6 +177,14 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
     manifest_summary = await _read_store_and_adjust_manifest(
         payload.file_id, result.manifest_path, storage
     )
+    if output_path.exists():
+        save_harmonized_artifacts(
+            workflow_storage,
+            user,
+            payload.file_id,
+            output_path,
+            storage.load_harmonization_manifest_path(payload.file_id),
+        )
     _router_logger.info(
         "Manifest summary result",
         extra={"file_id": payload.file_id, "has_summary": manifest_summary is not None},

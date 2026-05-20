@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -15,6 +15,8 @@ from starlette.responses import FileResponse, Response
 from starlette.types import Scope
 
 from src.domain.paths import PROJECT_ROOT, SHARED_STATIC_DIR, get_stage_static_dir
+from src.domain.storage import WorkflowAccessDeniedError, WorkflowNotFoundError
+from src.domain.user_context import bind_user_context, reset_user_context
 from src.stage_1_upload.router import stage_one_router
 from src.stage_2_review_columns.router import stage_two_router
 from src.stage_3_harmonize.router import stage_three_router
@@ -107,6 +109,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.middleware("http")(_bind_user_context)
+    app.add_exception_handler(WorkflowAccessDeniedError, _workflow_access_denied)
+    app.add_exception_handler(WorkflowNotFoundError, _workflow_not_found)
 
     app.include_router(stage_one_router)
     app.include_router(stage_two_router)
@@ -124,6 +129,7 @@ def create_app() -> FastAPI:
         )
 
     app.add_api_route("/favicon.ico", _serve_favicon, include_in_schema=False)
+    app.add_api_route("/healthz", _healthz, include_in_schema=False)
     app.add_api_route("/", _redirect_to_stage_one, include_in_schema=False)
 
     return app
@@ -131,6 +137,27 @@ def create_app() -> FastAPI:
 
 async def _serve_favicon() -> FileResponse:
     return FileResponse(SHARED_STATIC_DIR / "favicon.ico", media_type="image/x-icon")
+
+
+async def _healthz() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+async def _bind_user_context(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    token = bind_user_context(request.headers)
+    try:
+        response = await call_next(request)
+    finally:
+        reset_user_context(token)
+    return response
+
+
+async def _workflow_access_denied(_request: Request, _exc: Exception) -> Response:
+    return Response("Forbidden", status_code=403)
+
+
+async def _workflow_not_found(_request: Request, _exc: Exception) -> Response:
+    return Response("Workflow not found", status_code=404)
 
 
 async def _redirect_to_stage_one() -> RedirectResponse:

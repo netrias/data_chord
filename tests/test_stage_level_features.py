@@ -21,7 +21,9 @@ from src.domain.cde import CDEInfo
 from src.domain.data_model_cache import clear_session_cache, get_session_cache
 from src.domain.harmonize import HarmonizeResult, HarmonizeStatus
 from src.domain.manifest import ManifestPayload
-from src.domain.storage import UploadStorage
+from src.domain.storage import UploadStorage, WorkflowFile
+from src.domain.workflow_state import WorkflowState
+from src.domain.workflow_state_store import load_workflow_state
 from tests.conftest import (
     TEST_TARGET_SCHEMA,
     TEST_TSV_CONTENT_TYPE,
@@ -35,6 +37,23 @@ from tests.conftest import (
 )
 
 pytestmark = pytest.mark.asyncio
+
+
+def _load_workflow_state(file_id: str) -> WorkflowState | None:
+    return load_workflow_state(
+        dependencies.get_workflow_storage(),
+        dependencies.get_user_context(),
+        file_id,
+    )
+
+
+def _load_json_artifact(file_id: str, kind: WorkflowFile) -> object | None:
+    stored = dependencies.get_workflow_storage().read_json(
+        dependencies.get_user_context(),
+        file_id,
+        kind,
+    )
+    return stored.data if stored is not None else None
 
 
 def _read_downloaded_csv(response_bytes: bytes) -> list[dict[str, str]]:
@@ -464,7 +483,7 @@ async def test_stage1_analyze_persists_selected_data_model_version(
 
     # Given: an uploaded CSV with no workflow selection saved yet
     file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "selection.csv")
-    assert dependencies.get_file_store().load_workflow_state(file_id) is None
+    assert _load_workflow_state(file_id) is None
 
     # When: analysis is requested for a specific model version
     response = await app_client.post(
@@ -478,7 +497,7 @@ async def test_stage1_analyze_persists_selected_data_model_version(
 
     # Then: the selected model/version is available from durable workflow state
     assert response.status_code == 200
-    state = dependencies.get_file_store().load_workflow_state(file_id)
+    state = _load_workflow_state(file_id)
     assert state is not None
     assert state.file_id == file_id
     assert state.data_model_selection.key == "gc"
@@ -587,7 +606,7 @@ async def test_stage2_saves_confirmed_mapping_choices_to_workflow_state(
         json={"file_id": file_id, "target_schema": "gc", "target_version_number": 2},
     )
     assert analyze_response.status_code == 200
-    state = dependencies.get_file_store().load_workflow_state(file_id)
+    state = _load_workflow_state(file_id)
     assert state is not None
     assert state.mapping_choices is None
 
@@ -603,7 +622,7 @@ async def test_stage2_saves_confirmed_mapping_choices_to_workflow_state(
 
     # Then: the choices are durable workflow state
     assert response.status_code == 200
-    updated = dependencies.get_file_store().load_workflow_state(file_id)
+    updated = _load_workflow_state(file_id)
     assert updated is not None
     assert updated.mapping_choices is not None
     assert updated.mapping_choices.column_overrides.to_strings() == {
@@ -620,7 +639,7 @@ async def test_stage2_save_mapping_choices_requires_workflow_state(
 
     # Given: a file was uploaded, but Stage 1 analysis has not created workflow state
     file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "no-state.csv")
-    assert dependencies.get_file_store().load_workflow_state(file_id) is None
+    assert _load_workflow_state(file_id) is None
 
     # When: Stage 2 tries to persist confirmed choices
     response = await app_client.post(
@@ -746,7 +765,7 @@ async def test_stage3_persists_cde_mapping_download_artifact(
 
     # Then: a mapping artifact records AI mappings, user overrides, and output names by column key
     assert response.status_code == 200
-    document = dependencies.get_file_store().load_column_mapping(file_id)
+    document = _load_json_artifact(file_id, WorkflowFile.CDE_MAPPING)
     assert isinstance(document, dict)
     mappings = {entry["column_key"]: entry for entry in document["mappings"]}
     assert mappings["col_0000"]["mapping_source"] == "ai"
@@ -1054,8 +1073,10 @@ async def test_stage5_download_includes_cde_mapping_artifact(
     meta = temp_storage.load(file_id)
     assert meta is not None
     create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
-    dependencies.get_file_store().save_column_mapping(
+    dependencies.get_workflow_storage().write_json(
+        dependencies.get_user_context(),
         file_id,
+        WorkflowFile.CDE_MAPPING,
         {
             "file_id": file_id,
             "generated_at": "2026-05-13T00:00:00+00:00",

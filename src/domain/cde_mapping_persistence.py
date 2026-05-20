@@ -19,7 +19,7 @@ from src.domain.columns import ColumnKey
 from src.domain.data_model_cache import SessionCache
 from src.domain.data_model_selection import DataModelSelection
 from src.domain.manifest import ColumnMappingManifest, ColumnMappingRecord
-from src.domain.storage import FileStore
+from src.domain.storage import UserContext, WorkflowFile, WorkflowNotFoundError, WorkflowStorage
 
 MAPPING_SOURCE_AI: Final = "ai"
 MAPPING_SOURCE_USER_OVERRIDE: Final = "user_override"
@@ -77,16 +77,37 @@ def save_cde_mapping_document(
         target_version=target_selection.target_version,
         mappings=_build_entries(manifest, column_overrides, column_renames, cache),
     )
-    dependencies.get_file_store().save_column_mapping(file_id, document)
+    storage = dependencies.get_workflow_storage()
+    user = dependencies.get_user_context()
+    try:
+        existing = storage.read_json(user, file_id, WorkflowFile.CDE_MAPPING)
+    except WorkflowNotFoundError:
+        storage.create_workflow(user, file_id=file_id)
+        existing = None
+    storage.write_json(
+        user,
+        file_id,
+        WorkflowFile.CDE_MAPPING,
+        document,
+        expected_version=existing.version if existing is not None else None,
+    )
 
 
-def load_cde_mapping_json(file_id: str, file_store: FileStore | None = None) -> str | None:
+def load_cde_mapping_json(
+    file_id: str,
+    workflow_storage: WorkflowStorage | None = None,
+    user: UserContext | None = None,
+) -> str | None:
     """Return a pretty JSON mapping artifact for the download bundle."""
-    store = file_store if file_store is not None else dependencies.get_file_store()
-    payload = store.load_column_mapping(file_id)
-    if payload is None:
+    storage = workflow_storage if workflow_storage is not None else dependencies.get_workflow_storage()
+    context = user if user is not None else dependencies.get_user_context()
+    try:
+        stored = storage.read_json(context, file_id, WorkflowFile.CDE_MAPPING)
+    except WorkflowNotFoundError:
         return None
-    return json.dumps(payload, indent=2)
+    if stored is None:
+        return None
+    return json.dumps(stored.data, indent=2)
 
 
 def _build_entries(

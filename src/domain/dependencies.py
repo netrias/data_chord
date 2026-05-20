@@ -7,24 +7,43 @@ Axis of change: service wiring and lifecycle. Stages depend on getters, not cons
 from __future__ import annotations
 
 import logging
+from typing import cast
 
 from netrias_client import Environment, NetriasClient
 
-from src.domain.config import get_netrias_api_key
+from src.domain.config import (
+    ConfigurationError,
+    get_netrias_api_key,
+    get_storage_backend,
+    get_workflow_s3_bucket,
+    get_workflow_s3_prefix,
+    get_workflow_storage_dir,
+)
 from src.domain.harmonize import HarmonizeService
 from src.domain.mapping_service import MappingDiscoveryService
 from src.domain.paths import PROJECT_ROOT
-from src.domain.storage import FileStore, UploadConstraints, UploadStorage
+from src.domain.storage import (
+    LocalWorkflowStorage,
+    S3WorkflowClient,
+    S3WorkflowStorage,
+    UploadConstraints,
+    UploadStorage,
+    UserContext,
+    WorkflowStorage,
+)
+from src.domain.user_context import current_user_context
 
 logger = logging.getLogger(__name__)
 
 UPLOAD_BASE_DIR = PROJECT_ROOT / "uploads"
-
+DEFAULT_WORKFLOW_STORAGE_DIR = PROJECT_ROOT / "workflow_storage"
+LOCAL_STORAGE_BACKEND = "local"
+S3_STORAGE_BACKEND = "s3"
 MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024
 
 _upload_constraints: UploadConstraints | None = None
 _storage: UploadStorage | None = None
-_file_store: FileStore | None = None
+_workflow_storage: WorkflowStorage | None = None
 _mapping_discovery: MappingDiscoveryService | None = None
 _harmonizer: HarmonizeService | None = None
 _netrias_client: NetriasClient | None = None
@@ -46,12 +65,33 @@ def get_upload_storage() -> UploadStorage:
     return _storage
 
 
-def get_file_store() -> FileStore:
-    global _file_store  # noqa: PLW0603 - intentional singleton
-    if _file_store is None:
-        logger.info("Initializing file store")
-        _file_store = FileStore(UPLOAD_BASE_DIR / "manifests")
-    return _file_store
+def get_workflow_storage() -> WorkflowStorage:
+    global _workflow_storage  # noqa: PLW0603 - intentional singleton
+    if _workflow_storage is None:
+        backend = get_storage_backend()
+        if backend == LOCAL_STORAGE_BACKEND:
+            storage_dir = get_workflow_storage_dir()
+            base_dir = DEFAULT_WORKFLOW_STORAGE_DIR if storage_dir is None else PROJECT_ROOT / storage_dir
+            logger.info("Initializing local workflow storage", extra={"base_dir": str(base_dir)})
+            _workflow_storage = LocalWorkflowStorage(base_dir)
+        elif backend == S3_STORAGE_BACKEND:
+            bucket = get_workflow_s3_bucket()
+            if not bucket:
+                raise ConfigurationError("DATA_CHORD_S3_BUCKET is required when DATA_CHORD_STORAGE=s3")
+            import boto3
+
+            _workflow_storage = S3WorkflowStorage(
+                bucket=bucket,
+                prefix=get_workflow_s3_prefix(),
+                client=cast(S3WorkflowClient, boto3.client("s3")),
+            )
+        else:
+            raise ConfigurationError(f"Unsupported DATA_CHORD_STORAGE value: {backend}")
+    return _workflow_storage
+
+
+def get_user_context() -> UserContext:
+    return current_user_context()
 
 
 def get_netrias_client() -> NetriasClient | None:
@@ -88,19 +128,22 @@ def get_harmonize_service() -> HarmonizeService:
 
 def cleanup_services() -> None:
     """Clean up resources held by singleton services (call on app shutdown)."""
-    global _netrias_client, _netrias_client_initialized  # noqa: PLW0603
+    global _netrias_client, _netrias_client_initialized, _workflow_storage  # noqa: PLW0603
     _netrias_client = None
     _netrias_client_initialized = False
+    _workflow_storage = None
 
 
 __all__ = [
     "MAX_UPLOAD_BYTES",
     "UPLOAD_BASE_DIR",
+    "DEFAULT_WORKFLOW_STORAGE_DIR",
     "cleanup_services",
-    "get_file_store",
     "get_harmonize_service",
     "get_mapping_service",
     "get_netrias_client",
     "get_upload_constraints",
     "get_upload_storage",
+    "get_user_context",
+    "get_workflow_storage",
 ]

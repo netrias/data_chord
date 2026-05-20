@@ -1,0 +1,29 @@
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  install:
+    commands:
+      - curl -LsSf https://astral.sh/uv/install.sh | sh
+      - export PATH="$HOME/.local/bin:$PATH"
+  pre_build:
+    commands:
+      - export PATH="$HOME/.local/bin:$PATH"
+      - uv sync --extra dev
+      - uv run ruff check .
+      - uv run basedpyright
+      - uv run pytest
+      - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - export SOURCE_TAG="${CODEBUILD_RESOLVED_SOURCE_VERSION:-manual}"
+      - export IMAGE_TAG="$(echo "$SOURCE_TAG" | cut -c1-12)"
+      - if [ -z "$IMAGE_TAG" ]; then export IMAGE_TAG="manual"; fi
+  build:
+    commands:
+      - docker build -t "$IMAGE_REPO_URI:latest" -t "$IMAGE_REPO_URI:$IMAGE_TAG" .
+  post_build:
+    commands:
+      - docker push "$IMAGE_REPO_URI:latest"
+      - docker push "$IMAGE_REPO_URI:$IMAGE_TAG"
+      - aws ecs update-service --cluster "$ECS_CLUSTER_NAME" --service "$ECS_SERVICE_NAME" --force-new-deployment

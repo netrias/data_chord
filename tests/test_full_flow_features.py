@@ -14,7 +14,7 @@ import src.domain.dependencies as dependencies
 from src.domain.column_cde_map import ColumnCdeMap
 from src.domain.data_model_cache import clear_all_session_caches
 from src.domain.pv_manifest import PVManifest
-from src.domain.storage import UploadStorage
+from src.domain.storage import UploadStorage, WorkflowFile
 from tests.conftest import (
     TEST_TARGET_SCHEMA,
     create_csv_content,
@@ -43,14 +43,16 @@ def _read_downloaded_csv_rows(response_bytes: bytes) -> list[list[str]]:
 
 
 def _save_test_pv_manifest(file_id: str, column_key: str, cde_key: str, pvs: list[str]) -> None:
-    dependencies.get_file_store().save_pv_manifest(
+    dependencies.get_workflow_storage().write_json(
+        dependencies.get_user_context(),
         file_id,
+        WorkflowFile.PV_MANIFEST,
         PVManifest(
             data_model_key=TEST_TARGET_SCHEMA,
             version_label="1",
             column_to_cde_key=ColumnCdeMap.from_strings({column_key: cde_key}),
             pvs={cde_key: frozenset(pvs)},
-        ),
+        ).to_store(),
     )
 
 
