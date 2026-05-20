@@ -314,7 +314,7 @@ def _next_stage_url(*, file_id: str, job_id: str, job_status: HarmonizeStatus, d
     query_params = urlencode({
         "file_id": file_id,
         "job_id": job_id,
-        "status": job_status,
+        "status": job_status.value,
         "detail": detail or "",
     })
     return f"{NEXT_STAGE_PATH}?{query_params}"

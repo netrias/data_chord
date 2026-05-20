@@ -655,12 +655,18 @@ async def test_stage3_harmonize_returns_queued_while_long_job_finishes(
         assert response.status_code == 200
         body = response.json()
         assert body["status"] == "queued"
+        queued_next_stage_url = body["next_stage_url"]
+        assert isinstance(queued_next_stage_url, str)
+        assert "status=queued" in queued_next_stage_url
         assert body["manifest_summary"] is None
 
         finished = await _wait_for_stage_three_job(app_client, body["job_id"])
 
     assert finished["status"] == "succeeded"
     assert finished["job_id"] == "job-slow"
+    finished_next_stage_url = finished["next_stage_url"]
+    assert isinstance(finished_next_stage_url, str)
+    assert "status=succeeded" in finished_next_stage_url
 
 
 async def test_stage2_saves_confirmed_mapping_choices_to_workflow_state(
