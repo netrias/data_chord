@@ -59,8 +59,22 @@ def column_pv_sets(
     column_keys: Iterable[ColumnKey | str],
 ) -> dict[str, frozenset[str] | None]:
     """Return PV sets by source column key, using cache as an implementation detail."""
+    requested_column_keys = [str(column_key) for column_key in column_keys]
     cache = ensure_pvs_loaded(file_id)
-    return {str(column_key): cache.get_pvs_for_column(column_key) for column_key in column_keys}
+    if not _cache_can_resolve_columns(cache, requested_column_keys):
+        load_pv_manifest_from_disk(file_id, cache)
+    return {column_key: cache.get_pvs_for_column(column_key) for column_key in requested_column_keys}
+
+
+def _cache_can_resolve_columns(cache: SessionCache, column_keys: Iterable[str]) -> bool:
+    """Return false when PVs exist but column->CDE mappings were lost from cache."""
+    mappings = cache.get_column_mappings().to_strings()
+    pvs_by_cde = cache.get_all_pvs()
+    for column_key in column_keys:
+        cde_key = mappings.get(column_key)
+        if cde_key is None or cde_key not in pvs_by_cde:
+            return False
+    return True
 
 
 def save_pv_manifest_to_disk(file_id: str, cache: SessionCache, pv_map: dict[str, frozenset[str]]) -> None:

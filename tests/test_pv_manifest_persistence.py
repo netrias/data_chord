@@ -19,7 +19,7 @@ from src.domain.data_model_cache import (
     clear_all_session_caches,
     get_session_cache,
 )
-from src.domain.pv_persistence import ensure_pvs_loaded, load_pv_manifest_from_disk
+from src.domain.pv_persistence import column_pv_sets, ensure_pvs_loaded, load_pv_manifest_from_disk
 from src.domain.storage import LocalWorkflowStorage, UserContext, WorkflowFile
 
 
@@ -161,6 +161,31 @@ class TestPVManifestPersistenceFeature:
         # Then: Cache is returned with PVs loaded
         assert cache.has_any_pvs()
         assert cache.get_pvs_for_column("col1") == frozenset(["Value A", "Value B"])
+
+    def test_column_pv_sets_restores_missing_column_mappings(self, tmp_path: Path) -> None:
+        """FEATURE: Stage 4 recovers PVs when cache has values but lost column mappings."""
+        # Given: A file with durable PV data, but the process cache cannot map columns to CDEs
+        file_id = "partial_cache_file"
+        pv_manifest_data = {
+            "column_to_cde_key": {"col_0000": "primary_diagnosis"},
+            "pvs": {"primary_diagnosis": ["Adenocarcinoma", "Glioma"]},
+        }
+        clear_all_session_caches()
+        cache = get_session_cache(file_id)
+        cache.set_pvs_batch({"primary_diagnosis": frozenset(["Adenocarcinoma", "Glioma"])})
+        assert cache.get_pvs_for_column("col_0000") is None, "Cache should not already resolve the column"
+
+        # When: Stage 4 asks for PV sets by source column key
+        storage, user = _workflow_storage_with_pv_manifest(tmp_path, file_id, pv_manifest_data)
+        with (
+            patch("src.domain.dependencies.get_workflow_storage", return_value=storage),
+            patch("src.domain.dependencies.get_user_context", return_value=user),
+        ):
+            pvs_by_column = column_pv_sets(file_id, ["col_0000"])
+
+        # Then: the durable manifest is reloaded and the column gets its PV set
+        assert pvs_by_column["col_0000"] == frozenset(["Adenocarcinoma", "Glioma"])
+        assert cache.get_pvs_for_column("col_0000") == frozenset(["Adenocarcinoma", "Glioma"])
 
 
 class TestSessionCacheThreadSafety:
