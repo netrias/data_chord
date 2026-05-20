@@ -1,7 +1,7 @@
 # Security: keep uv pinned so dependency age enforcement stays stable in container builds.
 FROM ghcr.io/astral-sh/uv:0.10.0 AS uv
 
-FROM python:3.13-slim-bookworm AS builder
+FROM public.ecr.aws/docker/library/python:3.13-slim-bookworm AS builder
 
 ENV UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT=/app/.venv \
@@ -18,7 +18,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 
-FROM python:3.13-slim-bookworm AS runtime
+FROM public.ecr.aws/docker/library/python:3.13-slim-bookworm AS runtime
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1

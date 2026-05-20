@@ -24,6 +24,7 @@ phases:
       - docker build -t "$IMAGE_REPO_URI:latest" -t "$IMAGE_REPO_URI:$IMAGE_TAG" .
   post_build:
     commands:
+      - if [ "$CODEBUILD_BUILD_SUCCEEDING" != "1" ]; then echo "Build failed; skipping image push and ECS deploy"; exit 1; fi
       - docker push "$IMAGE_REPO_URI:latest"
       - docker push "$IMAGE_REPO_URI:$IMAGE_TAG"
       - aws ecs update-service --cluster "$ECS_CLUSTER_NAME" --service "$ECS_SERVICE_NAME" --force-new-deployment
