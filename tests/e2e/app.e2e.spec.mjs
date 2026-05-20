@@ -840,6 +840,67 @@ test('error handling: wrong file type and oversize upload', async ({ page }) => 
   }
 });
 
+test('Stage 1 shows upload progress and disabled button guidance', async ({ page }) => {
+  await mockDataModels(page);
+  let releaseUpload;
+  const uploadCanFinish = new Promise((resolve) => {
+    releaseUpload = resolve;
+  });
+  let markUploadStarted;
+  const uploadStarted = new Promise((resolve) => {
+    markUploadStarted = resolve;
+  });
+  await page.route('**/stage-1/upload', async (route) => {
+    markUploadStarted();
+    await uploadCanFinish;
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        file_id: 'abc12345',
+        file_name: 'basic.csv',
+        human_size: '24 B',
+        content_type: 'text/csv',
+        uploaded_at: '2026-05-20T18:00:00Z',
+        tabular_format: 'csv',
+        sheet_names: [],
+        selected_sheet: null,
+        sheet_previews: {},
+      }),
+    });
+  });
+
+  // Given: the upload page has no file yet
+  await page.goto('/stage-1');
+  await expect(page.locator('#analyzeButton')).toBeVisible();
+  await expect(page.locator('#analyzeButton')).toBeDisabled();
+  await expect(page.locator('#dropzoneUploading')).toBeHidden();
+
+  // When: the disabled action is hovered
+  await page.locator('#analyzeButtonShell').hover();
+
+  // Then: the fast custom tooltip explains what is needed
+  await expect(page.locator('#analyzeButtonHelp')).toHaveText('Please upload a file to continue.');
+  await expect(page.locator('#analyzeButtonHelp')).toHaveCSS('opacity', '1');
+
+  // When: the user selects a file and upload is still in flight
+  await page.setInputFiles('#fileInput', fileFixture('basic.csv'));
+  await uploadStarted;
+
+  // Then: the blocking upload indicator is visible and the action remains disabled
+  await expect(page.locator('#dropzoneUploading')).toBeVisible();
+  await expect(page.locator('#dropzoneUploading')).toContainText('Please wait while your file is uploaded');
+  await expect(page.locator('#analyzeButton')).toBeDisabled();
+
+  // When: upload completes
+  releaseUpload();
+
+  // Then: the normal uploaded state returns and the action is enabled
+  await expect(page.locator('#dropzoneFileStatus')).toHaveText('Uploaded');
+  await expect(page.locator('#dropzoneUploading')).toBeHidden();
+  await expect(page.locator('#analyzeButton')).toBeEnabled();
+});
+
 test('error handling: harmonize failure and missing manifest', async ({ page }) => {
   await mockHarmonizeFailure(page);
 

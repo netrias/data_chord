@@ -38,11 +38,14 @@
           </li>
         </ol>
         <div class="progress-tracker-action">
-          <button id="analyzeButton" class="btn-3d" type="button" disabled>
-            <span class="btn-3d-shadow" aria-hidden="true"></span>
-            <span class="btn-3d-edge" aria-hidden="true"></span>
-            <span class="btn-3d-front">Map →</span>
-          </button>
+          <span id="analyzeButtonShell" class="analyze-button-shell" data-disabled-reason="Please upload a file to continue.">
+            <button id="analyzeButton" class="btn-3d" type="button" disabled aria-describedby="analyzeButtonHelp">
+              <span class="btn-3d-shadow" aria-hidden="true"></span>
+              <span class="btn-3d-edge" aria-hidden="true"></span>
+              <span class="btn-3d-front">Map →</span>
+            </button>
+            <span id="analyzeButtonHelp" class="analyze-button-tooltip" role="tooltip">Please upload a file to continue.</span>
+          </span>
         </div>
       </div>
       <div id="stepInstruction" class="step-instruction">
@@ -67,6 +70,19 @@
                 </div>
                 <p class="dropzone-title">Click or drag to upload</p>
                 <p class="dropzone-hint">CSV, TSV, or XLSX · up to {{ ui_constraints.max_mb }} MB</p>
+              </div>
+              <div id="dropzoneUploading" class="dropzone-uploading hidden" aria-hidden="true">
+                <div class="uploading-file-stack" aria-hidden="true">
+                  <span class="uploading-file-sheet uploading-file-sheet--back"></span>
+                  <span class="uploading-file-sheet uploading-file-sheet--front"></span>
+                  <span class="uploading-dots">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </span>
+                </div>
+                <p class="uploading-title">Please wait while your file is uploaded</p>
+                <p class="uploading-file-name" id="uploadingFileName"></p>
               </div>
               <div id="dropzoneFile" class="dropzone-file hidden">
                 <div class="dropzone-success-icon" aria-hidden="true">
