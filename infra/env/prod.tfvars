@@ -8,6 +8,7 @@ public_subnet_ids = [
   "subnet-06a392e3c0aed038e",
   "subnet-046ea5c040e6fd135",
 ]
+secretsmanager_vpc_endpoint_id = "vpce-09e34dd0835d4c005"
 
 certificate_arn  = ""
 domain_name      = ""

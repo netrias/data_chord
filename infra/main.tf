@@ -108,17 +108,9 @@ resource "aws_security_group" "secrets_endpoint" {
   tags = local.common_tags
 }
 
-resource "aws_vpc_endpoint" "secretsmanager" {
-  vpc_id              = var.vpc_id
-  service_name        = "com.amazonaws.${var.aws_region}.secretsmanager"
-  vpc_endpoint_type   = "Interface"
-  subnet_ids          = var.public_subnet_ids
-  security_group_ids  = [aws_security_group.secrets_endpoint.id]
-  private_dns_enabled = true
-
-  tags = merge(local.common_tags, {
-    Name = "${local.name_prefix}-secretsmanager"
-  })
+resource "aws_vpc_endpoint_security_group_association" "secretsmanager_tasks" {
+  vpc_endpoint_id   = var.secretsmanager_vpc_endpoint_id
+  security_group_id = aws_security_group.secrets_endpoint.id
 }
 
 resource "aws_s3_bucket" "workflow" {

@@ -26,6 +26,11 @@ variable "public_subnet_ids" {
   type        = list(string)
 }
 
+variable "secretsmanager_vpc_endpoint_id" {
+  description = "Existing Secrets Manager VPC endpoint id used by Fargate tasks to fetch NETRIAS_API_KEY."
+  type        = string
+}
+
 variable "certificate_arn" {
   description = "Optional ACM certificate ARN for the HTTPS listener. Leave empty to create and validate one in hosted_zone_name."
   type        = string
