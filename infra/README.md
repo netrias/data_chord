@@ -183,9 +183,13 @@ aws cognito-idp admin-create-user \
   --user-attributes Name=email,Value=user@example.com Name=email_verified,Value=true
 ```
 
-## Why The Network Is Public
+## Network
 
-The Fargate tasks run in public subnets with a security group that only allows inbound traffic from the load balancer. This avoids NAT gateways and VPC endpoints for the first hosted version, which keeps cost and OpenTofu simpler. Moving tasks to private subnets is a good later hardening step if this becomes a shared production deployment.
+The Fargate tasks run in existing public subnets with a security group that only
+allows inbound traffic from the load balancer. This avoids NAT gateways, VPC
+endpoints, and VPC quota management for the first hosted version. Moving tasks
+to private subnets is a good later hardening step if this becomes a shared
+production deployment.
 
 ## Useful Outputs
 

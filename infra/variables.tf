@@ -16,10 +16,14 @@ variable "aws_region" {
   default     = "us-east-2"
 }
 
-variable "vpc_cidr" {
-  description = "CIDR block for the small app VPC."
+variable "vpc_id" {
+  description = "Existing VPC id for the ALB and Fargate service."
   type        = string
-  default     = "10.40.0.0/16"
+}
+
+variable "public_subnet_ids" {
+  description = "Existing public subnet ids for the ALB and Fargate service. Use at least two availability zones."
+  type        = list(string)
 }
 
 variable "certificate_arn" {

@@ -1,7 +1,3 @@
-data "aws_availability_zones" "available" {
-  state = "available"
-}
-
 data "aws_caller_identity" "current" {}
 
 data "aws_secretsmanager_secret" "netrias_api_key" {
@@ -32,61 +28,10 @@ data "aws_route53_zone" "app" {
   private_zone = false
 }
 
-resource "aws_vpc" "app" {
-  cidr_block           = var.vpc_cidr
-  enable_dns_hostnames = true
-  enable_dns_support   = true
-
-  tags = merge(local.common_tags, {
-    Name = "${local.name_prefix}-vpc"
-  })
-}
-
-resource "aws_internet_gateway" "app" {
-  vpc_id = aws_vpc.app.id
-
-  tags = merge(local.common_tags, {
-    Name = "${local.name_prefix}-igw"
-  })
-}
-
-resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.app.id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.app.id
-  }
-
-  tags = merge(local.common_tags, {
-    Name = "${local.name_prefix}-public"
-  })
-}
-
-resource "aws_subnet" "public" {
-  count = 2
-
-  vpc_id                  = aws_vpc.app.id
-  cidr_block              = cidrsubnet(var.vpc_cidr, 8, count.index)
-  availability_zone       = data.aws_availability_zones.available.names[count.index]
-  map_public_ip_on_launch = true
-
-  tags = merge(local.common_tags, {
-    Name = "${local.name_prefix}-public-${count.index + 1}"
-  })
-}
-
-resource "aws_route_table_association" "public" {
-  count = length(aws_subnet.public)
-
-  subnet_id      = aws_subnet.public[count.index].id
-  route_table_id = aws_route_table.public.id
-}
-
 resource "aws_security_group" "alb" {
   name        = "${local.name_prefix}-alb"
   description = "Public access to the Data Chord load balancer"
-  vpc_id      = aws_vpc.app.id
+  vpc_id      = var.vpc_id
 
   ingress {
     description = "HTTP redirect"
@@ -118,7 +63,7 @@ resource "aws_security_group" "alb" {
 resource "aws_security_group" "task" {
   name        = "${local.name_prefix}-task"
   description = "Only the ALB can reach the app task"
-  vpc_id      = aws_vpc.app.id
+  vpc_id      = var.vpc_id
 
   ingress {
     description     = "App traffic from ALB"
@@ -356,7 +301,7 @@ resource "aws_lb" "app" {
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
-  subnets            = aws_subnet.public[*].id
+  subnets            = var.public_subnet_ids
 
   tags = local.common_tags
 }
@@ -366,7 +311,7 @@ resource "aws_lb_target_group" "app" {
   port        = var.container_port
   protocol    = "HTTP"
   target_type = "ip"
-  vpc_id      = aws_vpc.app.id
+  vpc_id      = var.vpc_id
 
   health_check {
     enabled             = true
@@ -523,7 +468,7 @@ resource "aws_ecs_service" "app" {
   }
 
   network_configuration {
-    subnets          = aws_subnet.public[*].id
+    subnets          = var.public_subnet_ids
     security_groups  = [aws_security_group.task.id]
     assign_public_ip = true
   }
