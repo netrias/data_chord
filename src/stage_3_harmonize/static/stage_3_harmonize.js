@@ -18,6 +18,7 @@ const errorBanner = document.getElementById('stageThreeError');
 const stageThreeTitle = document.getElementById('stageThreeTitle');
 const returnToStageTwo = document.getElementById('returnToStageTwo');
 const harmonizeAnimation = document.querySelector('#loadingState .harmonize-animation');
+const harmonizeProgressMessage = document.getElementById('harmonizeProgressMessage');
 
 const metricsDashboard = StageThreeMetricsDashboard.initFromDom();
 
@@ -144,6 +145,36 @@ const _hideJobMeta = () => {
   }
 };
 
+const _formatElapsed = (elapsedSeconds) => {
+  if (!Number.isFinite(elapsedSeconds) || elapsedSeconds < 0) {
+    return null;
+  }
+  const minutes = Math.floor(elapsedSeconds / 60);
+  const seconds = Math.floor(elapsedSeconds % 60);
+  if (minutes <= 0) {
+    return `${seconds}s`;
+  }
+  return `${minutes}m ${seconds.toString().padStart(2, '0')}s`;
+};
+
+const _updateProgressMessage = (job) => {
+  if (!harmonizeProgressMessage) {
+    return;
+  }
+
+  const elapsedSeconds = Number(job?.elapsed_seconds);
+  const elapsedLabel = _formatElapsed(elapsedSeconds);
+  if (elapsedSeconds >= 600 && elapsedLabel) {
+    harmonizeProgressMessage.textContent = `Still running after ${elapsedLabel}. Large datasets can take a while; keep this tab open.`;
+    return;
+  }
+  if (elapsedSeconds >= 120 && elapsedLabel) {
+    harmonizeProgressMessage.textContent = `Still working after ${elapsedLabel}. Larger datasets can take several minutes.`;
+    return;
+  }
+  harmonizeProgressMessage.textContent = 'This usually takes 1-2 minutes.';
+};
+
 const _clearPollTimer = () => {
   if (state.pollTimer) {
     window.clearTimeout(state.pollTimer);
@@ -207,6 +238,7 @@ const _renderJob = (job) => {
   } else {
     _toggleLoadingState(true);
     _toggleAnimation(true);
+    _updateProgressMessage(jobForSession);
     _hideMetricsDashboard();
     reviewButton.disabled = true;
     retryButton.classList.add('hidden');

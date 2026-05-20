@@ -19,6 +19,7 @@ _DATA_CHORD_UPLOAD_DIR_VAR = "DATA_CHORD_UPLOAD_DIR"
 _DATA_CHORD_WORKFLOW_STORAGE_DIR_VAR = "DATA_CHORD_WORKFLOW_STORAGE_DIR"
 _DATA_CHORD_S3_BUCKET_VAR = "DATA_CHORD_S3_BUCKET"
 _DATA_CHORD_S3_PREFIX_VAR = "DATA_CHORD_S3_PREFIX"
+_DATA_CHORD_NETRIAS_TIMEOUT_SECONDS_VAR = "DATA_CHORD_NETRIAS_TIMEOUT_SECONDS"
 _DEFAULT_STORAGE_BACKEND = "local"
 
 
@@ -44,6 +45,19 @@ def get_workflow_s3_bucket() -> str | None:
 
 def get_workflow_s3_prefix() -> str:
     return os.getenv(_DATA_CHORD_S3_PREFIX_VAR, "").strip()
+
+
+def get_netrias_timeout_seconds() -> float | None:
+    raw_timeout = os.getenv(_DATA_CHORD_NETRIAS_TIMEOUT_SECONDS_VAR)
+    if raw_timeout is None or not raw_timeout.strip():
+        return None
+    try:
+        timeout = float(raw_timeout)
+    except ValueError as exc:
+        raise ConfigurationError(f"{_DATA_CHORD_NETRIAS_TIMEOUT_SECONDS_VAR} must be a number") from exc
+    if timeout <= 0:
+        raise ConfigurationError(f"{_DATA_CHORD_NETRIAS_TIMEOUT_SECONDS_VAR} must be positive")
+    return timeout
 
 
 def validate_required_config() -> None:

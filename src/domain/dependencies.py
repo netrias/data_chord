@@ -15,6 +15,7 @@ from netrias_client import Environment, NetriasClient
 from src.domain.config import (
     ConfigurationError,
     get_netrias_api_key,
+    get_netrias_timeout_seconds,
     get_storage_backend,
     get_upload_dir,
     get_workflow_s3_bucket,
@@ -110,8 +111,11 @@ def get_netrias_client() -> NetriasClient | None:
     if not _netrias_client_initialized:
         api_key = get_netrias_api_key()
         if api_key:
+            timeout = get_netrias_timeout_seconds()
             try:
                 _netrias_client = NetriasClient(api_key=api_key, environment=Environment.STAGING)
+                if timeout is not None:
+                    _netrias_client.configure(timeout=timeout)
             except Exception:
                 logger.exception("Failed to initialize NetriasClient")
         else:

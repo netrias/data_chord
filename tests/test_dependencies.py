@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 from src.domain import dependencies
 
@@ -21,3 +22,19 @@ def test_upload_storage_uses_configured_scratch_dir(monkeypatch, tmp_path: Path)
     assert storage is not None
     assert (scratch_dir / "files").is_dir()
     assert (scratch_dir / "meta").is_dir()
+
+
+def test_netrias_client_uses_configured_timeout(monkeypatch) -> None:
+    # Given: hosted runtime configures a longer wait for large harmonization jobs
+    monkeypatch.setenv("NETRIAS_API_KEY", "test-key")
+    monkeypatch.setenv("DATA_CHORD_NETRIAS_TIMEOUT_SECONDS", "3600")
+    monkeypatch.setattr(dependencies, "_netrias_client", None)
+    monkeypatch.setattr(dependencies, "_netrias_client_initialized", False)
+
+    # When: the shared Netrias client is initialized
+    with patch("src.domain.dependencies.NetriasClient") as client_class:
+        client = dependencies.get_netrias_client()
+
+    # Then: the SDK receives the configured timeout
+    assert client is client_class.return_value
+    client_class.return_value.configure.assert_called_once_with(timeout=3600.0)

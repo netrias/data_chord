@@ -283,6 +283,7 @@ class TestHarmonizeContract:
         assert "status" in data
         assert "detail" in data
         assert "next_stage_url" in data
+        assert "elapsed_seconds" in data
 
     async def test_status_is_valid_value(
         self,

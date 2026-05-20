@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -80,6 +81,7 @@ class StageThreeJob:
     status: HarmonizeStatus
     detail: str
     next_stage_url: str
+    started_at: float
     job_id_available: bool = False
     manifest_summary: ManifestSummarySchema | None = None
 
@@ -157,6 +159,7 @@ def _create_stage_three_job(file_id: str) -> StageThreeJob:
         status=HarmonizeStatus.QUEUED,
         detail="Harmonization job accepted.",
         next_stage_url=next_stage_url,
+        started_at=time.monotonic(),
         job_id_available=False,
     )
     _stage_three_jobs[job_id] = job
@@ -179,15 +182,18 @@ async def _run_stage_three_job(job_id: str, payload: HarmonizeRequest) -> None:
                 job_status=HarmonizeStatus.FAILED,
                 detail=str(exc),
             ),
+            started_at=_stage_three_jobs[job_id].started_at,
         )
         return
 
+    started_at = _stage_three_jobs[job_id].started_at
     _stage_three_jobs[job_id] = StageThreeJob(
         job_id=response.job_id,
         file_id=payload.file_id,
         status=response.status,
         detail=response.detail,
         next_stage_url=response.next_stage_url,
+        started_at=started_at,
         job_id_available=response.job_id_available,
         manifest_summary=response.manifest_summary,
     )
@@ -200,6 +206,7 @@ def _response_from_job(job: StageThreeJob) -> HarmonizeResponse:
         detail=job.detail,
         next_stage_url=job.next_stage_url,
         job_id_available=job.job_id_available,
+        elapsed_seconds=max(0, int(time.monotonic() - job.started_at)),
         manifest_summary=job.manifest_summary,
     )
 
