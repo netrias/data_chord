@@ -158,6 +158,20 @@ const _showJobId = (jobId) => {
   }
 };
 
+/* why: extract file_id from URL for job and payload validation. */
+const _getFileIdFromUrl = () => {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('file_id');
+};
+
+const _getPayloadFileId = (payload) => payload?.request?.file_id ?? payload?.file_id ?? null;
+
+const _payloadMatchesCurrentFile = (payload) => {
+  const currentFileId = _getFileIdFromUrl();
+  const payloadFileId = _getPayloadFileId(payload);
+  return !currentFileId || !payloadFileId || currentFileId === payloadFileId;
+};
+
 /* why: update UI based on job status. */
 const _renderJob = (job) => {
   if (!job) {
@@ -229,6 +243,10 @@ const _pollJob = async (jobId) => {
 /* why: extract session payload for harmonization request. */
 const _extractRequestPayload = () => {
   let payload = readFromSession(STAGE_3_PAYLOAD_KEY);
+  if (payload && !_payloadMatchesCurrentFile(payload)) {
+    removeFromSession(STAGE_3_PAYLOAD_KEY);
+    payload = null;
+  }
   let harmonizePayload = payload?.request ?? payload;
   if (!harmonizePayload) {
     const params = new URLSearchParams(window.location.search);
@@ -249,12 +267,6 @@ const _extractRequestPayload = () => {
   state.payload = payload;
   state.requestBody = harmonizePayload;
   return harmonizePayload;
-};
-
-/* why: extract file_id from URL for job validation. */
-const _getFileIdFromUrl = () => {
-  const params = new URLSearchParams(window.location.search);
-  return params.get('file_id');
 };
 
 const _startHarmonize = async (payloadOverride = null) => {

@@ -979,6 +979,52 @@ test('Stage 2 locks and Stage 5 is reachable after Stage 3 completes', async ({ 
   expect(harmonizeRequests).toBe(1);
 });
 
+test('Stage 3 ignores stale session payload when URL points at a new file', async ({ page }) => {
+  let harmonizePayload = null;
+  const currentFileId = '22222222abcdef00';
+
+  await page.route('**/stage-3/harmonize', async (route) => {
+    harmonizePayload = route.request().postDataJSON?.() ?? {};
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        job_id: 'e2e-job-current-file',
+        status: 'succeeded',
+        detail: 'Harmonization completed.',
+        next_stage_url: `/stage-4?file_id=${currentFileId}&job_id=e2e-job-current-file&status=succeeded`,
+        job_id_available: true,
+        manifest_summary: null,
+      }),
+    });
+  });
+
+  // Given: the browser has a Stage 3 payload for a previous workflow
+  await page.goto('/stage-1');
+  await page.evaluate(() => {
+    sessionStorage.setItem(
+      'stage3HarmonizePayload',
+      JSON.stringify({
+        request: {
+          file_id: '11111111abcdef00',
+          target_schema: 'stale',
+          target_version_number: 9,
+          manual_overrides: {},
+        },
+      }),
+    );
+  });
+
+  // When: Stage 3 is opened for a different file from the URL alone
+  await page.goto(`/stage-3?file_id=${currentFileId}&target_schema=gc&version_number=2`);
+  await expect(page.locator('#reviewButton')).toBeEnabled();
+
+  // Then: harmonization starts with the current URL file, not the stale session file
+  expect(harmonizePayload?.file_id).toBe(currentFileId);
+  expect(harmonizePayload?.target_schema).toBe('gc');
+  expect(harmonizePayload?.target_version_number).toBe(2);
+});
+
 test('multiple columns with changes show as separate tabs', async ({ page }) => {
   await mockHarmonizeSuccess(page);
 
