@@ -40,7 +40,7 @@ output "ecs_cluster_name" {
 
 output "ecs_service_name" {
   description = "ECS service name."
-  value       = aws_ecs_service.app.name
+  value       = local.name_prefix
 }
 
 output "ecs_log_group" {

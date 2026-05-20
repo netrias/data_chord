@@ -456,6 +456,8 @@ resource "aws_route53_record" "app" {
 }
 
 resource "aws_ecs_service" "app" {
+  count = local.cognito_auth_ready ? 1 : 0
+
   name            = local.name_prefix
   cluster         = aws_ecs_cluster.app.id
   task_definition = aws_ecs_task_definition.app.arn
@@ -534,7 +536,7 @@ resource "aws_iam_role_policy" "codebuild" {
           "ecs:DescribeServices",
           "ecs:UpdateService"
         ]
-        Resource = aws_ecs_service.app.arn
+        Resource = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/${aws_ecs_cluster.app.name}/${local.name_prefix}"
       }
     ]
   })
@@ -578,7 +580,7 @@ resource "aws_codebuild_project" "app_image" {
 
     environment_variable {
       name  = "ECS_SERVICE_NAME"
-      value = aws_ecs_service.app.name
+      value = local.name_prefix
     }
   }
 
