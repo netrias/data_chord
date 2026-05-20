@@ -7,6 +7,7 @@ Axis of change: service wiring and lifecycle. Stages depend on getters, not cons
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import cast
 
 from netrias_client import Environment, NetriasClient
@@ -15,6 +16,7 @@ from src.domain.config import (
     ConfigurationError,
     get_netrias_api_key,
     get_storage_backend,
+    get_upload_dir,
     get_workflow_s3_bucket,
     get_workflow_s3_prefix,
     get_workflow_storage_dir,
@@ -61,8 +63,16 @@ def get_upload_storage() -> UploadStorage:
     global _storage  # noqa: PLW0603 - intentional singleton
     if _storage is None:
         logger.info("Initializing upload storage")
-        _storage = UploadStorage(UPLOAD_BASE_DIR, get_upload_constraints())
+        _storage = UploadStorage(_upload_base_dir(), get_upload_constraints())
     return _storage
+
+
+def _upload_base_dir() -> Path:
+    upload_dir = get_upload_dir()
+    if upload_dir is None:
+        return UPLOAD_BASE_DIR
+    path = Path(upload_dir)
+    return path if path.is_absolute() else PROJECT_ROOT / path
 
 
 def get_workflow_storage() -> WorkflowStorage:

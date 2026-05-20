@@ -20,7 +20,8 @@ RUN uv sync --frozen --no-dev
 
 FROM public.ecr.aws/docker/library/python:3.13-slim-bookworm AS runtime
 
-ENV FORWARDED_ALLOW_IPS="*" \
+ENV DATA_CHORD_UPLOAD_DIR="/tmp/data-chord/uploads" \
+    FORWARDED_ALLOW_IPS="*" \
     PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1
 

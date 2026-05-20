@@ -15,6 +15,7 @@ class ConfigurationError(Exception):
 
 _NETRIAS_API_KEY_VAR = "NETRIAS_API_KEY"
 _DATA_CHORD_STORAGE_VAR = "DATA_CHORD_STORAGE"
+_DATA_CHORD_UPLOAD_DIR_VAR = "DATA_CHORD_UPLOAD_DIR"
 _DATA_CHORD_WORKFLOW_STORAGE_DIR_VAR = "DATA_CHORD_WORKFLOW_STORAGE_DIR"
 _DATA_CHORD_S3_BUCKET_VAR = "DATA_CHORD_S3_BUCKET"
 _DATA_CHORD_S3_PREFIX_VAR = "DATA_CHORD_S3_PREFIX"
@@ -27,6 +28,10 @@ def get_netrias_api_key() -> str | None:
 
 def get_storage_backend() -> str:
     return os.getenv(_DATA_CHORD_STORAGE_VAR, _DEFAULT_STORAGE_BACKEND).strip().lower()
+
+
+def get_upload_dir() -> str | None:
+    return os.getenv(_DATA_CHORD_UPLOAD_DIR_VAR)
 
 
 def get_workflow_storage_dir() -> str | None:
