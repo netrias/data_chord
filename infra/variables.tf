@@ -66,6 +66,13 @@ variable "cognito_user_pool_client_id" {
   default     = ""
 }
 
+variable "auth_bypass_cidrs" {
+  description = "Trusted source CIDRs that can reach the app without Cognito auth. Loaded by deploy scripts from Secrets Manager."
+  type        = list(string)
+  default     = []
+  sensitive   = true
+}
+
 variable "desired_count" {
   description = "Number of Fargate tasks to run."
   type        = number

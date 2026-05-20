@@ -13,6 +13,7 @@ locals {
   app_url             = "https://${local.app_host}"
   callback_url        = "${local.app_url}/oauth2/idpresponse"
   cognito_auth_ready  = var.cognito_user_pool_client_id != ""
+  auth_bypass_ready   = local.cognito_auth_ready && length(nonsensitive(var.auth_bypass_cidrs)) > 0
   certificate_arn     = var.certificate_arn != "" ? var.certificate_arn : aws_acm_certificate_validation.app[0].certificate_arn
   common_tags = merge(var.tags, {
     Project     = var.project_name
@@ -464,6 +465,26 @@ resource "aws_lb_listener" "https" {
         message_body = "Data Chord infrastructure is waiting for Cognito app-client bootstrap. Run just deploy staging or just deploy prod."
         status_code  = "503"
       }
+    }
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_lb_listener_rule" "auth_bypass" {
+  count = local.auth_bypass_ready ? 1 : 0
+
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 10
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.app.arn
+  }
+
+  condition {
+    source_ip {
+      values = var.auth_bypass_cidrs
     }
   }
 

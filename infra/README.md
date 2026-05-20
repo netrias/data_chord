@@ -67,6 +67,27 @@ The first run may apply OpenTofu twice: once to create Cognito and DNS, then
 again after the script creates the Cognito app client. Later runs normally reuse
 the existing resources.
 
+## Optional VPN Auth Bypass
+
+The HTTPS listener normally requires Cognito login. An environment can also
+trust specific VPN egress CIDRs by storing a JSON array in Secrets Manager:
+
+```text
+data-chord/<environment>/auth-bypass-cidrs
+```
+
+For example:
+
+```json
+["203.0.113.10/32"]
+```
+
+During deploy, the script loads this value into OpenTofu as
+`auth_bypass_cidrs`. The CIDR list is not checked into git. Requests from those
+source IPs are forwarded directly to the app; everyone else still uses Cognito.
+Bypassed requests do not include the ALB OIDC identity header, so the app treats
+them as the shared fallback local user.
+
 ## Deploy Source
 
 CodeBuild builds the current Git commit, not your local working tree. Normal

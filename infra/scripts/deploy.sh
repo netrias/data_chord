@@ -29,6 +29,8 @@ tofu_args=(
   "-var-file=$GENERATED_TFVARS_FILE"
 )
 
+AUTH_BYPASS_CIDRS_SECRET_NAME="data-chord/$ENV_NAME/auth-bypass-cidrs"
+
 git_branch() {
   git -C "$REPO_DIR" branch --show-current
 }
@@ -105,6 +107,45 @@ ensure_secret() {
 
 check_secret() {
   "$SCRIPT_DIR/bootstrap-secrets.sh" "$ENV_NAME" check
+}
+
+load_auth_bypass_cidrs() {
+  local output secret_value normalized
+
+  if ! output="$(
+    aws secretsmanager get-secret-value \
+      --secret-id "$AUTH_BYPASS_CIDRS_SECRET_NAME" \
+      --query SecretString \
+      --output text 2>&1
+  )"; then
+    if [[ "$output" == *"ResourceNotFoundException"* ]]; then
+      log "No auth bypass CIDR secret found: $AUTH_BYPASS_CIDRS_SECRET_NAME"
+      return 0
+    fi
+    fail "Could not read auth bypass CIDR secret '$AUTH_BYPASS_CIDRS_SECRET_NAME': $output"
+  fi
+
+  secret_value="$output"
+  if [[ -z "$secret_value" || "$secret_value" == "None" ]]; then
+    log "Auth bypass CIDR secret is empty: $AUTH_BYPASS_CIDRS_SECRET_NAME"
+    return 0
+  fi
+
+  normalized="$(
+    python3 -c 'import json, sys
+raw = sys.stdin.read().strip()
+try:
+    value = json.loads(raw)
+except json.JSONDecodeError as exc:
+    raise SystemExit(f"Secret must be a JSON array of CIDR strings: {exc}") from exc
+if not isinstance(value, list) or not all(isinstance(item, str) and item.strip() for item in value):
+    raise SystemExit("Secret must be a JSON array of non-empty CIDR strings")
+print(json.dumps(value))
+' <<<"$secret_value"
+  )" || fail "Invalid auth bypass CIDR secret: $AUTH_BYPASS_CIDRS_SECRET_NAME"
+
+  export TF_VAR_auth_bypass_cidrs="$normalized"
+  log "Loaded auth bypass CIDRs from Secrets Manager: $AUTH_BYPASS_CIDRS_SECRET_NAME"
 }
 
 ensure_cognito_client_if_possible() {
@@ -284,6 +325,7 @@ run_full_deploy() {
   bootstrap_state
   ensure_generated_tfvars "$ENV_NAME"
   ensure_secret
+  load_auth_bypass_cidrs
   init_tofu
 
   ensure_cognito_client_if_possible || clear_cognito_client_id
@@ -311,6 +353,7 @@ case "$MODE" in
     bootstrap_state
     ensure_generated_tfvars "$ENV_NAME"
     check_secret
+    load_auth_bypass_cidrs
     init_tofu
     if [[ -z "$(tofu_output cognito_user_pool_id)" ]]; then
       clear_cognito_client_id
