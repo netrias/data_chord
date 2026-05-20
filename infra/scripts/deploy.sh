@@ -37,9 +37,15 @@ git_commit() {
   git -C "$REPO_DIR" rev-parse HEAD
 }
 
-remote_has_commit() {
-  local commit="$1"
-  git -C "$REPO_DIR" ls-remote --exit-code origin "$commit" >/dev/null 2>&1
+remote_branch_matches_commit() {
+  local branch="$1"
+  local commit="$2"
+  local remote_commit
+  remote_commit="$(
+    git -C "$REPO_DIR" ls-remote origin "refs/heads/$branch" |
+      awk '{print $1}'
+  )"
+  [[ "$remote_commit" == "$commit" ]]
 }
 
 ensure_deployable_git_state() {
@@ -54,8 +60,8 @@ ensure_deployable_git_state() {
     fail "Working tree has uncommitted changes. Commit them, or rerun with DATA_CHORD_DEPLOY_ALLOW_DIRTY=1 to deploy the current HEAD anyway."
   fi
 
-  if ! remote_has_commit "$commit"; then
-    fail "Current commit is not available on origin. Push branch '$branch' before deploying."
+  if ! remote_branch_matches_commit "$branch" "$commit"; then
+    fail "origin/$branch does not match local HEAD. Push branch '$branch' before deploying."
   fi
 
   log "Deploy source: $branch @ ${commit:0:12}"

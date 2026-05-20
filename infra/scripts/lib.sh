@@ -72,5 +72,10 @@ ensure_generated_tfvars() {
 
 tofu_output() {
   local output_name="$1"
-  tofu -chdir="$INFRA_DIR" output -raw "$output_name" 2>/dev/null || true
+  local output_json
+  output_json="$(tofu -chdir="$INFRA_DIR" output -json "$output_name" 2>/dev/null)" || return 0
+  python3 -c 'import json, sys
+value = json.load(sys.stdin)["value"]
+print(json.dumps(value) if isinstance(value, (dict, list)) else value)
+' <<<"$output_json" 2>/dev/null || true
 }
