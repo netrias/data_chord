@@ -65,3 +65,9 @@ deploy-logs env:
 
 deploy-build env:
 	infra/scripts/deploy.sh {{env}} build
+
+invite-user env email:
+	infra/scripts/invite-cognito-user.sh {{env}} {{email}}
+
+resend-user-invite env email:
+	infra/scripts/invite-cognito-user.sh {{env}} {{email}} resend

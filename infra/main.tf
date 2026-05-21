@@ -5,16 +5,23 @@ data "aws_secretsmanager_secret" "netrias_api_key" {
 }
 
 locals {
-  name_prefix         = substr(lower(replace("${var.project_name}-${var.environment}", "_", "-")), 0, 32)
-  hosted_zone_name    = trimsuffix(var.hosted_zone_name, ".")
-  use_managed_dns     = var.domain_name == "" && local.hosted_zone_name != ""
-  managed_domain_name = "${var.domain_label != "" ? var.domain_label : local.name_prefix}.${local.hosted_zone_name}"
-  app_host            = var.domain_name != "" ? var.domain_name : (local.use_managed_dns ? local.managed_domain_name : aws_lb.app.dns_name)
-  app_url             = "https://${local.app_host}"
-  callback_url        = "${local.app_url}/oauth2/idpresponse"
-  cognito_auth_ready  = var.cognito_user_pool_client_id != ""
-  auth_bypass_ready   = local.cognito_auth_ready && length(nonsensitive(var.auth_bypass_cidrs)) > 0
-  certificate_arn     = var.certificate_arn != "" ? var.certificate_arn : aws_acm_certificate_validation.app[0].certificate_arn
+  name_prefix          = substr(lower(replace("${var.project_name}-${var.environment}", "_", "-")), 0, 32)
+  hosted_zone_name     = trimsuffix(var.hosted_zone_name, ".")
+  use_managed_dns      = var.domain_name == "" && local.hosted_zone_name != ""
+  managed_domain_name  = "${var.domain_label != "" ? var.domain_label : local.name_prefix}.${local.hosted_zone_name}"
+  app_host             = var.domain_name != "" ? var.domain_name : (local.use_managed_dns ? local.managed_domain_name : aws_lb.app.dns_name)
+  app_url              = "https://${local.app_host}"
+  callback_url         = "${local.app_url}/oauth2/idpresponse"
+  cognito_auth_ready   = var.cognito_user_pool_client_id != ""
+  auth_bypass_ready    = local.cognito_auth_ready && length(nonsensitive(var.auth_bypass_cidrs)) > 0
+  certificate_arn      = var.certificate_arn != "" ? var.certificate_arn : aws_acm_certificate_validation.app[0].certificate_arn
+  invite_environment   = var.environment == "prod" ? "" : " (${var.environment} environment)"
+  invite_email_subject = "Your Data Chord${local.invite_environment} access"
+  invite_sms_message   = "Data Chord${local.invite_environment}: username {username}, temporary password {####}"
+  invite_email_message = templatefile("${path.module}/templates/cognito-invite-email.html.tftpl", {
+    app_url            = local.app_url
+    invite_environment = local.invite_environment
+  })
   common_tags = merge(var.tags, {
     Project     = var.project_name
     Environment = var.environment
@@ -399,6 +406,12 @@ resource "aws_cognito_user_pool" "auth" {
 
   admin_create_user_config {
     allow_admin_create_user_only = true
+
+    invite_message_template {
+      email_message = local.invite_email_message
+      email_subject = local.invite_email_subject
+      sms_message   = local.invite_sms_message
+    }
   }
 
   tags = local.common_tags

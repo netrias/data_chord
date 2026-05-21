@@ -198,11 +198,31 @@ just deploy-build staging
 Cognito is configured so only admins can create users. Invite a user with:
 
 ```bash
-aws cognito-idp admin-create-user \
-  --user-pool-id "$(tofu -chdir=infra output -raw cognito_user_pool_id)" \
-  --username user@example.com \
-  --user-attributes Name=email,Value=user@example.com Name=email_verified,Value=true
+AWS_PROFILE=strides just invite-user staging user@example.com
 ```
+
+For production, use `prod` instead of `staging`.
+
+The command creates the Cognito user and Cognito emails them a temporary
+password. The email includes the Data Chord URL, a short description of the
+service, the username, and the temporary password.
+
+You can also print the app URL directly:
+
+```bash
+tofu -chdir=infra output -raw app_url
+```
+
+If the user already exists and needs a fresh temporary password email, resend
+the invitation with:
+
+```bash
+AWS_PROFILE=strides just resend-user-invite staging user@example.com
+```
+
+The resend command is only for users who are still in Cognito's temporary
+password onboarding state. It refuses to resend for confirmed users so it does
+not disturb an account that has already finished setup.
 
 ## Network
 
