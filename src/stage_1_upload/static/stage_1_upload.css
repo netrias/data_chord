@@ -197,7 +197,9 @@
 .uploading-file-stack {
   position: relative;
   width: 74px;
-  height: 64px;
+  /* Tall enough to seat the dots pill below the rotated sheets without
+     clipping or overlapping them. */
+  height: 88px;
   margin-bottom: 0.35rem;
 }
 
@@ -240,8 +242,9 @@
 
 .uploading-dots {
   position: absolute;
-  right: 3px;
-  bottom: 3px;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
   display: inline-flex;
   gap: 4px;
   align-items: center;
