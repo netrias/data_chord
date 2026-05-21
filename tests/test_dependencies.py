@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+from netrias_client import Environment
+
 from src.domain import dependencies
 
 
@@ -37,4 +39,21 @@ def test_netrias_client_uses_configured_timeout(monkeypatch) -> None:
 
     # Then: the SDK receives the configured timeout
     assert client is client_class.return_value
+    client_class.assert_called_once_with(api_key="test-key", environment=Environment.STAGING)
     client_class.return_value.configure.assert_called_once_with(timeout=3600.0)
+
+
+def test_netrias_client_uses_configured_environment(monkeypatch) -> None:
+    # Given: prod runtime tells the app to use prod Netrias services
+    monkeypatch.setenv("NETRIAS_API_KEY", "test-key")
+    monkeypatch.setenv("DATA_CHORD_NETRIAS_ENVIRONMENT", "prod")
+    monkeypatch.setattr(dependencies, "_netrias_client", None)
+    monkeypatch.setattr(dependencies, "_netrias_client_initialized", False)
+
+    # When: the shared Netrias client is initialized
+    with patch("src.domain.dependencies.NetriasClient") as client_class:
+        client = dependencies.get_netrias_client()
+
+    # Then: the SDK is wired to prod endpoints
+    assert client is client_class.return_value
+    client_class.assert_called_once_with(api_key="test-key", environment=Environment.PROD)

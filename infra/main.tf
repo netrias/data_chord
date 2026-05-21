@@ -303,6 +303,10 @@ resource "aws_ecs_task_definition" "app" {
           value = var.environment
         },
         {
+          name  = "DATA_CHORD_NETRIAS_ENVIRONMENT"
+          value = var.environment
+        },
+        {
           name  = "DATA_CHORD_NETRIAS_TIMEOUT_SECONDS"
           value = "3600"
         },

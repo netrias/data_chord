@@ -15,6 +15,7 @@ from netrias_client import Environment, NetriasClient
 from src.domain.config import (
     ConfigurationError,
     get_netrias_api_key,
+    get_netrias_environment_name,
     get_netrias_timeout_seconds,
     get_storage_backend,
     get_upload_dir,
@@ -112,8 +113,9 @@ def get_netrias_client() -> NetriasClient | None:
         api_key = get_netrias_api_key()
         if api_key:
             timeout = get_netrias_timeout_seconds()
+            environment = _netrias_environment()
             try:
-                _netrias_client = NetriasClient(api_key=api_key, environment=Environment.STAGING)
+                _netrias_client = NetriasClient(api_key=api_key, environment=environment)
                 if timeout is not None:
                     _netrias_client.configure(timeout=timeout)
             except Exception:
@@ -122,6 +124,10 @@ def get_netrias_client() -> NetriasClient | None:
             logger.warning("NETRIAS_API_KEY missing; SDK calls will be unavailable.")
         _netrias_client_initialized = True
     return _netrias_client
+
+
+def _netrias_environment() -> Environment:
+    return Environment(get_netrias_environment_name())
 
 
 def get_mapping_service() -> MappingDiscoveryService:
