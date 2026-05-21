@@ -48,6 +48,11 @@ output "ecs_log_group" {
   value       = aws_cloudwatch_log_group.app.name
 }
 
+output "alert_topic_arn" {
+  description = "SNS topic ARN for environment-specific Data Chord health alerts."
+  value       = aws_sns_topic.alerts.arn
+}
+
 output "target_group_arn" {
   description = "ALB target group ARN for task health checks."
   value       = aws_lb_target_group.app.arn

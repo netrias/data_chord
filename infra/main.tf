@@ -21,6 +21,8 @@ locals {
     app_url            = local.app_url
     invite_environment = local.invite_environment
   })
+  alert_actions   = [aws_sns_topic.alerts.arn]
+  ecs_service_arn = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/${aws_ecs_cluster.app.name}/${local.name_prefix}"
   common_tags = merge(var.tags, {
     Project     = var.project_name
     Environment = var.environment
@@ -177,6 +179,230 @@ resource "aws_cloudwatch_log_group" "app" {
 resource "aws_cloudwatch_log_group" "codebuild" {
   name              = "/aws/codebuild/${local.name_prefix}"
   retention_in_days = 14
+
+  tags = local.common_tags
+}
+
+resource "aws_sns_topic" "alerts" {
+  name         = "${local.name_prefix}-alerts"
+  display_name = "Data Chord ${var.environment} alerts"
+
+  tags = local.common_tags
+}
+
+resource "aws_sns_topic_subscription" "alert_email" {
+  for_each = toset(var.alert_email_addresses)
+
+  topic_arn = aws_sns_topic.alerts.arn
+  protocol  = "email"
+  endpoint  = each.value
+}
+
+resource "aws_cloudwatch_log_metric_filter" "app_error_logs" {
+  name           = "${local.name_prefix}-app-error-logs"
+  log_group_name = aws_cloudwatch_log_group.app.name
+  pattern        = "\"| ERROR |\""
+
+  metric_transformation {
+    name      = "${local.name_prefix}-app-error-count"
+    namespace = "DataChord/${var.environment}"
+    value     = "1"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "app_error_logs" {
+  alarm_name          = "${local.name_prefix}-app-error-logs"
+  alarm_description   = "[${upper(var.environment)}] Data Chord app emitted ERROR logs."
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  metric_name         = aws_cloudwatch_log_metric_filter.app_error_logs.metric_transformation[0].name
+  namespace           = aws_cloudwatch_log_metric_filter.app_error_logs.metric_transformation[0].namespace
+  period              = 300
+  statistic           = "Sum"
+  threshold           = var.app_error_log_alarm_threshold
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alert_actions
+  ok_actions          = local.alert_actions
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "alb_no_healthy_targets" {
+  alarm_name          = "${local.name_prefix}-alb-no-healthy-targets"
+  alarm_description   = "[${upper(var.environment)}] Data Chord ALB has fewer healthy targets than desired tasks."
+  comparison_operator = "LessThanThreshold"
+  datapoints_to_alarm = 2
+  evaluation_periods  = 2
+  metric_name         = "HealthyHostCount"
+  namespace           = "AWS/ApplicationELB"
+  period              = 60
+  statistic           = "Minimum"
+  threshold           = var.desired_count
+  treat_missing_data  = "breaching"
+  alarm_actions       = local.alert_actions
+  ok_actions          = local.alert_actions
+
+  dimensions = {
+    LoadBalancer = aws_lb.app.arn_suffix
+    TargetGroup  = aws_lb_target_group.app.arn_suffix
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "alb_unhealthy_targets" {
+  alarm_name          = "${local.name_prefix}-alb-unhealthy-targets"
+  alarm_description   = "[${upper(var.environment)}] Data Chord ALB target group has unhealthy targets."
+  comparison_operator = "GreaterThanThreshold"
+  datapoints_to_alarm = 2
+  evaluation_periods  = 2
+  metric_name         = "UnHealthyHostCount"
+  namespace           = "AWS/ApplicationELB"
+  period              = 60
+  statistic           = "Minimum"
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alert_actions
+  ok_actions          = local.alert_actions
+
+  dimensions = {
+    LoadBalancer = aws_lb.app.arn_suffix
+    TargetGroup  = aws_lb_target_group.app.arn_suffix
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "app_5xx" {
+  alarm_name          = "${local.name_prefix}-app-5xx"
+  alarm_description   = "[${upper(var.environment)}] Data Chord app targets returned 5xx responses."
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  metric_name         = "HTTPCode_Target_5XX_Count"
+  namespace           = "AWS/ApplicationELB"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = var.app_5xx_alarm_threshold
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alert_actions
+  ok_actions          = local.alert_actions
+
+  dimensions = {
+    LoadBalancer = aws_lb.app.arn_suffix
+    TargetGroup  = aws_lb_target_group.app.arn_suffix
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
+  alarm_name          = "${local.name_prefix}-alb-5xx"
+  alarm_description   = "[${upper(var.environment)}] Data Chord ALB generated 5xx responses."
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  metric_name         = "HTTPCode_ELB_5XX_Count"
+  namespace           = "AWS/ApplicationELB"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = var.alb_5xx_alarm_threshold
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alert_actions
+  ok_actions          = local.alert_actions
+
+  dimensions = {
+    LoadBalancer = aws_lb.app.arn_suffix
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "target_connection_errors" {
+  alarm_name          = "${local.name_prefix}-target-connection-errors"
+  alarm_description   = "[${upper(var.environment)}] Data Chord ALB could not connect to app targets."
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  metric_name         = "TargetConnectionErrorCount"
+  namespace           = "AWS/ApplicationELB"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = var.target_connection_error_alarm_threshold
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alert_actions
+  ok_actions          = local.alert_actions
+
+  dimensions = {
+    LoadBalancer = aws_lb.app.arn_suffix
+    TargetGroup  = aws_lb_target_group.app.arn_suffix
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "target_response_time" {
+  alarm_name          = "${local.name_prefix}-target-response-time"
+  alarm_description   = "[${upper(var.environment)}] Data Chord p95 app target response time is high."
+  comparison_operator = "GreaterThanThreshold"
+  datapoints_to_alarm = 2
+  evaluation_periods  = 3
+  extended_statistic  = "p95"
+  metric_name         = "TargetResponseTime"
+  namespace           = "AWS/ApplicationELB"
+  period              = 300
+  threshold           = var.target_response_time_alarm_seconds
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alert_actions
+  ok_actions          = local.alert_actions
+
+  dimensions = {
+    LoadBalancer = aws_lb.app.arn_suffix
+    TargetGroup  = aws_lb_target_group.app.arn_suffix
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "ecs_cpu_high" {
+  alarm_name          = "${local.name_prefix}-ecs-cpu-high"
+  alarm_description   = "[${upper(var.environment)}] Data Chord ECS service CPU utilization is high."
+  comparison_operator = "GreaterThanThreshold"
+  datapoints_to_alarm = 3
+  evaluation_periods  = 3
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/ECS"
+  period              = 300
+  statistic           = "Average"
+  threshold           = var.ecs_cpu_alarm_threshold_percent
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alert_actions
+  ok_actions          = local.alert_actions
+
+  dimensions = {
+    ClusterName = aws_ecs_cluster.app.name
+    ServiceName = local.name_prefix
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "ecs_memory_high" {
+  alarm_name          = "${local.name_prefix}-ecs-memory-high"
+  alarm_description   = "[${upper(var.environment)}] Data Chord ECS service memory utilization is high."
+  comparison_operator = "GreaterThanThreshold"
+  datapoints_to_alarm = 3
+  evaluation_periods  = 3
+  metric_name         = "MemoryUtilization"
+  namespace           = "AWS/ECS"
+  period              = 300
+  statistic           = "Average"
+  threshold           = var.ecs_memory_alarm_threshold_percent
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alert_actions
+  ok_actions          = local.alert_actions
+
+  dimensions = {
+    ClusterName = aws_ecs_cluster.app.name
+    ServiceName = local.name_prefix
+  }
 
   tags = local.common_tags
 }
@@ -549,6 +775,164 @@ resource "aws_ecs_service" "app" {
   depends_on = [aws_lb_listener.https]
 
   tags = local.common_tags
+}
+
+resource "aws_cloudwatch_event_rule" "codebuild_failed" {
+  name        = "${local.name_prefix}-codebuild-failed"
+  description = "Alert when Data Chord ${var.environment} CodeBuild deploys fail."
+
+  event_pattern = jsonencode({
+    source        = ["aws.codebuild"]
+    "detail-type" = ["CodeBuild Build State Change"]
+    detail = {
+      "build-status" = ["FAILED", "FAULT", "STOPPED", "TIMED_OUT"]
+      "project-name" = [aws_codebuild_project.app_image.name]
+    }
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_event_target" "codebuild_failed_alert" {
+  rule = aws_cloudwatch_event_rule.codebuild_failed.name
+  arn  = aws_sns_topic.alerts.arn
+
+  input_transformer {
+    input_paths = {
+      build_id = "$.detail.build-id"
+      project  = "$.detail.project-name"
+      status   = "$.detail.build-status"
+      time     = "$.time"
+    }
+    input_template = "\"[${upper(var.environment)}] Data Chord CodeBuild failure: project <project> build <build_id> finished with <status> at <time>.\""
+  }
+}
+
+resource "aws_cloudwatch_event_rule" "ecs_service_error" {
+  name        = "${local.name_prefix}-ecs-service-error"
+  description = "Alert when the Data Chord ${var.environment} ECS service emits an ERROR action event."
+
+  event_pattern = jsonencode({
+    source        = ["aws.ecs"]
+    "detail-type" = ["ECS Service Action"]
+    resources     = [local.ecs_service_arn]
+    detail = {
+      clusterArn = [aws_ecs_cluster.app.arn]
+      eventType  = ["ERROR"]
+    }
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_event_target" "ecs_service_error_alert" {
+  rule = aws_cloudwatch_event_rule.ecs_service_error.name
+  arn  = aws_sns_topic.alerts.arn
+
+  input_transformer {
+    input_paths = {
+      event_name = "$.detail.eventName"
+      reason     = "$.detail.reason"
+      time       = "$.time"
+    }
+    input_template = "\"[${upper(var.environment)}] Data Chord ECS service error: <event_name> at <time>. Reason: <reason>.\""
+  }
+}
+
+resource "aws_cloudwatch_event_rule" "ecs_deployment_failed" {
+  name        = "${local.name_prefix}-ecs-deployment-failed"
+  description = "Alert when the Data Chord ${var.environment} ECS deployment circuit breaker reports failure."
+
+  event_pattern = jsonencode({
+    source        = ["aws.ecs"]
+    "detail-type" = ["ECS Deployment State Change"]
+    resources     = [local.ecs_service_arn]
+    detail = {
+      eventName = ["SERVICE_DEPLOYMENT_FAILED"]
+      eventType = ["ERROR"]
+    }
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_event_target" "ecs_deployment_failed_alert" {
+  rule = aws_cloudwatch_event_rule.ecs_deployment_failed.name
+  arn  = aws_sns_topic.alerts.arn
+
+  input_transformer {
+    input_paths = {
+      deployment_id = "$.detail.deploymentId"
+      reason        = "$.detail.reason"
+      time          = "$.time"
+    }
+    input_template = "\"[${upper(var.environment)}] Data Chord ECS deployment failed: deployment <deployment_id> at <time>. Reason: <reason>.\""
+  }
+}
+
+resource "aws_sns_topic_policy" "alerts" {
+  arn = aws_sns_topic.alerts.arn
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowAccountOwnerManageTopic"
+        Effect = "Allow"
+        Principal = {
+          AWS = "*"
+        }
+        Action = [
+          "SNS:AddPermission",
+          "SNS:DeleteTopic",
+          "SNS:GetTopicAttributes",
+          "SNS:ListSubscriptionsByTopic",
+          "SNS:Publish",
+          "SNS:RemovePermission",
+          "SNS:SetTopicAttributes",
+          "SNS:Subscribe"
+        ]
+        Resource = aws_sns_topic.alerts.arn
+        Condition = {
+          StringEquals = {
+            "AWS:SourceOwner" = data.aws_caller_identity.current.account_id
+          }
+        }
+      },
+      {
+        Sid    = "AllowCloudWatchAlarmsPublish"
+        Effect = "Allow"
+        Principal = {
+          Service = "cloudwatch.amazonaws.com"
+        }
+        Action   = "SNS:Publish"
+        Resource = aws_sns_topic.alerts.arn
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = data.aws_caller_identity.current.account_id
+          }
+        }
+      },
+      {
+        Sid    = "AllowEventBridgePublish"
+        Effect = "Allow"
+        Principal = {
+          Service = "events.amazonaws.com"
+        }
+        Action   = "SNS:Publish"
+        Resource = aws_sns_topic.alerts.arn
+        Condition = {
+          ArnEquals = {
+            "aws:SourceArn" = [
+              aws_cloudwatch_event_rule.codebuild_failed.arn,
+              aws_cloudwatch_event_rule.ecs_deployment_failed.arn,
+              aws_cloudwatch_event_rule.ecs_service_error.arn
+            ]
+          }
+        }
+      }
+    ]
+  })
 }
 
 resource "aws_iam_role" "codebuild" {

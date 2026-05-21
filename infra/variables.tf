@@ -73,6 +73,54 @@ variable "desired_count" {
   default     = 1
 }
 
+variable "alert_email_addresses" {
+  description = "Email addresses subscribed to environment-specific health alerts. Leave empty to create alarms without email subscribers."
+  type        = list(string)
+  default     = []
+}
+
+variable "app_5xx_alarm_threshold" {
+  description = "Number of target-generated 5xx responses in five minutes before alerting."
+  type        = number
+  default     = 1
+}
+
+variable "alb_5xx_alarm_threshold" {
+  description = "Number of load-balancer-generated 5xx responses in five minutes before alerting."
+  type        = number
+  default     = 1
+}
+
+variable "target_connection_error_alarm_threshold" {
+  description = "Number of ALB target connection errors in five minutes before alerting."
+  type        = number
+  default     = 1
+}
+
+variable "target_response_time_alarm_seconds" {
+  description = "p95 ALB target response time in seconds before alerting."
+  type        = number
+  default     = 10
+}
+
+variable "ecs_cpu_alarm_threshold_percent" {
+  description = "Average ECS service CPU utilization percentage before alerting."
+  type        = number
+  default     = 85
+}
+
+variable "ecs_memory_alarm_threshold_percent" {
+  description = "Average ECS service memory utilization percentage before alerting."
+  type        = number
+  default     = 85
+}
+
+variable "app_error_log_alarm_threshold" {
+  description = "Number of app ERROR log entries in five minutes before alerting."
+  type        = number
+  default     = 1
+}
+
 variable "container_cpu" {
   description = "Fargate task CPU units."
   type        = number

@@ -19,6 +19,20 @@ test:
 test-e2e:
 	npm run test:e2e
 
+perf-e2e:
+	npm run perf:e2e
+
+perf-staging base_url="":
+	@set -euo pipefail; \
+	url="{{base_url}}"; \
+	if [ -z "$url" ]; then url="${DATA_CHORD_STAGING_URL:-}"; fi; \
+	if [ -z "$url" ]; then \
+		tofu -chdir=infra init -backend-config=env/staging.backend.hcl -input=false >/dev/null; \
+		url="$(tofu -chdir=infra output -raw app_url)"; \
+	fi; \
+	echo "Running staging performance journey against $url"; \
+	PLAYWRIGHT_BASE_URL="$url" npm run perf:staging
+
 e2e-install:
 	# Security: npm ci enforces the lockfile and .npmrc package age gate.
 	npm ci

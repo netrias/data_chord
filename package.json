@@ -8,7 +8,9 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "perf:e2e": "RUN_PERF=true playwright test tests/e2e/performance.e2e.spec.mjs --reporter=line",
+    "perf:staging": "RUN_REMOTE_PERF=true PLAYWRIGHT_NO_WEBSERVER=true playwright test tests/e2e/performance.remote.e2e.spec.mjs --reporter=line"
   },
   "keywords": [],
   "author": "",

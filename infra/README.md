@@ -59,6 +59,17 @@ The deploy script is idempotent. It creates or updates:
 
 5. The CodeBuild image build and ECS rollout.
 
+## Alerting
+
+Each environment creates its own CloudWatch alarms, EventBridge failure rules,
+and SNS topic. Alert names and messages include the environment name, for
+example `data-chord-staging` or `data-chord-prod`, so staging failures are easy
+to separate from production failures.
+
+Subscribe email recipients by setting `alert_email_addresses` in the matching
+environment tfvars file or with a deploy-time variable. AWS sends each address a
+confirmation email before it receives alerts.
+
 ## Optional VPN Auth Bypass
 
 The HTTPS listener normally requires Cognito login. An environment can also

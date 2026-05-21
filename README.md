@@ -62,6 +62,27 @@ just lint        # Lint
 just typecheck   # Type check
 ```
 
+### Performance Journeys
+
+Use the local journey for browser/render timing while developing:
+
+```bash
+just perf-e2e
+```
+
+Use the staging journey for deployed user-experience timing once you are on the
+company VPN and the timing instrumentation has been deployed:
+
+```bash
+just perf-staging
+# or pass an explicit URL:
+just perf-staging https://your-staging-host.example.com
+```
+
+The staging journey drives the real app flow and prints upload, analyze,
+harmonize, Stage 4, Stage 5, and download timings.
+Set `PERF_REMOTE_ROWS=50` to change the generated CSV size.
+
 ## AWS Hosting
 
 The app has an OpenTofu starter stack in [infra/README.md](infra/README.md). It deploys ECS Fargate behind ALB + Cognito, stores workflow artifacts in S3, and uses CodeBuild to test, build, push, and redeploy the Docker image.
