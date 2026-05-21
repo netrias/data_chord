@@ -159,7 +159,7 @@ resource "aws_s3_bucket_versioning" "workflow" {
 
 resource "aws_ecr_repository" "app" {
   name                 = local.name_prefix
-  image_tag_mutability = "MUTABLE"
+  image_tag_mutability = "IMMUTABLE"
   force_delete         = var.force_delete_repositories
 
   image_scanning_configuration {
@@ -928,6 +928,7 @@ resource "aws_iam_role_policy" "codebuild" {
         Action = [
           "ecr:BatchCheckLayerAvailability",
           "ecr:CompleteLayerUpload",
+          "ecr:DescribeImages",
           "ecr:GetAuthorizationToken",
           "ecr:InitiateLayerUpload",
           "ecr:PutImage",
@@ -973,6 +974,11 @@ resource "aws_codebuild_project" "app_image" {
     environment_variable {
       name  = "IMAGE_REPO_URI"
       value = aws_ecr_repository.app.repository_url
+    }
+
+    environment_variable {
+      name  = "IMAGE_REPO_NAME"
+      value = aws_ecr_repository.app.name
     }
   }
 
