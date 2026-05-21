@@ -63,12 +63,21 @@ The deploy script is idempotent. It creates or updates:
 
 Each environment creates its own CloudWatch alarms, EventBridge failure rules,
 and SNS topic. Alert names and messages include the environment name, for
-example `data-chord-staging` or `data-chord-prod`, so staging failures are easy
-to separate from production failures.
+example `STAGING` or `PROD`, so staging failures are easy to separate from
+production failures.
 
 Subscribe email recipients by setting `alert_email_addresses` in the matching
 environment tfvars file or with a deploy-time variable. AWS sends each address a
 confirmation email before it receives alerts.
+
+Production is the only environment subscribed by default. Staging still has
+alarms for manual inspection, but it does not send email unless a recipient is
+explicitly added to `infra/env/staging.tfvars`.
+
+Only outage and user-visible failure alarms publish to email. Warning alarms
+such as high CPU, high memory, high response time, and app ERROR logs are kept
+in CloudWatch without email actions. CloudWatch OK transitions also do not send
+email, so deploys do not generate a recovery-message burst.
 
 ## Optional VPN Auth Bypass
 
