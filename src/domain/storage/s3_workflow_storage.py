@@ -102,7 +102,8 @@ class S3WorkflowStorage:
         self._require_json_kind(kind)
         self._require_access(user, file_id)
         key = self._json_key(file_id, kind)
-        self._check_write_version(key, kind, expected_version)
+        if not kind.is_mutable and expected_version is not None:
+            raise WorkflowConflictError(f"Artifact is create-once: {kind.value}")
         kwargs: dict[str, object] = {
             "Bucket": self.bucket,
             "Key": key,
@@ -207,22 +208,6 @@ class S3WorkflowStorage:
         if metadata.owner_user_id != user.user_id and not user.is_admin:
             raise WorkflowAccessDeniedError(file_id)
         return metadata
-
-    def _check_write_version(
-        self,
-        key: str,
-        kind: WorkflowFile,
-        expected_version: VersionToken | None,
-    ) -> None:
-        current_version = self._object_version(key)
-        if current_version is None:
-            if expected_version is not None:
-                raise WorkflowConflictError(f"Artifact does not exist: {kind.value}")
-            return
-        if not kind.is_mutable:
-            raise WorkflowConflictError(f"Artifact is create-once: {kind.value}")
-        if expected_version is None or expected_version != current_version:
-            raise WorkflowConflictError(f"Artifact version changed: {kind.value}")
 
     def _object_version(self, key: str) -> VersionToken | None:
         try:

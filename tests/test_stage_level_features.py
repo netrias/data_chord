@@ -8,6 +8,7 @@ import io
 import json
 import time
 import zipfile
+from datetime import UTC, datetime
 from io import BytesIO
 from typing import cast
 from unittest.mock import MagicMock
@@ -27,6 +28,7 @@ from src.domain.manifest import ManifestPayload
 from src.domain.storage import UploadStorage, WorkflowFile
 from src.domain.workflow_state import WorkflowState
 from src.domain.workflow_state_store import load_workflow_state
+from src.stage_3_harmonize.job_state import StageThreeJobState
 from tests.conftest import (
     TEST_TARGET_SCHEMA,
     TEST_TSV_CONTENT_TYPE,
@@ -91,6 +93,31 @@ async def _wait_for_stage_three_job(app_client: AsyncClient, job_id: str, file_i
             return cast(dict[str, object], body)
         await asyncio.sleep(0.02)
     raise AssertionError(f"Stage 3 job did not finish: {job_id}")
+
+
+async def test_stage_three_job_state_requires_timezone_aware_start() -> None:
+    # Given / When / Then: persisted job timing rejects ambiguous local datetimes
+    with pytest.raises(ValueError):
+        StageThreeJobState(
+            polling_job_id="polling-job",
+            job_id="job",
+            file_id="file",
+            status=HarmonizeStatus.QUEUED,
+            detail="queued",
+            next_stage_url="/stage-4",
+            started_at=datetime(2026, 5, 21),
+        )
+
+    job = StageThreeJobState(
+        polling_job_id="polling-job",
+        job_id="job",
+        file_id="file",
+        status=HarmonizeStatus.QUEUED,
+        detail="queued",
+        next_stage_url="/stage-4",
+        started_at=datetime(2026, 5, 21, tzinfo=UTC),
+    )
+    assert job.started_at.tzinfo is UTC
 
 
 async def test_stage1_upload_persists_exact_bytes(

@@ -41,6 +41,10 @@ class StageThreeJobState:
     job_id_available: bool = False
     manifest_summary: ManifestSummarySchema | None = None
 
+    def __post_init__(self) -> None:
+        if self.started_at.tzinfo is None or self.started_at.utcoffset() is None:
+            raise ValueError("StageThreeJobState.started_at must be timezone-aware")
+
     def elapsed_seconds(self, *, now: datetime | None = None) -> int:
         current_time = now or datetime.now(UTC)
         return max(0, int((current_time - self.started_at).total_seconds()))

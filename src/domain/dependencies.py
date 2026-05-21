@@ -14,6 +14,7 @@ from netrias_client import Environment, NetriasClient
 
 from src.domain.config import (
     ConfigurationError,
+    StorageBackend,
     get_netrias_api_key,
     get_netrias_environment_name,
     get_netrias_timeout_seconds,
@@ -41,8 +42,6 @@ logger = logging.getLogger(__name__)
 
 UPLOAD_BASE_DIR = PROJECT_ROOT / "uploads"
 DEFAULT_WORKFLOW_STORAGE_DIR = PROJECT_ROOT / "workflow_storage"
-LOCAL_STORAGE_BACKEND = "local"
-S3_STORAGE_BACKEND = "s3"
 MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024
 
 _upload_constraints: UploadConstraints | None = None
@@ -81,15 +80,16 @@ def get_workflow_storage() -> WorkflowStorage:
     global _workflow_storage  # noqa: PLW0603 - intentional singleton
     if _workflow_storage is None:
         backend = get_storage_backend()
-        if backend == LOCAL_STORAGE_BACKEND:
+        if backend == StorageBackend.LOCAL:
             storage_dir = get_workflow_storage_dir()
             base_dir = DEFAULT_WORKFLOW_STORAGE_DIR if storage_dir is None else PROJECT_ROOT / storage_dir
             logger.info("Initializing local workflow storage", extra={"base_dir": str(base_dir)})
             _workflow_storage = LocalWorkflowStorage(base_dir)
-        elif backend == S3_STORAGE_BACKEND:
+        elif backend == StorageBackend.S3:
             bucket = get_workflow_s3_bucket()
             if not bucket:
                 raise ConfigurationError("DATA_CHORD_S3_BUCKET is required when DATA_CHORD_STORAGE=s3")
+            # Lazy import keeps local storage and lightweight tests from initializing AWS clients.
             import boto3
 
             _workflow_storage = S3WorkflowStorage(
@@ -98,7 +98,7 @@ def get_workflow_storage() -> WorkflowStorage:
                 client=cast(S3WorkflowClient, boto3.client("s3")),
             )
         else:
-            raise ConfigurationError(f"Unsupported DATA_CHORD_STORAGE value: {backend}")
+            raise ConfigurationError(f"Unsupported DATA_CHORD_STORAGE value: {backend.value}")
     return _workflow_storage
 
 

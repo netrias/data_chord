@@ -524,6 +524,10 @@ resource "aws_ecs_task_definition" "app" {
           value = "3600"
         },
         {
+          name  = "DATA_CHORD_ALB_ARN"
+          value = aws_lb.app.arn
+        },
+        {
           name  = "CORS_ALLOW_ORIGINS"
           value = local.app_url
         }

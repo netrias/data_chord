@@ -16,7 +16,7 @@ from starlette.types import Scope
 
 from src.domain.paths import PROJECT_ROOT, SHARED_STATIC_DIR, get_stage_static_dir
 from src.domain.storage import WorkflowAccessDeniedError, WorkflowNotFoundError
-from src.domain.user_context import bind_user_context, reset_user_context
+from src.domain.user_context import InvalidUserContextError, bind_user_context, reset_user_context
 from src.stage_1_upload.router import stage_one_router
 from src.stage_2_review_columns.router import stage_two_router
 from src.stage_3_harmonize.router import stage_three_router
@@ -144,7 +144,10 @@ async def _healthz() -> dict[str, str]:
 
 
 async def _bind_user_context(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-    token = bind_user_context(request.headers)
+    try:
+        token = bind_user_context(request.headers)
+    except InvalidUserContextError:
+        return Response("Invalid identity headers", status_code=401)
     try:
         response = await call_next(request)
     finally:

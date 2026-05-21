@@ -7,10 +7,16 @@ Centralized here to allow fail-fast validation at Docker build time.
 from __future__ import annotations
 
 import os
+from enum import StrEnum
 
 
 class ConfigurationError(Exception):
     pass
+
+
+class StorageBackend(StrEnum):
+    LOCAL = "local"
+    S3 = "s3"
 
 
 _NETRIAS_API_KEY_VAR = "NETRIAS_API_KEY"
@@ -21,7 +27,8 @@ _DATA_CHORD_S3_BUCKET_VAR = "DATA_CHORD_S3_BUCKET"
 _DATA_CHORD_S3_PREFIX_VAR = "DATA_CHORD_S3_PREFIX"
 _DATA_CHORD_NETRIAS_ENVIRONMENT_VAR = "DATA_CHORD_NETRIAS_ENVIRONMENT"
 _DATA_CHORD_NETRIAS_TIMEOUT_SECONDS_VAR = "DATA_CHORD_NETRIAS_TIMEOUT_SECONDS"
-_DEFAULT_STORAGE_BACKEND = "local"
+_DATA_CHORD_ALB_ARN_VAR = "DATA_CHORD_ALB_ARN"
+_DEFAULT_STORAGE_BACKEND = StorageBackend.LOCAL
 _DEFAULT_NETRIAS_ENVIRONMENT = "staging"
 _VALID_NETRIAS_ENVIRONMENTS = frozenset({"prod", "staging"})
 
@@ -30,8 +37,13 @@ def get_netrias_api_key() -> str | None:
     return os.getenv(_NETRIAS_API_KEY_VAR)
 
 
-def get_storage_backend() -> str:
-    return os.getenv(_DATA_CHORD_STORAGE_VAR, _DEFAULT_STORAGE_BACKEND).strip().lower()
+def get_storage_backend() -> StorageBackend:
+    raw_backend = os.getenv(_DATA_CHORD_STORAGE_VAR, _DEFAULT_STORAGE_BACKEND.value).strip().lower()
+    try:
+        return StorageBackend(raw_backend)
+    except ValueError as exc:
+        valid_backends = ", ".join(backend.value for backend in StorageBackend)
+        raise ConfigurationError(f"{_DATA_CHORD_STORAGE_VAR} must be one of: {valid_backends}") from exc
 
 
 def get_upload_dir() -> str | None:
@@ -72,6 +84,14 @@ def get_netrias_timeout_seconds() -> float | None:
     if timeout <= 0:
         raise ConfigurationError(f"{_DATA_CHORD_NETRIAS_TIMEOUT_SECONDS_VAR} must be positive")
     return timeout
+
+
+def get_expected_alb_arn() -> str | None:
+    raw_arn = os.getenv(_DATA_CHORD_ALB_ARN_VAR)
+    if raw_arn is None:
+        return None
+    arn = raw_arn.strip()
+    return arn or None
 
 
 def validate_required_config() -> None:

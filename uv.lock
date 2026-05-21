@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.13"
 
 [options]
-exclude-newer = "2026-05-14T17:26:58.078387Z"
+exclude-newer = "2026-05-14T22:34:10.557479Z"
 exclude-newer-span = "P7D"
 
 [[package]]
@@ -318,6 +318,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "boto3" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "idna" },
     { name = "jinja2" },
@@ -359,6 +360,7 @@ requires-dist = [
     { name = "bandit", marker = "extra == 'dev'", specifier = ">=1.7" },
     { name = "basedpyright", marker = "extra == 'dev'", specifier = ">=1.17.0" },
     { name = "boto3", specifier = ">=1.40.69" },
+    { name = "cryptography", specifier = ">=47.0.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "filelock", marker = "extra == 'dev'", specifier = ">=3.20.1" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
