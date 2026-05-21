@@ -1,7 +1,5 @@
 # Data Chord AWS Deploy
 
-Current open deployment items are tracked in [DEPLOYMENT_TALLY.md](DEPLOYMENT_TALLY.md).
-
 This stack is intentionally small. It creates:
 
 1. An internet-facing Application Load Balancer with Cognito login.
