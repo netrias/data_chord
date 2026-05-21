@@ -21,7 +21,7 @@ require_env_name() {
       printf '%s\n' "$env_name"
       ;;
     *)
-      fail "Choose an environment: just deploy staging or just deploy prod."
+      fail "Choose an environment, for example: just deploy staging, just deploy-app staging, or just deploy-infra staging."
       ;;
   esac
 }

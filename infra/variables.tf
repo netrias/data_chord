@@ -140,9 +140,57 @@ variable "container_port" {
 }
 
 variable "image_tag" {
-  description = "Image tag the ECS task definition should run. CodeBuild updates the service after pushing latest."
+  description = "Immutable image tag the ECS task definition should run. Deploy scripts pass the short source commit SHA."
   type        = string
-  default     = "latest"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$", var.image_tag)) && var.image_tag != "latest"
+    error_message = "image_tag must be an immutable Docker tag, such as a short commit SHA, and must not be latest."
+  }
+}
+
+variable "target_group_deregistration_delay_seconds" {
+  description = "Seconds the target group waits before deregistered targets stop receiving traffic."
+  type        = number
+  default     = 300
+
+  validation {
+    condition     = var.target_group_deregistration_delay_seconds >= 0 && var.target_group_deregistration_delay_seconds <= 3600
+    error_message = "target_group_deregistration_delay_seconds must be between 0 and 3600."
+  }
+}
+
+variable "target_group_health_check_interval_seconds" {
+  description = "Seconds between ALB target group health checks."
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = var.target_group_health_check_interval_seconds >= 5 && var.target_group_health_check_interval_seconds <= 300
+    error_message = "target_group_health_check_interval_seconds must be between 5 and 300."
+  }
+}
+
+variable "target_group_healthy_threshold" {
+  description = "Consecutive successful health checks required before a target is healthy."
+  type        = number
+  default     = 2
+
+  validation {
+    condition     = var.target_group_healthy_threshold >= 2 && var.target_group_healthy_threshold <= 10
+    error_message = "target_group_healthy_threshold must be between 2 and 10."
+  }
+}
+
+variable "target_group_unhealthy_threshold" {
+  description = "Consecutive failed health checks required before a target is unhealthy."
+  type        = number
+  default     = 3
+
+  validation {
+    condition     = var.target_group_unhealthy_threshold >= 2 && var.target_group_unhealthy_threshold <= 10
+    error_message = "target_group_unhealthy_threshold must be between 2 and 10."
+  }
 }
 
 variable "codebuild_source_type" {

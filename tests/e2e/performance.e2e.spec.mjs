@@ -79,25 +79,74 @@ const _reportLine = (label, duration) => {
   return `  ${label}: ${rendered}`;
 };
 
+const _subtractDurations = (total, ...parts) => {
+  if (total === null || parts.some((part) => part === null)) {
+    return null;
+  }
+  return Math.max(0, total - parts.reduce((sum, part) => sum + part, 0));
+};
+
+const _appendLoadBreakdown = (lines, { total, network, parse, render }) => {
+  lines.push(
+    _reportLine('page usable', total),
+    _reportLine('network request', network),
+    _reportLine('client after network', _subtractDurations(total, network)),
+    _reportLine('JSON parse', parse),
+    _reportLine('render DOM work', render),
+    _reportLine('other client time', _subtractDurations(total, network, parse, render)),
+  );
+};
+
+const _appendDownloadBreakdown = (lines, { total, network, blob }) => {
+  lines.push(
+    _reportLine('download usable', total),
+    _reportLine('network request', network),
+    _reportLine('client after network', _subtractDurations(total, network)),
+    _reportLine('blob read', blob),
+    _reportLine('other client time', _subtractDurations(total, network, blob)),
+  );
+};
+
 const _printReport = ({ rowCount, columnCount, stage4, stage5 }) => {
+  const stage4RowsRequest = _latestDuration(stage4, 'stage4.rows.request');
+  const stage4RowsParse = _latestDuration(stage4, 'stage4.rows.parse');
+  const stage4RenderDom = _latestDuration(stage4, 'stage4.render.dom');
+  const stage4Usable = _latestDuration(stage4, 'stage4.init_to_usable');
+  const stage5SummaryRequest = _latestDuration(stage5, 'stage5.summary.request');
+  const stage5SummaryParse = _latestDuration(stage5, 'stage5.summary.parse');
+  const stage5RenderDom = _latestDuration(stage5, 'stage5.summary.render.dom');
+  const stage5Usable = _latestDuration(stage5, 'stage5.init_to_usable');
+  const downloadRequest = _latestDuration(stage5, 'stage5.download.request');
+  const downloadBlob = _latestDuration(stage5, 'stage5.download.blob');
+  const downloadUsable = _latestDuration(stage5, 'stage5.download_to_usable');
+
   const lines = [
     '',
     `Performance journey (${rowCount} rows x ${columnCount} columns)`,
-    'Stage 4 navigation:',
-    _reportLine('rows request', _latestDuration(stage4, 'stage4.rows.request')),
-    _reportLine('rows JSON parse', _latestDuration(stage4, 'stage4.rows.parse')),
-    _reportLine('first render DOM work', _latestDuration(stage4, 'stage4.render.dom')),
-    _reportLine('page usable', _latestDuration(stage4, 'stage4.init_to_usable')),
-    _reportLine('next batch usable', _latestDuration(stage4, 'stage4.batch_change_to_usable')),
-    'Stage 5 summary:',
-    _reportLine('summary request', _latestDuration(stage5, 'stage5.summary.request')),
-    _reportLine('summary JSON parse', _latestDuration(stage5, 'stage5.summary.parse')),
-    _reportLine('summary render DOM work', _latestDuration(stage5, 'stage5.summary.render.dom')),
-    _reportLine('page usable', _latestDuration(stage5, 'stage5.init_to_usable')),
-    _reportLine('download request', _latestDuration(stage5, 'stage5.download.request')),
-    _reportLine('download blob read', _latestDuration(stage5, 'stage5.download.blob')),
-    _reportLine('download usable', _latestDuration(stage5, 'stage5.download_to_usable')),
+    'Stage 4 in-page load:',
   ];
+  _appendLoadBreakdown(lines, {
+    total: stage4Usable,
+    network: stage4RowsRequest,
+    parse: stage4RowsParse,
+    render: stage4RenderDom,
+  });
+  lines.push(
+    _reportLine('next batch usable', _latestDuration(stage4, 'stage4.batch_change_to_usable')),
+    'Stage 5 in-page load:',
+  );
+  _appendLoadBreakdown(lines, {
+    total: stage5Usable,
+    network: stage5SummaryRequest,
+    parse: stage5SummaryParse,
+    render: stage5RenderDom,
+  });
+  lines.push('Stage 5 download:');
+  _appendDownloadBreakdown(lines, {
+    total: downloadUsable,
+    network: downloadRequest,
+    blob: downloadBlob,
+  });
   console.log(lines.join('\n'));
 };
 

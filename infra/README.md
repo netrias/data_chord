@@ -10,7 +10,7 @@ This stack is intentionally small. It creates:
 
 4. An ECR repository for the Docker image.
 
-5. A CodeBuild project that runs Python checks, builds the Docker image, pushes it to ECR, and restarts ECS.
+5. A CodeBuild project that runs Python checks, builds the Docker image, and pushes an immutable commit tag to ECR.
 
 The app uses local container disk only as scratch. Durable workflow files go to S3 through `DATA_CHORD_STORAGE=s3`.
 
@@ -31,6 +31,15 @@ Each environment has a matching S3 backend config:
 2. `infra/env/prod.backend.hcl`
 
 ## Deploy
+
+The normal app deploy path is:
+
+```text
+git commit -> immutable image tag -> OpenTofu task definition -> ECS rollout
+```
+
+CodeBuild does not update ECS directly. OpenTofu records the image tag in the
+task definition, so OpenTofu state and ECS agree on what is running.
 
 Use one command and specify the environment explicitly:
 
@@ -57,7 +66,33 @@ The deploy script is idempotent. It creates or updates:
 
 4. The Cognito user pool and app client.
 
-5. The CodeBuild image build and ECS rollout.
+5. The CodeBuild image build.
+
+6. The OpenTofu-managed ECS task definition and rollout.
+
+`just deploy <env>` and `just deploy-app <env>` both build the current pushed
+Git commit, push only the short commit SHA image tag, apply OpenTofu with
+`image_tag=<sha>`, and then watch the ECS rollout.
+
+Use an app-only deploy for normal code changes:
+
+```bash
+AWS_PROFILE=strides just deploy-app staging
+```
+
+Use an infra-only deploy when the image should stay the same:
+
+```bash
+AWS_PROFILE=strides just deploy-infra staging
+```
+
+Infra-only deploys reuse the currently deployed ECS image tag. If there is no
+current ECS service yet, set `DATA_CHORD_IMAGE_TAG` to an existing immutable ECR
+tag:
+
+```bash
+AWS_PROFILE=strides DATA_CHORD_IMAGE_TAG=abc123def456 just deploy-infra staging
+```
 
 ## Alerting
 
@@ -102,7 +137,7 @@ them as the shared fallback local user.
 
 ## Deploy Source
 
-CodeBuild builds the current Git commit, not your local working tree. Normal
+CodeBuild builds the current Git commit, not your local working tree. App
 deploys require:
 
 1. A named branch, not a detached `HEAD`.
@@ -120,6 +155,9 @@ DATA_CHORD_DEPLOY_ALLOW_DIRTY=1 just deploy staging
 
 That still deploys the current committed `HEAD`. It does not upload or build
 uncommitted files.
+
+The deployed image tag is the first 12 characters of the deployed commit SHA.
+The deploy path does not push or deploy `latest`.
 
 ## Manual Prerequisite: CodeBuild GitHub Access
 
@@ -199,10 +237,16 @@ Show recent app and build logs:
 just deploy-logs staging
 ```
 
-Build and redeploy the image without changing infrastructure:
+Build and push the image without applying OpenTofu or rolling ECS:
 
 ```bash
 just deploy-build staging
+```
+
+Redeploy a code change through OpenTofu:
+
+```bash
+just deploy-app staging
 ```
 
 ## Giving Users Access

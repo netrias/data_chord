@@ -85,4 +85,4 @@ Set `PERF_REMOTE_ROWS=50` to change the generated CSV size.
 
 ## AWS Hosting
 
-The app has an OpenTofu starter stack in [infra/README.md](infra/README.md). It deploys ECS Fargate behind ALB + Cognito, stores workflow artifacts in S3, and uses CodeBuild to test, build, push, and redeploy the Docker image.
+The app has an OpenTofu starter stack in [infra/README.md](infra/README.md). It deploys ECS Fargate behind ALB + Cognito, stores workflow artifacts in S3, and uses CodeBuild to test, build, and push the Docker image before OpenTofu rolls ECS.

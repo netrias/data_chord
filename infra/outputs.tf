@@ -24,7 +24,7 @@ output "ecr_repository_url" {
 }
 
 output "codebuild_project_name" {
-  description = "CodeBuild project that tests, builds, pushes, and redeploys the app."
+  description = "CodeBuild project that tests, builds, and pushes the app image."
   value       = aws_codebuild_project.app_image.name
 }
 
@@ -56,6 +56,11 @@ output "alert_topic_arn" {
 output "target_group_arn" {
   description = "ALB target group ARN for task health checks."
   value       = aws_lb_target_group.app.arn
+}
+
+output "deployed_image_tag" {
+  description = "Immutable image tag recorded in the OpenTofu-managed ECS task definition."
+  value       = var.image_tag
 }
 
 output "cognito_user_pool_id" {

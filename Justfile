@@ -63,10 +63,16 @@ infra-plan env:
 	infra/scripts/deploy.sh {{env}} plan
 
 infra-apply env:
-	infra/scripts/deploy.sh {{env}}
+	infra/scripts/deploy.sh {{env}} deploy-infra
 
 deploy env:
 	infra/scripts/deploy.sh {{env}}
+
+deploy-app env:
+	infra/scripts/deploy.sh {{env}} deploy-app
+
+deploy-infra env:
+	infra/scripts/deploy.sh {{env}} deploy-infra
 
 deploy-plan env:
 	infra/scripts/deploy.sh {{env}} plan

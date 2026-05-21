@@ -564,20 +564,21 @@ resource "aws_lb" "app" {
 }
 
 resource "aws_lb_target_group" "app" {
-  name        = substr("${local.name_prefix}-app", 0, 32)
-  port        = var.container_port
-  protocol    = "HTTP"
-  target_type = "ip"
-  vpc_id      = var.vpc_id
+  name                 = substr("${local.name_prefix}-app", 0, 32)
+  port                 = var.container_port
+  protocol             = "HTTP"
+  target_type          = "ip"
+  vpc_id               = var.vpc_id
+  deregistration_delay = var.target_group_deregistration_delay_seconds
 
   health_check {
     enabled             = true
     path                = "/healthz"
     matcher             = "200"
-    interval            = 30
+    interval            = var.target_group_health_check_interval_seconds
     timeout             = 5
-    healthy_threshold   = 2
-    unhealthy_threshold = 3
+    healthy_threshold   = var.target_group_healthy_threshold
+    unhealthy_threshold = var.target_group_unhealthy_threshold
   }
 
   tags = local.common_tags
@@ -933,14 +934,6 @@ resource "aws_iam_role_policy" "codebuild" {
           "ecr:UploadLayerPart"
         ]
         Resource = "*"
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "ecs:DescribeServices",
-          "ecs:UpdateService"
-        ]
-        Resource = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/${aws_ecs_cluster.app.name}/${local.name_prefix}"
       }
     ]
   })
@@ -948,11 +941,16 @@ resource "aws_iam_role_policy" "codebuild" {
 
 resource "aws_codebuild_project" "app_image" {
   name         = "${local.name_prefix}-image"
-  description  = "Build and deploy the Data Chord container image"
+  description  = "Build and push the Data Chord container image"
   service_role = aws_iam_role.codebuild.arn
 
   artifacts {
     type = "NO_ARTIFACTS"
+  }
+
+  cache {
+    type  = "LOCAL"
+    modes = ["LOCAL_DOCKER_LAYER_CACHE", "LOCAL_SOURCE_CACHE"]
   }
 
   environment {
@@ -975,16 +973,6 @@ resource "aws_codebuild_project" "app_image" {
     environment_variable {
       name  = "IMAGE_REPO_URI"
       value = aws_ecr_repository.app.repository_url
-    }
-
-    environment_variable {
-      name  = "ECS_CLUSTER_NAME"
-      value = aws_ecs_cluster.app.name
-    }
-
-    environment_variable {
-      name  = "ECS_SERVICE_NAME"
-      value = local.name_prefix
     }
   }
 

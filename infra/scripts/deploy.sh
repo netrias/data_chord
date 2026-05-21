@@ -40,6 +40,18 @@ git_commit() {
   git -C "$REPO_DIR" rev-parse HEAD
 }
 
+git_image_tag() {
+  git -C "$REPO_DIR" rev-parse --short=12 HEAD
+}
+
+require_immutable_image_tag() {
+  local image_tag="$1"
+
+  if [[ "$image_tag" == "latest" || ! "$image_tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+    fail "Image tag must be an immutable Docker tag such as a short commit SHA, not '$image_tag'."
+  fi
+}
+
 remote_branch_matches_commit() {
   local branch="$1"
   local commit="$2"
@@ -79,13 +91,17 @@ init_tofu() {
 }
 
 apply_stack() {
-  log "Applying OpenTofu stack for $ENV_NAME"
-  tofu -chdir="$INFRA_DIR" apply -input=false -auto-approve "${tofu_args[@]}"
+  local image_tag="$1"
+  require_immutable_image_tag "$image_tag"
+  log "Applying OpenTofu stack for $ENV_NAME with image tag $image_tag"
+  tofu -chdir="$INFRA_DIR" apply -input=false -auto-approve "${tofu_args[@]}" "-var=image_tag=$image_tag"
 }
 
 plan_stack() {
-  log "Planning OpenTofu stack for $ENV_NAME"
-  tofu -chdir="$INFRA_DIR" plan -input=false "${tofu_args[@]}"
+  local image_tag="$1"
+  require_immutable_image_tag "$image_tag"
+  log "Planning OpenTofu stack for $ENV_NAME with image tag $image_tag"
+  tofu -chdir="$INFRA_DIR" plan -input=false "${tofu_args[@]}" "-var=image_tag=$image_tag"
 }
 
 bootstrap_state() {
@@ -205,6 +221,57 @@ watch_build() {
   done
 }
 
+current_task_definition_arn() {
+  local cluster service task_definition
+  cluster="$(tofu_output ecs_cluster_name)"
+  service="$(tofu_output ecs_service_name)"
+  [[ -n "$cluster" && -n "$service" ]] || return 0
+
+  task_definition="$(
+    aws ecs describe-services \
+      --cluster "$cluster" \
+      --services "$service" \
+      --query "services[0].taskDefinition" \
+      --output text 2>/dev/null
+  )" || return 0
+
+  [[ "$task_definition" == "None" ]] || printf '%s\n' "$task_definition"
+}
+
+current_image_tag() {
+  local task_definition image
+  task_definition="$(current_task_definition_arn)"
+  [[ -n "$task_definition" ]] || return 0
+
+  image="$(
+    aws ecs describe-task-definition \
+      --task-definition "$task_definition" \
+      --query "taskDefinition.containerDefinitions[?name=='app'] | [0].image" \
+      --output text 2>/dev/null
+  )" || return 0
+
+  [[ -n "$image" && "$image" != "None" ]] || return 0
+  [[ "$image" != *@* ]] || fail "Current ECS image uses a digest, but this deploy path expects an image tag: $image"
+  printf '%s\n' "${image##*:}"
+}
+
+infra_image_tag() {
+  local image_tag
+
+  if [[ -n "${DATA_CHORD_IMAGE_TAG:-}" ]]; then
+    printf '%s\n' "$DATA_CHORD_IMAGE_TAG"
+    return 0
+  fi
+
+  image_tag="$(current_image_tag)"
+  if [[ -n "$image_tag" ]]; then
+    printf '%s\n' "$image_tag"
+    return 0
+  fi
+
+  fail "No deployed image tag is available. Run an app deploy after the base infrastructure exists, or set DATA_CHORD_IMAGE_TAG to an existing immutable image tag."
+}
+
 print_target_health() {
   local target_group_arn
   target_group_arn="$(tofu_output target_group_arn)"
@@ -299,36 +366,71 @@ tail_logs() {
   }
 }
 
-run_full_deploy() {
-  local build_id app_url
+run_app_deploy() {
+  local build_id image_tag app_url
 
   log "Using AWS profile: $AWS_PROFILE"
   ensure_deployable_git_state
+  image_tag="$(git_image_tag)"
   bootstrap_state
   ensure_secret
   load_auth_bypass_cidrs
   init_tofu
-  apply_stack
 
   build_id="$(start_build)"
   watch_build "$build_id"
+  apply_stack "$image_tag"
   watch_ecs_rollout
 
   app_url="$(tofu_output app_url)"
   log "Deploy complete: $app_url"
 }
 
+run_infra_deploy() {
+  local before_task_definition after_task_definition image_tag app_url
+
+  log "Using AWS profile: $AWS_PROFILE"
+  bootstrap_state
+  ensure_secret
+  load_auth_bypass_cidrs
+  init_tofu
+
+  image_tag="$(infra_image_tag)"
+  before_task_definition="$(current_task_definition_arn)"
+  apply_stack "$image_tag"
+  after_task_definition="$(current_task_definition_arn)"
+
+  if [[ -n "$after_task_definition" && "$after_task_definition" != "$before_task_definition" ]]; then
+    watch_ecs_rollout
+  else
+    log "No ECS task definition change detected; skipping rollout watch"
+  fi
+
+  app_url="$(tofu_output app_url)"
+  log "Infra deploy complete: $app_url"
+}
+
+run_plan() {
+  local image_tag
+
+  log "Using AWS profile: $AWS_PROFILE"
+  bootstrap_state
+  check_secret
+  load_auth_bypass_cidrs
+  init_tofu
+  image_tag="$(infra_image_tag)"
+  plan_stack "$image_tag"
+}
+
 case "$MODE" in
-  deploy)
-    run_full_deploy
+  deploy | deploy-app | app)
+    run_app_deploy
+    ;;
+  deploy-infra | infra)
+    run_infra_deploy
     ;;
   plan)
-    log "Using AWS profile: $AWS_PROFILE"
-    bootstrap_state
-    check_secret
-    load_auth_bypass_cidrs
-    init_tofu
-    plan_stack
+    run_plan
     ;;
   status)
     bootstrap_state
@@ -346,7 +448,7 @@ case "$MODE" in
     init_tofu
     build_id="$(start_build)"
     watch_build "$build_id"
-    watch_ecs_rollout
+    log "Image build complete. OpenTofu has not been applied, so ECS was not rolled."
     ;;
   *)
     fail "Unknown deploy mode: $MODE"
