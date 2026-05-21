@@ -48,6 +48,7 @@ class WorkflowFile(str, Enum):
     HARMONIZED_OUTPUT = "harmonized_output"
     PV_MANIFEST = "pv_manifest"
     CDE_MAPPING = "cde_mapping"
+    STAGE_THREE_JOB = "stage_three_job"
     WORKFLOW_STATE = "workflow_state"
     REVIEW_OVERRIDES = "review_overrides"
     REVIEW_AUDIT = "review_audit"
@@ -60,6 +61,7 @@ class WorkflowFile(str, Enum):
             WorkflowFile.MAPPING_MANIFEST,
             WorkflowFile.PV_MANIFEST,
             WorkflowFile.CDE_MAPPING,
+            WorkflowFile.STAGE_THREE_JOB,
             WorkflowFile.WORKFLOW_STATE,
             WorkflowFile.REVIEW_OVERRIDES,
             WorkflowFile.REVIEW_AUDIT,
@@ -71,6 +73,7 @@ class WorkflowFile(str, Enum):
             WorkflowFile.UPLOAD_METADATA,
             WorkflowFile.MAPPING_MANIFEST,
             WorkflowFile.CDE_MAPPING,
+            WorkflowFile.STAGE_THREE_JOB,
             WorkflowFile.PV_MANIFEST,
             WorkflowFile.WORKFLOW_STATE,
             WorkflowFile.REVIEW_OVERRIDES,

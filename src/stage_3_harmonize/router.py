@@ -8,15 +8,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from collections import defaultdict
-from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import urlencode
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -54,7 +53,7 @@ from src.domain.manifest.writer import apply_pv_adjustments_batch
 from src.domain.pv_persistence import save_pv_manifest_to_disk
 from src.domain.pv_validation import check_value_conformance, compute_pv_adjustment
 from src.domain.review_override_store import delete_review_overrides_state
-from src.domain.storage import UploadStorage, WorkflowFile, WorkflowNotFoundError
+from src.domain.storage import UploadStorage, UserContext, WorkflowFile, WorkflowNotFoundError, WorkflowStorage
 from src.domain.workflow_artifact_store import (
     load_mapping_manifest,
     load_upload_artifact,
@@ -62,6 +61,11 @@ from src.domain.workflow_artifact_store import (
 )
 from src.domain.workflow_state import ConfirmedMappingChoices, WorkflowState
 from src.domain.workflow_state_store import load_workflow_state
+from src.stage_3_harmonize.job_state import (
+    StageThreeJobState,
+    load_stage_three_job_state,
+    save_stage_three_job_state,
+)
 
 MODULE_DIR = Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"
@@ -74,19 +78,7 @@ _router_logger = logging.getLogger(__name__)
 stage_three_router = APIRouter(prefix="/stage-3", tags=["Stage 3 Harmonize"])
 
 
-@dataclass
-class StageThreeJob:
-    job_id: str
-    file_id: str
-    status: HarmonizeStatus
-    detail: str
-    next_stage_url: str
-    started_at: float
-    job_id_available: bool = False
-    manifest_summary: ManifestSummarySchema | None = None
-
-
-_stage_three_jobs: dict[str, StageThreeJob] = {}
+_stage_three_jobs: dict[str, StageThreeJobState] = {}
 _stage_three_tasks: dict[str, asyncio.Task[None]] = {}
 
 
@@ -127,15 +119,15 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
     if not meta:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please rerun analysis.")
 
-    job = _create_stage_three_job(payload.file_id)
-    task = asyncio.create_task(_run_stage_three_job(job.job_id, payload))
-    _stage_three_tasks[job.job_id] = task
-    task.add_done_callback(lambda _task: _stage_three_tasks.pop(job.job_id, None))
+    job = _create_stage_three_job(payload.file_id, workflow_storage, user)
+    task = asyncio.create_task(_run_stage_three_job(job.polling_job_id, payload, workflow_storage, user))
+    _stage_three_tasks[job.polling_job_id] = task
+    task.add_done_callback(lambda _task: _stage_three_tasks.pop(job.polling_job_id, None))
     try:
         await asyncio.wait_for(asyncio.shield(task), timeout=JOB_START_GRACE_SECONDS)
     except TimeoutError:
         pass
-    return _response_from_job(_stage_three_jobs[job.job_id])
+    return _response_from_job(_stage_three_jobs[job.polling_job_id])
 
 
 @stage_three_router.get(
@@ -143,51 +135,68 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
     response_model=HarmonizeResponse,
     name="stage_three_harmonize_job",
 )
-async def get_harmonize_job(job_id: str) -> HarmonizeResponse:
-    job = _stage_three_jobs.get(job_id)
+async def get_harmonize_job(job_id: str, file_id: str | None = Query(default=None)) -> HarmonizeResponse:
+    workflow_storage = dependencies.get_workflow_storage()
+    user = dependencies.get_user_context()
+    job = _load_stage_three_job(job_id, file_id, workflow_storage, user)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Harmonization job not found.")
     return _response_from_job(job)
 
 
-def _create_stage_three_job(file_id: str) -> StageThreeJob:
+def _create_stage_three_job(
+    file_id: str,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+) -> StageThreeJobState:
     job_id = uuid4().hex
     next_stage_url = _next_stage_url(file_id=file_id, job_id=job_id, job_status=HarmonizeStatus.QUEUED, detail="")
-    job = StageThreeJob(
+    job = StageThreeJobState(
+        polling_job_id=job_id,
         job_id=job_id,
         file_id=file_id,
         status=HarmonizeStatus.QUEUED,
         detail="Harmonization job accepted.",
         next_stage_url=next_stage_url,
-        started_at=time.monotonic(),
+        started_at=datetime.now(UTC),
         job_id_available=False,
     )
     _stage_three_jobs[job_id] = job
+    save_stage_three_job_state(workflow_storage, user, job)
     return job
 
 
-async def _run_stage_three_job(job_id: str, payload: HarmonizeRequest) -> None:
+async def _run_stage_three_job(
+    polling_job_id: str,
+    payload: HarmonizeRequest,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+) -> None:
     try:
         response = await _run_harmonization_workflow(payload)
     except Exception as exc:  # pragma: no cover - defensive job boundary
         _router_logger.exception("Stage 3 background harmonization failed", extra={"file_id": payload.file_id})
-        _stage_three_jobs[job_id] = StageThreeJob(
-            job_id=job_id,
+        failed_job = StageThreeJobState(
+            polling_job_id=polling_job_id,
+            job_id=polling_job_id,
             file_id=payload.file_id,
             status=HarmonizeStatus.FAILED,
             detail=str(exc),
             next_stage_url=_next_stage_url(
                 file_id=payload.file_id,
-                job_id=job_id,
+                job_id=polling_job_id,
                 job_status=HarmonizeStatus.FAILED,
                 detail=str(exc),
             ),
-            started_at=_stage_three_jobs[job_id].started_at,
+            started_at=_stage_three_jobs[polling_job_id].started_at,
         )
+        _stage_three_jobs[polling_job_id] = failed_job
+        save_stage_three_job_state(workflow_storage, user, failed_job)
         return
 
-    started_at = _stage_three_jobs[job_id].started_at
-    _stage_three_jobs[job_id] = StageThreeJob(
+    started_at = _stage_three_jobs[polling_job_id].started_at
+    completed_job = StageThreeJobState(
+        polling_job_id=polling_job_id,
         job_id=response.job_id,
         file_id=payload.file_id,
         status=response.status,
@@ -197,16 +206,39 @@ async def _run_stage_three_job(job_id: str, payload: HarmonizeRequest) -> None:
         job_id_available=response.job_id_available,
         manifest_summary=response.manifest_summary,
     )
+    _stage_three_jobs[polling_job_id] = completed_job
+    save_stage_three_job_state(workflow_storage, user, completed_job)
 
 
-def _response_from_job(job: StageThreeJob) -> HarmonizeResponse:
+def _load_stage_three_job(
+    job_id: str,
+    file_id: str | None,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+) -> StageThreeJobState | None:
+    job = _stage_three_jobs.get(job_id)
+    if job is not None:
+        return job
+    if file_id is None:
+        return None
+    try:
+        stored_job = load_stage_three_job_state(workflow_storage, user, file_id)
+    except WorkflowNotFoundError:
+        return None
+    if stored_job is None or not stored_job.matches_request(job_id):
+        return None
+    _stage_three_jobs[stored_job.polling_job_id] = stored_job
+    return stored_job
+
+
+def _response_from_job(job: StageThreeJobState) -> HarmonizeResponse:
     return HarmonizeResponse(
         job_id=job.job_id,
         status=job.status,
         detail=job.detail,
         next_stage_url=job.next_stage_url,
         job_id_available=job.job_id_available,
-        elapsed_seconds=max(0, int(time.monotonic() - job.started_at)),
+        elapsed_seconds=job.elapsed_seconds(),
         manifest_summary=job.manifest_summary,
     )
 

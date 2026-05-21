@@ -19,6 +19,7 @@ from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
 import src.domain.dependencies as dependencies
+import src.stage_3_harmonize.router as stage_three_router
 from src.domain.cde import CDEInfo
 from src.domain.data_model_cache import clear_session_cache, get_session_cache
 from src.domain.harmonize import HarmonizeResult, HarmonizeStatus
@@ -81,9 +82,9 @@ def _read_downloaded_xlsx(response_bytes: bytes, sheet_name: str) -> list[list[s
     return [[str(value) if value is not None else "" for value in row] for row in sheet.iter_rows(values_only=True)]
 
 
-async def _wait_for_stage_three_job(app_client: AsyncClient, job_id: str) -> dict[str, object]:
+async def _wait_for_stage_three_job(app_client: AsyncClient, job_id: str, file_id: str) -> dict[str, object]:
     for _ in range(50):
-        response = await app_client.get(f"/stage-3/jobs/{job_id}")
+        response = await app_client.get(f"/stage-3/jobs/{job_id}", params={"file_id": file_id})
         assert response.status_code == 200
         body = response.json()
         if body["status"] in {"succeeded", "failed"}:
@@ -661,7 +662,7 @@ async def test_stage3_harmonize_returns_queued_while_long_job_finishes(
         assert "status=queued" in queued_next_stage_url
         assert body["manifest_summary"] is None
 
-        finished = await _wait_for_stage_three_job(app_client, body["job_id"])
+        finished = await _wait_for_stage_three_job(app_client, body["job_id"], file_id)
 
     assert finished["status"] == "succeeded"
     assert finished["job_id"] == "job-slow"
@@ -669,6 +670,71 @@ async def test_stage3_harmonize_returns_queued_while_long_job_finishes(
     finished_next_stage_url = finished["next_stage_url"]
     assert isinstance(finished_next_stage_url, str)
     assert "status=succeeded" in finished_next_stage_url
+
+
+async def test_stage3_job_status_recovers_from_durable_state_after_cache_loss(
+    app_client: AsyncClient,
+) -> None:
+    """Stage 3 polling can recover after the process-local job cache is gone."""
+
+    class SlowStubHarmonizer:
+        def run(  # type: ignore[no-untyped-def]
+            self,
+            *,
+            file_path,
+            target_schema,
+            column_overrides,
+            column_renames,
+            cache,
+            target_version,
+            manifest,
+            output_path,
+            sheet_name,
+        ):
+            time.sleep(0.5)
+            return HarmonizeResult(job_id="job-durable", status=HarmonizeStatus.SUCCEEDED, detail="ok")
+
+    # Given: a slow Stage 3 job has been accepted and later completed
+    file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "durable-stage3.csv")
+    analyze_response = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "target_schema": "gc", "target_version_number": 2},
+    )
+    assert analyze_response.status_code == 200
+    assert _load_json_artifact(file_id, WorkflowFile.STAGE_THREE_JOB) is None
+
+    import unittest.mock
+
+    with unittest.mock.patch("src.stage_3_harmonize.router.get_harmonize_service", return_value=SlowStubHarmonizer()):
+        response = await app_client.post(
+            "/stage-3/harmonize",
+            json={
+                "file_id": file_id,
+                "target_schema": "gc",
+                "target_version_number": 2,
+                "manual_overrides": {},
+            },
+        )
+        assert response.status_code == 200
+        accepted_job_id = response.json()["job_id"]
+        assert _load_json_artifact(file_id, WorkflowFile.STAGE_THREE_JOB) is not None
+
+        finished = await _wait_for_stage_three_job(app_client, accepted_job_id, file_id)
+
+    # When: the in-memory job cache disappears, like it would after a deploy
+    stage_three_router._stage_three_jobs.clear()
+    recovered_response = await app_client.get(
+        f"/stage-3/jobs/{accepted_job_id}",
+        params={"file_id": file_id},
+    )
+
+    # Then: the poll endpoint falls back to workflow storage
+    assert finished["status"] == "succeeded"
+    assert recovered_response.status_code == 200
+    recovered = recovered_response.json()
+    assert recovered["status"] == "succeeded"
+    assert recovered["job_id"] == "job-durable"
+    assert isinstance(recovered["elapsed_seconds"], int)
 
 
 async def test_stage2_saves_confirmed_mapping_choices_to_workflow_state(

@@ -246,7 +246,17 @@ const _renderJob = (job) => {
   }
 };
 
-const _jobStatusEndpoint = (jobId) => `${harmonizeEndpoint.replace(/\/harmonize$/, '')}/jobs/${encodeURIComponent(jobId)}`;
+const _jobStatusEndpoint = (jobId) => {
+  const endpoint = new URL(
+    `${harmonizeEndpoint.replace(/\/harmonize$/, '')}/jobs/${encodeURIComponent(jobId)}`,
+    window.location.origin,
+  );
+  const fileId = state.requestBody?.file_id ?? state.job?.file_id ?? _getFileIdFromUrl();
+  if (fileId) {
+    endpoint.searchParams.set('file_id', fileId);
+  }
+  return `${endpoint.pathname}${endpoint.search}`;
+};
 
 const _scheduleJobPoll = (jobId) => {
   if (!jobId) {
