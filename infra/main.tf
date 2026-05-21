@@ -12,8 +12,7 @@ locals {
   app_host             = var.domain_name != "" ? var.domain_name : (local.use_managed_dns ? local.managed_domain_name : aws_lb.app.dns_name)
   app_url              = "https://${local.app_host}"
   callback_url         = "${local.app_url}/oauth2/idpresponse"
-  cognito_auth_ready   = var.cognito_user_pool_client_id != ""
-  auth_bypass_ready    = local.cognito_auth_ready && length(nonsensitive(var.auth_bypass_cidrs)) > 0
+  auth_bypass_ready    = length(nonsensitive(var.auth_bypass_cidrs)) > 0
   certificate_arn      = var.certificate_arn != "" ? var.certificate_arn : aws_acm_certificate_validation.app[0].certificate_arn
   invite_environment   = var.environment == "prod" ? "" : " (${var.environment} environment)"
   invite_email_subject = "Your Data Chord${local.invite_environment} access"
@@ -422,6 +421,23 @@ resource "aws_cognito_user_pool_domain" "auth" {
   user_pool_id = aws_cognito_user_pool.auth.id
 }
 
+resource "aws_cognito_user_pool_client" "alb" {
+  name         = "${local.name_prefix}-alb"
+  user_pool_id = aws_cognito_user_pool.auth.id
+
+  generate_secret                      = true
+  allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_scopes                 = ["openid", "email", "profile"]
+  supported_identity_providers         = ["COGNITO"]
+  callback_urls                        = [local.callback_url]
+  logout_urls                          = [local.app_url]
+
+  lifecycle {
+    ignore_changes = [generate_secret]
+  }
+}
+
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.app.arn
   port              = 80
@@ -447,42 +463,22 @@ resource "aws_lb_listener" "https" {
   certificate_arn   = local.certificate_arn
   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
 
-  dynamic "default_action" {
-    for_each = local.cognito_auth_ready ? [1] : []
+  default_action {
+    type  = "authenticate-cognito"
+    order = 1
 
-    content {
-      type = "authenticate-cognito"
-
-      authenticate_cognito {
-        user_pool_arn              = aws_cognito_user_pool.auth.arn
-        user_pool_client_id        = var.cognito_user_pool_client_id
-        user_pool_domain           = aws_cognito_user_pool_domain.auth.domain
-        on_unauthenticated_request = "authenticate"
-      }
+    authenticate_cognito {
+      user_pool_arn              = aws_cognito_user_pool.auth.arn
+      user_pool_client_id        = aws_cognito_user_pool_client.alb.id
+      user_pool_domain           = aws_cognito_user_pool_domain.auth.domain
+      on_unauthenticated_request = "authenticate"
     }
   }
 
-  dynamic "default_action" {
-    for_each = local.cognito_auth_ready ? [1] : []
-
-    content {
-      type             = "forward"
-      target_group_arn = aws_lb_target_group.app.arn
-    }
-  }
-
-  dynamic "default_action" {
-    for_each = local.cognito_auth_ready ? [] : [1]
-
-    content {
-      type = "fixed-response"
-
-      fixed_response {
-        content_type = "text/plain"
-        message_body = "Data Chord infrastructure is waiting for Cognito app-client bootstrap. Run just deploy staging or just deploy prod."
-        status_code  = "503"
-      }
-    }
+  default_action {
+    type             = "forward"
+    order            = 2
+    target_group_arn = aws_lb_target_group.app.arn
   }
 
   tags = local.common_tags
@@ -523,8 +519,6 @@ resource "aws_route53_record" "app" {
 }
 
 resource "aws_ecs_service" "app" {
-  count = local.cognito_auth_ready ? 1 : 0
-
   name            = local.name_prefix
   cluster         = aws_ecs_cluster.app.id
   task_definition = aws_ecs_task_definition.app.arn

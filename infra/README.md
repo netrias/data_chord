@@ -18,19 +18,17 @@ The app uses local container disk only as scratch. Durable workflow files go to 
 
 Deployment config is checked in under `infra/env`.
 
-1. `infra/env/staging.tfvars`
+1. `infra/env/common.tfvars`
 
-2. `infra/env/prod.tfvars`
+2. `infra/env/staging.tfvars`
+
+3. `infra/env/prod.tfvars`
 
 Each environment has a matching S3 backend config:
 
 1. `infra/env/staging.backend.hcl`
 
 2. `infra/env/prod.backend.hcl`
-
-Generated bootstrap values, such as the Cognito app client ID, are written to
-`infra/generated/<environment>.tfvars`. They are intentionally ignored because
-they can be recreated from AWS.
 
 ## Deploy
 
@@ -57,13 +55,9 @@ The deploy script is idempotent. It creates or updates:
 
 3. The OpenTofu-managed AWS infrastructure.
 
-4. The Cognito app client with a secret, outside OpenTofu state.
+4. The Cognito user pool and app client.
 
 5. The CodeBuild image build and ECS rollout.
-
-The first run may apply OpenTofu twice: once to create Cognito and DNS, then
-again after the script creates the Cognito app client. Later runs normally reuse
-the existing resources.
 
 ## Optional VPN Auth Bypass
 

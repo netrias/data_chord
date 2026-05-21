@@ -60,12 +60,6 @@ variable "netrias_api_key_secret_name" {
   type        = string
 }
 
-variable "cognito_user_pool_client_id" {
-  description = "Cognito user pool app client ID created by the deployment bootstrap script. Leave empty for the first infrastructure pass."
-  type        = string
-  default     = ""
-}
-
 variable "auth_bypass_cidrs" {
   description = "Trusted source CIDRs that can reach the app without Cognito auth. Loaded by deploy scripts from Secrets Manager."
   type        = list(string)

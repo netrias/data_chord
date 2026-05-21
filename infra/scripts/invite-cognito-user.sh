@@ -19,11 +19,12 @@ ENV_NAME="$(require_env_name "${1:-}")"
 EMAIL="${2:-}"
 MESSAGE_ACTION="${3:-}"
 BACKEND_FILE="$(backend_config_path "$ENV_NAME")"
+COMMON_TFVARS_FILE="$(common_tfvars_path)"
 ENV_TFVARS_FILE="$(env_tfvars_path "$ENV_NAME")"
 
 export AWS_PROFILE="${AWS_PROFILE:-strides}"
-AWS_REGION_VALUE="$(tfvar_value "$ENV_TFVARS_FILE" aws_region)"
-[[ -n "$AWS_REGION_VALUE" ]] || fail "aws_region is missing in $ENV_TFVARS_FILE"
+AWS_REGION_VALUE="$(env_tfvar_value "$ENV_NAME" aws_region)"
+[[ -n "$AWS_REGION_VALUE" ]] || fail "aws_region is missing in $COMMON_TFVARS_FILE or $ENV_TFVARS_FILE"
 export AWS_REGION="$AWS_REGION_VALUE"
 export AWS_DEFAULT_REGION="$AWS_REGION_VALUE"
 
@@ -31,6 +32,7 @@ require_command aws
 require_command tofu
 
 [[ -f "$BACKEND_FILE" ]] || fail "Missing backend config: $BACKEND_FILE"
+[[ -f "$COMMON_TFVARS_FILE" ]] || fail "Missing common config: $COMMON_TFVARS_FILE"
 [[ -f "$ENV_TFVARS_FILE" ]] || fail "Missing env config: $ENV_TFVARS_FILE"
 
 if [[ -z "$EMAIL" || "$EMAIL" != *@*.* ]]; then
