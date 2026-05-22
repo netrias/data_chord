@@ -62,7 +62,7 @@ async def render_stage_two(
         "cde_catalog": [_cde_catalog_item(cde) for cde in cde_catalog],
         "no_mapping_label": UILabel.NO_MAPPING.value,
     }
-    return _templates.TemplateResponse("stage_2_mappings.html", context)
+    return _templates.TemplateResponse(request=request, name="stage_2_mappings.html", context=context)
 
 
 def _data_model_selection_for_request(

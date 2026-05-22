@@ -16,7 +16,7 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "pyarrow>=23.0.1",
     # transitive dep pins for security (CVE remediation)
-    "starlette>=0.49.1",  # CVE-2025-62727 (via fastapi)
+    "starlette>=1.0.1",  # PYSEC-2026-161; targeted lockfile age exception for security fix (via fastapi)
     "pygments>=2.20.0",   # CVE-2026-4539 (via rich/pytest)
     "requests>=2.33.0",   # CVE-2026-25645 (via boto3)
     "urllib3>=2.6.0",     # CVE-2025-66418, CVE-2025-66471 (via requests/boto3)

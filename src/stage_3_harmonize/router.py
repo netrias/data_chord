@@ -103,7 +103,7 @@ async def render_stage_three(request: Request) -> HTMLResponse:
         "request": request,
         "next_stage_url": NEXT_STAGE_PATH,
     }
-    return _templates.TemplateResponse("stage_3_harmonize.html", context)
+    return _templates.TemplateResponse(request=request, name="stage_3_harmonize.html", context=context)
 
 
 @stage_three_router.post(

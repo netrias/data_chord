@@ -74,7 +74,7 @@ async def render_stage_one(request: Request) -> HTMLResponse:
         "ui_constraints": describe_constraints(_upload_constraints),
         "default_schema": None,
     }
-    return _templates.TemplateResponse("stage_1_upload.html", context)
+    return _templates.TemplateResponse(request=request, name="stage_1_upload.html", context=context)
 
 
 @stage_one_router.get(
