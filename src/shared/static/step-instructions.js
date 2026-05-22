@@ -9,12 +9,12 @@ export const STAGE_ORDER = ['upload', 'mapping', 'harmonize', 'verify', 'review'
 
 export const STEP_INSTRUCTIONS = {
   upload: {
-    short: "Upload your CSV or TSV dataset to begin the harmonization workflow.",
-    long: "Select a CSV or TSV file from your computer to upload. The system will analyze your file's columns and prepare them for mapping to standard ontologies."
+    short: "Upload your dataset to begin the harmonization workflow.",
+    long: "Select a CSV, TSV, or XLSX file from your computer to upload. The system will analyze your file's columns and prepare them for mapping to standard ontologies."
   },
   mapping: {
     short: "Review and confirm which ontologies your data columns should map to.",
-    long: "Each row is one column from your file, with an AI-suggested target standard and a value-fit score.\n\nColumns fall into three categories:\n  ✎ Rewrite — values will be harmonized to match the standard\n  → Pass-through — mapped, but no permissible values to enforce\n  — Unmapped — column will pass through unchanged\n\nUse the Settings sidebar to toggle category visibility, show empty columns, and control column renaming. Hover a category to preview which rows would appear or disappear.\n\nClick any row to open its detail view where you can change the target or review individual value mappings."
+    long: "Each row is one column from your file, with an AI-suggested target common data element and a value-fit score.\n\nColumns fall into three categories:\n  ✎ Rewrite — values will be harmonized to match the standard\n  → Pass-through — the target standard does not have permissible values that we can conform your data to, so your data will be left untouched\n  — Unmapped — column will pass through unchanged\n\nUse the Settings sidebar to toggle category visibility, show empty columns, and choose whether to rename columns so they align with the target standard names. Column renaming is optional.\n\nClick any row to open its detail view where you can change the target or review individual value mappings."
   },
   harmonize: {
     short: "Your data is being transformed to match the target ontology.",

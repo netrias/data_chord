@@ -3,7 +3,7 @@
  *
  * The base view is a simple list of columns; clicking any row opens a
  * takeover that shows the column's distinct values on the left and the
- * target standard on the right.
+ * target common data element on the right.
  */
 import {
   initStepInstruction,
@@ -59,14 +59,19 @@ const OUTCOME_TIP = {
 const OUTCOME_DESC = {
   [OUTCOME.REWRITE]: 'Mapped to a standard with permissible values — data will be harmonized during processing.',
   [OUTCOME.PASSTHROUGH]: 'Mapped to a standard, but the standard has no enumerated permissible values, so your values will stay the same.',
-  [OUTCOME.UNCHANGED]: 'No target standard selected. Column will pass through without any changes.',
+  [OUTCOME.UNCHANGED]: 'No target common data element selected. Column will pass through without any changes.',
 };
 const MATCH_TIP = "Distinct values in your column that exactly match a permissible value of this CDE.";
-const PASSTHROUGH_FIT_TIP = "This standard has no permissible value list — values will pass through unchanged.";
+// Single canonical user-visible explanation of pass-through behavior. Used by
+// the main column-list value-fit tooltip, the picker dropdown row's right-edge
+// cell, and the in-pane help card so all three communicate the same thing.
+const PASSTHROUGH_TOOLTIP = "This target common data element has no permissible values to harmonize against. Your data will be left unchanged.";
 const PASSTHROUGH_GLYPH = '→';
 const NO_MAP_DESC = "Skip this column. Values will not be harmonized to any standard.";
-const VALUE_MAPPING_SECTION_LABEL = 'Harmonize values';
-const RENAME_ONLY_SECTION_LABEL = 'No value harmonization';
+const AI_RECOMMENDED_SECTION_LABEL = 'AI recommended common data elements';
+const NO_MAPPING_SECTION_LABEL = 'No mapping';
+const PV_CDE_SECTION_LABEL = 'Common data elements with permissible values';
+const RENAME_ONLY_SECTION_LABEL = 'Common data elements with no permissible values';
 
 /* User-facing messages */
 const MSG_NO_ANALYSIS_DATA = 'No analysis data found. Upload a file on Stage 1 to begin.';
@@ -165,11 +170,12 @@ const _isRenameOnly = (cdeType) => cdeType !== 'pv';
 
 // Ordered list of AI-recommended CDE keys for a column (top first), filtered
 // to the catalog the frontend knows about. The picker fans this list out as
-// individual ✦ AI rec rows so users can see every candidate the model returned.
+// individual rows in the "AI recommended common data elements" section so
+// users can see every candidate the model returned.
 const _aiCdeKeys = (column) => _columnSuggestions(column).map((s) => s.target);
 
-// The single CDE that auto-populates the row's "Target standard" cell when
-// the user has not set an override — i.e., the implicit applied default.
+// The single CDE that auto-populates the row's "Target common data element"
+// cell when the user has not set an override — i.e., the implicit applied default.
 const _topAiCdeKey = (column) => _aiCdeKeys(column)[0] ?? null;
 
 const _effectiveCde = (column) => {
@@ -693,7 +699,7 @@ const _rowHtml = (col) => {
 const _overlapCellHtml = (col) => {
   const kind = _mappingKindFor(col);
   if (kind === MAPPING_KIND.RENAME_ONLY) {
-    return `<div class="mapping-row-fit mapping-row-fit--na" data-fast-tooltip="${_escAttr(PASSTHROUGH_FIT_TIP)}">N/A</div>`;
+    return `<div class="mapping-row-fit mapping-row-fit--na" data-fast-tooltip="${_escAttr(PASSTHROUGH_TOOLTIP)}">N/A</div>`;
   }
   if (kind === MAPPING_KIND.VALUE_MAPPING) {
     const ratio = _overlapRatioFor(col);
@@ -977,7 +983,10 @@ const _sampleHtml = (s, pvSet) => {
 const _targetPaneHtml = (col, cde, detail, profile) => {
   const colKey = _columnKey(col);
   const override = state.overrides.get(colKey);
-  const isAi = cde && cde === _topAiCdeKey(col) && !state.overrides.has(colKey);
+  // The ✦ AI rec badge marks "this CDE is among the AI's recommendations" —
+  // not "the user accepted the top default" — so picking a lower-ranked AI
+  // candidate still earns the badge.
+  const isAi = !!cde && _aiCdeKeys(col).includes(cde);
   const isNone = _isNoMapValue(override);
   const meta = cde ? cdeByKey.get(cde) : null;
   const cdeType = detail?.cde_types?.[cde] ?? meta?.type ?? 'pv';
@@ -987,7 +996,7 @@ const _targetPaneHtml = (col, cde, detail, profile) => {
   if (isNone) {
     pickerInner = `<span class="cde-picker-name cde-picker-name--none">No Mapping</span><span class="cde-picker-caret">▾</span>`;
   } else if (!cde) {
-    pickerInner = `<span class="cde-picker-name cde-picker-name--placeholder">Select a target standard…</span><span class="cde-picker-caret">▾</span>`;
+    pickerInner = `<span class="cde-picker-name cde-picker-name--placeholder">Select a target common data element…</span><span class="cde-picker-caret">▾</span>`;
   } else {
     const typeBadge = _isRenameOnly(cdeType)
       ? `<span class="type-badge type-badge--passthrough">Pass-through</span>`
@@ -1002,7 +1011,7 @@ const _targetPaneHtml = (col, cde, detail, profile) => {
 
   const head = `
     <div class="takeover-pane-head">
-      <h3 class="takeover-pane-title">Target standard</h3>
+      <h3 class="takeover-pane-title">Target common data element</h3>
       ${_conformSummaryHtml(col, cde, detail, profile)}
     </div>
     <div class="cde-picker-wrap" id="pickerWrap">
@@ -1034,7 +1043,7 @@ const _targetPaneHtml = (col, cde, detail, profile) => {
     <div class="type-card passthrough">
       <div class="type-icon">${PASSTHROUGH_GLYPH}</div>
       <div class="type-name">Pass-through field</div>
-      <div class="type-desc">Values are stored as-is. There is no permissible value list and no validation against a standard.</div>
+      <div class="type-desc">${_escHtml(PASSTHROUGH_TOOLTIP)}</div>
     </div>
   `;
 };
@@ -1061,7 +1070,7 @@ const _togglePicker = () => {
   });
 
   // Lower sections receive the catalog with AI candidates removed so each
-  // CDE appears in exactly one place — top section (✦ AI rec) or below.
+  // CDE appears in exactly one place — the AI section or one of the lower two.
   const opts = cdeCatalog
     .filter((c) => !aiKeysSet.has(c.key))
     .map(_toOption)
@@ -1117,23 +1126,22 @@ const _renderDropdownItems = (aiOptions, opts, q, totalDistinct) => {
   const matches = (c) => !lq
     || (c.label || c.key).toLowerCase().includes(lq)
     || (c.description || '').toLowerCase().includes(lq);
-  const topItems = [];
-  for (const ai of aiOptions) {
-    if (matches(ai)) topItems.push(_optHtml(ai, 'ai', totalDistinct));
-  }
-  if (!q) {
-    topItems.push(_optHtml({ key: NO_MAP_OPTION_VALUE, label: NO_MAPPING_OPTION, description: NO_MAP_DESC }, 'none', totalDistinct));
-  }
+  const matchingAi = aiOptions.filter(matches);
+  // The "No mapping" sentinel is a sticky default, not a searchable CDE —
+  // suppress it entirely when a query is active so it does not crowd results.
+  const noMappingEntries = q
+    ? []
+    : [{ key: NO_MAP_OPTION_VALUE, label: NO_MAPPING_OPTION, description: NO_MAP_DESC }];
   const valueOptions = opts.filter((o) => !_isRenameOnly(o.type) && matches(o));
   const renameOnlyOptions = opts.filter((o) => _isRenameOnly(o.type) && matches(o));
   renameOnlyOptions.sort((a, b) => a.label.localeCompare(b.label));
   const sections = [
-    ...topItems,
-    topItems.length ? `<div class="dd-divider"></div>` : '',
-    _dropdownSectionHtml(VALUE_MAPPING_SECTION_LABEL, valueOptions, 'alt', totalDistinct),
+    _dropdownSectionHtml(AI_RECOMMENDED_SECTION_LABEL, matchingAi, 'ai', totalDistinct),
+    _dropdownSectionHtml(NO_MAPPING_SECTION_LABEL, noMappingEntries, 'none', totalDistinct),
+    _dropdownSectionHtml(PV_CDE_SECTION_LABEL, valueOptions, 'alt', totalDistinct),
     _dropdownSectionHtml(RENAME_ONLY_SECTION_LABEL, renameOnlyOptions, 'alt rename-only', totalDistinct),
   ].filter(Boolean);
-  if (!sections.length || (valueOptions.length === 0 && renameOnlyOptions.length === 0 && topItems.length === 0)) {
+  if (!sections.length) {
     return `<div class="dd-empty">No standards match "${_escHtml(q)}"</div>`;
   }
   return sections.join('');
@@ -1152,29 +1160,24 @@ const _dropdownSectionHtml = (label, options, kind, totalDistinct) => {
 const _optHtml = (c, kind, totalDistinct) => {
   const showMatch = kind !== 'none';
   const matchCount = _isRenameOnly(c.type) ? 0 : c.matches ?? 0;
-  const matchTip = _isRenameOnly(c.type) ? 'No permissible values to compare.' : MATCH_TIP;
   let matchHtml = '';
   if (showMatch) {
     if (_isRenameOnly(c.type)) {
-      matchHtml = `<span class="count zero" title="${matchTip}">N/A</span>`;
+      // The right-edge cell carries the canonical pass-through signal — the pill
+      // next to the name is intentionally omitted to avoid duplicate indicators.
+      matchHtml = `<span class="count" data-fast-tooltip="${_escAttr(PASSTHROUGH_TOOLTIP)}">Pass-through</span>`;
     } else if (totalDistinct > 0) {
       const pct = _formatRatio(matchCount / totalDistinct);
-      matchHtml = `<span class="count ${matchCount > 0 ? 'high' : 'zero'}" title="${matchTip}">${pct} value fit</span>`;
+      matchHtml = `<span class="count ${matchCount > 0 ? 'high' : 'zero'}" data-fast-tooltip="${_escAttr(MATCH_TIP)}">${pct} value fit</span>`;
     } else {
-      matchHtml = `<span class="count zero" title="${matchTip}">0% value fit</span>`;
+      matchHtml = `<span class="count zero" data-fast-tooltip="${_escAttr(MATCH_TIP)}">0% value fit</span>`;
     }
   }
-  const aiBadge = kind === 'ai' ? `<span class="ai-badge">✦ AI rec</span>` : '';
-  const typeBadge = _isRenameOnly(c.type)
-    ? `<span class="type-badge type-badge--passthrough">Pass-through</span>`
-    : '';
   const desc = c.description ? `<div class="dd-desc">${_escHtml(c.description)}</div>` : '';
   return `
     <div class="dd-opt ${kind}" data-value="${_escAttr(c.key)}">
       <div class="dd-row">
         <span class="name" title="${_escAttr(c.label || c.key)}">${_escHtml(c.label || c.key)}</span>
-        ${typeBadge}
-        ${aiBadge}
         ${matchHtml}
       </div>
       ${desc}

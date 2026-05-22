@@ -7,57 +7,6 @@
   padding: var(--space-4);
 }
 
-.analyze-button-shell {
-  position: relative;
-  display: inline-flex;
-}
-
-.analyze-button-tooltip {
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 0.65rem);
-  z-index: 20;
-  width: max-content;
-  max-width: 240px;
-  padding: 0.45rem 0.65rem;
-  border: 1px solid var(--gray-200);
-  border-radius: var(--radius-sm);
-  background: var(--gray-900);
-  color: var(--white);
-  font-size: 0.78rem;
-  font-weight: 600;
-  line-height: 1.25;
-  text-align: center;
-  box-shadow: var(--shadow-md);
-  opacity: 0;
-  pointer-events: none;
-  transform: translate(-50%, 4px);
-  transition: opacity 70ms ease, transform 70ms ease;
-}
-
-.analyze-button-tooltip::after {
-  content: "";
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  border: 6px solid transparent;
-  border-top-color: var(--gray-900);
-  transform: translateX(-50%);
-}
-
-.analyze-button-shell.has-disabled-tooltip:hover .analyze-button-tooltip,
-.analyze-button-shell.has-disabled-tooltip:focus-within .analyze-button-tooltip {
-  opacity: 1;
-  transform: translate(-50%, 0);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .analyze-button-tooltip {
-    transition: opacity 60ms ease;
-    transform: translate(-50%, 0);
-  }
-}
-
 /* Upload grid layout */
 .upload-grid {
   display: flex;

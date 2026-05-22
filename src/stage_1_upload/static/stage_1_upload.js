@@ -3,14 +3,10 @@ import { STAGE_2_PAYLOAD_KEY, STAGE_3_PAYLOAD_KEY, STAGE_3_JOB_KEY, CURRENT_FILE
 import { showDataModelPopup, preloadDataModels } from './data_model_popup.js';
 
 const config = window.stageOneUploadConfig ?? {};
-const UPLOAD_REQUIRED_MESSAGE = 'Please upload a file to continue.';
-const UPLOAD_IN_PROGRESS_MESSAGE = 'Please wait while your file is uploaded.';
 
 const dropzone = document.getElementById('dropzone');
 const fileInput = document.getElementById('fileInput');
 const analyzeButton = document.getElementById('analyzeButton');
-const analyzeButtonShell = document.getElementById('analyzeButtonShell');
-const analyzeButtonHelp = document.getElementById('analyzeButtonHelp');
 const statusMessage = document.getElementById('statusMessage');
 const dropzoneCopy = document.getElementById('dropzoneCopy');
 const dropzoneUploading = document.getElementById('dropzoneUploading');
@@ -68,15 +64,9 @@ const _setStatus = (message = '', tone = '') => {
   }
 };
 
-const _setAnalyzeButtonEnabled = (enabled, disabledReason = UPLOAD_REQUIRED_MESSAGE) => {
+const _setAnalyzeButtonEnabled = (enabled) => {
   if (!analyzeButton) return;
   analyzeButton.disabled = !enabled;
-  if (!analyzeButtonShell || !analyzeButtonHelp) return;
-  const hasReason = !enabled && Boolean(disabledReason);
-  analyzeButtonShell.classList.toggle('has-disabled-tooltip', hasReason);
-  analyzeButtonShell.dataset.disabledReason = disabledReason;
-  analyzeButtonHelp.textContent = disabledReason;
-  analyzeButtonHelp.setAttribute('aria-hidden', hasReason ? 'false' : 'true');
 };
 
 const _showDropzoneCopy = () => {
@@ -185,7 +175,7 @@ const _uploadDataset = async () => {
     return;
   }
   state.isUploading = true;
-  _setAnalyzeButtonEnabled(false, UPLOAD_IN_PROGRESS_MESSAGE);
+  _setAnalyzeButtonEnabled(false);
   if (dropzone) {
     dropzone.classList.add('is-uploading');
     dropzone.setAttribute('aria-busy', 'true');
@@ -561,7 +551,7 @@ const _analyzeDataset = async () => {
     return;
   }
   state.isAnalyzing = true;
-  _setAnalyzeButtonEnabled(false, '');
+  _setAnalyzeButtonEnabled(false);
   _showDropzoneSummary(state.file, 'Analyzing columns…');
   if (analyzeOverlay) analyzeOverlay.classList.remove('hidden');
 

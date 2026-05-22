@@ -92,7 +92,7 @@ const _stage2HarnessHtml = (cdeCatalog) => `
       <div class="mapping-list-head">
         <button id="columnSortBtn" type="button"><span>Your column</span><span class="mapping-list-head-sort-arrow"></span></button>
         <div></div>
-        <button id="targetSortBtn" type="button"><span>Target standard</span><span class="mapping-list-head-sort-arrow"></span></button>
+        <button id="targetSortBtn" type="button"><span>Target common data element</span><span class="mapping-list-head-sort-arrow"></span></button>
         <button id="valueFitSortBtn" type="button"><span>Value fit</span><span class="mapping-list-head-sort-arrow"></span></button>
         <div></div>
       </div>
@@ -145,13 +145,135 @@ test('happy path flow: upload → analyze → harmonize → review → summary �
 
   const rows = await downloadCsvRows(page, fileId);
   expect(rows[0].col_a).toBe('Baz');
+
+  // And: a real UI download reveals the Stage 5 start-over action.
+  await expect(page.locator('#uploadNavAction')).toHaveClass(/hidden/);
+  const downloadPromise = page.waitForEvent('download');
+  await page.click('#downloadResults');
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/\.zip$/);
+  await expect(page.locator('#uploadNavAction')).not.toHaveClass(/hidden/);
+});
+
+test('Stage 5 confirms start-over after successful download and clears browser workflow state', async ({ page }) => {
+  /*
+   * Given: the user has reached Stage 5 with workflow state in session storage
+   * When:  download fails, then succeeds, then the user cancels and confirms start-over
+   * Then:  the start-over action appears only after success, cancel preserves state,
+   *        and confirm clears Data Chord workflow keys before returning to Stage 1.
+   */
+  await mockHarmonizeSuccess(page);
+  let downloadAttempts = 0;
+  await page.route('**/stage-5/download', async (route) => {
+    downloadAttempts += 1;
+    if (downloadAttempts === 1) {
+      await route.fulfill({ status: 500, body: 'Download failed' });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      headers: {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': 'attachment; filename="harmonized_data.zip"',
+      },
+      body: 'zip-bytes',
+    });
+  });
+
+  const fileId = await uploadAndAnalyze(page, fileFixture('basic.csv'));
+  await clickHarmonize(page);
+  await expect(page.locator('#reviewButton')).toBeEnabled();
+  seedHarmonization(fileId, {});
+
+  await page.click('#reviewButton');
+  await page.waitForURL(/\/stage-4/);
+  await waitForReviewRows(page);
+  await page.click('#stageFiveButton');
+  await page.waitForURL(/\/stage-5/);
+  await page.locator('#summaryGrid').waitFor({ state: 'visible' });
+
+  // Given: workflow state exists, while an unrelated session key should be preserved.
+  await page.evaluate(() => {
+    sessionStorage.setItem('unrelatedKey', 'keep-me');
+  });
+  const keysBeforeStartOver = await page.evaluate(() => ({
+    currentFileSession: sessionStorage.getItem('currentFileSession'),
+    stage2Payload: sessionStorage.getItem('stage2Payload'),
+    stage3HarmonizePayload: sessionStorage.getItem('stage3HarmonizePayload'),
+    stage3HarmonizeJob: sessionStorage.getItem('stage3HarmonizeJob'),
+    maxReachedStage: sessionStorage.getItem('maxReachedStage'),
+    unrelatedKey: sessionStorage.getItem('unrelatedKey'),
+  }));
+  expect(keysBeforeStartOver.currentFileSession).not.toBeNull();
+  expect(keysBeforeStartOver.stage2Payload).not.toBeNull();
+  expect(keysBeforeStartOver.stage3HarmonizePayload).not.toBeNull();
+  expect(keysBeforeStartOver.stage3HarmonizeJob).not.toBeNull();
+  expect(keysBeforeStartOver.maxReachedStage).not.toBeNull();
+  expect(keysBeforeStartOver.unrelatedKey).toBe('keep-me');
+  await expect(page.locator('#uploadNavAction')).toHaveClass(/hidden/);
+
+  // When: the download fails.
+  await page.click('#downloadResults');
+
+  // Then: the start-over action is still hidden.
+  await expect(page.locator('#downloadError')).toBeVisible();
+  await expect(page.locator('#uploadNavAction')).toHaveClass(/hidden/);
+
+  // When: the download succeeds.
+  await page.click('#downloadResults');
+
+  // Then: the start-over action appears.
+  await expect(page.locator('#uploadNavAction')).not.toHaveClass(/hidden/);
+
+  // When: the user opens the dialog and cancels.
+  await page.click('#startOverButton');
+  await expect(page.locator('#startOverDialog')).toBeVisible();
+  await page.click('#startOverCancel');
+
+  // Then: they stay on Stage 5 and workflow state remains.
+  await expect(page.locator('#startOverDialog')).toBeHidden();
+  expect(page.url()).toContain('/stage-5');
+  const keysAfterCancel = await page.evaluate(() => ({
+    currentFileSession: sessionStorage.getItem('currentFileSession'),
+    stage2Payload: sessionStorage.getItem('stage2Payload'),
+    stage3HarmonizePayload: sessionStorage.getItem('stage3HarmonizePayload'),
+    stage3HarmonizeJob: sessionStorage.getItem('stage3HarmonizeJob'),
+    maxReachedStage: sessionStorage.getItem('maxReachedStage'),
+    unrelatedKey: sessionStorage.getItem('unrelatedKey'),
+  }));
+  expect(keysAfterCancel).toEqual(keysBeforeStartOver);
+
+  // When: the user confirms start-over.
+  await page.click('#startOverButton');
+  await page.click('#startOverConfirm');
+  await page.waitForURL(/\/stage-1$/);
+
+  // Then: Stage 1 is empty and only the Data Chord workflow keys were cleared.
+  await expect(page.locator('#dropzoneCopy')).not.toHaveClass(/hidden/);
+  await expect(page.locator('#analyzeButton')).toBeDisabled();
+  const keysAfterConfirm = await page.evaluate(() => ({
+    currentFileSession: sessionStorage.getItem('currentFileSession'),
+    stage2Payload: sessionStorage.getItem('stage2Payload'),
+    stage3HarmonizePayload: sessionStorage.getItem('stage3HarmonizePayload'),
+    stage3HarmonizeJob: sessionStorage.getItem('stage3HarmonizeJob'),
+    maxReachedStage: sessionStorage.getItem('maxReachedStage'),
+    unrelatedKey: sessionStorage.getItem('unrelatedKey'),
+  }));
+  expect(keysAfterConfirm).toEqual({
+    currentFileSession: null,
+    stage2Payload: null,
+    stage3HarmonizePayload: null,
+    stage3HarmonizeJob: null,
+    maxReachedStage: null,
+    unrelatedKey: 'keep-me',
+  });
 });
 
 test('Stage 2 list opens a takeover on row click', async ({ page }) => {
   /*
    * Given: a CSV is analyzed and Stage 2 lands on the list view
    * When:  a row is clicked
-   * Then:  the takeover opens with "Your column" + "Target standard"
+   * Then:  the takeover opens with "Your column" + "Target common data element"
    *        panes; closing the takeover returns to the list.
    */
   await mockColumnDetail(page);
@@ -167,7 +289,7 @@ test('Stage 2 list opens a takeover on row click', async ({ page }) => {
   await row.click();
   await expect(page.locator('#takeover')).not.toHaveClass(/hidden/);
   await expect(page.locator('.takeover-pane--data .takeover-pane-title')).toHaveText(/your column/i);
-  await expect(page.locator('.takeover-pane--target .takeover-pane-title')).toHaveText(/target standard/i);
+  await expect(page.locator('.takeover-pane--target .takeover-pane-title')).toHaveText(/target common data element/i);
 
   // Close via the ✕ button
   await page.locator('.takeover-btn--close').click();
@@ -268,11 +390,18 @@ test('Stage 2 splits picker sections by mapping kind', async ({ page }) => {
   await page.locator('.mapping-row', { hasText: 'diagnosis' }).click();
   await page.locator('#cdePicker').click();
 
-  await expect(page.locator('.dd-section-label', { hasText: 'Harmonize values' })).toBeVisible();
-  await expect(page.locator('.dd-section-label', { hasText: 'No value harmonization' })).toBeVisible();
-  await expect(page.locator('.dd-section--rename-only .dd-opt', { hasText: 'notes_cde' })).toBeVisible();
-  await expect(page.locator('.dd-section--rename-only .dd-opt', { hasText: 'notes_cde' })).not.toContainText('5 matches');
-  await expect(page.locator('.dd-section--rename-only .dd-opt', { hasText: 'notes_cde' })).toContainText('N/A');
+  await expect(page.locator('.dd-section-label', { hasText: 'Common data elements with permissible values' })).toBeVisible();
+  await expect(page.locator('.dd-section-label', { hasText: 'Common data elements with no permissible values' })).toBeVisible();
+  const passthroughRow = page.locator('.dd-section--rename-only .dd-opt', { hasText: 'notes_cde' });
+  await expect(passthroughRow).toBeVisible();
+  await expect(passthroughRow).not.toContainText('5 matches');
+  // Single right-edge "Pass-through" cell replaces the prior N/A text + pill pair.
+  await expect(passthroughRow).toContainText('Pass-through');
+  await expect(passthroughRow.locator('.type-badge--passthrough')).toHaveCount(0);
+  await expect(passthroughRow.locator('.count')).toHaveAttribute(
+    'data-fast-tooltip',
+    'This target common data element has no permissible values to harmonize against. Your data will be left unchanged.',
+  );
 
   await page.locator('.dd-section--rename-only .dd-opt', { hasText: 'notes_cde' }).click();
 
@@ -471,10 +600,11 @@ test('Stage 2 picker surfaces all AI candidates as separate rows', async ({ page
    * Given: cde_targets["diagnosis"] returns two ranked AI candidates.
    * When:  the user opens the picker for that column.
    * Then:  both candidates render as .dd-opt.ai rows in similarity order
-   *        (top first), each with the ✦ AI rec badge, and neither key
-   *        appears in the "Harmonize values" / "No value harmonization"
-   *        sections below the divider. Picking a candidate updates the row's
-   *        target standard while preserving the rewrite outcome for PV CDEs.
+   *        (top first) under the "AI recommended common data elements"
+   *        section header, and neither key appears in the lower sections
+   *        for CDEs with/without permissible values. Picking a candidate
+   *        updates the row's target CDE while preserving the rewrite
+   *        outcome for PV CDEs.
    */
   const payload = {
     file_id: 'abcdef0123456789',
@@ -549,18 +679,21 @@ test('Stage 2 picker surfaces all AI candidates as separate rows', async ({ page
   await page.locator('.mapping-row', { hasText: 'diagnosis' }).click();
   await page.locator('#cdePicker').click();
 
-  // Top section: both AI candidates render as .dd-opt.ai rows, top-first
-  // (similarity order), both carrying the ✦ AI rec badge.
+  // AI section: both candidates render as .dd-opt.ai rows under the AI
+  // section header, top-first (similarity order). The per-row ✦ AI rec
+  // badge is intentionally absent — the section header conveys it.
+  await expect(
+    page.locator('.dd-section-label', { hasText: 'AI recommended common data elements' })
+  ).toBeVisible();
   const aiRows = page.locator('#pickerDropdown .dd-opt.ai');
   await expect(aiRows).toHaveCount(2);
   await expect(aiRows.nth(0)).toContainText('dx');
-  await expect(aiRows.nth(0)).toContainText('AI rec');
   await expect(aiRows.nth(1)).toContainText('dx_alt');
-  await expect(aiRows.nth(1)).toContainText('AI rec');
+  await expect(aiRows.nth(0).locator('.ai-badge')).toHaveCount(0);
 
-  // Dedup: AI candidates do not also appear in the lower sections.
-  await expect(page.locator('#pickerDropdown .dd-section .dd-opt[data-value="dx"]')).toHaveCount(0);
-  await expect(page.locator('#pickerDropdown .dd-section .dd-opt[data-value="dx_alt"]')).toHaveCount(0);
+  // Dedup: each AI candidate appears exactly once across the whole dropdown.
+  await expect(page.locator('#pickerDropdown .dd-opt[data-value="dx"]')).toHaveCount(1);
+  await expect(page.locator('#pickerDropdown .dd-opt[data-value="dx_alt"]')).toHaveCount(1);
 
   // Default state: row reflects the top AI candidate.
   await expect(
@@ -579,6 +712,10 @@ test('Stage 2 picker surfaces all AI candidates as separate rows', async ({ page
   await expect(
     page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-status.mapping-ico--rewrite')
   ).toBeVisible();
+  // The ✦ AI rec badge on the picker button marks "the selected CDE is an AI
+  // recommendation", not "the user accepted the top default" — so picking the
+  // 2nd-ranked AI candidate must keep the badge visible on the button.
+  await expect(page.locator('#cdePicker .ai-badge')).toBeVisible();
 
   // Picking a non-AI catalog CDE updates the target and still remains a rewrite
   // outcome because the selected CDE is PV-backed.
@@ -785,16 +922,16 @@ test('version dropdown panel renders below trigger and scrolls when versions ove
   await page.locator('.data-model-dialog').waitFor({ state: 'visible' });
 
   // Negative check: panel hidden before trigger click
-  await expect(page.locator('.data-model-dropdown-panel')).toBeHidden();
+  await expect(page.locator('.data-model-dropdown--version .data-model-dropdown-panel')).toBeHidden();
 
   await page.click('#versionDropdownTrigger');
-  await page.locator('.data-model-dropdown-panel').waitFor({ state: 'visible' });
+  await page.locator('.data-model-dropdown--version .data-model-dropdown-panel').waitFor({ state: 'visible' });
 
   const geom = await page.evaluate(() => {
     const trigger = document.querySelector('#versionDropdownTrigger');
-    const panel = document.querySelector('.data-model-dropdown-panel');
+    const panel = document.querySelector('.data-model-dropdown--version .data-model-dropdown-panel');
     /* Scroll lives on the inner list; outer panel only clips for rounded corners. */
-    const list = document.querySelector('.data-model-dropdown-list');
+    const list = document.querySelector('.data-model-dropdown--version .data-model-dropdown-list');
     return {
       triggerBottom: trigger.getBoundingClientRect().bottom,
       panelTop: panel.getBoundingClientRect().top,
@@ -807,9 +944,114 @@ test('version dropdown panel renders below trigger and scrolls when versions ove
   expect(geom.itemCount).toBe(20);
   expect(geom.listScrollHeight).toBeGreaterThan(geom.listClientHeight);
 
-  const items = page.locator('.data-model-dropdown-item');
+  const items = page.locator('.data-model-dropdown--version .data-model-dropdown-item');
   await expect(items.first()).toHaveText('v20.0');
   await expect(items.first()).toHaveAttribute('aria-selected', 'true');
+});
+
+test('data model dropdown shares custom styling and custom dropdowns close on outside click', async ({ page }) => {
+  /*
+   * Given: the Stage 1 data model popup has two data models and multiple versions
+   * When:  the user opens the data model dropdown and the version dropdown
+   * Then:  both use the same custom trigger styling, the hidden native select
+   *        remains available, and clicking elsewhere in the dialog dismisses
+   *        the open custom dropdown.
+   */
+  await page.route('**/stage-1/data-models', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          key: 'alpha',
+          label: 'Alpha Model',
+          versions: [
+            { version_label: 'v1', version_number: 1, external_version_number: null, is_default: false },
+            { version_label: 'v3', version_number: 3, external_version_number: null, is_default: true },
+          ],
+        },
+        {
+          key: 'gc',
+          label: 'Genomic Cancer',
+          versions: [
+            { version_label: 'v2', version_number: 2, external_version_number: null, is_default: true },
+          ],
+        },
+      ]),
+    });
+  });
+  await mockAnalyze(page);
+
+  await page.goto('/stage-1');
+  await page.setInputFiles('#fileInput', fileFixture('basic.csv'));
+  await page.locator('#analyzeButton').waitFor({ state: 'visible' });
+  await page.waitForFunction(() => !document.querySelector('#analyzeButton')?.disabled);
+  await page.click('#analyzeButton');
+  await page.locator('.data-model-dialog').waitFor({ state: 'visible' });
+
+  // Given: the native data model select is hidden, not removed.
+  await expect(page.locator('#dataModelSelect')).toHaveClass(/sr-only/);
+  await expect(page.locator('.data-model-dropdown--model .data-model-dropdown-panel')).toBeHidden();
+
+  // When: the data model dropdown opens.
+  await page.click('#dataModelDropdownTrigger');
+  await expect(page.locator('.data-model-dropdown--model .data-model-dropdown-panel')).toBeVisible();
+  await expect(page.locator('.data-model-dropdown--model .data-model-dropdown-item')).toHaveCount(2);
+
+  // Then: the model trigger uses the same styling as the version trigger.
+  const triggerStyles = await page.evaluate(() => {
+    const model = getComputedStyle(document.querySelector('#dataModelDropdownTrigger'));
+    const version = getComputedStyle(document.querySelector('#versionDropdownTrigger'));
+    return {
+      sameBorderRadius: model.borderRadius === version.borderRadius,
+      samePadding: model.padding === version.padding,
+      sameBackgroundImage: model.backgroundImage === version.backgroundImage,
+      sameTextAlign: model.textAlign === version.textAlign,
+    };
+  });
+  expect(triggerStyles).toEqual({
+    sameBorderRadius: true,
+    samePadding: true,
+    sameBackgroundImage: true,
+    sameTextAlign: true,
+  });
+
+  // When: the user clicks elsewhere in the dialog.
+  await page.locator('.data-model-dialog-title').click();
+
+  // Then: the open custom dropdown closes.
+  await expect(page.locator('.data-model-dropdown--model .data-model-dropdown-panel')).toBeHidden();
+
+  // When: selecting a model through the custom dropdown.
+  await page.click('#dataModelDropdownTrigger');
+  await page.locator('.data-model-dropdown--model .data-model-dropdown-item[data-value="alpha"]').click();
+
+  // Then: the hidden select and dependent version dropdown stay in sync.
+  await expect(page.locator('#dataModelSelect')).toHaveValue('alpha');
+  await expect(page.locator('#versionDropdownTrigger')).toContainText('v3');
+
+  // When: automation changes the hidden select directly.
+  await page.selectOption('#dataModelSelect', 'gc');
+
+  // Then: the visible custom dropdown and version list still stay in sync.
+  await expect(page.locator('#dataModelDropdownTrigger')).toContainText('Genomic Cancer');
+  await expect(page.locator('#versionDropdownTrigger')).toContainText('v2');
+
+  // When: a keyboard user changes the custom model dropdown.
+  await page.click('#dataModelDropdownTrigger');
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('Enter');
+
+  // Then: the same state sync path is used.
+  await expect(page.locator('#dataModelSelect')).toHaveValue('alpha');
+  await expect(page.locator('#dataModelDropdownTrigger')).toContainText('Alpha Model');
+  await expect(page.locator('#versionDropdownTrigger')).toContainText('v3');
+
+  // When/Then: the version dropdown also closes when the user clicks off it.
+  await page.click('#versionDropdownTrigger');
+  await expect(page.locator('.data-model-dropdown--version .data-model-dropdown-panel')).toBeVisible();
+  await page.locator('.data-model-dialog-title').click();
+  await expect(page.locator('.data-model-dropdown--version .data-model-dropdown-panel')).toBeHidden();
 });
 
 test('error handling: wrong file type and oversize upload', async ({ page }) => {
@@ -840,7 +1082,7 @@ test('error handling: wrong file type and oversize upload', async ({ page }) => 
   }
 });
 
-test('Stage 1 shows upload progress and disabled button guidance', async ({ page }) => {
+test('Stage 1 shows upload progress and keeps the Map button disabled until upload completes', async ({ page }) => {
   await mockDataModels(page);
   let releaseUpload;
   const uploadCanFinish = new Promise((resolve) => {
@@ -875,13 +1117,6 @@ test('Stage 1 shows upload progress and disabled button guidance', async ({ page
   await expect(page.locator('#analyzeButton')).toBeVisible();
   await expect(page.locator('#analyzeButton')).toBeDisabled();
   await expect(page.locator('#dropzoneUploading')).toBeHidden();
-
-  // When: the disabled action is hovered
-  await page.locator('#analyzeButtonShell').hover();
-
-  // Then: the fast custom tooltip explains what is needed
-  await expect(page.locator('#analyzeButtonHelp')).toHaveText('Please upload a file to continue.');
-  await expect(page.locator('#analyzeButtonHelp')).toHaveCSS('opacity', '1');
 
   // When: the user selects a file and upload is still in flight
   await page.setInputFiles('#fileInput', fileFixture('basic.csv'));
