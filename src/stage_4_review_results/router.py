@@ -59,7 +59,7 @@ async def render_stage_four(request: Request) -> HTMLResponse:
         "request": request,
         "results_endpoint": request.url_for("stage_four_harmonized_rows"),
     }
-    return _templates.TemplateResponse("stage_4_review.html", context)
+    return _templates.TemplateResponse(request, "stage_4_review.html", context)
 
 
 @stage_four_router.post("/rows", response_model=StageFourResultsResponse, name="stage_four_harmonized_rows")
