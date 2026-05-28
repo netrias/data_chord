@@ -117,6 +117,8 @@ def _build_entries(
     cache: SessionCache,
 ) -> list[CdeMappingEntry]:
     override_by_key = column_overrides.overrides
+    # Include rename-only and no-mapping columns too; the download artifact is
+    # an audit trail for every output column, not just value-harmonized fields.
     keys = sorted(set(manifest.records) | set(override_by_key) | set(column_renames.renames), key=str)
     return [
         _build_entry(column_key, manifest.records.get(column_key), override_by_key, column_renames, cache)

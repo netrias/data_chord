@@ -85,6 +85,8 @@ export const measureTiming = (name, startName, endName, detail = {}) => {
 
 export const markAfterPaint = (name, detail = {}) => {
   return new Promise((resolve) => {
+    // Two animation frames puts the mark after layout and paint, which is closer
+    // to what a user sees than timing only the JavaScript render call.
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         resolve(markTiming(name, detail));

@@ -62,10 +62,14 @@ def load_upload_artifact(
     try:
         stored = workflow_storage.read_json(user, file_id, WorkflowFile.UPLOAD_METADATA)
     except WorkflowNotFoundError:
+        # Older local workflows may predate durable metadata; keep them usable
+        # instead of forcing users to re-upload.
         return local_meta
     if stored is None or not isinstance(stored.data, Mapping):
         return local_meta
     if local_meta is not None and local_meta.saved_path.exists():
+        # Prefer the existing local file when present to avoid copying large
+        # artifacts back out of durable storage on every stage transition.
         return upload_storage.restore_upload(stored.data, local_meta.saved_path)
     try:
         with workflow_storage.materialize_artifact(user, file_id, WorkflowFile.ORIGINAL_UPLOAD) as source_path:
@@ -159,6 +163,8 @@ def _upsert_json(
     kind: WorkflowFile,
     data: Mapping[str, object],
 ) -> None:
+    # Write through the storage version token so browser retries do not erase a
+    # newer artifact written by another request.
     existing = workflow_storage.read_json(user, file_id, kind)
     expected_version = existing.version if existing is not None else None
     workflow_storage.write_json(user, file_id, kind, data, expected_version=expected_version)

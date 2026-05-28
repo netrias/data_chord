@@ -43,6 +43,8 @@ class InvalidUserContextError(RuntimeError):
 
 def current_user_context() -> UserContext:
     user = _current_user.get()
+    # Local development has no ALB identity headers, but storage still needs a
+    # stable owner id so the same authorization paths run in every environment.
     return user if user is not None else UserContext(user_id=LOCAL_USER_ID)
 
 
@@ -63,10 +65,14 @@ def _user_context_from_headers(headers: Mapping[str, str]) -> UserContext:
         signed_user_id = _string_claim(claims, "sub")
         if signed_user_id is None:
             raise InvalidUserContextError("ALB identity claims are missing sub")
+        # ALB sends both headers, but only x-amzn-oidc-data is signed; require
+        # the unsigned convenience header to agree before trusting it.
         if unsigned_user_id and unsigned_user_id != signed_user_id:
             raise InvalidUserContextError("ALB identity header does not match signed claims")
         return UserContext(user_id=signed_user_id, email=_string_claim(claims, "email"))
     if expected_alb_arn and unsigned_user_id:
+        # In hosted mode, accepting only the unsigned identity header would let
+        # callers spoof workflow ownership if traffic reached the app directly.
         raise InvalidUserContextError("ALB identity header is missing signed claims")
     if not unsigned_user_id:
         return UserContext(user_id=LOCAL_USER_ID)
@@ -83,6 +89,8 @@ def _verified_alb_claims(encoded_jwt: str, expected_alb_arn: str | None) -> Mapp
     if not signer:
         raise InvalidUserContextError("ALB identity claims are missing signer")
     if expected_alb_arn is not None and signer != expected_alb_arn:
+        # Pinning the signer prevents a valid token from another load balancer
+        # from being replayed against this app.
         raise InvalidUserContextError("ALB identity signer does not match expected load balancer")
     _verify_expiration(header)
     key_id = _string_claim(header, "kid")
@@ -163,6 +171,8 @@ def _verify_signature(public_key: EllipticCurvePublicKey, signing_input: bytes, 
 def _signature_for_cryptography(signature: bytes) -> bytes:
     if len(signature) != 64:
         return signature
+    # ALB provides ES256 signatures as raw r+s bytes, while cryptography expects
+    # DER-encoded DSS signatures.
     r = int.from_bytes(signature[:32], byteorder="big")
     s = int.from_bytes(signature[32:], byteorder="big")
     return utils.encode_dss_signature(r, s)

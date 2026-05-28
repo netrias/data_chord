@@ -69,6 +69,8 @@ class WorkflowFile(str, Enum):
 
     @property
     def is_mutable(self) -> bool:
+        # Upload originals and final bundles are create-once so later stages cannot
+        # silently replace evidence that earlier stages or downloads depend on.
         return self in {
             WorkflowFile.UPLOAD_METADATA,
             WorkflowFile.MAPPING_MANIFEST,
@@ -236,6 +238,8 @@ class LocalWorkflowStorage:
         metadata = WorkflowMetadata.create(user, workflow_id)
         metadata_path = workflow_dir / _METADATA_FILE
         try:
+            # Exclusive create preserves the owner record as the source of truth
+            # when retries or duplicate uploads race on the same workflow id.
             with metadata_path.open("x", encoding="utf-8") as handle:
                 json.dump(metadata.to_store(), handle, indent=2)
         except FileExistsError as exc:
@@ -308,6 +312,8 @@ class LocalWorkflowStorage:
             raise WorkflowArtifactNotFoundError(f"Source artifact not found: {source_path}")
         path = self._artifact_path(file_id, kind, source_path.suffix)
         path.parent.mkdir(parents=True, exist_ok=True)
+        # A mutable artifact may change suffix after processing, so remove stale
+        # siblings before writing the replacement named by the new source file.
         for existing_path in self._existing_artifact_paths(file_id, kind):
             if existing_path != path:
                 existing_path.unlink(missing_ok=True)
@@ -366,6 +372,8 @@ class LocalWorkflowStorage:
         kind: WorkflowFile,
         expected_version: VersionToken | None,
     ) -> None:
+        # Local storage mirrors S3 conditional writes so both backends reject
+        # lost updates instead of letting the last writer win by accident.
         if not path.exists():
             if expected_version is not None:
                 raise WorkflowConflictError(f"Artifact does not exist: {kind.value}")
@@ -378,6 +386,8 @@ class LocalWorkflowStorage:
 
     def _write_json_atomic(self, path: Path, data: JsonValue) -> None:
         content = json.dumps(data, indent=2, default=str)
+        # Write beside the target and replace in one step so readers never see a
+        # partially written JSON document.
         with NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as temp_file:
             temp_path = Path(temp_file.name)
             temp_file.write(content)
@@ -399,6 +409,8 @@ class LocalWorkflowStorage:
 
 
 def _version_for_file(path: Path) -> VersionToken:
+    # Content hashes give local files the same optimistic-write shape as S3
+    # ETags without relying on filesystem timestamps.
     return VersionToken(f"{_SHA256_PREFIX}{_sha256_for_file(path)}")
 
 

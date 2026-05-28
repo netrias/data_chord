@@ -5,13 +5,17 @@ data "aws_secretsmanager_secret" "netrias_api_key" {
 }
 
 locals {
-  name_prefix          = substr(lower(replace("${var.project_name}-${var.environment}", "_", "-")), 0, 32)
-  hosted_zone_name     = trimsuffix(var.hosted_zone_name, ".")
-  use_managed_dns      = var.domain_name == "" && local.hosted_zone_name != ""
-  managed_domain_name  = "${var.domain_label != "" ? var.domain_label : local.name_prefix}.${local.hosted_zone_name}"
-  app_host             = var.domain_name != "" ? var.domain_name : (local.use_managed_dns ? local.managed_domain_name : aws_lb.app.dns_name)
-  app_url              = "https://${local.app_host}"
-  callback_url         = "${local.app_url}/oauth2/idpresponse"
+  name_prefix      = substr(lower(replace("${var.project_name}-${var.environment}", "_", "-")), 0, 32)
+  hosted_zone_name = trimsuffix(var.hosted_zone_name, ".")
+  # Prefer a managed subdomain when the caller supplies a hosted zone but not a
+  # final domain name; this keeps staging/prod setup small for internal deploys.
+  use_managed_dns     = var.domain_name == "" && local.hosted_zone_name != ""
+  managed_domain_name = "${var.domain_label != "" ? var.domain_label : local.name_prefix}.${local.hosted_zone_name}"
+  app_host            = var.domain_name != "" ? var.domain_name : (local.use_managed_dns ? local.managed_domain_name : aws_lb.app.dns_name)
+  app_url             = "https://${local.app_host}"
+  callback_url        = "${local.app_url}/oauth2/idpresponse"
+  # Omit the bypass listener rule unless ranges exist so hosted auth stays
+  # mandatory by default.
   auth_bypass_ready    = length(nonsensitive(var.auth_bypass_cidrs)) > 0
   certificate_arn      = var.certificate_arn != "" ? var.certificate_arn : aws_acm_certificate_validation.app[0].certificate_arn
   invite_environment   = var.environment == "prod" ? "" : " (${var.environment} environment)"
@@ -153,6 +157,8 @@ resource "aws_s3_bucket_versioning" "workflow" {
   bucket = aws_s3_bucket.workflow.id
 
   versioning_configuration {
+    # Workflow writes use optimistic version checks, so keeping object versions
+    # gives operators a recovery trail when a bad deploy corrupts artifacts.
     status = "Enabled"
   }
 }
@@ -461,6 +467,8 @@ resource "aws_iam_role_policy" "task_workflow_storage" {
           "s3:PutObject",
           "s3:DeleteObject"
         ]
+        # App code prefixes every workflow key by environment; IAM repeats that
+        # boundary so a task cannot cross-read another environment's artifacts.
         Resource = "${aws_s3_bucket.workflow.arn}/${var.environment}/*"
       },
       {
@@ -512,7 +520,9 @@ resource "aws_ecs_task_definition" "app" {
           value = aws_s3_bucket.workflow.bucket
         },
         {
-          name  = "DATA_CHORD_S3_PREFIX"
+          name = "DATA_CHORD_S3_PREFIX"
+          # Prefix storage by environment inside one bucket so staging and prod
+          # can share bucket policy shape while keeping object namespaces apart.
           value = var.environment
         },
         {
@@ -713,6 +723,8 @@ resource "aws_lb_listener_rule" "auth_bypass" {
   priority     = 10
 
   action {
+    # This rule exists for trusted networks such as VPNs during onboarding and
+    # incident recovery; normal public traffic still goes through Cognito.
     type             = "forward"
     target_group_arn = aws_lb_target_group.app.arn
   }
@@ -954,7 +966,9 @@ resource "aws_codebuild_project" "app_image" {
   }
 
   cache {
-    type  = "LOCAL"
+    type = "LOCAL"
+    # Docker and source caches keep app-only deploys fast enough to use as the
+    # normal deployment path instead of pushing images from a developer laptop.
     modes = ["LOCAL_DOCKER_LAYER_CACHE", "LOCAL_SOURCE_CACHE"]
   }
 

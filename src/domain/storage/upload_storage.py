@@ -244,6 +244,8 @@ class UploadStorage:
         meta = self._metadata_from_payload(cast(StoredMeta, payload))
         meta.saved_path.parent.mkdir(parents=True, exist_ok=True)
         if source_path.resolve() != meta.saved_path.resolve():
+            # Durable storage can materialize files from a temp path; restore to
+            # the managed upload path so legacy stage code sees the usual layout.
             shutil.copy2(source_path, meta.saved_path)
         self._write_metadata(meta)
         return meta

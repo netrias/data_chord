@@ -75,6 +75,8 @@ ensure_deployable_git_state() {
     fail "Working tree has uncommitted changes. Commit them, or rerun with DATA_CHORD_DEPLOY_ALLOW_DIRTY=1 to deploy the current HEAD anyway."
   fi
 
+  # CodeBuild pulls from GitHub, so local-only commits would build a different
+  # image than the one this script is about to deploy.
   if ! remote_branch_matches_commit "$branch" "$commit"; then
     fail "origin/$branch does not match local HEAD. Push branch '$branch' before deploying."
   fi
@@ -138,6 +140,8 @@ load_auth_bypass_cidrs() {
     return 0
   fi
 
+  # Keep bypass ranges out of tfvars so emergency/VPN access can change without
+  # leaving sensitive network details in the repo.
   normalized="$(
     python3 -c 'import json, sys
 raw = sys.stdin.read().strip()
@@ -265,6 +269,8 @@ infra_image_tag() {
 
   image_tag="$(current_image_tag)"
   if [[ -n "$image_tag" ]]; then
+    # Infra-only changes should keep the running app image unless the operator
+    # explicitly provides a replacement tag.
     printf '%s\n' "$image_tag"
     return 0
   fi
@@ -400,6 +406,8 @@ run_infra_deploy() {
   apply_stack "$image_tag"
   after_task_definition="$(current_task_definition_arn)"
 
+  # Pure infrastructure edits do not always create a new task definition, so
+  # only wait for an ECS rollout when there is actually a new task to watch.
   if [[ -n "$after_task_definition" && "$after_task_definition" != "$before_task_definition" ]]; then
     watch_ecs_rollout
   else

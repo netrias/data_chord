@@ -124,6 +124,8 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
     _stage_three_tasks[job.polling_job_id] = task
     task.add_done_callback(lambda _task: _stage_three_tasks.pop(job.polling_job_id, None))
     try:
+        # Fast mocked jobs should return their final state immediately, while
+        # real SDK jobs fall through to browser polling without blocking the POST.
         await asyncio.wait_for(asyncio.shield(task), timeout=JOB_START_GRACE_SECONDS)
     except TimeoutError:
         pass
@@ -227,6 +229,8 @@ def _load_stage_three_job(
         return None
     if stored_job is None or not stored_job.matches_request(job_id):
         return None
+    # Repopulate the process cache after a restart so later polls avoid durable
+    # storage once the job has been recovered.
     _stage_three_jobs[stored_job.polling_job_id] = stored_job
     return stored_job
 
@@ -257,6 +261,8 @@ async def _run_harmonization_workflow(payload: HarmonizeRequest) -> HarmonizeRes
         payload.file_id,
     )
     try:
+        # A fresh harmonization invalidates any Stage 4 edits and mapping audit
+        # generated from the previous manifest.
         workflow_storage.delete_json(
             user,
             payload.file_id,
@@ -304,7 +310,8 @@ async def _run_harmonization_workflow(payload: HarmonizeRequest) -> HarmonizeRes
         )
     )
 
-    # Wait for both to complete
+    # Fetch PVs beside harmonization so Stage 4 can validate values without
+    # adding another user-visible wait after the SDK call finishes.
     result, _ = await asyncio.gather(harmonize_task, pv_fetch_task)
 
     _router_logger.info(
@@ -465,7 +472,7 @@ async def _fetch_and_cache_pvs(
             },
         )
 
-    # Persist PV manifest to disk for recovery after server restart
+    # Stage 4/5 may run in a fresh process, so PV state must outlive memory.
     save_pv_manifest_to_disk(file_id, cache, pv_map)
 
 
@@ -487,6 +494,8 @@ async def _fetch_pvs_for_session(
 
     try:
         if cache.has_any_pvs():
+            # Persist even on cache hits; earlier stages may have populated memory
+            # before durable workflow storage existed for this run.
             save_pv_manifest_to_disk(file_id, cache, cache.get_all_pvs())
             return
         await _fetch_and_cache_pvs(cache, model_info.key, model_info.version_label, cde_keys, file_id)
@@ -574,9 +583,11 @@ def _log_non_conformant_samples(rows: list[ManifestRow], cache: SessionCache) ->
     """Capped at 5 samples from first 50 rows to avoid log spam while providing debugging signal."""
     samples = [
         {"column": row.column_name, "value": row.top_harmonization}
-        for row in rows[:50]  # Limit scan to first 50 rows
+        # A small prefix sample is enough to diagnose bad PV coverage without
+        # making large manifests expensive to log.
+        for row in rows[:50]
         if _is_top_harmonization_non_conformant(row, cache)
-    ][:5]  # Keep only first 5 samples
+    ][:5]
     if samples:
         _router_logger.warning(
             "Non-conformant values with no PV-compliant alternative",
@@ -678,7 +689,8 @@ def _build_column_breakdowns(
         )
         for key, col_rows in column_rows.items()
     ]
-    # Columns needing attention (changes OR non-conformant) sort first
+    # Put columns needing attention first so reviewers do not have to hunt for
+    # changed or non-conformant values in wide files.
     breakdowns.sort(key=lambda b: (b.changed_rows == 0 and b.non_conformant_terms == 0, -b.total_rows))
     return breakdowns
 

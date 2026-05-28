@@ -36,6 +36,8 @@ const _installRemoteTiming = async (page) => {
     window.__dataChordFetchTimingInstalled = true;
     const originalFetch = window.fetch.bind(window);
 
+    // Remote pages may be served by an older build without the full timing
+    // helper, so wrap fetch at test time to keep network timings comparable.
     const pathnameFor = (input) => {
       const rawUrl = typeof input === 'string' ? input : input?.url;
       if (!rawUrl) return null;
@@ -75,6 +77,8 @@ const _createRemotePerfCsv = (rowCount) => {
   const { headerLine, rows } = _readSampleRows();
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'data-chord-remote-perf-'));
   const csvPath = path.join(tmpDir, `remote-perf-${rowCount}.csv`);
+  // Repeat real fixture rows instead of synthetic columns so remote timings
+  // exercise the deployed Data Model Store path with representative values.
   const body = Array.from({ length: rowCount }, (_, index) => rows[index % rows.length]);
   fs.writeFileSync(csvPath, `${[headerLine, ...body].join('\n')}\n`);
   return csvPath;

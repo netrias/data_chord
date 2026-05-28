@@ -149,6 +149,8 @@ async def _bind_user_context(request: Request, call_next: Callable[[Request], Aw
     except InvalidUserContextError:
         return Response("Invalid identity headers", status_code=401)
     try:
+        # ContextVar keeps route signatures clean while still scoping storage
+        # authorization to the current request.
         response = await call_next(request)
     finally:
         reset_user_context(token)

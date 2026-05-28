@@ -72,6 +72,8 @@ if GET_USER_OUTPUT="$(aws cognito-idp admin-get-user \
   fi
 
   if [[ "$USER_STATUS" == "CONFIRMED" ]]; then
+    # Admin invites only reset the temporary-password path; confirmed users
+    # should recover access through Cognito's normal password flow.
     fail "User is already confirmed: $EMAIL. Not resending an admin invite because that is only for temporary-password onboarding."
   fi
 

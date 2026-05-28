@@ -89,6 +89,8 @@ class StageThreeJobState:
             return None
 
         return cls(
+            # Older persisted jobs only had the SDK job id. Treat that as the
+            # polling id so refreshed browsers can still find their Stage 3 job.
             polling_job_id=polling_job_id or job_id,
             job_id=job_id,
             file_id=file_id,
@@ -128,6 +130,8 @@ def save_stage_three_job_state(
             expected_version=expected_version,
         )
     except WorkflowConflictError:
+        # Polling state is last-known status, not user-authored data. If another
+        # request saved progress first, read its token and publish the newer job.
         latest = workflow_storage.read_json(user, job.file_id, WorkflowFile.STAGE_THREE_JOB)
         workflow_storage.write_json(
             user,

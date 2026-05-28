@@ -22,6 +22,8 @@ REGION="$(env_tfvar_value "$ENV_NAME" aws_region)"
 
 if aws secretsmanager describe-secret --region "$REGION" --secret-id "$SECRET_NAME" >/dev/null 2>&1; then
   if [[ -n "${NETRIAS_API_KEY:-}" && "$MODE" == "ensure" ]]; then
+    # Treat NETRIAS_API_KEY as the desired value only during deploys; plan mode
+    # should verify presence without rotating a secret.
     log "Updating Secrets Manager value: $SECRET_NAME"
     aws secretsmanager put-secret-value \
       --region "$REGION" \

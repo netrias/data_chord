@@ -61,6 +61,8 @@ class S3WorkflowStorage:
 
     def create_workflow(self, user: UserContext, file_id: str | None = None) -> WorkflowMetadata:
         if file_id is None:
+            # Hosted storage must share the upload id generated at the app edge;
+            # a backend-generated id would split metadata from the saved upload.
             raise WorkflowStorageError("S3 workflow creation requires a caller-supplied file_id")
         metadata = WorkflowMetadata.create(user, file_id)
         try:
@@ -69,6 +71,8 @@ class S3WorkflowStorage:
                 Key=self._metadata_key(file_id),
                 Body=_json_bytes(metadata.to_store()),
                 ContentType=_CONTENT_TYPE_JSON,
+                # Metadata is the ownership anchor, so creation must fail when
+                # the workflow already exists.
                 IfNoneMatch="*",
             )
         except ClientError as exc:
@@ -111,6 +115,8 @@ class S3WorkflowStorage:
             "ContentType": _CONTENT_TYPE_JSON,
         }
         if expected_version is None:
+            # First writes are create-only; callers must read before replacing
+            # mutable artifacts so stale browser sessions cannot overwrite them.
             kwargs["IfNoneMatch"] = "*"
         else:
             kwargs["IfMatch"] = expected_version.value
@@ -166,6 +172,8 @@ class S3WorkflowStorage:
         self._require_access(user, file_id)
         if not source_path.is_file():
             raise WorkflowArtifactNotFoundError(f"Source artifact not found: {source_path}")
+        # Mutable file artifacts are stored under one logical kind. Delete stale
+        # suffix variants before uploading the current file.
         for key in self._existing_artifact_keys(file_id, kind):
             self.client.delete_object(Bucket=self.bucket, Key=key)
         response = self.client.put_object(
@@ -187,6 +195,8 @@ class S3WorkflowStorage:
         key = self._existing_artifact_key(file_id, kind)
         response = self.client.get_object(Bucket=self.bucket, Key=key)
         suffix = Path(key).suffix
+        # Downstream tabular readers operate on Paths, so S3 objects are exposed
+        # through a short-lived local file at the storage boundary.
         with NamedTemporaryFile("wb", suffix=suffix, delete=False) as temp_file:
             temp_path = Path(temp_file.name)
             temp_file.write(_body_bytes(response))
@@ -205,6 +215,8 @@ class S3WorkflowStorage:
         metadata = WorkflowMetadata.from_store(json.loads(_body_bytes(response).decode("utf-8")))
         if metadata is None:
             raise WorkflowStorageError(f"Workflow metadata is unreadable: {file_id}")
+        # S3 IAM limits access by environment prefix; the workflow owner check
+        # keeps users inside that environment from reading each other's uploads.
         if metadata.owner_user_id != user.user_id and not user.is_admin:
             raise WorkflowAccessDeniedError(file_id)
         return metadata

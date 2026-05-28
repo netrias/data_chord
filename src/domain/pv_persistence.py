@@ -62,6 +62,8 @@ def column_pv_sets(
     requested_column_keys = [str(column_key) for column_key in column_keys]
     cache = ensure_pvs_loaded(file_id)
     if not _cache_can_resolve_columns(cache, requested_column_keys):
+        # A cache can contain PV values without the column mapping after partial
+        # warmup; reload the manifest so lookups stay column-key based.
         load_pv_manifest_from_disk(file_id, cache)
     return {column_key: cache.get_pvs_for_column(column_key) for column_key in requested_column_keys}
 

@@ -25,6 +25,8 @@ const _createPerfCsv = (rowCount, columnCount) => {
   const headers = Array.from({ length: columnCount }, (_, index) => `perf_col_${index + 1}`);
   const lines = [headers.join(',')];
 
+  // Synthetic values make the mocked harmonization deterministic while still
+  // scaling DOM and JSON work with both rows and columns.
   for (let row = 0; row < rowCount; row += 1) {
     lines.push(headers.map((header) => `${header}_raw_${row + 1}`).join(','));
   }

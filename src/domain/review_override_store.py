@@ -45,6 +45,8 @@ def save_review_overrides_state(
         raise ReviewOverridesWorkflowNotFoundError(file_id) from exc
 
     current = ReviewOverrides.from_store(existing.data, file_id) if existing is not None else None
+    # Preserve created_at across saves so Stage 5 can distinguish the first
+    # review session from later edits.
     saved = ReviewOverrides.create(
         file_id=file_id,
         created_at=current.created_at if current else now,

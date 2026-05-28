@@ -241,6 +241,8 @@ def _find_unique_non_conformant_values(
     for row in manifest.rows:
         current_value = _current_value_for_row(row)
         col_key = str(row.column_key)
+        # Gate once per unique term/current value pair; repeated source rows
+        # should not make reviewers resolve the same problem more than once.
         key = (col_key, row.to_harmonize, current_value or "")
         if key in seen:
             continue
@@ -422,6 +424,8 @@ def _sync_override_audit(
     if not overrides_batch:
         return
 
+    # The parquet manifest is the Stage 5 audit source, so mirror saved review
+    # edits there instead of treating the override JSON as a separate truth.
     success = add_manual_overrides_batch(
         manifest_path=manifest_path,
         overrides=overrides_batch,

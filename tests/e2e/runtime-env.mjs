@@ -7,6 +7,8 @@ export const e2eRuntimeDir = process.env.DATA_CHORD_E2E_RUNTIME_DIR
 
 export const e2eEnv = {
   ...process.env,
+  // Keep browser-driven tests out of the repo workspace so failed runs do not
+  // leave uploads that affect later tests or local development.
   DATA_CHORD_UPLOAD_DIR: path.join(e2eRuntimeDir, 'uploads'),
   DATA_CHORD_WORKFLOW_STORAGE_DIR: path.join(e2eRuntimeDir, 'workflow_storage'),
 };

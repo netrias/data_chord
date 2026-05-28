@@ -39,6 +39,8 @@ def save_initial_workflow_state(
     try:
         existing = storage.read_json(user, state.file_id, WorkflowFile.WORKFLOW_STATE)
     except WorkflowNotFoundError:
+        # Some callers can arrive with artifacts restored from older local-only
+        # flows, so create the owner record here instead of failing late.
         storage.create_workflow(user, file_id=state.file_id)
         existing = None
     expected_version = existing.version if existing is not None else None
@@ -89,6 +91,8 @@ def save_confirmed_mapping_choices_to_state(
     choices = ConfirmedMappingChoices.from_raw(manual_overrides, column_renames)
     updated = state.with_mapping_choices(choices)
     try:
+        # Stage 2 choices are the canonical handoff to Stage 3; reject stale
+        # writes so a second tab cannot replace a newer mapping decision.
         storage.write_json(
             user,
             file_id,

@@ -21,6 +21,8 @@ if aws s3api head-bucket --bucket "$BUCKET" >/dev/null 2>&1; then
   log "State bucket exists: $BUCKET"
 else
   log "Creating state bucket: $BUCKET"
+  # us-east-1 rejects LocationConstraint even though every other region
+  # requires it.
   if [[ "$REGION" == "us-east-1" ]]; then
     aws s3api create-bucket --bucket "$BUCKET" --region "$REGION" >/dev/null
   else

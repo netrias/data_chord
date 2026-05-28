@@ -218,7 +218,8 @@ def _sort_steps_chronologically(steps: list[TransformationStep]) -> list[Transfo
     rest = steps[1:]
 
     def sort_key(step: TransformationStep) -> tuple[int, int]:
-        # Parse timestamp for sorting; original stays first via separate handling.
+        # Original stays first even when upload and AI timestamps tie; the rest
+        # should follow the user's edit timeline.
         if step.timestamp is None:
             return (0, 0)
         try:
@@ -361,6 +362,8 @@ def _apply_review_overrides(
     original_dataset: TabularDataset,
     overrides: ReviewOverrides | None,
 ) -> TabularDataset:
+    # Stage 4 overrides apply only to export rows. The stored harmonized file
+    # remains the AI/PV-adjusted artifact for audit and comparison.
     final_rows = (
         overrides.apply_to_rows(harmonized_dataset.rows, original_dataset)
         if overrides

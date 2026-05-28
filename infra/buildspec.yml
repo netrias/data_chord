@@ -20,6 +20,8 @@ phases:
       - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - export SOURCE_TAG="${CODEBUILD_RESOLVED_SOURCE_VERSION:-}"
       - if [ -z "$SOURCE_TAG" ]; then echo "CODEBUILD_RESOLVED_SOURCE_VERSION is required for immutable image tags"; exit 1; fi
+      # Use the GitHub commit as the image tag so ECS deploys can be traced back
+      # to an exact source revision.
       - export IMAGE_TAG="$(echo "$SOURCE_TAG" | cut -c1-12)"
       - 'if aws ecr describe-images --repository-name "$IMAGE_REPO_NAME" --image-ids imageTag="$IMAGE_TAG" >/dev/null 2>&1; then echo "Image tag already exists and ECR tags are immutable: $IMAGE_TAG"; exit 1; fi'
   build:
