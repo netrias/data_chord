@@ -38,7 +38,14 @@ from src.domain.storage import (
     UploadTooLargeError,
     describe_constraints,
 )
+from src.domain.workflow_artifact_store import (
+    load_upload_artifact,
+    save_mapping_manifest,
+    save_upload_artifacts,
+    save_upload_metadata,
+)
 from src.domain.workflow_state import WorkflowState
+from src.domain.workflow_state_store import create_workflow_record, save_initial_workflow_state
 
 from .schemas import (
     AnalyzeRequest,
@@ -101,6 +108,17 @@ async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadRespon
         raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(exc)) from exc
     except UploadTooLargeError as exc:
         raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(exc)) from exc
+    create_workflow_record(
+        dependencies.get_workflow_storage(),
+        dependencies.get_user_context(),
+        meta.file_id,
+    )
+    save_upload_artifacts(
+        dependencies.get_workflow_storage(),
+        dependencies.get_user_context(),
+        storage,
+        meta,
+    )
 
     return UploadResponse(
         file_id=meta.file_id,
@@ -122,11 +140,22 @@ async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadRespon
 )
 async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     storage = dependencies.get_upload_storage()
-    meta = storage.load(payload.file_id)
+    meta = load_upload_artifact(
+        storage,
+        dependencies.get_workflow_storage(),
+        dependencies.get_user_context(),
+        payload.file_id,
+    )
     if not meta:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please upload again.")
 
     meta = _select_sheet_safe(storage, payload.file_id, payload.sheet_name)
+    save_upload_metadata(
+        dependencies.get_workflow_storage(),
+        dependencies.get_user_context(),
+        storage,
+        meta,
+    )
     target_selection = DataModelSelection.from_version_number(payload.target_schema, payload.target_version_number)
     analysis_task = asyncio.create_task(
         run_in_threadpool(
@@ -157,8 +186,16 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
         await _cancel_pending_tasks(discovery_task, reference_task)
         raise
     storage.save_manifest(meta.file_id, manifest)
-    dependencies.get_file_store().save_workflow_state(
-        WorkflowState.from_selection(meta.file_id, target_selection)
+    save_mapping_manifest(
+        dependencies.get_workflow_storage(),
+        dependencies.get_user_context(),
+        meta.file_id,
+        manifest,
+    )
+    save_initial_workflow_state(
+        dependencies.get_workflow_storage(),
+        dependencies.get_user_context(),
+        WorkflowState.from_selection(meta.file_id, target_selection),
     )
     # Stash profiles in the session cache so the Stage 2 column-detail endpoint
     # can serve them without re-reading the file.

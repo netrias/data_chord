@@ -7,8 +7,9 @@ warnings when they return to Stage 4 or Stage 5.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -18,14 +19,27 @@ from src.domain.data_model_cache import (
     clear_all_session_caches,
     get_session_cache,
 )
-from src.domain.pv_manifest import PVManifest
-from src.domain.pv_persistence import ensure_pvs_loaded, load_pv_manifest_from_disk
+from src.domain.pv_persistence import column_pv_sets, ensure_pvs_loaded, load_pv_manifest_from_disk
+from src.domain.storage import LocalWorkflowStorage, UserContext, WorkflowFile
+
+
+def _workflow_storage_with_pv_manifest(
+    tmp_path: Path,
+    file_id: str,
+    payload: dict[str, object] | None,
+) -> tuple[LocalWorkflowStorage, UserContext]:
+    storage = LocalWorkflowStorage(tmp_path / "workflow-storage")
+    user = UserContext(user_id="test-user")
+    storage.create_workflow(user, file_id=file_id)
+    if payload is not None:
+        storage.write_json(user, file_id, WorkflowFile.PV_MANIFEST, payload)
+    return storage, user
 
 
 class TestPVManifestPersistenceFeature:
     """PV manifest persistence enables recovery after server restart."""
 
-    def test_pvs_restored_from_disk_after_cache_cleared(self) -> None:
+    def test_pvs_restored_from_disk_after_cache_cleared(self, tmp_path: Path) -> None:
         """FEATURE: PVs are recovered from disk manifest when cache is empty.
 
         Simulates: User completes Stage 3 → server restarts → user returns to Stage 4
@@ -53,11 +67,11 @@ class TestPVManifestPersistenceFeature:
         assert not cache.has_any_pvs(), "Cache should be empty after clear"
 
         # When: Stage 4/5 lazy-loads PVs from disk
-        with patch("src.domain.dependencies.get_file_store") as mock_get_store:
-            mock_store = MagicMock()
-            mock_store.load_pv_manifest.return_value = PVManifest.from_store(pv_manifest_data)
-            mock_get_store.return_value = mock_store
-
+        storage, user = _workflow_storage_with_pv_manifest(tmp_path, file_id, pv_manifest_data)
+        with (
+            patch("src.domain.dependencies.get_workflow_storage", return_value=storage),
+            patch("src.domain.dependencies.get_user_context", return_value=user),
+        ):
             load_pv_manifest_from_disk(file_id, cache)
 
         # Then: PVs are available for validation and dropdowns
@@ -80,7 +94,7 @@ class TestPVManifestPersistenceFeature:
         assert "Lung" in tissue_pvs
         assert len(tissue_pvs) == 3
 
-    def test_missing_pv_manifest_degrades_gracefully(self) -> None:
+    def test_missing_pv_manifest_degrades_gracefully(self, tmp_path: Path) -> None:
         """FEATURE: Missing PV manifest doesn't crash; PV features just don't work.
 
         Simulates: User skips Stage 3 or manifest was never saved
@@ -91,11 +105,11 @@ class TestPVManifestPersistenceFeature:
         cache = get_session_cache(file_id)
 
         # When: Attempting to load from non-existent manifest
-        with patch("src.domain.dependencies.get_file_store") as mock_get_store:
-            mock_store = MagicMock()
-            mock_store.load_pv_manifest.return_value = None  # No manifest found
-            mock_get_store.return_value = mock_store
-
+        storage, user = _workflow_storage_with_pv_manifest(tmp_path, file_id, None)
+        with (
+            patch("src.domain.dependencies.get_workflow_storage", return_value=storage),
+            patch("src.domain.dependencies.get_user_context", return_value=user),
+        ):
             # Then: No exception raised, cache remains empty
             load_pv_manifest_from_disk(file_id, cache)
 
@@ -125,7 +139,7 @@ class TestPVManifestPersistenceFeature:
         fresh_cache = get_session_cache(new_file_id)
         assert not fresh_cache.has_any_pvs(), "New file should have empty cache"
 
-    def test_ensure_pvs_loaded_returns_cache_with_pvs(self) -> None:
+    def test_ensure_pvs_loaded_returns_cache_with_pvs(self, tmp_path: Path) -> None:
         """FEATURE: ensure_pvs_loaded is a single entry point that handles lazy loading."""
         # Given: A file with PV manifest on disk
         file_id = "ensure_test_file"
@@ -137,16 +151,41 @@ class TestPVManifestPersistenceFeature:
         clear_all_session_caches()
 
         # When: ensure_pvs_loaded is called
-        with patch("src.domain.dependencies.get_file_store") as mock_get_store:
-            mock_store = MagicMock()
-            mock_store.load_pv_manifest.return_value = PVManifest.from_store(pv_manifest_data)
-            mock_get_store.return_value = mock_store
-
+        storage, user = _workflow_storage_with_pv_manifest(tmp_path, file_id, pv_manifest_data)
+        with (
+            patch("src.domain.dependencies.get_workflow_storage", return_value=storage),
+            patch("src.domain.dependencies.get_user_context", return_value=user),
+        ):
             cache = ensure_pvs_loaded(file_id)
 
         # Then: Cache is returned with PVs loaded
         assert cache.has_any_pvs()
         assert cache.get_pvs_for_column("col1") == frozenset(["Value A", "Value B"])
+
+    def test_column_pv_sets_restores_missing_column_mappings(self, tmp_path: Path) -> None:
+        """FEATURE: Stage 4 recovers PVs when cache has values but lost column mappings."""
+        # Given: A file with durable PV data, but the process cache cannot map columns to CDEs
+        file_id = "partial_cache_file"
+        pv_manifest_data = {
+            "column_to_cde_key": {"col_0000": "primary_diagnosis"},
+            "pvs": {"primary_diagnosis": ["Adenocarcinoma", "Glioma"]},
+        }
+        clear_all_session_caches()
+        cache = get_session_cache(file_id)
+        cache.set_pvs_batch({"primary_diagnosis": frozenset(["Adenocarcinoma", "Glioma"])})
+        assert cache.get_pvs_for_column("col_0000") is None, "Cache should not already resolve the column"
+
+        # When: Stage 4 asks for PV sets by source column key
+        storage, user = _workflow_storage_with_pv_manifest(tmp_path, file_id, pv_manifest_data)
+        with (
+            patch("src.domain.dependencies.get_workflow_storage", return_value=storage),
+            patch("src.domain.dependencies.get_user_context", return_value=user),
+        ):
+            pvs_by_column = column_pv_sets(file_id, ["col_0000"])
+
+        # Then: the durable manifest is reloaded and the column gets its PV set
+        assert pvs_by_column["col_0000"] == frozenset(["Adenocarcinoma", "Glioma"])
+        assert cache.get_pvs_for_column("col_0000") == frozenset(["Adenocarcinoma", "Glioma"])
 
 
 class TestSessionCacheThreadSafety:

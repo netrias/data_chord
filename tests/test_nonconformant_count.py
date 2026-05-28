@@ -8,7 +8,7 @@ from httpx import AsyncClient
 import src.domain.dependencies as dependencies
 from src.domain.column_cde_map import ColumnCdeMap
 from src.domain.pv_manifest import PVManifest
-from src.domain.storage import UploadStorage
+from src.domain.storage import UploadStorage, WorkflowFile
 from tests.conftest import (
     TEST_TARGET_SCHEMA,
     create_csv_content,
@@ -52,14 +52,16 @@ def _save_pv_manifest(file_id: str, pvs_by_column_key: dict[str, frozenset[str]]
         cde_key: pvs_by_column_key[column_key]
         for column_key, cde_key in column_to_cde_key.items()
     }
-    dependencies.get_file_store().save_pv_manifest(
+    dependencies.get_workflow_storage().write_json(
+        dependencies.get_user_context(),
         file_id,
+        WorkflowFile.PV_MANIFEST,
         PVManifest(
             data_model_key=TEST_TARGET_SCHEMA,
             version_label="1",
             column_to_cde_key=ColumnCdeMap.from_strings(column_to_cde_key),
             pvs=pvs,
-        ),
+        ).to_store(),
     )
 
 

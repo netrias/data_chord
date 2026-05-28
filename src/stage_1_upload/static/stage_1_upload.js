@@ -9,6 +9,8 @@ const fileInput = document.getElementById('fileInput');
 const analyzeButton = document.getElementById('analyzeButton');
 const statusMessage = document.getElementById('statusMessage');
 const dropzoneCopy = document.getElementById('dropzoneCopy');
+const dropzoneUploading = document.getElementById('dropzoneUploading');
+const uploadingFileName = document.getElementById('uploadingFileName');
 const dropzoneFile = document.getElementById('dropzoneFile');
 const dropzoneFileName = document.getElementById('dropzoneFileName');
 const dropzoneFileSize = document.getElementById('dropzoneFileSize');
@@ -62,22 +64,42 @@ const _setStatus = (message = '', tone = '') => {
   }
 };
 
-const _setAnalyzeButtonVisible = (visible) => {
+const _setAnalyzeButtonEnabled = (enabled) => {
   if (!analyzeButton) return;
-  analyzeButton.classList.toggle('reserve-space', !visible);
-  analyzeButton.disabled = !visible;
+  analyzeButton.disabled = !enabled;
 };
 
 const _showDropzoneCopy = () => {
   if (dropzoneCopy) dropzoneCopy.classList.remove('hidden');
+  if (dropzoneUploading) {
+    dropzoneUploading.classList.add('hidden');
+    dropzoneUploading.setAttribute('aria-hidden', 'true');
+  }
   if (dropzoneFile) dropzoneFile.classList.add('hidden');
 };
 
 /* ~45 chars fills one line at 1.4rem in the 600px dropzone. */
 const LONG_NAME_THRESHOLD = 45;
 
+const _showDropzoneUploading = (file) => {
+  if (dropzoneCopy) dropzoneCopy.classList.add('hidden');
+  if (dropzoneFile) dropzoneFile.classList.add('hidden');
+  if (dropzoneUploading) {
+    dropzoneUploading.classList.remove('hidden');
+    dropzoneUploading.setAttribute('aria-hidden', 'false');
+  }
+  if (uploadingFileName) {
+    uploadingFileName.textContent = file.name;
+    uploadingFileName.classList.toggle('uploading-file-name--long', file.name.length > LONG_NAME_THRESHOLD);
+  }
+};
+
 const _showDropzoneSummary = (file, statusText) => {
   if (dropzoneCopy) dropzoneCopy.classList.add('hidden');
+  if (dropzoneUploading) {
+    dropzoneUploading.classList.add('hidden');
+    dropzoneUploading.setAttribute('aria-hidden', 'true');
+  }
   if (dropzoneFile) dropzoneFile.classList.remove('hidden');
   if (dropzoneFileName) {
     dropzoneFileName.textContent = file.name;
@@ -90,7 +112,7 @@ const _showDropzoneSummary = (file, statusText) => {
 };
 
 const _openFilePicker = () => {
-  if (!fileInput) return;
+  if (!fileInput || state.isUploading) return;
   fileInput.value = '';
   fileInput.click();
 };
@@ -104,8 +126,11 @@ const _resetUploadState = () => {
   state.isUploading = false;
   state.isAnalyzing = false;
   if (fileInput) fileInput.value = '';
-  _setAnalyzeButtonVisible(false);
-  if (dropzone) dropzone.classList.remove('has-file');
+  _setAnalyzeButtonEnabled(false);
+  if (dropzone) {
+    dropzone.classList.remove('has-file', 'is-uploading');
+    dropzone.removeAttribute('aria-busy');
+  }
   _showDropzoneCopy();
   _renderSheetSelector();
   _setStatus('');
@@ -150,8 +175,12 @@ const _uploadDataset = async () => {
     return;
   }
   state.isUploading = true;
-  _setAnalyzeButtonVisible(false);
-  _showDropzoneSummary(state.file, 'Uploading…');
+  _setAnalyzeButtonEnabled(false);
+  if (dropzone) {
+    dropzone.classList.add('is-uploading');
+    dropzone.setAttribute('aria-busy', 'true');
+  }
+  _showDropzoneUploading(state.file);
 
   const formData = new FormData();
   formData.append('file', state.file);
@@ -173,13 +202,17 @@ const _uploadDataset = async () => {
     if (dropzone) dropzone.classList.add('has-file');
     _showDropzoneSummary(state.file, 'Uploaded');
     _renderSheetSelector();
-    _setAnalyzeButtonVisible(true);
+    _setAnalyzeButtonEnabled(true);
   } catch (error) {
     console.error(error);
     _showDropzoneSummary(state.file, 'Upload failed');
     _setStatus(error.message, 'error');
   } finally {
     state.isUploading = false;
+    if (dropzone) {
+      dropzone.classList.remove('is-uploading');
+      dropzone.removeAttribute('aria-busy');
+    }
   }
 };
 
@@ -223,7 +256,7 @@ const _hydrateFromSession = () => {
   if (dropzone) dropzone.classList.add('has-file');
   _showDropzoneSummary(state.file, 'Uploaded');
   _renderSheetSelector();
-  _setAnalyzeButtonVisible(true);
+  _setAnalyzeButtonEnabled(true);
   return true;
 };
 
@@ -518,7 +551,7 @@ const _analyzeDataset = async () => {
     return;
   }
   state.isAnalyzing = true;
-  if (analyzeButton) analyzeButton.disabled = true;
+  _setAnalyzeButtonEnabled(false);
   _showDropzoneSummary(state.file, 'Analyzing columns…');
   if (analyzeOverlay) analyzeOverlay.classList.remove('hidden');
 
@@ -544,7 +577,7 @@ const _analyzeDataset = async () => {
   } catch (error) {
     console.error(error);
     _setStatus(error.message, 'error');
-    _setAnalyzeButtonVisible(true);
+    _setAnalyzeButtonEnabled(true);
     _showDropzoneSummary(state.file, 'Uploaded');
     // Only hide overlay and reset state on error
     state.isAnalyzing = false;

@@ -326,14 +326,19 @@ This stage is read-only on the server — no files are written.
 
 **Endpoints:**
 - `GET /stage-3` — Render progress page (with animated loading state)
-- `POST /stage-3/harmonize` — Run harmonization, fetch PVs, apply adjustments, return summary
+- `POST /stage-3/harmonize` — Accept a harmonization request, persist app-side job status, and start the background run
+- `GET /stage-3/jobs/{job_id}` — Poll job status, reloading from workflow storage when process memory is empty
 
 **Flow:** Receives `HarmonizeRequest` with `file_id`, column overrides, and
-target schema. Runs harmonization and PV fetching in parallel. Applies PV
-adjustments to the manifest (preferring original values when already conformant).
-Persists PV manifest to disk for session recovery. Returns column-level
-breakdown metrics. Also persists the column-keyed CDE mapping plan that Stage 5
-includes in the ZIP download.
+target schema. Creates a durable Stage 3 job record first, then runs
+harmonization and PV fetching in the server process. The in-memory job table is
+only a speed-up; browser-visible job status is also stored as a workflow JSON
+artifact so polling can recover after a deploy or process restart. When
+harmonization finishes, Stage 3 applies PV adjustments to the manifest
+(preferring original values when already conformant), persists the PV manifest
+for session recovery, and returns column-level breakdown metrics. It also
+persists the column-keyed CDE mapping plan that Stage 5 includes in the ZIP
+download.
 
 ### Stage 4: Review Results
 
@@ -500,6 +505,8 @@ Vanilla ES6 modules with direct DOM manipulation. No bundler. Key patterns:
 
 - **Session pass-through:** Stages 1–3 pass payloads via `sessionStorage`
   (keys centralized in `storage-keys.js`)
+- **Durable polling:** Stage 3 stores app-side job status in workflow storage;
+  `sessionStorage` only remembers which job the browser should poll
 - **Debounced auto-save:** Stage 4 batches user edits and POSTs to the server
   after a delay to avoid request spam
 - **Modular review modes:** Stage 4 delegates rendering to

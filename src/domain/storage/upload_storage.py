@@ -220,21 +220,15 @@ class UploadStorage:
         if not meta_path.exists():
             return None
 
-        payload = cast(StoredMeta, json.loads(meta_path.read_text()))
-        return UploadedFileMeta(
-            file_id=file_id,
-            original_name=payload[_META_ORIGINAL_NAME],
-            content_type=payload[_META_CONTENT_TYPE],
-            size_bytes=payload[_META_SIZE_BYTES],
-            saved_path=self._data_dir / payload[_META_SAVED_NAME],
-            uploaded_at=datetime.fromisoformat(payload[_META_UPLOADED_AT]),
-            tabular_format=_tabular_format_from_metadata(payload),
-            sheet_names=payload.get(_META_SHEET_NAMES, []),
-            selected_sheet=payload.get(_META_SELECTED_SHEET),
-        )
+        return self._metadata_from_payload(cast(StoredMeta, json.loads(meta_path.read_text())))
 
     def _write_metadata(self, meta: UploadedFileMeta) -> None:
-        meta_payload = {
+        meta_payload = self.metadata_payload(meta)
+        meta_path = self._meta_dir / f"{meta.file_id}.json"
+        meta_path.write_text(json.dumps(meta_payload, indent=2))
+
+    def metadata_payload(self, meta: UploadedFileMeta) -> dict[str, object]:
+        return {
             _META_FILE_ID: meta.file_id,
             _META_ORIGINAL_NAME: meta.original_name,
             _META_CONTENT_TYPE: meta.content_type,
@@ -245,8 +239,29 @@ class UploadStorage:
             _META_SHEET_NAMES: meta.sheet_names,
             _META_SELECTED_SHEET: meta.selected_sheet,
         }
-        meta_path = self._meta_dir / f"{meta.file_id}.json"
-        meta_path.write_text(json.dumps(meta_payload, indent=2))
+
+    def restore_upload(self, payload: Mapping[str, object], source_path: Path) -> UploadedFileMeta:
+        meta = self._metadata_from_payload(cast(StoredMeta, payload))
+        meta.saved_path.parent.mkdir(parents=True, exist_ok=True)
+        if source_path.resolve() != meta.saved_path.resolve():
+            # Durable storage can materialize files from a temp path; restore to
+            # the managed upload path so legacy stage code sees the usual layout.
+            shutil.copy2(source_path, meta.saved_path)
+        self._write_metadata(meta)
+        return meta
+
+    def restore_harmonization_manifest(self, file_id: str, source_path: Path) -> Path:
+        destination = self._manifest_dir / f"{file_id}_harmonization.parquet"
+        if source_path.resolve() != destination.resolve():
+            shutil.copy2(source_path, destination)
+        return destination
+
+    def restore_harmonized_output(self, file_id: str, original_path: Path, source_path: Path) -> Path:
+        destination = self.harmonized_path_for(file_id, original_path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if source_path.resolve() != destination.resolve():
+            shutil.copy2(source_path, destination)
+        return destination
 
     def select_sheet(self, file_id: str, sheet_name: str | None) -> UploadedFileMeta:
         meta = self.load(file_id)
@@ -305,6 +320,19 @@ class UploadStorage:
             raise UnsupportedUploadError(str(exc)) from exc
         if not is_supported_tabular_content_type(content_type, file_format):
             raise UnsupportedUploadError(f"Unsupported content type for {suffix}: {content_type}")
+
+    def _metadata_from_payload(self, payload: StoredMeta) -> UploadedFileMeta:
+        return UploadedFileMeta(
+            file_id=payload[_META_FILE_ID],
+            original_name=payload[_META_ORIGINAL_NAME],
+            content_type=payload[_META_CONTENT_TYPE],
+            size_bytes=payload[_META_SIZE_BYTES],
+            saved_path=self._data_dir / payload[_META_SAVED_NAME],
+            uploaded_at=datetime.fromisoformat(payload[_META_UPLOADED_AT]),
+            tabular_format=_tabular_format_from_metadata(payload),
+            sheet_names=payload.get(_META_SHEET_NAMES, []),
+            selected_sheet=payload.get(_META_SELECTED_SHEET),
+        )
 
 
 def describe_constraints(constraints: UploadConstraints) -> dict[str, str | int]:

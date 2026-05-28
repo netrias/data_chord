@@ -38,10 +38,10 @@
           </li>
         </ol>
         <div id="uploadNavAction" class="progress-tracker-action hidden">
-          <button class="btn-3d" type="button" data-nav-target="{{ stage_one_url }}">
+          <button id="startOverButton" class="btn-3d" type="button" data-start-over-target="{{ stage_one_url }}">
             <span class="btn-3d-shadow" aria-hidden="true"></span>
             <span class="btn-3d-edge" aria-hidden="true"></span>
-            <span class="btn-3d-front">Upload →</span>
+            <span class="btn-3d-front">Harmonize New Data →</span>
           </button>
         </div>
       </div>
@@ -94,6 +94,25 @@
         </div>
       </section>
     </main>
+
+    <dialog id="startOverDialog" class="start-over-dialog" aria-labelledby="startOverDialogTitle">
+      <form method="dialog" class="start-over-dialog-content">
+        <div class="start-over-dialog-header">
+          <h2 id="startOverDialogTitle" class="start-over-dialog-title">Start over and harmonize more data?</h2>
+        </div>
+        <p class="start-over-dialog-copy">
+          This will clear the current browser workflow state. Your downloaded file will not be affected.
+        </p>
+        <div class="start-over-dialog-actions">
+          <button id="startOverCancel" class="start-over-cancel" type="button">Cancel</button>
+          <button id="startOverConfirm" class="btn-3d" type="button">
+            <span class="btn-3d-shadow" aria-hidden="true"></span>
+            <span class="btn-3d-edge" aria-hidden="true"></span>
+            <span class="btn-3d-front">Start Over</span>
+          </button>
+        </div>
+      </form>
+    </dialog>
 
     <script>
       window.stageFiveConfig = {

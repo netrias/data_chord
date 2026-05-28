@@ -26,8 +26,9 @@ For a detailed overview, see [app.md](app.md).
    git clone https://github.com/netrias/data_chord.git
    cd data_chord
    git checkout $(git describe --tags --abbrev=0)
-   uv sync
+   uv sync --frozen
    ```
+   The frozen install is an important supply-chain security control: normal setup uses the committed lockfile instead of resolving newly published packages.
 
 3. Configure your API key:
    ```bash
@@ -46,7 +47,7 @@ For a detailed overview, see [app.md](app.md).
 ```bash
 git fetch --tags
 git checkout $(git describe --tags --abbrev=0 origin/main)
-uv sync
+uv sync --frozen
 ```
 
 ## Development
@@ -60,3 +61,28 @@ just test        # Run tests
 just lint        # Lint
 just typecheck   # Type check
 ```
+
+### Performance Journeys
+
+Use the local journey for browser/render timing while developing:
+
+```bash
+just perf-e2e
+```
+
+Use the staging journey for deployed user-experience timing once you are on the
+company VPN and the timing instrumentation has been deployed:
+
+```bash
+just perf-staging
+# or pass an explicit URL:
+just perf-staging https://your-staging-host.example.com
+```
+
+The staging journey drives the real app flow and prints upload, analyze,
+harmonize, Stage 4, Stage 5, and download timings.
+Set `PERF_REMOTE_ROWS=50` to change the generated CSV size.
+
+## AWS Hosting
+
+The app has an OpenTofu starter stack in [infra/README.md](infra/README.md). It deploys ECS Fargate behind ALB + Cognito, stores workflow artifacts in S3, and uses CodeBuild to test, build, and push the Docker image before OpenTofu rolls ECS.

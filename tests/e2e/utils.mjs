@@ -5,6 +5,8 @@ import path from 'node:path';
 import { expect } from '@playwright/test';
 import AdmZip from 'adm-zip';
 
+import { e2eEnv } from './runtime-env.mjs';
+
 export const fixturesDir = path.resolve('tests/e2e/fixtures');
 const E2E_TARGET_MODEL = 'gc';
 const E2E_TARGET_VERSION_NUMBER = 2;
@@ -236,6 +238,8 @@ export const seedHarmonization = (fileId, changes = {}, options = {}) => {
     path.resolve('tests/e2e/support/seed_harmonization.py'),
     '--file-id',
     fileId,
+    '--upload-base-dir',
+    e2eEnv.DATA_CHORD_UPLOAD_DIR,
   ];
   const hasChanges = Object.keys(changes).length > 0;
   if (hasChanges) {
@@ -244,7 +248,7 @@ export const seedHarmonization = (fileId, changes = {}, options = {}) => {
   if (options.noManifest) {
     args.push('--no-manifest');
   }
-  execFileSync('uv', args, { stdio: 'inherit' });
+  execFileSync('uv', args, { env: e2eEnv, stdio: 'inherit' });
 };
 
 export const createWorkbookFixture = () => {
@@ -256,7 +260,7 @@ export const createWorkbookFixture = () => {
     path.resolve('tests/e2e/support/create_workbook_fixture.py'),
     '--output',
     workbookPath,
-  ], { stdio: 'inherit' });
+  ], { env: e2eEnv, stdio: 'inherit' });
   return workbookPath;
 };
 
@@ -272,7 +276,7 @@ export const parseDownloadedWorkbook = async (response, sheetName) => {
     zipPath,
     '--sheet-name',
     sheetName,
-  ], { encoding: 'utf-8' });
+  ], { encoding: 'utf-8', env: e2eEnv });
   return JSON.parse(output);
 };
 
@@ -285,7 +289,7 @@ const persistSelectedSheet = (fileId, sheetName) => {
     fileId,
     '--sheet-name',
     sheetName,
-  ], { stdio: 'inherit' });
+  ], { env: e2eEnv, stdio: 'inherit' });
 };
 
 export const parseDownloadedCsv = async (response) => {

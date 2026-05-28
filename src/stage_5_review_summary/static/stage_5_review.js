@@ -2,8 +2,20 @@
  * Stage 5 Download - Final step to download harmonized data with manual overrides applied.
  */
 
-import { initStepInstruction, setActiveStage, initNavigationEvents } from '/assets/shared/step-instruction-ui.js';
-import { STAGE_3_PAYLOAD_KEY, isValidFileId, isSafeFilename, readFromSession } from '/assets/shared/storage-keys.js';
+import {
+  initStepInstruction,
+  setActiveStage,
+  initNavigationEvents,
+  isSafeRelativeUrl,
+} from '/assets/shared/step-instruction-ui.js';
+import { markAfterPaint, markTiming, measureTiming } from '/assets/shared/performance-timing.js';
+import {
+  STAGE_3_PAYLOAD_KEY,
+  clearWorkflowSession,
+  isValidFileId,
+  isSafeFilename,
+  readFromSession,
+} from '/assets/shared/storage-keys.js';
 
 const _DEFAULT_SUMMARY_ENDPOINT = '/stage-5/summary';
 const _DEFAULT_DOWNLOAD_ENDPOINT = '/stage-5/download';
@@ -20,7 +32,11 @@ const _downloadEndpoint = _config.downloadEndpoint ?? _DEFAULT_DOWNLOAD_ENDPOINT
 const _downloadBtn = document.getElementById('downloadResults');
 const _downloadError = document.getElementById('downloadError');
 const _summaryGrid = document.getElementById('summaryGrid');
-const _uploadNavAction = document.getElementById('uploadNavAction');
+const _startOverAction = document.getElementById('uploadNavAction') ?? document.getElementById('startOverAction');
+const _startOverButton = document.getElementById('startOverButton');
+const _startOverDialog = document.getElementById('startOverDialog');
+const _startOverCancel = document.getElementById('startOverCancel');
+const _startOverConfirm = document.getElementById('startOverConfirm');
 const _changesTableSection = document.getElementById('changesTableSection');
 const _changesTableBody = document.getElementById('changesTableBody');
 const _changesTable = document.getElementById('changesTable');
@@ -109,10 +125,36 @@ const _loadSourceContext = () => {
   return { fileId: id };
 };
 
-const _showUploadNav = () => {
-  if (_uploadNavAction) {
-    _uploadNavAction.classList.remove('hidden');
+const _showStartOverAction = () => {
+  if (_startOverAction) {
+    _startOverAction.classList.remove('hidden');
   }
+};
+
+const _openStartOverDialog = () => {
+  if (!_startOverDialog) return;
+  if (_startOverDialog.hasAttribute('open')) return;
+  if (_startOverDialog.showModal) {
+    _startOverDialog.showModal();
+  } else {
+    _startOverDialog.setAttribute('open', '');
+  }
+};
+
+const _closeStartOverDialog = () => {
+  if (!_startOverDialog) return;
+  if (_startOverDialog.close) {
+    _startOverDialog.close();
+  } else {
+    _startOverDialog.removeAttribute('open');
+  }
+};
+
+const _confirmStartOver = () => {
+  const target = _startOverButton?.dataset.startOverTarget;
+  if (!isSafeRelativeUrl(target)) return;
+  clearWorkflowSession();
+  window.location.assign(target);
 };
 
 const _handleDownload = async () => {
@@ -123,7 +165,7 @@ const _handleDownload = async () => {
 
   _hideError();
   _setDownloadButtonState(true);
-  _showUploadNav();
+  markTiming('stage5.download.start');
 
   try {
     const response = await fetch(_downloadEndpoint, {
@@ -131,21 +173,30 @@ const _handleDownload = async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ file_id: _state.fileId }),
     });
+    markTiming('stage5.download.response', { status: response.status });
+    measureTiming('stage5.download.request', 'stage5.download.start', 'stage5.download.response');
 
     if (!response.ok) {
       throw new Error('Download failed.');
     }
 
     const blob = await response.blob();
+    markTiming('stage5.download.blob_ready', { bytes: blob.size });
+    measureTiming('stage5.download.blob', 'stage5.download.response', 'stage5.download.blob_ready', {
+      bytes: blob.size,
+    });
     const disposition = response.headers.get('Content-Disposition') ?? '';
     const filename = _extractFilename(disposition);
 
     _triggerBrowserDownload(blob, filename);
+    _showStartOverAction();
   } catch (error) {
     console.error('Download failed:', error);
     _showError('Download failed. Please try again.');
   } finally {
     _setDownloadButtonState(false);
+    await markAfterPaint('stage5.download.usable');
+    measureTiming('stage5.download_to_usable', 'stage5.download.start', 'stage5.download.usable');
   }
 };
 
@@ -669,20 +720,35 @@ const _fetchSummary = async () => {
   _state.fileId = context.fileId;
 
   try {
+    markTiming('stage5.summary.fetch.start');
     const response = await fetch(_summaryEndpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ file_id: context.fileId }),
     });
+    markTiming('stage5.summary.fetch.response', { status: response.status });
+    measureTiming('stage5.summary.request', 'stage5.summary.fetch.start', 'stage5.summary.fetch.response');
 
     if (!response.ok) {
       throw new Error('Unable to load summary.');
     }
 
     const data = await response.json();
+    markTiming('stage5.summary.fetch.parsed', {
+      column_count: data.column_summaries?.length ?? 0,
+      term_mapping_count: data.term_mappings?.length ?? 0,
+    });
+    measureTiming('stage5.summary.parse', 'stage5.summary.fetch.response', 'stage5.summary.fetch.parsed');
+    markTiming('stage5.summary.render.start');
     _state.nonConformantCount = data.non_conformant_count ?? 0;
     _renderSummary(data.column_summaries ?? [], _state.nonConformantCount);
     _renderChangesTable(data.term_mappings ?? []);
+    markTiming('stage5.summary.render.dom_complete');
+    measureTiming('stage5.summary.render.dom', 'stage5.summary.render.start', 'stage5.summary.render.dom_complete', {
+      term_mapping_count: data.term_mappings?.length ?? 0,
+    });
+    await markAfterPaint('stage5.usable');
+    measureTiming('stage5.init_to_usable', 'stage5.init.start', 'stage5.usable');
   } catch (error) {
     console.error('Failed to fetch summary:', error);
     _showEmptyMessage('Unable to load harmonization summary.');
@@ -690,12 +756,22 @@ const _fetchSummary = async () => {
 };
 
 const _init = () => {
+  markTiming('stage5.init.start');
   setActiveStage('review');
   initStepInstruction('review');
   initNavigationEvents();
 
   if (_downloadBtn) {
     _downloadBtn.addEventListener('click', _handleDownload);
+  }
+  if (_startOverButton) {
+    _startOverButton.addEventListener('click', _openStartOverDialog);
+  }
+  if (_startOverCancel) {
+    _startOverCancel.addEventListener('click', _closeStartOverDialog);
+  }
+  if (_startOverConfirm) {
+    _startOverConfirm.addEventListener('click', _confirmStartOver);
   }
 
   _fetchSummary();

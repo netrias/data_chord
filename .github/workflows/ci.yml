@@ -15,7 +15,8 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '22'
+          # Security: keep CI on the same Node line as dependency-install jobs.
+          node-version: '24.5.0'
 
       - name: Check JavaScript syntax
         run: find src -path '*/static/*.js' -exec node --check {} \;
@@ -28,7 +29,12 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '22'
+          # Security: Node must be new enough to run the pinned npm with package age enforcement.
+          node-version: '24.5.0'
+
+      - name: Install pinned npm
+        # Security: npm 11.10+ enforces min-release-age from .npmrc.
+        run: npm install -g npm@11.11.1
 
       - name: Install JS test dependencies
         run: npm ci
@@ -46,13 +52,15 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
         with:
-          version: "latest"
+          # Security: pin uv so dependency age enforcement stays stable in CI.
+          version: "0.10.0"
 
       - name: Set up Python
         run: uv python install
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        # Security: CI must use the committed lockfile, not silently resolve fresh packages.
+        run: uv sync --frozen --all-extras
 
       - name: Run tests
         run: uv run pytest --tb=short
@@ -65,13 +73,15 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
         with:
-          version: "latest"
+          # Security: pin uv so dependency age enforcement stays stable in CI.
+          version: "0.10.0"
 
       - name: Set up Python
         run: uv python install
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        # Security: CI must use the committed lockfile, not silently resolve fresh packages.
+        run: uv sync --frozen --all-extras
 
       - name: Run basedpyright
         run: uv run basedpyright --level error src/
@@ -84,13 +94,15 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
         with:
-          version: "latest"
+          # Security: pin uv so dependency age enforcement stays stable in CI.
+          version: "0.10.0"
 
       - name: Set up Python
         run: uv python install
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        # Security: CI must use the committed lockfile, not silently resolve fresh packages.
+        run: uv sync --frozen --all-extras
 
       - name: Run ruff check
         run: uv run ruff check src/ tests/
@@ -103,19 +115,18 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
         with:
-          version: "latest"
+          # Security: pin uv so dependency age enforcement stays stable in CI.
+          version: "0.10.0"
 
       - name: Set up Python
         run: uv python install
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        # Security: CI must use the committed lockfile, not silently resolve fresh packages.
+        run: uv sync --frozen --all-extras
 
       - name: Run bandit
         run: uv run bandit -r src/ -c pyproject.toml
-
-      - name: Upgrade pip
-        run: uv run pip install --upgrade pip
 
       - name: Run dependency audit
         run: uv run pip-audit
@@ -131,18 +142,25 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
         with:
-          version: "latest"
+          # Security: pin uv so dependency age enforcement stays stable in CI.
+          version: "0.10.0"
 
       - name: Set up Python
         run: uv python install
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        # Security: CI must use the committed lockfile, not silently resolve fresh packages.
+        run: uv sync --frozen --all-extras
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '22'
+          # Security: Node must be new enough to run the pinned npm with package age enforcement.
+          node-version: '24.5.0'
+
+      - name: Install pinned npm
+        # Security: npm 11.10+ enforces min-release-age from .npmrc.
+        run: npm install -g npm@11.11.1
 
       - name: Install npm dependencies
         run: npm ci
@@ -160,11 +178,11 @@ jobs:
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: npx playwright install chromium --with-deps
+        run: ./node_modules/.bin/playwright install chromium --with-deps
 
       - name: Install Playwright deps (cached)
         if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: npx playwright install-deps chromium
+        run: ./node_modules/.bin/playwright install-deps chromium
 
       - name: Run E2E tests
         run: npm run test:e2e

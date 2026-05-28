@@ -9,11 +9,13 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import urlencode
+from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -36,7 +38,7 @@ from src.domain.data_model_selection import DataModelSelection
 from src.domain.dependencies import (
     get_harmonize_service,
 )
-from src.domain.harmonize import HarmonizeResult
+from src.domain.harmonize import HarmonizeResult, HarmonizeStatus
 from src.domain.manifest import (
     ColumnMappingManifest,
     ConfidenceBucket,
@@ -50,17 +52,34 @@ from src.domain.manifest import (
 from src.domain.manifest.writer import apply_pv_adjustments_batch
 from src.domain.pv_persistence import save_pv_manifest_to_disk
 from src.domain.pv_validation import check_value_conformance, compute_pv_adjustment
-from src.domain.storage import UploadStorage
+from src.domain.review_override_store import delete_review_overrides_state
+from src.domain.storage import UploadStorage, UserContext, WorkflowFile, WorkflowNotFoundError, WorkflowStorage
+from src.domain.workflow_artifact_store import (
+    load_mapping_manifest,
+    load_upload_artifact,
+    save_harmonized_artifacts,
+)
 from src.domain.workflow_state import ConfirmedMappingChoices, WorkflowState
+from src.domain.workflow_state_store import load_workflow_state
+from src.stage_3_harmonize.job_state import (
+    StageThreeJobState,
+    load_stage_three_job_state,
+    save_stage_three_job_state,
+)
 
 MODULE_DIR = Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"
 NEXT_STAGE_PATH = "/stage-4"
+JOB_START_GRACE_SECONDS = 0.25
 
 _templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 _router_logger = logging.getLogger(__name__)
 
 stage_three_router = APIRouter(prefix="/stage-3", tags=["Stage 3 Harmonize"])
+
+
+_stage_three_jobs: dict[str, StageThreeJobState] = {}
+_stage_three_tasks: dict[str, asyncio.Task[None]] = {}
 
 
 class PVAdjustmentRecord(NamedTuple):
@@ -94,16 +113,170 @@ async def render_stage_three(request: Request) -> HTMLResponse:
 )
 async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
     storage = dependencies.get_upload_storage()
-    meta = storage.load(payload.file_id)
+    workflow_storage = dependencies.get_workflow_storage()
+    user = dependencies.get_user_context()
+    meta = load_upload_artifact(storage, workflow_storage, user, payload.file_id)
     if not meta:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please rerun analysis.")
 
-    store = dependencies.get_file_store()
-    store.delete_review_overrides(payload.file_id)
-    store.delete_column_mapping(payload.file_id)
-    workflow_state = store.load_workflow_state(payload.file_id)
+    job = _create_stage_three_job(payload.file_id, workflow_storage, user)
+    task = asyncio.create_task(_run_stage_three_job(job.polling_job_id, payload, workflow_storage, user))
+    _stage_three_tasks[job.polling_job_id] = task
+    task.add_done_callback(lambda _task: _stage_three_tasks.pop(job.polling_job_id, None))
+    try:
+        # Fast mocked jobs should return their final state immediately, while
+        # real SDK jobs fall through to browser polling without blocking the POST.
+        await asyncio.wait_for(asyncio.shield(task), timeout=JOB_START_GRACE_SECONDS)
+    except TimeoutError:
+        pass
+    return _response_from_job(_stage_three_jobs[job.polling_job_id])
 
-    stored_manifest = storage.load_manifest(payload.file_id)
+
+@stage_three_router.get(
+    "/jobs/{job_id}",
+    response_model=HarmonizeResponse,
+    name="stage_three_harmonize_job",
+)
+async def get_harmonize_job(job_id: str, file_id: str | None = Query(default=None)) -> HarmonizeResponse:
+    workflow_storage = dependencies.get_workflow_storage()
+    user = dependencies.get_user_context()
+    job = _load_stage_three_job(job_id, file_id, workflow_storage, user)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Harmonization job not found.")
+    return _response_from_job(job)
+
+
+def _create_stage_three_job(
+    file_id: str,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+) -> StageThreeJobState:
+    job_id = uuid4().hex
+    next_stage_url = _next_stage_url(file_id=file_id, job_id=job_id, job_status=HarmonizeStatus.QUEUED, detail="")
+    job = StageThreeJobState(
+        polling_job_id=job_id,
+        job_id=job_id,
+        file_id=file_id,
+        status=HarmonizeStatus.QUEUED,
+        detail="Harmonization job accepted.",
+        next_stage_url=next_stage_url,
+        started_at=datetime.now(UTC),
+        job_id_available=False,
+    )
+    _stage_three_jobs[job_id] = job
+    save_stage_three_job_state(workflow_storage, user, job)
+    return job
+
+
+async def _run_stage_three_job(
+    polling_job_id: str,
+    payload: HarmonizeRequest,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+) -> None:
+    try:
+        response = await _run_harmonization_workflow(payload)
+    except Exception as exc:  # pragma: no cover - defensive job boundary
+        _router_logger.exception("Stage 3 background harmonization failed", extra={"file_id": payload.file_id})
+        failed_job = StageThreeJobState(
+            polling_job_id=polling_job_id,
+            job_id=polling_job_id,
+            file_id=payload.file_id,
+            status=HarmonizeStatus.FAILED,
+            detail=str(exc),
+            next_stage_url=_next_stage_url(
+                file_id=payload.file_id,
+                job_id=polling_job_id,
+                job_status=HarmonizeStatus.FAILED,
+                detail=str(exc),
+            ),
+            started_at=_stage_three_jobs[polling_job_id].started_at,
+        )
+        _stage_three_jobs[polling_job_id] = failed_job
+        save_stage_three_job_state(workflow_storage, user, failed_job)
+        return
+
+    started_at = _stage_three_jobs[polling_job_id].started_at
+    completed_job = StageThreeJobState(
+        polling_job_id=polling_job_id,
+        job_id=response.job_id,
+        file_id=payload.file_id,
+        status=response.status,
+        detail=response.detail,
+        next_stage_url=response.next_stage_url,
+        started_at=started_at,
+        job_id_available=response.job_id_available,
+        manifest_summary=response.manifest_summary,
+    )
+    _stage_three_jobs[polling_job_id] = completed_job
+    save_stage_three_job_state(workflow_storage, user, completed_job)
+
+
+def _load_stage_three_job(
+    job_id: str,
+    file_id: str | None,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+) -> StageThreeJobState | None:
+    job = _stage_three_jobs.get(job_id)
+    if job is not None:
+        return job
+    if file_id is None:
+        return None
+    try:
+        stored_job = load_stage_three_job_state(workflow_storage, user, file_id)
+    except WorkflowNotFoundError:
+        return None
+    if stored_job is None or not stored_job.matches_request(job_id):
+        return None
+    # Repopulate the process cache after a restart so later polls avoid durable
+    # storage once the job has been recovered.
+    _stage_three_jobs[stored_job.polling_job_id] = stored_job
+    return stored_job
+
+
+def _response_from_job(job: StageThreeJobState) -> HarmonizeResponse:
+    return HarmonizeResponse(
+        job_id=job.job_id,
+        status=job.status,
+        detail=job.detail,
+        next_stage_url=job.next_stage_url,
+        job_id_available=job.job_id_available,
+        elapsed_seconds=job.elapsed_seconds(),
+        manifest_summary=job.manifest_summary,
+    )
+
+
+async def _run_harmonization_workflow(payload: HarmonizeRequest) -> HarmonizeResponse:
+    storage = dependencies.get_upload_storage()
+    workflow_storage = dependencies.get_workflow_storage()
+    user = dependencies.get_user_context()
+    meta = load_upload_artifact(storage, workflow_storage, user, payload.file_id)
+    if not meta:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please rerun analysis.")
+
+    delete_review_overrides_state(
+        workflow_storage,
+        user,
+        payload.file_id,
+    )
+    try:
+        # A fresh harmonization invalidates any Stage 4 edits and mapping audit
+        # generated from the previous manifest.
+        workflow_storage.delete_json(
+            user,
+            payload.file_id,
+            WorkflowFile.CDE_MAPPING,
+        )
+    except WorkflowNotFoundError:
+        pass
+    workflow_state = load_workflow_state(
+        workflow_storage,
+        user,
+        payload.file_id,
+    )
+
+    stored_manifest = load_mapping_manifest(storage, workflow_storage, user, payload.file_id)
     manifest_payload = stored_manifest or payload.manifest
     manifest = ColumnMappingManifest.from_payload(manifest_payload)
     mapping_choices = _mapping_choices_for_harmonize(workflow_state, payload)
@@ -137,7 +310,8 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
         )
     )
 
-    # Wait for both to complete
+    # Fetch PVs beside harmonization so Stage 4 can validate values without
+    # adding another user-visible wait after the SDK call finishes.
     result, _ = await asyncio.gather(harmonize_task, pv_fetch_task)
 
     _router_logger.info(
@@ -154,26 +328,42 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
     manifest_summary = await _read_store_and_adjust_manifest(
         payload.file_id, result.manifest_path, storage
     )
+    if output_path.exists():
+        save_harmonized_artifacts(
+            workflow_storage,
+            user,
+            payload.file_id,
+            output_path,
+            storage.load_harmonization_manifest_path(payload.file_id),
+        )
     _router_logger.info(
         "Manifest summary result",
         extra={"file_id": payload.file_id, "has_summary": manifest_summary is not None},
     )
 
-    query_params = urlencode({
-        "file_id": payload.file_id,
-        "job_id": result.job_id,
-        "status": result.status,
-        "detail": result.detail or "",
-    })
-    next_stage_url = f"{NEXT_STAGE_PATH}?{query_params}"
     return HarmonizeResponse(
         job_id=result.job_id,
         status=result.status,
         detail=result.detail,
-        next_stage_url=next_stage_url,
+        next_stage_url=_next_stage_url(
+            file_id=payload.file_id,
+            job_id=result.job_id,
+            job_status=result.status,
+            detail=result.detail,
+        ),
         job_id_available=result.job_id_available,
         manifest_summary=manifest_summary,
     )
+
+
+def _next_stage_url(*, file_id: str, job_id: str, job_status: HarmonizeStatus, detail: str) -> str:
+    query_params = urlencode({
+        "file_id": file_id,
+        "job_id": job_id,
+        "status": job_status.value,
+        "detail": detail or "",
+    })
+    return f"{NEXT_STAGE_PATH}?{query_params}"
 
 
 def _column_cde_map_for_session(manifest: ColumnMappingManifest, column_overrides: ColumnCdeOverrides) -> ColumnCdeMap:
@@ -282,7 +472,7 @@ async def _fetch_and_cache_pvs(
             },
         )
 
-    # Persist PV manifest to disk for recovery after server restart
+    # Stage 4/5 may run in a fresh process, so PV state must outlive memory.
     save_pv_manifest_to_disk(file_id, cache, pv_map)
 
 
@@ -304,6 +494,8 @@ async def _fetch_pvs_for_session(
 
     try:
         if cache.has_any_pvs():
+            # Persist even on cache hits; earlier stages may have populated memory
+            # before durable workflow storage existed for this run.
             save_pv_manifest_to_disk(file_id, cache, cache.get_all_pvs())
             return
         await _fetch_and_cache_pvs(cache, model_info.key, model_info.version_label, cde_keys, file_id)
@@ -391,9 +583,11 @@ def _log_non_conformant_samples(rows: list[ManifestRow], cache: SessionCache) ->
     """Capped at 5 samples from first 50 rows to avoid log spam while providing debugging signal."""
     samples = [
         {"column": row.column_name, "value": row.top_harmonization}
-        for row in rows[:50]  # Limit scan to first 50 rows
+        # A small prefix sample is enough to diagnose bad PV coverage without
+        # making large manifests expensive to log.
+        for row in rows[:50]
         if _is_top_harmonization_non_conformant(row, cache)
-    ][:5]  # Keep only first 5 samples
+    ][:5]
     if samples:
         _router_logger.warning(
             "Non-conformant values with no PV-compliant alternative",
@@ -495,7 +689,8 @@ def _build_column_breakdowns(
         )
         for key, col_rows in column_rows.items()
     ]
-    # Columns needing attention (changes OR non-conformant) sort first
+    # Put columns needing attention first so reviewers do not have to hunt for
+    # changed or non-conformant values in wide files.
     breakdowns.sort(key=lambda b: (b.changed_rows == 0 and b.non_conformant_terms == 0, -b.total_rows))
     return breakdowns
 

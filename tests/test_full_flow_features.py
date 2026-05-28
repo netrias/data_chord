@@ -14,7 +14,8 @@ import src.domain.dependencies as dependencies
 from src.domain.column_cde_map import ColumnCdeMap
 from src.domain.data_model_cache import clear_all_session_caches
 from src.domain.pv_manifest import PVManifest
-from src.domain.storage import UploadStorage
+from src.domain.storage import UploadStorage, WorkflowFile
+from src.domain.user_context import ALB_IDENTITY_HEADER
 from tests.conftest import (
     TEST_TARGET_SCHEMA,
     create_csv_content,
@@ -43,14 +44,16 @@ def _read_downloaded_csv_rows(response_bytes: bytes) -> list[list[str]]:
 
 
 def _save_test_pv_manifest(file_id: str, column_key: str, cde_key: str, pvs: list[str]) -> None:
-    dependencies.get_file_store().save_pv_manifest(
+    dependencies.get_workflow_storage().write_json(
+        dependencies.get_user_context(),
         file_id,
+        WorkflowFile.PV_MANIFEST,
         PVManifest(
             data_model_key=TEST_TARGET_SCHEMA,
             version_label="1",
             column_to_cde_key=ColumnCdeMap.from_strings({column_key: cde_key}),
             pvs={cde_key: frozenset(pvs)},
-        ),
+        ).to_store(),
     )
 
 
@@ -258,6 +261,66 @@ async def test_full_flow_reharmonize_clears_overrides(
     overrides_response = await app_client.get(f"/stage-4/overrides/{file_id}")
     assert overrides_response.status_code == 200
     assert overrides_response.json() is None
+
+
+async def test_reharmonize_cannot_clear_another_users_overrides(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """A guessed file id cannot be used to wipe another user's review overrides."""
+
+    # Given: Alice owns a workflow with saved review overrides
+    rows = [["col_a"], ["alpha"], ["beta"]]
+    alice_headers = {ALB_IDENTITY_HEADER: "alice"}
+    bob_headers = {ALB_IDENTITY_HEADER: "bob"}
+    upload_response = await app_client.post(
+        "/stage-1/upload",
+        headers=alice_headers,
+        files={"file": ("alice.csv", create_csv_content(rows), "text/csv")},
+    )
+    assert upload_response.status_code == 201
+    file_id = upload_response.json()["file_id"]
+    analyze_response = await app_client.post(
+        "/stage-1/analyze",
+        headers=alice_headers,
+        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
+    )
+    assert analyze_response.status_code == 200
+    harmonize_response = await app_client.post(
+        "/stage-3/harmonize",
+        headers=alice_headers,
+        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "manual_overrides": {}},
+    )
+    assert harmonize_response.status_code == 200
+    meta = temp_storage.load(file_id)
+    assert meta is not None
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
+    create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
+    save_response = await app_client.post(
+        "/stage-4/overrides",
+        headers=alice_headers,
+        json={
+            "file_id": file_id,
+            "overrides": {
+                "1": {"col_0000": {"ai_value": "alpha", "human_value": "gamma", "original_value": "alpha"}},
+            },
+            "review_state": review_state_payload(),
+        },
+    )
+    assert save_response.status_code == 200
+
+    # When: Bob guesses Alice's file id and tries to re-harmonize it
+    rerun_response = await app_client.post(
+        "/stage-3/harmonize",
+        headers=bob_headers,
+        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "manual_overrides": {}},
+    )
+
+    # Then: Bob is denied and Alice's overrides remain intact
+    assert rerun_response.status_code == 403
+    overrides_response = await app_client.get(f"/stage-4/overrides/{file_id}", headers=alice_headers)
+    assert overrides_response.status_code == 200
+    assert overrides_response.json()["overrides"]["1"]["col_0000"]["human_value"] == "gamma"
 
 
 async def test_stage4_recovers_pvs_after_session_cache_loss(

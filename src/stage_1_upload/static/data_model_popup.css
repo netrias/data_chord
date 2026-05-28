@@ -115,7 +115,20 @@
   cursor: not-allowed;
 }
 
-/* Custom version dropdown — replaces native <select> so the picker can render below
+/* Hidden native select stays available for programmatic selection while the
+ * visible control uses the shared custom dropdown styling below. */
+.data-model-field select.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+/* Custom dropdowns — replace native <select> so the picker can render below
  * the trigger instead of overlaying it (macOS native behavior we cannot override). */
 .data-model-dropdown {
   position: relative;

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import json
+import time
 import zipfile
+from datetime import UTC, datetime
 from io import BytesIO
 from typing import cast
 from unittest.mock import MagicMock
@@ -17,11 +20,15 @@ from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
 import src.domain.dependencies as dependencies
+import src.stage_3_harmonize.router as stage_three_router
 from src.domain.cde import CDEInfo
 from src.domain.data_model_cache import clear_session_cache, get_session_cache
 from src.domain.harmonize import HarmonizeResult, HarmonizeStatus
 from src.domain.manifest import ManifestPayload
-from src.domain.storage import UploadStorage
+from src.domain.storage import UploadStorage, WorkflowFile
+from src.domain.workflow_state import WorkflowState
+from src.domain.workflow_state_store import load_workflow_state
+from src.stage_3_harmonize.job_state import StageThreeJobState
 from tests.conftest import (
     TEST_TARGET_SCHEMA,
     TEST_TSV_CONTENT_TYPE,
@@ -35,6 +42,23 @@ from tests.conftest import (
 )
 
 pytestmark = pytest.mark.asyncio
+
+
+def _load_workflow_state(file_id: str) -> WorkflowState | None:
+    return load_workflow_state(
+        dependencies.get_workflow_storage(),
+        dependencies.get_user_context(),
+        file_id,
+    )
+
+
+def _load_json_artifact(file_id: str, kind: WorkflowFile) -> object | None:
+    stored = dependencies.get_workflow_storage().read_json(
+        dependencies.get_user_context(),
+        file_id,
+        kind,
+    )
+    return stored.data if stored is not None else None
 
 
 def _read_downloaded_csv(response_bytes: bytes) -> list[dict[str, str]]:
@@ -58,6 +82,42 @@ def _read_downloaded_xlsx(response_bytes: bytes, sheet_name: str) -> list[list[s
     workbook = load_workbook(workbook_bytes, data_only=True)
     sheet = cast(Worksheet, workbook[sheet_name])
     return [[str(value) if value is not None else "" for value in row] for row in sheet.iter_rows(values_only=True)]
+
+
+async def _wait_for_stage_three_job(app_client: AsyncClient, job_id: str, file_id: str) -> dict[str, object]:
+    for _ in range(50):
+        response = await app_client.get(f"/stage-3/jobs/{job_id}", params={"file_id": file_id})
+        assert response.status_code == 200
+        body = response.json()
+        if body["status"] in {"succeeded", "failed"}:
+            return cast(dict[str, object], body)
+        await asyncio.sleep(0.02)
+    raise AssertionError(f"Stage 3 job did not finish: {job_id}")
+
+
+async def test_stage_three_job_state_requires_timezone_aware_start() -> None:
+    # Given / When / Then: persisted job timing rejects ambiguous local datetimes
+    with pytest.raises(ValueError):
+        StageThreeJobState(
+            polling_job_id="polling-job",
+            job_id="job",
+            file_id="file",
+            status=HarmonizeStatus.QUEUED,
+            detail="queued",
+            next_stage_url="/stage-4",
+            started_at=datetime(2026, 5, 21),
+        )
+
+    job = StageThreeJobState(
+        polling_job_id="polling-job",
+        job_id="job",
+        file_id="file",
+        status=HarmonizeStatus.QUEUED,
+        detail="queued",
+        next_stage_url="/stage-4",
+        started_at=datetime(2026, 5, 21, tzinfo=UTC),
+    )
+    assert job.started_at.tzinfo is UTC
 
 
 async def test_stage1_upload_persists_exact_bytes(
@@ -490,7 +550,7 @@ async def test_stage1_analyze_persists_selected_data_model_version(
 
     # Given: an uploaded CSV with no workflow selection saved yet
     file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "selection.csv")
-    assert dependencies.get_file_store().load_workflow_state(file_id) is None
+    assert _load_workflow_state(file_id) is None
 
     # When: analysis is requested for a specific model version
     response = await app_client.post(
@@ -504,7 +564,7 @@ async def test_stage1_analyze_persists_selected_data_model_version(
 
     # Then: the selected model/version is available from durable workflow state
     assert response.status_code == 200
-    state = dependencies.get_file_store().load_workflow_state(file_id)
+    state = _load_workflow_state(file_id)
     assert state is not None
     assert state.file_id == file_id
     assert state.data_model_selection.key == "gc"
@@ -601,6 +661,135 @@ async def test_stage3_harmonize_prefers_stored_selection_over_stale_request(
     assert stub.received_target_version == "2"
 
 
+async def test_stage3_harmonize_returns_queued_while_long_job_finishes(
+    app_client: AsyncClient,
+) -> None:
+    """Stage 3 does not keep the browser request open for slow harmonization jobs."""
+
+    class SlowStubHarmonizer:
+        def run(  # type: ignore[no-untyped-def]
+            self,
+            *,
+            file_path,
+            target_schema,
+            column_overrides,
+            column_renames,
+            cache,
+            target_version,
+            manifest,
+            output_path,
+            sheet_name,
+        ):
+            time.sleep(0.5)
+            return HarmonizeResult(job_id="job-slow", status=HarmonizeStatus.SUCCEEDED, detail="ok")
+
+    # Given: an analyzed upload has no completed Stage 3 job yet
+    file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "slow-stage3.csv")
+    analyze_response = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "target_schema": "gc", "target_version_number": 2},
+    )
+    assert analyze_response.status_code == 200
+
+    # When: harmonization is triggered and the harmonizer is still running
+    import unittest.mock
+
+    with unittest.mock.patch("src.stage_3_harmonize.router.get_harmonize_service", return_value=SlowStubHarmonizer()):
+        response = await app_client.post(
+            "/stage-3/harmonize",
+            json={
+                "file_id": file_id,
+                "target_schema": "gc",
+                "target_version_number": 2,
+                "manual_overrides": {},
+            },
+        )
+
+        # Then: the browser gets a queued job promptly and can poll it to completion
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "queued"
+        assert isinstance(body["elapsed_seconds"], int)
+        queued_next_stage_url = body["next_stage_url"]
+        assert isinstance(queued_next_stage_url, str)
+        assert "status=queued" in queued_next_stage_url
+        assert body["manifest_summary"] is None
+
+        finished = await _wait_for_stage_three_job(app_client, body["job_id"], file_id)
+
+    assert finished["status"] == "succeeded"
+    assert finished["job_id"] == "job-slow"
+    assert isinstance(finished["elapsed_seconds"], int)
+    finished_next_stage_url = finished["next_stage_url"]
+    assert isinstance(finished_next_stage_url, str)
+    assert "status=succeeded" in finished_next_stage_url
+
+
+async def test_stage3_job_status_recovers_from_durable_state_after_cache_loss(
+    app_client: AsyncClient,
+) -> None:
+    """Stage 3 polling can recover after the process-local job cache is gone."""
+
+    class SlowStubHarmonizer:
+        def run(  # type: ignore[no-untyped-def]
+            self,
+            *,
+            file_path,
+            target_schema,
+            column_overrides,
+            column_renames,
+            cache,
+            target_version,
+            manifest,
+            output_path,
+            sheet_name,
+        ):
+            time.sleep(0.5)
+            return HarmonizeResult(job_id="job-durable", status=HarmonizeStatus.SUCCEEDED, detail="ok")
+
+    # Given: a slow Stage 3 job has been accepted and later completed
+    file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "durable-stage3.csv")
+    analyze_response = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "target_schema": "gc", "target_version_number": 2},
+    )
+    assert analyze_response.status_code == 200
+    assert _load_json_artifact(file_id, WorkflowFile.STAGE_THREE_JOB) is None
+
+    import unittest.mock
+
+    with unittest.mock.patch("src.stage_3_harmonize.router.get_harmonize_service", return_value=SlowStubHarmonizer()):
+        response = await app_client.post(
+            "/stage-3/harmonize",
+            json={
+                "file_id": file_id,
+                "target_schema": "gc",
+                "target_version_number": 2,
+                "manual_overrides": {},
+            },
+        )
+        assert response.status_code == 200
+        accepted_job_id = response.json()["job_id"]
+        assert _load_json_artifact(file_id, WorkflowFile.STAGE_THREE_JOB) is not None
+
+        finished = await _wait_for_stage_three_job(app_client, accepted_job_id, file_id)
+
+    # When: the in-memory job cache disappears, like it would after a deploy
+    stage_three_router._stage_three_jobs.clear()
+    recovered_response = await app_client.get(
+        f"/stage-3/jobs/{accepted_job_id}",
+        params={"file_id": file_id},
+    )
+
+    # Then: the poll endpoint falls back to workflow storage
+    assert finished["status"] == "succeeded"
+    assert recovered_response.status_code == 200
+    recovered = recovered_response.json()
+    assert recovered["status"] == "succeeded"
+    assert recovered["job_id"] == "job-durable"
+    assert isinstance(recovered["elapsed_seconds"], int)
+
+
 async def test_stage2_saves_confirmed_mapping_choices_to_workflow_state(
     app_client: AsyncClient,
 ) -> None:
@@ -613,7 +802,7 @@ async def test_stage2_saves_confirmed_mapping_choices_to_workflow_state(
         json={"file_id": file_id, "target_schema": "gc", "target_version_number": 2},
     )
     assert analyze_response.status_code == 200
-    state = dependencies.get_file_store().load_workflow_state(file_id)
+    state = _load_workflow_state(file_id)
     assert state is not None
     assert state.mapping_choices is None
 
@@ -629,7 +818,7 @@ async def test_stage2_saves_confirmed_mapping_choices_to_workflow_state(
 
     # Then: the choices are durable workflow state
     assert response.status_code == 200
-    updated = dependencies.get_file_store().load_workflow_state(file_id)
+    updated = _load_workflow_state(file_id)
     assert updated is not None
     assert updated.mapping_choices is not None
     assert updated.mapping_choices.column_overrides.to_strings() == {
@@ -646,7 +835,7 @@ async def test_stage2_save_mapping_choices_requires_workflow_state(
 
     # Given: a file was uploaded, but Stage 1 analysis has not created workflow state
     file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "no-state.csv")
-    assert dependencies.get_file_store().load_workflow_state(file_id) is None
+    assert _load_workflow_state(file_id) is None
 
     # When: Stage 2 tries to persist confirmed choices
     response = await app_client.post(
@@ -772,7 +961,7 @@ async def test_stage3_persists_cde_mapping_download_artifact(
 
     # Then: a mapping artifact records AI mappings, user overrides, and output names by column key
     assert response.status_code == 200
-    document = dependencies.get_file_store().load_column_mapping(file_id)
+    document = _load_json_artifact(file_id, WorkflowFile.CDE_MAPPING)
     assert isinstance(document, dict)
     mappings = {entry["column_key"]: entry for entry in document["mappings"]}
     assert mappings["col_0000"]["mapping_source"] == "ai"
@@ -1080,8 +1269,10 @@ async def test_stage5_download_includes_cde_mapping_artifact(
     meta = temp_storage.load(file_id)
     assert meta is not None
     create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
-    dependencies.get_file_store().save_column_mapping(
+    dependencies.get_workflow_storage().write_json(
+        dependencies.get_user_context(),
         file_id,
+        WorkflowFile.CDE_MAPPING,
         {
             "file_id": file_id,
             "generated_at": "2026-05-13T00:00:00+00:00",

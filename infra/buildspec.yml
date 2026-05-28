@@ -1,0 +1,33 @@
+version: 0.2
+
+env:
+  shell: bash
+  variables:
+    UV_VERSION: "0.10.0"
+
+phases:
+  install:
+    commands:
+      - curl -LsSf "https://astral.sh/uv/$UV_VERSION/install.sh" | sh
+      - export PATH="$HOME/.local/bin:$PATH"
+  pre_build:
+    commands:
+      - export PATH="$HOME/.local/bin:$PATH"
+      - uv sync --frozen --extra dev
+      - uv run ruff check .
+      - uv run basedpyright
+      - uv run pytest
+      - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - export SOURCE_TAG="${CODEBUILD_RESOLVED_SOURCE_VERSION:-}"
+      - if [ -z "$SOURCE_TAG" ]; then echo "CODEBUILD_RESOLVED_SOURCE_VERSION is required for immutable image tags"; exit 1; fi
+      # Use the GitHub commit as the image tag so ECS deploys can be traced back
+      # to an exact source revision.
+      - export IMAGE_TAG="$(echo "$SOURCE_TAG" | cut -c1-12)"
+      - 'if aws ecr describe-images --repository-name "$IMAGE_REPO_NAME" --image-ids imageTag="$IMAGE_TAG" >/dev/null 2>&1; then echo "Image tag already exists and ECR tags are immutable: $IMAGE_TAG"; exit 1; fi'
+  build:
+    commands:
+      - docker build -t "$IMAGE_REPO_URI:$IMAGE_TAG" .
+  post_build:
+    commands:
+      - if [ "$CODEBUILD_BUILD_SUCCEEDING" != "1" ]; then echo "Build failed; skipping image push"; exit 1; fi
+      - docker push "$IMAGE_REPO_URI:$IMAGE_TAG"

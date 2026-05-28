@@ -59,4 +59,5 @@ class HarmonizeResponse(BaseModel):
     detail: str
     next_stage_url: str
     job_id_available: bool = False
+    elapsed_seconds: int | None = None
     manifest_summary: ManifestSummarySchema | None = None

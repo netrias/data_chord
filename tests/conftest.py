@@ -204,7 +204,7 @@ async def app_client(
 ) -> AsyncGenerator[AsyncClient]:
     """why: provide an async HTTP client for testing the full API."""
     import src.domain.dependencies as deps_module
-    from src.domain.storage import FileStore
+    from src.domain.storage import LocalWorkflowStorage
 
     original_storage = deps_module._storage
     deps_module._storage = temp_storage
@@ -212,9 +212,11 @@ async def app_client(
     original_get_storage = deps_module.get_upload_storage
     deps_module.get_upload_storage = lambda: temp_storage
 
-    original_get_file_store = deps_module.get_file_store
-    test_store = FileStore(temp_storage._base_dir / "manifests")
-    deps_module.get_file_store = lambda: test_store
+    original_workflow_storage = deps_module._workflow_storage
+    original_get_workflow_storage = deps_module.get_workflow_storage
+    test_workflow_storage = LocalWorkflowStorage(temp_storage._base_dir / "workflow_storage")
+    deps_module._workflow_storage = test_workflow_storage
+    deps_module.get_workflow_storage = lambda: test_workflow_storage
 
     try:
         from backend.app.main import create_app
@@ -226,7 +228,8 @@ async def app_client(
     finally:
         deps_module._storage = original_storage
         deps_module.get_upload_storage = original_get_storage
-        deps_module.get_file_store = original_get_file_store
+        deps_module._workflow_storage = original_workflow_storage
+        deps_module.get_workflow_storage = original_get_workflow_storage
 
 
 @pytest.fixture

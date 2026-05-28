@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+  <body style="margin:0; padding:0; background:#f4f7f2; color:#1f2937; font-family:Arial, Helvetica, sans-serif;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4f7f2; margin:0; padding:28px 0;">
+      <tr>
+        <td align="center" style="padding:0 16px;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px; background:#ffffff; border:1px solid #dfe7d8; border-radius:14px; overflow:hidden;">
+            <tr>
+              <td style="background:#1f2937; padding:26px 30px;">
+                <div style="font-size:12px; letter-spacing:3px; text-transform:uppercase; color:#a8d580; font-weight:700;">Netrias</div>
+                <div style="font-size:28px; line-height:34px; color:#ffffff; font-weight:700; margin-top:10px;">Your Data Chord${invite_environment} access is ready</div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:30px;">
+                <p style="margin:0 0 16px; font-size:16px; line-height:24px;">Hello,</p>
+                <p style="margin:0 0 18px; font-size:16px; line-height:24px;">You have been invited to <strong>Data Chord${invite_environment}</strong>, Netrias' tool for harmonizing data.</p>
+                <table role="presentation" cellspacing="0" cellpadding="0" style="margin:26px 0;">
+                  <tr>
+                    <td style="border-radius:8px; background:#73b306;">
+                      <a href="${app_url}" style="display:inline-block; padding:13px 20px; color:#ffffff; font-size:16px; line-height:20px; font-weight:700; text-decoration:none;">Open Data Chord</a>
+                    </td>
+                  </tr>
+                </table>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f8faf7; border:1px solid #dfe7d8; border-radius:10px; margin:0 0 22px;">
+                  <tr>
+                    <td style="padding:18px 20px;">
+                      <div style="font-size:13px; line-height:18px; color:#64748b; text-transform:uppercase; letter-spacing:1px; font-weight:700; margin-bottom:10px;">Temporary login</div>
+                      <div style="font-size:15px; line-height:24px;"><strong>Username:</strong> {username}</div>
+                      <div style="font-size:15px; line-height:24px;"><strong>Temporary password:</strong> {####}</div>
+                    </td>
+                  </tr>
+                </table>
+                <p style="margin:0 0 16px; font-size:15px; line-height:23px;">After you sign in, Cognito will ask you to set a new password.</p>
+                <p style="margin:0; font-size:13px; line-height:20px; color:#64748b;">If the button does not work, copy and paste this URL into your browser:<br><a href="${app_url}" style="color:#4a7304;">${app_url}</a></p>
+              </td>
+            </tr>
+            <tr>
+              <td style="background:#f8faf7; border-top:1px solid #dfe7d8; padding:18px 30px; color:#64748b; font-size:12px; line-height:18px;">
+                This invitation was sent by Netrias. If you were not expecting it, you can ignore this email.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

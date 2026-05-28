@@ -32,8 +32,14 @@ from src.domain.manifest import (
 )
 from src.domain.pv_persistence import column_pv_sets
 from src.domain.pv_validation import check_value_conformance
+from src.domain.review_override_store import load_review_overrides
 from src.domain.review_overrides import ReviewOverrides
-from src.domain.storage import FileStore, UploadedFileMeta, UploadStorage
+from src.domain.storage import UploadedFileMeta, UploadStorage, UserContext, WorkflowStorage
+from src.domain.workflow_artifact_store import (
+    load_harmonization_manifest_path,
+    load_harmonized_output_path,
+    load_upload_artifact,
+)
 from src.stage_5_review_summary.schemas import (
     ColumnSummary,
     StageFiveSummaryResponse,
@@ -78,8 +84,10 @@ def build_summary(
     *,
     file_id: str,
     upload_storage: UploadStorage,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
 ) -> StageFiveSummaryResponse:
-    manifest_path = upload_storage.load_harmonization_manifest_path(file_id)
+    manifest_path = load_harmonization_manifest_path(upload_storage, workflow_storage, user, file_id)
     if manifest_path is None:
         raise SummaryManifestNotFoundError(file_id)
 
@@ -87,30 +95,31 @@ def build_summary(
     if manifest_summary is None:
         raise SummaryManifestUnreadableError(file_id)
 
-    return _build_summary_from_manifest(manifest_summary, file_id, upload_storage)
+    return _build_summary_from_manifest(manifest_summary, file_id, upload_storage, workflow_storage, user)
 
 
 def build_download_package(
     *,
     file_id: str,
     upload_storage: UploadStorage,
-    file_store: FileStore,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
 ) -> DownloadPackage:
-    meta = upload_storage.load(file_id)
+    meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
     if meta is None:
         raise UploadNotFoundError(file_id)
 
-    harmonized_path = _load_harmonized_path(upload_storage, file_id)
-    manifest_path = upload_storage.load_harmonization_manifest_path(file_id)
+    harmonized_path = _load_harmonized_path(upload_storage, workflow_storage, user, file_id, meta)
+    manifest_path = load_harmonization_manifest_path(upload_storage, workflow_storage, user, file_id)
     original_dataset = read_tabular(meta.saved_path, sheet_name=meta.selected_sheet)
     harmonized_dataset = read_tabular(harmonized_path, sheet_name=meta.selected_sheet)
     if not original_dataset.columns or not harmonized_dataset.columns:
         raise DownloadDatasetUnreadableError(file_id)
 
-    overrides = file_store.load_review_overrides(file_id)
+    overrides = load_review_overrides(workflow_storage, user, file_id)
     final_dataset = _apply_review_overrides(harmonized_dataset, original_dataset, overrides)
     base_name = _download_base_name(meta, file_id)
-    mapping_content = load_cde_mapping_json(file_id, file_store)
+    mapping_content = load_cde_mapping_json(file_id, workflow_storage, user)
     zip_buffer = _create_zip_buffer(base_name, final_dataset, manifest_path, meta.saved_path, mapping_content)
 
     # Session complete: release in-memory cache to prevent unbounded growth.
@@ -209,7 +218,8 @@ def _sort_steps_chronologically(steps: list[TransformationStep]) -> list[Transfo
     rest = steps[1:]
 
     def sort_key(step: TransformationStep) -> tuple[int, int]:
-        # Parse timestamp for sorting; original stays first via separate handling.
+        # Original stays first even when upload and AI timestamps tie; the rest
+        # should follow the user's edit timeline.
         if step.timestamp is None:
             return (0, 0)
         try:
@@ -257,9 +267,11 @@ def _build_summary_from_manifest(
     summary: ManifestSummary,
     file_id: str,
     upload_storage: UploadStorage,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
 ) -> StageFiveSummaryResponse:
     column_pv_map = column_pv_sets(file_id, [row.column_key for row in summary.rows])
-    meta = upload_storage.load(file_id)
+    meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
     upload_timestamp = meta.uploaded_at if meta else None
 
     ai_counts: dict[int, int] = defaultdict(int)
@@ -332,8 +344,14 @@ def _track_mapping(
     mappings[key] = _MappingInfo(is_conformant, history)
 
 
-def _load_harmonized_path(storage: UploadStorage, file_id: str) -> Path:
-    path = storage.load_harmonized_path(file_id)
+def _load_harmonized_path(
+    storage: UploadStorage,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+    file_id: str,
+    meta: UploadedFileMeta,
+) -> Path:
+    path = load_harmonized_output_path(storage, workflow_storage, user, file_id, meta)
     if path is None:
         raise HarmonizedOutputNotFoundError(file_id)
     return path
@@ -344,6 +362,8 @@ def _apply_review_overrides(
     original_dataset: TabularDataset,
     overrides: ReviewOverrides | None,
 ) -> TabularDataset:
+    # Stage 4 overrides apply only to export rows. The stored harmonized file
+    # remains the AI/PV-adjusted artifact for audit and comparison.
     final_rows = (
         overrides.apply_to_rows(harmonized_dataset.rows, original_dataset)
         if overrides

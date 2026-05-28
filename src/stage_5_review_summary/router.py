@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 import src.domain.dependencies as dependencies
-from src.domain.storage import FileStore, UploadStorage
+from src.domain.storage import UploadStorage, UserContext, WorkflowStorage
 from src.stage_5_review_summary.schemas import StageFiveRequest, StageFiveSummaryResponse
 from src.stage_5_review_summary.use_cases import (
     DownloadDatasetUnreadableError,
@@ -59,17 +59,22 @@ async def render_stage_five(request: Request) -> HTMLResponse:
 @stage_five_router.post("/summary", response_model=StageFiveSummaryResponse, name="stage_five_summary")
 async def summarize_harmonized_results(payload: StageFiveRequest) -> StageFiveSummaryResponse:
     storage: UploadStorage = dependencies.get_upload_storage()
-    return _build_summary_or_raise(file_id=payload.file_id, storage=storage)
+    return _build_summary_or_raise(
+        file_id=payload.file_id,
+        storage=storage,
+        workflow_storage=dependencies.get_workflow_storage(),
+        user=dependencies.get_user_context(),
+    )
 
 
 @stage_five_router.post("/download", name="stage_five_download")
 async def download_harmonized_data(payload: StageFiveRequest) -> StreamingResponse:
     storage: UploadStorage = dependencies.get_upload_storage()
-    file_store = dependencies.get_file_store()
     download = _build_download_or_raise(
         file_id=payload.file_id,
         storage=storage,
-        file_store=file_store,
+        workflow_storage=dependencies.get_workflow_storage(),
+        user=dependencies.get_user_context(),
     )
     return _create_streaming_response(download.base_name, download.content)
 
@@ -78,10 +83,16 @@ def _build_download_or_raise(
     *,
     file_id: str,
     storage: UploadStorage,
-    file_store: FileStore,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
 ) -> DownloadPackage:
     try:
-        return build_download_package(file_id=file_id, upload_storage=storage, file_store=file_store)
+        return build_download_package(
+            file_id=file_id,
+            upload_storage=storage,
+            workflow_storage=workflow_storage,
+            user=user,
+        )
     except UploadNotFoundError as exc:
         raise HTTPException(status_code=404, detail=_ERROR_UPLOAD_NOT_FOUND) from exc
     except HarmonizedOutputNotFoundError as exc:
@@ -94,9 +105,16 @@ def _build_summary_or_raise(
     *,
     file_id: str,
     storage: UploadStorage,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
 ) -> StageFiveSummaryResponse:
     try:
-        return build_summary(file_id=file_id, upload_storage=storage)
+        return build_summary(
+            file_id=file_id,
+            upload_storage=storage,
+            workflow_storage=workflow_storage,
+            user=user,
+        )
     except SummaryManifestNotFoundError as exc:
         raise HTTPException(status_code=404, detail=_ERROR_MANIFEST_NOT_FOUND) from exc
     except SummaryManifestUnreadableError as exc:

@@ -5,6 +5,7 @@
  */
 import { initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
 import { isValidFileId } from '/assets/shared/storage-keys.js';
+import { markAfterPaint, markTiming, measureTiming } from '/assets/shared/performance-timing.js';
 import {
   getTotalUnits as getColumnTotalUnits,
   getCurrentEntries as getColumnCurrentEntries,
@@ -158,15 +159,22 @@ const fetchRows = async () => {
   }
 
   try {
+    markTiming('stage4.rows.fetch.start');
     const response = await fetch(resultsEndpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ file_id: fileId }),
     });
+    markTiming('stage4.rows.fetch.response', { status: response.status });
+    measureTiming('stage4.rows.request', 'stage4.rows.fetch.start', 'stage4.rows.fetch.response');
     if (!response.ok) {
       throw new Error('Unable to load harmonized results.');
     }
     const body = await response.json();
+    markTiming('stage4.rows.fetch.parsed', {
+      column_count: body.columns?.length ?? 0,
+    });
+    measureTiming('stage4.rows.parse', 'stage4.rows.fetch.response', 'stage4.rows.fetch.parsed');
     state.columns = body.columns || [];
     state.columnPVs = body.columnPVs || {};
     state.totalOriginalRows = body.totalOriginalRows || 0;
@@ -403,8 +411,14 @@ const renderEntries = (batchMeta) => {
  * Main render function - updates all UI components.
  */
 const render = () => {
+  markTiming('stage4.render.start', {
+    review_mode: state.reviewMode,
+    scroll_mode: state.scrollMode,
+  });
   if (state.scrollMode) {
     renderScrollMode();
+    markTiming('stage4.render.dom_complete');
+    measureTiming('stage4.render.dom', 'stage4.render.start', 'stage4.render.dom_complete');
     return;
   }
 
@@ -413,6 +427,13 @@ const render = () => {
   updateNavigationButtons(batchMeta);
   renderProgressPillsUI(batchMeta);
   renderEntries(batchMeta);
+  markTiming('stage4.render.dom_complete', {
+    entry_count: batchMeta.entries.length,
+    total_units: batchMeta.totalUnits,
+  });
+  measureTiming('stage4.render.dom', 'stage4.render.start', 'stage4.render.dom_complete', {
+    entry_count: batchMeta.entries.length,
+  });
 };
 
 /**
@@ -582,6 +603,7 @@ const flashStageFiveButton = () => {
  * @param {number} delta - Direction to move (-1 or +1)
  */
 const changeUnit = (delta) => {
+  markTiming('stage4.batch_change.start', { direction: delta });
   const modeState = getModeState();
   const totalUnits = getTotalUnits();
 
@@ -597,6 +619,9 @@ const changeUnit = (delta) => {
 
   modeState.currentUnit = next;
   render();
+  markAfterPaint('stage4.batch_change.usable').then(() => {
+    measureTiming('stage4.batch_change_to_usable', 'stage4.batch_change.start', 'stage4.batch_change.usable');
+  });
 };
 
 /**
@@ -781,7 +806,10 @@ const loadStateFromDisk = async () => {
   const fileId = getFileIdFromUrl();
   if (!fileId) return;
 
+  markTiming('stage4.overrides.fetch.start');
   const stored = await fetchOverrides(fileId);
+  markTiming('stage4.overrides.fetch.complete', { found: Boolean(stored) });
+  measureTiming('stage4.overrides.request', 'stage4.overrides.fetch.start', 'stage4.overrides.fetch.complete');
   if (!stored) return;
 
   state.pendingOverrides = stored.overrides || {};
@@ -930,6 +958,7 @@ const handleAdvanceToStage5 = async () => {
  * @returns {Promise<void>}
  */
 const init = async () => {
+  markTiming('stage4.init.start');
   setActiveStage('verify');
   initStepInstruction('verify');
 
@@ -968,6 +997,13 @@ const init = async () => {
   await fetchRows();
   _clampCurrentUnitsToValidRange();
   render();
+  await markAfterPaint('stage4.usable', {
+    column_count: state.columns.length,
+    total_original_rows: state.totalOriginalRows,
+  });
+  measureTiming('stage4.init_to_usable', 'stage4.init.start', 'stage4.usable', {
+    column_count: state.columns.length,
+  });
 };
 
 /**

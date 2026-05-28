@@ -7,6 +7,7 @@ const config = window.stageThreeConfig ?? {};
 const harmonizeEndpoint = config.harmonizeEndpoint ?? '/stage-3/harmonize';
 const nextStageUrl = config.nextStageUrl ?? '/stage-4';
 const stageTwoUrl = config.stageTwoUrl ?? '/stage-2';
+const JOB_POLL_INTERVAL_MS = 3000;
 
 const loadingState = document.getElementById('loadingState');
 const jobIdDisplay = document.getElementById('jobIdDisplay');
@@ -17,6 +18,7 @@ const errorBanner = document.getElementById('stageThreeError');
 const stageThreeTitle = document.getElementById('stageThreeTitle');
 const returnToStageTwo = document.getElementById('returnToStageTwo');
 const harmonizeAnimation = document.querySelector('#loadingState .harmonize-animation');
+const harmonizeProgressMessage = document.getElementById('harmonizeProgressMessage');
 
 const metricsDashboard = StageThreeMetricsDashboard.initFromDom();
 
@@ -25,6 +27,7 @@ const state = {
   requestBody: null,
   job: null,
   isProcessing: false,
+  pollTimer: null,
 };
 
 /* why: keep dashboard orchestration isolated from the job rendering logic. */
@@ -142,6 +145,43 @@ const _hideJobMeta = () => {
   }
 };
 
+const _formatElapsed = (elapsedSeconds) => {
+  if (!Number.isFinite(elapsedSeconds) || elapsedSeconds < 0) {
+    return null;
+  }
+  const minutes = Math.floor(elapsedSeconds / 60);
+  const seconds = Math.floor(elapsedSeconds % 60);
+  if (minutes <= 0) {
+    return `${seconds}s`;
+  }
+  return `${minutes}m ${seconds.toString().padStart(2, '0')}s`;
+};
+
+const _updateProgressMessage = (job) => {
+  if (!harmonizeProgressMessage) {
+    return;
+  }
+
+  const elapsedSeconds = Number(job?.elapsed_seconds);
+  const elapsedLabel = _formatElapsed(elapsedSeconds);
+  if (elapsedSeconds >= 600 && elapsedLabel) {
+    harmonizeProgressMessage.textContent = `Still running after ${elapsedLabel}. Large datasets can take a while; keep this tab open.`;
+    return;
+  }
+  if (elapsedSeconds >= 120 && elapsedLabel) {
+    harmonizeProgressMessage.textContent = `Still working after ${elapsedLabel}. Larger datasets can take several minutes.`;
+    return;
+  }
+  harmonizeProgressMessage.textContent = 'This usually takes 1-2 minutes.';
+};
+
+const _clearPollTimer = () => {
+  if (state.pollTimer) {
+    window.clearTimeout(state.pollTimer);
+    state.pollTimer = null;
+  }
+};
+
 const _showJobId = (jobId) => {
   if (jobIdDisplay && jobId) {
     jobIdDisplay.textContent = `Job ID: ${jobId}`;
@@ -149,11 +189,26 @@ const _showJobId = (jobId) => {
   }
 };
 
+/* why: extract file_id from URL for job and payload validation. */
+const _getFileIdFromUrl = () => {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('file_id');
+};
+
+const _getPayloadFileId = (payload) => payload?.request?.file_id ?? payload?.file_id ?? null;
+
+const _payloadMatchesCurrentFile = (payload) => {
+  const currentFileId = _getFileIdFromUrl();
+  const payloadFileId = _getPayloadFileId(payload);
+  return !currentFileId || !payloadFileId || currentFileId === payloadFileId;
+};
+
 /* why: update UI based on job status. */
 const _renderJob = (job) => {
   if (!job) {
     return;
   }
+  _clearPollTimer();
   const jobForSession = _jobWithCurrentFile(job);
   state.job = jobForSession;
   _persistJobMeta(jobForSession);
@@ -183,15 +238,57 @@ const _renderJob = (job) => {
   } else {
     _toggleLoadingState(true);
     _toggleAnimation(true);
+    _updateProgressMessage(jobForSession);
     _hideMetricsDashboard();
     reviewButton.disabled = true;
     retryButton.classList.add('hidden');
+    _scheduleJobPoll(jobForSession.job_id);
+  }
+};
+
+const _jobStatusEndpoint = (jobId) => {
+  const endpoint = new URL(
+    `${harmonizeEndpoint.replace(/\/harmonize$/, '')}/jobs/${encodeURIComponent(jobId)}`,
+    window.location.origin,
+  );
+  const fileId = state.requestBody?.file_id ?? state.job?.file_id ?? _getFileIdFromUrl();
+  if (fileId) {
+    endpoint.searchParams.set('file_id', fileId);
+  }
+  return `${endpoint.pathname}${endpoint.search}`;
+};
+
+const _scheduleJobPoll = (jobId) => {
+  if (!jobId) {
+    return;
+  }
+  state.pollTimer = window.setTimeout(() => {
+    _pollJob(jobId);
+  }, JOB_POLL_INTERVAL_MS);
+};
+
+const _pollJob = async (jobId) => {
+  try {
+    const response = await fetch(_jobStatusEndpoint(jobId));
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(body.detail || 'Unable to check harmonization status.');
+    }
+    _renderJob(body);
+  } catch (error) {
+    console.error(error);
+    _showError(error.message || 'Unable to check harmonization status.');
+    _scheduleJobPoll(jobId);
   }
 };
 
 /* why: extract session payload for harmonization request. */
 const _extractRequestPayload = () => {
   let payload = readFromSession(STAGE_3_PAYLOAD_KEY);
+  if (payload && !_payloadMatchesCurrentFile(payload)) {
+    removeFromSession(STAGE_3_PAYLOAD_KEY);
+    payload = null;
+  }
   let harmonizePayload = payload?.request ?? payload;
   if (!harmonizePayload) {
     const params = new URLSearchParams(window.location.search);
@@ -212,12 +309,6 @@ const _extractRequestPayload = () => {
   state.payload = payload;
   state.requestBody = harmonizePayload;
   return harmonizePayload;
-};
-
-/* why: extract file_id from URL for job validation. */
-const _getFileIdFromUrl = () => {
-  const params = new URLSearchParams(window.location.search);
-  return params.get('file_id');
 };
 
 const _startHarmonize = async (payloadOverride = null) => {
