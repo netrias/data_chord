@@ -30,7 +30,6 @@ workflow_storage/
 *.tfstate
 *.tfstate.*
 infra/terraform.tfvars
-infra/generated/
 
 # Harmonization outputs
 outputs/

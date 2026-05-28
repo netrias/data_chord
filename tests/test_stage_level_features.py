@@ -294,6 +294,32 @@ async def test_stage1_analyze_accepts_duplicate_headers_with_distinct_column_key
     assert columns[1]["sample_values"] == ["beta"]
 
 
+async def test_stage1_analyze_accepts_blank_middle_header_by_column_position(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """Analyze preserves blank display headers while keeping positional column keys."""
+
+    # Given: a CSV with a blank middle header and no stored manifest yet
+    content = b"col_a,,col_c\nalpha,beta,gamma\n"
+    file_id = await upload_content(app_client, content, "blank-header.csv")
+    assert temp_storage.load_manifest(file_id) is None
+
+    # When: analyze is requested
+    response = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
+    )
+
+    # Then: the blank display name is allowed and the source column remains addressable by key
+    assert response.status_code == 200
+    columns = response.json()["columns"]
+    assert [column["column_name"] for column in columns] == ["col_a", "", "col_c"]
+    assert [column["column_key"] for column in columns] == ["col_0000", "col_0001", "col_0002"]
+    assert [column["source_index"] for column in columns] == [0, 1, 2]
+    assert columns[1]["sample_values"] == ["beta"]
+
+
 async def test_stage1_analyze_accepts_tsv(
     app_client: AsyncClient,
     temp_storage: UploadStorage,

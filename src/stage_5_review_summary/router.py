@@ -53,7 +53,7 @@ async def render_stage_five(request: Request) -> HTMLResponse:
         "summary_endpoint": str(request.url_for("stage_five_summary")),
         "download_endpoint": str(request.url_for("stage_five_download")),
     }
-    return _templates.TemplateResponse(request=request, name="stage_5_review.html", context=context)
+    return _templates.TemplateResponse(request, "stage_5_review.html", context)
 
 
 @stage_five_router.post("/summary", response_model=StageFiveSummaryResponse, name="stage_five_summary")
