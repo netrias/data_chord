@@ -42,6 +42,7 @@ class HarmonizeResult:
     detail: str
     job_id_available: bool = False
     manifest_path: Path | None = None
+    output_path: Path | None = None
 
 
 class HarmonizeService:
@@ -151,6 +152,7 @@ class HarmonizeService:
             else str(raw_mapping_id) if raw_mapping_id else fallback_job_id
         )
         manifest_path = _extract_manifest_path(netrias_result)
+        output_path = _extract_output_path(netrias_result)
         logger.info(
             "Harmonization finished",
             extra={"file_path": str(file_path), "job_id": remote_job_id, "status": status.value},
@@ -161,6 +163,7 @@ class HarmonizeService:
             detail=detail,
             job_id_available=has_remote_job_id,
             manifest_path=manifest_path,
+            output_path=output_path,
         )
 
 
@@ -229,6 +232,15 @@ def _log_mapping_results(
 
 def _extract_manifest_path(netrias_result: object) -> Path | None:
     raw_path = getattr(netrias_result, "manifest_path", None)
+    return _existing_path_from_value(raw_path)
+
+
+def _extract_output_path(netrias_result: object) -> Path | None:
+    raw_path = getattr(netrias_result, "file_path", None)
+    return _existing_path_from_value(raw_path)
+
+
+def _existing_path_from_value(raw_path: object) -> Path | None:
     if raw_path is None:
         return None
     if isinstance(raw_path, Path):

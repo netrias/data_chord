@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,6 +20,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from netrias_client import read_tabular, write_tabular
 
 import src.domain.dependencies as dependencies
 from src.domain import (
@@ -49,11 +51,16 @@ from src.domain.manifest import (
     is_value_changed,
     read_manifest_parquet,
 )
-from src.domain.manifest.writer import apply_pv_adjustments_batch
+from src.domain.manifest.writer import apply_column_renames_batch, apply_pv_adjustments_batch
 from src.domain.pv_persistence import save_pv_manifest_to_disk
 from src.domain.pv_validation import check_value_conformance, compute_pv_adjustment
 from src.domain.review_override_store import delete_review_overrides_state
 from src.domain.storage import UploadStorage, UserContext, WorkflowFile, WorkflowNotFoundError, WorkflowStorage
+from src.domain.tabular_column_renames import (
+    ResolvedTabularColumn,
+    apply_column_renames_to_dataset,
+    resolve_tabular_columns,
+)
 from src.domain.workflow_artifact_store import (
     load_mapping_manifest,
     load_upload_artifact,
@@ -283,11 +290,24 @@ async def _run_harmonization_workflow(payload: HarmonizeRequest) -> HarmonizeRes
     column_overrides = mapping_choices.column_overrides
     column_renames = mapping_choices.column_renames
     target_selection = _data_model_selection_for_harmonize(workflow_state, payload)
+    resolved_columns = await _resolved_columns_for_source(
+        meta.saved_path,
+        column_renames,
+        meta.selected_sheet,
+    )
 
     cache = get_session_cache(payload.file_id)
     column_cde_map = _column_cde_map_for_session(manifest, column_overrides)
     _store_column_mappings_in_cache(cache, column_cde_map)
-    save_cde_mapping_document(payload.file_id, manifest, column_overrides, column_renames, cache, target_selection)
+    save_cde_mapping_document(
+        payload.file_id,
+        manifest,
+        column_overrides,
+        column_renames,
+        resolved_columns,
+        cache,
+        target_selection,
+    )
     output_path = storage.harmonized_path_for(payload.file_id, meta.saved_path)
 
     harmonize_task = asyncio.create_task(
@@ -313,6 +333,18 @@ async def _run_harmonization_workflow(payload: HarmonizeRequest) -> HarmonizeRes
     # Fetch PVs beside harmonization so Stage 4 can validate values without
     # adding another user-visible wait after the SDK call finishes.
     result, _ = await asyncio.gather(harmonize_task, pv_fetch_task)
+    effective_column_renames = column_renames
+    harmonized_output_path = result.output_path or output_path
+    if result.status == HarmonizeStatus.SUCCEEDED:
+        effective_column_renames = await _apply_column_renames_to_output(
+            harmonized_output_path,
+            column_renames,
+            meta.selected_sheet,
+        )
+        harmonized_output_path = await _refresh_managed_harmonized_output(
+            harmonized_output_path,
+            output_path,
+        )
 
     _router_logger.info(
         "Harmonization job dispatched",
@@ -326,14 +358,17 @@ async def _run_harmonization_workflow(payload: HarmonizeRequest) -> HarmonizeRes
     )
 
     manifest_summary = await _read_store_and_adjust_manifest(
-        payload.file_id, result.manifest_path, storage
+        payload.file_id,
+        result.manifest_path,
+        storage,
+        effective_column_renames,
     )
-    if output_path.exists():
+    if harmonized_output_path.exists():
         save_harmonized_artifacts(
             workflow_storage,
             user,
             payload.file_id,
-            output_path,
+            harmonized_output_path,
             storage.load_harmonization_manifest_path(payload.file_id),
         )
     _router_logger.info(
@@ -510,13 +545,22 @@ def _read_manifest_if_exists(manifest_path: Path | None) -> ManifestSummary | No
 
 
 async def _store_and_adjust_manifest(
-    file_id: str, manifest_path: Path, manifest_data: ManifestSummary, storage: UploadStorage
+    file_id: str,
+    manifest_path: Path,
+    manifest_data: ManifestSummary,
+    storage: UploadStorage,
+    column_renames: ColumnRenameSet,
 ) -> ManifestSummary:
     """Must store before adjusting so later stages read the adjusted version."""
     stored_path = storage.save_harmonization_manifest(file_id, manifest_path)
     if stored_path is None:
         _router_logger.warning("Failed to store manifest", extra={"file_id": file_id})
         return manifest_data
+
+    renamed_count = await _apply_column_renames_to_manifest(stored_path, column_renames)
+    if renamed_count > 0:
+        _router_logger.info("Applied column renames", extra={"file_id": file_id, "renamed_count": renamed_count})
+        manifest_data = read_manifest_parquet(stored_path) or manifest_data
 
     adjustment_count = await _apply_pv_adjustments(file_id, stored_path)
     if adjustment_count > 0:
@@ -527,19 +571,59 @@ async def _store_and_adjust_manifest(
 
 
 async def _read_store_and_adjust_manifest(
-    file_id: str, manifest_path: Path | None, storage: UploadStorage
+    file_id: str,
+    manifest_path: Path | None,
+    storage: UploadStorage,
+    column_renames: ColumnRenameSet,
 ) -> ManifestSummarySchema | None:
     manifest_data = _read_manifest_if_exists(manifest_path)
     if manifest_data is None or manifest_path is None:
         return None
 
-    final_data = await _store_and_adjust_manifest(file_id, manifest_path, manifest_data, storage)
+    final_data = await _store_and_adjust_manifest(file_id, manifest_path, manifest_data, storage, column_renames)
     cache = get_session_cache(file_id)
     column_pv_map = {
         str(row.column_key): cache.get_pvs_for_column(row.column_key)
         for row in final_data.rows
     }
     return _convert_to_schema(final_data, column_pv_map)
+
+
+async def _apply_column_renames_to_output(
+    output_path: Path,
+    column_renames: ColumnRenameSet,
+    sheet_name: str | None,
+) -> ColumnRenameSet:
+    if not column_renames.renames or not output_path.exists():
+        return column_renames
+
+    dataset = await run_in_threadpool(read_tabular, output_path, sheet_name)
+    renamed = apply_column_renames_to_dataset(dataset, column_renames)
+    await run_in_threadpool(write_tabular, output_path, renamed, output_path)
+    return column_renames
+
+
+async def _resolved_columns_for_source(
+    source_path: Path,
+    column_renames: ColumnRenameSet,
+    sheet_name: str | None,
+) -> tuple[ResolvedTabularColumn, ...]:
+    if not source_path.exists():
+        return ()
+    dataset = await run_in_threadpool(read_tabular, source_path, sheet_name)
+    return resolve_tabular_columns(dataset, column_renames)
+
+
+async def _refresh_managed_harmonized_output(actual_path: Path, managed_path: Path) -> Path:
+    if actual_path.resolve() == managed_path.resolve():
+        return managed_path
+    managed_path.parent.mkdir(parents=True, exist_ok=True)
+    await run_in_threadpool(shutil.copy2, actual_path, managed_path)
+    return managed_path
+
+
+async def _apply_column_renames_to_manifest(manifest_path: Path, column_renames: ColumnRenameSet) -> int:
+    return await run_in_threadpool(apply_column_renames_batch, manifest_path, column_renames)
 
 
 def _compute_row_adjustment(
