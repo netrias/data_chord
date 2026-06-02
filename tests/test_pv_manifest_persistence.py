@@ -19,6 +19,7 @@ from src.domain.data_model_cache import (
     clear_all_session_caches,
     get_session_cache,
 )
+from src.domain.dataset_workflow_ids import dataset_workflow_id_from_string
 from src.domain.pv_persistence import column_pv_sets, ensure_pvs_loaded, load_pv_manifest_from_disk
 from src.domain.storage import LocalWorkflowStorage, UserContext, WorkflowFile
 
@@ -30,7 +31,7 @@ def _workflow_storage_with_pv_manifest(
 ) -> tuple[LocalWorkflowStorage, UserContext]:
     storage = LocalWorkflowStorage(tmp_path / "workflow-storage")
     user = UserContext(user_id="test-user")
-    storage.create_workflow(user, file_id=file_id)
+    storage.create_workflow(user, dataset_workflow_id_from_string(file_id))
     if payload is not None:
         storage.write_json(user, file_id, WorkflowFile.PV_MANIFEST, payload)
     return storage, user
@@ -45,7 +46,7 @@ class TestPVManifestPersistenceFeature:
         Simulates: User completes Stage 3 → server restarts → user returns to Stage 4
         """
         # Given: A PV manifest was saved to disk during Stage 3
-        file_id = "test_file_123"
+        file_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         pv_manifest_data = {
             "data_model_key": "cptac",
             "version_label": "v2.1",
@@ -100,7 +101,7 @@ class TestPVManifestPersistenceFeature:
         Simulates: User skips Stage 3 or manifest was never saved
         """
         # Given: No PV manifest exists on disk
-        file_id = "no_manifest_file"
+        file_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         clear_all_session_caches()
         cache = get_session_cache(file_id)
 
@@ -127,22 +128,22 @@ class TestPVManifestPersistenceFeature:
         old_cache.set_pvs_batch({"some_cde": frozenset(["Old Value 1", "Old Value 2"])})
         assert old_cache.has_any_pvs()
 
-        # When: User uploads a new file (Stage 1 clears caches)
+        # When: the user starts a new dataset workflow and Stage 1 clears caches
         clear_all_session_caches()
 
         # Then: Old cache is cleared
         new_cache = get_session_cache(old_file_id)
         assert not new_cache.has_any_pvs(), "Old PV data should be cleared"
 
-        # And new file gets a fresh cache
-        new_file_id = "new_file_xyz"
-        fresh_cache = get_session_cache(new_file_id)
-        assert not fresh_cache.has_any_pvs(), "New file should have empty cache"
+        # And the new workflow gets a fresh cache
+        new_dataset_workflow_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        fresh_cache = get_session_cache(new_dataset_workflow_id)
+        assert not fresh_cache.has_any_pvs(), "New workflow should have empty cache"
 
     def test_ensure_pvs_loaded_returns_cache_with_pvs(self, tmp_path: Path) -> None:
         """FEATURE: ensure_pvs_loaded is a single entry point that handles lazy loading."""
         # Given: A file with PV manifest on disk
-        file_id = "ensure_test_file"
+        file_id = "cccccccccccccccccccccccccccccccc"
         pv_manifest_data = {
             "column_to_cde_key": {"col1": "cde1"},
             "pvs": {"cde1": ["Value A", "Value B"]},
@@ -165,7 +166,7 @@ class TestPVManifestPersistenceFeature:
     def test_column_pv_sets_restores_missing_column_mappings(self, tmp_path: Path) -> None:
         """FEATURE: Stage 4 recovers PVs when cache has values but lost column mappings."""
         # Given: A file with durable PV data, but the process cache cannot map columns to CDEs
-        file_id = "partial_cache_file"
+        file_id = "dddddddddddddddddddddddddddddddd"
         pv_manifest_data = {
             "column_to_cde_key": {"col_0000": "primary_diagnosis"},
             "pvs": {"primary_diagnosis": ["Adenocarcinoma", "Glioma"]},

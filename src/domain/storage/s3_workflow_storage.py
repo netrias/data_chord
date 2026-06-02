@@ -16,6 +16,8 @@ from typing import Protocol
 
 from botocore.exceptions import ClientError
 
+from src.domain.dataset_workflow_ids import DatasetWorkflowId
+
 from .workflow_storage import (
     JsonValue,
     StoredArtifact,
@@ -59,16 +61,12 @@ class S3WorkflowStorage:
     client: S3WorkflowClient
     prefix: str = ""
 
-    def create_workflow(self, user: UserContext, file_id: str | None = None) -> WorkflowMetadata:
-        if file_id is None:
-            # Hosted storage must share the upload id generated at the app edge;
-            # a backend-generated id would split metadata from the saved upload.
-            raise WorkflowStorageError("S3 workflow creation requires a caller-supplied file_id")
-        metadata = WorkflowMetadata.create(user, file_id)
+    def create_workflow(self, user: UserContext, dataset_workflow_id: DatasetWorkflowId) -> WorkflowMetadata:
+        metadata = WorkflowMetadata.create(user, dataset_workflow_id)
         try:
             self.client.put_object(
                 Bucket=self.bucket,
-                Key=self._metadata_key(file_id),
+                Key=self._metadata_key(dataset_workflow_id),
                 Body=_json_bytes(metadata.to_store()),
                 ContentType=_CONTENT_TYPE_JSON,
                 # Metadata is the ownership anchor, so creation must fail when
@@ -77,7 +75,7 @@ class S3WorkflowStorage:
             )
         except ClientError as exc:
             if _is_precondition_failed(exc):
-                raise WorkflowConflictError(f"Workflow already exists: {file_id}") from exc
+                raise WorkflowConflictError(f"Workflow already exists: {dataset_workflow_id}") from exc
             raise
         return metadata
 

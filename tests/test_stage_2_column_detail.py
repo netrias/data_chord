@@ -53,12 +53,12 @@ async def test_compute_column_detail_raises_when_profile_missing() -> None:
     Then: ColumnDetailNotFound is raised
     """
     # Given: cache empty (negative assertion)
-    cache = get_session_cache("abcdef0123456789")
+    cache = get_session_cache("abcdef0123456789abcdef0123456789")
     assert cache.get_column_profile("col") is None
 
     # When / Then
     with pytest.raises(ColumnDetailNotFound):
-        await compute_column_detail("abcdef0123456789", "col", selected_cde_key=None)
+        await compute_column_detail("abcdef0123456789abcdef0123456789", "col", selected_cde_key=None)
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +77,7 @@ async def test_compute_column_detail_returns_pv_match_and_sorted_pvs(
     Then: match_counts has the overlap; selected_pvs is the sorted PV list
     """
     # Given
-    file_id = "abcdef0123456789"
+    file_id = "abcdef0123456789abcdef0123456789"
     cache = get_session_cache(file_id)
     cache.set_column_profiles({
         "col": ColumnProfile(
@@ -128,7 +128,7 @@ async def test_compute_column_detail_downgrades_to_passthrough_on_empty_pvs(
     Then: cde_types reports passthrough and selected_pvs is None
     """
     # Given
-    file_id = "abcdef0123456789"
+    file_id = "abcdef0123456789abcdef0123456789"
     cache = get_session_cache(file_id)
     cache.set_column_profiles({
         "col": ColumnProfile(
@@ -171,7 +171,7 @@ async def test_compute_column_detail_returns_empty_when_cdes_not_yet_loaded() ->
     Then: response is empty rather than raising — frontend can retry
     """
     # Given
-    file_id = "abcdef0123456789"
+    file_id = "abcdef0123456789abcdef0123456789"
     cache = get_session_cache(file_id)
     cache.set_column_profiles({
         "col": ColumnProfile(
@@ -217,17 +217,17 @@ async def test_compute_column_detail_rebuilds_profile_when_cache_lost(
 
     # Given
     storage = UploadStorage(tmp_path / "uploads", UploadConstraints(max_bytes=10_000))
-    csv_path = storage._data_dir / "abcdef0123456789.csv"
+    csv_path = storage._data_dir / "abcdef0123456789abcdef0123456789.csv"
     csv_path.write_text("diagnosis\nLung\nLung\nBreast\n", encoding="utf-8")
-    meta_path = storage._meta_dir / "abcdef0123456789.json"
+    meta_path = storage._meta_dir / "abcdef0123456789abcdef0123456789.json"
     meta_path.write_text(
         """
         {
-          "file_id": "abcdef0123456789",
+          "file_id": "abcdef0123456789abcdef0123456789",
           "original_name": "diagnosis.csv",
           "content_type": "text/csv",
           "size_bytes": 27,
-          "saved_name": "abcdef0123456789.csv",
+          "saved_name": "abcdef0123456789abcdef0123456789.csv",
           "uploaded_at": "2026-04-29T00:00:00+00:00",
           "tabular_format": "csv",
           "sheet_names": [],
@@ -238,7 +238,7 @@ async def test_compute_column_detail_rebuilds_profile_when_cache_lost(
     )
     monkeypatch.setattr(use_cases.dependencies, "get_upload_storage", lambda: storage)
 
-    file_id = "abcdef0123456789"
+    file_id = "abcdef0123456789abcdef0123456789"
     cache = get_session_cache(file_id)
     cache.set_cdes(
         [CDEInfo(cde_id=1, cde_key="dx", description=None, version_label="1")],

@@ -625,6 +625,7 @@ const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange
     pvValues,
     initialValue: displayValue,
     originalValue,
+    targetCdeLabel: entry.targetCdeLabel,
     onChange: applyValueChange,
   });
 

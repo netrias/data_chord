@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_string
 from src.domain.manifest import normalize_manifest
 from src.domain.storage import LocalWorkflowStorage, UploadConstraints, UploadStorage, UserContext, WorkflowFile
 from src.domain.workflow_artifact_store import (
@@ -20,6 +21,10 @@ from src.domain.workflow_artifact_store import (
 )
 
 pytestmark = pytest.mark.asyncio
+
+
+def dataset_workflow_id(raw: str = "a" * 32) -> DatasetWorkflowId:
+    return dataset_workflow_id_from_string(raw)
 
 
 class InMemoryUpload:
@@ -48,8 +53,8 @@ async def test_upload_artifact_restores_original_file_into_new_scratch_space(tmp
     first_scratch = UploadStorage(tmp_path / "first", UploadConstraints(max_bytes=10_000))
     second_scratch = UploadStorage(tmp_path / "second", UploadConstraints(max_bytes=10_000))
     content = b"diagnosis\nalpha\n"
-    meta = await first_scratch.store(InMemoryUpload(content))
-    workflow_storage.create_workflow(user, meta.file_id)
+    meta = await first_scratch.store(InMemoryUpload(content), dataset_workflow_id())
+    workflow_storage.create_workflow(user, meta.dataset_workflow_id)
     save_upload_artifacts(workflow_storage, user, first_scratch, meta)
 
     assert second_scratch.load(meta.file_id) is None
@@ -69,8 +74,8 @@ async def test_upload_artifact_refreshes_local_metadata_from_workflow_storage(tm
     user = UserContext(user_id="alice")
     workflow_storage = LocalWorkflowStorage(tmp_path / "workflow")
     scratch = UploadStorage(tmp_path / "scratch", UploadConstraints(max_bytes=10_000))
-    meta = await scratch.store(InMemoryUpload(b"diagnosis\nalpha\n", filename="first.csv"))
-    workflow_storage.create_workflow(user, meta.file_id)
+    meta = await scratch.store(InMemoryUpload(b"diagnosis\nalpha\n", filename="first.csv"), dataset_workflow_id())
+    workflow_storage.create_workflow(user, meta.dataset_workflow_id)
     save_upload_artifacts(workflow_storage, user, scratch, meta)
     stored = workflow_storage.read_json(user, meta.file_id, WorkflowFile.UPLOAD_METADATA)
     assert stored is not None
@@ -103,8 +108,8 @@ async def test_generated_artifacts_restore_into_new_scratch_space(tmp_path: Path
     workflow_storage = LocalWorkflowStorage(tmp_path / "workflow")
     first_scratch = UploadStorage(tmp_path / "first", UploadConstraints(max_bytes=10_000))
     second_scratch = UploadStorage(tmp_path / "second", UploadConstraints(max_bytes=10_000))
-    meta = await first_scratch.store(InMemoryUpload(b"diagnosis\nalpha\n"))
-    workflow_storage.create_workflow(user, meta.file_id)
+    meta = await first_scratch.store(InMemoryUpload(b"diagnosis\nalpha\n"), dataset_workflow_id())
+    workflow_storage.create_workflow(user, meta.dataset_workflow_id)
     save_upload_artifacts(workflow_storage, user, first_scratch, meta)
 
     manifest = {

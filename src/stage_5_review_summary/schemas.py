@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
+from src.domain.schemas import DatasetWorkflowIdField
 
 
 class StageFiveRequest(BaseModel):
-    file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_PATTERN)
+    file_id: DatasetWorkflowIdField
 
 
 class ColumnSummary(BaseModel):

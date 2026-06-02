@@ -13,13 +13,17 @@ import { escapeHtml as _escapeHtml } from './shared_review_utils.js';
  * @param {Object} config
  * @param {string} config.originalValue - Original value from source data
  * @param {string} config.currentValue - Current effective value
+ * @param {string} [config.targetCdeLabel] - Target common data element display label
  * @param {Array<{value: string, isPVConformant: boolean}>} config.suggestions
  * @param {string[]} config.pvValues - Alphabetized PV list
  * @returns {string}
  */
-const _buildModalHTML = ({ originalValue, currentValue, suggestions, pvValues }) => {
+const _buildModalHTML = ({ originalValue, currentValue, targetCdeLabel, suggestions, pvValues }) => {
   const safeOriginal = _escapeHtml(originalValue);
   const safeCurrent = _escapeHtml(currentValue);
+  const targetCdeHTML = targetCdeLabel
+    ? `<p class="pv-selection-subtitle">Target common data element: <span>${_escapeHtml(targetCdeLabel)}</span></p>`
+    : '';
 
   // Build suggestion options HTML
   const suggestionValuesSet = new Set(suggestions.map((s) => s.value));
@@ -42,7 +46,10 @@ const _buildModalHTML = ({ originalValue, currentValue, suggestions, pvValues })
   return `
     <div class="pv-selection-content">
       <div class="pv-selection-header">
-        <h2 class="pv-selection-title" id="pv-modal-title">Select Value</h2>
+        <div class="pv-selection-heading">
+          <h2 class="pv-selection-title" id="pv-modal-title">Select Value</h2>
+          ${targetCdeHTML}
+        </div>
         <button class="pv-selection-close-btn" type="button" aria-label="Close">&times;</button>
       </div>
 
@@ -81,6 +88,7 @@ const _buildModalHTML = ({ originalValue, currentValue, suggestions, pvValues })
  * @param {Object} config
  * @param {string} config.originalValue - Original value from source data
  * @param {string} config.currentValue - Current effective value
+ * @param {string} [config.targetCdeLabel] - Target common data element display label
  * @param {Array<{value: string, isPVConformant: boolean}>} config.suggestions
  * @param {string[]} config.pvValues - Alphabetized PV list
  * @returns {Promise<string|null>} Selected value, or null if dismissed
@@ -207,10 +215,11 @@ export async function showPVSelectionModal(config) {
  * @param {string[]} config.pvValues - Alphabetized list of valid PVs
  * @param {string} [config.initialValue] - Current value
  * @param {string} [config.originalValue] - Original value from source data (for "was: X" display)
+ * @param {string} [config.targetCdeLabel] - Target common data element display label
  * @param {function(string, boolean): void} config.onChange - Callback when value changes (value, isKnownConformant)
  * @returns {HTMLElement}
  */
-export const createPVCombobox = ({ suggestions, pvValues, initialValue, originalValue, onChange }) => {
+export const createPVCombobox = ({ suggestions, pvValues, initialValue, originalValue, targetCdeLabel, onChange }) => {
   const wrapper = document.createElement('div');
   wrapper.className = 'pv-combobox';
 
@@ -232,6 +241,7 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, original
     const selected = await showPVSelectionModal({
       originalValue: originalValue ?? '',
       currentValue: committedValue,
+      targetCdeLabel,
       suggestions,
       pvValues,
     });

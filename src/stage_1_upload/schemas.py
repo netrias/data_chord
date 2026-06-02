@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from src.domain import ModelSuggestion
 from src.domain.column_profile import ColumnProfilePayload
 from src.domain.manifest import ConfidenceBucket, ManifestPayload
-from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
+from src.domain.schemas import DatasetWorkflowIdField
 
 
 class SheetPreview(BaseModel):
@@ -20,7 +20,7 @@ class SheetPreview(BaseModel):
 
 
 class UploadResponse(BaseModel):
-    file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, max_length=128)
+    file_id: DatasetWorkflowIdField
     file_name: str
     human_size: str
     content_type: str
@@ -32,7 +32,7 @@ class UploadResponse(BaseModel):
 
 
 class AnalyzeRequest(BaseModel):
-    file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, max_length=128, pattern=FILE_ID_PATTERN)
+    file_id: DatasetWorkflowIdField
     target_schema: str = Field(..., min_length=1)
     target_version_number: int | None = Field(default=None, ge=1)
     sheet_name: str | None = None
@@ -63,7 +63,7 @@ class AnalyzeResponse(BaseModel):
     do not carry every distinct value for every column.
     """
 
-    file_id: str
+    file_id: DatasetWorkflowIdField
     file_name: str
     target_version_number: int | None = None
     total_rows: int = Field(ge=0)

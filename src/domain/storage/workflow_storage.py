@@ -17,7 +17,8 @@ from enum import Enum
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Protocol
-from uuid import uuid4
+
+from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_value
 
 STORAGE_SCHEMA_VERSION = 1
 _WORKFLOWS_DIR = "workflows"
@@ -96,14 +97,18 @@ class UserContext:
 class WorkflowMetadata:
     """Create-once owner record for a workflow."""
 
-    file_id: str
+    dataset_workflow_id: DatasetWorkflowId
     owner_user_id: str
     created_at: datetime
     storage_schema_version: int = STORAGE_SCHEMA_VERSION
 
     @classmethod
-    def create(cls, user: UserContext, file_id: str) -> WorkflowMetadata:
-        return cls(file_id=file_id, owner_user_id=user.user_id, created_at=datetime.now(UTC))
+    def create(cls, user: UserContext, dataset_workflow_id: DatasetWorkflowId | str) -> WorkflowMetadata:
+        return cls(
+            dataset_workflow_id=dataset_workflow_id_from_value(dataset_workflow_id),
+            owner_user_id=user.user_id,
+            created_at=datetime.now(UTC),
+        )
 
     @classmethod
     def from_store(cls, payload: object) -> WorkflowMetadata | None:
@@ -118,7 +123,7 @@ class WorkflowMetadata:
         if created_at is None or not isinstance(schema_version, int):
             return None
         return cls(
-            file_id=file_id,
+            dataset_workflow_id=dataset_workflow_id_from_value(file_id),
             owner_user_id=owner_user_id,
             created_at=created_at,
             storage_schema_version=schema_version,
@@ -126,7 +131,7 @@ class WorkflowMetadata:
 
     def to_store(self) -> dict[str, object]:
         return {
-            _FIELD_FILE_ID: self.file_id,
+            _FIELD_FILE_ID: self.dataset_workflow_id,
             _FIELD_OWNER_USER_ID: self.owner_user_id,
             _FIELD_CREATED_AT: self.created_at.isoformat(),
             _FIELD_STORAGE_SCHEMA_VERSION: self.storage_schema_version,
@@ -184,7 +189,11 @@ class WorkflowArtifactTypeError(WorkflowStorageError):
 class WorkflowStorage(Protocol):
     """Storage contract shared by local and hosted implementations."""
 
-    def create_workflow(self, user: UserContext, file_id: str | None = None) -> WorkflowMetadata: ...
+    def create_workflow(
+        self,
+        user: UserContext,
+        dataset_workflow_id: DatasetWorkflowId,
+    ) -> WorkflowMetadata: ...
 
     def read_json(self, user: UserContext, file_id: str, kind: WorkflowFile) -> StoredJson | None: ...
 
@@ -231,11 +240,10 @@ class LocalWorkflowStorage:
         self._workflow_dir = self._base_dir / _WORKFLOWS_DIR
         self._workflow_dir.mkdir(parents=True, exist_ok=True)
 
-    def create_workflow(self, user: UserContext, file_id: str | None = None) -> WorkflowMetadata:
-        workflow_id = file_id or uuid4().hex
-        workflow_dir = self._path_for_workflow(workflow_id)
+    def create_workflow(self, user: UserContext, dataset_workflow_id: DatasetWorkflowId) -> WorkflowMetadata:
+        workflow_dir = self._path_for_workflow(dataset_workflow_id)
         workflow_dir.mkdir(parents=True, exist_ok=True)
-        metadata = WorkflowMetadata.create(user, workflow_id)
+        metadata = WorkflowMetadata.create(user, dataset_workflow_id)
         metadata_path = workflow_dir / _METADATA_FILE
         try:
             # Exclusive create preserves the owner record as the source of truth
@@ -243,7 +251,7 @@ class LocalWorkflowStorage:
             with metadata_path.open("x", encoding="utf-8") as handle:
                 json.dump(metadata.to_store(), handle, indent=2)
         except FileExistsError as exc:
-            raise WorkflowConflictError(f"Workflow already exists: {workflow_id}") from exc
+            raise WorkflowConflictError(f"Workflow already exists: {dataset_workflow_id}") from exc
         return metadata
 
     def read_json(self, user: UserContext, file_id: str, kind: WorkflowFile) -> StoredJson | None:
