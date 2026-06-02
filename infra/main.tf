@@ -210,15 +210,6 @@ resource "aws_s3_bucket_policy" "alb_logs" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "AllowLoadBalancerLogDeliveryAclCheck"
-        Effect = "Allow"
-        Principal = {
-          Service = "logdelivery.elasticloadbalancing.amazonaws.com"
-        }
-        Action   = "s3:GetBucketAcl"
-        Resource = aws_s3_bucket.alb_logs.arn
-      },
-      {
         Sid    = "AllowLoadBalancerLogDeliveryWrite"
         Effect = "Allow"
         Principal = {
@@ -226,11 +217,6 @@ resource "aws_s3_bucket_policy" "alb_logs" {
         }
         Action   = "s3:PutObject"
         Resource = "${aws_s3_bucket.alb_logs.arn}/alb/${var.environment}/AWSLogs/${data.aws_caller_identity.current.account_id}/*"
-        Condition = {
-          StringEquals = {
-            "s3:x-amz-acl" = "bucket-owner-full-control"
-          }
-        }
       }
     ]
   })
@@ -654,6 +640,8 @@ resource "aws_lb" "app" {
   }
 
   tags = local.common_tags
+
+  depends_on = [aws_s3_bucket_policy.alb_logs]
 }
 
 resource "aws_lb_target_group" "app" {
