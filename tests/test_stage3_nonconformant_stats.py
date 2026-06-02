@@ -275,7 +275,7 @@ class TestManualOverridePropagation:
 
         # Given
         payload = {
-            "file_id": "abcdef0123456789",
+            "file_id": "abcdef0123456789abcdef0123456789",
             "target_schema": "CCDI",
             "manual_overrides": {"col": None},
         }
@@ -297,7 +297,7 @@ class TestManualOverridePropagation:
 
         # Given
         payload = {
-            "file_id": "abcdef0123456789",
+            "file_id": "abcdef0123456789abcdef0123456789",
             "target_schema": "CCDI",
             "manual_overrides": {"col_0000": "primary_diagnosis"},
             "column_renames": {"col_0000": "Primary Diagnosis"},

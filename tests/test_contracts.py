@@ -8,7 +8,7 @@ import pytest
 from httpx import AsyncClient
 
 import src.domain.dependencies as dependencies
-from src.domain.storage import UploadStorage
+from src.domain.storage import UploadStorage, WorkflowFile
 from tests.conftest import (
     TEST_CSV_CONTENT_TYPE,
     TEST_TARGET_SCHEMA,
@@ -378,6 +378,55 @@ class TestRowsContract:
             assert "termsWithChanges" in column
             assert "transformations" in column
 
+    async def test_column_includes_target_cde_label_from_mapping_artifact(
+        self,
+        app_client: AsyncClient,
+        temp_storage: UploadStorage,
+        sample_csv_path: Path,
+    ) -> None:
+        """Stage 4 columns expose the target CDE reviewers are selecting values against."""
+
+        # Given: a harmonized file has a saved mapping artifact for the first source column
+        file_id = await upload_file(app_client, sample_csv_path)
+        meta = temp_storage.load(file_id)
+        assert meta is not None
+        create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
+        create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
+        dependencies.get_workflow_storage().write_json(
+            dependencies.get_user_context(),
+            file_id,
+            WorkflowFile.CDE_MAPPING,
+            {
+                "file_id": file_id,
+                "generated_at": "2026-06-02T00:00:00+00:00",
+                "target_schema": TEST_TARGET_SCHEMA,
+                "target_version": "1",
+                "mappings": [{
+                    "column_key": "col_0000",
+                    "source_column_name": "col_a",
+                    "output_column_name": "col_a",
+                    "cde_key": "primary_diagnosis",
+                    "cde_description": "Primary Diagnosis",
+                    "mapping_source": "ai",
+                    "maps_values": True,
+                }],
+            },
+        )
+
+        # When: rows are requested for review
+        response = await app_client.post(
+            "/stage-4/rows",
+            json={"file_id": file_id, "manual_columns": []},
+        )
+
+        # Then: the column carries both stable identity and reviewer-facing label
+        assert response.status_code == 200
+        columns = response.json()["columns"]
+        assert len(columns) > 0
+        first_column = next(column for column in columns if column["columnKey"] == "col_0000")
+        assert first_column["targetCdeKey"] == "primary_diagnosis"
+        assert first_column["targetCdeLabel"] == "primary_diagnosis"
+
     async def test_transformation_structure(
         self,
         app_client: AsyncClient,
@@ -477,7 +526,7 @@ class TestRowContextContract:
         """Non-existent file_id returns 404."""
 
         # Given: A file_id that doesn't exist
-        fake_file_id = "deadbeef12345678"
+        fake_file_id = "deadbeef12345678deadbeef12345678"
 
         # When: Row context is requested with invalid file_id
         response = await app_client.post(

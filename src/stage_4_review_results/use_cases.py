@@ -10,7 +10,9 @@ from datetime import datetime
 from netrias_client import read_tabular
 
 from src.domain import CONFIDENCE, RecommendationType
-from src.domain.columns import ColumnIdentity
+from src.domain.cde_mapping_persistence import CdeMappingEntry, load_cde_mapping_entries_by_column
+from src.domain.columns import ColumnIdentity, ColumnKey
+from src.domain.dataset_workflow_ids import DatasetWorkflowId
 from src.domain.manifest import (
     ConfidenceBucket,
     ManifestRow,
@@ -56,7 +58,7 @@ ReviewOverridePayload = Mapping[str, Mapping[str, CellOverrideSchema]]
 
 @dataclass(frozen=True)
 class SaveReviewOverridesResult:
-    file_id: str
+    file_id: DatasetWorkflowId
     updated_at: datetime
 
 
@@ -78,7 +80,7 @@ class TermRowIndicesManifestNotFoundError(Exception):
 
 def build_stage_four_rows(
     *,
-    file_id: str,
+    file_id: DatasetWorkflowId,
     upload_storage: UploadStorage,
     workflow_storage: WorkflowStorage,
     user: UserContext,
@@ -96,7 +98,8 @@ def build_stage_four_rows(
     column_info = _extract_columns_from_manifest(manifest)
     column_pv_map = column_pv_sets(file_id, [col.key for col in column_info])
     column_pvs = _build_column_pvs(column_info, column_pv_map, file_id)
-    columns = _build_columns_from_manifest(manifest, column_pv_map)
+    cde_mappings_by_column = load_cde_mapping_entries_by_column(file_id, workflow_storage, user)
+    columns = _build_columns_from_manifest(manifest, column_pv_map, cde_mappings_by_column)
 
     return StageFourResultsResponse(
         columns=columns,
@@ -169,7 +172,7 @@ def get_review_overrides(
     *,
     workflow_storage: WorkflowStorage,
     user: UserContext,
-    file_id: str,
+    file_id: DatasetWorkflowId,
 ) -> ReviewOverridesSchema | None:
     saved = load_review_overrides(workflow_storage, user, file_id)
     if saved is None:
@@ -181,7 +184,7 @@ def delete_review_overrides(
     *,
     workflow_storage: WorkflowStorage,
     user: UserContext,
-    file_id: str,
+    file_id: DatasetWorkflowId,
 ) -> DeleteOverridesResponse:
     existed = delete_review_overrides_state(workflow_storage, user, file_id)
     return DeleteOverridesResponse(file_id=file_id, deleted=existed)
@@ -192,7 +195,7 @@ def save_review_overrides(
     workflow_storage: WorkflowStorage,
     user: UserContext,
     upload_storage: UploadStorage,
-    file_id: str,
+    file_id: DatasetWorkflowId,
     overrides: ReviewOverridePayload,
     review_state: ReviewStateSchema,
 ) -> SaveReviewOverridesResult:
@@ -267,13 +270,14 @@ def _current_value_for_row(row: ManifestRow) -> str:
 def _build_columns_from_manifest(
     manifest: ManifestSummary,
     column_pv_map: dict[str, frozenset[str] | None],
+    cde_mappings_by_column: Mapping[ColumnKey, CdeMappingEntry],
 ) -> list[ColumnReviewData]:
-    columns_map: dict[str, list[ManifestRow]] = {}
-    column_indices: dict[str, int] = {}
-    column_labels: dict[str, str] = {}
+    columns_map: dict[ColumnKey, list[ManifestRow]] = {}
+    column_indices: dict[ColumnKey, int] = {}
+    column_labels: dict[ColumnKey, str] = {}
 
     for row in manifest.rows:
-        col_key = str(row.column_key)
+        col_key = row.column_key
         if col_key not in columns_map:
             columns_map[col_key] = []
             column_indices[col_key] = row.column_id
@@ -283,14 +287,19 @@ def _build_columns_from_manifest(
     columns: list[ColumnReviewData] = []
     for col_key in sorted(columns_map.keys(), key=lambda c: column_indices[c]):
         manifest_rows = columns_map[col_key]
+        mapping_entry = cde_mappings_by_column.get(col_key)
+        target_cde_key = _target_cde_key(mapping_entry)
+        serialized_col_key = str(col_key)
         transformations = [
-            _build_transformation(row, column_pv_map.get(col_key)) for row in manifest_rows
+            _build_transformation(row, column_pv_map.get(serialized_col_key)) for row in manifest_rows
         ]
         terms_with_changes = sum(1 for transformation in transformations if transformation.isChanged)
 
         columns.append(ColumnReviewData(
-            columnKey=col_key,
+            columnKey=serialized_col_key,
             columnLabel=column_labels[col_key] or "Unknown",
+            targetCdeKey=target_cde_key,
+            targetCdeLabel=target_cde_key,
             sourceColumnIndex=column_indices[col_key],
             termCount=len(transformations),
             termsWithChanges=terms_with_changes,
@@ -298,6 +307,12 @@ def _build_columns_from_manifest(
         ))
 
     return columns
+
+
+def _target_cde_key(mapping_entry: CdeMappingEntry | None) -> str | None:
+    if mapping_entry is None:
+        return None
+    return mapping_entry.cde_key
 
 
 def _build_transformation(row: ManifestRow, pv_set: frozenset[str] | None) -> Transformation:

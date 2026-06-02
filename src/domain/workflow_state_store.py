@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from src.domain.dataset_workflow_ids import DatasetWorkflowId
 from src.domain.storage import (
     UserContext,
     WorkflowConflictError,
@@ -25,9 +26,13 @@ class WorkflowStateConflictError(Exception):
     """Raised when workflow state changed during a read-modify-write update."""
 
 
-def create_workflow_record(storage: WorkflowStorage, user: UserContext, file_id: str) -> None:
+def create_workflow_record(
+    storage: WorkflowStorage,
+    user: UserContext,
+    dataset_workflow_id: DatasetWorkflowId,
+) -> None:
     """Create owner metadata for a newly uploaded workflow."""
-    storage.create_workflow(user, file_id=file_id)
+    storage.create_workflow(user, dataset_workflow_id)
 
 
 def save_initial_workflow_state(
@@ -41,7 +46,7 @@ def save_initial_workflow_state(
     except WorkflowNotFoundError:
         # Some callers can arrive with artifacts restored from older local-only
         # flows, so create the owner record here instead of failing late.
-        storage.create_workflow(user, file_id=state.file_id)
+        storage.create_workflow(user, state.file_id)
         existing = None
     expected_version = existing.version if existing is not None else None
     try:

@@ -6,17 +6,45 @@ Used by multiple stages; stage-specific schemas belong in their respective packa
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from typing import Annotated
 
+from pydantic import BaseModel, BeforeValidator, Field, PlainSerializer, WithJsonSchema
+
+from src.domain.dataset_workflow_ids import (
+    DATASET_WORKFLOW_ID_LENGTH,
+    DATASET_WORKFLOW_ID_PATTERN,
+    DatasetWorkflowId,
+    dataset_workflow_id_from_value,
+)
 from src.domain.harmonize import HarmonizeStatus
 from src.domain.manifest import ManifestPayload
 
-FILE_ID_PATTERN = r"^[a-f0-9]+$"
-FILE_ID_MIN_LENGTH = 8
+FILE_ID_MIN_LENGTH = DATASET_WORKFLOW_ID_LENGTH
+
+DatasetWorkflowIdField = Annotated[
+    DatasetWorkflowId,
+    BeforeValidator(dataset_workflow_id_from_value),
+    PlainSerializer(str, return_type=str),
+    Field(
+        min_length=DATASET_WORKFLOW_ID_LENGTH,
+        max_length=DATASET_WORKFLOW_ID_LENGTH,
+        pattern=DATASET_WORKFLOW_ID_PATTERN,
+    ),
+    WithJsonSchema({
+        "type": "string",
+        "minLength": DATASET_WORKFLOW_ID_LENGTH,
+        "maxLength": DATASET_WORKFLOW_ID_LENGTH,
+        "pattern": DATASET_WORKFLOW_ID_PATTERN,
+    }),
+]
+
+# Compatibility only. Public JSON fields may still be named file_id, but new
+# schemas should spell the internal type as DatasetWorkflowIdField.
+FileIdField = DatasetWorkflowIdField
 
 
 class HarmonizeRequest(BaseModel):
-    file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_PATTERN)
+    file_id: DatasetWorkflowIdField
     target_schema: str
     target_version_number: int | None = Field(default=None, ge=1)
     manual_overrides: dict[str, str | None] = Field(default_factory=dict)

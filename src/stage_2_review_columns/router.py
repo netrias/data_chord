@@ -21,7 +21,7 @@ from src.domain import UILabel
 from src.domain.cde import CDEInfo
 from src.domain.data_model_cache import get_session_cache, populate_cde_cache
 from src.domain.data_model_selection import DataModelSelection
-from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
+from src.domain.schemas import DatasetWorkflowIdField
 from src.domain.workflow_state_store import load_workflow_state
 
 from .schemas import ColumnDetailResponse, SaveMappingChoicesRequest, SaveMappingChoicesResponse
@@ -45,7 +45,7 @@ stage_two_router = APIRouter(tags=["Stage 2 Mapping"])
 @stage_two_router.get("/stage-2", response_class=HTMLResponse, name="stage_two_mapping_page")
 async def render_stage_two(
     request: Request,
-    file_id: Annotated[str | None, Query(min_length=8, pattern=r"^[a-f0-9]+$")] = None,
+    file_id: Annotated[DatasetWorkflowIdField | None, Query()] = None,
     schema: Annotated[str | None, Query(min_length=1)] = None,
     version_number: Annotated[int | None, Query(ge=1)] = None,
 ) -> HTMLResponse:
@@ -115,7 +115,7 @@ def _cde_catalog_item(cde: CDEInfo) -> dict[str, object]:
     name="stage_two_column_detail",
 )
 async def get_column_detail(
-    file_id: Annotated[str, Path(min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_PATTERN)],
+    file_id: Annotated[DatasetWorkflowIdField, Path()],
     column_key: Annotated[str, Path(min_length=1)],
     selected_cde_key: Annotated[str | None, Query(min_length=1)] = None,
 ) -> ColumnDetailResponse:

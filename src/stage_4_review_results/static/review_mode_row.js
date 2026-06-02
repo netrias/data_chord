@@ -42,6 +42,8 @@ const _reconstructRowsFromColumns = (columns, filterOptions = {}) => {
           ...t,
           columnKey: col.columnKey,
           columnLabel: col.columnLabel,
+          targetCdeKey: col.targetCdeKey,
+          targetCdeLabel: col.targetCdeLabel,
           sourceColumnIndex: col.sourceColumnIndex,
         });
       }

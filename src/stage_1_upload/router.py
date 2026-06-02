@@ -25,6 +25,7 @@ from src.domain.data_model_adapter import (
 )
 from src.domain.data_model_cache import get_session_cache
 from src.domain.data_model_selection import DataModelSelection
+from src.domain.dataset_workflow_ids import new_dataset_workflow_id
 from src.domain.dependencies import (
     get_mapping_service,
     get_upload_constraints,
@@ -102,8 +103,9 @@ async def list_data_models() -> list[DataModelSummary]:
 )
 async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadResponse:
     storage = dependencies.get_upload_storage()
+    dataset_workflow_id = new_dataset_workflow_id()
     try:
-        meta = await storage.store(file)
+        meta = await storage.store(file, dataset_workflow_id)
     except UnsupportedUploadError as exc:
         raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(exc)) from exc
     except UploadTooLargeError as exc:
@@ -111,7 +113,7 @@ async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadRespon
     create_workflow_record(
         dependencies.get_workflow_storage(),
         dependencies.get_user_context(),
-        meta.file_id,
+        meta.dataset_workflow_id,
     )
     save_upload_artifacts(
         dependencies.get_workflow_storage(),
@@ -185,21 +187,21 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     except Exception:
         await _cancel_pending_tasks(discovery_task, reference_task)
         raise
-    storage.save_manifest(meta.file_id, manifest)
+    storage.save_manifest(meta.dataset_workflow_id, manifest)
     save_mapping_manifest(
         dependencies.get_workflow_storage(),
         dependencies.get_user_context(),
-        meta.file_id,
+        meta.dataset_workflow_id,
         manifest,
     )
     save_initial_workflow_state(
         dependencies.get_workflow_storage(),
         dependencies.get_user_context(),
-        WorkflowState.from_selection(meta.file_id, target_selection),
+        WorkflowState.from_selection(meta.dataset_workflow_id, target_selection),
     )
     # Stash profiles in the session cache so the Stage 2 column-detail endpoint
     # can serve them without re-reading the file.
-    cache = get_session_cache(meta.file_id)
+    cache = get_session_cache(meta.dataset_workflow_id)
     cache.set_column_profiles(profiles)
     column_summaries = _build_column_summaries(
         profiles,
@@ -257,7 +259,7 @@ def _load_sheet_previews_safe(meta: UploadedFileMeta) -> dict[str, SheetPreview]
     except Exception as exc:
         _router_logger.warning(
             "Worksheet previews unavailable",
-            extra={"file_id": meta.file_id, "error": type(exc).__name__},
+            extra={"file_id": meta.dataset_workflow_id, "error": type(exc).__name__},
         )
         return {}
 

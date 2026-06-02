@@ -298,7 +298,7 @@ test('Stage 2 list opens a takeover on row click', async ({ page }) => {
 
 test('Stage 2 splits picker sections by mapping kind', async ({ page }) => {
   const payload = {
-    file_id: 'abcdef0123456789',
+    file_id: 'abcdef0123456789abcdef0123456789',
     file_name: 'mixed.csv',
     total_rows: 5,
     columns: [
@@ -379,7 +379,7 @@ test('Stage 2 splits picker sections by mapping kind', async ({ page }) => {
     });
   });
 
-  await page.goto('/stage-2?file_id=abcdef0123456789&schema=gc&version_number=1');
+  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&schema=gc&version_number=1');
 
   await expect(page.locator('#mappingRows .mapping-row')).toHaveCount(6);
   await expect(page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-fit')).toHaveText('80%');
@@ -419,7 +419,7 @@ test('Stage 2 settings sidebar filters rows by mapping outcome', async ({ page }
    *        the outcome counts.
    */
   const payload = {
-    file_id: 'abcdef0123456789',
+    file_id: 'abcdef0123456789abcdef0123456789',
     file_name: 'mixed.csv',
     total_rows: 5,
     columns: [
@@ -487,7 +487,7 @@ test('Stage 2 settings sidebar filters rows by mapping outcome', async ({ page }
     });
   });
 
-  await page.goto('/stage-2?file_id=abcdef0123456789&schema=gc&version_number=1');
+  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&schema=gc&version_number=1');
 
   // Negative: takeover starts hidden, all four rows render, ordering matches CSV.
   await expect(page.locator('#takeover')).toHaveClass(/hidden/);
@@ -537,7 +537,7 @@ test('Stage 2 submits selected column renames for harmonization', async ({ page 
    * Then:  the Stage 3 handoff includes column_renames separately from CDE overrides.
    */
   const payload = {
-    file_id: 'abcdef0123456789',
+    file_id: 'abcdef0123456789abcdef0123456789',
     file_name: 'rename.csv',
     total_rows: 1,
     columns: [_stage2Column('diagnosis')],
@@ -576,7 +576,7 @@ test('Stage 2 submits selected column renames for harmonization', async ({ page 
     });
   });
 
-  await page.goto('/stage-2?file_id=abcdef0123456789&schema=gc&version_number=1');
+  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&schema=gc&version_number=1');
 
   // Negative: no rename has been handed off yet.
   const before = await page.evaluate(() => JSON.parse(sessionStorage.getItem('stage2Payload')).column_renames);
@@ -607,7 +607,7 @@ test('Stage 2 picker surfaces all AI candidates as separate rows', async ({ page
    *        outcome for PV CDEs.
    */
   const payload = {
-    file_id: 'abcdef0123456789',
+    file_id: 'abcdef0123456789abcdef0123456789',
     file_name: 'multi.csv',
     total_rows: 5,
     columns: [_stage2Column('diagnosis'), _stage2Column('notes')],
@@ -673,7 +673,7 @@ test('Stage 2 picker surfaces all AI candidates as separate rows', async ({ page
     });
   });
 
-  await page.goto('/stage-2?file_id=abcdef0123456789&schema=gc&version_number=1');
+  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&schema=gc&version_number=1');
 
   // Open takeover for the diagnosis column, then open the picker.
   await page.locator('.mapping-row', { hasText: 'diagnosis' }).click();

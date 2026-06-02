@@ -10,7 +10,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from src.domain.column_profile import ColumnProfilePayload
-from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
+from src.domain.schemas import DatasetWorkflowIdField
 
 
 class ColumnDetailResponse(BaseModel):
@@ -32,10 +32,10 @@ class ColumnDetailResponse(BaseModel):
 class SaveMappingChoicesRequest(BaseModel):
     """Stage 2 choices to persist before the user enters harmonization."""
 
-    file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_PATTERN)
+    file_id: DatasetWorkflowIdField
     manual_overrides: dict[str, str | None] = Field(default_factory=dict)
     column_renames: dict[str, str] = Field(default_factory=dict)
 
 
 class SaveMappingChoicesResponse(BaseModel):
-    file_id: str
+    file_id: DatasetWorkflowIdField

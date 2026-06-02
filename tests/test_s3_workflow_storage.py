@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from botocore.exceptions import ClientError
 
+from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_string
 from src.domain.storage import (
     S3WorkflowStorage,
     UserContext,
@@ -16,6 +17,10 @@ from src.domain.storage import (
     WorkflowConflictError,
     WorkflowFile,
 )
+
+
+def dataset_workflow_id(raw: str = "a" * 32) -> DatasetWorkflowId:
+    return dataset_workflow_id_from_string(raw)
 
 
 class FakeS3Client:
@@ -66,15 +71,15 @@ def test_s3_workflow_json_uses_owner_and_versions() -> None:
     storage = S3WorkflowStorage(bucket="bucket", prefix="app", client=client)
     alice = UserContext(user_id="alice")
     bob = UserContext(user_id="bob")
-    workflow = storage.create_workflow(alice, file_id="abc123")
+    workflow = storage.create_workflow(alice, dataset_workflow_id())
 
-    assert storage.read_json(alice, workflow.file_id, WorkflowFile.WORKFLOW_STATE) is None
+    assert storage.read_json(alice, workflow.dataset_workflow_id, WorkflowFile.WORKFLOW_STATE) is None
 
     # When: Alice writes and updates mutable workflow state
-    first = storage.write_json(alice, workflow.file_id, WorkflowFile.WORKFLOW_STATE, {"stage": "uploaded"})
+    first = storage.write_json(alice, workflow.dataset_workflow_id, WorkflowFile.WORKFLOW_STATE, {"stage": "uploaded"})
     second = storage.write_json(
         alice,
-        workflow.file_id,
+        workflow.dataset_workflow_id,
         WorkflowFile.WORKFLOW_STATE,
         {"stage": "mapped"},
         expected_version=first.version,
@@ -85,13 +90,13 @@ def test_s3_workflow_json_uses_owner_and_versions() -> None:
     with pytest.raises(WorkflowConflictError):
         storage.write_json(
             alice,
-            workflow.file_id,
+            workflow.dataset_workflow_id,
             WorkflowFile.WORKFLOW_STATE,
             {"stage": "harmonized"},
             expected_version=first.version,
         )
     with pytest.raises(WorkflowAccessDeniedError):
-        storage.read_json(bob, workflow.file_id, WorkflowFile.WORKFLOW_STATE)
+        storage.read_json(bob, workflow.dataset_workflow_id, WorkflowFile.WORKFLOW_STATE)
 
 
 def test_s3_workflow_artifact_materializes_to_temp_file(tmp_path: Path) -> None:
@@ -99,18 +104,18 @@ def test_s3_workflow_artifact_materializes_to_temp_file(tmp_path: Path) -> None:
     client = FakeS3Client()
     storage = S3WorkflowStorage(bucket="bucket", prefix="app", client=client)
     user = UserContext(user_id="alice")
-    workflow = storage.create_workflow(user, file_id="abc123")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
     source = tmp_path / "sample.csv"
     source.write_text("a,b\n1,2\n", encoding="utf-8")
 
     assert not any(key.endswith("original_upload.csv") for key in client.objects)
 
     # When: the artifact is saved and materialized
-    artifact = storage.create_artifact(user, workflow.file_id, WorkflowFile.ORIGINAL_UPLOAD, source)
+    artifact = storage.create_artifact(user, workflow.dataset_workflow_id, WorkflowFile.ORIGINAL_UPLOAD, source)
 
     # Then: callers get a temporary local path containing the object bytes
     assert artifact.suffix == ".csv"
-    with storage.materialize_artifact(user, workflow.file_id, WorkflowFile.ORIGINAL_UPLOAD) as path:
+    with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.ORIGINAL_UPLOAD) as path:
         assert path.exists()
         assert path.suffix == ".csv"
         assert path.read_text(encoding="utf-8") == "a,b\n1,2\n"
@@ -122,20 +127,20 @@ def test_s3_workflow_write_artifact_replaces_existing_object(tmp_path: Path) -> 
     client = FakeS3Client()
     storage = S3WorkflowStorage(bucket="bucket", prefix="app", client=client)
     user = UserContext(user_id="alice")
-    workflow = storage.create_workflow(user, file_id="abc123")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
     first = tmp_path / "first.csv"
     second = tmp_path / "second.csv"
     first.write_text("a\nold\n", encoding="utf-8")
     second.write_text("a\nnew\n", encoding="utf-8")
-    storage.write_artifact(user, workflow.file_id, WorkflowFile.HARMONIZED_OUTPUT, first)
+    storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, first)
 
     assert any(key.endswith("harmonized_output.csv") for key in client.objects)
 
     # When: the generated artifact is written again
-    storage.write_artifact(user, workflow.file_id, WorkflowFile.HARMONIZED_OUTPUT, second)
+    storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, second)
 
     # Then: materialization returns the newest bytes
-    with storage.materialize_artifact(user, workflow.file_id, WorkflowFile.HARMONIZED_OUTPUT) as path:
+    with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT) as path:
         assert path.read_text(encoding="utf-8") == "a\nnew\n"
 
 
