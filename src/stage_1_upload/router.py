@@ -466,9 +466,7 @@ def _log_analysis_results(
     cde_targets: dict[str, list[ModelSuggestion]],
 ) -> None:
     cde_target_keys = set(cde_targets)
-    missing_columns = [
-        col.column_key for col in columns if col.column_key not in cde_target_keys
-    ]
+    missing_count = sum(1 for col in columns if col.column_key not in cde_target_keys)
     _router_logger.info(
         "Analyze completed",
         extra={
@@ -476,8 +474,7 @@ def _log_analysis_results(
             "total_rows": total_rows,
             "column_count": len(columns),
             "mapped_columns": len(cde_targets),
-            "missing_columns": missing_columns[:10],
-            "missing_count": len(missing_columns),
+            "missing_count": missing_count,
         },
     )
 
