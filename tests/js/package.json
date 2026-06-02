@@ -8,7 +8,7 @@
     "npm": ">=11.10.0"
   },
   "scripts": {
-    "test": "node --test combobox.test.js row-state.test.js card-state.test.js whitespace-markers.test.js"
+    "test": "node --test combobox.test.js row-state.test.js card-state.test.js whitespace-markers.test.js client-events.test.js"
   },
   "devDependencies": {
     "jsdom": "^25.0.0"

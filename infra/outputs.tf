@@ -18,6 +18,11 @@ output "workflow_bucket" {
   value       = aws_s3_bucket.workflow.bucket
 }
 
+output "alb_access_log_bucket" {
+  description = "S3 bucket used for ALB access logs."
+  value       = aws_s3_bucket.alb_logs.bucket
+}
+
 output "ecr_repository_url" {
   description = "ECR repository URI for the app image."
   value       = aws_ecr_repository.app.repository_url

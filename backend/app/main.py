@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import logging
 import os
+import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
@@ -14,9 +14,25 @@ from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse, Response
 from starlette.types import Scope
 
+from src.domain.observability import (
+    REQUEST_ID_HEADER,
+    RequestTrace,
+    bind_request_id,
+    configure_structured_logging,
+    elapsed_ms,
+    log_request,
+    request_id_from_header,
+    reset_request_id,
+)
 from src.domain.paths import PROJECT_ROOT, SHARED_STATIC_DIR, get_stage_static_dir
 from src.domain.storage import WorkflowAccessDeniedError, WorkflowNotFoundError
-from src.domain.user_context import InvalidUserContextError, bind_user_context, reset_user_context
+from src.domain.user_context import (
+    InvalidUserContextError,
+    bind_user_context,
+    current_user_context,
+    reset_user_context,
+)
+from src.observability.router import observability_router
 from src.stage_1_upload.router import stage_one_router
 from src.stage_2_review_columns.router import stage_two_router
 from src.stage_3_harmonize.router import stage_three_router
@@ -68,10 +84,7 @@ def _load_env_file() -> None:
 
 
 def _configure_logging() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-    )
+    configure_structured_logging()
 
 
 def _cors_allow_origins() -> list[str]:
@@ -113,6 +126,7 @@ def create_app() -> FastAPI:
     app.add_exception_handler(WorkflowAccessDeniedError, _workflow_access_denied)
     app.add_exception_handler(WorkflowNotFoundError, _workflow_not_found)
 
+    app.include_router(observability_router)
     app.include_router(stage_one_router)
     app.include_router(stage_two_router)
     app.include_router(stage_three_router)
@@ -144,17 +158,45 @@ async def _healthz() -> dict[str, str]:
 
 
 async def _bind_user_context(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    request_id = request_id_from_header(request.headers.get(REQUEST_ID_HEADER))
+    request_token = bind_request_id(request_id)
+    started_at = time.perf_counter()
+    status_code = 500
+    user_id: str | None = None
+    user_token = None
     try:
-        token = bind_user_context(request.headers)
-    except InvalidUserContextError:
-        return Response("Invalid identity headers", status_code=401)
-    try:
-        # ContextVar keeps route signatures clean while still scoping storage
-        # authorization to the current request.
-        response = await call_next(request)
+        try:
+            user_token = bind_user_context(request.headers)
+            user_id = current_user_context().user_id
+        except InvalidUserContextError:
+            status_code = 401
+            response = Response("Invalid identity headers", status_code=status_code)
+        else:
+            # ContextVar keeps route signatures clean while still scoping storage
+            # authorization to the current request.
+            response = await call_next(request)
+            status_code = response.status_code
+        response.headers[REQUEST_ID_HEADER] = request_id
+        return response
     finally:
-        reset_user_context(token)
-    return response
+        if user_token is not None:
+            reset_user_context(user_token)
+        if _should_log_request(request.url.path):
+            log_request(
+                RequestTrace(
+                    method=request.method,
+                    path=request.url.path,
+                    status_code=status_code,
+                    duration_ms=elapsed_ms(started_at),
+                    request_id=request_id,
+                    user_id=user_id,
+                )
+            )
+        reset_request_id(request_token)
+
+
+def _should_log_request(path: str) -> bool:
+    return path != "/healthz" and path != "/favicon.ico" and not path.startswith("/assets/")
 
 
 async def _workflow_access_denied(_request: Request, _exc: Exception) -> Response:

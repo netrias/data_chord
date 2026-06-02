@@ -1,5 +1,6 @@
 import { initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
 import { STAGE_2_PAYLOAD_KEY, STAGE_3_PAYLOAD_KEY, STAGE_3_JOB_KEY, CURRENT_FILE_SESSION_KEY, removeFromSession, writeToSession, readFromSession } from '/assets/shared/storage-keys.js';
+import { reportApiError, reportFetchFailure } from '/assets/shared/client-events.js';
 import { showDataModelPopup, preloadDataModels } from './data_model_popup.js';
 
 const config = window.stageOneUploadConfig ?? {};
@@ -186,12 +187,29 @@ const _uploadDataset = async () => {
   formData.append('file', state.file);
 
   try {
-    const response = await fetch(config.uploadEndpoint, {
-      method: 'POST',
-      body: formData,
-    });
+    let response;
+    try {
+      response = await fetch(config.uploadEndpoint, {
+        method: 'POST',
+        body: formData,
+      });
+    } catch (error) {
+      reportFetchFailure({
+        stage: 'stage_1',
+        operation: 'upload',
+        endpoint: config.uploadEndpoint,
+        error,
+      });
+      throw error;
+    }
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
+      reportApiError({
+        stage: 'stage_1',
+        operation: 'upload',
+        endpoint: config.uploadEndpoint,
+        statusCode: response.status,
+      });
       throw new Error(payload.detail || 'Upload failed.');
     }
     state.uploaded = payload;
@@ -556,20 +574,39 @@ const _analyzeDataset = async () => {
   if (analyzeOverlay) analyzeOverlay.classList.remove('hidden');
 
   try {
-    const response = await fetch(config.analyzeEndpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        file_id: state.uploaded.file_id,
-        target_schema: selection.dataModelKey,
-        target_version_number: selection.versionNumber,
-        sheet_name: state.selectedSheet,
-      }),
-    });
+    let response;
+    try {
+      response = await fetch(config.analyzeEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          file_id: state.uploaded.file_id,
+          target_schema: selection.dataModelKey,
+          target_version_number: selection.versionNumber,
+          sheet_name: state.selectedSheet,
+        }),
+      });
+    } catch (error) {
+      reportFetchFailure({
+        stage: 'stage_1',
+        operation: 'analyze',
+        endpoint: config.analyzeEndpoint,
+        fileId: state.uploaded.file_id,
+        error,
+      });
+      throw error;
+    }
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
+      reportApiError({
+        stage: 'stage_1',
+        operation: 'analyze',
+        endpoint: config.analyzeEndpoint,
+        fileId: state.uploaded.file_id,
+        statusCode: response.status,
+      });
       throw new Error(payload.detail || 'Analysis failed.');
     }
     // Keep overlay visible during navigation - browser will replace the page
