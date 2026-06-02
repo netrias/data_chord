@@ -30,11 +30,11 @@ def save_upload_artifacts(
     _upsert_json(
         workflow_storage,
         user,
-        meta.file_id,
+        meta.dataset_workflow_id,
         WorkflowFile.UPLOAD_METADATA,
         upload_storage.metadata_payload(meta),
     )
-    workflow_storage.create_artifact(user, meta.file_id, WorkflowFile.ORIGINAL_UPLOAD, meta.saved_path)
+    workflow_storage.create_artifact(user, meta.dataset_workflow_id, WorkflowFile.ORIGINAL_UPLOAD, meta.saved_path)
 
 
 def save_upload_metadata(
@@ -46,7 +46,7 @@ def save_upload_metadata(
     _upsert_json(
         workflow_storage,
         user,
-        meta.file_id,
+        meta.dataset_workflow_id,
         WorkflowFile.UPLOAD_METADATA,
         upload_storage.metadata_payload(meta),
     )

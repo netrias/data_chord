@@ -12,6 +12,7 @@ from collections.abc import Iterable
 import src.domain.dependencies as dependencies
 from src.domain.columns import ColumnKey
 from src.domain.data_model_cache import SessionCache, get_session_cache
+from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_value
 from src.domain.pv_manifest import PVManifest
 from src.domain.storage import WorkflowFile, WorkflowNotFoundError
 
@@ -79,7 +80,11 @@ def _cache_can_resolve_columns(cache: SessionCache, column_keys: Iterable[str]) 
     return True
 
 
-def save_pv_manifest_to_disk(file_id: str, cache: SessionCache, pv_map: dict[str, frozenset[str]]) -> None:
+def save_pv_manifest_to_disk(
+    file_id: DatasetWorkflowId | str,
+    cache: SessionCache,
+    pv_map: dict[str, frozenset[str]],
+) -> None:
     """Persists PVs so Stage 4/5 can recover after server restart without re-running harmonization."""
     selection = cache.get_model_selection()
     if selection is None:
@@ -96,7 +101,7 @@ def save_pv_manifest_to_disk(file_id: str, cache: SessionCache, pv_map: dict[str
     try:
         existing = storage.read_json(user, file_id, WorkflowFile.PV_MANIFEST)
     except WorkflowNotFoundError:
-        storage.create_workflow(user, file_id=file_id)
+        storage.create_workflow(user, dataset_workflow_id_from_value(file_id))
         existing = None
     storage.write_json(
         user,

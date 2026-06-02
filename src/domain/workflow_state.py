@@ -9,6 +9,7 @@ from typing import Final
 from src.domain.column_cde_map import ColumnCdeOverrides
 from src.domain.column_renames import ColumnRenameSet
 from src.domain.data_model_selection import DataModelSelection
+from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_value
 
 _FIELD_FILE_ID: Final = "file_id"
 _FIELD_DATA_MODEL_KEY: Final = "data_model_key"
@@ -71,13 +72,13 @@ class ConfirmedMappingChoices:
 class WorkflowState:
     """Small durable record for workflow choices keyed by uploaded file."""
 
-    file_id: str
+    file_id: DatasetWorkflowId
     data_model_selection: DataModelSelection
     mapping_choices: ConfirmedMappingChoices | None = None
 
     @classmethod
-    def from_selection(cls, file_id: str, selection: DataModelSelection) -> WorkflowState:
-        return cls(file_id=file_id, data_model_selection=selection)
+    def from_selection(cls, file_id: DatasetWorkflowId | str, selection: DataModelSelection) -> WorkflowState:
+        return cls(file_id=dataset_workflow_id_from_value(file_id), data_model_selection=selection)
 
     def with_mapping_choices(self, choices: ConfirmedMappingChoices) -> WorkflowState:
         return WorkflowState(
@@ -97,20 +98,21 @@ class WorkflowState:
         return payload
 
     @classmethod
-    def from_store(cls, payload: object, file_id: str) -> WorkflowState | None:
+    def from_store(cls, payload: object, file_id: DatasetWorkflowId | str) -> WorkflowState | None:
         if not isinstance(payload, Mapping):
             return None
+        dataset_workflow_id = dataset_workflow_id_from_value(file_id)
 
         stored_file_id = payload.get(_FIELD_FILE_ID)
         data_model_key = payload.get(_FIELD_DATA_MODEL_KEY)
         version_number = payload.get(_FIELD_VERSION_NUMBER)
-        if stored_file_id != file_id or not isinstance(data_model_key, str):
+        if stored_file_id != dataset_workflow_id or not isinstance(data_model_key, str):
             return None
         if version_number is not None and not isinstance(version_number, int):
             return None
 
         return cls(
-            file_id=file_id,
+            file_id=dataset_workflow_id,
             data_model_selection=DataModelSelection.from_version_number(data_model_key, version_number),
             mapping_choices=ConfirmedMappingChoices.from_store(payload),
         )

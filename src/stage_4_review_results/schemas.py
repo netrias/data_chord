@@ -7,7 +7,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field, model_validator
 
-from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
+from src.domain.schemas import DatasetWorkflowIdField
 
 
 class CellOverrideSchema(BaseModel):
@@ -75,7 +75,7 @@ class ReviewStateSchema(BaseModel):
 class ReviewOverridesSchema(BaseModel):
     """Complete review overrides for a file."""
 
-    file_id: str
+    file_id: DatasetWorkflowIdField
     created_at: datetime
     updated_at: datetime
     overrides: dict[str, dict[str, CellOverrideSchema]]
@@ -85,7 +85,7 @@ class ReviewOverridesSchema(BaseModel):
 class SaveOverridesRequest(BaseModel):
     """Request payload for saving review overrides."""
 
-    file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_PATTERN)
+    file_id: DatasetWorkflowIdField
     overrides: dict[str, dict[str, CellOverrideSchema]]
     review_state: ReviewStateSchema
 
@@ -93,21 +93,21 @@ class SaveOverridesRequest(BaseModel):
 class SaveOverridesResponse(BaseModel):
     """Response after saving review overrides."""
 
-    file_id: str
+    file_id: DatasetWorkflowIdField
     updated_at: datetime
 
 
 class DeleteOverridesResponse(BaseModel):
     """Response after deleting review overrides."""
 
-    file_id: str
+    file_id: DatasetWorkflowIdField
     deleted: bool
 
 
 class StageFourResultsRequest(BaseModel):
     """Request payload for loading Stage 4 harmonized review rows."""
 
-    file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_PATTERN)
+    file_id: DatasetWorkflowIdField
 
 
 class NonConformantItem(BaseModel):
@@ -128,7 +128,7 @@ class NonConformantResponse(BaseModel):
 class RowContextRequest(BaseModel):
     """Request payload for fetching original row context."""
 
-    file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_PATTERN)
+    file_id: DatasetWorkflowIdField
     row_indices: list[Annotated[int, Field(ge=0)]] = Field(max_length=10000)
 
 
@@ -142,7 +142,7 @@ class RowContextResponse(BaseModel):
 class TermRowIndicesRequest(BaseModel):
     """Request payload for fetching all source rows for one manifest term."""
 
-    file_id: str = Field(..., min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_PATTERN)
+    file_id: DatasetWorkflowIdField
     column_key: str
     original_value: str
 
@@ -182,6 +182,8 @@ class ColumnReviewData(BaseModel):
 
     columnKey: str
     columnLabel: str
+    targetCdeKey: str | None = None
+    targetCdeLabel: str | None = None
     sourceColumnIndex: int
     termCount: int
     termsWithChanges: int

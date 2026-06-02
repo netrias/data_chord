@@ -51,6 +51,8 @@ export const getAllEntries = (columns, sortMode = SORT_MODE.ORIGINAL, filterOpti
         ...entry,
         columnKey: col.columnKey,
         columnLabel: col.columnLabel,
+        targetCdeKey: col.targetCdeKey,
+        targetCdeLabel: col.targetCdeLabel,
       });
     }
   }
@@ -104,6 +106,8 @@ const getColumnSummaries = (columns, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH
         unitIndex: unitIndex + 1,
         columnLabel: col.columnLabel,
         columnKey: col.columnKey,
+        targetCdeKey: col.targetCdeKey,
+        targetCdeLabel: col.targetCdeLabel,
         columnIndex: col.sourceColumnIndex,
         batchWithinColumn: batch + 1,
         totalBatchesInColumn: batchCount,
@@ -155,6 +159,8 @@ export const getCurrentEntries = (columns, currentUnit, entriesPerBatch = DEFAUL
     ...entry,
     columnKey: summary.columnKey,
     columnLabel: summary.columnLabel,
+    targetCdeKey: summary.targetCdeKey,
+    targetCdeLabel: summary.targetCdeLabel,
   }));
 
   return {

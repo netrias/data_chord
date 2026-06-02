@@ -25,6 +25,7 @@ from src.domain.data_model_adapter import (
 )
 from src.domain.data_model_cache import get_session_cache
 from src.domain.data_model_selection import DataModelSelection
+from src.domain.dataset_workflow_ids import new_dataset_workflow_id
 from src.domain.dependencies import (
     get_mapping_service,
     get_upload_constraints,
@@ -112,22 +113,24 @@ async def list_data_models() -> list[DataModelSummary]:
 async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadResponse:
     storage = dependencies.get_upload_storage()
     user = dependencies.get_user_context()
+    dataset_workflow_id = new_dataset_workflow_id()
     log_workflow_event(
         WorkflowEvent(
             event_name=WorkflowEventName.UPLOAD_STARTED,
             stage=WorkflowStage.STAGE_1,
             operation=WorkflowOperation.UPLOAD,
             outcome=WorkflowOutcome.STARTED,
+            file_id=dataset_workflow_id,
             metadata={"content_type": file.content_type or "unknown"},
         ),
         user,
     )
     try:
-        meta = await storage.store(file)
+        meta = await storage.store(file, dataset_workflow_id)
         create_workflow_record(
             dependencies.get_workflow_storage(),
             user,
-            meta.file_id,
+            meta.dataset_workflow_id,
         )
         save_upload_artifacts(
             dependencies.get_workflow_storage(),
@@ -136,13 +139,13 @@ async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadRespon
             meta,
         )
     except UnsupportedUploadError as exc:
-        _log_upload_failed(user, "unsupported_upload")
+        _log_upload_failed(user, dataset_workflow_id, "unsupported_upload")
         raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(exc)) from exc
     except UploadTooLargeError as exc:
-        _log_upload_failed(user, "upload_too_large")
+        _log_upload_failed(user, dataset_workflow_id, "upload_too_large")
         raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(exc)) from exc
     except Exception as exc:
-        _log_upload_failed(user, type(exc).__name__)
+        _log_upload_failed(user, dataset_workflow_id, type(exc).__name__)
         raise
     log_workflow_event(
         WorkflowEvent(
@@ -244,21 +247,21 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
         _log_analyze_failed(user, payload.file_id, type(exc).__name__)
         await _cancel_pending_tasks(discovery_task, reference_task)
         raise
-    storage.save_manifest(meta.file_id, manifest)
+    storage.save_manifest(meta.dataset_workflow_id, manifest)
     save_mapping_manifest(
         dependencies.get_workflow_storage(),
         user,
-        meta.file_id,
+        meta.dataset_workflow_id,
         manifest,
     )
     save_initial_workflow_state(
         dependencies.get_workflow_storage(),
         user,
-        WorkflowState.from_selection(meta.file_id, target_selection),
+        WorkflowState.from_selection(meta.dataset_workflow_id, target_selection),
     )
     # Stash profiles in the session cache so the Stage 2 column-detail endpoint
     # can serve them without re-reading the file.
-    cache = get_session_cache(meta.file_id)
+    cache = get_session_cache(meta.dataset_workflow_id)
     cache.set_column_profiles(profiles)
     column_summaries = _build_column_summaries(
         profiles,
@@ -331,7 +334,7 @@ def _load_sheet_previews_safe(meta: UploadedFileMeta) -> dict[str, SheetPreview]
     except Exception as exc:
         _router_logger.warning(
             "Worksheet previews unavailable",
-            extra={"file_id": meta.file_id, "error": type(exc).__name__},
+            extra={"file_id": meta.dataset_workflow_id, "error": type(exc).__name__},
         )
         return {}
 
@@ -479,13 +482,14 @@ def _log_analysis_results(
     )
 
 
-def _log_upload_failed(user: UserContext, error_type: str) -> None:
+def _log_upload_failed(user: UserContext, file_id: str, error_type: str) -> None:
     log_workflow_event(
         WorkflowEvent(
             event_name=WorkflowEventName.UPLOAD_FAILED,
             stage=WorkflowStage.STAGE_1,
             operation=WorkflowOperation.UPLOAD,
             outcome=WorkflowOutcome.FAILED,
+            file_id=file_id,
             metadata={"error_type": error_type},
         ),
         user,

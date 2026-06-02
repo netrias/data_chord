@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, NotRequired, Protocol, TypedDict, cast
-from uuid import uuid4
 
 from netrias_client import (
     SUPPORTED_TABULAR_SUFFIXES,
@@ -24,6 +23,7 @@ from netrias_client import (
     list_workbook_sheets,
 )
 
+from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_value
 from src.domain.manifest import ManifestPayload, normalize_manifest
 
 logger = logging.getLogger(__name__)
@@ -79,7 +79,7 @@ class UploadConstraints:
 class UploadedFileMeta:
     """Canonical metadata for one uploaded dataset in managed storage."""
 
-    file_id: str
+    dataset_workflow_id: DatasetWorkflowId
     original_name: str
     content_type: str
     size_bytes: int
@@ -88,6 +88,11 @@ class UploadedFileMeta:
     tabular_format: TabularFormat
     sheet_names: list[str]
     selected_sheet: str | None = None
+
+    @property
+    def file_id(self) -> DatasetWorkflowId:
+        """Compatibility view for public APIs and persisted ``file_id`` fields."""
+        return self.dataset_workflow_id
 
     @property
     def human_size(self) -> str:
@@ -149,12 +154,11 @@ class UploadStorage:
         self._manifest_dir.mkdir(parents=True, exist_ok=True)
         self._harmonized_dir.mkdir(parents=True, exist_ok=True)
 
-    async def store(self, upload: UploadStream) -> UploadedFileMeta:
+    async def store(self, upload: UploadStream, dataset_workflow_id: DatasetWorkflowId) -> UploadedFileMeta:
         filename, suffix, content_type = self._extract_upload_info(upload)
         self._validate_upload(suffix, content_type)
 
-        file_id = uuid4().hex
-        destination = self._data_dir / f"{file_id}{suffix}"
+        destination = self._data_dir / f"{dataset_workflow_id}{suffix}"
 
         try:
             total_bytes = await self._write_upload_chunks(upload, destination)
@@ -162,7 +166,13 @@ class UploadStorage:
             await upload.close()
 
         try:
-            return self._create_and_save_metadata(file_id, filename, content_type, total_bytes, destination)
+            return self._create_and_save_metadata(
+                dataset_workflow_id,
+                filename,
+                content_type,
+                total_bytes,
+                destination,
+            )
         except UnsupportedUploadError:
             destination.unlink(missing_ok=True)
             raise
@@ -191,7 +201,7 @@ class UploadStorage:
 
     def _create_and_save_metadata(
         self,
-        file_id: str,
+        dataset_workflow_id: DatasetWorkflowId,
         filename: str,
         content_type: str,
         total_bytes: int,
@@ -201,7 +211,7 @@ class UploadStorage:
         sheet_names = _sheet_names_for(destination)
         selected_sheet = sheet_names[0] if sheet_names else None
         meta = UploadedFileMeta(
-            file_id=file_id,
+            dataset_workflow_id=dataset_workflow_id,
             original_name=filename,
             content_type=content_type,
             size_bytes=total_bytes,
@@ -212,7 +222,7 @@ class UploadStorage:
             selected_sheet=selected_sheet,
         )
         self._write_metadata(meta)
-        logger.info("Stored upload", extra={"file_id": file_id, "size_bytes": total_bytes})
+        logger.info("Stored upload", extra={"file_id": dataset_workflow_id, "size_bytes": total_bytes})
         return meta
 
     def load(self, file_id: str) -> UploadedFileMeta | None:
@@ -224,12 +234,12 @@ class UploadStorage:
 
     def _write_metadata(self, meta: UploadedFileMeta) -> None:
         meta_payload = self.metadata_payload(meta)
-        meta_path = self._meta_dir / f"{meta.file_id}.json"
+        meta_path = self._meta_dir / f"{meta.dataset_workflow_id}.json"
         meta_path.write_text(json.dumps(meta_payload, indent=2))
 
     def metadata_payload(self, meta: UploadedFileMeta) -> dict[str, object]:
         return {
-            _META_FILE_ID: meta.file_id,
+            _META_FILE_ID: meta.dataset_workflow_id,
             _META_ORIGINAL_NAME: meta.original_name,
             _META_CONTENT_TYPE: meta.content_type,
             _META_SIZE_BYTES: meta.size_bytes,
@@ -323,7 +333,7 @@ class UploadStorage:
 
     def _metadata_from_payload(self, payload: StoredMeta) -> UploadedFileMeta:
         return UploadedFileMeta(
-            file_id=payload[_META_FILE_ID],
+            dataset_workflow_id=dataset_workflow_id_from_value(payload[_META_FILE_ID]),
             original_name=payload[_META_ORIGINAL_NAME],
             content_type=payload[_META_CONTENT_TYPE],
             size_bytes=payload[_META_SIZE_BYTES],
@@ -378,7 +388,7 @@ def _resolve_selected_sheet(meta: UploadedFileMeta, requested_sheet: str | None)
 
 def _with_selected_sheet(meta: UploadedFileMeta, selected_sheet: str) -> UploadedFileMeta:
     return UploadedFileMeta(
-        file_id=meta.file_id,
+        dataset_workflow_id=meta.dataset_workflow_id,
         original_name=meta.original_name,
         content_type=meta.content_type,
         size_bytes=meta.size_bytes,

@@ -18,7 +18,9 @@ import { dirname, join } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pvComboboxPath = join(__dirname, '../../src/stage_4_review_results/static/pv_combobox.js');
+const stageFourCssPath = join(__dirname, '../../src/stage_4_review_results/static/stage_4_review.css');
 const pvComboboxCode = readFileSync(pvComboboxPath, 'utf-8');
+const stageFourCss = readFileSync(stageFourCssPath, 'utf-8');
 
 const TEST_SUGGESTIONS = [
   { value: 'Lung Cancer', isPVConformant: true },
@@ -50,8 +52,15 @@ const setupDOM = () => {
     };
   }
 
+  dom.window._escapeHtml = (str) => {
+    if (typeof str !== 'string') return String(str);
+    const escapeMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+    return str.replace(/[&<>"']/g, (c) => escapeMap[c]);
+  };
+
   // Inject the pv_combobox code as a script (remove exports for eval)
   const moduleCode = pvComboboxCode
+    .replace("import { escapeHtml as _escapeHtml } from './shared_review_utils.js';", 'const _escapeHtml = window._escapeHtml;')
     .replace('export const createPVCombobox', 'window.createPVCombobox')
     .replace('export async function showPVSelectionModal', 'window.showPVSelectionModal = async function');
 
@@ -133,6 +142,57 @@ describe('PV Selection Modal', () => {
       assert.ok(wasRow.textContent.includes('Lung cancer'), 'Was row should show original value');
       assert.ok(nowRow.textContent.includes('now:'), 'Second row should be "now"');
       assert.ok(nowRow.textContent.includes('Lung Cancer'), 'Now row should show current value');
+
+      // Cleanup
+      dialog.close();
+      await modalPromise;
+    });
+
+    it('displays target common data element when provided', async () => {
+      // Given: the card knows which target CDE the column was harmonized against
+      const modalPromise = showPVSelectionModal({
+        originalValue: 'Lung cancer',
+        currentValue: 'Lung Cancer',
+        targetCdeLabel: 'primary_diagnosis',
+        suggestions: TEST_SUGGESTIONS,
+        pvValues: TEST_PV_VALUES,
+      });
+
+      const dialog = dom.window.document.querySelector('dialog.pv-selection-dialog');
+
+      // When: the modal opens
+      const targetRow = dialog.querySelector('.pv-selection-subtitle');
+
+      // Then: the target CDE lives as a small subheader under the title, not beside
+      // the was/now context.
+      assert.ok(targetRow, 'Target CDE subtitle should be present');
+      assert.ok(dialog.querySelector('.pv-selection-heading .pv-selection-subtitle'));
+      assert.strictEqual(dialog.querySelector('.pv-selection-title .pv-selection-subtitle'), null);
+      assert.strictEqual(dialog.querySelector('.pv-selection-context .pv-selection-subtitle'), null);
+      assert.ok(targetRow.textContent.includes('Target common data element'));
+      assert.ok(targetRow.textContent.includes('primary_diagnosis'));
+
+      // Cleanup
+      dialog.close();
+      await modalPromise;
+    });
+
+    it('does not render an empty target CDE row', async () => {
+      // Given: older data has no target CDE metadata
+      const modalPromise = showPVSelectionModal({
+        originalValue: 'Lung cancer',
+        currentValue: 'Lung Cancer',
+        suggestions: TEST_SUGGESTIONS,
+        pvValues: TEST_PV_VALUES,
+      });
+
+      const dialog = dom.window.document.querySelector('dialog.pv-selection-dialog');
+
+      // When: the modal opens
+      const targetRow = dialog.querySelector('.pv-selection-subtitle');
+
+      // Then: the modal omits the target row instead of showing a blank label
+      assert.strictEqual(targetRow, null);
 
       // Cleanup
       dialog.close();
@@ -320,6 +380,20 @@ describe('PV Selection Modal', () => {
       // Cleanup
       dialog.close();
       await modalPromise;
+    });
+  });
+
+  describe('Fixed Layout', () => {
+    it('keeps modal frame sizing fixed while the values list scrolls', () => {
+      // Given: the Stage 4 stylesheet controls the PV selection popup
+      const dialogRule = stageFourCss.match(/\.pv-selection-dialog\s*\{[^}]+\}/)?.[0] ?? '';
+      const listRule = stageFourCss.match(/\.pv-selection-list\s*\{[^}]+\}/)?.[0] ?? '';
+
+      // Then: the dialog has an explicit height, and the list owns overflow
+      assert.match(dialogRule, /height:\s*min\(/);
+      assert.match(dialogRule, /max-height:\s*80vh/);
+      assert.match(listRule, /overflow-y:\s*auto/);
+      assert.match(listRule, /min-height:\s*0/);
     });
   });
 

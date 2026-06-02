@@ -67,6 +67,7 @@ def test_analyze_response_does_not_require_full_profiles() -> None:
     Then: the profile map defaults to empty so the browser does not need to
           store every distinct value for every column
     """
+    from src.domain.dataset_workflow_ids import dataset_workflow_id_from_string
     from src.domain.manifest import ConfidenceBucket
     from src.stage_1_upload.schemas import AnalyzeResponse, ColumnPreview
 
@@ -76,7 +77,7 @@ def test_analyze_response_does_not_require_full_profiles() -> None:
 
     # When
     response = AnalyzeResponse(
-        file_id="abcdef0123456789",
+        file_id=dataset_workflow_id_from_string("abcdef0123456789abcdef0123456789"),
         file_name="data.csv",
         total_rows=1,
         columns=[

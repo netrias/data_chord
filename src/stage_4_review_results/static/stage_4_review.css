@@ -1308,6 +1308,7 @@
     0 20px 40px rgba(0, 0, 0, 0.1);
   width: 720px;
   max-width: 90vw;
+  height: min(720px, 80vh);
   max-height: 80vh;
   margin: auto;
   display: flex;
@@ -1335,11 +1336,31 @@
   flex-shrink: 0;
 }
 
+.pv-selection-heading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
 .pv-selection-title {
   margin: 0;
   font-size: 1.1rem;
   font-weight: 700;
   color: var(--gray-900);
+}
+
+.pv-selection-subtitle {
+  margin: 0;
+  color: var(--gray-500);
+  font-size: 0.8rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.pv-selection-subtitle span {
+  color: var(--gray-700);
+  font-weight: 600;
 }
 
 .pv-selection-close-btn {
@@ -1427,6 +1448,7 @@
 
 .pv-selection-list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: var(--space-2) 0;
 }

@@ -978,7 +978,7 @@ async def test_stage2_mapping_page_renders_manual_options(
     """Stage 2 mapping page exposes CDE labels for manual mapping."""
 
     # Given: CDE cache is pre-populated for the file
-    file_id = "deadbeef"
+    file_id = "deadbeefdeadbeefdeadbeefdeadbeef"
     cache = get_session_cache(file_id)
     cache.set_cdes(
         [CDEInfo(cde_id=2, cde_key="primary_diagnosis", description=None, version_label="v1")],

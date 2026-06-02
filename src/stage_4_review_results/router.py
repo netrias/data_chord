@@ -14,7 +14,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 import src.domain.dependencies as dependencies
-from src.domain.schemas import FILE_ID_MIN_LENGTH, FILE_ID_PATTERN
+from src.domain.schemas import DatasetWorkflowIdField
 from src.domain.storage import UploadStorage
 from src.stage_4_review_results.schemas import (
     DeleteOverridesResponse,
@@ -78,7 +78,7 @@ async def fetch_stage_four_rows(payload: StageFourResultsRequest) -> StageFourRe
         raise HTTPException(status_code=404, detail="Harmonization manifest not found. Please rerun Stage 3.") from exc
 
 
-FileIdPath = Annotated[str, Path(min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_PATTERN)]
+DatasetWorkflowIdPath = Annotated[DatasetWorkflowIdField, Path()]
 
 
 @stage_four_router.get(
@@ -86,7 +86,7 @@ FileIdPath = Annotated[str, Path(min_length=FILE_ID_MIN_LENGTH, pattern=FILE_ID_
     response_model=ReviewOverridesSchema | None,
     name="stage_four_get_overrides",
 )
-async def get_overrides(file_id: FileIdPath) -> ReviewOverridesSchema | None:
+async def get_overrides(file_id: DatasetWorkflowIdPath) -> ReviewOverridesSchema | None:
     return get_review_overrides(
         workflow_storage=dependencies.get_workflow_storage(),
         user=dependencies.get_user_context(),
@@ -113,7 +113,7 @@ async def save_overrides(payload: SaveOverridesRequest) -> SaveOverridesResponse
     response_model=DeleteOverridesResponse,
     name="stage_four_delete_overrides",
 )
-async def delete_overrides(file_id: FileIdPath) -> DeleteOverridesResponse:
+async def delete_overrides(file_id: DatasetWorkflowIdPath) -> DeleteOverridesResponse:
     return delete_review_overrides(
         workflow_storage=dependencies.get_workflow_storage(),
         user=dependencies.get_user_context(),
@@ -126,7 +126,7 @@ async def delete_overrides(file_id: FileIdPath) -> DeleteOverridesResponse:
     response_model=NonConformantResponse,
     name="stage_four_non_conformant",
 )
-async def get_non_conformant_values(file_id: FileIdPath) -> NonConformantResponse:
+async def get_non_conformant_values(file_id: DatasetWorkflowIdPath) -> NonConformantResponse:
     """Deduplicate by (column, original, final) to match Stage 5's unique mapping logic."""
     storage = dependencies.get_upload_storage()
     return build_non_conformant_values(
