@@ -121,6 +121,23 @@ variable "app_error_log_alarm_threshold" {
   default     = 1
 }
 
+variable "enable_alb_access_logs" {
+  description = "Whether the ALB should write access logs to the environment log bucket."
+  type        = bool
+  default     = true
+}
+
+variable "alb_access_log_retention_days" {
+  description = "Days to retain ALB access logs."
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = var.alb_access_log_retention_days >= 1 && var.alb_access_log_retention_days <= 365
+    error_message = "alb_access_log_retention_days must be between 1 and 365."
+  }
+}
+
 variable "container_cpu" {
   description = "Fargate task CPU units."
   type        = number

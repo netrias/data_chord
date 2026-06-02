@@ -32,11 +32,20 @@ from src.domain.dependencies import (
 )
 from src.domain.manifest import ManifestPayload
 from src.domain.match_counts import column_value_overlap_ratio
+from src.domain.observability import (
+    WorkflowEvent,
+    WorkflowEventName,
+    WorkflowOperation,
+    WorkflowOutcome,
+    WorkflowStage,
+    log_workflow_event,
+)
 from src.domain.storage import (
     UnsupportedUploadError,
     UploadedFileMeta,
     UploadStorage,
     UploadTooLargeError,
+    UserContext,
     describe_constraints,
 )
 from src.domain.workflow_artifact_store import (
@@ -103,23 +112,56 @@ async def list_data_models() -> list[DataModelSummary]:
 )
 async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadResponse:
     storage = dependencies.get_upload_storage()
+    user = dependencies.get_user_context()
     dataset_workflow_id = new_dataset_workflow_id()
+    log_workflow_event(
+        WorkflowEvent(
+            event_name=WorkflowEventName.UPLOAD_STARTED,
+            stage=WorkflowStage.STAGE_1,
+            operation=WorkflowOperation.UPLOAD,
+            outcome=WorkflowOutcome.STARTED,
+            file_id=dataset_workflow_id,
+            metadata={"content_type": file.content_type or "unknown"},
+        ),
+        user,
+    )
     try:
         meta = await storage.store(file, dataset_workflow_id)
+        create_workflow_record(
+            dependencies.get_workflow_storage(),
+            user,
+            meta.dataset_workflow_id,
+        )
+        save_upload_artifacts(
+            dependencies.get_workflow_storage(),
+            user,
+            storage,
+            meta,
+        )
     except UnsupportedUploadError as exc:
+        _log_upload_failed(user, dataset_workflow_id, "unsupported_upload")
         raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(exc)) from exc
     except UploadTooLargeError as exc:
+        _log_upload_failed(user, dataset_workflow_id, "upload_too_large")
         raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(exc)) from exc
-    create_workflow_record(
-        dependencies.get_workflow_storage(),
-        dependencies.get_user_context(),
-        meta.dataset_workflow_id,
-    )
-    save_upload_artifacts(
-        dependencies.get_workflow_storage(),
-        dependencies.get_user_context(),
-        storage,
-        meta,
+    except Exception as exc:
+        _log_upload_failed(user, dataset_workflow_id, type(exc).__name__)
+        raise
+    log_workflow_event(
+        WorkflowEvent(
+            event_name=WorkflowEventName.UPLOAD_COMPLETED,
+            stage=WorkflowStage.STAGE_1,
+            operation=WorkflowOperation.UPLOAD,
+            outcome=WorkflowOutcome.COMPLETED,
+            file_id=meta.file_id,
+            metadata={
+                "size_bytes": meta.size_bytes,
+                "content_type": meta.content_type,
+                "tabular_format": meta.tabular_format.value,
+                "sheet_count": len(meta.sheet_names),
+            },
+        ),
+        user,
     )
 
     return UploadResponse(
@@ -142,19 +184,35 @@ async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadRespon
 )
 async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     storage = dependencies.get_upload_storage()
+    user = dependencies.get_user_context()
+    log_workflow_event(
+        WorkflowEvent(
+            event_name=WorkflowEventName.ANALYZE_STARTED,
+            stage=WorkflowStage.STAGE_1,
+            operation=WorkflowOperation.ANALYZE,
+            outcome=WorkflowOutcome.STARTED,
+            file_id=payload.file_id,
+            metadata={
+                "target_schema": payload.target_schema,
+                "target_version_number": payload.target_version_number,
+            },
+        ),
+        user,
+    )
     meta = load_upload_artifact(
         storage,
         dependencies.get_workflow_storage(),
-        dependencies.get_user_context(),
+        user,
         payload.file_id,
     )
     if not meta:
+        _log_analyze_failed(user, payload.file_id, "upload_not_found")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please upload again.")
 
     meta = _select_sheet_safe(storage, payload.file_id, payload.sheet_name)
     save_upload_metadata(
         dependencies.get_workflow_storage(),
-        dependencies.get_user_context(),
+        user,
         storage,
         meta,
     )
@@ -170,6 +228,7 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     discovery_task = asyncio.create_task(
         _discover_mappings(
             meta.saved_path,
+            payload.file_id,
             target_selection,
             meta.selected_sheet,
         )
@@ -184,19 +243,20 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
         total_rows, columns, profiles = await analysis_task
         cde_targets, manual_overrides, manifest = await discovery_task
         await reference_task
-    except Exception:
+    except Exception as exc:
+        _log_analyze_failed(user, payload.file_id, type(exc).__name__)
         await _cancel_pending_tasks(discovery_task, reference_task)
         raise
     storage.save_manifest(meta.dataset_workflow_id, manifest)
     save_mapping_manifest(
         dependencies.get_workflow_storage(),
-        dependencies.get_user_context(),
+        user,
         meta.dataset_workflow_id,
         manifest,
     )
     save_initial_workflow_state(
         dependencies.get_workflow_storage(),
-        dependencies.get_user_context(),
+        user,
         WorkflowState.from_selection(meta.dataset_workflow_id, target_selection),
     )
     # Stash profiles in the session cache so the Stage 2 column-detail endpoint
@@ -209,7 +269,22 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
         cache.get_all_cdes(),
         cache.get_all_pvs(),
     )
-    _log_analysis_results(total_rows, columns, cde_targets)
+    _log_analysis_results(payload.file_id, total_rows, columns, cde_targets)
+    log_workflow_event(
+        WorkflowEvent(
+            event_name=WorkflowEventName.ANALYZE_COMPLETED,
+            stage=WorkflowStage.STAGE_1,
+            operation=WorkflowOperation.ANALYZE,
+            outcome=WorkflowOutcome.COMPLETED,
+            file_id=payload.file_id,
+            metadata={
+                "total_rows": total_rows,
+                "column_count": len(columns),
+                "mapped_columns": len(cde_targets),
+            },
+        ),
+        user,
+    )
 
     return AnalyzeResponse(
         file_id=meta.file_id,
@@ -266,10 +341,26 @@ def _load_sheet_previews_safe(meta: UploadedFileMeta) -> dict[str, SheetPreview]
 
 async def _discover_mappings(
     csv_path: Path,
+    file_id: str,
     target_selection: DataModelSelection,
     sheet_name: str | None,
 ) -> tuple[dict[str, list[ModelSuggestion]], dict[str, str], ManifestPayload]:
     mapping_service = get_mapping_service()
+    user = dependencies.get_user_context()
+    log_workflow_event(
+        WorkflowEvent(
+            event_name=WorkflowEventName.MAPPING_STARTED,
+            stage=WorkflowStage.STAGE_1,
+            operation=WorkflowOperation.MAPPING,
+            outcome=WorkflowOutcome.STARTED,
+            file_id=file_id,
+            metadata={
+                "target_schema": target_selection.key,
+                "target_version": target_selection.target_version,
+            },
+        ),
+        user,
+    )
     try:
         cde_targets, manual_overrides, manifest = await run_in_threadpool(
             mapping_service.discover,
@@ -278,13 +369,27 @@ async def _discover_mappings(
             target_version=target_selection.target_version,
             sheet_name=sheet_name,
         )
+        log_workflow_event(
+            WorkflowEvent(
+                event_name=WorkflowEventName.MAPPING_COMPLETED,
+                stage=WorkflowStage.STAGE_1,
+                operation=WorkflowOperation.MAPPING,
+                outcome=WorkflowOutcome.COMPLETED,
+                file_id=file_id,
+                metadata={"mapped_columns": len(cde_targets)},
+            ),
+            user,
+        )
         return cde_targets, manual_overrides, manifest
     except (UnicodeDecodeError, ValueError) as exc:
-        _router_logger.warning("Upload failed validation during analysis", extra={"file_id": csv_path.stem})
+        _log_mapping_failed(user, file_id, type(exc).__name__)
+        _router_logger.warning("Upload failed validation during analysis", extra={"file_id": file_id})
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except RuntimeError as exc:
+        _log_mapping_failed(user, file_id, type(exc).__name__)
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except Exception as exc:  # pragma: no cover - defensive
+        _log_mapping_failed(user, file_id, type(exc).__name__)
         _router_logger.exception(
             "Failed discovering mappings: %s", type(exc).__name__, exc_info=exc
         )
@@ -358,21 +463,62 @@ async def _cancel_pending_tasks(*tasks: asyncio.Task[object]) -> None:
 
 
 def _log_analysis_results(
+    file_id: str,
     total_rows: int,
     columns: list[ColumnPreview],
     cde_targets: dict[str, list[ModelSuggestion]],
 ) -> None:
     cde_target_keys = set(cde_targets)
-    missing_columns = [
-        col.column_key for col in columns if col.column_key not in cde_target_keys
-    ]
+    missing_count = sum(1 for col in columns if col.column_key not in cde_target_keys)
     _router_logger.info(
         "Analyze completed",
         extra={
+            "file_id": file_id,
             "total_rows": total_rows,
             "column_count": len(columns),
             "mapped_columns": len(cde_targets),
-            "missing_columns": missing_columns[:10],
-            "missing_count": len(missing_columns),
+            "missing_count": missing_count,
         },
+    )
+
+
+def _log_upload_failed(user: UserContext, file_id: str, error_type: str) -> None:
+    log_workflow_event(
+        WorkflowEvent(
+            event_name=WorkflowEventName.UPLOAD_FAILED,
+            stage=WorkflowStage.STAGE_1,
+            operation=WorkflowOperation.UPLOAD,
+            outcome=WorkflowOutcome.FAILED,
+            file_id=file_id,
+            metadata={"error_type": error_type},
+        ),
+        user,
+    )
+
+
+def _log_analyze_failed(user: UserContext, file_id: str, error_type: str) -> None:
+    log_workflow_event(
+        WorkflowEvent(
+            event_name=WorkflowEventName.ANALYZE_FAILED,
+            stage=WorkflowStage.STAGE_1,
+            operation=WorkflowOperation.ANALYZE,
+            outcome=WorkflowOutcome.FAILED,
+            file_id=file_id,
+            metadata={"error_type": error_type},
+        ),
+        user,
+    )
+
+
+def _log_mapping_failed(user: UserContext, file_id: str, error_type: str) -> None:
+    log_workflow_event(
+        WorkflowEvent(
+            event_name=WorkflowEventName.MAPPING_FAILED,
+            stage=WorkflowStage.STAGE_1,
+            operation=WorkflowOperation.MAPPING,
+            outcome=WorkflowOutcome.FAILED,
+            file_id=file_id,
+            metadata={"error_type": error_type},
+        ),
+        user,
     )
