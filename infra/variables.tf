@@ -91,6 +91,12 @@ variable "alb_5xx_alarm_threshold" {
   default     = 1
 }
 
+variable "alb_auth_alarm_threshold" {
+  description = "Number of ALB authentication errors or failures in five minutes before alerting."
+  type        = number
+  default     = 1
+}
+
 variable "target_connection_error_alarm_threshold" {
   description = "Number of ALB target connection errors in five minutes before alerting."
   type        = number

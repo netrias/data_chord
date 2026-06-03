@@ -375,6 +375,46 @@ resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
   tags = local.common_tags
 }
 
+resource "aws_cloudwatch_metric_alarm" "alb_auth_errors" {
+  alarm_name          = "${upper(var.environment)} Data Chord AUTH ERRORS - ALB authentication flow failed"
+  alarm_description   = "[${upper(var.environment)}] Data Chord ALB could not complete an authentication flow. Check ALB access log error_reason for details."
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  metric_name         = "ELBAuthError"
+  namespace           = "AWS/ApplicationELB"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = var.alb_auth_alarm_threshold
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alert_actions
+
+  dimensions = {
+    LoadBalancer = aws_lb.app.arn_suffix
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "alb_auth_failures" {
+  alarm_name          = "${upper(var.environment)} Data Chord AUTH FAILURES - user authentication failed"
+  alarm_description   = "[${upper(var.environment)}] Data Chord ALB authentication failed because the IdP denied access or an authorization code was reused. Check ALB access log error_reason for details."
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  metric_name         = "ELBAuthFailure"
+  namespace           = "AWS/ApplicationELB"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = var.alb_auth_alarm_threshold
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alert_actions
+
+  dimensions = {
+    LoadBalancer = aws_lb.app.arn_suffix
+  }
+
+  tags = local.common_tags
+}
+
 resource "aws_cloudwatch_metric_alarm" "target_connection_errors" {
   alarm_name          = "${upper(var.environment)} Data Chord DOWN - ALB cannot reach app"
   alarm_description   = "[${upper(var.environment)}] Data Chord ALB could not connect to app targets."
