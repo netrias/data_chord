@@ -57,10 +57,10 @@ def test_discover_returns_manifest_from_client(
     csv_path.write_text("breed,diagnosis\nLabrador,Cancer\n")
 
     # When
-    _, _, manifest = svc.discover(csv_path=csv_path, target_schema="ccdi")
+    discovery = svc.discover(csv_path=csv_path, target_schema="ccdi")
 
     # Then: manifest contains both columns
-    column_mappings = manifest.get("column_mappings", {})
+    column_mappings = discovery.manifest_payload.get("column_mappings", {})
     assert "col_0000" in column_mappings
     assert "col_0001" in column_mappings
     assert column_mappings["col_0000"]["cde_key"] == "organism_species"
@@ -122,9 +122,10 @@ def test_discover_builds_cde_targets_from_manifest(
     csv_path.write_text("breed,diagnosis\nLabrador,Cancer\n")
 
     # When
-    cde_targets, _, _ = svc.discover(csv_path=csv_path, target_schema="ccdi")
+    discovery = svc.discover(csv_path=csv_path, target_schema="ccdi")
 
     # Then: cde_targets has entries for both columns
+    cde_targets = discovery.cde_targets
     assert "col_0000" in cde_targets
     assert "col_0001" in cde_targets
     assert cde_targets["col_0000"][0].target == "organism_species"
@@ -315,10 +316,10 @@ def test_discover_preserves_duplicate_headers_with_column_keys(
     csv_path = tmp_path / "dupes.csv"
     csv_path.write_text("name,name\nAlice,Smith\n")
 
-    cde_targets, _, manifest = svc.discover(csv_path=csv_path, target_schema="ccdi")
+    discovery = svc.discover(csv_path=csv_path, target_schema="ccdi")
 
-    column_mappings = manifest.get("column_mappings", {})
+    column_mappings = discovery.manifest_payload.get("column_mappings", {})
     assert column_mappings["col_0000"]["cde_key"] == "first_name"
     assert column_mappings["col_0001"]["cde_key"] == "last_name"
-    assert cde_targets["col_0000"][0].target == "first_name"
-    assert cde_targets["col_0001"][0].target == "last_name"
+    assert discovery.cde_targets["col_0000"][0].target == "first_name"
+    assert discovery.cde_targets["col_0001"][0].target == "last_name"

@@ -11,6 +11,7 @@ import pytest
 from httpx import AsyncClient
 
 import src.domain.dependencies as dependencies
+from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.column_cde_map import ColumnCdeMap
 from src.domain.data_model_cache import clear_all_session_caches
 from src.domain.pv_manifest import PVManifest
@@ -52,7 +53,7 @@ def _save_test_pv_manifest(file_id: str, column_key: str, cde_key: str, pvs: lis
             data_model_key=TEST_TARGET_SCHEMA,
             version_label="1",
             column_to_cde_key=ColumnCdeMap.from_strings({column_key: cde_key}),
-            pvs={cde_key: frozenset(pvs)},
+            pvs=CdePvCatalog.from_mapping({cde_key: frozenset(pvs)}),
         ).to_store(),
     )
 

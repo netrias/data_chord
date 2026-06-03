@@ -7,6 +7,7 @@ Axis of change: CDE recommendation service integration and response normalizatio
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 from netrias_client import NetriasClient
@@ -15,6 +16,21 @@ from src.domain.cde import ModelSuggestion
 from src.domain.manifest import ColumnMappingManifest, ManifestPayload
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class MappingDiscoveryResult:
+    """Domain result of mapping discovery, with payload views derived at the edge."""
+
+    manifest: ColumnMappingManifest
+
+    @property
+    def cde_targets(self) -> dict[str, list[ModelSuggestion]]:
+        return self.manifest.suggestions_by_column()
+
+    @property
+    def manifest_payload(self) -> ManifestPayload:
+        return self.manifest.to_payload()
 
 
 class MappingDiscoveryService:
@@ -31,8 +47,7 @@ class MappingDiscoveryService:
         target_schema: str,
         target_version: str = "latest",
         sheet_name: str | None = None,
-    ) -> tuple[dict[str, list[ModelSuggestion]], dict[str, str], ManifestPayload]:
-        """manual_overrides (pos 2) always empty — preserved for caller interface compatibility."""
+    ) -> MappingDiscoveryResult:
         if not self._client:
             raise RuntimeError("NetriasClient unavailable (missing NETRIAS_API_KEY)")
 
@@ -48,4 +63,7 @@ class MappingDiscoveryService:
             raise RuntimeError(f"CDE discovery failed: {exc}") from exc
 
         manifest = ColumnMappingManifest.from_payload(raw_manifest)
-        return manifest.suggestions_by_column(), {}, manifest.to_payload()
+        return MappingDiscoveryResult(manifest=manifest)
+
+
+__all__ = ["MappingDiscoveryResult", "MappingDiscoveryService"]

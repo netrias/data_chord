@@ -16,6 +16,8 @@ import httpx
 from netrias_client import DataModelStoreError, NetriasAPIUnavailable, NetriasClient
 
 from src.domain.cde import CDEInfo, DataModelSummary, DataModelVersionInfo
+from src.domain.cde_catalog import CdeCatalog
+from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.cde_type_classification import classify_cde
 from src.domain.dependencies import get_netrias_client
 
@@ -156,9 +158,9 @@ def fetch_cdes(data_model_key: str, version: str) -> list[CDEInfo]:
 
 
 def refine_cde_types_from_pvs(
-    cdes: list[CDEInfo],
-    pv_sets: dict[str, frozenset[str]],
-) -> list[CDEInfo]:
+    catalog: CdeCatalog,
+    pv_sets: CdePvCatalog,
+) -> CdeCatalog:
     """Re-classify CDEs once PVs are known.
 
     For every CDE whose PV set has been fetched, the type is now decidable:
@@ -166,11 +168,11 @@ def refine_cde_types_from_pvs(
     Returns a new list — domain types are frozen.
     """
     refined: list[CDEInfo] = []
-    for cde in cdes:
-        if cde.cde_key not in pv_sets:
+    for cde in catalog:
+        if not pv_sets.has(cde.cde_key):
             refined.append(cde)
             continue
-        has_pvs = bool(pv_sets[cde.cde_key])
+        has_pvs = bool(pv_sets.get(cde.cde_key))
         new_type = classify_cde(has_pvs=has_pvs)
         if new_type == cde.cde_type:
             refined.append(cde)
@@ -184,17 +186,17 @@ def refine_cde_types_from_pvs(
                     cde_type=new_type,
                 )
             )
-    return refined
+    return CdeCatalog.from_cdes(refined)
 
 
-async def fetch_all_pvs_async(data_model_key: str, version: str) -> dict[str, frozenset[str]]:
+async def fetch_all_pvs_async(data_model_key: str, version: str) -> CdePvCatalog:
     """Fetch all PVs for a model version in one request, grouped by CDE key."""
     client = get_netrias_client()
     if client is None:
-        return {}
+        return CdePvCatalog.empty()
     config = _data_model_store_config(client)
     if config is None:
-        return {}
+        return CdePvCatalog.empty()
 
     path = f"/data-models/{quote(data_model_key, safe='')}/versions/{quote(version, safe='')}/pvs"
     try:
@@ -212,7 +214,7 @@ async def fetch_all_pvs_async(data_model_key: str, version: str) -> dict[str, fr
     return _pv_map_from_all_pvs_response(body)
 
 
-def _pv_map_from_all_pvs_response(body: Mapping[str, object]) -> dict[str, frozenset[str]]:
+def _pv_map_from_all_pvs_response(body: Mapping[str, object]) -> CdePvCatalog:
     grouped: dict[str, set[str]] = {}
     for item in _list_or_empty(body.get("items")):
         if not isinstance(item, Mapping):
@@ -221,7 +223,7 @@ def _pv_map_from_all_pvs_response(body: Mapping[str, object]) -> dict[str, froze
         pv_value = item.get("pv_value")
         if isinstance(cde_key, str) and isinstance(pv_value, str):
             grouped.setdefault(cde_key, set()).add(pv_value)
-    return {cde_key: frozenset(values) for cde_key, values in grouped.items()}
+    return CdePvCatalog({cde_key: frozenset(values) for cde_key, values in grouped.items()})
 
 
 def _data_model_store_config(client: object) -> _DataModelStoreConfig | None:

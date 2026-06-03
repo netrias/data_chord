@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
+from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.columns import column_key_from_string
 from src.domain.data_model_cache import (
     SessionCache,
@@ -22,6 +23,10 @@ from src.domain.data_model_cache import (
 from src.domain.dataset_workflow_ids import dataset_workflow_id_from_string
 from src.domain.pv_persistence import column_pv_sets, ensure_pvs_loaded, load_pv_manifest_from_disk
 from src.domain.storage import LocalWorkflowStorage, UserContext, WorkflowFile
+
+
+def _pv_catalog(values: dict[str, frozenset[str]]) -> CdePvCatalog:
+    return CdePvCatalog.from_mapping(values)
 
 
 def _workflow_storage_with_pv_manifest(
@@ -125,7 +130,7 @@ class TestPVManifestPersistenceFeature:
         # Given: A previous session has PVs in cache
         old_file_id = "old_file_abc"
         old_cache = get_session_cache(old_file_id)
-        old_cache.set_pvs_batch({"some_cde": frozenset(["Old Value 1", "Old Value 2"])})
+        old_cache.set_pvs_batch(_pv_catalog({"some_cde": frozenset(["Old Value 1", "Old Value 2"])}))
         assert old_cache.has_any_pvs()
 
         # When: the user starts a new dataset workflow and Stage 1 clears caches
@@ -173,7 +178,7 @@ class TestPVManifestPersistenceFeature:
         }
         clear_all_session_caches()
         cache = get_session_cache(file_id)
-        cache.set_pvs_batch({"primary_diagnosis": frozenset(["Adenocarcinoma", "Glioma"])})
+        cache.set_pvs_batch(_pv_catalog({"primary_diagnosis": frozenset(["Adenocarcinoma", "Glioma"])}))
         assert cache.get_pvs_for_column("col_0000") is None, "Cache should not already resolve the column"
 
         # When: Stage 4 asks for PV sets by source column key
@@ -185,7 +190,10 @@ class TestPVManifestPersistenceFeature:
             pvs_by_column = column_pv_sets(file_id, ["col_0000"])
 
         # Then: the durable manifest is reloaded and the column gets its PV set
-        assert pvs_by_column["col_0000"] == frozenset(["Adenocarcinoma", "Glioma"])
+        assert pvs_by_column.get("col_0000") == frozenset(["Adenocarcinoma", "Glioma"])
+        assert pvs_by_column.to_strings() == {
+            "col_0000": frozenset(["Adenocarcinoma", "Glioma"]),
+        }
         assert cache.get_pvs_for_column("col_0000") == frozenset(["Adenocarcinoma", "Glioma"])
 
 
@@ -214,10 +222,11 @@ class TestSessionCacheThreadSafety:
 
         # When: Setting PVs
         pv_list = ["Value A", "Value B", "Value C"]
-        cache.set_pvs_batch({"test_cde": frozenset(pv_list)})
+        cache.set_pvs_batch(_pv_catalog({"test_cde": frozenset(pv_list)}))
 
         # Then: PVs are retrievable and membership check is O(1)
-        pvs = cache.get_all_pvs()["test_cde"]
+        pvs = cache.get_all_pvs().get("test_cde")
+        assert pvs is not None
         assert isinstance(pvs, frozenset)
         assert "Value A" in pvs
         assert "Unknown" not in pvs
@@ -232,10 +241,10 @@ class TestSessionCacheThreadSafety:
             "cde1": frozenset(["A", "B"]),
             "cde2": frozenset(["X", "Y", "Z"]),
         }
-        cache.set_pvs_batch(pv_map)
+        cache.set_pvs_batch(_pv_catalog(pv_map))
 
         # Then: All PVs are available
-        assert cache.get_all_pvs() == pv_map
+        assert cache.get_all_pvs().to_mapping() == pv_map
         assert cache.has_any_pvs()
 
 
@@ -247,7 +256,7 @@ class TestPVLookupByColumn:
         # Given: A cache with column mappings and PVs
         cache = SessionCache()
         cache.set_column_mappings({"diagnosis_col": "primary_diagnosis_cde"})
-        cache.set_pvs_batch({"primary_diagnosis_cde": frozenset(["Cancer", "Normal"])})
+        cache.set_pvs_batch(_pv_catalog({"primary_diagnosis_cde": frozenset(["Cancer", "Normal"])}))
 
         # When: Looking up PVs by column name
         pvs = cache.get_pvs_for_column("diagnosis_col")
@@ -262,7 +271,7 @@ class TestPVLookupByColumn:
         # Given: A cache with some mappings but not for all columns
         cache = SessionCache()
         cache.set_column_mappings({"mapped_col": "some_cde"})
-        cache.set_pvs_batch({"some_cde": frozenset(["Value"])})
+        cache.set_pvs_batch(_pv_catalog({"some_cde": frozenset(["Value"])}))
 
         # When: Looking up PVs for an unmapped column
         pvs = cache.get_pvs_for_column("unmapped_col")

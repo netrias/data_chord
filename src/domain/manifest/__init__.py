@@ -4,6 +4,7 @@ Harmonization results including AI suggestions, confidence scores, and manual ov
 Encapsulates manifest structure, reading, and writing; tracks override audit trail.
 """
 
+from src.domain.manifest.adjustments import ManifestManualOverride, ManifestPvAdjustment, ManifestTermKey
 from src.domain.manifest.mapping_manifest import (
     DEFAULT_HARMONIZATION,
     MANIFEST_FIELD_COLUMN_MAPPINGS,
@@ -64,8 +65,11 @@ __all__ = [
     "MAPPING_FIELD_ROUTE",
     "MAPPING_FIELD_TARGET",
     "ManifestPayload",
+    "ManifestManualOverride",
+    "ManifestPvAdjustment",
     "ManifestRow",
     "ManifestSummary",
+    "ManifestTermKey",
     "ManualOverride",
     "MappingAlternative",
     "add_manual_overrides_batch",

@@ -5,6 +5,8 @@ from src.domain.cde import CDEInfo as CDEInfo
 from src.domain.cde import DataModelSummary as DataModelSummary
 from src.domain.cde import ModelSuggestion as ModelSuggestion
 from src.domain.cde import normalize_cde_key as normalize_cde_key
+from src.domain.cde_catalog import CdeCatalog as CdeCatalog
+from src.domain.cde_pv_catalog import CdePvCatalog as CdePvCatalog
 from src.domain.change import CONFIDENCE as CONFIDENCE
 from src.domain.change import ChangeType as ChangeType
 from src.domain.change import ConfidenceThresholds as ConfidenceThresholds

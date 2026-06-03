@@ -8,7 +8,10 @@ from pathlib import Path
 import pytest
 
 from src.domain.cde import CDEInfo, CdeType, ModelSuggestion
+from src.domain.cde_catalog import CdeCatalog
+from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.column_profile import ColumnProfile, DistinctValue
+from src.domain.manifest import ColumnMappingManifest
 from src.stage_1_upload.router import _build_column_summaries
 from src.stage_1_upload.services import analyze_columns
 
@@ -177,7 +180,25 @@ def test_build_column_summaries_reports_ai_rec_overlap_ratios() -> None:
     assert summaries == {}
 
     # When
-    summaries = _build_column_summaries(profiles, cde_targets, cdes, pv_sets)
+    mapping_manifest = ColumnMappingManifest.from_payload({
+        "column_mappings": {
+            column_key: {
+                "cde_key": suggestions[0].target,
+                "cde_id": index,
+                "alternatives": [
+                    {"target": suggestion.target, "confidence": suggestion.similarity}
+                    for suggestion in suggestions
+                ],
+            }
+            for index, (column_key, suggestions) in enumerate(cde_targets.items(), start=1)
+        }
+    })
+    summaries = _build_column_summaries(
+        profiles,
+        mapping_manifest,
+        CdeCatalog.from_cdes(cdes),
+        CdePvCatalog.from_mapping(pv_sets),
+    )
 
     # Then
     assert summaries["diagnosis"].value_overlap_ratio == 0.8

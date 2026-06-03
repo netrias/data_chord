@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.domain.cde import CDEInfo
+from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.column_profile import ColumnProfile, DistinctValue
 from src.domain.data_model_cache import (
     clear_all_session_caches,
@@ -98,7 +99,7 @@ async def test_compute_column_detail_returns_pv_match_and_sorted_pvs(
 
     monkeypatch.setattr(
         "src.stage_2_review_columns.use_cases.fetch_all_pvs_async",
-        AsyncMock(return_value={"dx": frozenset({"Lung", "Breast", "Glioma"})}),
+        AsyncMock(return_value=CdePvCatalog.from_mapping({"dx": frozenset({"Lung", "Breast", "Glioma"})})),
     )
 
     # When
@@ -145,7 +146,7 @@ async def test_compute_column_detail_downgrades_to_passthrough_on_empty_pvs(
     )
     monkeypatch.setattr(
         "src.stage_2_review_columns.use_cases.fetch_all_pvs_async",
-        AsyncMock(return_value={"notes": frozenset()}),
+        AsyncMock(return_value=CdePvCatalog.from_mapping({"notes": frozenset()})),
     )
 
     # When
@@ -248,7 +249,7 @@ async def test_compute_column_detail_rebuilds_profile_when_cache_lost(
     assert cache.get_column_profile("col_0000") is None
     monkeypatch.setattr(
         "src.stage_2_review_columns.use_cases.fetch_all_pvs_async",
-        AsyncMock(return_value={"dx": frozenset({"Lung", "Breast"})}),
+        AsyncMock(return_value=CdePvCatalog.from_mapping({"dx": frozenset({"Lung", "Breast"})})),
     )
 
     # When

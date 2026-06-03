@@ -30,7 +30,7 @@ from src.domain.manifest import (
     get_latest_override_value,
     read_manifest_parquet,
 )
-from src.domain.pv_persistence import column_pv_sets
+from src.domain.pv_persistence import ColumnPvSets, column_pv_sets
 from src.domain.pv_validation import check_value_conformance
 from src.domain.review_override_store import load_review_overrides
 from src.domain.review_overrides import ReviewOverrides
@@ -239,13 +239,23 @@ class _MappingInfo(NamedTuple):
     history: list[TransformationStep]
 
 
+@dataclass(frozen=True, order=True)
+class _UniqueTermMapping:
+    """Identity for one column/original/final value mapping in the summary."""
+
+    column_key: str
+    column_label: str
+    original_value: str
+    final_value: str
+
+
 def _process_manifest_row(
     row: ManifestRow,
     ai_counts: dict[int, int],
     manual_counts: dict[int, int],
     unchanged_counts: dict[int, int],
-    unique_mappings: dict[tuple[str, str, str, str], _MappingInfo],
-    column_pv_map: dict[str, frozenset[str] | None],
+    unique_mappings: dict[_UniqueTermMapping, _MappingInfo],
+    column_pv_map: ColumnPvSets,
     upload_timestamp: datetime | None,
 ) -> None:
     col_id = row.column_id
@@ -279,7 +289,7 @@ def _build_summary_from_manifest(
     unchanged_counts: dict[int, int] = defaultdict(int)
     distinct_terms: dict[int, int] = defaultdict(int)
     column_names: dict[int, str] = {}
-    unique_mappings: dict[tuple[str, str, str, str], _MappingInfo] = {}
+    unique_mappings: dict[_UniqueTermMapping, _MappingInfo] = {}
 
     for row in summary.rows:
         distinct_terms[row.column_id] += 1
@@ -298,13 +308,13 @@ def _build_summary_from_manifest(
     sorted_mappings = sorted(unique_mappings.items(), key=lambda x: x[0])
     term_mappings = [
         TermMapping(
-            column=col,
-            original_value=orig,
-            final_value=final,
+            column=key.column_label,
+            original_value=key.original_value,
+            final_value=key.final_value,
             is_pv_conformant=info.is_conformant,
             history=info.history,
         )
-        for (_col_key, col, orig, final), info in sorted_mappings
+        for key, info in sorted_mappings
     ]
 
     return StageFiveSummaryResponse(
@@ -324,9 +334,9 @@ def _build_summary_from_manifest(
 
 
 def _track_mapping(
-    mappings: dict[tuple[str, str, str, str], _MappingInfo],
+    mappings: dict[_UniqueTermMapping, _MappingInfo],
     row: ManifestRow,
-    column_pv_map: dict[str, frozenset[str] | None],
+    column_pv_map: ColumnPvSets,
     upload_timestamp: datetime | None,
 ) -> None:
     """Deduplicates by (column, original, final) so we check conformance once per unique mapping."""
@@ -334,11 +344,10 @@ def _track_mapping(
     if not row.to_harmonize:
         return
     final = _get_final_value(row)
-    col_key = str(row.column_key)
-    key = (col_key, row.column_name, row.to_harmonize, final)
+    key = _UniqueTermMapping(str(row.column_key), row.column_name, row.to_harmonize, final)
     if key in mappings:
         return
-    pv_set = column_pv_map.get(col_key)
+    pv_set = column_pv_map.get(row.column_key)
     is_conformant = check_value_conformance(final, pv_set)
     history = _build_history(row, upload_timestamp, pv_set)
     mappings[key] = _MappingInfo(is_conformant, history)

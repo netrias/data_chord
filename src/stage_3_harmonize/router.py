@@ -45,6 +45,7 @@ from src.domain.manifest import (
     ColumnMappingManifest,
     ConfidenceBucket,
     ManifestPayload,
+    ManifestPvAdjustment,
     ManifestRow,
     ManifestSummary,
     confidence_bucket,
@@ -52,7 +53,7 @@ from src.domain.manifest import (
     read_manifest_parquet,
 )
 from src.domain.manifest.writer import apply_column_renames_batch, apply_pv_adjustments_batch
-from src.domain.pv_persistence import save_pv_manifest_to_disk
+from src.domain.pv_persistence import ColumnPvSets, save_pv_manifest_to_disk
 from src.domain.pv_validation import check_value_conformance, compute_pv_adjustment
 from src.domain.review_override_store import delete_review_overrides_state
 from src.domain.storage import UploadStorage, UserContext, WorkflowFile, WorkflowNotFoundError, WorkflowStorage
@@ -87,13 +88,6 @@ stage_three_router = APIRouter(prefix="/stage-3", tags=["Stage 3 Harmonize"])
 
 _stage_three_jobs: dict[str, StageThreeJobState] = {}
 _stage_three_tasks: dict[str, asyncio.Task[None]] = {}
-
-
-class PVAdjustmentRecord(NamedTuple):
-    column_key: str
-    to_harmonize: str
-    adjusted_value: str
-    source: str
 
 
 class ColumnStats(NamedTuple):
@@ -483,15 +477,14 @@ async def _fetch_and_cache_pvs(
             "cde_keys": cde_keys,
         },
     )
-    raw_pv_map = await fetch_all_pvs_async(data_model_key, version_label)
-    pv_map = {cde_key: raw_pv_map.get(cde_key, frozenset()) for cde_key in cde_keys}
-    cache.set_pvs_batch(pv_map)
-    pv_counts = {k: len(v) for k, v in pv_map.items()}
-    total_pvs = sum(pv_counts.values())
+    pv_catalog = (await fetch_all_pvs_async(data_model_key, version_label)).with_defaults(cde_keys)
+    cache.set_pvs_batch(pv_catalog)
+    pv_counts = pv_catalog.counts()
+    total_pvs = pv_catalog.total_count()
 
     _router_logger.info(
         "Fetched PVs for session",
-        extra={"file_id": file_id, "cde_count": len(pv_map), "pv_counts": pv_counts, "total_pvs": total_pvs},
+        extra={"file_id": file_id, "cde_count": len(pv_catalog), "pv_counts": pv_counts, "total_pvs": total_pvs},
     )
 
     # Warn if no PVs were found - likely indicates API issue or version mismatch
@@ -508,7 +501,7 @@ async def _fetch_and_cache_pvs(
         )
 
     # Stage 4/5 may run in a fresh process, so PV state must outlive memory.
-    save_pv_manifest_to_disk(file_id, cache, pv_map)
+    save_pv_manifest_to_disk(file_id, cache, pv_catalog)
 
 
 async def _fetch_pvs_for_session(
@@ -582,10 +575,7 @@ async def _read_store_and_adjust_manifest(
 
     final_data = await _store_and_adjust_manifest(file_id, manifest_path, manifest_data, storage, column_renames)
     cache = get_session_cache(file_id)
-    column_pv_map = {
-        str(row.column_key): cache.get_pvs_for_column(row.column_key)
-        for row in final_data.rows
-    }
+    column_pv_map = ColumnPvSets({row.column_key: cache.get_pvs_for_column(row.column_key) for row in final_data.rows})
     return _convert_to_schema(final_data, column_pv_map)
 
 
@@ -628,7 +618,7 @@ async def _apply_column_renames_to_manifest(manifest_path: Path, column_renames:
 
 def _compute_row_adjustment(
     row: ManifestRow, pv_set: frozenset[str]
-) -> PVAdjustmentRecord | None:
+) -> ManifestPvAdjustment | None:
     result = compute_pv_adjustment(
         original_value=row.to_harmonize,
         top_harmonization=row.top_harmonization,
@@ -639,8 +629,8 @@ def _compute_row_adjustment(
         return None
     if result.adjusted_value == row.top_harmonization:
         return None
-    return PVAdjustmentRecord(
-        str(row.column_key),
+    return ManifestPvAdjustment.from_raw(
+        row.column_key,
         row.to_harmonize,
         result.adjusted_value,
         result.adjustment_source.value,
@@ -649,7 +639,7 @@ def _compute_row_adjustment(
 
 def _process_row_for_adjustment(
     row: ManifestRow, cache: SessionCache
-) -> PVAdjustmentRecord | None:
+) -> ManifestPvAdjustment | None:
     """Skips columns without PVs — those don't need conformance adjustment."""
     pv_set = cache.get_pvs_for_column(row.column_key)
     if not pv_set:
@@ -657,7 +647,7 @@ def _process_row_for_adjustment(
     return _compute_row_adjustment(row, pv_set)
 
 
-def _collect_pv_adjustments(rows: list[ManifestRow], cache: SessionCache) -> list[PVAdjustmentRecord]:
+def _collect_pv_adjustments(rows: list[ManifestRow], cache: SessionCache) -> list[ManifestPvAdjustment]:
     adjustments = [adj for row in rows if (adj := _process_row_for_adjustment(row, cache))]
     _log_non_conformant_samples(rows, cache)
     return adjustments
@@ -685,11 +675,6 @@ def _is_top_harmonization_non_conformant(row: ManifestRow, cache: SessionCache) 
     return pv_set is not None and row.top_harmonization not in pv_set
 
 
-def _records_to_tuples(records: list[PVAdjustmentRecord]) -> list[tuple[str, str, str, str]]:
-    """Writer API expects plain tuples; convert from typed records."""
-    return [(r.column_key, r.to_harmonize, r.adjusted_value, r.source) for r in records]
-
-
 async def _apply_pv_adjustments(file_id: str, manifest_path: Path) -> int:
     """AI harmonization may produce values outside the permissible value set; fix those."""
     cache = get_session_cache(file_id)
@@ -704,7 +689,7 @@ async def _apply_pv_adjustments(file_id: str, manifest_path: Path) -> int:
     if not adjustments:
         return 0
 
-    return await run_in_threadpool(apply_pv_adjustments_batch, manifest_path, _records_to_tuples(adjustments))
+    return await run_in_threadpool(apply_pv_adjustments_batch, manifest_path, adjustments)
 
 
 def _compute_column_stats(
@@ -759,7 +744,7 @@ def _create_breakdown_schema(
 
 def _build_column_breakdowns(
     rows: list[ManifestRow],
-    column_pv_map: dict[str, frozenset[str] | None],
+    column_pv_map: ColumnPvSets,
 ) -> list[ColumnBreakdownSchema]:
     column_rows: dict[str, list[ManifestRow]] = defaultdict(list)
     for row in rows:
@@ -769,9 +754,9 @@ def _build_column_breakdowns(
         _create_breakdown_schema(
             col_rows[0].column_name,
             col_rows,
-            column_pv_map.get(key, column_pv_map.get(col_rows[0].column_name)),
+            column_pv_map.get(col_rows[0].column_key),
         )
-        for key, col_rows in column_rows.items()
+        for col_rows in column_rows.values()
     ]
     # Put columns needing attention first so reviewers do not have to hunt for
     # changed or non-conformant values in wide files.
@@ -781,7 +766,7 @@ def _build_column_breakdowns(
 
 def _convert_to_schema(
     manifest: ManifestSummary,
-    column_pv_map: dict[str, frozenset[str] | None],
+    column_pv_map: ColumnPvSets,
 ) -> ManifestSummarySchema:
     column_breakdowns = _build_column_breakdowns(manifest.rows, column_pv_map)
     total_non_conformant = sum(b.non_conformant_terms for b in column_breakdowns)

@@ -10,6 +10,8 @@ import pytest
 from netrias_client import DataModel, DataModelVersion
 
 from src.domain.cde import CDEInfo, CdeType
+from src.domain.cde_catalog import CdeCatalog
+from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.data_model_adapter import (
     _pv_map_from_all_pvs_response,
     fetch_cdes,
@@ -192,14 +194,14 @@ def test_all_pvs_response_groups_values_by_cde_key() -> None:
             {"cde_key": "sex", "pv_value": "Female"},
         ]
     }
-    parsed: dict[str, frozenset[str]] = {}
-    assert parsed == {}
+    parsed = CdePvCatalog.empty()
+    assert parsed.to_mapping() == {}
 
     # When
     parsed = _pv_map_from_all_pvs_response(response_body)
 
     # Then
-    assert parsed == {
+    assert parsed.to_mapping() == {
         "diagnosis": frozenset({"Lung", "Breast"}),
         "sex": frozenset({"Female"}),
     }
@@ -243,20 +245,23 @@ def test_refine_cde_types_downgrades_to_passthrough_for_empty_pvs() -> None:
         CDEInfo(cde_id=1, cde_key="diagnosis", description=None, version_label="1"),
         CDEInfo(cde_id=2, cde_key="free_notes", description=None, version_label="1"),
     ]
-    pv_sets = {
+    pv_sets = CdePvCatalog.from_mapping({
         "diagnosis": frozenset({"A", "B"}),
         "free_notes": frozenset(),
-    }
+    })
     # negative assertion: types start as PV
     assert all(c.cde_type == CdeType.PV for c in cdes)
 
     # When
-    refined = refine_cde_types_from_pvs(cdes, pv_sets)
-    by_key = {c.cde_key: c for c in refined}
+    refined = refine_cde_types_from_pvs(CdeCatalog.from_cdes(cdes), pv_sets)
 
     # Then
-    assert by_key["diagnosis"].cde_type == CdeType.PV
-    assert by_key["free_notes"].cde_type == CdeType.PASSTHROUGH
+    diagnosis = refined.get("diagnosis")
+    free_notes = refined.get("free_notes")
+    assert diagnosis is not None
+    assert free_notes is not None
+    assert diagnosis.cde_type == CdeType.PV
+    assert free_notes.cde_type == CdeType.PASSTHROUGH
 
 
 def test_refine_cde_types_skips_unfetched_cdes() -> None:
@@ -270,14 +275,15 @@ def test_refine_cde_types_skips_unfetched_cdes() -> None:
         CDEInfo(cde_id=1, cde_key="diagnosis", description=None, version_label="1"),
         CDEInfo(cde_id=2, cde_key="other", description=None, version_label="1"),
     ]
-    pv_sets = {"diagnosis": frozenset({"A"})}
+    pv_sets = CdePvCatalog.from_mapping({"diagnosis": frozenset({"A"})})
 
     # When
-    refined = refine_cde_types_from_pvs(cdes, pv_sets)
-    by_key = {c.cde_key: c for c in refined}
+    refined = refine_cde_types_from_pvs(CdeCatalog.from_cdes(cdes), pv_sets)
 
     # Then: untouched CDE remains as it was
-    assert by_key["other"].cde_type == CdeType.PV
+    other = refined.get("other")
+    assert other is not None
+    assert other.cde_type == CdeType.PV
 
 
 def test_refine_does_not_downgrade_when_fetch_failure_omits_key() -> None:
@@ -294,10 +300,12 @@ def test_refine_does_not_downgrade_when_fetch_failure_omits_key() -> None:
         CDEInfo(cde_id=1, cde_key="primary_diagnosis", description=None, version_label="1"),
     ]
     # PV sets dict is empty — the fetch failed for primary_diagnosis
-    pv_sets: dict[str, frozenset[str]] = {}
+    pv_sets = CdePvCatalog.empty()
 
     # When
-    refined = refine_cde_types_from_pvs(cdes, pv_sets)
+    refined = refine_cde_types_from_pvs(CdeCatalog.from_cdes(cdes), pv_sets)
 
     # Then: type is PRESERVED at PV; no PASSTHROUGH downgrade
-    assert refined[0].cde_type == CdeType.PV
+    primary_diagnosis = refined.get("primary_diagnosis")
+    assert primary_diagnosis is not None
+    assert primary_diagnosis.cde_type == CdeType.PV
