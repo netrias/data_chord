@@ -114,7 +114,7 @@ def save_pv_manifest_to_disk(
         return
     manifest = PVManifest(
         data_model_key=selection.key,
-        version_label=selection.version_label,
+        external_version_number=selection.external_version_number,
         column_to_cde_key=cache.get_column_mappings(),
         pvs=pv_map if isinstance(pv_map, CdePvCatalog) else CdePvCatalog.from_mapping(pv_map),
     )

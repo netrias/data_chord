@@ -27,6 +27,7 @@ TEST_CSV_CONTENT_TYPE = "text/csv"
 TEST_TSV_CONTENT_TYPE = "text/tab-separated-values"
 TEST_XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 TEST_TARGET_SCHEMA = "CCDI"
+TEST_TARGET_EXTERNAL_VERSION_NUMBER = "11.0.4"
 SAMPLE_CSV_ROW_COUNT = 10
 SAMPLE_CSV_COLUMN_COUNT = 6
 MAX_EXAMPLES_LIMIT = 20
@@ -291,7 +292,11 @@ async def upload_and_analyze(client: AsyncClient, csv_path: Path) -> str:
     file_id = await upload_file(client, csv_path)
     await client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
+        json={
+            "file_id": file_id,
+            "target_schema": TEST_TARGET_SCHEMA,
+            "target_external_version_number": TEST_TARGET_EXTERNAL_VERSION_NUMBER,
+        },
     )
     return file_id
 

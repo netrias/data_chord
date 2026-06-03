@@ -10,6 +10,7 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import Protocol, cast
 from uuid import uuid4
 
 from netrias_client import NetriasClient
@@ -45,6 +46,28 @@ class HarmonizeResult:
     output_path: Path | None = None
 
 
+class _ExternalVersionHarmonizeClient(Protocol):
+    def discover_mapping_from_tabular(
+        self,
+        *,
+        source_path: Path,
+        target_schema: str,
+        external_version_number: str,
+        sheet_name: str | None,
+    ) -> ManifestPayload: ...
+
+    def harmonize(
+        self,
+        *,
+        source_path: Path,
+        manifest: ManifestPayload,
+        data_commons_key: str,
+        external_version_number: str,
+        output_path: Path | None,
+        sheet_name: str | None,
+    ) -> object: ...
+
+
 class HarmonizeService:
     def __init__(self, client: NetriasClient | None) -> None:
         self._client = client
@@ -59,7 +82,7 @@ class HarmonizeService:
         column_overrides: ColumnCdeOverrides,
         column_renames: ColumnRenameSet,
         cache: SessionCache,
-        target_version: str = "latest",
+        external_version_number: str,
         manifest: ManifestPayload | None = None,
         output_path: Path | None = None,
         sheet_name: str | None = None,
@@ -71,9 +94,23 @@ class HarmonizeService:
             return HarmonizeResult(job_id=job_id, status=HarmonizeStatus.QUEUED, detail=detail)
 
         try:
-            cde_map = self._prepare_cde_map(file_path, target_schema, target_version, manifest, sheet_name)
+            cde_map = self._prepare_cde_map(
+                file_path,
+                target_schema,
+                external_version_number,
+                manifest,
+                sheet_name,
+            )
             cde_map = _apply_column_updates(cde_map, column_overrides, column_renames, cache)
-            return self._execute_harmonization(file_path, cde_map, job_id, target_schema, output_path, sheet_name)
+            return self._execute_harmonization(
+                file_path,
+                cde_map,
+                job_id,
+                target_schema,
+                external_version_number,
+                output_path,
+                sheet_name,
+            )
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception("Harmonize call failed; falling back to stub", exc_info=exc)
             return HarmonizeResult(job_id=job_id, status=HarmonizeStatus.FAILED, detail=str(exc))
@@ -82,7 +119,7 @@ class HarmonizeService:
         self,
         file_path: Path,
         target_schema: str,
-        target_version: str,
+        external_version_number: str,
         manifest: ManifestPayload | None,
         sheet_name: str | None,
     ) -> ColumnMappingManifest:
@@ -91,7 +128,7 @@ class HarmonizeService:
         return self._discover_cde_map(
             file_path=file_path,
             target_schema=target_schema,
-            target_version=target_version,
+            external_version_number=external_version_number,
             sheet_name=sheet_name,
         )
 
@@ -100,15 +137,16 @@ class HarmonizeService:
         *,
         file_path: Path,
         target_schema: str,
-        target_version: str,
+        external_version_number: str,
         sheet_name: str | None,
     ) -> ColumnMappingManifest:
         if not self._client:
             raise RuntimeError("Netrias client unavailable")
-        raw_cde_map = self._client.discover_mapping_from_tabular(
+        external_version_client = cast(_ExternalVersionHarmonizeClient, self._client)
+        raw_cde_map = external_version_client.discover_mapping_from_tabular(
             source_path=file_path,
             target_schema=target_schema,
-            target_version=target_version,
+            external_version_number=external_version_number,
             sheet_name=sheet_name,
         )
         cde_map = ColumnMappingManifest.from_payload(raw_cde_map)
@@ -124,16 +162,19 @@ class HarmonizeService:
         cde_map: ColumnMappingManifest,
         fallback_job_id: str,
         target_schema: str,
+        external_version_number: str,
         output_path: Path | None,
         sheet_name: str | None,
     ) -> HarmonizeResult:
         if not self._client:
             raise RuntimeError("Netrias client unavailable")
 
-        netrias_result = self._client.harmonize(
+        external_version_client = cast(_ExternalVersionHarmonizeClient, self._client)
+        netrias_result = external_version_client.harmonize(
             source_path=file_path,
             manifest=cde_map.to_payload(),
             data_commons_key=target_schema,
+            external_version_number=external_version_number,
             output_path=output_path,
             sheet_name=sheet_name,
         )

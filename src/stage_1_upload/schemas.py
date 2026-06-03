@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from src.domain import ModelSuggestion
 from src.domain.column_profile import ColumnProfilePayload
+from src.domain.data_model_selection import DataModelSelection
 from src.domain.manifest import ConfidenceBucket, ManifestPayload
 from src.domain.schemas import DatasetWorkflowIdField
 
@@ -34,8 +35,30 @@ class UploadResponse(BaseModel):
 class AnalyzeRequest(BaseModel):
     file_id: DatasetWorkflowIdField
     target_schema: str = Field(..., min_length=1)
+    target_external_version_number: str | None = Field(default=None, min_length=1)
     target_version_number: int | None = Field(default=None, ge=1)
     sheet_name: str | None = None
+
+    @model_validator(mode="after")
+    def _require_version(self) -> AnalyzeRequest:
+        if self.target_external_version_number is None and self.target_version_number is None:
+            raise ValueError("target_external_version_number is required")
+        if self.target_external_version_number is not None:
+            DataModelSelection.from_external_version_number(
+                self.target_schema,
+                self.target_external_version_number,
+            )
+        return self
+
+    def data_model_selection(self) -> DataModelSelection:
+        if self.target_external_version_number is not None:
+            return DataModelSelection.from_external_version_number(
+                self.target_schema,
+                self.target_external_version_number,
+            )
+        if self.target_version_number is None:
+            raise ValueError("target_external_version_number is required")
+        return DataModelSelection.from_legacy_version_number(self.target_schema, self.target_version_number)
 
 
 class ColumnPreview(BaseModel):
@@ -65,6 +88,7 @@ class AnalyzeResponse(BaseModel):
 
     file_id: DatasetWorkflowIdField
     file_name: str
+    target_external_version_number: str
     target_version_number: int | None = None
     total_rows: int = Field(ge=0)
     columns: list[ColumnPreview]

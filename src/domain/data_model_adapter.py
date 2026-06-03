@@ -6,13 +6,13 @@ Axis of change: SDK response shapes. Callers get stable domain types.
 
 from __future__ import annotations
 
-import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import cast
+from typing import Protocol, cast
 from urllib.parse import quote
 
 import httpx
+from netrias_client import CDE as SdkCDE
 from netrias_client import DataModelStoreError, NetriasAPIUnavailable, NetriasClient
 
 from src.domain.cde import CDEInfo, DataModelSummary, DataModelVersionInfo
@@ -20,9 +20,6 @@ from src.domain.cde_catalog import CdeCatalog
 from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.cde_type_classification import classify_cde
 from src.domain.dependencies import get_netrias_client
-
-_logger = logging.getLogger(__name__)
-
 
 # GC is the primary user right now — surface it first so the UI defaults to it
 _PREFERRED_MODEL_KEY = "gc"
@@ -37,6 +34,16 @@ class _DataModelStoreConfig:
     timeout: float
 
 
+class _ExternalVersionCdeClient(Protocol):
+    def list_cdes(
+        self,
+        data_model_key: str,
+        *,
+        external_version_number: str,
+        include_description: bool,
+    ) -> Sequence[SdkCDE]: ...
+
+
 def list_data_model_summaries() -> list[DataModelSummary]:
     """Why: decouples callers from SDK DataModel shape and versions tuple."""
     client = get_netrias_client()
@@ -46,20 +53,6 @@ def list_data_model_summaries() -> list[DataModelSummary]:
     summaries = _list_data_model_summaries_direct(config) if config else _list_data_model_summaries_from_sdk(client)
     summaries.sort(key=lambda s: (s.key != _PREFERRED_MODEL_KEY, s.key))
     return summaries
-
-
-def get_latest_version(data_model_key: str) -> str:
-    """Why: callers need a single version string, not SDK model traversal."""
-    client = get_netrias_client()
-    if client is None:
-        _logger.warning("NetriasClient unavailable; defaulting to version 1")
-        return "1"
-    models = client.list_data_models(query=data_model_key, include_versions=True)
-    for m in models:
-        if m.key == data_model_key and m.versions:
-            return m.versions[-1].version_label
-    _logger.warning("No versions found for %s, defaulting to 1", data_model_key)
-    return "1"
 
 
 def _list_data_model_summaries_from_sdk(client: NetriasClient) -> list[DataModelSummary]:
@@ -118,23 +111,27 @@ def _version_info_from_item(item: Mapping[str, object]) -> DataModelVersionInfo 
         return None
     raw_label = item.get("version_label")
     external = item.get("external_version_number")
+    if not isinstance(external, str) or not external.strip():
+        return None
     return DataModelVersionInfo(
         version_label=str(raw_label) if raw_label else str(version_number),
         version_number=version_number,
-        external_version_number=str(external) if external else None,
+        external_version_number=external.strip(),
         is_default=bool(item.get("is_default", False)),
     )
 
 
 def _version_info_from_label(version_label: str, is_default: bool = False) -> DataModelVersionInfo:
+    """Compatibility adapter for older SDK objects that only expose version_label."""
     return DataModelVersionInfo(
         version_label=version_label,
         version_number=_int_or_none(version_label) or 1,
+        external_version_number=version_label,
         is_default=is_default,
     )
 
 
-def fetch_cdes(data_model_key: str, version: str) -> list[CDEInfo]:
+def fetch_cdes(data_model_key: str, external_version_number: str) -> list[CDEInfo]:
     """Why: converts SDK CDE tuples to domain CDEInfo list.
 
     Initial cde_type is decided by classify_cde with has_pvs=None (PVs not
@@ -144,13 +141,18 @@ def fetch_cdes(data_model_key: str, version: str) -> list[CDEInfo]:
     client = get_netrias_client()
     if client is None:
         return []
-    sdk_cdes = client.list_cdes(data_model_key, version, include_description=True)
+    external_version_client = cast(_ExternalVersionCdeClient, client)
+    sdk_cdes = external_version_client.list_cdes(
+        data_model_key,
+        external_version_number=external_version_number,
+        include_description=True,
+    )
     return [
         CDEInfo(
             cde_id=c.cde_id,
             cde_key=c.cde_key,
             description=c.description,
-            version_label=version,
+            version_label=external_version_number,
             cde_type=classify_cde(has_pvs=None),
         )
         for c in sdk_cdes
@@ -189,7 +191,7 @@ def refine_cde_types_from_pvs(
     return CdeCatalog.from_cdes(refined)
 
 
-async def fetch_all_pvs_async(data_model_key: str, version: str) -> CdePvCatalog:
+async def fetch_all_pvs_async(data_model_key: str, external_version_number: str) -> CdePvCatalog:
     """Fetch all PVs for a model version in one request, grouped by CDE key."""
     client = get_netrias_client()
     if client is None:
@@ -198,7 +200,10 @@ async def fetch_all_pvs_async(data_model_key: str, version: str) -> CdePvCatalog
     if config is None:
         return CdePvCatalog.empty()
 
-    path = f"/data-models/{quote(data_model_key, safe='')}/versions/{quote(version, safe='')}/pvs"
+    path = (
+        f"/data-models/{quote(data_model_key, safe='')}"
+        f"/versions/{quote(external_version_number, safe='')}/pvs"
+    )
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(config.timeout)) as http_client:
             response = await http_client.get(

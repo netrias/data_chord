@@ -13,7 +13,8 @@ from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_
 
 _FIELD_FILE_ID: Final = "file_id"
 _FIELD_DATA_MODEL_KEY: Final = "data_model_key"
-_FIELD_VERSION_NUMBER: Final = "version_number"
+_FIELD_EXTERNAL_VERSION_NUMBER: Final = "external_version_number"
+_FIELD_LEGACY_VERSION_NUMBER: Final = "version_number"
 _FIELD_MANUAL_OVERRIDES: Final = "manual_overrides"
 _FIELD_COLUMN_RENAMES: Final = "column_renames"
 
@@ -91,7 +92,7 @@ class WorkflowState:
         payload: dict[str, object] = {
             _FIELD_FILE_ID: self.file_id,
             _FIELD_DATA_MODEL_KEY: self.data_model_selection.key,
-            _FIELD_VERSION_NUMBER: self.data_model_selection.version_number,
+            _FIELD_EXTERNAL_VERSION_NUMBER: self.data_model_selection.external_version_number,
         }
         if self.mapping_choices is not None:
             payload.update(self.mapping_choices.to_store())
@@ -105,17 +106,31 @@ class WorkflowState:
 
         stored_file_id = payload.get(_FIELD_FILE_ID)
         data_model_key = payload.get(_FIELD_DATA_MODEL_KEY)
-        version_number = payload.get(_FIELD_VERSION_NUMBER)
         if stored_file_id != dataset_workflow_id or not isinstance(data_model_key, str):
             return None
-        if version_number is not None and not isinstance(version_number, int):
+        selection = _selection_from_store(data_model_key, payload)
+        if selection is None:
             return None
 
         return cls(
             file_id=dataset_workflow_id,
-            data_model_selection=DataModelSelection.from_version_number(data_model_key, version_number),
+            data_model_selection=selection,
             mapping_choices=ConfirmedMappingChoices.from_store(payload),
         )
+
+
+def _selection_from_store(data_model_key: str, payload: Mapping[str, object]) -> DataModelSelection | None:
+    external_version_number = payload.get(_FIELD_EXTERNAL_VERSION_NUMBER)
+    if isinstance(external_version_number, str):
+        try:
+            return DataModelSelection.from_external_version_number(data_model_key, external_version_number)
+        except ValueError:
+            return None
+
+    legacy_version_number = payload.get(_FIELD_LEGACY_VERSION_NUMBER)
+    if isinstance(legacy_version_number, int):
+        return DataModelSelection.from_legacy_version_number(data_model_key, legacy_version_number)
+    return None
 
 
 __all__ = ["ConfirmedMappingChoices", "WorkflowState"]

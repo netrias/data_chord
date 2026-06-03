@@ -59,7 +59,7 @@ def _save_pv_manifest(file_id: str, pvs_by_column_key: dict[str, frozenset[str]]
         WorkflowFile.PV_MANIFEST,
         PVManifest(
             data_model_key=TEST_TARGET_SCHEMA,
-            version_label="1",
+            external_version_number="11.0.4",
             column_to_cde_key=ColumnCdeMap.from_strings(column_to_cde_key),
             pvs=CdePvCatalog.from_mapping(pvs),
         ).to_store(),

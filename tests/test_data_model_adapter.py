@@ -15,7 +15,6 @@ from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.data_model_adapter import (
     _pv_map_from_all_pvs_response,
     fetch_cdes,
-    get_latest_version,
     list_data_model_summaries,
     refine_cde_types_from_pvs,
 )
@@ -113,66 +112,6 @@ def test_list_summaries_returns_empty_when_client_unavailable() -> None:
 
     # Then
     assert summaries == [], f"Expected empty list, got {summaries}"
-
-
-# ---------------------------------------------------------------------------
-# Test: get_latest_version returns last version label from matching model
-# ---------------------------------------------------------------------------
-
-
-def test_get_latest_version_returns_last_version_label(
-    mock_netrias: MagicMock,
-) -> None:
-    """
-    Given: a data model "gc" with versions ["1", "2", "3"]
-    When: get_latest_version("gc") is called
-    Then: returns "3" (the last version in the tuple)
-    """
-    # Given
-    mock_netrias.list_data_models.return_value = (
-        DataModel(
-            data_commons_id=1, key="gc", name="Genomic Commons",
-            description=None, is_active=True,
-            versions=(
-                DataModelVersion(version_label="1"),
-                DataModelVersion(version_label="2"),
-                DataModelVersion(version_label="3"),
-            ),
-        ),
-    )
-
-    # When
-    version = get_latest_version("gc")
-
-    # Then
-    assert version == "3", f"Expected '3', got '{version}'"
-    mock_netrias.list_data_models.assert_called_once_with(
-        query="gc", include_versions=True,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Test: get_latest_version returns "1" when client is None
-# ---------------------------------------------------------------------------
-
-
-def test_get_latest_version_returns_default_when_client_unavailable() -> None:
-    """
-    Given: no NetriasClient (API key missing)
-    When: get_latest_version("gc") is called
-    Then: returns fallback version "1"
-    """
-    import src.domain.dependencies as deps
-
-    # Given
-    deps._netrias_client = None
-    deps._netrias_client_initialized = True
-
-    # When
-    version = get_latest_version("gc")
-
-    # Then
-    assert version == "1", f"Expected fallback '1', got '{version}'"
 
 
 # ---------------------------------------------------------------------------

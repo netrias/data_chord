@@ -197,7 +197,7 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
             file_id=payload.file_id,
             metadata={
                 "target_schema": payload.target_schema,
-                "target_version_number": payload.target_version_number,
+                "target_external_version_number": payload.target_external_version_number,
             },
         ),
         user,
@@ -219,7 +219,7 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
         storage,
         meta,
     )
-    target_selection = DataModelSelection.from_version_number(payload.target_schema, payload.target_version_number)
+    target_selection = payload.data_model_selection()
     analysis_task = asyncio.create_task(
         run_in_threadpool(
             _analyze_columns_safe,
@@ -295,7 +295,7 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     return AnalyzeResponse(
         file_id=meta.file_id,
         file_name=meta.original_name,
-        target_version_number=payload.target_version_number,
+        target_external_version_number=target_selection.external_version_number,
         total_rows=total_rows,
         columns=columns,
         column_summaries=column_summaries,
@@ -362,7 +362,7 @@ async def _discover_mappings(
             file_id=file_id,
             metadata={
                 "target_schema": target_selection.key,
-                "target_version": target_selection.target_version,
+                "target_external_version_number": target_selection.external_version_number,
             },
         ),
         user,
@@ -372,7 +372,7 @@ async def _discover_mappings(
             mapping_service.discover,
             csv_path=csv_path,
             target_schema=target_selection.key,
-            target_version=target_selection.target_version,
+            external_version_number=target_selection.external_version_number,
             sheet_name=sheet_name,
         )
         log_workflow_event(
@@ -408,9 +408,11 @@ async def _prime_data_model_cache(file_id: str, target_selection: DataModelSelec
     """Warm CDEs and all PVs while mapping discovery is running."""
     try:
         cdes_task = asyncio.create_task(
-            run_in_threadpool(fetch_cdes, target_selection.key, target_selection.target_version)
+            run_in_threadpool(fetch_cdes, target_selection.key, target_selection.external_version_number)
         )
-        pvs_task = asyncio.create_task(fetch_all_pvs_async(target_selection.key, target_selection.target_version))
+        pvs_task = asyncio.create_task(
+            fetch_all_pvs_async(target_selection.key, target_selection.external_version_number)
+        )
         cdes, raw_pv_catalog = await asyncio.gather(cdes_task, pvs_task)
     except (DataModelStoreError, NetriasAPIUnavailable):
         _router_logger.warning("Data Model Store API unavailable during cache warmup", extra={"file_id": file_id})
@@ -423,8 +425,7 @@ async def _prime_data_model_cache(file_id: str, target_selection: DataModelSelec
     cache.set_cde_catalog(
         refined,
         data_model_key=target_selection.key,
-        version_label=target_selection.version_label,
-        version_number=target_selection.version_number,
+        external_version_number=target_selection.external_version_number,
     )
     cache.set_pvs_batch(pv_catalog)
 

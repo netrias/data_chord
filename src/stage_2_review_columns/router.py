@@ -47,10 +47,14 @@ async def render_stage_two(
     request: Request,
     file_id: Annotated[DatasetWorkflowIdField | None, Query()] = None,
     schema: Annotated[str | None, Query(min_length=1)] = None,
+    external_version_number: Annotated[str | None, Query(min_length=1)] = None,
     version_number: Annotated[int | None, Query(ge=1)] = None,
 ) -> HTMLResponse:
     cde_catalog: list[CDEInfo] = []
-    selection = _data_model_selection_for_request(file_id, schema, version_number)
+    try:
+        selection = _data_model_selection_for_request(file_id, schema, external_version_number, version_number)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     if file_id and selection:
         cde_catalog = await _get_cde_options_for_session(file_id, selection)
@@ -58,7 +62,11 @@ async def render_stage_two(
     context = {
         "request": request,
         "default_schema": selection.key if selection else schema or "",
-        "default_version_number": selection.version_number if selection else version_number,
+        "default_external_version_number": (
+            selection.external_version_number
+            if selection
+            else external_version_number or _legacy_version_query(version_number)
+        ),
         "cde_catalog": [_cde_catalog_item(cde) for cde in cde_catalog],
         "no_mapping_label": UILabel.NO_MAPPING.value,
     }
@@ -68,6 +76,7 @@ async def render_stage_two(
 def _data_model_selection_for_request(
     file_id: str | None,
     target_schema: str | None,
+    external_version_number: str | None,
     version_number: int | None,
 ) -> DataModelSelection | None:
     if file_id:
@@ -80,7 +89,15 @@ def _data_model_selection_for_request(
             return state.data_model_selection
     if target_schema is None:
         return None
-    return DataModelSelection.from_version_number(target_schema, version_number)
+    if external_version_number is not None:
+        return DataModelSelection.from_external_version_number(target_schema, external_version_number)
+    if version_number is not None:
+        return DataModelSelection.from_legacy_version_number(target_schema, version_number)
+    return None
+
+
+def _legacy_version_query(version_number: int | None) -> str | None:
+    return str(version_number) if version_number is not None else None
 
 
 async def _get_cde_options_for_session(

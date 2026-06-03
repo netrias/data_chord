@@ -83,7 +83,9 @@ function _addMappingContext(url) {
 
   const schemaParam = url.pathname === '/stage-3' ? 'target_schema' : 'schema';
   url.searchParams.set(schemaParam, context.schema);
-  if (context.versionNumber) {
+  if (context.externalVersionNumber) {
+    url.searchParams.set('external_version_number', context.externalVersionNumber);
+  } else if (context.versionNumber) {
     url.searchParams.set('version_number', String(context.versionNumber));
   }
 }
@@ -91,9 +93,10 @@ function _addMappingContext(url) {
 function _getTargetContextForNavigation() {
   const params = new URLSearchParams(window.location.search);
   const schema = params.get('schema') || params.get('target_schema');
+  const externalVersionNumber = params.get('external_version_number');
   const versionNumber = params.get('version_number');
   if (schema) {
-    return { schema, versionNumber };
+    return { schema, externalVersionNumber, versionNumber };
   }
 
   try {
@@ -102,6 +105,8 @@ function _getTargetContextForNavigation() {
     const parsed = JSON.parse(stored);
     return {
       schema: parsed.context?.targetSchema || parsed.request?.target_schema || null,
+      externalVersionNumber:
+        parsed.context?.targetExternalVersionNumber || parsed.request?.target_external_version_number || null,
       versionNumber: parsed.context?.targetVersionNumber || parsed.request?.target_version_number || null,
     };
   } catch {

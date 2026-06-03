@@ -405,7 +405,7 @@ def _data_model_selection_for_harmonize(
 ) -> DataModelSelection:
     if workflow_state is not None:
         return workflow_state.data_model_selection
-    return DataModelSelection.from_version_number(payload.target_schema, payload.target_version_number)
+    return payload.data_model_selection()
 
 
 def _mapping_choices_for_harmonize(
@@ -442,7 +442,7 @@ async def _run_harmonization(
         column_overrides=column_overrides,
         column_renames=column_renames,
         cache=cache,
-        target_version=target_selection.target_version,
+        external_version_number=target_selection.external_version_number,
         manifest=manifest,
         output_path=output_path,
         sheet_name=sheet_name,
@@ -466,18 +466,18 @@ def _validate_pv_fetch_preconditions(
 
 
 async def _fetch_and_cache_pvs(
-    cache: SessionCache, data_model_key: str, version_label: str, cde_keys: list[str], file_id: str
+    cache: SessionCache, data_model_key: str, external_version_number: str, cde_keys: list[str], file_id: str
 ) -> None:
     _router_logger.info(
         "Fetching PVs from Data Model Store",
         extra={
             "file_id": file_id,
             "data_model_key": data_model_key,
-            "version_label": version_label,
+            "external_version_number": external_version_number,
             "cde_keys": cde_keys,
         },
     )
-    pv_catalog = (await fetch_all_pvs_async(data_model_key, version_label)).with_defaults(cde_keys)
+    pv_catalog = (await fetch_all_pvs_async(data_model_key, external_version_number)).with_defaults(cde_keys)
     cache.set_pvs_batch(pv_catalog)
     pv_counts = pv_catalog.counts()
     total_pvs = pv_catalog.total_count()
@@ -491,11 +491,11 @@ async def _fetch_and_cache_pvs(
     if total_pvs == 0 and cde_keys:
         _router_logger.warning(
             "No PVs found for any CDE. PV combobox will not be available. "
-            "Check Data Model Store API response and version_label.",
+            "Check Data Model Store API response and external_version_number.",
             extra={
                 "file_id": file_id,
                 "data_model_key": data_model_key,
-                "version_label": version_label,
+                "external_version_number": external_version_number,
                 "cde_keys": cde_keys,
             },
         )
@@ -526,7 +526,7 @@ async def _fetch_pvs_for_session(
             # before durable workflow storage existed for this run.
             save_pv_manifest_to_disk(file_id, cache, cache.get_all_pvs())
             return
-        await _fetch_and_cache_pvs(cache, model_info.key, model_info.version_label, cde_keys, file_id)
+        await _fetch_and_cache_pvs(cache, model_info.key, model_info.external_version_number, cde_keys, file_id)
     except Exception:
         _router_logger.exception("Failed to fetch PVs for session", extra={"file_id": file_id})
 

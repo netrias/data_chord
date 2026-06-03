@@ -26,7 +26,8 @@ async def test_harmonize_returns_job_id(
         json={
             "file_id": file_id,
             "target_schema": TEST_TARGET_SCHEMA,
-            "manual_overrides": {},
+            "target_external_version_number": "11.0.4",
+                "manual_overrides": {},
         },
     )
 
@@ -52,7 +53,8 @@ async def test_harmonize_returns_status(
         json={
             "file_id": file_id,
             "target_schema": TEST_TARGET_SCHEMA,
-            "manual_overrides": {},
+            "target_external_version_number": "11.0.4",
+                "manual_overrides": {},
         },
     )
 
@@ -79,7 +81,8 @@ async def test_harmonize_with_manual_overrides(
         json={
             "file_id": file_id,
             "target_schema": TEST_TARGET_SCHEMA,
-            "manual_overrides": overrides,
+            "target_external_version_number": "11.0.4",
+                "manual_overrides": overrides,
         },
     )
 
@@ -104,7 +107,8 @@ async def test_harmonize_uses_stored_mapping_manifest_when_request_omits_manifes
         json={
             "file_id": file_id,
             "target_schema": TEST_TARGET_SCHEMA,
-            "manual_overrides": {},
+            "target_external_version_number": "11.0.4",
+                "manual_overrides": {},
         },
     )
 
@@ -137,7 +141,8 @@ async def test_harmonize_prefers_stored_mapping_manifest_over_stale_request_mani
         json={
             "file_id": file_id,
             "target_schema": TEST_TARGET_SCHEMA,
-            "manual_overrides": {},
+            "target_external_version_number": "11.0.4",
+                "manual_overrides": {},
             "manifest": stale_manifest,
         },
     )
@@ -161,7 +166,8 @@ async def test_harmonize_file_not_found(app_client: AsyncClient) -> None:
         json={
             "file_id": invalid_file_id,
             "target_schema": TEST_TARGET_SCHEMA,
-            "manual_overrides": {},
+            "target_external_version_number": "11.0.4",
+                "manual_overrides": {},
         },
     )
 
@@ -184,7 +190,8 @@ async def test_harmonize_returns_next_stage_url(
         json={
             "file_id": file_id,
             "target_schema": TEST_TARGET_SCHEMA,
-            "manual_overrides": {},
+            "target_external_version_number": "11.0.4",
+                "manual_overrides": {},
         },
     )
 
@@ -217,6 +224,7 @@ async def test_harmonize_without_client_returns_stubbed_job(
         column_overrides=ColumnCdeOverrides.from_strings({}),
         column_renames=ColumnRenameSet.empty(),
         cache=SessionCache(),
+        external_version_number="11.0.4",
         manifest=None,
     )
 
@@ -247,6 +255,7 @@ def test_harmonize_sends_source_file_and_column_keyed_manifest(tmp_path: Path) -
         column_overrides=ColumnCdeOverrides.from_strings({}),
         column_renames=ColumnRenameSet.empty(),
         cache=SessionCache(),
+        external_version_number="11.0.4",
         manifest=manifest,
     )
 
@@ -290,6 +299,7 @@ def test_harmonize_applies_column_renames_to_manifest(tmp_path: Path) -> None:
         column_overrides=ColumnCdeOverrides.from_strings({}),
         column_renames=ColumnRenameSet.from_dict({"col_0000": "Primary Diagnosis"}),
         cache=SessionCache(),
+        external_version_number="11.0.4",
         manifest=manifest,
     )
 

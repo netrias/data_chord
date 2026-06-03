@@ -294,14 +294,16 @@ const _extractRequestPayload = () => {
     const params = new URLSearchParams(window.location.search);
     const fileId = params.get('file_id');
     const targetSchema = params.get('target_schema') || config.targetSchema;
-    const versionNumber = Number(params.get('version_number'));
+    const externalVersionNumber = params.get('external_version_number');
+    const legacyVersionNumber = Number(params.get('version_number'));
     if (!fileId || !targetSchema) {
       return null;
     }
     harmonizePayload = {
       file_id: fileId,
       target_schema: targetSchema,
-      target_version_number: Number.isFinite(versionNumber) && versionNumber > 0 ? versionNumber : null,
+      target_external_version_number: externalVersionNumber || null,
+      target_version_number: Number.isFinite(legacyVersionNumber) && legacyVersionNumber > 0 ? legacyVersionNumber : null,
       manual_overrides: {},
       manifest: null,
     };

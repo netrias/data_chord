@@ -11,15 +11,13 @@ import logging
 import threading
 from dataclasses import dataclass, field
 
-from netrias_client import DataModelStoreError, NetriasAPIUnavailable
-
 from src.domain.cde import CDEInfo
 from src.domain.cde_catalog import CdeCatalog
 from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.column_cde_map import ColumnCdeMap
 from src.domain.column_profile import ColumnProfile
 from src.domain.columns import ColumnKey, column_key_from_string
-from src.domain.data_model_selection import DataModelSelection, version_number_from_label
+from src.domain.data_model_selection import DataModelSelection
 
 _logger = logging.getLogger(__name__)
 
@@ -51,16 +49,12 @@ class SessionCache:
         self,
         cdes: list[CDEInfo],
         data_model_key: str,
-        version_label: str,
-        version_number: int | None = None,
+        external_version_number: str,
     ) -> None:
         with self._lock:
-            selected_version_number = (
-                version_number if version_number is not None else version_number_from_label(version_label)
-            )
             self.data_model_selection = DataModelSelection(
                 key=data_model_key,
-                version_number=selected_version_number,
+                external_version_number=external_version_number,
             )
             self.cde_catalog = CdeCatalog.from_cdes(cdes)
 
@@ -68,16 +62,12 @@ class SessionCache:
         self,
         catalog: CdeCatalog,
         data_model_key: str,
-        version_label: str,
-        version_number: int | None = None,
+        external_version_number: str,
     ) -> None:
         with self._lock:
-            selected_version_number = (
-                version_number if version_number is not None else version_number_from_label(version_label)
-            )
             self.data_model_selection = DataModelSelection(
                 key=data_model_key,
-                version_number=selected_version_number,
+                external_version_number=external_version_number,
             )
             self.cde_catalog = catalog
 
@@ -168,24 +158,14 @@ class SessionCache:
 
 def populate_cde_cache(file_id: str, selection: DataModelSelection) -> None:
     """PV validation in Stage 3+ requires model key and version; must run before PV fetch."""
-    from src.domain.data_model_adapter import fetch_cdes, get_latest_version
+    from src.domain.data_model_adapter import fetch_cdes
 
-    if selection.version_number is None:
-        try:
-            version_label = get_latest_version(selection.key)
-        except (DataModelStoreError, NetriasAPIUnavailable):
-            _logger.warning("Data Model Store API unavailable; defaulting to version 1")
-            version_label = "1"
-    else:
-        version_label = selection.version_label
-
-    cdes = fetch_cdes(selection.key, version_label)
+    cdes = fetch_cdes(selection.key, selection.external_version_number)
     cache = get_session_cache(file_id)
     cache.set_cdes(
         cdes,
         data_model_key=selection.key,
-        version_label=version_label,
-        version_number=selection.version_number,
+        external_version_number=selection.external_version_number,
     )
 
     _logger.info(
@@ -194,7 +174,7 @@ def populate_cde_cache(file_id: str, selection: DataModelSelection) -> None:
             "file_id": file_id,
             "cde_count": len(cdes),
             "data_model": selection.key,
-            "version": version_label,
+            "external_version_number": selection.external_version_number,
         },
     )
 

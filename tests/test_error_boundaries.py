@@ -9,7 +9,7 @@ import pytest
 from httpx import AsyncClient
 from netrias_client import DataModelStoreError
 
-from tests.conftest import TEST_CSV_CONTENT_TYPE, TEST_TARGET_SCHEMA, upload_file
+from tests.conftest import TEST_CSV_CONTENT_TYPE, TEST_TARGET_EXTERNAL_VERSION_NUMBER, TEST_TARGET_SCHEMA, upload_file
 
 pytestmark = pytest.mark.asyncio
 
@@ -27,7 +27,11 @@ class TestMissingFileErrors:
         # When: Analyze is called with the non-existent file_id
         response = await app_client.post(
             "/stage-1/analyze",
-            json={"file_id": INVALID_FILE_ID, "target_schema": TEST_TARGET_SCHEMA},
+            json={
+                "file_id": INVALID_FILE_ID,
+                "target_schema": TEST_TARGET_SCHEMA,
+                "target_external_version_number": TEST_TARGET_EXTERNAL_VERSION_NUMBER,
+            },
         )
 
         # Then: 404 response with "not found" message
@@ -45,6 +49,7 @@ class TestMissingFileErrors:
             json={
                 "file_id": INVALID_FILE_ID,
                 "target_schema": TEST_TARGET_SCHEMA,
+                "target_external_version_number": TEST_TARGET_EXTERNAL_VERSION_NUMBER,
                 "manual_overrides": {},
             },
         )

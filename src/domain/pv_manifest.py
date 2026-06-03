@@ -12,7 +12,7 @@ from src.domain.column_cde_map import ColumnCdeMap
 @dataclass(frozen=True)
 class PVManifest:
     data_model_key: str
-    version_label: str
+    external_version_number: str
     column_to_cde_key: ColumnCdeMap
     pvs: CdePvCatalog
 
@@ -24,7 +24,9 @@ class PVManifest:
         raw_pvs = payload.get("pvs")
         return cls(
             data_model_key=_string_or_empty(payload.get("data_model_key")),
-            version_label=_string_or_empty(payload.get("version_label")),
+            external_version_number=_string_or_empty(
+                payload.get("external_version_number") or payload.get("version_label")
+            ),
             column_to_cde_key=ColumnCdeMap.from_strings(_string_mapping(raw_mappings)),
             pvs=CdePvCatalog.from_mapping(_pv_mapping(raw_pvs)),
         )
@@ -32,7 +34,7 @@ class PVManifest:
     def to_store(self) -> dict[str, object]:
         return {
             "data_model_key": self.data_model_key,
-            "version_label": self.version_label,
+            "external_version_number": self.external_version_number,
             "column_to_cde_key": self.column_to_cde_key.to_strings(),
             "pvs": {cde_key: sorted(values) for cde_key, values in self.pvs.values.items()},
         }

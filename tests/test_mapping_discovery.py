@@ -57,7 +57,7 @@ def test_discover_returns_manifest_from_client(
     csv_path.write_text("breed,diagnosis\nLabrador,Cancer\n")
 
     # When
-    discovery = svc.discover(csv_path=csv_path, target_schema="ccdi")
+    discovery = svc.discover(csv_path=csv_path, target_schema="ccdi", external_version_number="11.0.4")
 
     # Then: manifest contains both columns
     column_mappings = discovery.manifest_payload.get("column_mappings", {})
@@ -66,7 +66,7 @@ def test_discover_returns_manifest_from_client(
     assert column_mappings["col_0000"]["cde_key"] == "organism_species"
     assert column_mappings["col_0001"]["cde_key"] == "primary_diagnosis"
     mock_client.discover_mapping_from_tabular.assert_called_once()
-    assert mock_client.discover_mapping_from_tabular.call_args.kwargs["target_version"] == "latest"
+    assert mock_client.discover_mapping_from_tabular.call_args.kwargs["external_version_number"] == "11.0.4"
 
 
 def test_discover_passes_selected_target_version(
@@ -89,10 +89,10 @@ def test_discover_passes_selected_target_version(
     assert mock_client.discover_mapping_from_tabular.call_count == 0
 
     # When
-    svc.discover(csv_path=csv_path, target_schema="ccdi", target_version="2")
+    svc.discover(csv_path=csv_path, target_schema="ccdi", external_version_number="11.0.4")
 
     # Then
-    assert mock_client.discover_mapping_from_tabular.call_args.kwargs["target_version"] == "2"
+    assert mock_client.discover_mapping_from_tabular.call_args.kwargs["external_version_number"] == "11.0.4"
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +122,7 @@ def test_discover_builds_cde_targets_from_manifest(
     csv_path.write_text("breed,diagnosis\nLabrador,Cancer\n")
 
     # When
-    discovery = svc.discover(csv_path=csv_path, target_schema="ccdi")
+    discovery = svc.discover(csv_path=csv_path, target_schema="ccdi", external_version_number="11.0.4")
 
     # Then: cde_targets has entries for both columns
     cde_targets = discovery.cde_targets
@@ -176,7 +176,7 @@ def test_discover_raises_when_client_unavailable() -> None:
 
     # When/Then
     with pytest.raises(RuntimeError, match="NetriasClient unavailable"):
-        svc.discover(csv_path=Path("/fake.csv"), target_schema="ccdi")
+        svc.discover(csv_path=Path("/fake.csv"), target_schema="ccdi", external_version_number="11.0.4")
 
 
 # ---------------------------------------------------------------------------
@@ -280,7 +280,7 @@ def test_discover_wraps_sdk_errors_as_runtime_error(
 
     # When/Then
     with pytest.raises(RuntimeError, match="CDE discovery failed.*connection refused"):
-        svc.discover(csv_path=csv_path, target_schema="ccdi")
+        svc.discover(csv_path=csv_path, target_schema="ccdi", external_version_number="11.0.4")
 
 
 def test_discover_preserves_duplicate_headers_with_column_keys(
@@ -298,12 +298,12 @@ def test_discover_preserves_duplicate_headers_with_column_keys(
         *,
         source_path: Path,
         target_schema: str,
-        target_version: str,
+        external_version_number: str,
         confidence_threshold: float,
         sheet_name: str | None = None,
     ) -> dict[str, object]:
         assert source_path.name == "dupes.csv"
-        assert target_version == "latest"
+        assert external_version_number == "11.0.4"
         assert sheet_name is None
         return {
             "column_mappings": {
@@ -316,7 +316,7 @@ def test_discover_preserves_duplicate_headers_with_column_keys(
     csv_path = tmp_path / "dupes.csv"
     csv_path.write_text("name,name\nAlice,Smith\n")
 
-    discovery = svc.discover(csv_path=csv_path, target_schema="ccdi")
+    discovery = svc.discover(csv_path=csv_path, target_schema="ccdi", external_version_number="11.0.4")
 
     column_mappings = discovery.manifest_payload.get("column_mappings", {})
     assert column_mappings["col_0000"]["cde_key"] == "first_name"

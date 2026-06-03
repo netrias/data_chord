@@ -542,11 +542,11 @@ const _persistStageTwoPayload = (payload) => {
   writeToSession(STAGE_2_PAYLOAD_KEY, payload);
 };
 
-const _navigateToStageTwo = (fileId, targetSchema, targetVersionNumber, payload) => {
+const _navigateToStageTwo = (fileId, targetSchema, targetExternalVersionNumber, payload) => {
   _persistStageTwoPayload(payload);
   advanceMaxReachedStage('mapping');
   const search = new URLSearchParams({ file_id: fileId, schema: targetSchema });
-  if (targetVersionNumber) search.set('version_number', String(targetVersionNumber));
+  if (targetExternalVersionNumber) search.set('external_version_number', targetExternalVersionNumber);
   window.location.assign(`/stage-2?${search.toString()}`);
 };
 
@@ -584,7 +584,7 @@ const _analyzeDataset = async () => {
         body: JSON.stringify({
           file_id: state.uploaded.file_id,
           target_schema: selection.dataModelKey,
-          target_version_number: selection.versionNumber,
+          target_external_version_number: selection.externalVersionNumber,
           sheet_name: state.selectedSheet,
         }),
       });
@@ -610,7 +610,12 @@ const _analyzeDataset = async () => {
       throw new Error(payload.detail || 'Analysis failed.');
     }
     // Keep overlay visible during navigation - browser will replace the page
-    _navigateToStageTwo(state.uploaded.file_id, selection.dataModelKey, selection.versionNumber, payload);
+    _navigateToStageTwo(
+      state.uploaded.file_id,
+      selection.dataModelKey,
+      selection.externalVersionNumber,
+      payload,
+    );
   } catch (error) {
     console.error(error);
     _setStatus(error.message, 'error');

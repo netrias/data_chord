@@ -10,6 +10,7 @@ import { e2eEnv } from './runtime-env.mjs';
 export const fixturesDir = path.resolve('tests/e2e/fixtures');
 const E2E_TARGET_MODEL = 'gc';
 const E2E_TARGET_VERSION_NUMBER = 2;
+const E2E_TARGET_EXTERNAL_VERSION_NUMBER = '11.0.4';
 const E2E_TARGET_CDE = 'primary_diagnosis';
 const E2E_TARGET_CDE_ID = 376;
 
@@ -180,7 +181,7 @@ export const mockDataModels = async (page) => {
           {
             version_label: `v${E2E_TARGET_VERSION_NUMBER}`,
             version_number: E2E_TARGET_VERSION_NUMBER,
-            external_version_number: null,
+            external_version_number: E2E_TARGET_EXTERNAL_VERSION_NUMBER,
             is_default: true,
           },
         ],
@@ -203,7 +204,7 @@ export const mockDataModelsWithVersionCount = async (page, count) => {
     const versions = Array.from({ length: count }, (_, i) => ({
       version_label: `v${i + 1}.0`,
       version_number: i + 1,
-      external_version_number: null,
+      external_version_number: `11.0.${i + 1}`,
       is_default: i === count - 1,
     }));
     const models = [

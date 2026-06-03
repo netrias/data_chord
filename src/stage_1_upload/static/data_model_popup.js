@@ -23,7 +23,12 @@ async function _fetchDataModels() {
   }
   const models = await resp.json();
   /* Filter out models without versions - they cannot be used for mapping. */
-  return models.filter((m) => m.versions && m.versions.length > 0);
+  return models
+    .map((m) => ({
+      ...m,
+      versions: (m.versions || []).filter((v) => v.external_version_number),
+    }))
+    .filter((m) => m.versions.length > 0);
 }
 
 /**
@@ -190,8 +195,8 @@ function _createVersionDropdown(versions, selectedVersion) {
     hiddenId: 'versionSelect',
     hiddenControl: 'input',
     items: _sortVersionsDescending(versions),
-    selectedValue: selectedVersion?.version_number ?? selectedVersion,
-    valueFor: (version) => version.version_number,
+    selectedValue: selectedVersion?.external_version_number ?? selectedVersion,
+    valueFor: (version) => version.external_version_number,
     labelFor: _versionDisplayLabel,
   });
 }
@@ -200,7 +205,7 @@ function _populateVersionDropdown(wrap, versions, selectedVersion) {
   _populateDropdown(
     wrap,
     _sortVersionsDescending(versions),
-    selectedVersion?.version_number ?? selectedVersion,
+    selectedVersion?.external_version_number ?? selectedVersion,
   );
 }
 
@@ -493,7 +498,7 @@ function _setupModelChangeHandler(dialog, dataModels) {
 
 /**
  * Show the data model selection popup.
- * @returns {Promise<{dataModelKey: string, versionNumber: number} | null>}
+ * @returns {Promise<{dataModelKey: string, externalVersionNumber: string} | null>}
  *   Resolves with selection on confirm, or null on cancel/close.
  * @throws {Error} If data models are unavailable (preload failed).
  */
@@ -528,10 +533,10 @@ export async function showDataModelPopup() {
       if (!dataModelSelect || !versionSelect) return;
       markResolved();
       const dataModelKey = dataModelSelect.value;
-      const versionNumber = Number(versionSelect.value);
+      const externalVersionNumber = versionSelect.value;
       dialog.close();
       dialog.remove();
-      resolve({ dataModelKey, versionNumber });
+      resolve({ dataModelKey, externalVersionNumber });
     });
   });
 }

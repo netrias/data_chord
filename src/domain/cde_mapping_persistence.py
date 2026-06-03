@@ -188,7 +188,7 @@ def save_cde_mapping_document(
         dataset_workflow_id=dataset_workflow_id,
         generated_at=datetime.now(UTC),
         target_schema=target_selection.key,
-        target_version=target_selection.target_version,
+        target_version=target_selection.external_version_number,
         mappings=_build_entries(manifest, column_overrides, column_renames, columns, cache),
     )
     storage = dependencies.get_workflow_storage()
