@@ -52,11 +52,11 @@ const downloadWorkbookRows = async (page, fileId, sheetName) => {
   return parseDownloadedWorkbook(response, sheetName);
 };
 
-const _stage2Column = (key) => ({
-  column_name: key,
+const _stage2Column = (key, header = key) => ({
+  column_name: header,
   column_key: key,
   source_index: 0,
-  header: key,
+  header,
   inferred_type: 'text',
   sample_values: ['Sample'],
   confidence_bucket: 'high',
@@ -540,19 +540,19 @@ test('Stage 2 submits selected column renames for harmonization', async ({ page 
     file_id: 'abcdef0123456789abcdef0123456789',
     file_name: 'rename.csv',
     total_rows: 1,
-    columns: [_stage2Column('diagnosis')],
+    columns: [_stage2Column('col_0000', 'diagnosis')],
     cde_targets: {
-      diagnosis: [{ target: 'primary_diagnosis', similarity: 0.95 }],
+      col_0000: [{ target: 'primary_diagnosis', similarity: 0.95 }],
     },
     column_summaries: {
-      diagnosis: { value_overlap_ratio: 1.0 },
+      col_0000: { value_overlap_ratio: 1.0 },
     },
     next_stage: 'mapping',
     next_step_hint: 'Review mappings.',
     manual_overrides: {},
     manifest: {
       column_mappings: {
-        diagnosis: { column_name: 'diagnosis', cde_key: 'primary_diagnosis', cde_id: 101 },
+        col_0000: { column_name: 'diagnosis', cde_key: 'primary_diagnosis', cde_id: 101 },
       },
     },
   };
@@ -590,7 +590,7 @@ test('Stage 2 submits selected column renames for harmonization', async ({ page 
 
   const handoff = await page.evaluate(() => JSON.parse(sessionStorage.getItem('stage3HarmonizePayload')));
   expect(handoff.request.manual_overrides).toEqual({});
-  expect(handoff.request.column_renames).toEqual({ diagnosis: 'Primary Diagnosis' });
+  expect(handoff.request.column_renames).toEqual({ col_0000: 'Primary Diagnosis' });
   expect(handoff.request).not.toHaveProperty('manifest');
   expect(handoff).not.toHaveProperty('manifest');
 });

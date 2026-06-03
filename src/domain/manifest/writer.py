@@ -16,6 +16,7 @@ from typing import Any, NamedTuple
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from src.domain.column_renames import ColumnRenameSet
 from src.domain.manifest.models import ManifestRow, ManualOverride, get_manifest_schema
 from src.domain.manifest.reader import read_manifest_parquet
 
@@ -116,6 +117,36 @@ def apply_pv_adjustments_batch(
     return result.adjustment_count
 
 
+def apply_column_renames_batch(manifest_path: Path, renames: ColumnRenameSet) -> int:
+    """Apply Stage 2 output names to manifest display metadata by column key."""
+    if not renames.renames:
+        return 0
+
+    summary = read_manifest_parquet(manifest_path)
+    if summary is None:
+        logger.warning("Cannot apply column renames: manifest not found", extra={"path": str(manifest_path)})
+        return 0
+
+    updated: list[ManifestRow] = []
+    renamed_count = 0
+    for row in summary.rows:
+        output_name = renames.renames.get(row.column_key)
+        if output_name is None or output_name == row.column_name:
+            updated.append(row)
+            continue
+        updated.append(replace(row, column_name=output_name))
+        renamed_count += 1
+
+    if renamed_count > 0 and not _write_manifest_parquet(manifest_path, updated):
+        return 0
+
+    logger.info(
+        "Applied column renames to manifest",
+        extra={"path": str(manifest_path), "renamed_count": renamed_count},
+    )
+    return renamed_count
+
+
 def _row_column_key(row: ManifestRow) -> str:
     return str(row.column_key)
 
@@ -159,5 +190,6 @@ def _rows_to_table(rows: list[ManifestRow]) -> pa.Table:
 
 __all__ = [
     "add_manual_overrides_batch",
+    "apply_column_renames_batch",
     "apply_pv_adjustments_batch",
 ]

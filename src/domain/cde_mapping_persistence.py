@@ -7,7 +7,7 @@ Axis of change: the audit document format for column-keyed CDE mappings.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -25,6 +25,7 @@ from src.domain.data_model_selection import DataModelSelection
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_value
 from src.domain.manifest import ColumnMappingManifest, ColumnMappingRecord
 from src.domain.storage import UserContext, WorkflowFile, WorkflowNotFoundError, WorkflowStorage
+from src.domain.tabular_column_renames import ResolvedTabularColumn
 
 MAPPING_SOURCE_AI: Final = "ai"
 MAPPING_SOURCE_USER_OVERRIDE: Final = "user_override"
@@ -177,6 +178,7 @@ def save_cde_mapping_document(
     manifest: ColumnMappingManifest,
     column_overrides: ColumnCdeOverrides,
     column_renames: ColumnRenameSet,
+    columns: Sequence[ResolvedTabularColumn],
     cache: SessionCache,
     target_selection: DataModelSelection,
 ) -> None:
@@ -187,7 +189,7 @@ def save_cde_mapping_document(
         generated_at=datetime.now(UTC),
         target_schema=target_selection.key,
         target_version=target_selection.target_version,
-        mappings=_build_entries(manifest, column_overrides, column_renames, cache),
+        mappings=_build_entries(manifest, column_overrides, column_renames, columns, cache),
     )
     storage = dependencies.get_workflow_storage()
     user = dependencies.get_user_context()
@@ -256,14 +258,26 @@ def _build_entries(
     manifest: ColumnMappingManifest,
     column_overrides: ColumnCdeOverrides,
     column_renames: ColumnRenameSet,
+    columns: Sequence[ResolvedTabularColumn],
     cache: SessionCache,
 ) -> list[CdeMappingEntry]:
     override_by_key = column_overrides.overrides
+    column_by_key = {column.key: column for column in columns}
     # Include rename-only and no-mapping columns too; the download artifact is
     # an audit trail for every output column, not just value-harmonized fields.
-    keys = sorted(set(manifest.records) | set(override_by_key) | set(column_renames.renames), key=str)
+    keys = sorted(
+        set(column_by_key) | set(manifest.records) | set(override_by_key) | set(column_renames.renames),
+        key=str,
+    )
     return [
-        _build_entry(column_key, manifest.records.get(column_key), override_by_key, column_renames, cache)
+        _build_entry(
+            column_key,
+            manifest.records.get(column_key),
+            override_by_key,
+            column_renames,
+            column_by_key.get(column_key),
+            cache,
+        )
         for column_key in keys
     ]
 
@@ -273,12 +287,19 @@ def _build_entry(
     record: ColumnMappingRecord | None,
     overrides: Mapping[ColumnKey, str | None],
     renames: ColumnRenameSet,
+    column: ResolvedTabularColumn | None,
     cache: SessionCache,
 ) -> CdeMappingEntry:
     cde_key = overrides.get(column_key, record.cde_key if record else None)
     source = _mapping_source(column_key, overrides, cde_key)
-    source_name = record.column_name if record and record.column_name else str(column_key)
-    output_name = renames.renames.get(column_key, source_name)
+    source_name = (
+        column.original_name
+        if column
+        else record.column_name
+        if record and record.column_name
+        else str(column_key)
+    )
+    output_name = column.output_name if column else renames.renames.get(column_key, source_name)
     if cde_key is None:
         return CdeMappingEntry(
             column_key=column_key,

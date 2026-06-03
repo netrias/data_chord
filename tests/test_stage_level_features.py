@@ -10,6 +10,7 @@ import time
 import zipfile
 from datetime import UTC, datetime
 from io import BytesIO
+from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock
 
@@ -36,6 +37,7 @@ from tests.conftest import (
     create_csv_content,
     create_harmonized_csv,
     create_manifest_for_file,
+    create_test_manifest_parquet,
     create_xlsx_content,
     review_state_payload,
     upload_content,
@@ -916,6 +918,225 @@ async def test_stage3_harmonize_prefers_stored_mapping_choices_over_stale_reques
     assert response.status_code == 200
     assert stub.received_overrides == {"col_0000": "primary_diagnosis", "col_0001": None}
     assert stub.received_renames == {"col_0000": "Primary Diagnosis"}
+
+
+async def test_stage3_applies_confirmed_column_renames_to_download(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+    tmp_path: Path,
+) -> None:
+    """Confirmed Stage 2 rename choices become final download headers."""
+
+    class StubHarmonizer:
+        def __init__(self) -> None:
+            self.received_renames: dict[str, str] | None = None
+
+        def run(  # type: ignore[no-untyped-def]
+            self,
+            *,
+            file_path,
+            target_schema,
+            column_overrides,
+            column_renames,
+            cache,
+            target_version,
+            manifest,
+            output_path,
+            sheet_name,
+        ):
+            with output_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.writer(handle)
+                writer.writerows([["diagnosis"], ["Lung Cancer"]])
+            assert output_path.read_text(encoding="utf-8").splitlines()[0] == "diagnosis"
+            manifest_path = tmp_path / "rename-manifest.parquet"
+            create_test_manifest_parquet(
+                manifest_path,
+                [
+                    {
+                        "job_id": "job-renamed-download",
+                        "column_id": 0,
+                        "column_name": "diagnosis",
+                        "to_harmonize": "Lung",
+                        "top_harmonization": "Lung Cancer",
+                        "ontology_id": None,
+                        "top_harmonizations": ["Lung Cancer"],
+                        "confidence_score": 0.95,
+                        "error": None,
+                        "row_indices": [0],
+                        "manual_overrides": [],
+                    }
+                ],
+            )
+            return HarmonizeResult(
+                job_id="job-renamed-download",
+                status=HarmonizeStatus.SUCCEEDED,
+                detail="ok",
+                manifest_path=manifest_path,
+            )
+
+    # Given: Stage 2 saved a confirmed output rename for the analyzed column
+    file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "renamed-flow.csv")
+    analyze_response = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_version_number": 1},
+    )
+    assert analyze_response.status_code == 200
+    choices_response = await app_client.post(
+        "/stage-2/choices",
+        json={
+            "file_id": file_id,
+            "manual_overrides": {},
+            "column_renames": {"col_0000": "Primary Diagnosis"},
+        },
+    )
+    assert choices_response.status_code == 200
+
+    # When: Stage 3 runs and Stage 5 downloads the final dataset
+    import unittest.mock
+
+    with unittest.mock.patch("src.stage_3_harmonize.router.get_harmonize_service", return_value=StubHarmonizer()):
+        harmonize_response = await app_client.post(
+            "/stage-3/harmonize",
+            json={
+                "file_id": file_id,
+                "target_schema": TEST_TARGET_SCHEMA,
+                "target_version_number": 1,
+                "manual_overrides": {},
+                "column_renames": {},
+            },
+        )
+    assert harmonize_response.status_code == 200
+
+    rows_response = await app_client.post("/stage-4/rows", json={"file_id": file_id})
+    summary_response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
+    download_response = await app_client.post("/stage-5/download", json={"file_id": file_id})
+
+    # Then: review, summary, and download use the confirmed output header, not the source header
+    assert rows_response.status_code == 200
+    assert rows_response.json()["columns"][0]["columnLabel"] == "Primary Diagnosis"
+    assert summary_response.status_code == 200
+    assert summary_response.json()["column_summaries"][0]["column"] == "Primary Diagnosis"
+    assert download_response.status_code == 200
+    output_rows = _read_downloaded_csv(download_response.content)
+    assert list(output_rows[0]) == ["Primary Diagnosis"]
+    assert output_rows[0]["Primary Diagnosis"] == "Lung Cancer"
+
+
+async def test_stage3_column_renames_propagate_when_output_name_matches_existing_header(
+    app_client: AsyncClient,
+    tmp_path: Path,
+) -> None:
+    """Rename choices are keyed by column identity, even when output names repeat."""
+
+    class StubHarmonizer:
+        def run(  # type: ignore[no-untyped-def]
+            self,
+            *,
+            file_path,
+            target_schema,
+            column_overrides,
+            column_renames,
+            cache,
+            target_version,
+            manifest,
+            output_path,
+            sheet_name,
+        ):
+            self.received_renames = column_renames.to_strings()
+            with output_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.writer(handle)
+                writer.writerows([["disease_type", "disease_type"], ["stale", ""]])
+            actual_output_path = output_path.with_name(f"{output_path.stem}.v2{output_path.suffix}")
+            with actual_output_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.writer(handle)
+                writer.writerows([["diagnosis", "disease_type"], ["Lung Cancer", ""]])
+            manifest_path = tmp_path / "repeat-output-name-manifest.parquet"
+            create_test_manifest_parquet(
+                manifest_path,
+                [
+                    {
+                        "job_id": "job-repeat-output-name",
+                        "column_id": 0,
+                        "column_name": "diagnosis",
+                        "to_harmonize": "Lung",
+                        "top_harmonization": "Lung Cancer",
+                        "ontology_id": None,
+                        "top_harmonizations": ["Lung Cancer"],
+                        "confidence_score": 0.95,
+                        "error": None,
+                        "row_indices": [0],
+                        "manual_overrides": [],
+                    }
+                ],
+            )
+            return HarmonizeResult(
+                job_id="job-repeat-output-name",
+                status=HarmonizeStatus.SUCCEEDED,
+                detail="ok",
+                manifest_path=manifest_path,
+                output_path=actual_output_path,
+            )
+
+    # Given: the uploaded file already contains the target standard column name
+    stub = StubHarmonizer()
+    file_id = await upload_content(
+        app_client,
+        create_csv_content([["diagnosis", "disease_type"], ["Lung", ""]]),
+        "repeat-output-name-flow.csv",
+    )
+    analyze_response = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_version_number": 1},
+    )
+    assert analyze_response.status_code == 200
+    choices_response = await app_client.post(
+        "/stage-2/choices",
+        json={
+            "file_id": file_id,
+            "manual_overrides": {},
+            "column_renames": {"col_0000": "disease_type"},
+        },
+    )
+    assert choices_response.status_code == 200
+
+    # When: Stage 3 runs and Stage 5 downloads the final dataset
+    import unittest.mock
+
+    with unittest.mock.patch("src.stage_3_harmonize.router.get_harmonize_service", return_value=stub):
+        harmonize_response = await app_client.post(
+            "/stage-3/harmonize",
+            json={
+                "file_id": file_id,
+                "target_schema": TEST_TARGET_SCHEMA,
+                "target_version_number": 1,
+                "manual_overrides": {},
+                "column_renames": {},
+            },
+        )
+    assert harmonize_response.status_code == 200
+
+    rows_response = await app_client.post("/stage-4/rows", json={"file_id": file_id})
+    summary_response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
+    download_response = await app_client.post("/stage-5/download", json={"file_id": file_id})
+    cde_mapping = _load_json_artifact(file_id, WorkflowFile.CDE_MAPPING)
+
+    # Then: the selected output name propagates for col_0000 without merging it into col_0001
+    assert rows_response.status_code == 200
+    assert stub.received_renames == {"col_0000": "disease_type"}
+    assert [column["columnLabel"] for column in rows_response.json()["columns"]] == ["disease_type"]
+    assert summary_response.status_code == 200
+    assert [summary["column"] for summary in summary_response.json()["column_summaries"]] == ["disease_type"]
+    assert download_response.status_code == 200
+    output_rows = _read_downloaded_tabular(download_response.content, ".csv", ",")
+    output_headers = output_rows[0]
+    assert output_headers == ["disease_type", "disease_type"]
+    assert len(output_headers) == 2
+    assert len(set(output_headers)) == 1
+    assert output_rows[1] == ["Lung Cancer", ""]
+    assert isinstance(cde_mapping, dict)
+    mappings = {mapping["column_key"]: mapping for mapping in cde_mapping["mappings"]}
+    assert mappings["col_0000"]["output_column_name"] == "disease_type"
+    assert mappings["col_0001"]["output_column_name"] == "disease_type"
 
 
 async def test_stage3_persists_cde_mapping_download_artifact(
