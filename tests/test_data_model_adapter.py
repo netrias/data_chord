@@ -6,6 +6,7 @@ from collections.abc import Generator
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 from netrias_client import DataModel, DataModelVersion
 
@@ -170,6 +171,64 @@ def test_fetch_cdes_defaults_cde_type_to_pv(mock_netrias: MagicMock) -> None:
 
     # Then: every CDE starts as PV (refinement happens later)
     assert {c.cde_type for c in fetched} == {CdeType.PV}
+
+
+def test_fetch_cdes_translates_external_version_for_dms_boundary(
+    mock_netrias: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DMS CDE endpoints still require internal version_number at the boundary."""
+
+    mock_netrias.settings = SimpleNamespace(
+        data_model_store_endpoints=SimpleNamespace(base_url="https://dms.example.test"),
+        api_key="test-key",
+        timeout=10,
+    )
+    mock_netrias.list_cdes.return_value = [
+        SimpleNamespace(cde_id=1, cde_key="diagnosis", description="dx"),
+    ]
+
+    def _fake_get(
+        url: str,
+        *,
+        headers: dict[str, str],
+        params: dict[str, str],
+        timeout: float,
+    ) -> httpx.Response:
+        assert url == "https://dms.example.test/data-models"
+        assert headers == {"x-api-key": "test-key"}
+        assert params == {"include_versions": "true"}
+        assert timeout == 10
+        return httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "key": "gc",
+                        "name": "Genomic Commons",
+                        "versions": [
+                            {
+                                "version_number": 2,
+                                "version_label": "v2",
+                                "external_version_number": "11.0.4",
+                            },
+                        ],
+                    },
+                ],
+            },
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr("src.domain.data_model_adapter.httpx.get", _fake_get)
+
+    fetched = fetch_cdes("gc", "11.0.4")
+
+    assert [c.cde_key for c in fetched] == ["diagnosis"]
+    mock_netrias.list_cdes.assert_called_once_with(
+        model_key="gc",
+        version="2",
+        include_description=True,
+    )
 
 
 def test_refine_cde_types_downgrades_to_passthrough_for_empty_pvs() -> None:

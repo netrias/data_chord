@@ -133,9 +133,10 @@ def fetch_cdes(data_model_key: str, external_version_number: str) -> list[CDEInf
     client = get_netrias_client()
     if client is None:
         return []
+    dms_version = _dms_version_for_external(client, data_model_key, external_version_number)
     sdk_cdes = client.list_cdes(
         model_key=data_model_key,
-        version=external_version_number,
+        version=dms_version,
         include_description=True,
     )
     return [
@@ -190,10 +191,11 @@ async def fetch_all_pvs_async(data_model_key: str, external_version_number: str)
     config = _data_model_store_config(client)
     if config is None:
         return CdePvCatalog.empty()
+    dms_version = await _dms_version_for_external_async(config, data_model_key, external_version_number)
 
     path = (
         f"/data-models/{quote(data_model_key, safe='')}"
-        f"/versions/{quote(external_version_number, safe='')}/pvs"
+        f"/versions/{quote(dms_version, safe='')}/pvs"
     )
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(config.timeout)) as http_client:
@@ -220,6 +222,67 @@ def _pv_map_from_all_pvs_response(body: Mapping[str, object]) -> CdePvCatalog:
         if isinstance(cde_key, str) and isinstance(pv_value, str):
             grouped.setdefault(cde_key, set()).add(pv_value)
     return CdePvCatalog({cde_key: frozenset(values) for cde_key, values in grouped.items()})
+
+
+def _dms_version_for_external(client: NetriasClient, data_model_key: str, external_version_number: str) -> str:
+    config = _data_model_store_config(client)
+    if config is None:
+        return external_version_number
+    summaries = _list_data_model_summaries_direct(config)
+    return _find_dms_version_number(
+        summaries=summaries,
+        data_model_key=data_model_key,
+        external_version_number=external_version_number,
+    )
+
+
+async def _dms_version_for_external_async(
+    config: _DataModelStoreConfig,
+    data_model_key: str,
+    external_version_number: str,
+) -> str:
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(config.timeout)) as http_client:
+            response = await http_client.get(
+                f"{config.base_url.rstrip('/')}/data-models",
+                headers={"x-api-key": config.api_key},
+                params={"include_versions": "true"},
+            )
+    except httpx.TimeoutException as exc:
+        raise NetriasAPIUnavailable("data model store request timed out") from exc
+    except httpx.HTTPError as exc:
+        raise NetriasAPIUnavailable(f"data model store request failed: {exc}") from exc
+
+    body = _response_json(response)
+    items = body.get("items")
+    summaries = (
+        [_summary_from_item(item) for item in items if isinstance(item, Mapping)]
+        if isinstance(items, list)
+        else []
+    )
+    return _find_dms_version_number(
+        summaries=summaries,
+        data_model_key=data_model_key,
+        external_version_number=external_version_number,
+    )
+
+
+def _find_dms_version_number(
+    *,
+    summaries: list[DataModelSummary],
+    data_model_key: str,
+    external_version_number: str,
+) -> str:
+    for summary in summaries:
+        if summary.key != data_model_key:
+            continue
+        for version in summary.versions:
+            if version.external_version_number == external_version_number:
+                return str(version.version_number)
+    raise DataModelStoreError(
+        "data model store version lookup failed: "
+        f"no version_number found for {data_model_key} external version {external_version_number}"
+    )
 
 
 def _data_model_store_config(client: object) -> _DataModelStoreConfig | None:
