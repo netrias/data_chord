@@ -12,6 +12,9 @@ wheels/
 # Local environment variables
 .env
 
+# Local Codex principles
+.codex/principles.md
+
 # Node artifacts
 node_modules/
 frontend/node_modules
