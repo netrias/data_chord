@@ -153,7 +153,7 @@ def mock_netrias_client() -> Generator[MagicMock]:
         DataModel(
             data_commons_id=1, key="test-data-model", name="Test Data Model",
             description=None, is_active=True,
-            versions=(DataModelVersion(version_label="1"),),
+            versions=(DataModelVersion(external_version_number="11.0.4"),),
         ),
     )
     mock_client.list_cdes.return_value = (

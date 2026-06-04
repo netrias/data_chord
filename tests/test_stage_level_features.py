@@ -548,7 +548,7 @@ async def test_stage1_analyze_uses_selected_version_and_primes_reference_cache(
     # Then: discovery and the session cache use the selected external version
     assert response.status_code == 200
     assert response.json()["target_external_version_number"] == "11.0.4"
-    assert mock_netrias_client.discover_mapping_from_tabular.call_args.kwargs["external_version_number"] == "11.0.4"
+    assert mock_netrias_client.discover_mapping_from_tabular.call_args.kwargs["target_version"] == "11.0.4"
     selection = cache.get_model_selection()
     assert selection is not None
     assert selection.key == "gc"
@@ -613,8 +613,8 @@ async def test_stage2_mapping_page_recovers_selected_model_from_workflow_state(
     assert 'targetSchema: "gc"' in response.text
     assert 'targetExternalVersionNumber: "11.0.4"' in response.text
     mock_netrias_client.list_cdes.assert_called_with(
-        "gc",
-        external_version_number="11.0.4",
+        model_key="gc",
+        version="11.0.4",
         include_description=True,
     )
 

@@ -33,7 +33,7 @@ def mock_netrias() -> Generator[MagicMock]:
         DataModel(
             data_commons_id=1, key="gc", name="Genomic Commons",
             description=None, is_active=True,
-            versions=(DataModelVersion(version_label="2"),),
+            versions=(DataModelVersion(external_version_number="2.0.0"),),
         ),
     )
     mock.list_cdes.return_value = (
@@ -85,8 +85,8 @@ def test_populate_cde_cache_stores_real_cdes(
     assert selection.external_version_number == "2.0.0"
 
     mock_netrias.list_cdes.assert_called_once_with(
-        "gc",
-        external_version_number="2.0.0",
+        model_key="gc",
+        version="2.0.0",
         include_description=True,
     )
 
@@ -117,8 +117,8 @@ def test_populate_cde_cache_uses_explicit_external_version(
 
     # Then: the required external version is used directly; no latest fallback occurs
     mock_netrias.list_cdes.assert_called_once_with(
-        "gc",
-        external_version_number="1.0.0",
+        model_key="gc",
+        version="1.0.0",
         include_description=True,
     )
     assert cache.has_cdes()

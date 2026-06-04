@@ -66,14 +66,14 @@ def test_list_summaries_returns_preferred_model_first(
         DataModel(
             data_commons_id=1, key="alpha", name="Alpha Model",
             description=None, is_active=True,
-            versions=(DataModelVersion(version_label="1"),),
+            versions=(DataModelVersion(external_version_number="11.0.3"),),
         ),
         DataModel(
             data_commons_id=2, key="gc", name="Genomic Commons",
             description=None, is_active=True,
             versions=(
-                DataModelVersion(version_label="1"),
-                DataModelVersion(version_label="2"),
+                DataModelVersion(external_version_number="11.0.3"),
+                DataModelVersion(external_version_number="11.0.4"),
             ),
         ),
     )
@@ -85,8 +85,8 @@ def test_list_summaries_returns_preferred_model_first(
     assert len(summaries) == 2, f"Expected 2 summaries, got {len(summaries)}"
     assert summaries[0].key == "gc"
     assert summaries[0].label == "Genomic Commons"
-    assert [v.version_number for v in summaries[0].versions] == [1, 2]
-    assert [v.version_label for v in summaries[0].versions] == ["1", "2"]
+    assert [v.external_version_number for v in summaries[0].versions] == ["11.0.3", "11.0.4"]
+    assert [v.version_label for v in summaries[0].versions] == ["11.0.3", "11.0.4"]
     assert summaries[1].key == "alpha"
 
 

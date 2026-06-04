@@ -6,13 +6,12 @@ Axis of change: SDK response shapes. Callers get stable domain types.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Protocol, cast
+from typing import cast
 from urllib.parse import quote
 
 import httpx
-from netrias_client import CDE as SdkCDE
 from netrias_client import DataModelStoreError, NetriasAPIUnavailable, NetriasClient
 
 from src.domain.cde import CDEInfo, DataModelSummary, DataModelVersionInfo
@@ -34,16 +33,6 @@ class _DataModelStoreConfig:
     timeout: float
 
 
-class _ExternalVersionCdeClient(Protocol):
-    def list_cdes(
-        self,
-        data_model_key: str,
-        *,
-        external_version_number: str,
-        include_description: bool,
-    ) -> Sequence[SdkCDE]: ...
-
-
 def list_data_model_summaries() -> list[DataModelSummary]:
     """Why: decouples callers from SDK DataModel shape and versions tuple."""
     client = get_netrias_client()
@@ -62,7 +51,10 @@ def _list_data_model_summaries_from_sdk(client: NetriasClient) -> list[DataModel
             key=m.key,
             label=m.name,
             versions=[
-                _version_info_from_label(v.version_label, is_default=index == len(m.versions or ()) - 1)
+                _version_info_from_label(
+                    getattr(v, "external_version_number", getattr(v, "version_label", "")),
+                    is_default=index == len(m.versions or ()) - 1,
+                )
                 for index, v in enumerate(m.versions or ())
             ],
         )
@@ -141,10 +133,9 @@ def fetch_cdes(data_model_key: str, external_version_number: str) -> list[CDEInf
     client = get_netrias_client()
     if client is None:
         return []
-    external_version_client = cast(_ExternalVersionCdeClient, client)
-    sdk_cdes = external_version_client.list_cdes(
-        data_model_key,
-        external_version_number=external_version_number,
+    sdk_cdes = client.list_cdes(
+        model_key=data_model_key,
+        version=external_version_number,
         include_description=True,
     )
     return [
