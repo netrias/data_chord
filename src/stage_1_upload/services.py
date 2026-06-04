@@ -1,9 +1,4 @@
-"""Analyze tabular structure and infer column types for upload preview.
-
-Produces both the small ``ColumnPreview`` list (legacy 5-row sample for the
-upload screen) and a ``ColumnProfile`` per column (full distinct-value tally
-consumed by the Stage 2 takeover left pane).
-"""
+"""Analyze tabular structure and derive compact column summaries."""
 
 from __future__ import annotations
 
@@ -19,7 +14,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 from src.domain.column_profile import ColumnProfile, build_column_profile
 from src.domain.manifest import completeness_bucket
 
-from .schemas import ColumnPreview, SheetPreview
+from .schemas import ColumnSummary, SheetPreview
 
 DEFAULT_SHEET_PREVIEW_ROWS = 5
 DEFAULT_SHEET_PREVIEW_COLUMNS = 6
@@ -36,15 +31,12 @@ _OPENPYXL_FIRST_CELL = "A1"
 
 def analyze_columns(
     csv_path: Path,
-    max_preview_rows: int = 5,
     sheet_name: str | None = None,
-) -> tuple[int, list[ColumnPreview], dict[str, ColumnProfile]]:
+) -> tuple[int, list[ColumnSummary], dict[str, ColumnProfile]]:
     if not csv_path.exists():
         raise FileNotFoundError(csv_path)
 
     dataset = read_tabular(csv_path, sheet_name=sheet_name)
-    sample_rows = dataset.rows[:max_preview_rows]
-    columns = [_analyze_single_column(column, sample_rows) for column in dataset.columns]
     profiles = {
         column.key: build_column_profile(
             column.key,
@@ -52,6 +44,13 @@ def analyze_columns(
         )
         for column in dataset.columns
     }
+    columns = [
+        _analyze_single_column(
+            column,
+            profiles[column.key],
+        )
+        for column in dataset.columns
+    ]
     total_rows = len(dataset.rows)
     return total_rows, columns, profiles
 
@@ -127,30 +126,24 @@ def _cell_to_string(value: object) -> str:
     return str(value)
 
 
-def _analyze_single_column(column: TabularColumn, sample_rows: list[list[str]]) -> ColumnPreview:
-    samples = [_normalize_sample(row[column.index] if column.index < len(row) else "") for row in sample_rows]
-    non_empty_values = [value for value in samples if value]
-    non_empty_count = len(non_empty_values)
-    sample_size = max(len(samples), 1)
+def _analyze_single_column(
+    column: TabularColumn,
+    profile: ColumnProfile,
+) -> ColumnSummary:
+    non_empty_values = [value.value for value in profile.distinct_values]
+    non_empty_count = profile.total_rows - profile.null_count
+    row_count = max(profile.total_rows, 1)
 
-    return ColumnPreview(
+    return ColumnSummary(
         column_name=column.header,
         column_key=column.key,
         source_index=column.index,
         header=column.header,
         inferred_type=_infer_type(non_empty_values),
-        sample_values=samples,
-        confidence_bucket=completeness_bucket(non_empty_count, sample_size),
-        confidence_score=round(non_empty_count / sample_size, 2),
+        has_non_empty_values=profile.total_distinct > 0,
+        confidence_bucket=completeness_bucket(non_empty_count, row_count),
+        confidence_score=round(non_empty_count / row_count, 2),
     )
-
-
-def _normalize_sample(value: str | None) -> str:
-    """Truncate to 80 chars to prevent oversized UI tooltips."""
-    if value is None:
-        return ""
-    sanitized = value.strip()
-    return sanitized[:80]
 
 
 def _infer_type(values: Iterable[str]) -> str:

@@ -240,10 +240,11 @@ async def test_stage1_analyze_handles_quoted_commas(
         json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
     )
 
-    # Then: sample values keep the comma inside the string
+    # Then: analyze succeeds and summarizes the column
     assert response.status_code == 200
-    sample = response.json()["columns"][0]["sample_values"][0]
-    assert sample == "alpha, beta"
+    column = response.json()["columns"][0]
+    assert column["column_name"] == "col_a"
+    assert column["inferred_type"] == "text"
 
 
 async def test_stage1_analyze_handles_ragged_rows(
@@ -263,11 +264,11 @@ async def test_stage1_analyze_handles_ragged_rows(
         json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
     )
 
-    # Then: sample values include empty string for missing cells
+    # Then: the full-column confidence reflects the missing cell
     assert response.status_code == 200
-    columns = response.json()["columns"]
-    col_b_samples = next(col for col in columns if col["column_name"] == "col_b")["sample_values"]
-    assert col_b_samples[1] == ""
+    data = response.json()
+    col_b = next(col for col in data["columns"] if col["column_name"] == "col_b")
+    assert col_b["confidence_score"] == 0.5
 
 
 async def test_stage1_analyze_accepts_duplicate_headers_with_distinct_column_keys(
@@ -292,8 +293,6 @@ async def test_stage1_analyze_accepts_duplicate_headers_with_distinct_column_key
     columns = response.json()["columns"]
     assert [column["column_name"] for column in columns] == ["col_a", "col_a"]
     assert [column["column_key"] for column in columns] == ["col_0000", "col_0001"]
-    assert columns[0]["sample_values"] == ["alpha"]
-    assert columns[1]["sample_values"] == ["beta"]
 
 
 async def test_stage1_analyze_accepts_blank_middle_header_by_column_position(
@@ -319,7 +318,6 @@ async def test_stage1_analyze_accepts_blank_middle_header_by_column_position(
     assert [column["column_name"] for column in columns] == ["col_a", "", "col_c"]
     assert [column["column_key"] for column in columns] == ["col_0000", "col_0001", "col_0002"]
     assert [column["source_index"] for column in columns] == [0, 1, 2]
-    assert columns[1]["sample_values"] == ["beta"]
 
 
 async def test_stage1_analyze_accepts_tsv(
@@ -339,11 +337,10 @@ async def test_stage1_analyze_accepts_tsv(
         json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
     )
 
-    # Then: tab-separated columns are parsed and comma text is preserved
+    # Then: tab-separated columns are parsed
     assert response.status_code == 200
     columns = response.json()["columns"]
     assert [column["column_name"] for column in columns] == ["col_a", "col_b"]
-    assert columns[0]["sample_values"] == ["alpha, beta"]
 
 
 async def test_stage1_analyze_xlsx_defaults_to_first_sheet(
@@ -354,8 +351,8 @@ async def test_stage1_analyze_xlsx_defaults_to_first_sheet(
 
     # Given: an XLSX workbook with distinct values on each sheet
     content = create_xlsx_content({
-        "First": [["col_a"], ["first-value"]],
-        "Second": [["col_a"], ["second-value"]],
+        "First": [["first_col"], ["first-value"]],
+        "Second": [["second_col"], ["second-value"]],
     })
     file_id = await upload_content(app_client, content, "data.xlsx", TEST_XLSX_CONTENT_TYPE)
     assert temp_storage.load_manifest(file_id) is None
@@ -366,10 +363,10 @@ async def test_stage1_analyze_xlsx_defaults_to_first_sheet(
         json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
     )
 
-    # Then: samples come from the first sheet
+    # Then: analyzed columns come from the first sheet
     assert response.status_code == 200
     columns = response.json()["columns"]
-    assert columns[0]["sample_values"] == ["first-value"]
+    assert [column["column_name"] for column in columns] == ["first_col"]
 
 
 async def test_stage1_analyze_xlsx_uses_selected_sheet(
@@ -400,30 +397,6 @@ async def test_stage1_analyze_xlsx_uses_selected_sheet(
     meta = temp_storage.load(file_id)
     assert meta is not None
     assert meta.selected_sheet == "Patients"
-
-
-async def test_stage1_analyze_truncates_preview_only(
-    app_client: AsyncClient,
-    temp_storage: UploadStorage,
-) -> None:
-    """Analyze truncates preview values but not stored content."""
-
-    # Given: a CSV with very long values
-    long_value = "a" * 200
-    content = create_csv_content([["col_a"], [long_value]])
-    file_id = await upload_content(app_client, content, "long.csv")
-    assert temp_storage.load_manifest(file_id) is None
-
-    # When: analyze is requested
-    response = await app_client.post(
-        "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
-    )
-
-    # Then: sample values are truncated but file content is intact
-    assert response.status_code == 200
-    sample_value = response.json()["columns"][0]["sample_values"][0]
-    assert len(sample_value) == 80
 
 
 async def test_stage1_analyze_bom_and_non_bom_match_headers(
