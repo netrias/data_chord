@@ -584,6 +584,47 @@ test('Stage 2 empty-column filter uses full-column value presence', async ({ pag
   await expect(page.locator('#mappingRows .mapping-row')).toHaveCount(2);
 });
 
+test('Stage 2 keeps columns visible when value presence is unknown', async ({ page }) => {
+  /*
+   * Given: a stale Stage 2 payload without the newer full-column presence flag
+   * When:  Stage 2 renders with the default empty-column filter
+   * Then:  the column remains visible because unknown is not the same as empty.
+   */
+  const legacyColumn = _stage2Column('legacy_col', 'legacy_col');
+  delete legacyColumn.has_non_empty_values;
+  const payload = {
+    file_id: 'abcdef0123456789abcdef0123456789',
+    file_name: 'legacy.csv',
+    total_rows: 1,
+    columns: [legacyColumn],
+    cde_targets: {},
+    column_summaries: {
+      legacy_col: { value_overlap_ratio: null },
+    },
+    next_stage: 'mapping',
+    next_step_hint: 'Review mappings.',
+    manual_overrides: {},
+    manifest: { column_mappings: {} },
+  };
+
+  await page.addInitScript((stagePayload) => {
+    sessionStorage.setItem('stage2Payload', JSON.stringify(stagePayload));
+    sessionStorage.setItem('maxReachedStage', 'mapping');
+  }, payload);
+  await page.route('**/stage-2?**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/html',
+      body: _stage2HarnessHtml([]),
+    });
+  });
+
+  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&schema=gc&version_number=1');
+
+  await expect(page.locator('#mappingRows .mapping-row')).toHaveCount(1);
+  await expect(page.locator('#mappingRows')).toContainText('legacy_col');
+});
+
 test('Stage 2 submits selected column renames for harmonization', async ({ page }) => {
   /*
    * Given: Stage 2 has a mapped column whose CDE label differs from the source header.

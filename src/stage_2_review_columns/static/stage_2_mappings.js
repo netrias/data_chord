@@ -215,7 +215,8 @@ const _hasValues = (column) => {
   if (profile) {
     return (profile.total_distinct ?? profile.distinct_values?.length ?? 0) > 0;
   }
-  return column.has_non_empty_values === true;
+  if (typeof column.has_non_empty_values === 'boolean') return column.has_non_empty_values;
+  return true;
 };
 
 const _passesFilters = (column) => {
