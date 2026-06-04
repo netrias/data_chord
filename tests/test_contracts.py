@@ -162,7 +162,7 @@ class TestAnalyzeContract:
         app_client: AsyncClient,
         sample_csv_path: Path,
     ) -> None:
-        """Each column in response has ColumnPreview fields."""
+        """Each column in response has column summary fields."""
 
         # Given: An uploaded CSV file
         file_id = await upload_file(app_client, sample_csv_path)
@@ -173,7 +173,7 @@ class TestAnalyzeContract:
             json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
         )
 
-        # Then: Each column contains all required ColumnPreview fields
+        # Then: Each column contains all required summary fields
         columns = response.json()["columns"]
         assert len(columns) > 0
         for col in columns:
@@ -182,7 +182,7 @@ class TestAnalyzeContract:
             assert "source_index" in col
             assert "header" in col
             assert "inferred_type" in col
-            assert "sample_values" in col
+            assert "has_non_empty_values" in col
             assert "confidence_bucket" in col
             assert col["confidence_bucket"] in ("low", "medium", "high")
 

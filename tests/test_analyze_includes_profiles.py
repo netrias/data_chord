@@ -69,7 +69,7 @@ def test_analyze_response_does_not_require_full_profiles() -> None:
     """
     from src.domain.dataset_workflow_ids import dataset_workflow_id_from_string
     from src.domain.manifest import ConfidenceBucket
-    from src.stage_1_upload.schemas import AnalyzeResponse, ColumnPreview
+    from src.stage_1_upload.schemas import AnalyzeResponse, ColumnSummary
 
     # Given: no profile payload has been supplied
     profile_payload = None
@@ -81,13 +81,13 @@ def test_analyze_response_does_not_require_full_profiles() -> None:
         file_name="data.csv",
         total_rows=1,
         columns=[
-            ColumnPreview(
+            ColumnSummary(
                 column_name="diagnosis",
                 column_key="diagnosis",
                 source_index=0,
                 header="diagnosis",
                 inferred_type="text",
-                sample_values=["Lung"],
+                has_non_empty_values=True,
                 confidence_bucket=ConfidenceBucket.HIGH,
                 confidence_score=1.0,
             )
@@ -99,6 +99,31 @@ def test_analyze_response_does_not_require_full_profiles() -> None:
 
     # Then
     assert response.column_profiles == {}
+
+
+def test_analyze_marks_columns_with_late_values_as_non_empty(tmp_path: Path) -> None:
+    """
+    Given: one sparse column with later values and one fully blank column
+    When: analyze_columns builds the Stage 1 response contract
+    Then: the compact value-presence flag reflects the full dataset
+    """
+    # Given
+    csv_path = tmp_path / "late-values.csv"
+    with csv_path.open("w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["late_value", "all_blank"])
+        for _ in range(5):
+            writer.writerow(["", ""])
+        writer.writerow(["present", ""])
+
+    # When
+    _, columns, profiles = analyze_columns(csv_path)
+
+    # Then
+    by_name = {column.column_name: column for column in columns}
+    assert by_name["late_value"].has_non_empty_values is True
+    assert by_name["all_blank"].has_non_empty_values is False
+    assert profiles[by_name["late_value"].column_key].total_distinct == 1
 
 
 def test_build_column_summaries_reports_ai_rec_overlap_ratios() -> None:

@@ -1,4 +1,4 @@
-"""Pydantic models for upload metadata and column preview responses."""
+"""Pydantic models for upload metadata and analyze responses."""
 
 from __future__ import annotations
 
@@ -38,13 +38,17 @@ class AnalyzeRequest(BaseModel):
     sheet_name: str | None = None
 
 
-class ColumnPreview(BaseModel):
+class ColumnSummary(BaseModel):
+    """Small Stage 1/2 column summary."""
+
     column_name: str
     column_key: str
     source_index: int
     header: str
     inferred_type: str
-    sample_values: list[str]
+    has_non_empty_values: bool = Field(
+        description="True when the full uploaded column has at least one non-empty value.",
+    )
     confidence_bucket: ConfidenceBucket
     confidence_score: float = Field(ge=0.0, le=1.0)
 
@@ -67,7 +71,7 @@ class AnalyzeResponse(BaseModel):
     file_name: str
     target_version_number: int | None = None
     total_rows: int = Field(ge=0)
-    columns: list[ColumnPreview]
+    columns: list[ColumnSummary]
     column_profiles: dict[str, ColumnProfilePayload] = Field(default_factory=dict)
     column_summaries: dict[str, ColumnOverlapRatio] = Field(default_factory=dict)
     cde_targets: dict[str, list[ModelSuggestion]]

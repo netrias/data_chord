@@ -1,4 +1,4 @@
-"""HTTP routes for file upload and column preview."""
+"""HTTP routes for file upload and column analysis."""
 
 from .router import stage_one_router
 
