@@ -59,6 +59,7 @@ const _stage2Column = (key, header = key) => ({
   header,
   inferred_type: 'text',
   sample_values: ['Sample'],
+  has_non_empty_values: true,
   confidence_bucket: 'high',
   confidence_score: 0.9,
 });
@@ -945,7 +946,7 @@ test('version dropdown panel renders below trigger and scrolls when versions ove
   expect(geom.listScrollHeight).toBeGreaterThan(geom.listClientHeight);
 
   const items = page.locator('.data-model-dropdown--version .data-model-dropdown-item');
-  await expect(items.first()).toHaveText('v20.0');
+  await expect(items.first()).toHaveText('11.0.20');
   await expect(items.first()).toHaveAttribute('aria-selected', 'true');
 });
 
@@ -1028,14 +1029,14 @@ test('data model dropdown shares custom styling and custom dropdowns close on ou
 
   // Then: the hidden select and dependent version dropdown stay in sync.
   await expect(page.locator('#dataModelSelect')).toHaveValue('alpha');
-  await expect(page.locator('#versionDropdownTrigger')).toContainText('v3');
+  await expect(page.locator('#versionDropdownTrigger')).toContainText('11.0.3');
 
   // When: automation changes the hidden select directly.
   await page.selectOption('#dataModelSelect', 'gc');
 
   // Then: the visible custom dropdown and version list still stay in sync.
   await expect(page.locator('#dataModelDropdownTrigger')).toContainText('Genomic Cancer');
-  await expect(page.locator('#versionDropdownTrigger')).toContainText('v2');
+  await expect(page.locator('#versionDropdownTrigger')).toContainText('11.0.2');
 
   // When: a keyboard user changes the custom model dropdown.
   await page.click('#dataModelDropdownTrigger');
@@ -1045,7 +1046,7 @@ test('data model dropdown shares custom styling and custom dropdowns close on ou
   // Then: the same state sync path is used.
   await expect(page.locator('#dataModelSelect')).toHaveValue('alpha');
   await expect(page.locator('#dataModelDropdownTrigger')).toContainText('Alpha Model');
-  await expect(page.locator('#versionDropdownTrigger')).toContainText('v3');
+  await expect(page.locator('#versionDropdownTrigger')).toContainText('11.0.3');
 
   // When/Then: the version dropdown also closes when the user clicks off it.
   await page.click('#versionDropdownTrigger');

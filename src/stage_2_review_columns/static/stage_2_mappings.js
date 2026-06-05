@@ -205,7 +205,8 @@ const _mappingKindFor = (column) => {
 };
 
 // Profiles are loaded lazily (column_profiles is empty in the initial payload),
-// so fall back to sample_values from the column entry, then to detail data.
+// so use the full-column presence fact from Stage 1 before falling back to
+// preview samples for legacy browser sessions.
 const _hasValues = (column) => {
   const colKey = _columnKey(column);
   const detail = state.detailByColumn.get(colKey);
@@ -215,6 +216,9 @@ const _hasValues = (column) => {
   const profile = state.payload?.column_profiles?.[colKey];
   if (profile) {
     return (profile.total_distinct ?? profile.distinct_values?.length ?? 0) > 0;
+  }
+  if (typeof column.has_non_empty_values === 'boolean') {
+    return column.has_non_empty_values;
   }
   return (column.sample_values ?? []).some((v) => v !== '' && v != null);
 };

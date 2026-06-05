@@ -43,8 +43,6 @@ def analyze_columns(
         raise FileNotFoundError(csv_path)
 
     dataset = read_tabular(csv_path, sheet_name=sheet_name)
-    sample_rows = dataset.rows[:max_preview_rows]
-    columns = [_analyze_single_column(column, sample_rows) for column in dataset.columns]
     profiles = {
         column.key: build_column_profile(
             column.key,
@@ -52,6 +50,15 @@ def analyze_columns(
         )
         for column in dataset.columns
     }
+    sample_rows = dataset.rows[:max_preview_rows]
+    columns = [
+        _analyze_single_column(
+            column,
+            sample_rows,
+            profiles[column.key],
+        )
+        for column in dataset.columns
+    ]
     total_rows = len(dataset.rows)
     return total_rows, columns, profiles
 
@@ -127,7 +134,11 @@ def _cell_to_string(value: object) -> str:
     return str(value)
 
 
-def _analyze_single_column(column: TabularColumn, sample_rows: list[list[str]]) -> ColumnPreview:
+def _analyze_single_column(
+    column: TabularColumn,
+    sample_rows: list[list[str]],
+    profile: ColumnProfile,
+) -> ColumnPreview:
     samples = [_normalize_sample(row[column.index] if column.index < len(row) else "") for row in sample_rows]
     non_empty_values = [value for value in samples if value]
     non_empty_count = len(non_empty_values)
@@ -140,6 +151,7 @@ def _analyze_single_column(column: TabularColumn, sample_rows: list[list[str]]) 
         header=column.header,
         inferred_type=_infer_type(non_empty_values),
         sample_values=samples,
+        has_non_empty_values=profile.total_distinct > 0,
         confidence_bucket=completeness_bucket(non_empty_count, sample_size),
         confidence_score=round(non_empty_count / sample_size, 2),
     )

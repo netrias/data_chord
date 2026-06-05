@@ -68,6 +68,9 @@ class ColumnPreview(BaseModel):
     header: str
     inferred_type: str
     sample_values: list[str]
+    has_non_empty_values: bool = Field(
+        description="True when the full uploaded column has at least one non-empty value.",
+    )
     confidence_bucket: ConfidenceBucket
     confidence_score: float = Field(ge=0.0, le=1.0)
 

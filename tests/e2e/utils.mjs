@@ -111,6 +111,7 @@ export const mockAnalyze = async (page) => {
           header: 'col_a',
           inferred_type: 'text',
           sample_values: ['Foo', 'Bar'],
+          has_non_empty_values: true,
           confidence_bucket: 'high',
           confidence_score: 0.95,
         },

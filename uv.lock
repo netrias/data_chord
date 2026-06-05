@@ -370,7 +370,7 @@ requires-dist = [
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.100" },
     { name = "idna", specifier = ">=3.15" },
     { name = "jinja2", specifier = ">=3.1.4" },
-    { name = "netrias-client", git = "https://github.com/netrias/netrias_client.git?rev=30a677f9804a1c4228f76fed850324c228b4e997" },
+    { name = "netrias-client", git = "https://github.com/netrias/netrias_client.git?rev=3cde0cd7e0b97c93b7645c22ad031b479d6bed3a" },
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "pip", marker = "extra == 'dev'", specifier = ">=26.1" },
     { name = "pip-audit", marker = "extra == 'dev'", specifier = ">=2.7" },
@@ -720,7 +720,7 @@ wheels = [
 [[package]]
 name = "netrias-client"
 version = "0.6.0"
-source = { git = "https://github.com/netrias/netrias_client.git?rev=30a677f9804a1c4228f76fed850324c228b4e997#30a677f9804a1c4228f76fed850324c228b4e997" }
+source = { git = "https://github.com/netrias/netrias_client.git?rev=3cde0cd7e0b97c93b7645c22ad031b479d6bed3a#3cde0cd7e0b97c93b7645c22ad031b479d6bed3a" }
 dependencies = [
     { name = "boto3" },
     { name = "cryptography" },
