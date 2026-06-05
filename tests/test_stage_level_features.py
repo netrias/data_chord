@@ -612,11 +612,21 @@ async def test_stage2_mapping_page_recovers_selected_model_from_workflow_state(
     assert response.status_code == 200
     assert 'targetSchema: "gc"' in response.text
     assert 'targetExternalVersionNumber: "11.0.4"' in response.text
+    assert "stage_2_mappings.js?v=" in response.text
     mock_netrias_client.list_cdes.assert_called_with(
         model_key="gc",
         version="11.0.4",
         include_description=True,
     )
+
+
+async def test_static_assets_require_browser_revalidation(app_client: AsyncClient) -> None:
+    """Deployed browsers must not keep stale stage JavaScript across releases."""
+
+    response = await app_client.get("/assets/stage-2/stage_2_mappings.js?v=test-release")
+
+    assert response.status_code == 200
+    assert "must-revalidate" in response.headers["Cache-Control"]
 
 
 async def test_stage3_harmonize_prefers_stored_selection_over_stale_request(

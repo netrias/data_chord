@@ -633,6 +633,10 @@ resource "aws_ecs_task_definition" "app" {
           value = "3600"
         },
         {
+          name  = "DATA_CHORD_ASSET_VERSION"
+          value = var.image_tag
+        },
+        {
           name  = "DATA_CHORD_ALB_ARN"
           value = aws_lb.app.arn
         },

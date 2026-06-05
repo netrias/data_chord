@@ -41,20 +41,29 @@ from src.stage_5_review_summary.router import stage_five_router
 
 APP_TITLE = "Data Chord"
 APP_DESCRIPTION = "Data harmonization workflow bootstrap application."
+_DEFAULT_ASSET_VERSION = "local"
+_ASSET_VERSION_VAR = "DATA_CHORD_ASSET_VERSION"
 
 
 def _is_dev_mode() -> bool:
     return os.getenv("DEV_MODE", "").lower() == "true"
 
 
-class DevStaticFiles(StaticFiles):
-    """Disable browser caching in dev mode so JS/CSS changes appear immediately."""
+class AppStaticFiles(StaticFiles):
+    """Keep deployed browsers from running stale stage JavaScript after rollout."""
 
     async def get_response(self, path: str, scope: Scope) -> Response:
         response = await super().get_response(path, scope)
         if _is_dev_mode():
             response.headers["Cache-Control"] = "no-store, must-revalidate"
+        else:
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
         return response
+
+
+def _asset_version() -> str:
+    version = os.getenv(_ASSET_VERSION_VAR, _DEFAULT_ASSET_VERSION).strip()
+    return version or _DEFAULT_ASSET_VERSION
 
 
 def _should_skip_env_line(line: str) -> bool:
@@ -115,6 +124,7 @@ def create_app() -> FastAPI:
     validate_required_config()
 
     app = FastAPI(title=APP_TITLE, description=APP_DESCRIPTION, lifespan=_lifespan)
+    app.state.asset_version = _asset_version()
 
     app.add_middleware(
         CORSMiddleware,
@@ -133,12 +143,12 @@ def create_app() -> FastAPI:
     app.include_router(stage_four_router)
     app.include_router(stage_five_router)
 
-    app.mount("/assets/shared", DevStaticFiles(directory=str(SHARED_STATIC_DIR)), name="shared_static")
+    app.mount("/assets/shared", AppStaticFiles(directory=str(SHARED_STATIC_DIR)), name="shared_static")
     stage_name_map = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five"}
     for stage in range(1, 6):
         app.mount(
             f"/assets/stage-{stage}",
-            DevStaticFiles(directory=str(get_stage_static_dir(stage))),
+            AppStaticFiles(directory=str(get_stage_static_dir(stage))),
             name=f"stage_{stage_name_map[stage]}_static",
         )
 

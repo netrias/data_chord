@@ -4,10 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Data Chord · Harmonize</title>
-    <link rel="stylesheet" href="/assets/shared/tokens.css" />
-    <link rel="stylesheet" href="{{ request.url_for('stage_three_static', path='stage_3_harmonize.css') }}" />
+    <link rel="stylesheet" href="/assets/shared/tokens.css?v={{ request.app.state.asset_version }}" />
+    <link rel="stylesheet" href="{{ request.url_for('stage_three_static', path='stage_3_harmonize.css') }}?v={{ request.app.state.asset_version }}" />
     <!-- Animation CSS loaded separately - page works without it -->
-    <link rel="stylesheet" href="{{ request.url_for('stage_three_static', path='harmonize-animation.css') }}" />
+    <link rel="stylesheet" href="{{ request.url_for('stage_three_static', path='harmonize-animation.css') }}?v={{ request.app.state.asset_version }}" />
   </head>
   <body>
     <nav class="progress-tracker">
@@ -135,6 +135,6 @@
         stageTwoUrl: "{{ request.url_for('stage_two_mapping_page') }}",
       };
     </script>
-    <script type="module" src="{{ request.url_for('stage_three_static', path='stage_3_harmonize.js') }}"></script>
+    <script type="module" src="{{ request.url_for('stage_three_static', path='stage_3_harmonize.js') }}?v={{ request.app.state.asset_version }}"></script>
   </body>
 </html>

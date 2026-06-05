@@ -4,9 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Data Chord · Review Harmonization</title>
-    <link rel="stylesheet" href="/assets/shared/tokens.css" />
-    <link rel="stylesheet" href="{{ request.url_for('stage_one_static', path='stage_1_upload.css') }}" />
-    <link rel="stylesheet" href="{{ request.url_for('stage_four_static', path='stage_4_review.css') }}" />
+    <link rel="stylesheet" href="/assets/shared/tokens.css?v={{ request.app.state.asset_version }}" />
+    <link rel="stylesheet" href="{{ request.url_for('stage_one_static', path='stage_1_upload.css') }}?v={{ request.app.state.asset_version }}" />
+    <link rel="stylesheet" href="{{ request.url_for('stage_four_static', path='stage_4_review.css') }}?v={{ request.app.state.asset_version }}" />
   </head>
   <body>
     <nav class="progress-tracker">
@@ -145,6 +145,6 @@
     </script>
     <!-- Clusterize.js for virtualized table rendering in row context popup -->
     <script src="https://cdn.jsdelivr.net/npm/clusterize.js@0.19.0/clusterize.min.js"></script>
-    <script type="module" src="{{ request.url_for('stage_four_static', path='stage_4_review.js') }}"></script>
+    <script type="module" src="{{ request.url_for('stage_four_static', path='stage_4_review.js') }}?v={{ request.app.state.asset_version }}"></script>
   </body>
 </html>
