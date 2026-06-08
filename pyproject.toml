@@ -33,7 +33,7 @@ dev = [
     "httpx>=0.27",
     "bandit>=1.7",
     "pip-audit>=2.7",
-    "pip>=26.1",  # CVE remediation for the audited virtualenv pip package
+    "pip>=26.1.2",  # CVE remediation for the audited virtualenv pip package
     "pre-commit>=3.8",
     "pytest-playwright>=0.6.2",
     # transitive dep pin for security (CVE remediation)
