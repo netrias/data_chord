@@ -70,7 +70,7 @@ async def test_full_flow_no_changes_produces_zero_summary(
     assert temp_storage.load_manifest(file_id) is None
     analyze_response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
     assert analyze_response.status_code == 200
 
@@ -79,8 +79,8 @@ async def test_full_flow_no_changes_produces_zero_summary(
         "/stage-3/harmonize",
         json={
             "file_id": file_id,
-            "target_schema": TEST_TARGET_SCHEMA,
-            "target_external_version_number": "11.0.4",
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
             "manual_overrides": {},
         },
     )
@@ -115,7 +115,7 @@ async def test_full_flow_overrides_propagate_within_column(
     assert temp_storage.load_manifest(file_id) is None
     analyze_response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
     assert analyze_response.status_code == 200
 
@@ -124,8 +124,8 @@ async def test_full_flow_overrides_propagate_within_column(
         "/stage-3/harmonize",
         json={
             "file_id": file_id,
-            "target_schema": TEST_TARGET_SCHEMA,
-            "target_external_version_number": "11.0.4",
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
             "manual_overrides": {},
         },
     )
@@ -188,15 +188,15 @@ async def test_full_flow_two_files_isolated_overrides(
     for file_id in (file_one, file_two):
         analyze_response = await app_client.post(
             "/stage-1/analyze",
-            json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+            json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
         )
         assert analyze_response.status_code == 200
         harmonize_response = await app_client.post(
             "/stage-3/harmonize",
             json={
                 "file_id": file_id,
-                "target_schema": TEST_TARGET_SCHEMA,
-                "target_external_version_number": "11.0.4",
+                "data_model_key": TEST_TARGET_SCHEMA,
+                "external_version_number": "11.0.4",
                 "manual_overrides": {},
             },
         )
@@ -242,15 +242,15 @@ async def test_full_flow_reharmonize_clears_overrides(
     assert temp_storage.load_manifest(file_id) is None
     analyze_response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
     assert analyze_response.status_code == 200
     harmonize_response = await app_client.post(
         "/stage-3/harmonize",
         json={
             "file_id": file_id,
-            "target_schema": TEST_TARGET_SCHEMA,
-            "target_external_version_number": "11.0.4",
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
             "manual_overrides": {},
         },
     )
@@ -276,8 +276,8 @@ async def test_full_flow_reharmonize_clears_overrides(
         "/stage-3/harmonize",
         json={
             "file_id": file_id,
-            "target_schema": TEST_TARGET_SCHEMA,
-            "target_external_version_number": "11.0.4",
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
             "manual_overrides": {},
         },
     )
@@ -309,7 +309,7 @@ async def test_reharmonize_cannot_clear_another_users_overrides(
     analyze_response = await app_client.post(
         "/stage-1/analyze",
         headers=alice_headers,
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
     assert analyze_response.status_code == 200
     harmonize_response = await app_client.post(
@@ -317,8 +317,8 @@ async def test_reharmonize_cannot_clear_another_users_overrides(
         headers=alice_headers,
         json={
             "file_id": file_id,
-            "target_schema": TEST_TARGET_SCHEMA,
-            "target_external_version_number": "11.0.4",
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
             "manual_overrides": {},
         },
     )
@@ -346,8 +346,8 @@ async def test_reharmonize_cannot_clear_another_users_overrides(
         headers=bob_headers,
         json={
             "file_id": file_id,
-            "target_schema": TEST_TARGET_SCHEMA,
-            "target_external_version_number": "11.0.4",
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
             "manual_overrides": {},
         },
     )
@@ -430,15 +430,15 @@ async def test_full_flow_bom_overrides_apply(
     assert temp_storage.load_manifest(file_id) is None
     analyze_response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
     assert analyze_response.status_code == 200
     harmonize_response = await app_client.post(
         "/stage-3/harmonize",
         json={
             "file_id": file_id,
-            "target_schema": TEST_TARGET_SCHEMA,
-            "target_external_version_number": "11.0.4",
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
             "manual_overrides": {},
         },
     )
@@ -496,7 +496,7 @@ async def test_full_flow_duplicate_headers_keep_columns_separate(
     file_id = await upload_content(app_client, create_csv_content(rows), "duplicate-headers.csv")
     analyze_response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
     assert analyze_response.status_code == 200
     analyzed_columns = analyze_response.json()["columns"]

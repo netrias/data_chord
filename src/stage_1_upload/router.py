@@ -85,7 +85,7 @@ async def render_stage_one(request: Request) -> HTMLResponse:
     context = {
         "request": request,
         "ui_constraints": describe_constraints(_upload_constraints),
-        "default_schema": None,
+        "default_data_model_key": None,
     }
     return _templates.TemplateResponse(request, "stage_1_upload.html", context)
 
@@ -196,8 +196,8 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
             outcome=WorkflowOutcome.STARTED,
             file_id=payload.file_id,
             metadata={
-                "target_schema": payload.target_schema,
-                "target_external_version_number": payload.target_external_version_number,
+                "data_model_key": payload.data_model_key,
+                "external_version_number": payload.external_version_number,
             },
         ),
         user,
@@ -295,7 +295,7 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     return AnalyzeResponse(
         file_id=meta.file_id,
         file_name=meta.original_name,
-        target_external_version_number=data_model_version.external_version_number,
+        external_version_number=data_model_version.external_version_number,
         total_rows=total_rows,
         columns=columns,
         column_summaries=column_summaries,
@@ -361,8 +361,8 @@ async def _discover_mappings(
             outcome=WorkflowOutcome.STARTED,
             file_id=file_id,
             metadata={
-                "target_schema": data_model_version.data_model_key,
-                "target_external_version_number": data_model_version.external_version_number,
+                "data_model_key": data_model_version.data_model_key,
+                "external_version_number": data_model_version.external_version_number,
             },
         ),
         user,

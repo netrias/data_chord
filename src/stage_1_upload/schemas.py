@@ -34,14 +34,14 @@ class UploadResponse(BaseModel):
 
 class AnalyzeRequest(BaseModel):
     file_id: DatasetWorkflowIdField
-    target_schema: str = Field(..., min_length=1)
-    target_external_version_number: str = Field(..., min_length=1)
+    data_model_key: str = Field(..., min_length=1)
+    external_version_number: str = Field(..., min_length=1)
     sheet_name: str | None = None
 
     def data_model_version(self) -> DataModelVersionReference:
         return DataModelVersionReference(
-            data_model_key=self.target_schema,
-            external_version_number=self.target_external_version_number,
+            data_model_key=self.data_model_key,
+            external_version_number=self.external_version_number,
         )
 
 
@@ -76,7 +76,7 @@ class AnalyzeResponse(BaseModel):
 
     file_id: DatasetWorkflowIdField
     file_name: str
-    target_external_version_number: str
+    external_version_number: str
     total_rows: int = Field(ge=0)
     columns: list[ColumnSummary]
     column_profiles: dict[str, ColumnProfilePayload] = Field(default_factory=dict)

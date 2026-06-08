@@ -143,7 +143,7 @@ class TestAnalyzeContract:
         # When: The file is analyzed
         response = await app_client.post(
             "/stage-1/analyze",
-            json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+            json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
         )
 
         # Then: Response contains all required AnalyzeResponse fields
@@ -170,7 +170,7 @@ class TestAnalyzeContract:
         # When: The file is analyzed
         response = await app_client.post(
             "/stage-1/analyze",
-            json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+            json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
         )
 
         # Then: Each column contains all required summary fields
@@ -209,7 +209,7 @@ class TestAnalyzeContract:
         # When: The file is analyzed
         response = await app_client.post(
             "/stage-1/analyze",
-            json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+            json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
         )
 
         # Then: Column type is correctly inferred (numeric, date, or text)
@@ -240,7 +240,7 @@ class TestAnalyzeContract:
         # When: The file is analyzed
         response = await app_client.post(
             "/stage-1/analyze",
-            json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+            json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
         )
 
         # Then: Confidence bucket reflects data quality (high/medium/low)
@@ -263,7 +263,7 @@ class TestHarmonizeContract:
         file_id = await upload_file(app_client, sample_csv_path)
         await app_client.post(
             "/stage-1/analyze",
-            json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+            json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
         )
 
         # When: Harmonization is triggered
@@ -271,8 +271,8 @@ class TestHarmonizeContract:
             "/stage-3/harmonize",
             json={
                 "file_id": file_id,
-                "target_schema": TEST_TARGET_SCHEMA,
-                "target_external_version_number": "11.0.4",
+                "data_model_key": TEST_TARGET_SCHEMA,
+                "external_version_number": "11.0.4",
                 "manual_overrides": {},
             },
         )
@@ -297,7 +297,7 @@ class TestHarmonizeContract:
         file_id = await upload_file(app_client, sample_csv_path)
         await app_client.post(
             "/stage-1/analyze",
-            json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+            json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
         )
 
         # When: Harmonization is triggered
@@ -305,8 +305,8 @@ class TestHarmonizeContract:
             "/stage-3/harmonize",
             json={
                 "file_id": file_id,
-                "target_schema": TEST_TARGET_SCHEMA,
-                "target_external_version_number": "11.0.4",
+                "data_model_key": TEST_TARGET_SCHEMA,
+                "external_version_number": "11.0.4",
                 "manual_overrides": {},
             },
         )
@@ -401,8 +401,8 @@ class TestRowsContract:
             {
                 "file_id": file_id,
                 "generated_at": "2026-06-02T00:00:00+00:00",
-                "target_schema": TEST_TARGET_SCHEMA,
-                "target_version": "1",
+                "data_model_key": TEST_TARGET_SCHEMA,
+                "external_version_number": "1",
                 "mappings": [{
                     "column_key": "col_0000",
                     "source_column_name": "col_a",

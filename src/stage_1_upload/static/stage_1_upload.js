@@ -542,11 +542,11 @@ const _persistStageTwoPayload = (payload) => {
   writeToSession(STAGE_2_PAYLOAD_KEY, payload);
 };
 
-const _navigateToStageTwo = (fileId, targetSchema, targetExternalVersionNumber, payload) => {
+const _navigateToStageTwo = (fileId, dataModelKey, externalVersionNumber, payload) => {
   _persistStageTwoPayload(payload);
   advanceMaxReachedStage('mapping');
-  const search = new URLSearchParams({ file_id: fileId, schema: targetSchema });
-  if (targetExternalVersionNumber) search.set('external_version_number', targetExternalVersionNumber);
+  const search = new URLSearchParams({ file_id: fileId, data_model_key: dataModelKey });
+  if (externalVersionNumber) search.set('external_version_number', externalVersionNumber);
   window.location.assign(`/stage-2?${search.toString()}`);
 };
 
@@ -583,8 +583,8 @@ const _analyzeDataset = async () => {
         },
         body: JSON.stringify({
           file_id: state.uploaded.file_id,
-          target_schema: selection.dataModelKey,
-          target_external_version_number: selection.externalVersionNumber,
+          data_model_key: selection.dataModelKey,
+          external_version_number: selection.externalVersionNumber,
           sheet_name: state.selectedSheet,
         }),
       });

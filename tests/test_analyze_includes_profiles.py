@@ -106,7 +106,7 @@ def test_analyze_response_does_not_require_full_profiles() -> None:
     response = AnalyzeResponse(
         file_id=dataset_workflow_id_from_string("abcdef0123456789abcdef0123456789"),
         file_name="data.csv",
-        target_external_version_number="11.0.4",
+        external_version_number="11.0.4",
         total_rows=1,
         columns=[
             ColumnSummary(

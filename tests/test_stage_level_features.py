@@ -215,7 +215,7 @@ async def test_stage1_analyze_rejects_invalid_utf8(
     # When: analyze is requested
     response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
 
     # Then: bad request is returned
@@ -236,7 +236,7 @@ async def test_stage1_analyze_handles_quoted_commas(
     # When: analyze is requested
     response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
 
     # Then: analyze succeeds and summarizes the column
@@ -260,7 +260,7 @@ async def test_stage1_analyze_handles_ragged_rows(
     # When: analyze is requested
     response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
 
     # Then: the full-column confidence reflects the missing cell
@@ -284,7 +284,7 @@ async def test_stage1_analyze_accepts_duplicate_headers_with_distinct_column_key
     # When: analyze is requested
     response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
 
     # Then: both duplicate columns are present and independently addressable
@@ -308,7 +308,7 @@ async def test_stage1_analyze_accepts_blank_middle_header_by_column_position(
     # When: analyze is requested
     response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
 
     # Then: the blank display name is allowed and the source column remains addressable by key
@@ -333,7 +333,7 @@ async def test_stage1_analyze_accepts_tsv(
     # When: analyze is requested
     response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
 
     # Then: tab-separated columns are parsed
@@ -359,7 +359,7 @@ async def test_stage1_analyze_xlsx_defaults_to_first_sheet(
     # When: analyze is requested without a sheet override
     response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
 
     # Then: analyzed columns come from the first sheet
@@ -387,8 +387,8 @@ async def test_stage1_analyze_xlsx_uses_selected_sheet(
         "/stage-1/analyze",
         json={
             "file_id": file_id,
-            "target_schema": TEST_TARGET_SCHEMA,
-            "target_external_version_number": "11.0.4",
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
             "sheet_name": "Patients",
         },
     )
@@ -422,16 +422,16 @@ async def test_stage1_analyze_bom_and_non_bom_match_headers(
         "/stage-1/analyze",
         json={
             "file_id": bom_file_id,
-            "target_schema": TEST_TARGET_SCHEMA,
-            "target_external_version_number": "11.0.4",
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
         },
     )
     non_bom_response = await app_client.post(
         "/stage-1/analyze",
         json={
             "file_id": non_bom_file_id,
-            "target_schema": TEST_TARGET_SCHEMA,
-            "target_external_version_number": "11.0.4",
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
         },
     )
 
@@ -456,7 +456,7 @@ async def test_stage1_analyze_handles_bom_headers(
     # When: the file is analyzed
     response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
 
     # Then: column names do not include BOM characters
@@ -479,11 +479,11 @@ async def test_stage1_analyze_is_idempotent(
     # When: the file is analyzed twice
     response_one = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
     response_two = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
 
     # Then: manifest and API outputs remain stable
@@ -513,14 +513,14 @@ async def test_stage1_analyze_uses_selected_version_and_primes_reference_cache(
         "/stage-1/analyze",
         json={
             "file_id": file_id,
-            "target_schema": "gc",
-            "target_external_version_number": "11.0.4",
+            "data_model_key": "gc",
+            "external_version_number": "11.0.4",
         },
     )
 
     # Then: discovery and the session cache use the selected external version
     assert response.status_code == 200
-    assert response.json()["target_external_version_number"] == "11.0.4"
+    assert response.json()["external_version_number"] == "11.0.4"
     assert mock_netrias_client.discover_mapping_from_tabular.call_args.kwargs["target_version"] == "11.0.4"
     data_model_version = cache.get_data_model_version()
     assert data_model_version is not None
@@ -544,8 +544,8 @@ async def test_stage1_analyze_persists_selected_data_model_version(
         "/stage-1/analyze",
         json={
             "file_id": file_id,
-            "target_schema": "gc",
-            "target_external_version_number": "11.0.4",
+            "data_model_key": "gc",
+            "external_version_number": "11.0.4",
         },
     )
 
@@ -570,8 +570,8 @@ async def test_stage2_mapping_page_recovers_selected_model_from_workflow_state(
         "/stage-1/analyze",
         json={
             "file_id": file_id,
-            "target_schema": "gc",
-            "target_external_version_number": "11.0.4",
+            "data_model_key": "gc",
+            "external_version_number": "11.0.4",
         },
     )
     assert analyze_response.status_code == 200
@@ -583,8 +583,8 @@ async def test_stage2_mapping_page_recovers_selected_model_from_workflow_state(
 
     # Then: the page uses the stored selection to rebuild CDE options
     assert response.status_code == 200
-    assert 'targetSchema: "gc"' in response.text
-    assert 'targetExternalVersionNumber: "11.0.4"' in response.text
+    assert 'dataModelKey: "gc"' in response.text
+    assert 'externalVersionNumber: "11.0.4"' in response.text
     assert "stage_2_mappings.js?v=" in response.text
     mock_netrias_client.list_cdes.assert_called_with(
         model_key="gc",
@@ -635,8 +635,8 @@ async def test_stage3_harmonize_prefers_stored_selection_over_stale_request(
         "/stage-1/analyze",
         json={
             "file_id": file_id,
-            "target_schema": "gc",
-            "target_external_version_number": "11.0.4",
+            "data_model_key": "gc",
+            "external_version_number": "11.0.4",
         },
     )
     assert analyze_response.status_code == 200
@@ -650,8 +650,8 @@ async def test_stage3_harmonize_prefers_stored_selection_over_stale_request(
             "/stage-3/harmonize",
             json={
                 "file_id": file_id,
-                "target_schema": "stale-model",
-                "target_external_version_number": "99.0.0",
+                "data_model_key": "stale-model",
+                "external_version_number": "99.0.0",
                 "manual_overrides": {},
             },
         )
@@ -688,7 +688,7 @@ async def test_stage3_harmonize_returns_queued_while_long_job_finishes(
     file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "slow-stage3.csv")
     analyze_response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": "gc", "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": "gc", "external_version_number": "11.0.4"},
     )
     assert analyze_response.status_code == 200
 
@@ -700,8 +700,8 @@ async def test_stage3_harmonize_returns_queued_while_long_job_finishes(
             "/stage-3/harmonize",
             json={
                 "file_id": file_id,
-                "target_schema": "gc",
-                "target_external_version_number": "11.0.4",
+                "data_model_key": "gc",
+                "external_version_number": "11.0.4",
                 "manual_overrides": {},
             },
         )
@@ -752,7 +752,7 @@ async def test_stage3_job_status_recovers_from_durable_state_after_cache_loss(
     file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "durable-stage3.csv")
     analyze_response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": "gc", "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": "gc", "external_version_number": "11.0.4"},
     )
     assert analyze_response.status_code == 200
     assert _load_json_artifact(file_id, WorkflowFile.STAGE_THREE_JOB) is None
@@ -764,8 +764,8 @@ async def test_stage3_job_status_recovers_from_durable_state_after_cache_loss(
             "/stage-3/harmonize",
             json={
                 "file_id": file_id,
-                "target_schema": "gc",
-                "target_external_version_number": "11.0.4",
+                "data_model_key": "gc",
+                "external_version_number": "11.0.4",
                 "manual_overrides": {},
             },
         )
@@ -800,7 +800,7 @@ async def test_stage2_saves_confirmed_mapping_choices_to_workflow_state(
     file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "mapping-choices.csv")
     analyze_response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": "gc", "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": "gc", "external_version_number": "11.0.4"},
     )
     assert analyze_response.status_code == 200
     state = _load_workflow_state(file_id)
@@ -884,7 +884,7 @@ async def test_stage3_harmonize_prefers_stored_mapping_choices_over_stale_reques
     file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "stage3-choices.csv")
     analyze_response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": "gc", "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": "gc", "external_version_number": "11.0.4"},
     )
     assert analyze_response.status_code == 200
     choices_response = await app_client.post(
@@ -906,8 +906,8 @@ async def test_stage3_harmonize_prefers_stored_mapping_choices_over_stale_reques
             "/stage-3/harmonize",
             json={
                 "file_id": file_id,
-                "target_schema": "stale-model",
-                "target_external_version_number": "99.0.0",
+                "data_model_key": "stale-model",
+                "external_version_number": "99.0.0",
                 "manual_overrides": {"col_0000": "therapeutic_agents"},
                 "column_renames": {"col_0000": "Stale Name"},
             },
@@ -977,7 +977,7 @@ async def test_stage3_applies_confirmed_column_renames_to_download(
     file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "renamed-flow.csv")
     analyze_response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
     assert analyze_response.status_code == 200
     choices_response = await app_client.post(
@@ -998,8 +998,8 @@ async def test_stage3_applies_confirmed_column_renames_to_download(
             "/stage-3/harmonize",
             json={
                 "file_id": file_id,
-                "target_schema": TEST_TARGET_SCHEMA,
-                "target_external_version_number": "11.0.4",
+                "data_model_key": TEST_TARGET_SCHEMA,
+                "external_version_number": "11.0.4",
                 "manual_overrides": {},
                 "column_renames": {},
             },
@@ -1085,7 +1085,7 @@ async def test_stage3_column_renames_propagate_when_output_name_matches_existing
     )
     analyze_response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
     assert analyze_response.status_code == 200
     choices_response = await app_client.post(
@@ -1106,8 +1106,8 @@ async def test_stage3_column_renames_propagate_when_output_name_matches_existing
             "/stage-3/harmonize",
             json={
                 "file_id": file_id,
-                "target_schema": TEST_TARGET_SCHEMA,
-                "target_external_version_number": "11.0.4",
+                "data_model_key": TEST_TARGET_SCHEMA,
+                "external_version_number": "11.0.4",
                 "manual_overrides": {},
                 "column_renames": {},
             },
@@ -1170,8 +1170,8 @@ async def test_stage3_persists_cde_mapping_download_artifact(
         "/stage-3/harmonize",
         json={
             "file_id": file_id,
-            "target_schema": TEST_TARGET_SCHEMA,
-            "target_external_version_number": "11.0.4",
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
             "manual_overrides": {"col_0001": "primary_diagnosis"},
             "column_renames": {"col_0001": "Treatment Diagnosis"},
             "manifest": manifest,
@@ -1205,9 +1205,9 @@ async def test_stage2_mapping_page_renders_manual_options(
         external_version_number="11.0.4",
     )
 
-    # When: the mapping page is requested with schema query param
+    # When: the mapping page is requested with data model version query params
     response = await app_client.get(
-        f"/stage-2?file_id={file_id}&schema=test-data-model&external_version_number=11.0.4"
+        f"/stage-2?file_id={file_id}&data_model_key=test-data-model&external_version_number=11.0.4"
     )
 
     # Then: the page renders and includes CDE labels
@@ -1215,18 +1215,18 @@ async def test_stage2_mapping_page_renders_manual_options(
     assert "primary_diagnosis" in response.text
 
 
-async def test_stage2_mapping_page_includes_default_schema(
+async def test_stage2_mapping_page_includes_default_data_model_key(
     app_client: AsyncClient,
 ) -> None:
-    """Stage 2 mapping page renders the schema from query param."""
+    """Stage 2 mapping page renders the data model key from query param."""
 
     # Given: the mapping page has not been loaded yet
-    # When: the mapping page is requested with schema query param
-    response = await app_client.get("/stage-2?schema=test-data-model")
+    # When: the mapping page is requested with data model key query param
+    response = await app_client.get("/stage-2?data_model_key=test-data-model")
 
-    # Then: the schema is embedded for client-side use
+    # Then: the data model key is embedded for client-side use
     assert response.status_code == 200
-    assert 'targetSchema: "test-data-model"' in response.text
+    assert 'dataModelKey: "test-data-model"' in response.text
 
 
 async def test_stage3_harmonize_uses_stored_manifest_when_payload_missing(
@@ -1270,8 +1270,8 @@ async def test_stage3_harmonize_uses_stored_manifest_when_payload_missing(
             "/stage-3/harmonize",
             json={
                 "file_id": file_id,
-                "target_schema": TEST_TARGET_SCHEMA,
-                "target_external_version_number": "11.0.4",
+                "data_model_key": TEST_TARGET_SCHEMA,
+                "external_version_number": "11.0.4",
                 "manual_overrides": {},
             },
         )
@@ -1336,8 +1336,8 @@ async def test_stage3_harmonize_prefers_stored_manifest_over_payload_manifest(
             "/stage-3/harmonize",
             json={
                 "file_id": file_id,
-                "target_schema": TEST_TARGET_SCHEMA,
-                "target_external_version_number": "11.0.4",
+                "data_model_key": TEST_TARGET_SCHEMA,
+                "external_version_number": "11.0.4",
                 "manual_overrides": {},
                 "manifest": payload_manifest,
             },
@@ -1498,8 +1498,8 @@ async def test_stage5_download_includes_cde_mapping_artifact(
         {
             "file_id": file_id,
             "generated_at": "2026-05-13T00:00:00+00:00",
-            "target_schema": TEST_TARGET_SCHEMA,
-            "target_version": "1",
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "1",
             "mappings": [{"column_key": "col_0000", "source_column_name": "col_a"}],
         },
     )
@@ -1561,8 +1561,8 @@ async def test_stage5_download_xlsx_input_exports_xlsx_selected_sheet(
         "/stage-1/analyze",
         json={
             "file_id": file_id,
-            "target_schema": TEST_TARGET_SCHEMA,
-            "target_external_version_number": "11.0.4",
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
             "sheet_name": "Patients",
         },
     )

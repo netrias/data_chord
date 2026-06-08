@@ -74,8 +74,8 @@ class CdeMappingDocument:
 
     dataset_workflow_id: DatasetWorkflowId
     generated_at: datetime
-    target_schema: str
-    target_version: str
+    data_model_key: str
+    external_version_number: str
     mappings: list[CdeMappingEntry]
 
     def to_store(self) -> dict[str, object]:
@@ -135,8 +135,8 @@ class CdeMappingDocumentStore(BaseModel):
 
     file_id: StrictStr | None = None
     generated_at: StrictStr | None = None
-    target_schema: StrictStr | None = None
-    target_version: StrictStr | None = None
+    data_model_key: StrictStr | None = None
+    external_version_number: StrictStr | None = None
     mappings: list[CdeMappingEntryStore] = Field(default_factory=list)
 
     @field_validator("mappings", mode="before")
@@ -157,8 +157,8 @@ class CdeMappingDocumentStore(BaseModel):
         return cls(
             file_id=str(document.dataset_workflow_id),
             generated_at=document.generated_at.isoformat(),
-            target_schema=document.target_schema,
-            target_version=document.target_version,
+            data_model_key=document.data_model_key,
+            external_version_number=document.external_version_number,
             mappings=[CdeMappingEntryStore.from_domain(entry) for entry in document.mappings],
         )
 
@@ -187,8 +187,8 @@ def save_cde_mapping_document(
     document = CdeMappingDocument(
         dataset_workflow_id=dataset_workflow_id,
         generated_at=datetime.now(UTC),
-        target_schema=data_model_version.data_model_key,
-        target_version=data_model_version.external_version_number,
+        data_model_key=data_model_version.data_model_key,
+        external_version_number=data_model_version.external_version_number,
         mappings=_build_entries(manifest, column_overrides, column_renames, columns, cache),
     )
     storage = dependencies.get_workflow_storage()

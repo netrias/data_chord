@@ -42,7 +42,7 @@ async def test_upload_to_analyze_journey(
     # When: User analyzes the uploaded file for column mappings
     analyze_response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
 
     # Then: Analysis returns column info, CDE suggestions, and manifest
@@ -69,7 +69,7 @@ async def test_analyze_to_harmonize_journey(
 
     analyze_response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
     manifest = analyze_response.json()["manifest"]
 
@@ -78,8 +78,8 @@ async def test_analyze_to_harmonize_journey(
         "/stage-3/harmonize",
         json={
             "file_id": file_id,
-            "target_schema": TEST_TARGET_SCHEMA,
-            "target_external_version_number": "11.0.4",
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
                 "manual_overrides": {},
             "manifest": manifest,
         },
@@ -189,7 +189,7 @@ async def test_full_pipeline_journey(
     # When: User analyzes the uploaded file
     analyze_response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
     # Then: Analysis succeeds with manifest
     assert analyze_response.status_code == 200
@@ -201,8 +201,8 @@ async def test_full_pipeline_journey(
         "/stage-3/harmonize",
         json={
             "file_id": file_id,
-            "target_schema": TEST_TARGET_SCHEMA,
-            "target_external_version_number": "11.0.4",
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
                 "manual_overrides": {},
             "manifest": manifest,
         },

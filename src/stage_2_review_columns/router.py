@@ -46,12 +46,12 @@ stage_two_router = APIRouter(tags=["Stage 2 Mapping"])
 async def render_stage_two(
     request: Request,
     file_id: Annotated[DatasetWorkflowIdField | None, Query()] = None,
-    schema: Annotated[str | None, Query(min_length=1)] = None,
+    data_model_key: Annotated[str | None, Query(min_length=1)] = None,
     external_version_number: Annotated[str | None, Query(min_length=1)] = None,
 ) -> HTMLResponse:
     cde_catalog: list[CDEInfo] = []
     try:
-        data_model_version = _data_model_version_for_request(file_id, schema, external_version_number)
+        data_model_version = _data_model_version_for_request(file_id, data_model_key, external_version_number)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -60,7 +60,7 @@ async def render_stage_two(
 
     context = {
         "request": request,
-        "default_schema": data_model_version.data_model_key if data_model_version else schema or "",
+        "default_data_model_key": data_model_version.data_model_key if data_model_version else data_model_key or "",
         "default_external_version_number": (
             data_model_version.external_version_number
             if data_model_version
@@ -74,7 +74,7 @@ async def render_stage_two(
 
 def _data_model_version_for_request(
     file_id: str | None,
-    target_schema: str | None,
+    data_model_key: str | None,
     external_version_number: str | None,
 ) -> DataModelVersionReference | None:
     if file_id:
@@ -85,11 +85,11 @@ def _data_model_version_for_request(
         )
         if state is not None:
             return state.data_model_version
-    if target_schema is None:
+    if data_model_key is None:
         return None
     if external_version_number is not None:
         return DataModelVersionReference(
-            data_model_key=target_schema,
+            data_model_key=data_model_key,
             external_version_number=external_version_number,
         )
     return None

@@ -108,8 +108,8 @@ const _stage2HarnessHtml = (cdeCatalog) => `
       window.stageTwoConfig = {
         analyzeEndpoint: "/stage-1/analyze",
         columnDetailBase: "/stage-2/column-detail",
-        targetSchema: "gc",
-        targetExternalVersionNumber: "11.0.4",
+        dataModelKey: "gc",
+        externalVersionNumber: "11.0.4",
         cdeCatalog: ${JSON.stringify(cdeCatalog)},
         noMappingLabel: "No Mapping",
         stageThreeUrl: "/stage-3"
@@ -380,7 +380,7 @@ test('Stage 2 splits picker sections by mapping kind', async ({ page }) => {
     });
   });
 
-  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&schema=gc&external_version_number=11.0.4');
+  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&data_model_key=gc&external_version_number=11.0.4');
 
   await expect(page.locator('#mappingRows .mapping-row')).toHaveCount(6);
   await expect(page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-fit')).toHaveText('80%');
@@ -488,7 +488,7 @@ test('Stage 2 settings sidebar filters rows by mapping outcome', async ({ page }
     });
   });
 
-  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&schema=gc&external_version_number=11.0.4');
+  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&data_model_key=gc&external_version_number=11.0.4');
 
   // Negative: takeover starts hidden, all four rows render, ordering matches CSV.
   await expect(page.locator('#takeover')).toHaveClass(/hidden/);
@@ -572,7 +572,7 @@ test('Stage 2 empty-column filter uses full-column value presence', async ({ pag
     });
   });
 
-  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&schema=gc&external_version_number=11.0.4');
+  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&data_model_key=gc&external_version_number=11.0.4');
 
   await expect(page.locator('#mappingRows .mapping-row')).toHaveCount(1);
   await expect(page.locator('#mappingRows')).toContainText('late_value');
@@ -630,7 +630,7 @@ test('Stage 2 submits selected column renames for harmonization', async ({ page 
     });
   });
 
-  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&schema=gc&external_version_number=11.0.4');
+  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&data_model_key=gc&external_version_number=11.0.4');
 
   // Negative: no rename has been handed off yet.
   const before = await page.evaluate(() => JSON.parse(sessionStorage.getItem('stage2Payload')).column_renames);
@@ -727,7 +727,7 @@ test('Stage 2 picker surfaces all AI candidates as separate rows', async ({ page
     });
   });
 
-  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&schema=gc&external_version_number=11.0.4');
+  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&data_model_key=gc&external_version_number=11.0.4');
 
   // Open takeover for the diagnosis column, then open the picker.
   await page.locator('.mapping-row', { hasText: 'diagnosis' }).click();
@@ -1312,7 +1312,7 @@ test('Stage 2 locks and Stage 5 is reachable after Stage 3 completes', async ({ 
   // Then: mapping is inspection-only for the completed harmonization
   const stageTwoUrl = new URL(page.url());
   expect(stageTwoUrl.searchParams.get('file_id')).toBe(fileId);
-  expect(stageTwoUrl.searchParams.get('schema')).toBe('gc');
+  expect(stageTwoUrl.searchParams.get('data_model_key')).toBe('gc');
   expect(stageTwoUrl.searchParams.get('external_version_number')).toBe('11.0.4');
   await expect(page.locator('#mappingLockBanner')).toBeVisible();
   await expect(page.locator('#harmonizeButton')).toContainText('Verify');
@@ -1357,8 +1357,8 @@ test('Stage 3 ignores stale session payload when URL points at a new file', asyn
       JSON.stringify({
         request: {
           file_id: '11111111abcdef00',
-          target_schema: 'stale',
-          target_external_version_number: '99.0.0',
+          data_model_key: 'stale',
+          external_version_number: '99.0.0',
           manual_overrides: {},
         },
       }),
@@ -1366,13 +1366,13 @@ test('Stage 3 ignores stale session payload when URL points at a new file', asyn
   });
 
   // When: Stage 3 is opened for a different file from the URL alone
-  await page.goto(`/stage-3?file_id=${currentFileId}&target_schema=gc&external_version_number=11.0.4`);
+  await page.goto(`/stage-3?file_id=${currentFileId}&data_model_key=gc&external_version_number=11.0.4`);
   await expect(page.locator('#reviewButton')).toBeEnabled();
 
   // Then: harmonization starts with the current URL file, not the stale session file
   expect(harmonizePayload?.file_id).toBe(currentFileId);
-  expect(harmonizePayload?.target_schema).toBe('gc');
-  expect(harmonizePayload?.target_external_version_number).toBe('11.0.4');
+  expect(harmonizePayload?.data_model_key).toBe('gc');
+  expect(harmonizePayload?.external_version_number).toBe('11.0.4');
 });
 
 test('multiple columns with changes show as separate tabs', async ({ page }) => {

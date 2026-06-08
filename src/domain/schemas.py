@@ -46,16 +46,16 @@ FileIdField = DatasetWorkflowIdField
 
 class HarmonizeRequest(BaseModel):
     file_id: DatasetWorkflowIdField
-    target_schema: str
-    target_external_version_number: str = Field(..., min_length=1)
+    data_model_key: str
+    external_version_number: str = Field(..., min_length=1)
     manual_overrides: dict[str, str | None] = Field(default_factory=dict)
     column_renames: dict[str, str] = Field(default_factory=dict)
     manifest: ManifestPayload | None = None
 
     def data_model_version(self) -> DataModelVersionReference:
         return DataModelVersionReference(
-            data_model_key=self.target_schema,
-            external_version_number=self.target_external_version_number,
+            data_model_key=self.data_model_key,
+            external_version_number=self.external_version_number,
         )
 
 

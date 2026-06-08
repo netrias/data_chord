@@ -41,7 +41,7 @@ async def test_alb_identity_header_controls_workflow_ownership(
     response = await app_client.post(
         "/stage-1/analyze",
         headers={ALB_IDENTITY_HEADER: "bob"},
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "target_external_version_number": "11.0.4"},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
 
     # Then: workflow storage denies access before the file is processed

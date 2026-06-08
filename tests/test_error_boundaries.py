@@ -29,8 +29,8 @@ class TestMissingFileErrors:
             "/stage-1/analyze",
             json={
                 "file_id": INVALID_FILE_ID,
-                "target_schema": TEST_TARGET_SCHEMA,
-                "target_external_version_number": TEST_TARGET_EXTERNAL_VERSION_NUMBER,
+                "data_model_key": TEST_TARGET_SCHEMA,
+                "external_version_number": TEST_TARGET_EXTERNAL_VERSION_NUMBER,
             },
         )
 
@@ -48,8 +48,8 @@ class TestMissingFileErrors:
             "/stage-3/harmonize",
             json={
                 "file_id": INVALID_FILE_ID,
-                "target_schema": TEST_TARGET_SCHEMA,
-                "target_external_version_number": TEST_TARGET_EXTERNAL_VERSION_NUMBER,
+                "data_model_key": TEST_TARGET_SCHEMA,
+                "external_version_number": TEST_TARGET_EXTERNAL_VERSION_NUMBER,
                 "manual_overrides": {},
             },
         )

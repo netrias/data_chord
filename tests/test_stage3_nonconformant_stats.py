@@ -277,8 +277,8 @@ class TestManualOverridePropagation:
         # Given
         payload = {
             "file_id": "abcdef0123456789abcdef0123456789",
-            "target_schema": "CCDI",
-            "target_external_version_number": "11.0.4",
+            "data_model_key": "CCDI",
+            "external_version_number": "11.0.4",
             "manual_overrides": {"col": None},
         }
         assert payload["manual_overrides"]["col"] is None
@@ -300,8 +300,8 @@ class TestManualOverridePropagation:
         # Given
         payload = {
             "file_id": "abcdef0123456789abcdef0123456789",
-            "target_schema": "CCDI",
-            "target_external_version_number": "11.0.4",
+            "data_model_key": "CCDI",
+            "external_version_number": "11.0.4",
             "manual_overrides": {"col_0000": "primary_diagnosis"},
             "column_renames": {"col_0000": "Primary Diagnosis"},
         }
