@@ -204,9 +204,7 @@ const _mappingKindFor = (column) => {
   return _isRenameOnly(meta.type) ? MAPPING_KIND.RENAME_ONLY : MAPPING_KIND.VALUE_MAPPING;
 };
 
-// Profiles are loaded lazily (column_profiles is empty in the initial payload),
-// so use the full-column presence fact from Stage 1 before falling back to
-// preview samples for legacy browser sessions.
+// Empty-column visibility uses the full-column facts from Stage 1/profile data.
 const _hasValues = (column) => {
   const colKey = _columnKey(column);
   const detail = state.detailByColumn.get(colKey);
@@ -217,10 +215,7 @@ const _hasValues = (column) => {
   if (profile) {
     return (profile.total_distinct ?? profile.distinct_values?.length ?? 0) > 0;
   }
-  if (typeof column.has_non_empty_values === 'boolean') {
-    return column.has_non_empty_values;
-  }
-  return (column.sample_values ?? []).some((v) => v !== '' && v != null);
+  return column.has_non_empty_values === true;
 };
 
 const _passesFilters = (column) => {

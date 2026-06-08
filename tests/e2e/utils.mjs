@@ -13,6 +13,7 @@ const E2E_TARGET_VERSION_NUMBER = 2;
 const E2E_TARGET_EXTERNAL_VERSION_NUMBER = '11.0.4';
 const E2E_TARGET_CDE = 'primary_diagnosis';
 const E2E_TARGET_CDE_ID = 376;
+const E2E_SOURCE_COLUMN = 'col_a';
 
 export const fileFixture = (name) => path.join(fixturesDir, name);
 
@@ -34,9 +35,7 @@ export const uploadAndAnalyze = async (page, filePath) => {
   await confirmButton.waitFor({ state: 'visible' });
   await confirmButton.click();
   await page.waitForURL(/\/stage-2/);
-  await expect(page.locator('#mappingRows .mapping-row-target').first()).toContainText(
-    E2E_TARGET_CDE,
-  );
+  await expectAnalyzedSourceRow(page);
   return getFileIdFromUrl(page);
 };
 
@@ -57,10 +56,17 @@ export const uploadAndAnalyzeSheet = async (page, filePath, sheetName) => {
   await confirmButton.waitFor({ state: 'visible' });
   await confirmButton.click();
   await page.waitForURL(/\/stage-2/);
-  await expect(page.locator('#mappingRows .mapping-row-target').first()).toContainText(
-    E2E_TARGET_CDE,
-  );
+  await expectAnalyzedSourceRow(page);
   return getFileIdFromUrl(page);
+};
+
+const expectAnalyzedSourceRow = async (page) => {
+  // This helper mocks Stage 1 analyze but lets Stage 2 render through the real
+  // server route. Stage 2 only shows a target CDE when the server-side catalog
+  // contains that CDE, so readiness here is the analyzed source row appearing.
+  const row = page.locator('#mappingRows .mapping-row').first();
+  await expect(row).toBeVisible();
+  await expect(row.locator('.mapping-row-col')).toContainText(E2E_SOURCE_COLUMN);
 };
 
 export const clickHarmonize = async (page) => {
@@ -105,29 +111,28 @@ export const mockAnalyze = async (page) => {
       total_rows: 3,
       columns: [
         {
-          column_name: 'col_a',
-          column_key: 'col_a',
+          column_name: E2E_SOURCE_COLUMN,
+          column_key: E2E_SOURCE_COLUMN,
           source_index: 0,
-          header: 'col_a',
+          header: E2E_SOURCE_COLUMN,
           inferred_type: 'text',
-          sample_values: ['Foo', 'Bar'],
           has_non_empty_values: true,
           confidence_bucket: 'high',
           confidence_score: 0.95,
         },
       ],
       cde_targets: {
-        col_a: [{ target: E2E_TARGET_CDE, similarity: 0.95 }],
+        [E2E_SOURCE_COLUMN]: [{ target: E2E_TARGET_CDE, similarity: 0.95 }],
       },
       column_summaries: {
-        col_a: { value_overlap_ratio: 0.5 },
+        [E2E_SOURCE_COLUMN]: { value_overlap_ratio: 0.5 },
       },
       next_stage: 'mapping',
       next_step_hint: 'Review AI-suggested column mappings once ready.',
       manual_overrides: {},
       manifest: {
         column_mappings: {
-          col_a: { cde_key: E2E_TARGET_CDE, cde_id: E2E_TARGET_CDE_ID },
+          [E2E_SOURCE_COLUMN]: { cde_key: E2E_TARGET_CDE, cde_id: E2E_TARGET_CDE_ID },
         },
       },
     };

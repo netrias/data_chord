@@ -64,7 +64,7 @@ from .schemas import (
     AnalyzeRequest,
     AnalyzeResponse,
     ColumnOverlapRatio,
-    ColumnPreview,
+    ColumnSummary,
     SheetPreview,
     UploadResponse,
 )
@@ -321,7 +321,7 @@ def _select_sheet_safe(storage: UploadStorage, file_id: str, sheet_name: str | N
 
 def _analyze_columns_safe(
     csv_path: Path, file_id: str, sheet_name: str | None
-) -> tuple[int, list[ColumnPreview], dict[str, ColumnProfile]]:
+) -> tuple[int, list[ColumnSummary], dict[str, ColumnProfile]]:
     try:
         return analyze_columns(csv_path, sheet_name=sheet_name)
     except (UnicodeDecodeError, ValueError) as exc:
@@ -475,7 +475,7 @@ async def _cancel_pending_tasks(*tasks: asyncio.Task[object]) -> None:
 def _log_analysis_results(
     file_id: str,
     total_rows: int,
-    columns: list[ColumnPreview],
+    columns: list[ColumnSummary],
     mapping_manifest: ColumnMappingManifest,
 ) -> None:
     cde_target_keys = {str(column_key) for column_key in mapping_manifest.records}

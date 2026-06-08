@@ -14,7 +14,6 @@ from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_
 _FIELD_FILE_ID: Final = "file_id"
 _FIELD_DATA_MODEL_KEY: Final = "data_model_key"
 _FIELD_EXTERNAL_VERSION_NUMBER: Final = "external_version_number"
-_FIELD_LEGACY_VERSION_NUMBER: Final = "version_number"
 _FIELD_MANUAL_OVERRIDES: Final = "manual_overrides"
 _FIELD_COLUMN_RENAMES: Final = "column_renames"
 
@@ -127,9 +126,6 @@ def _selection_from_store(data_model_key: str, payload: Mapping[str, object]) ->
         except ValueError:
             return None
 
-    legacy_version_number = payload.get(_FIELD_LEGACY_VERSION_NUMBER)
-    if isinstance(legacy_version_number, int):
-        return DataModelSelection.from_legacy_version_number(data_model_key, legacy_version_number)
     return None
 
 

@@ -52,16 +52,16 @@ const downloadWorkbookRows = async (page, fileId, sheetName) => {
   return parseDownloadedWorkbook(response, sheetName);
 };
 
-const _stage2Column = (key, header = key) => ({
+const _stage2Column = (key, header = key, overrides = {}) => ({
   column_name: header,
   column_key: key,
   source_index: 0,
   header,
   inferred_type: 'text',
-  sample_values: ['Sample'],
   has_non_empty_values: true,
   confidence_bucket: 'high',
   confidence_score: 0.9,
+  ...overrides,
 });
 
 const _stage2Cde = (key, type) => ({
@@ -529,6 +529,59 @@ test('Stage 2 settings sidebar filters rows by mapping outcome', async ({ page }
 
   await expect(page.locator('.fm-check[data-outcome="rewrite"] .fm-check-count')).toHaveText('0 / 4');
   await expect(page.locator('.fm-check[data-outcome="passthrough"] .fm-check-count')).toHaveText('3 / 4');
+});
+
+test('Stage 2 empty-column filter uses full-column value presence', async ({ page }) => {
+  /*
+   * Given: one analyzed column has values and one is blank
+   * When:  Stage 2 renders with the default empty-column filter
+   * Then:  that column remains visible, while the truly blank column is hidden.
+   */
+  const payload = {
+    file_id: 'abcdef0123456789abcdef0123456789',
+    file_name: 'late-values.csv',
+    total_rows: 6,
+    columns: [
+      _stage2Column('late_value', 'late_value', {
+        has_non_empty_values: true,
+      }),
+      _stage2Column('all_blank', 'all_blank', {
+        has_non_empty_values: false,
+      }),
+    ],
+    cde_targets: {},
+    column_summaries: {
+      late_value: { value_overlap_ratio: null },
+      all_blank: { value_overlap_ratio: null },
+    },
+    next_stage: 'mapping',
+    next_step_hint: 'Review mappings.',
+    manual_overrides: {},
+    manifest: { column_mappings: {} },
+  };
+
+  await page.addInitScript((stagePayload) => {
+    sessionStorage.setItem('stage2Payload', JSON.stringify(stagePayload));
+    sessionStorage.setItem('maxReachedStage', 'mapping');
+  }, payload);
+  await page.route('**/stage-2?**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/html',
+      body: _stage2HarnessHtml([]),
+    });
+  });
+
+  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&schema=gc&external_version_number=11.0.4');
+
+  await expect(page.locator('#mappingRows .mapping-row')).toHaveCount(1);
+  await expect(page.locator('#mappingRows')).toContainText('late_value');
+  await expect(page.locator('#mappingRows')).not.toContainText('all_blank');
+
+  await page.locator('#filterSidebarTrigger').click();
+  await expect(page.locator('.fm-check[data-toggle="showEmpty"] .fm-check-count')).toHaveText('1 / 2');
+  await page.locator('.fm-check[data-toggle="showEmpty"]').click();
+  await expect(page.locator('#mappingRows .mapping-row')).toHaveCount(2);
 });
 
 test('Stage 2 submits selected column renames for harmonization', async ({ page }) => {

@@ -85,8 +85,6 @@ function _addMappingContext(url) {
   url.searchParams.set(schemaParam, context.schema);
   if (context.externalVersionNumber) {
     url.searchParams.set('external_version_number', context.externalVersionNumber);
-  } else if (context.versionNumber) {
-    url.searchParams.set('version_number', String(context.versionNumber));
   }
 }
 
@@ -94,9 +92,8 @@ function _getTargetContextForNavigation() {
   const params = new URLSearchParams(window.location.search);
   const schema = params.get('schema') || params.get('target_schema');
   const externalVersionNumber = params.get('external_version_number');
-  const versionNumber = params.get('version_number');
   if (schema) {
-    return { schema, externalVersionNumber, versionNumber };
+    return { schema, externalVersionNumber };
   }
 
   try {
@@ -107,7 +104,6 @@ function _getTargetContextForNavigation() {
       schema: parsed.context?.targetSchema || parsed.request?.target_schema || null,
       externalVersionNumber:
         parsed.context?.targetExternalVersionNumber || parsed.request?.target_external_version_number || null,
-      versionNumber: parsed.context?.targetVersionNumber || parsed.request?.target_version_number || null,
     };
   } catch {
     return {};

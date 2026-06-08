@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from pydantic import BaseModel, BeforeValidator, Field, PlainSerializer, WithJsonSchema, model_validator
+from pydantic import BaseModel, BeforeValidator, Field, PlainSerializer, WithJsonSchema
 
 from src.domain.data_model_selection import DataModelSelection
 from src.domain.dataset_workflow_ids import (
@@ -47,32 +47,16 @@ FileIdField = DatasetWorkflowIdField
 class HarmonizeRequest(BaseModel):
     file_id: DatasetWorkflowIdField
     target_schema: str
-    target_external_version_number: str | None = Field(default=None, min_length=1)
-    target_version_number: int | None = Field(default=None, ge=1)
+    target_external_version_number: str = Field(..., min_length=1)
     manual_overrides: dict[str, str | None] = Field(default_factory=dict)
     column_renames: dict[str, str] = Field(default_factory=dict)
     manifest: ManifestPayload | None = None
 
-    @model_validator(mode="after")
-    def _require_version(self) -> HarmonizeRequest:
-        if self.target_external_version_number is None and self.target_version_number is None:
-            raise ValueError("target_external_version_number is required")
-        if self.target_external_version_number is not None:
-            DataModelSelection.from_external_version_number(
-                self.target_schema,
-                self.target_external_version_number,
-            )
-        return self
-
     def data_model_selection(self) -> DataModelSelection:
-        if self.target_external_version_number is not None:
-            return DataModelSelection.from_external_version_number(
-                self.target_schema,
-                self.target_external_version_number,
-            )
-        if self.target_version_number is None:
-            raise ValueError("target_external_version_number is required")
-        return DataModelSelection.from_legacy_version_number(self.target_schema, self.target_version_number)
+        return DataModelSelection.from_external_version_number(
+            self.target_schema,
+            self.target_external_version_number,
+        )
 
 
 class ConfidenceBucketSchema(BaseModel):

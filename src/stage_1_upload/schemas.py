@@ -1,10 +1,10 @@
-"""Pydantic models for upload metadata and column preview responses."""
+"""Pydantic models for upload metadata and analyze responses."""
 
 from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 from src.domain import ModelSuggestion
 from src.domain.column_profile import ColumnProfilePayload
@@ -35,39 +35,24 @@ class UploadResponse(BaseModel):
 class AnalyzeRequest(BaseModel):
     file_id: DatasetWorkflowIdField
     target_schema: str = Field(..., min_length=1)
-    target_external_version_number: str | None = Field(default=None, min_length=1)
-    target_version_number: int | None = Field(default=None, ge=1)
+    target_external_version_number: str = Field(..., min_length=1)
     sheet_name: str | None = None
 
-    @model_validator(mode="after")
-    def _require_version(self) -> AnalyzeRequest:
-        if self.target_external_version_number is None and self.target_version_number is None:
-            raise ValueError("target_external_version_number is required")
-        if self.target_external_version_number is not None:
-            DataModelSelection.from_external_version_number(
-                self.target_schema,
-                self.target_external_version_number,
-            )
-        return self
-
     def data_model_selection(self) -> DataModelSelection:
-        if self.target_external_version_number is not None:
-            return DataModelSelection.from_external_version_number(
-                self.target_schema,
-                self.target_external_version_number,
-            )
-        if self.target_version_number is None:
-            raise ValueError("target_external_version_number is required")
-        return DataModelSelection.from_legacy_version_number(self.target_schema, self.target_version_number)
+        return DataModelSelection.from_external_version_number(
+            self.target_schema,
+            self.target_external_version_number,
+        )
 
 
-class ColumnPreview(BaseModel):
+class ColumnSummary(BaseModel):
+    """Small Stage 1/2 column summary."""
+
     column_name: str
     column_key: str
     source_index: int
     header: str
     inferred_type: str
-    sample_values: list[str]
     has_non_empty_values: bool = Field(
         description="True when the full uploaded column has at least one non-empty value.",
     )
@@ -92,9 +77,8 @@ class AnalyzeResponse(BaseModel):
     file_id: DatasetWorkflowIdField
     file_name: str
     target_external_version_number: str
-    target_version_number: int | None = None
     total_rows: int = Field(ge=0)
-    columns: list[ColumnPreview]
+    columns: list[ColumnSummary]
     column_profiles: dict[str, ColumnProfilePayload] = Field(default_factory=dict)
     column_summaries: dict[str, ColumnOverlapRatio] = Field(default_factory=dict)
     cde_targets: dict[str, list[ModelSuggestion]]

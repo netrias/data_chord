@@ -48,11 +48,10 @@ async def render_stage_two(
     file_id: Annotated[DatasetWorkflowIdField | None, Query()] = None,
     schema: Annotated[str | None, Query(min_length=1)] = None,
     external_version_number: Annotated[str | None, Query(min_length=1)] = None,
-    version_number: Annotated[int | None, Query(ge=1)] = None,
 ) -> HTMLResponse:
     cde_catalog: list[CDEInfo] = []
     try:
-        selection = _data_model_selection_for_request(file_id, schema, external_version_number, version_number)
+        selection = _data_model_selection_for_request(file_id, schema, external_version_number)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -65,7 +64,7 @@ async def render_stage_two(
         "default_external_version_number": (
             selection.external_version_number
             if selection
-            else external_version_number or _legacy_version_query(version_number)
+            else external_version_number
         ),
         "cde_catalog": [_cde_catalog_item(cde) for cde in cde_catalog],
         "no_mapping_label": UILabel.NO_MAPPING.value,
@@ -77,7 +76,6 @@ def _data_model_selection_for_request(
     file_id: str | None,
     target_schema: str | None,
     external_version_number: str | None,
-    version_number: int | None,
 ) -> DataModelSelection | None:
     if file_id:
         state = load_workflow_state(
@@ -91,13 +89,7 @@ def _data_model_selection_for_request(
         return None
     if external_version_number is not None:
         return DataModelSelection.from_external_version_number(target_schema, external_version_number)
-    if version_number is not None:
-        return DataModelSelection.from_legacy_version_number(target_schema, version_number)
     return None
-
-
-def _legacy_version_query(version_number: int | None) -> str | None:
-    return str(version_number) if version_number is not None else None
 
 
 async def _get_cde_options_for_session(
