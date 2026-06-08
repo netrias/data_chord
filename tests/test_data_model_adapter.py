@@ -6,14 +6,16 @@ from collections.abc import Generator
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 from netrias_client import DataModel, DataModelVersion
 
 from src.domain.cde import CDEInfo, CdeType
+from src.domain.cde_catalog import CdeCatalog
+from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.data_model_adapter import (
     _pv_map_from_all_pvs_response,
     fetch_cdes,
-    get_latest_version,
     list_data_model_summaries,
     refine_cde_types_from_pvs,
 )
@@ -65,14 +67,14 @@ def test_list_summaries_returns_preferred_model_first(
         DataModel(
             data_commons_id=1, key="alpha", name="Alpha Model",
             description=None, is_active=True,
-            versions=(DataModelVersion(version_label="1"),),
+            versions=(DataModelVersion(external_version_number="11.0.3"),),
         ),
         DataModel(
             data_commons_id=2, key="gc", name="Genomic Commons",
             description=None, is_active=True,
             versions=(
-                DataModelVersion(version_label="1"),
-                DataModelVersion(version_label="2"),
+                DataModelVersion(external_version_number="11.0.3"),
+                DataModelVersion(external_version_number="11.0.4"),
             ),
         ),
     )
@@ -82,11 +84,11 @@ def test_list_summaries_returns_preferred_model_first(
 
     # Then: "gc" is first despite alphabetical ordering of raw data
     assert len(summaries) == 2, f"Expected 2 summaries, got {len(summaries)}"
-    assert summaries[0].key == "gc"
+    assert summaries[0].data_model_key == "gc"
     assert summaries[0].label == "Genomic Commons"
-    assert [v.version_number for v in summaries[0].versions] == [1, 2]
-    assert [v.version_label for v in summaries[0].versions] == ["1", "2"]
-    assert summaries[1].key == "alpha"
+    assert [v.external_version_number for v in summaries[0].versions] == ["11.0.3", "11.0.4"]
+    assert [v.version_label for v in summaries[0].versions] == ["11.0.3", "11.0.4"]
+    assert summaries[1].data_model_key == "alpha"
 
 
 # ---------------------------------------------------------------------------
@@ -114,66 +116,6 @@ def test_list_summaries_returns_empty_when_client_unavailable() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test: get_latest_version returns last version label from matching model
-# ---------------------------------------------------------------------------
-
-
-def test_get_latest_version_returns_last_version_label(
-    mock_netrias: MagicMock,
-) -> None:
-    """
-    Given: a data model "gc" with versions ["1", "2", "3"]
-    When: get_latest_version("gc") is called
-    Then: returns "3" (the last version in the tuple)
-    """
-    # Given
-    mock_netrias.list_data_models.return_value = (
-        DataModel(
-            data_commons_id=1, key="gc", name="Genomic Commons",
-            description=None, is_active=True,
-            versions=(
-                DataModelVersion(version_label="1"),
-                DataModelVersion(version_label="2"),
-                DataModelVersion(version_label="3"),
-            ),
-        ),
-    )
-
-    # When
-    version = get_latest_version("gc")
-
-    # Then
-    assert version == "3", f"Expected '3', got '{version}'"
-    mock_netrias.list_data_models.assert_called_once_with(
-        query="gc", include_versions=True,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Test: get_latest_version returns "1" when client is None
-# ---------------------------------------------------------------------------
-
-
-def test_get_latest_version_returns_default_when_client_unavailable() -> None:
-    """
-    Given: no NetriasClient (API key missing)
-    When: get_latest_version("gc") is called
-    Then: returns fallback version "1"
-    """
-    import src.domain.dependencies as deps
-
-    # Given
-    deps._netrias_client = None
-    deps._netrias_client_initialized = True
-
-    # When
-    version = get_latest_version("gc")
-
-    # Then
-    assert version == "1", f"Expected fallback '1', got '{version}'"
-
-
-# ---------------------------------------------------------------------------
 # Test: all-PV response parser groups PV sets by CDE key
 # ---------------------------------------------------------------------------
 
@@ -192,14 +134,14 @@ def test_all_pvs_response_groups_values_by_cde_key() -> None:
             {"cde_key": "sex", "pv_value": "Female"},
         ]
     }
-    parsed: dict[str, frozenset[str]] = {}
-    assert parsed == {}
+    parsed = CdePvCatalog.empty()
+    assert parsed.to_mapping() == {}
 
     # When
     parsed = _pv_map_from_all_pvs_response(response_body)
 
     # Then
-    assert parsed == {
+    assert parsed.to_mapping() == {
         "diagnosis": frozenset({"Lung", "Breast"}),
         "sex": frozenset({"Female"}),
     }
@@ -231,6 +173,64 @@ def test_fetch_cdes_defaults_cde_type_to_pv(mock_netrias: MagicMock) -> None:
     assert {c.cde_type for c in fetched} == {CdeType.PV}
 
 
+def test_fetch_cdes_translates_external_version_for_dms_boundary(
+    mock_netrias: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DMS CDE endpoints still require internal version_number at the boundary."""
+
+    mock_netrias.settings = SimpleNamespace(
+        data_model_store_endpoints=SimpleNamespace(base_url="https://dms.example.test"),
+        api_key="test-key",
+        timeout=10,
+    )
+    mock_netrias.list_cdes.return_value = [
+        SimpleNamespace(cde_id=1, cde_key="diagnosis", description="dx"),
+    ]
+
+    def _fake_get(
+        url: str,
+        *,
+        headers: dict[str, str],
+        params: dict[str, str],
+        timeout: float,
+    ) -> httpx.Response:
+        assert url == "https://dms.example.test/data-models"
+        assert headers == {"x-api-key": "test-key"}
+        assert params == {"include_versions": "true"}
+        assert timeout == 10
+        return httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "key": "gc",
+                        "name": "Genomic Commons",
+                        "versions": [
+                            {
+                                "version_number": 2,
+                                "version_label": "v2",
+                                "external_version_number": "11.0.4",
+                            },
+                        ],
+                    },
+                ],
+            },
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr("src.domain.data_model_adapter.httpx.get", _fake_get)
+
+    fetched = fetch_cdes("gc", "11.0.4")
+
+    assert [c.cde_key for c in fetched] == ["diagnosis"]
+    mock_netrias.list_cdes.assert_called_once_with(
+        model_key="gc",
+        version="2",
+        include_description=True,
+    )
+
+
 def test_refine_cde_types_downgrades_to_passthrough_for_empty_pvs() -> None:
     """
     Given: two CDEs both initially typed as PV; PV fetch returned an empty
@@ -243,20 +243,23 @@ def test_refine_cde_types_downgrades_to_passthrough_for_empty_pvs() -> None:
         CDEInfo(cde_id=1, cde_key="diagnosis", description=None, version_label="1"),
         CDEInfo(cde_id=2, cde_key="free_notes", description=None, version_label="1"),
     ]
-    pv_sets = {
+    pv_sets = CdePvCatalog.from_mapping({
         "diagnosis": frozenset({"A", "B"}),
         "free_notes": frozenset(),
-    }
+    })
     # negative assertion: types start as PV
     assert all(c.cde_type == CdeType.PV for c in cdes)
 
     # When
-    refined = refine_cde_types_from_pvs(cdes, pv_sets)
-    by_key = {c.cde_key: c for c in refined}
+    refined = refine_cde_types_from_pvs(CdeCatalog.from_cdes(cdes), pv_sets)
 
     # Then
-    assert by_key["diagnosis"].cde_type == CdeType.PV
-    assert by_key["free_notes"].cde_type == CdeType.PASSTHROUGH
+    diagnosis = refined.get("diagnosis")
+    free_notes = refined.get("free_notes")
+    assert diagnosis is not None
+    assert free_notes is not None
+    assert diagnosis.cde_type == CdeType.PV
+    assert free_notes.cde_type == CdeType.PASSTHROUGH
 
 
 def test_refine_cde_types_skips_unfetched_cdes() -> None:
@@ -270,14 +273,15 @@ def test_refine_cde_types_skips_unfetched_cdes() -> None:
         CDEInfo(cde_id=1, cde_key="diagnosis", description=None, version_label="1"),
         CDEInfo(cde_id=2, cde_key="other", description=None, version_label="1"),
     ]
-    pv_sets = {"diagnosis": frozenset({"A"})}
+    pv_sets = CdePvCatalog.from_mapping({"diagnosis": frozenset({"A"})})
 
     # When
-    refined = refine_cde_types_from_pvs(cdes, pv_sets)
-    by_key = {c.cde_key: c for c in refined}
+    refined = refine_cde_types_from_pvs(CdeCatalog.from_cdes(cdes), pv_sets)
 
     # Then: untouched CDE remains as it was
-    assert by_key["other"].cde_type == CdeType.PV
+    other = refined.get("other")
+    assert other is not None
+    assert other.cde_type == CdeType.PV
 
 
 def test_refine_does_not_downgrade_when_fetch_failure_omits_key() -> None:
@@ -294,10 +298,12 @@ def test_refine_does_not_downgrade_when_fetch_failure_omits_key() -> None:
         CDEInfo(cde_id=1, cde_key="primary_diagnosis", description=None, version_label="1"),
     ]
     # PV sets dict is empty — the fetch failed for primary_diagnosis
-    pv_sets: dict[str, frozenset[str]] = {}
+    pv_sets = CdePvCatalog.empty()
 
     # When
-    refined = refine_cde_types_from_pvs(cdes, pv_sets)
+    refined = refine_cde_types_from_pvs(CdeCatalog.from_cdes(cdes), pv_sets)
 
     # Then: type is PRESERVED at PV; no PASSTHROUGH downgrade
-    assert refined[0].cde_type == CdeType.PV
+    primary_diagnosis = refined.get("primary_diagnosis")
+    assert primary_diagnosis is not None
+    assert primary_diagnosis.cde_type == CdeType.PV

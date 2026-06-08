@@ -7,10 +7,10 @@ from unittest.mock import MagicMock
 
 import pytest
 from netrias_client import CDE as SdkCDE
-from netrias_client import DataModel, DataModelStoreError, DataModelVersion
+from netrias_client import DataModel, DataModelVersion
 
 from src.domain.data_model_cache import clear_session_cache, get_session_cache, populate_cde_cache
-from src.domain.data_model_selection import DataModelSelection
+from src.domain.data_model_version_reference import DataModelVersionReference
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -33,7 +33,7 @@ def mock_netrias() -> Generator[MagicMock]:
         DataModel(
             data_commons_id=1, key="gc", name="Genomic Commons",
             description=None, is_active=True,
-            versions=(DataModelVersion(version_label="2"),),
+            versions=(DataModelVersion(external_version_number="2.0.0"),),
         ),
     )
     mock.list_cdes.return_value = (
@@ -62,7 +62,7 @@ def test_populate_cde_cache_stores_real_cdes(
     """
     Given: a mocked NetriasClient returning 3 CDEs for model "gc"
            and the session cache has no CDEs
-    When: populate_cde_cache() is called with data_model_key="gc"
+    When: populate_cde_cache() is called with key="gc"
     Then: session cache contains all 3 CDEs with correct model info
     """
     # Given
@@ -70,7 +70,10 @@ def test_populate_cde_cache_stores_real_cdes(
     assert not cache.has_cdes()
 
     # When
-    populate_cde_cache("test-file-id", DataModelSelection.from_version_number("gc", None))
+    populate_cde_cache(
+        "test-file-id",
+        DataModelVersionReference(data_model_key="gc", external_version_number="2.0.0"),
+    )
 
     # Then
     assert cache.has_cdes()
@@ -79,30 +82,32 @@ def test_populate_cde_cache_stores_real_cdes(
     assert cache.get_cde_by_key("sex") is not None
     assert cache.get_cde_by_key("race") is not None
 
-    selection = cache.get_model_selection()
-    assert selection is not None
-    assert selection.key == "gc"
-    assert selection.version_label == "2"
+    data_model_version = cache.get_data_model_version()
+    assert data_model_version is not None
+    assert data_model_version.data_model_key == "gc"
+    assert data_model_version.external_version_number == "2.0.0"
 
-    mock_netrias.list_cdes.assert_called_once_with("gc", "2", include_description=True)
+    mock_netrias.list_cdes.assert_called_once_with(
+        model_key="gc",
+        version="2.0.0",
+        include_description=True,
+    )
 
 
 # ---------------------------------------------------------------------------
-# Test: populate_cde_cache falls back on version error
+# Test: populate_cde_cache requires explicit external version
 # ---------------------------------------------------------------------------
 
 
-def test_populate_cde_cache_falls_back_on_version_error(
+def test_populate_cde_cache_uses_explicit_external_version(
     mock_netrias: MagicMock,
 ) -> None:
     """
-    Given: list_data_models raises DataModelStoreError (version lookup fails)
-           and no CDEs are cached yet
+    Given: an explicit external version and no CDEs are cached yet
     When: populate_cde_cache() is called
-    Then: CDEs are fetched with version_label="1" (fallback)
+    Then: CDEs are fetched with that external version
     """
-    # Given: version lookup fails
-    mock_netrias.list_data_models.side_effect = DataModelStoreError("unavailable")
+    # Given
     mock_netrias.list_cdes.return_value = (
         SdkCDE(cde_key="age", cde_id=1, cde_version_id=1, description="Age"),
     )
@@ -111,12 +116,19 @@ def test_populate_cde_cache_falls_back_on_version_error(
     assert not cache.has_cdes()
 
     # When
-    populate_cde_cache("test-file-id", DataModelSelection.from_version_number("gc", None))
+    populate_cde_cache(
+        "test-file-id",
+        DataModelVersionReference(data_model_key="gc", external_version_number="1.0.0"),
+    )
 
-    # Then: fallback version "1" was used
-    mock_netrias.list_cdes.assert_called_once_with("gc", "1", include_description=True)
+    # Then: the required external version is used directly; no latest fallback occurs
+    mock_netrias.list_cdes.assert_called_once_with(
+        model_key="gc",
+        version="1.0.0",
+        include_description=True,
+    )
     assert cache.has_cdes()
 
-    selection = cache.get_model_selection()
-    assert selection is not None
-    assert selection.version_label == "1"
+    data_model_version = cache.get_data_model_version()
+    assert data_model_version is not None
+    assert data_model_version.external_version_number == "1.0.0"

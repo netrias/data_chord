@@ -11,6 +11,7 @@ import pytest
 from httpx import AsyncClient
 
 import src.domain.dependencies as dependencies
+from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.column_cde_map import ColumnCdeMap
 from src.domain.data_model_cache import clear_all_session_caches
 from src.domain.pv_manifest import PVManifest
@@ -50,9 +51,9 @@ def _save_test_pv_manifest(file_id: str, column_key: str, cde_key: str, pvs: lis
         WorkflowFile.PV_MANIFEST,
         PVManifest(
             data_model_key=TEST_TARGET_SCHEMA,
-            version_label="1",
+            external_version_number="11.0.4",
             column_to_cde_key=ColumnCdeMap.from_strings({column_key: cde_key}),
-            pvs={cde_key: frozenset(pvs)},
+            pvs=CdePvCatalog.from_mapping({cde_key: frozenset(pvs)}),
         ).to_store(),
     )
 
@@ -69,14 +70,19 @@ async def test_full_flow_no_changes_produces_zero_summary(
     assert temp_storage.load_manifest(file_id) is None
     analyze_response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
     assert analyze_response.status_code == 200
 
     # When: harmonize is triggered and a manifest with no changes is created
     harmonize_response = await app_client.post(
         "/stage-3/harmonize",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "manual_overrides": {}},
+        json={
+            "file_id": file_id,
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
+            "manual_overrides": {},
+        },
     )
     assert harmonize_response.status_code == 200
     meta = temp_storage.load(file_id)
@@ -109,14 +115,19 @@ async def test_full_flow_overrides_propagate_within_column(
     assert temp_storage.load_manifest(file_id) is None
     analyze_response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
     assert analyze_response.status_code == 200
 
     # When: harmonize is triggered and review overrides are saved
     harmonize_response = await app_client.post(
         "/stage-3/harmonize",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "manual_overrides": {}},
+        json={
+            "file_id": file_id,
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
+            "manual_overrides": {},
+        },
     )
     assert harmonize_response.status_code == 200
     meta = temp_storage.load(file_id)
@@ -177,12 +188,17 @@ async def test_full_flow_two_files_isolated_overrides(
     for file_id in (file_one, file_two):
         analyze_response = await app_client.post(
             "/stage-1/analyze",
-            json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
+            json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
         )
         assert analyze_response.status_code == 200
         harmonize_response = await app_client.post(
             "/stage-3/harmonize",
-            json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "manual_overrides": {}},
+            json={
+                "file_id": file_id,
+                "data_model_key": TEST_TARGET_SCHEMA,
+                "external_version_number": "11.0.4",
+                "manual_overrides": {},
+            },
         )
         assert harmonize_response.status_code == 200
         meta = temp_storage.load(file_id)
@@ -226,12 +242,17 @@ async def test_full_flow_reharmonize_clears_overrides(
     assert temp_storage.load_manifest(file_id) is None
     analyze_response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
     assert analyze_response.status_code == 200
     harmonize_response = await app_client.post(
         "/stage-3/harmonize",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "manual_overrides": {}},
+        json={
+            "file_id": file_id,
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
+            "manual_overrides": {},
+        },
     )
     assert harmonize_response.status_code == 200
     meta = temp_storage.load(file_id)
@@ -253,7 +274,12 @@ async def test_full_flow_reharmonize_clears_overrides(
     # When: harmonize is triggered again
     rerun_response = await app_client.post(
         "/stage-3/harmonize",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "manual_overrides": {}},
+        json={
+            "file_id": file_id,
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
+            "manual_overrides": {},
+        },
     )
 
     # Then: overrides are cleared
@@ -283,13 +309,18 @@ async def test_reharmonize_cannot_clear_another_users_overrides(
     analyze_response = await app_client.post(
         "/stage-1/analyze",
         headers=alice_headers,
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
     assert analyze_response.status_code == 200
     harmonize_response = await app_client.post(
         "/stage-3/harmonize",
         headers=alice_headers,
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "manual_overrides": {}},
+        json={
+            "file_id": file_id,
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
+            "manual_overrides": {},
+        },
     )
     assert harmonize_response.status_code == 200
     meta = temp_storage.load(file_id)
@@ -313,7 +344,12 @@ async def test_reharmonize_cannot_clear_another_users_overrides(
     rerun_response = await app_client.post(
         "/stage-3/harmonize",
         headers=bob_headers,
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "manual_overrides": {}},
+        json={
+            "file_id": file_id,
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
+            "manual_overrides": {},
+        },
     )
 
     # Then: Bob is denied and Alice's overrides remain intact
@@ -394,12 +430,17 @@ async def test_full_flow_bom_overrides_apply(
     assert temp_storage.load_manifest(file_id) is None
     analyze_response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
     assert analyze_response.status_code == 200
     harmonize_response = await app_client.post(
         "/stage-3/harmonize",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA, "manual_overrides": {}},
+        json={
+            "file_id": file_id,
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
+            "manual_overrides": {},
+        },
     )
     assert harmonize_response.status_code == 200
     meta = temp_storage.load(file_id)
@@ -428,9 +469,9 @@ async def test_full_flow_bom_overrides_apply(
         json={
             "file_id": file_id,
             "overrides": {
-                    str(index): {col_a_key: {"ai_value": "Foo", "human_value": "Bar", "original_value": "Foo"}}
-                    for index in row_indices
-                },
+                str(index): {col_a_key: {"ai_value": "Foo", "human_value": "Bar", "original_value": "Foo"}}
+                for index in row_indices
+            },
             "review_state": review_state_payload(),
         },
     )
@@ -455,7 +496,7 @@ async def test_full_flow_duplicate_headers_keep_columns_separate(
     file_id = await upload_content(app_client, create_csv_content(rows), "duplicate-headers.csv")
     analyze_response = await app_client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
+        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
     assert analyze_response.status_code == 200
     analyzed_columns = analyze_response.json()["columns"]

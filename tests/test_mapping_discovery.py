@@ -57,26 +57,26 @@ def test_discover_returns_manifest_from_client(
     csv_path.write_text("breed,diagnosis\nLabrador,Cancer\n")
 
     # When
-    _, _, manifest = svc.discover(csv_path=csv_path, target_schema="ccdi")
+    discovery = svc.discover(csv_path=csv_path, data_model_key="ccdi", external_version_number="11.0.4")
 
     # Then: manifest contains both columns
-    column_mappings = manifest.get("column_mappings", {})
+    column_mappings = discovery.manifest_payload.get("column_mappings", {})
     assert "col_0000" in column_mappings
     assert "col_0001" in column_mappings
     assert column_mappings["col_0000"]["cde_key"] == "organism_species"
     assert column_mappings["col_0001"]["cde_key"] == "primary_diagnosis"
     mock_client.discover_mapping_from_tabular.assert_called_once()
-    assert mock_client.discover_mapping_from_tabular.call_args.kwargs["target_version"] == "latest"
+    assert mock_client.discover_mapping_from_tabular.call_args.kwargs["external_version_number"] == "11.0.4"
 
 
-def test_discover_passes_selected_target_version(
+def test_discover_passes_selected_external_version(
     service_with_mock_client: tuple[MappingDiscoveryService, MagicMock],
     tmp_path: Path,
 ) -> None:
     """
     Given: a selected model version from the Stage 1 popup
     When: MappingDiscoveryService.discover() is called with that version
-    Then: the discovery API receives the same target_version
+    Then: the discovery API receives the same external_version_number
     """
     svc, mock_client = service_with_mock_client
 
@@ -89,10 +89,10 @@ def test_discover_passes_selected_target_version(
     assert mock_client.discover_mapping_from_tabular.call_count == 0
 
     # When
-    svc.discover(csv_path=csv_path, target_schema="ccdi", target_version="2")
+    svc.discover(csv_path=csv_path, data_model_key="ccdi", external_version_number="11.0.4")
 
     # Then
-    assert mock_client.discover_mapping_from_tabular.call_args.kwargs["target_version"] == "2"
+    assert mock_client.discover_mapping_from_tabular.call_args.kwargs["external_version_number"] == "11.0.4"
 
 
 # ---------------------------------------------------------------------------
@@ -122,9 +122,10 @@ def test_discover_builds_cde_targets_from_manifest(
     csv_path.write_text("breed,diagnosis\nLabrador,Cancer\n")
 
     # When
-    cde_targets, _, _ = svc.discover(csv_path=csv_path, target_schema="ccdi")
+    discovery = svc.discover(csv_path=csv_path, data_model_key="ccdi", external_version_number="11.0.4")
 
     # Then: cde_targets has entries for both columns
+    cde_targets = discovery.cde_targets
     assert "col_0000" in cde_targets
     assert "col_0001" in cde_targets
     assert cde_targets["col_0000"][0].target == "organism_species"
@@ -175,7 +176,7 @@ def test_discover_raises_when_client_unavailable() -> None:
 
     # When/Then
     with pytest.raises(RuntimeError, match="NetriasClient unavailable"):
-        svc.discover(csv_path=Path("/fake.csv"), target_schema="ccdi")
+        svc.discover(csv_path=Path("/fake.csv"), data_model_key="ccdi", external_version_number="11.0.4")
 
 
 # ---------------------------------------------------------------------------
@@ -279,7 +280,7 @@ def test_discover_wraps_sdk_errors_as_runtime_error(
 
     # When/Then
     with pytest.raises(RuntimeError, match="CDE discovery failed.*connection refused"):
-        svc.discover(csv_path=csv_path, target_schema="ccdi")
+        svc.discover(csv_path=csv_path, data_model_key="ccdi", external_version_number="11.0.4")
 
 
 def test_discover_preserves_duplicate_headers_with_column_keys(
@@ -297,12 +298,12 @@ def test_discover_preserves_duplicate_headers_with_column_keys(
         *,
         source_path: Path,
         target_schema: str,
-        target_version: str,
+        external_version_number: str,
         confidence_threshold: float,
         sheet_name: str | None = None,
     ) -> dict[str, object]:
         assert source_path.name == "dupes.csv"
-        assert target_version == "latest"
+        assert external_version_number == "11.0.4"
         assert sheet_name is None
         return {
             "column_mappings": {
@@ -315,10 +316,10 @@ def test_discover_preserves_duplicate_headers_with_column_keys(
     csv_path = tmp_path / "dupes.csv"
     csv_path.write_text("name,name\nAlice,Smith\n")
 
-    cde_targets, _, manifest = svc.discover(csv_path=csv_path, target_schema="ccdi")
+    discovery = svc.discover(csv_path=csv_path, data_model_key="ccdi", external_version_number="11.0.4")
 
-    column_mappings = manifest.get("column_mappings", {})
+    column_mappings = discovery.manifest_payload.get("column_mappings", {})
     assert column_mappings["col_0000"]["cde_key"] == "first_name"
     assert column_mappings["col_0001"]["cde_key"] == "last_name"
-    assert cde_targets["col_0000"][0].target == "first_name"
-    assert cde_targets["col_0001"][0].target == "last_name"
+    assert discovery.cde_targets["col_0000"][0].target == "first_name"
+    assert discovery.cde_targets["col_0001"][0].target == "last_name"

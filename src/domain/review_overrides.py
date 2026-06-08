@@ -9,6 +9,70 @@ from datetime import UTC, datetime
 from netrias_client import TabularDataset
 
 from src.domain.columns import ColumnKey, column_key_from_string
+from src.domain.manifest import ManifestManualOverride
+
+
+@dataclass(frozen=True)
+class ReviewModeProgress:
+    current_unit: int = 1
+    completed_units: tuple[int, ...] = ()
+    flagged_units: tuple[int, ...] = ()
+    batch_size: int = 5
+
+    @classmethod
+    def from_payload(cls, payload: object) -> ReviewModeProgress:
+        if not isinstance(payload, Mapping):
+            return cls()
+        return cls(
+            current_unit=_int_or_default(payload.get("current_unit"), 1),
+            completed_units=_int_tuple(payload.get("completed_units")),
+            flagged_units=_int_tuple(payload.get("flagged_units")),
+            batch_size=_int_or_default(payload.get("batch_size"), 5),
+        )
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "current_unit": self.current_unit,
+            "completed_units": list(self.completed_units),
+            "flagged_units": list(self.flagged_units),
+            "batch_size": self.batch_size,
+        }
+
+
+@dataclass(frozen=True)
+class ReviewProgressState:
+    review_mode: str = "column"
+    sort_mode: str = "original"
+    scroll_mode: bool = False
+    show_case_only_changes: bool = False
+    show_unchanged_values: bool = False
+    column_mode: ReviewModeProgress = ReviewModeProgress()
+    row_mode: ReviewModeProgress = ReviewModeProgress()
+
+    @classmethod
+    def from_payload(cls, payload: object) -> ReviewProgressState:
+        if not isinstance(payload, Mapping):
+            return cls()
+        return cls(
+            review_mode=_string_or_default(payload.get("review_mode"), "column"),
+            sort_mode=_string_or_default(payload.get("sort_mode"), "original"),
+            scroll_mode=_bool_or_default(payload.get("scroll_mode"), False),
+            show_case_only_changes=_bool_or_default(payload.get("show_case_only_changes"), False),
+            show_unchanged_values=_bool_or_default(payload.get("show_unchanged_values"), False),
+            column_mode=ReviewModeProgress.from_payload(payload.get("column_mode")),
+            row_mode=ReviewModeProgress.from_payload(payload.get("row_mode")),
+        )
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "review_mode": self.review_mode,
+            "sort_mode": self.sort_mode,
+            "scroll_mode": self.scroll_mode,
+            "show_case_only_changes": self.show_case_only_changes,
+            "show_unchanged_values": self.show_unchanged_values,
+            "column_mode": self.column_mode.to_payload(),
+            "row_mode": self.row_mode.to_payload(),
+        }
 
 
 @dataclass(frozen=True)
@@ -44,7 +108,7 @@ class ReviewOverrides:
     created_at: datetime
     updated_at: datetime
     overrides: dict[str, dict[ColumnKey, CellOverride]]
-    review_state: dict[str, object]
+    review_state: ReviewProgressState
 
     @classmethod
     def create(
@@ -52,7 +116,7 @@ class ReviewOverrides:
         *,
         file_id: str,
         overrides: object,
-        review_state: Mapping[str, object],
+        review_state: ReviewProgressState,
         created_at: datetime,
         updated_at: datetime,
     ) -> ReviewOverrides:
@@ -61,7 +125,7 @@ class ReviewOverrides:
             created_at=created_at,
             updated_at=updated_at,
             overrides=_parse_overrides(overrides),
-            review_state=dict(review_state),
+            review_state=review_state,
         )
 
     @classmethod
@@ -78,7 +142,7 @@ class ReviewOverrides:
             created_at=created_at,
             updated_at=updated_at,
             overrides=_parse_overrides(overrides if isinstance(overrides, Mapping) else {}),
-            review_state=dict(review_state) if isinstance(review_state, Mapping) else {},
+            review_state=ReviewProgressState.from_payload(review_state),
         )
 
     def to_store(self) -> dict[str, object]:
@@ -90,7 +154,7 @@ class ReviewOverrides:
                 row_key: {str(column_key): override.to_payload() for column_key, override in columns.items()}
                 for row_key, columns in self.overrides.items()
             },
-            "review_state": self.review_state,
+            "review_state": self.review_state.to_payload(),
         }
 
     def human_values_by_row(self) -> dict[str, dict[ColumnKey, str]]:
@@ -102,10 +166,10 @@ class ReviewOverrides:
             for row_key, columns in self.overrides.items()
         }
 
-    def manual_override_batch(self) -> list[tuple[str, str, str]]:
+    def manual_override_batch(self) -> list[ManifestManualOverride]:
         """Deduplicate by (column, original, value) before writing manifest audit rows."""
         seen: set[tuple[str, str, str]] = set()
-        batch: list[tuple[str, str, str]] = []
+        batch: list[ManifestManualOverride] = []
         for columns in self.overrides.values():
             for column_key, override in columns.items():
                 if override.original_value is None:
@@ -114,7 +178,9 @@ class ReviewOverrides:
                 if key in seen:
                     continue
                 seen.add(key)
-                batch.append(key)
+                batch.append(
+                    ManifestManualOverride.from_raw(column_key, override.original_value, override.human_value)
+                )
         return batch
 
     def apply_to_rows(self, rows: list[list[str]], dataset: TabularDataset) -> list[list[str]]:
@@ -170,6 +236,24 @@ def _optional_string(value: object) -> str | None:
     return value if isinstance(value, str) else None
 
 
+def _string_or_default(value: object, default: str) -> str:
+    return value if isinstance(value, str) else default
+
+
+def _bool_or_default(value: object, default: bool) -> bool:
+    return value if isinstance(value, bool) else default
+
+
+def _int_or_default(value: object, default: int) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else default
+
+
+def _int_tuple(value: object) -> tuple[int, ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple(item for item in value if isinstance(item, int) and not isinstance(item, bool))
+
+
 def _datetime_from_payload(value: object) -> datetime:
     if not isinstance(value, str):
         return datetime.now(UTC)
@@ -181,5 +265,7 @@ def _datetime_from_payload(value: object) -> datetime:
 
 __all__ = [
     "CellOverride",
+    "ReviewModeProgress",
     "ReviewOverrides",
+    "ReviewProgressState",
 ]

@@ -17,6 +17,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from src.domain.column_renames import ColumnRenameSet
+from src.domain.manifest.adjustments import ManifestManualOverride, ManifestPvAdjustment, ManifestTermKey
 from src.domain.manifest.models import ManifestRow, ManualOverride, get_manifest_schema
 from src.domain.manifest.reader import read_manifest_parquet
 
@@ -30,7 +31,7 @@ class AdjustmentResult(NamedTuple):
 
 def add_manual_overrides_batch(
     manifest_path: Path,
-    overrides: list[tuple[str, str, str]],
+    overrides: list[ManifestManualOverride],
     user_id: str | None = None,
 ) -> bool:
     """Single read/write avoids N parquet rewrites when applying N overrides."""
@@ -45,22 +46,21 @@ def add_manual_overrides_batch(
     timestamp = datetime.now(UTC).isoformat()
     updated_rows = summary.rows
 
-    for column_key, to_harmonize, override_value in overrides:
-        new_override = ManualOverride(user_id=user_id, timestamp=timestamp, value=override_value)
-        updated_rows = _apply_single_override(updated_rows, column_key, to_harmonize, new_override)
+    for override in overrides:
+        new_override = ManualOverride(user_id=user_id, timestamp=timestamp, value=override.override_value)
+        updated_rows = _apply_single_override(updated_rows, override.term_key, new_override)
 
     return _write_manifest_parquet(manifest_path, updated_rows)
 
 
 def _apply_single_override(
     rows: list[ManifestRow],
-    column_key: str,
-    to_harmonize: str,
+    term_key: ManifestTermKey,
     new_override: ManualOverride,
 ) -> list[ManifestRow]:
     updated: list[ManifestRow] = []
     for row in rows:
-        if column_key == _row_column_key(row) and row.to_harmonize == to_harmonize:
+        if ManifestTermKey.from_row(row) == term_key:
             updated_overrides = [*row.manual_overrides, new_override]
             updated.append(replace(row, manual_overrides=updated_overrides))
         else:
@@ -69,23 +69,22 @@ def _apply_single_override(
 
 
 def _build_adjustment_map(
-    adjustments: list[tuple[str, str, str, str]],
-) -> dict[tuple[str, str], tuple[str, str]]:
+    adjustments: list[ManifestPvAdjustment],
+) -> dict[ManifestTermKey, ManifestPvAdjustment]:
     """Dict lookup avoids O(n²) scan when matching rows to adjustments."""
-    return {(col, to_harm): (adjusted, source) for col, to_harm, adjusted, source in adjustments}
+    return {adjustment.term_key: adjustment for adjustment in adjustments}
 
 
 def _apply_adjustments_to_rows(
     rows: list[ManifestRow],
-    adjustment_map: dict[tuple[str, str], tuple[str, str]],
+    adjustment_map: dict[ManifestTermKey, ManifestPvAdjustment],
 ) -> AdjustmentResult:
     updated: list[ManifestRow] = []
     adjusted_count = 0
     for row in rows:
-        key = (_row_column_key(row), row.to_harmonize)
-        if key in adjustment_map:
-            adjusted_value, _source = adjustment_map[key]
-            updated.append(replace(row, top_harmonization=adjusted_value))
+        adjustment = adjustment_map.get(ManifestTermKey.from_row(row))
+        if adjustment is not None:
+            updated.append(replace(row, top_harmonization=adjustment.adjusted_value))
             adjusted_count += 1
         else:
             updated.append(row)
@@ -94,7 +93,7 @@ def _apply_adjustments_to_rows(
 
 def apply_pv_adjustments_batch(
     manifest_path: Path,
-    adjustments: list[tuple[str, str, str, str]],
+    adjustments: list[ManifestPvAdjustment],
 ) -> int:
     if not adjustments:
         return 0
@@ -147,10 +146,6 @@ def apply_column_renames_batch(manifest_path: Path, renames: ColumnRenameSet) ->
     return renamed_count
 
 
-def _row_column_key(row: ManifestRow) -> str:
-    return str(row.column_key)
-
-
 def _write_manifest_parquet(manifest_path: Path, rows: list[ManifestRow]) -> bool:
     try:
         table = _rows_to_table(rows)
@@ -192,4 +187,7 @@ __all__ = [
     "add_manual_overrides_batch",
     "apply_column_renames_batch",
     "apply_pv_adjustments_batch",
+    "ManifestManualOverride",
+    "ManifestPvAdjustment",
+    "ManifestTermKey",
 ]

@@ -79,21 +79,20 @@ function _addMappingContext(url) {
   if (url.pathname !== '/stage-2' && url.pathname !== '/stage-3') return;
 
   const context = _getTargetContextForNavigation();
-  if (!context.schema) return;
+  if (!context.dataModelKey) return;
 
-  const schemaParam = url.pathname === '/stage-3' ? 'target_schema' : 'schema';
-  url.searchParams.set(schemaParam, context.schema);
-  if (context.versionNumber) {
-    url.searchParams.set('version_number', String(context.versionNumber));
+  url.searchParams.set('data_model_key', context.dataModelKey);
+  if (context.externalVersionNumber) {
+    url.searchParams.set('external_version_number', context.externalVersionNumber);
   }
 }
 
 function _getTargetContextForNavigation() {
   const params = new URLSearchParams(window.location.search);
-  const schema = params.get('schema') || params.get('target_schema');
-  const versionNumber = params.get('version_number');
-  if (schema) {
-    return { schema, versionNumber };
+  const dataModelKey = params.get('data_model_key');
+  const externalVersionNumber = params.get('external_version_number');
+  if (dataModelKey) {
+    return { dataModelKey, externalVersionNumber };
   }
 
   try {
@@ -101,8 +100,8 @@ function _getTargetContextForNavigation() {
     if (!stored) return {};
     const parsed = JSON.parse(stored);
     return {
-      schema: parsed.context?.targetSchema || parsed.request?.target_schema || null,
-      versionNumber: parsed.context?.targetVersionNumber || parsed.request?.target_version_number || null,
+      dataModelKey: parsed.context?.dataModelKey || parsed.request?.data_model_key || null,
+      externalVersionNumber: parsed.context?.externalVersionNumber || parsed.request?.external_version_number || null,
     };
   } catch {
     return {};

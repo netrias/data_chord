@@ -20,7 +20,7 @@ import src.domain.dependencies as dependencies
 from src.domain import UILabel
 from src.domain.cde import CDEInfo
 from src.domain.data_model_cache import get_session_cache, populate_cde_cache
-from src.domain.data_model_selection import DataModelSelection
+from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.schemas import DatasetWorkflowIdField
 from src.domain.workflow_state_store import load_workflow_state
 
@@ -46,30 +46,37 @@ stage_two_router = APIRouter(tags=["Stage 2 Mapping"])
 async def render_stage_two(
     request: Request,
     file_id: Annotated[DatasetWorkflowIdField | None, Query()] = None,
-    schema: Annotated[str | None, Query(min_length=1)] = None,
-    version_number: Annotated[int | None, Query(ge=1)] = None,
+    data_model_key: Annotated[str | None, Query(min_length=1)] = None,
+    external_version_number: Annotated[str | None, Query(min_length=1)] = None,
 ) -> HTMLResponse:
     cde_catalog: list[CDEInfo] = []
-    selection = _data_model_selection_for_request(file_id, schema, version_number)
+    try:
+        data_model_version = _data_model_version_for_request(file_id, data_model_key, external_version_number)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    if file_id and selection:
-        cde_catalog = await _get_cde_options_for_session(file_id, selection)
+    if file_id and data_model_version:
+        cde_catalog = await _get_cde_options_for_session(file_id, data_model_version)
 
     context = {
         "request": request,
-        "default_schema": selection.key if selection else schema or "",
-        "default_version_number": selection.version_number if selection else version_number,
+        "default_data_model_key": data_model_version.data_model_key if data_model_version else data_model_key or "",
+        "default_external_version_number": (
+            data_model_version.external_version_number
+            if data_model_version
+            else external_version_number
+        ),
         "cde_catalog": [_cde_catalog_item(cde) for cde in cde_catalog],
         "no_mapping_label": UILabel.NO_MAPPING.value,
     }
     return _templates.TemplateResponse(request, "stage_2_mappings.html", context)
 
 
-def _data_model_selection_for_request(
+def _data_model_version_for_request(
     file_id: str | None,
-    target_schema: str | None,
-    version_number: int | None,
-) -> DataModelSelection | None:
+    data_model_key: str | None,
+    external_version_number: str | None,
+) -> DataModelVersionReference | None:
     if file_id:
         state = load_workflow_state(
             dependencies.get_workflow_storage(),
@@ -77,22 +84,27 @@ def _data_model_selection_for_request(
             file_id,
         )
         if state is not None:
-            return state.data_model_selection
-    if target_schema is None:
+            return state.data_model_version
+    if data_model_key is None:
         return None
-    return DataModelSelection.from_version_number(target_schema, version_number)
+    if external_version_number is not None:
+        return DataModelVersionReference(
+            data_model_key=data_model_key,
+            external_version_number=external_version_number,
+        )
+    return None
 
 
 async def _get_cde_options_for_session(
     file_id: str,
-    selection: DataModelSelection,
+    data_model_version: DataModelVersionReference,
 ) -> list[CDEInfo]:
     """Returns empty list on API failure (graceful degradation)."""
     cache = get_session_cache(file_id)
 
     if not cache.has_cdes():
         try:
-            await run_in_threadpool(populate_cde_cache, file_id, selection)
+            await run_in_threadpool(populate_cde_cache, file_id, data_model_version)
         except (DataModelStoreError, NetriasAPIUnavailable):
             logger.warning("Data Model Store API unavailable; CDE options will be empty", extra={"file_id": file_id})
 

@@ -293,15 +293,15 @@ const _extractRequestPayload = () => {
   if (!harmonizePayload) {
     const params = new URLSearchParams(window.location.search);
     const fileId = params.get('file_id');
-    const targetSchema = params.get('target_schema') || config.targetSchema;
-    const versionNumber = Number(params.get('version_number'));
-    if (!fileId || !targetSchema) {
+    const dataModelKey = params.get('data_model_key') || config.dataModelKey;
+    const externalVersionNumber = params.get('external_version_number');
+    if (!fileId || !dataModelKey || !externalVersionNumber) {
       return null;
     }
     harmonizePayload = {
       file_id: fileId,
-      target_schema: targetSchema,
-      target_version_number: Number.isFinite(versionNumber) && versionNumber > 0 ? versionNumber : null,
+      data_model_key: dataModelKey,
+      external_version_number: externalVersionNumber,
       manual_overrides: {},
       manifest: null,
     };

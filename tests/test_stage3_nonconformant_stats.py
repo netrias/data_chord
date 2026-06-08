@@ -11,6 +11,7 @@ from typing import cast
 from src.domain import ColumnCdeOverrides
 from src.domain.data_model_cache import SessionCache
 from src.domain.manifest import ColumnMappingManifest, ManifestPayload, ManifestRow, ManifestSummary
+from src.domain.pv_persistence import ColumnPvSets
 from src.stage_3_harmonize.router import (
     _column_cde_map_for_session,
     _compute_column_stats,
@@ -145,10 +146,10 @@ class TestSummaryAggregation:
             low_confidence_count=0,
             rows=rows,
         )
-        column_pv_map: dict[str, frozenset[str] | None] = {
-            "col_a": frozenset(["Good"]),
-            "col_b": frozenset(["Good"]),
-        }
+        column_pv_map = ColumnPvSets({
+            rows[0].column_key: frozenset(["Good"]),
+            rows[3].column_key: frozenset(["Good"]),
+        })
 
         schema = _convert_to_schema(manifest, column_pv_map)
 
@@ -167,10 +168,10 @@ class TestSummaryAggregation:
             low_confidence_count=0,
             rows=rows,
         )
-        column_pv_map: dict[str, frozenset[str] | None] = {
-            "with_pvs": frozenset(["Good"]),
-            "no_pvs": None,
-        }
+        column_pv_map = ColumnPvSets({
+            rows[0].column_key: frozenset(["Good"]),
+            rows[1].column_key: None,
+        })
 
         schema = _convert_to_schema(manifest, column_pv_map)
 
@@ -276,7 +277,8 @@ class TestManualOverridePropagation:
         # Given
         payload = {
             "file_id": "abcdef0123456789abcdef0123456789",
-            "target_schema": "CCDI",
+            "data_model_key": "CCDI",
+            "external_version_number": "11.0.4",
             "manual_overrides": {"col": None},
         }
         assert payload["manual_overrides"]["col"] is None
@@ -298,7 +300,8 @@ class TestManualOverridePropagation:
         # Given
         payload = {
             "file_id": "abcdef0123456789abcdef0123456789",
-            "target_schema": "CCDI",
+            "data_model_key": "CCDI",
+            "external_version_number": "11.0.4",
             "manual_overrides": {"col_0000": "primary_diagnosis"},
             "column_renames": {"col_0000": "Primary Diagnosis"},
         }

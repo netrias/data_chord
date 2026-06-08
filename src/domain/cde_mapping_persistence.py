@@ -21,7 +21,7 @@ from src.domain.column_cde_map import ColumnCdeOverrides
 from src.domain.column_renames import ColumnRenameSet
 from src.domain.columns import ColumnKey, column_key_from_string
 from src.domain.data_model_cache import SessionCache
-from src.domain.data_model_selection import DataModelSelection
+from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_value
 from src.domain.manifest import ColumnMappingManifest, ColumnMappingRecord
 from src.domain.storage import UserContext, WorkflowFile, WorkflowNotFoundError, WorkflowStorage
@@ -74,8 +74,8 @@ class CdeMappingDocument:
 
     dataset_workflow_id: DatasetWorkflowId
     generated_at: datetime
-    target_schema: str
-    target_version: str
+    data_model_key: str
+    external_version_number: str
     mappings: list[CdeMappingEntry]
 
     def to_store(self) -> dict[str, object]:
@@ -135,8 +135,8 @@ class CdeMappingDocumentStore(BaseModel):
 
     file_id: StrictStr | None = None
     generated_at: StrictStr | None = None
-    target_schema: StrictStr | None = None
-    target_version: StrictStr | None = None
+    data_model_key: StrictStr | None = None
+    external_version_number: StrictStr | None = None
     mappings: list[CdeMappingEntryStore] = Field(default_factory=list)
 
     @field_validator("mappings", mode="before")
@@ -157,8 +157,8 @@ class CdeMappingDocumentStore(BaseModel):
         return cls(
             file_id=str(document.dataset_workflow_id),
             generated_at=document.generated_at.isoformat(),
-            target_schema=document.target_schema,
-            target_version=document.target_version,
+            data_model_key=document.data_model_key,
+            external_version_number=document.external_version_number,
             mappings=[CdeMappingEntryStore.from_domain(entry) for entry in document.mappings],
         )
 
@@ -180,15 +180,15 @@ def save_cde_mapping_document(
     column_renames: ColumnRenameSet,
     columns: Sequence[ResolvedTabularColumn],
     cache: SessionCache,
-    target_selection: DataModelSelection,
+    data_model_version: DataModelVersionReference,
 ) -> None:
     """Save an audit-friendly mapping plan using the current column-key model."""
     dataset_workflow_id = dataset_workflow_id_from_value(file_id)
     document = CdeMappingDocument(
         dataset_workflow_id=dataset_workflow_id,
         generated_at=datetime.now(UTC),
-        target_schema=target_selection.key,
-        target_version=target_selection.target_version,
+        data_model_key=data_model_version.data_model_key,
+        external_version_number=data_model_version.external_version_number,
         mappings=_build_entries(manifest, column_overrides, column_renames, columns, cache),
     )
     storage = dependencies.get_workflow_storage()

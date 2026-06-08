@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.domain.cde import CDEInfo
+from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.column_profile import ColumnProfile, DistinctValue
 from src.domain.data_model_cache import (
     clear_all_session_caches,
@@ -93,12 +94,12 @@ async def test_compute_column_detail_returns_pv_match_and_sorted_pvs(
     cache.set_cdes(
         [CDEInfo(cde_id=1, cde_key="dx", description=None, version_label="1")],
         data_model_key="gc",
-        version_label="1",
+        external_version_number="11.0.4",
     )
 
     monkeypatch.setattr(
         "src.stage_2_review_columns.use_cases.fetch_all_pvs_async",
-        AsyncMock(return_value={"dx": frozenset({"Lung", "Breast", "Glioma"})}),
+        AsyncMock(return_value=CdePvCatalog.from_mapping({"dx": frozenset({"Lung", "Breast", "Glioma"})})),
     )
 
     # When
@@ -141,11 +142,11 @@ async def test_compute_column_detail_downgrades_to_passthrough_on_empty_pvs(
     cache.set_cdes(
         [CDEInfo(cde_id=2, cde_key="notes", description=None, version_label="1")],
         data_model_key="gc",
-        version_label="1",
+        external_version_number="11.0.4",
     )
     monkeypatch.setattr(
         "src.stage_2_review_columns.use_cases.fetch_all_pvs_async",
-        AsyncMock(return_value={"notes": frozenset()}),
+        AsyncMock(return_value=CdePvCatalog.from_mapping({"notes": frozenset()})),
     )
 
     # When
@@ -243,12 +244,12 @@ async def test_compute_column_detail_rebuilds_profile_when_cache_lost(
     cache.set_cdes(
         [CDEInfo(cde_id=1, cde_key="dx", description=None, version_label="1")],
         data_model_key="gc",
-        version_label="1",
+        external_version_number="11.0.4",
     )
     assert cache.get_column_profile("col_0000") is None
     monkeypatch.setattr(
         "src.stage_2_review_columns.use_cases.fetch_all_pvs_async",
-        AsyncMock(return_value={"dx": frozenset({"Lung", "Breast"})}),
+        AsyncMock(return_value=CdePvCatalog.from_mapping({"dx": frozenset({"Lung", "Breast"})})),
     )
 
     # When

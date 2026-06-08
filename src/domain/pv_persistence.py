@@ -7,16 +7,35 @@ Changes when: PV manifest format changes, storage backend changes, or cache reco
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+from types import MappingProxyType
 
 import src.domain.dependencies as dependencies
-from src.domain.columns import ColumnKey
+from src.domain.cde_pv_catalog import CdePvCatalog
+from src.domain.columns import ColumnKey, column_key_from_string
 from src.domain.data_model_cache import SessionCache, get_session_cache
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_value
 from src.domain.pv_manifest import PVManifest
 from src.domain.storage import WorkflowFile, WorkflowNotFoundError
 
 _logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ColumnPvSets:
+    """PV sets keyed by stable source column identity."""
+
+    values: Mapping[ColumnKey, frozenset[str] | None]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "values", MappingProxyType(dict(self.values)))
+
+    def get(self, column_key: ColumnKey | str) -> frozenset[str] | None:
+        return self.values.get(column_key_from_string(str(column_key)))
+
+    def to_strings(self) -> dict[str, frozenset[str] | None]:
+        return {str(column_key): pv_set for column_key, pv_set in self.values.items()}
 
 
 def load_pv_manifest_from_disk(file_id: str, cache: SessionCache) -> None:
@@ -58,7 +77,7 @@ def ensure_pvs_loaded(file_id: str) -> SessionCache:
 def column_pv_sets(
     file_id: str,
     column_keys: Iterable[ColumnKey | str],
-) -> dict[str, frozenset[str] | None]:
+) -> ColumnPvSets:
     """Return PV sets by source column key, using cache as an implementation detail."""
     requested_column_keys = [str(column_key) for column_key in column_keys]
     cache = ensure_pvs_loaded(file_id)
@@ -66,7 +85,10 @@ def column_pv_sets(
         # A cache can contain PV values without the column mapping after partial
         # warmup; reload the manifest so lookups stay column-key based.
         load_pv_manifest_from_disk(file_id, cache)
-    return {column_key: cache.get_pvs_for_column(column_key) for column_key in requested_column_keys}
+    return ColumnPvSets({
+        column_key_from_string(column_key): cache.get_pvs_for_column(column_key)
+        for column_key in requested_column_keys
+    })
 
 
 def _cache_can_resolve_columns(cache: SessionCache, column_keys: Iterable[str]) -> bool:
@@ -83,18 +105,18 @@ def _cache_can_resolve_columns(cache: SessionCache, column_keys: Iterable[str]) 
 def save_pv_manifest_to_disk(
     file_id: DatasetWorkflowId | str,
     cache: SessionCache,
-    pv_map: dict[str, frozenset[str]],
+    pv_map: CdePvCatalog | Mapping[str, frozenset[str]],
 ) -> None:
     """Persists PVs so Stage 4/5 can recover after server restart without re-running harmonization."""
-    selection = cache.get_model_selection()
-    if selection is None:
-        _logger.warning("Cannot save PV manifest without data model selection", extra={"file_id": file_id})
+    data_model_version = cache.get_data_model_version()
+    if data_model_version is None:
+        _logger.warning("Cannot save PV manifest without data model version", extra={"file_id": file_id})
         return
     manifest = PVManifest(
-        data_model_key=selection.key,
-        version_label=selection.version_label,
+        data_model_key=data_model_version.data_model_key,
+        external_version_number=data_model_version.external_version_number,
         column_to_cde_key=cache.get_column_mappings(),
-        pvs=pv_map,
+        pvs=pv_map if isinstance(pv_map, CdePvCatalog) else CdePvCatalog.from_mapping(pv_map),
     )
     storage = dependencies.get_workflow_storage()
     user = dependencies.get_user_context()
@@ -111,3 +133,12 @@ def save_pv_manifest_to_disk(
         expected_version=existing.version if existing is not None else None,
     )
     _logger.info("Saved PV manifest to disk", extra={"file_id": file_id})
+
+
+__all__ = [
+    "ColumnPvSets",
+    "column_pv_sets",
+    "ensure_pvs_loaded",
+    "load_pv_manifest_from_disk",
+    "save_pv_manifest_to_disk",
+]

@@ -14,9 +14,11 @@ from fastapi.templating import Jinja2Templates
 from netrias_client import DataModelStoreError, NetriasAPIUnavailable
 
 import src.domain.dependencies as dependencies
-from src.domain import ModelSuggestion
 from src.domain.cde import CDEInfo, DataModelSummary
+from src.domain.cde_catalog import CdeCatalog
+from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.column_profile import ColumnProfile
+from src.domain.columns import column_key_from_string
 from src.domain.data_model_adapter import (
     fetch_all_pvs_async,
     fetch_cdes,
@@ -24,13 +26,14 @@ from src.domain.data_model_adapter import (
     refine_cde_types_from_pvs,
 )
 from src.domain.data_model_cache import get_session_cache
-from src.domain.data_model_selection import DataModelSelection
+from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.dataset_workflow_ids import new_dataset_workflow_id
 from src.domain.dependencies import (
     get_mapping_service,
     get_upload_constraints,
 )
-from src.domain.manifest import ManifestPayload
+from src.domain.manifest import ColumnMappingManifest
+from src.domain.mapping_service import MappingDiscoveryResult
 from src.domain.match_counts import column_value_overlap_ratio
 from src.domain.observability import (
     WorkflowEvent,
@@ -82,7 +85,7 @@ async def render_stage_one(request: Request) -> HTMLResponse:
     context = {
         "request": request,
         "ui_constraints": describe_constraints(_upload_constraints),
-        "default_schema": None,
+        "default_data_model_key": None,
     }
     return _templates.TemplateResponse(request, "stage_1_upload.html", context)
 
@@ -193,8 +196,8 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
             outcome=WorkflowOutcome.STARTED,
             file_id=payload.file_id,
             metadata={
-                "target_schema": payload.target_schema,
-                "target_version_number": payload.target_version_number,
+                "data_model_key": payload.data_model_key,
+                "external_version_number": payload.external_version_number,
             },
         ),
         user,
@@ -216,7 +219,7 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
         storage,
         meta,
     )
-    target_selection = DataModelSelection.from_version_number(payload.target_schema, payload.target_version_number)
+    data_model_version = payload.data_model_version()
     analysis_task = asyncio.create_task(
         run_in_threadpool(
             _analyze_columns_safe,
@@ -229,19 +232,21 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
         _discover_mappings(
             meta.saved_path,
             payload.file_id,
-            target_selection,
+            data_model_version,
             meta.selected_sheet,
         )
     )
     reference_task = asyncio.create_task(
         _prime_data_model_cache(
             payload.file_id,
-            target_selection,
+            data_model_version,
         )
     )
     try:
         total_rows, columns, profiles = await analysis_task
-        cde_targets, manual_overrides, manifest = await discovery_task
+        discovery = await discovery_task
+        mapping_manifest = discovery.manifest
+        manifest = discovery.manifest_payload
         await reference_task
     except Exception as exc:
         _log_analyze_failed(user, payload.file_id, type(exc).__name__)
@@ -257,7 +262,7 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     save_initial_workflow_state(
         dependencies.get_workflow_storage(),
         user,
-        WorkflowState.from_selection(meta.dataset_workflow_id, target_selection),
+        WorkflowState.from_data_model_version(meta.dataset_workflow_id, data_model_version),
     )
     # Stash profiles in the session cache so the Stage 2 column-detail endpoint
     # can serve them without re-reading the file.
@@ -265,11 +270,11 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     cache.set_column_profiles(profiles)
     column_summaries = _build_column_summaries(
         profiles,
-        cde_targets,
-        cache.get_all_cdes(),
+        mapping_manifest,
+        cache.get_cde_catalog(),
         cache.get_all_pvs(),
     )
-    _log_analysis_results(payload.file_id, total_rows, columns, cde_targets)
+    _log_analysis_results(payload.file_id, total_rows, columns, mapping_manifest)
     log_workflow_event(
         WorkflowEvent(
             event_name=WorkflowEventName.ANALYZE_COMPLETED,
@@ -280,23 +285,24 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
             metadata={
                 "total_rows": total_rows,
                 "column_count": len(columns),
-                "mapped_columns": len(cde_targets),
+                "mapped_columns": len(mapping_manifest.records),
             },
         ),
         user,
     )
 
+    cde_targets = mapping_manifest.suggestions_by_column()
     return AnalyzeResponse(
         file_id=meta.file_id,
         file_name=meta.original_name,
-        target_version_number=payload.target_version_number,
+        external_version_number=data_model_version.external_version_number,
         total_rows=total_rows,
         columns=columns,
         column_summaries=column_summaries,
         cde_targets=cde_targets,
         next_stage="mapping",
         next_step_hint="Review AI-suggested column mappings once ready.",
-        manual_overrides=manual_overrides,
+        manual_overrides={},
         manifest=manifest,
     )
 
@@ -342,9 +348,9 @@ def _load_sheet_previews_safe(meta: UploadedFileMeta) -> dict[str, SheetPreview]
 async def _discover_mappings(
     csv_path: Path,
     file_id: str,
-    target_selection: DataModelSelection,
+    data_model_version: DataModelVersionReference,
     sheet_name: str | None,
-) -> tuple[dict[str, list[ModelSuggestion]], dict[str, str], ManifestPayload]:
+) -> MappingDiscoveryResult:
     mapping_service = get_mapping_service()
     user = dependencies.get_user_context()
     log_workflow_event(
@@ -355,18 +361,18 @@ async def _discover_mappings(
             outcome=WorkflowOutcome.STARTED,
             file_id=file_id,
             metadata={
-                "target_schema": target_selection.key,
-                "target_version": target_selection.target_version,
+                "data_model_key": data_model_version.data_model_key,
+                "external_version_number": data_model_version.external_version_number,
             },
         ),
         user,
     )
     try:
-        cde_targets, manual_overrides, manifest = await run_in_threadpool(
+        discovery = await run_in_threadpool(
             mapping_service.discover,
             csv_path=csv_path,
-            target_schema=target_selection.key,
-            target_version=target_selection.target_version,
+            data_model_key=data_model_version.data_model_key,
+            external_version_number=data_model_version.external_version_number,
             sheet_name=sheet_name,
         )
         log_workflow_event(
@@ -376,11 +382,11 @@ async def _discover_mappings(
                 operation=WorkflowOperation.MAPPING,
                 outcome=WorkflowOutcome.COMPLETED,
                 file_id=file_id,
-                metadata={"mapped_columns": len(cde_targets)},
+                metadata={"mapped_columns": len(discovery.cde_targets)},
             ),
             user,
         )
-        return cde_targets, manual_overrides, manifest
+        return discovery
     except (UnicodeDecodeError, ValueError) as exc:
         _log_mapping_failed(user, file_id, type(exc).__name__)
         _router_logger.warning("Upload failed validation during analysis", extra={"file_id": file_id})
@@ -398,41 +404,42 @@ async def _discover_mappings(
         ) from exc
 
 
-async def _prime_data_model_cache(file_id: str, target_selection: DataModelSelection) -> None:
+async def _prime_data_model_cache(file_id: str, data_model_version: DataModelVersionReference) -> None:
     """Warm CDEs and all PVs while mapping discovery is running."""
     try:
         cdes_task = asyncio.create_task(
-            run_in_threadpool(fetch_cdes, target_selection.key, target_selection.target_version)
+            run_in_threadpool(fetch_cdes, data_model_version.data_model_key, data_model_version.external_version_number)
         )
-        pvs_task = asyncio.create_task(fetch_all_pvs_async(target_selection.key, target_selection.target_version))
-        cdes, raw_pv_map = await asyncio.gather(cdes_task, pvs_task)
+        pvs_task = asyncio.create_task(
+            fetch_all_pvs_async(data_model_version.data_model_key, data_model_version.external_version_number)
+        )
+        cdes, raw_pv_catalog = await asyncio.gather(cdes_task, pvs_task)
     except (DataModelStoreError, NetriasAPIUnavailable):
         _router_logger.warning("Data Model Store API unavailable during cache warmup", extra={"file_id": file_id})
         return
 
     cache = get_session_cache(file_id)
-    pv_map = {cde.cde_key: raw_pv_map.get(cde.cde_key, frozenset()) for cde in cdes}
-    refined = refine_cde_types_from_pvs(cdes, pv_map)
-    cache.set_cdes(
+    catalog = CdeCatalog.from_cdes(cdes)
+    pv_catalog = raw_pv_catalog.with_defaults(catalog.keys())
+    refined = refine_cde_types_from_pvs(catalog, pv_catalog)
+    cache.set_cde_catalog(
         refined,
-        data_model_key=target_selection.key,
-        version_label=target_selection.version_label,
-        version_number=target_selection.version_number,
+        data_model_key=data_model_version.data_model_key,
+        external_version_number=data_model_version.external_version_number,
     )
-    cache.set_pvs_batch(pv_map)
+    cache.set_pvs_batch(pv_catalog)
 
 
 def _build_column_summaries(
     profiles: dict[str, ColumnProfile],
-    cde_targets: dict[str, list[ModelSuggestion]],
-    cdes: list[CDEInfo],
-    pv_sets: dict[str, frozenset[str]],
+    mapping_manifest: ColumnMappingManifest,
+    cde_catalog: CdeCatalog,
+    pv_sets: CdePvCatalog,
 ) -> dict[str, ColumnOverlapRatio]:
     """Analyze summaries are keyed by column_key so Stage 2 can render without row scans."""
-    cde_by_key = {cde.cde_key: cde for cde in cdes}
     summaries: dict[str, ColumnOverlapRatio] = {}
     for column_key, profile in profiles.items():
-        cde = _top_catalog_cde(column_key, cde_targets, cde_by_key)
+        cde = _top_catalog_cde(column_key, mapping_manifest, cde_catalog)
         distinct = frozenset(dv.value for dv in profile.distinct_values)
         ratio = (
             column_value_overlap_ratio(distinct, cde.cde_type, pv_sets.get(cde.cde_key))
@@ -445,11 +452,14 @@ def _build_column_summaries(
 
 def _top_catalog_cde(
     column_key: str,
-    cde_targets: dict[str, list[ModelSuggestion]],
-    cde_by_key: dict[str, CDEInfo],
+    mapping_manifest: ColumnMappingManifest,
+    cde_catalog: CdeCatalog,
 ) -> CDEInfo | None:
-    for suggestion in cde_targets.get(column_key, []):
-        if cde := cde_by_key.get(suggestion.target):
+    record = mapping_manifest.records.get(column_key_from_string(column_key))
+    if record is None:
+        return None
+    for suggestion in record.suggestions():
+        if cde := cde_catalog.get(suggestion.target):
             return cde
     return None
 
@@ -466,9 +476,9 @@ def _log_analysis_results(
     file_id: str,
     total_rows: int,
     columns: list[ColumnSummary],
-    cde_targets: dict[str, list[ModelSuggestion]],
+    mapping_manifest: ColumnMappingManifest,
 ) -> None:
-    cde_target_keys = set(cde_targets)
+    cde_target_keys = {str(column_key) for column_key in mapping_manifest.records}
     missing_count = sum(1 for col in columns if col.column_key not in cde_target_keys)
     _router_logger.info(
         "Analyze completed",
@@ -476,7 +486,7 @@ def _log_analysis_results(
             "file_id": file_id,
             "total_rows": total_rows,
             "column_count": len(columns),
-            "mapped_columns": len(cde_targets),
+            "mapped_columns": len(mapping_manifest.records),
             "missing_count": missing_count,
         },
     )

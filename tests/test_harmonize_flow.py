@@ -25,8 +25,9 @@ async def test_harmonize_returns_job_id(
         "/stage-3/harmonize",
         json={
             "file_id": file_id,
-            "target_schema": TEST_TARGET_SCHEMA,
-            "manual_overrides": {},
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
+                "manual_overrides": {},
         },
     )
 
@@ -51,8 +52,9 @@ async def test_harmonize_returns_status(
         "/stage-3/harmonize",
         json={
             "file_id": file_id,
-            "target_schema": TEST_TARGET_SCHEMA,
-            "manual_overrides": {},
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
+                "manual_overrides": {},
         },
     )
 
@@ -78,8 +80,9 @@ async def test_harmonize_with_manual_overrides(
         "/stage-3/harmonize",
         json={
             "file_id": file_id,
-            "target_schema": TEST_TARGET_SCHEMA,
-            "manual_overrides": overrides,
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
+                "manual_overrides": overrides,
         },
     )
 
@@ -103,8 +106,9 @@ async def test_harmonize_uses_stored_mapping_manifest_when_request_omits_manifes
         "/stage-3/harmonize",
         json={
             "file_id": file_id,
-            "target_schema": TEST_TARGET_SCHEMA,
-            "manual_overrides": {},
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
+                "manual_overrides": {},
         },
     )
 
@@ -136,8 +140,9 @@ async def test_harmonize_prefers_stored_mapping_manifest_over_stale_request_mani
         "/stage-3/harmonize",
         json={
             "file_id": file_id,
-            "target_schema": TEST_TARGET_SCHEMA,
-            "manual_overrides": {},
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
+                "manual_overrides": {},
             "manifest": stale_manifest,
         },
     )
@@ -160,8 +165,9 @@ async def test_harmonize_file_not_found(app_client: AsyncClient) -> None:
         "/stage-3/harmonize",
         json={
             "file_id": invalid_file_id,
-            "target_schema": TEST_TARGET_SCHEMA,
-            "manual_overrides": {},
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
+                "manual_overrides": {},
         },
     )
 
@@ -183,8 +189,9 @@ async def test_harmonize_returns_next_stage_url(
         "/stage-3/harmonize",
         json={
             "file_id": file_id,
-            "target_schema": TEST_TARGET_SCHEMA,
-            "manual_overrides": {},
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
+                "manual_overrides": {},
         },
     )
 
@@ -213,10 +220,11 @@ async def test_harmonize_without_client_returns_stubbed_job(
 
     result = service.run(
         file_path=Path("/tmp/test.csv"),
-        target_schema=TEST_TARGET_SCHEMA,
+        data_model_key=TEST_TARGET_SCHEMA,
         column_overrides=ColumnCdeOverrides.from_strings({}),
         column_renames=ColumnRenameSet.empty(),
         cache=SessionCache(),
+        external_version_number="11.0.4",
         manifest=None,
     )
 
@@ -243,10 +251,11 @@ def test_harmonize_sends_source_file_and_column_keyed_manifest(tmp_path: Path) -
     # When: harmonization is run
     result = service.run(
         file_path=csv_path,
-        target_schema=TEST_TARGET_SCHEMA,
+        data_model_key=TEST_TARGET_SCHEMA,
         column_overrides=ColumnCdeOverrides.from_strings({}),
         column_renames=ColumnRenameSet.empty(),
         cache=SessionCache(),
+        external_version_number="11.0.4",
         manifest=manifest,
     )
 
@@ -258,6 +267,43 @@ def test_harmonize_sends_source_file_and_column_keyed_manifest(tmp_path: Path) -
     assert sdk_keys == ["col_0001"]
     assert sdk_manifest["column_mappings"]["col_0001"]["alternatives"] == []
     assert harmonize_kwargs["source_path"].name == "dupes.csv"
+
+
+def test_harmonize_discovery_uses_external_version_keyword(tmp_path: Path) -> None:
+    """Fallback discovery speaks the current Netrias client external-version contract."""
+
+    # Given: harmonization needs to discover a manifest because none was supplied
+    from src.domain import ColumnCdeOverrides, ColumnRenameSet
+    from src.domain.data_model_cache import SessionCache
+    from src.domain.harmonize import HarmonizeService
+
+    csv_path = tmp_path / "source.csv"
+    csv_path.write_text("diagnosis\nLung\n", encoding="utf-8")
+    mock_client = MagicMock()
+    mock_client.discover_mapping_from_tabular.return_value = {
+        "column_mappings": {"col_0000": {"column_name": "diagnosis", "cde_key": "primary_diagnosis", "cde_id": 11}}
+    }
+    mock_client.harmonize.return_value = MagicMock(status="succeeded", description="ok", job_id="job-1")
+    service = HarmonizeService(mock_client)
+
+    # When: harmonization runs without a stored manifest
+    result = service.run(
+        file_path=csv_path,
+        data_model_key=TEST_TARGET_SCHEMA,
+        column_overrides=ColumnCdeOverrides.from_strings({}),
+        column_renames=ColumnRenameSet.empty(),
+        cache=SessionCache(),
+        external_version_number="11.0.4",
+        manifest=None,
+    )
+
+    # Then: discovery uses the latest SDK keyword and the manifest is passed to harmonize
+    assert result.job_id == "job-1"
+    discovery_kwargs = mock_client.discover_mapping_from_tabular.call_args.kwargs
+    assert discovery_kwargs["external_version_number"] == "11.0.4"
+    assert "target_version" not in discovery_kwargs
+    sdk_manifest = mock_client.harmonize.call_args.kwargs["manifest"]
+    assert sdk_manifest["column_mappings"]["col_0000"]["cde_key"] == "primary_diagnosis"
 
 
 def test_harmonize_applies_column_renames_to_manifest(tmp_path: Path) -> None:
@@ -286,10 +332,11 @@ def test_harmonize_applies_column_renames_to_manifest(tmp_path: Path) -> None:
     # When
     result = service.run(
         file_path=csv_path,
-        target_schema=TEST_TARGET_SCHEMA,
+        data_model_key=TEST_TARGET_SCHEMA,
         column_overrides=ColumnCdeOverrides.from_strings({}),
         column_renames=ColumnRenameSet.from_dict({"col_0000": "Primary Diagnosis"}),
         cache=SessionCache(),
+        external_version_number="11.0.4",
         manifest=manifest,
     )
 

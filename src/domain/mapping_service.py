@@ -7,7 +7,9 @@ Axis of change: CDE recommendation service integration and response normalizatio
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol, cast
 
 from netrias_client import NetriasClient
 
@@ -15,6 +17,33 @@ from src.domain.cde import ModelSuggestion
 from src.domain.manifest import ColumnMappingManifest, ManifestPayload
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class MappingDiscoveryResult:
+    """Domain result of mapping discovery, with payload views derived at the edge."""
+
+    manifest: ColumnMappingManifest
+
+    @property
+    def cde_targets(self) -> dict[str, list[ModelSuggestion]]:
+        return self.manifest.suggestions_by_column()
+
+    @property
+    def manifest_payload(self) -> ManifestPayload:
+        return self.manifest.to_payload()
+
+
+class _ExternalVersionMappingClient(Protocol):
+    def discover_mapping_from_tabular(
+        self,
+        *,
+        source_path: Path,
+        target_schema: str,
+        external_version_number: str,
+        confidence_threshold: float,
+        sheet_name: str | None,
+    ) -> ManifestPayload: ...
 
 
 class MappingDiscoveryService:
@@ -28,19 +57,19 @@ class MappingDiscoveryService:
         self,
         *,
         csv_path: Path,
-        target_schema: str,
-        target_version: str = "latest",
+        data_model_key: str,
+        external_version_number: str,
         sheet_name: str | None = None,
-    ) -> tuple[dict[str, list[ModelSuggestion]], dict[str, str], ManifestPayload]:
-        """manual_overrides (pos 2) always empty — preserved for caller interface compatibility."""
+    ) -> MappingDiscoveryResult:
         if not self._client:
             raise RuntimeError("NetriasClient unavailable (missing NETRIAS_API_KEY)")
 
         try:
-            raw_manifest = self._client.discover_mapping_from_tabular(
+            external_version_client = cast(_ExternalVersionMappingClient, self._client)
+            raw_manifest = external_version_client.discover_mapping_from_tabular(
                 source_path=csv_path,
-                target_schema=target_schema,
-                target_version=target_version,
+                target_schema=data_model_key,
+                external_version_number=external_version_number,
                 confidence_threshold=0.7,
                 sheet_name=sheet_name,
             )
@@ -48,4 +77,7 @@ class MappingDiscoveryService:
             raise RuntimeError(f"CDE discovery failed: {exc}") from exc
 
         manifest = ColumnMappingManifest.from_payload(raw_manifest)
-        return manifest.suggestions_by_column(), {}, manifest.to_payload()
+        return MappingDiscoveryResult(manifest=manifest)
+
+
+__all__ = ["MappingDiscoveryResult", "MappingDiscoveryService"]

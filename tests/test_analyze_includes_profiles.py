@@ -8,7 +8,10 @@ from pathlib import Path
 import pytest
 
 from src.domain.cde import CDEInfo, CdeType, ModelSuggestion
+from src.domain.cde_catalog import CdeCatalog
+from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.column_profile import ColumnProfile, DistinctValue
+from src.domain.manifest import ColumnMappingManifest
 from src.stage_1_upload.router import _build_column_summaries
 from src.stage_1_upload.services import analyze_columns
 
@@ -60,6 +63,30 @@ def test_analyze_returns_profiles_for_server_cache(two_column_csv: Path) -> None
     assert age.total_distinct == 3  # 57, 62, 29
 
 
+def test_column_preview_empty_visibility_uses_full_profile(tmp_path: Path) -> None:
+    """
+    Given: a column whose first five preview rows are empty but later rows have data
+    When: analyze_columns builds the lightweight Stage 1 column preview
+    Then: has_non_empty_values reflects the full file, not only the preview sample.
+    """
+    csv_path = tmp_path / "late-value.csv"
+    with csv_path.open("w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["late_value", "all_blank"])
+        for _ in range(5):
+            writer.writerow(["", ""])
+        writer.writerow(["present", ""])
+
+    total_rows, columns, profiles = analyze_columns(csv_path)
+
+    assert total_rows == 6
+    late_value = columns[0]
+    all_blank = columns[1]
+    assert late_value.has_non_empty_values is True
+    assert profiles[late_value.column_key].total_distinct == 1
+    assert all_blank.has_non_empty_values is False
+
+
 def test_analyze_response_does_not_require_full_profiles() -> None:
     """
     Given: the analyze API response schema
@@ -79,6 +106,7 @@ def test_analyze_response_does_not_require_full_profiles() -> None:
     response = AnalyzeResponse(
         file_id=dataset_workflow_id_from_string("abcdef0123456789abcdef0123456789"),
         file_name="data.csv",
+        external_version_number="11.0.4",
         total_rows=1,
         columns=[
             ColumnSummary(
@@ -202,7 +230,25 @@ def test_build_column_summaries_reports_ai_rec_overlap_ratios() -> None:
     assert summaries == {}
 
     # When
-    summaries = _build_column_summaries(profiles, cde_targets, cdes, pv_sets)
+    mapping_manifest = ColumnMappingManifest.from_payload({
+        "column_mappings": {
+            column_key: {
+                "cde_key": suggestions[0].target,
+                "cde_id": index,
+                "alternatives": [
+                    {"target": suggestion.target, "confidence": suggestion.similarity}
+                    for suggestion in suggestions
+                ],
+            }
+            for index, (column_key, suggestions) in enumerate(cde_targets.items(), start=1)
+        }
+    })
+    summaries = _build_column_summaries(
+        profiles,
+        mapping_manifest,
+        CdeCatalog.from_cdes(cdes),
+        CdePvCatalog.from_mapping(pv_sets),
+    )
 
     # Then
     assert summaries["diagnosis"].value_overlap_ratio == 0.8

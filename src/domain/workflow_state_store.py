@@ -5,8 +5,6 @@ Axis of change: how the backend stores and updates durable workflow progress.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-
 from src.domain.dataset_workflow_ids import DatasetWorkflowId
 from src.domain.storage import (
     UserContext,
@@ -79,8 +77,7 @@ def save_confirmed_mapping_choices_to_state(
     storage: WorkflowStorage,
     user: UserContext,
     file_id: str,
-    manual_overrides: Mapping[str, str | None],
-    column_renames: Mapping[str, str],
+    choices: ConfirmedMappingChoices,
 ) -> WorkflowState:
     try:
         stored = storage.read_json(user, file_id, WorkflowFile.WORKFLOW_STATE)
@@ -93,7 +90,6 @@ def save_confirmed_mapping_choices_to_state(
     if state is None:
         raise WorkflowStateNotFoundError(file_id)
 
-    choices = ConfirmedMappingChoices.from_raw(manual_overrides, column_renames)
     updated = state.with_mapping_choices(choices)
     try:
         # Stage 2 choices are the canonical handoff to Stage 3; reject stale

@@ -4,9 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Data Chord · Mapping</title>
-    <link rel="stylesheet" href="/assets/shared/tokens.css" />
-    <link rel="stylesheet" href="{{ request.url_for('stage_one_static', path='stage_1_upload.css') }}" />
-    <link rel="stylesheet" href="{{ request.url_for('stage_two_static', path='stage_2_mappings.css') }}" />
+    <link rel="stylesheet" href="/assets/shared/tokens.css?v={{ request.app.state.asset_version }}" />
+    <link rel="stylesheet" href="{{ request.url_for('stage_one_static', path='stage_1_upload.css') }}?v={{ request.app.state.asset_version }}" />
+    <link rel="stylesheet" href="{{ request.url_for('stage_two_static', path='stage_2_mappings.css') }}?v={{ request.app.state.asset_version }}" />
   </head>
   <body>
     <nav class="progress-tracker">
@@ -95,13 +95,13 @@
         analyzeEndpoint: "{{ request.url_for('stage_one_upload_analyze') }}",
         mappingChoicesEndpoint: "{{ request.url_for('stage_two_save_mapping_choices') }}",
         columnDetailBase: "/stage-2/column-detail",
-        targetSchema: "{{ default_schema }}",
-        targetVersionNumber: {{ default_version_number|tojson }},
+        dataModelKey: "{{ default_data_model_key }}",
+        externalVersionNumber: {{ default_external_version_number|tojson }},
         cdeCatalog: {{ cde_catalog | tojson }},
         noMappingLabel: {{ no_mapping_label | tojson }},
         stageThreeUrl: "{{ request.url_for('stage_three_entry') }}",
       };
     </script>
-    <script type="module" src="{{ request.url_for('stage_two_static', path='stage_2_mappings.js') }}"></script>
+    <script type="module" src="{{ request.url_for('stage_two_static', path='stage_2_mappings.js') }}?v={{ request.app.state.asset_version }}"></script>
   </body>
 </html>

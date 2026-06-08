@@ -27,6 +27,7 @@ TEST_CSV_CONTENT_TYPE = "text/csv"
 TEST_TSV_CONTENT_TYPE = "text/tab-separated-values"
 TEST_XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 TEST_TARGET_SCHEMA = "CCDI"
+TEST_TARGET_EXTERNAL_VERSION_NUMBER = "11.0.4"
 SAMPLE_CSV_ROW_COUNT = 10
 SAMPLE_CSV_COLUMN_COUNT = 6
 MAX_EXAMPLES_LIMIT = 20
@@ -152,7 +153,7 @@ def mock_netrias_client() -> Generator[MagicMock]:
         DataModel(
             data_commons_id=1, key="test-data-model", name="Test Data Model",
             description=None, is_active=True,
-            versions=(DataModelVersion(version_label="1"),),
+            versions=(DataModelVersion(external_version_number="11.0.4"),),
         ),
     )
     mock_client.list_cdes.return_value = (
@@ -291,7 +292,11 @@ async def upload_and_analyze(client: AsyncClient, csv_path: Path) -> str:
     file_id = await upload_file(client, csv_path)
     await client.post(
         "/stage-1/analyze",
-        json={"file_id": file_id, "target_schema": TEST_TARGET_SCHEMA},
+        json={
+            "file_id": file_id,
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": TEST_TARGET_EXTERNAL_VERSION_NUMBER,
+        },
     )
     return file_id
 

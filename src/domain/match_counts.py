@@ -11,9 +11,9 @@ ratios, but includes PV CDEs with a real zero overlap as ``0.0``.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
-
-from src.domain.cde import CDEInfo, CdeType
+from src.domain.cde import CdeType
+from src.domain.cde_catalog import CdeCatalog
+from src.domain.cde_pv_catalog import CdePvCatalog
 
 
 def column_value_overlap_ratio(
@@ -33,12 +33,12 @@ def column_value_overlap_ratio(
 
 def compute_column_overlap_by_cde(
     distinct_values: frozenset[str],
-    cdes: Iterable[CDEInfo],
-    pv_sets: Mapping[str, frozenset[str]],
+    catalog: CdeCatalog,
+    pv_sets: CdePvCatalog,
 ) -> dict[str, float]:
     """Build a per-CDE PV overlap map while preserving real zero-overlap results."""
     overlaps: dict[str, float] = {}
-    for cde in cdes:
+    for cde in catalog:
         ratio = column_value_overlap_ratio(
             distinct_values,
             cde.cde_type,
@@ -51,8 +51,8 @@ def compute_column_overlap_by_cde(
 
 def compute_match_counts(
     distinct_values: frozenset[str],
-    cdes: Iterable[CDEInfo],
-    pv_sets: Mapping[str, frozenset[str]],
+    catalog: CdeCatalog,
+    pv_sets: CdePvCatalog,
 ) -> dict[str, int]:
     """For each CDE, count the column's distinct values that conform under its type.
 
@@ -65,7 +65,7 @@ def compute_match_counts(
     """
     passthrough_count = len(distinct_values)
     out: dict[str, int] = {}
-    for cde in cdes:
+    for cde in catalog:
         match cde.cde_type:
             case CdeType.PV:
                 pv_set = pv_sets.get(cde.cde_key)

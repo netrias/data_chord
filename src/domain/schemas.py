@@ -10,6 +10,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, BeforeValidator, Field, PlainSerializer, WithJsonSchema
 
+from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.dataset_workflow_ids import (
     DATASET_WORKFLOW_ID_LENGTH,
     DATASET_WORKFLOW_ID_PATTERN,
@@ -45,11 +46,17 @@ FileIdField = DatasetWorkflowIdField
 
 class HarmonizeRequest(BaseModel):
     file_id: DatasetWorkflowIdField
-    target_schema: str
-    target_version_number: int | None = Field(default=None, ge=1)
+    data_model_key: str
+    external_version_number: str = Field(..., min_length=1)
     manual_overrides: dict[str, str | None] = Field(default_factory=dict)
     column_renames: dict[str, str] = Field(default_factory=dict)
     manifest: ManifestPayload | None = None
+
+    def data_model_version(self) -> DataModelVersionReference:
+        return DataModelVersionReference(
+            data_model_key=self.data_model_key,
+            external_version_number=self.external_version_number,
+        )
 
 
 class ConfidenceBucketSchema(BaseModel):

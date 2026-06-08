@@ -6,6 +6,8 @@ from hypothesis import assume, given
 from hypothesis import strategies as st
 
 from src.domain.cde import CDEInfo, CdeType
+from src.domain.cde_catalog import CdeCatalog
+from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.match_counts import (
     column_value_overlap_ratio,
     compute_column_overlap_by_cde,
@@ -24,15 +26,15 @@ def test_pv_type_counts_set_intersection() -> None:
     Then: count == size of the intersection
     """
     # Given
-    cdes = [_make_cde("diagnosis", CdeType.PV)]
-    pv_sets = {"diagnosis": frozenset({"Lung Cancer", "Breast Cancer", "Glioma"})}
+    catalog = _catalog("diagnosis", CdeType.PV)
+    pv_sets = _pv_catalog({"diagnosis": frozenset({"Lung Cancer", "Breast Cancer", "Glioma"})})
     distinct = frozenset({"Lung Cancer", "Breast Cancer", "lung cancer"})  # case-sensitive
     # negative assertion: nothing computed yet
     counts: dict[str, int] = {}
     assert counts == {}
 
     # When
-    counts = compute_match_counts(distinct, cdes, pv_sets)
+    counts = compute_match_counts(distinct, catalog, pv_sets)
 
     # Then: only exact-matching values are conformant (per project's whitespace rules)
     assert counts == {"diagnosis": 2}
@@ -50,11 +52,11 @@ def test_passthrough_type_counts_all_distinct_values() -> None:
     Then: count == number of distinct values (everything passes)
     """
     # Given
-    cdes = [_make_cde("free_notes", CdeType.PASSTHROUGH)]
+    catalog = _catalog("free_notes", CdeType.PASSTHROUGH)
     distinct = frozenset({"alpha", "beta", "gamma"})
 
     # When
-    counts = compute_match_counts(distinct, cdes, pv_sets={})
+    counts = compute_match_counts(distinct, catalog, CdePvCatalog.empty())
 
     # Then
     assert counts == {"free_notes": 3}
@@ -72,12 +74,12 @@ def test_zero_count_entries_omitted_from_output() -> None:
     Then: the key is omitted from the output (sparse map)
     """
     # Given
-    cdes = [_make_cde("diagnosis", CdeType.PV)]
-    pv_sets = {"diagnosis": frozenset({"X", "Y"})}
+    catalog = _catalog("diagnosis", CdeType.PV)
+    pv_sets = _pv_catalog({"diagnosis": frozenset({"X", "Y"})})
     distinct = frozenset({"foo", "bar"})
 
     # When
-    counts = compute_match_counts(distinct, cdes, pv_sets)
+    counts = compute_match_counts(distinct, catalog, pv_sets)
 
     # Then
     assert counts == {}
@@ -149,22 +151,22 @@ def test_compute_column_overlap_by_cde_includes_zero_pv_and_omits_undefined() ->
     Then: PV CDEs with fetched PVs appear, including zero overlap, and rename-only CDEs do not
     """
     # Given
-    cdes = [
+    catalog = CdeCatalog.from_cdes([
         _make_cde("dx", CdeType.PV),
         _make_cde("zero", CdeType.PV),
         _make_cde("missing", CdeType.PV),
         _make_cde("notes", CdeType.PASSTHROUGH),
-    ]
+    ])
     distinct = frozenset({"Lung", "Unknown"})
-    pv_sets = {
+    pv_sets = _pv_catalog({
         "dx": frozenset({"Lung", "Breast"}),
         "zero": frozenset({"Glioma"}),
-    }
+    })
     overlaps: dict[str, float] = {}
     assert overlaps == {}
 
     # When
-    overlaps = compute_column_overlap_by_cde(distinct, cdes, pv_sets)
+    overlaps = compute_column_overlap_by_cde(distinct, catalog, pv_sets)
 
     # Then
     assert overlaps == {"dx": 0.5, "zero": 0.0}
@@ -177,12 +179,12 @@ def test_compute_column_overlap_by_cde_returns_empty_for_empty_distinct_values()
     Then: the sparse result is empty because the ratio is undefined
     """
     # Given
-    cdes = [_make_cde("dx", CdeType.PV)]
+    catalog = _catalog("dx", CdeType.PV)
     distinct = frozenset()
     assert len(distinct) == 0
 
     # When
-    overlaps = compute_column_overlap_by_cde(distinct, cdes, {"dx": frozenset({"Lung"})})
+    overlaps = compute_column_overlap_by_cde(distinct, catalog, _pv_catalog({"dx": frozenset({"Lung"})}))
 
     # Then
     assert overlaps == {}
@@ -203,8 +205,8 @@ def test_pv_count_never_exceeds_distinct(distinct: set[str], pv: set[str]) -> No
     When: compute_match_counts runs against a single PV-typed CDE
     Then: result count ≤ |distinct_values|
     """
-    cdes = [_make_cde("c", CdeType.PV)]
-    counts = compute_match_counts(frozenset(distinct), cdes, {"c": frozenset(pv)})
+    catalog = _catalog("c", CdeType.PV)
+    counts = compute_match_counts(frozenset(distinct), catalog, _pv_catalog({"c": frozenset(pv)}))
     assert counts.get("c", 0) <= len(distinct)
 
 
@@ -220,8 +222,8 @@ def test_passthrough_count_equals_distinct_count(distinct: set[str]) -> None:
     When: compute_match_counts runs against a PASSTHROUGH CDE
     Then: count == |distinct_values| (everything passes through)
     """
-    cdes = [_make_cde("pass", CdeType.PASSTHROUGH)]
-    counts = compute_match_counts(frozenset(distinct), cdes, pv_sets={})
+    catalog = _catalog("pass", CdeType.PASSTHROUGH)
+    counts = compute_match_counts(frozenset(distinct), catalog, CdePvCatalog.empty())
     if distinct:
         assert counts["pass"] == len(distinct)
     else:
@@ -264,3 +266,11 @@ def _make_cde(key: str, cde_type: CdeType) -> CDEInfo:
         version_label="1",
         cde_type=cde_type,
     )
+
+
+def _catalog(key: str, cde_type: CdeType) -> CdeCatalog:
+    return CdeCatalog.from_cdes([_make_cde(key, cde_type)])
+
+
+def _pv_catalog(values: dict[str, frozenset[str]]) -> CdePvCatalog:
+    return CdePvCatalog.from_mapping(values)

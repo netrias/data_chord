@@ -5,6 +5,8 @@ from src.domain.cde import CDEInfo as CDEInfo
 from src.domain.cde import DataModelSummary as DataModelSummary
 from src.domain.cde import ModelSuggestion as ModelSuggestion
 from src.domain.cde import normalize_cde_key as normalize_cde_key
+from src.domain.cde_catalog import CdeCatalog as CdeCatalog
+from src.domain.cde_pv_catalog import CdePvCatalog as CdePvCatalog
 from src.domain.change import CONFIDENCE as CONFIDENCE
 from src.domain.change import ChangeType as ChangeType
 from src.domain.change import ConfidenceThresholds as ConfidenceThresholds
@@ -16,7 +18,7 @@ from src.domain.columns import ColumnIdentity as ColumnIdentity
 from src.domain.columns import ColumnKey as ColumnKey
 from src.domain.columns import column_key_for_index as column_key_for_index
 from src.domain.columns import column_key_from_string as column_key_from_string
-from src.domain.data_model_selection import DataModelSelection as DataModelSelection
+from src.domain.data_model_version_reference import DataModelVersionReference as DataModelVersionReference
 from src.domain.schemas import ColumnBreakdownSchema as ColumnBreakdownSchema
 from src.domain.schemas import ConfidenceBucketSchema as ConfidenceBucketSchema
 from src.domain.schemas import HarmonizeRequest as HarmonizeRequest

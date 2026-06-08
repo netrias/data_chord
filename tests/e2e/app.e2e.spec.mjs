@@ -108,8 +108,8 @@ const _stage2HarnessHtml = (cdeCatalog) => `
       window.stageTwoConfig = {
         analyzeEndpoint: "/stage-1/analyze",
         columnDetailBase: "/stage-2/column-detail",
-        targetSchema: "gc",
-        targetVersionNumber: 1,
+        dataModelKey: "gc",
+        externalVersionNumber: "11.0.4",
         cdeCatalog: ${JSON.stringify(cdeCatalog)},
         noMappingLabel: "No Mapping",
         stageThreeUrl: "/stage-3"
@@ -380,7 +380,7 @@ test('Stage 2 splits picker sections by mapping kind', async ({ page }) => {
     });
   });
 
-  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&schema=gc&version_number=1');
+  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&data_model_key=gc&external_version_number=11.0.4');
 
   await expect(page.locator('#mappingRows .mapping-row')).toHaveCount(6);
   await expect(page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-fit')).toHaveText('80%');
@@ -488,7 +488,7 @@ test('Stage 2 settings sidebar filters rows by mapping outcome', async ({ page }
     });
   });
 
-  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&schema=gc&version_number=1');
+  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&data_model_key=gc&external_version_number=11.0.4');
 
   // Negative: takeover starts hidden, all four rows render, ordering matches CSV.
   await expect(page.locator('#takeover')).toHaveClass(/hidden/);
@@ -572,7 +572,7 @@ test('Stage 2 empty-column filter uses full-column value presence', async ({ pag
     });
   });
 
-  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&schema=gc&version_number=1');
+  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&data_model_key=gc&external_version_number=11.0.4');
 
   await expect(page.locator('#mappingRows .mapping-row')).toHaveCount(1);
   await expect(page.locator('#mappingRows')).toContainText('late_value');
@@ -630,7 +630,7 @@ test('Stage 2 submits selected column renames for harmonization', async ({ page 
     });
   });
 
-  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&schema=gc&version_number=1');
+  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&data_model_key=gc&external_version_number=11.0.4');
 
   // Negative: no rename has been handed off yet.
   const before = await page.evaluate(() => JSON.parse(sessionStorage.getItem('stage2Payload')).column_renames);
@@ -727,7 +727,7 @@ test('Stage 2 picker surfaces all AI candidates as separate rows', async ({ page
     });
   });
 
-  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&schema=gc&version_number=1');
+  await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&data_model_key=gc&external_version_number=11.0.4');
 
   // Open takeover for the diagnosis column, then open the picker.
   await page.locator('.mapping-row', { hasText: 'diagnosis' }).click();
@@ -999,7 +999,7 @@ test('version dropdown panel renders below trigger and scrolls when versions ove
   expect(geom.listScrollHeight).toBeGreaterThan(geom.listClientHeight);
 
   const items = page.locator('.data-model-dropdown--version .data-model-dropdown-item');
-  await expect(items.first()).toHaveText('v20.0');
+  await expect(items.first()).toHaveText('11.0.20');
   await expect(items.first()).toHaveAttribute('aria-selected', 'true');
 });
 
@@ -1017,18 +1017,18 @@ test('data model dropdown shares custom styling and custom dropdowns close on ou
       contentType: 'application/json',
       body: JSON.stringify([
         {
-          key: 'alpha',
+          data_model_key: 'alpha',
           label: 'Alpha Model',
           versions: [
-            { version_label: 'v1', version_number: 1, external_version_number: null, is_default: false },
-            { version_label: 'v3', version_number: 3, external_version_number: null, is_default: true },
+            { version_label: 'v1', version_number: 1, external_version_number: '11.0.1', is_default: false },
+            { version_label: 'v3', version_number: 3, external_version_number: '11.0.3', is_default: true },
           ],
         },
         {
-          key: 'gc',
+          data_model_key: 'gc',
           label: 'Genomic Cancer',
           versions: [
-            { version_label: 'v2', version_number: 2, external_version_number: null, is_default: true },
+            { version_label: 'v2', version_number: 2, external_version_number: '11.0.2', is_default: true },
           ],
         },
       ]),
@@ -1082,14 +1082,14 @@ test('data model dropdown shares custom styling and custom dropdowns close on ou
 
   // Then: the hidden select and dependent version dropdown stay in sync.
   await expect(page.locator('#dataModelSelect')).toHaveValue('alpha');
-  await expect(page.locator('#versionDropdownTrigger')).toContainText('v3');
+  await expect(page.locator('#versionDropdownTrigger')).toContainText('11.0.3');
 
   // When: automation changes the hidden select directly.
   await page.selectOption('#dataModelSelect', 'gc');
 
   // Then: the visible custom dropdown and version list still stay in sync.
   await expect(page.locator('#dataModelDropdownTrigger')).toContainText('Genomic Cancer');
-  await expect(page.locator('#versionDropdownTrigger')).toContainText('v2');
+  await expect(page.locator('#versionDropdownTrigger')).toContainText('11.0.2');
 
   // When: a keyboard user changes the custom model dropdown.
   await page.click('#dataModelDropdownTrigger');
@@ -1099,7 +1099,7 @@ test('data model dropdown shares custom styling and custom dropdowns close on ou
   // Then: the same state sync path is used.
   await expect(page.locator('#dataModelSelect')).toHaveValue('alpha');
   await expect(page.locator('#dataModelDropdownTrigger')).toContainText('Alpha Model');
-  await expect(page.locator('#versionDropdownTrigger')).toContainText('v3');
+  await expect(page.locator('#versionDropdownTrigger')).toContainText('11.0.3');
 
   // When/Then: the version dropdown also closes when the user clicks off it.
   await page.click('#versionDropdownTrigger');
@@ -1312,8 +1312,8 @@ test('Stage 2 locks and Stage 5 is reachable after Stage 3 completes', async ({ 
   // Then: mapping is inspection-only for the completed harmonization
   const stageTwoUrl = new URL(page.url());
   expect(stageTwoUrl.searchParams.get('file_id')).toBe(fileId);
-  expect(stageTwoUrl.searchParams.get('schema')).toBe('gc');
-  expect(stageTwoUrl.searchParams.get('version_number')).toBe('2');
+  expect(stageTwoUrl.searchParams.get('data_model_key')).toBe('gc');
+  expect(stageTwoUrl.searchParams.get('external_version_number')).toBe('11.0.4');
   await expect(page.locator('#mappingLockBanner')).toBeVisible();
   await expect(page.locator('#harmonizeButton')).toContainText('Verify');
 
@@ -1357,8 +1357,8 @@ test('Stage 3 ignores stale session payload when URL points at a new file', asyn
       JSON.stringify({
         request: {
           file_id: '11111111abcdef00',
-          target_schema: 'stale',
-          target_version_number: 9,
+          data_model_key: 'stale',
+          external_version_number: '99.0.0',
           manual_overrides: {},
         },
       }),
@@ -1366,13 +1366,13 @@ test('Stage 3 ignores stale session payload when URL points at a new file', asyn
   });
 
   // When: Stage 3 is opened for a different file from the URL alone
-  await page.goto(`/stage-3?file_id=${currentFileId}&target_schema=gc&version_number=2`);
+  await page.goto(`/stage-3?file_id=${currentFileId}&data_model_key=gc&external_version_number=11.0.4`);
   await expect(page.locator('#reviewButton')).toBeEnabled();
 
   // Then: harmonization starts with the current URL file, not the stale session file
   expect(harmonizePayload?.file_id).toBe(currentFileId);
-  expect(harmonizePayload?.target_schema).toBe('gc');
-  expect(harmonizePayload?.target_version_number).toBe(2);
+  expect(harmonizePayload?.data_model_key).toBe('gc');
+  expect(harmonizePayload?.external_version_number).toBe('11.0.4');
 });
 
 test('multiple columns with changes show as separate tabs', async ({ page }) => {

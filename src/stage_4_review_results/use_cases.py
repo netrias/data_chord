@@ -23,14 +23,14 @@ from src.domain.manifest import (
     is_value_changed,
     read_manifest_parquet,
 )
-from src.domain.pv_persistence import column_pv_sets
+from src.domain.pv_persistence import ColumnPvSets, column_pv_sets
 from src.domain.pv_validation import check_value_conformance
 from src.domain.review_override_store import (
     delete_review_overrides_state,
     load_review_overrides,
     save_review_overrides_state,
 )
-from src.domain.review_overrides import ReviewOverrides
+from src.domain.review_overrides import ReviewOverrides, ReviewProgressState
 from src.domain.storage import UploadStorage, UserContext, WorkflowFile, WorkflowStorage
 from src.domain.workflow_artifact_store import (
     load_harmonization_manifest_path,
@@ -205,7 +205,7 @@ def save_review_overrides(
         user,
         file_id=file_id,
         overrides=_override_payload_to_store(overrides),
-        review_state=review_state.model_dump(),
+        review_state=ReviewProgressState.from_payload(review_state.model_dump(mode="json")),
     )
     _sync_override_audit(upload_storage, workflow_storage, user, saved)
     return SaveReviewOverridesResult(file_id=file_id, updated_at=saved.updated_at)
@@ -236,7 +236,7 @@ def _extract_columns_from_manifest(manifest: ManifestSummary) -> list[ColumnIden
 
 def _find_unique_non_conformant_values(
     manifest: ManifestSummary,
-    column_pv_map: dict[str, frozenset[str] | None],
+    column_pv_map: ColumnPvSets,
 ) -> list[NonConformantItem]:
     seen: set[tuple[str, str, str]] = set()
     non_conformant: list[NonConformantItem] = []
@@ -251,7 +251,7 @@ def _find_unique_non_conformant_values(
             continue
         seen.add(key)
 
-        pv_set = column_pv_map.get(col_key)
+        pv_set = column_pv_map.get(row.column_key)
         if pv_set and current_value and not check_value_conformance(current_value, pv_set):
             non_conformant.append(NonConformantItem(
                 column=row.column_name,
@@ -269,7 +269,7 @@ def _current_value_for_row(row: ManifestRow) -> str:
 
 def _build_columns_from_manifest(
     manifest: ManifestSummary,
-    column_pv_map: dict[str, frozenset[str] | None],
+    column_pv_map: ColumnPvSets,
     cde_mappings_by_column: Mapping[ColumnKey, CdeMappingEntry],
 ) -> list[ColumnReviewData]:
     columns_map: dict[ColumnKey, list[ManifestRow]] = {}
@@ -291,7 +291,7 @@ def _build_columns_from_manifest(
         target_cde_key = _target_cde_key(mapping_entry)
         serialized_col_key = str(col_key)
         transformations = [
-            _build_transformation(row, column_pv_map.get(serialized_col_key)) for row in manifest_rows
+            _build_transformation(row, column_pv_map.get(row.column_key)) for row in manifest_rows
         ]
         terms_with_changes = sum(1 for transformation in transformations if transformation.isChanged)
 
@@ -351,7 +351,7 @@ def _build_transformation(row: ManifestRow, pv_set: frozenset[str] | None) -> Tr
 
 def _build_column_pvs(
     columns: list[ColumnIdentity],
-    column_pv_map: dict[str, frozenset[str] | None],
+    column_pv_map: ColumnPvSets,
     file_id: str,
 ) -> dict[str, list[str]]:
     """Alphabetical sort ensures predictable dropdown ordering across page loads."""
@@ -359,7 +359,7 @@ def _build_column_pvs(
     columns_without_pvs: list[str] = []
 
     for col_info in columns:
-        pv_set = column_pv_map.get(str(col_info.key))
+        pv_set = column_pv_map.get(col_info.key)
         if pv_set:
             column_pvs[str(col_info.key)] = sorted(pv_set)
         else:

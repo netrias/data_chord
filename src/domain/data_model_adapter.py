@@ -6,7 +6,6 @@ Axis of change: SDK response shapes. Callers get stable domain types.
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import cast
@@ -16,11 +15,10 @@ import httpx
 from netrias_client import DataModelStoreError, NetriasAPIUnavailable, NetriasClient
 
 from src.domain.cde import CDEInfo, DataModelSummary, DataModelVersionInfo
+from src.domain.cde_catalog import CdeCatalog
+from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.cde_type_classification import classify_cde
 from src.domain.dependencies import get_netrias_client
-
-_logger = logging.getLogger(__name__)
-
 
 # GC is the primary user right now — surface it first so the UI defaults to it
 _PREFERRED_MODEL_KEY = "gc"
@@ -42,32 +40,21 @@ def list_data_model_summaries() -> list[DataModelSummary]:
         return []
     config = _data_model_store_config(client)
     summaries = _list_data_model_summaries_direct(config) if config else _list_data_model_summaries_from_sdk(client)
-    summaries.sort(key=lambda s: (s.key != _PREFERRED_MODEL_KEY, s.key))
+    summaries.sort(key=lambda s: (s.data_model_key != _PREFERRED_MODEL_KEY, s.data_model_key))
     return summaries
-
-
-def get_latest_version(data_model_key: str) -> str:
-    """Why: callers need a single version string, not SDK model traversal."""
-    client = get_netrias_client()
-    if client is None:
-        _logger.warning("NetriasClient unavailable; defaulting to version 1")
-        return "1"
-    models = client.list_data_models(query=data_model_key, include_versions=True)
-    for m in models:
-        if m.key == data_model_key and m.versions:
-            return m.versions[-1].version_label
-    _logger.warning("No versions found for %s, defaulting to 1", data_model_key)
-    return "1"
 
 
 def _list_data_model_summaries_from_sdk(client: NetriasClient) -> list[DataModelSummary]:
     models = client.list_data_models(include_versions=True)
     return [
         DataModelSummary(
-            key=m.key,
+            data_model_key=m.key,
             label=m.name,
             versions=[
-                _version_info_from_label(v.version_label, is_default=index == len(m.versions or ()) - 1)
+                _version_info_from_label(
+                    getattr(v, "external_version_number", getattr(v, "version_label", "")),
+                    is_default=index == len(m.versions or ()) - 1,
+                )
                 for index, v in enumerate(m.versions or ())
             ],
         )
@@ -103,7 +90,7 @@ def _summary_from_item(item: Mapping[str, object]) -> DataModelSummary:
         if isinstance(raw, Mapping) and (version := _version_info_from_item(raw)) is not None
     ]
     return DataModelSummary(
-        key=str(item.get("key", "")),
+        data_model_key=str(item.get("key", "")),
         label=str(item.get("name", "")),
         versions=versions,
     )
@@ -116,23 +103,27 @@ def _version_info_from_item(item: Mapping[str, object]) -> DataModelVersionInfo 
         return None
     raw_label = item.get("version_label")
     external = item.get("external_version_number")
+    if not isinstance(external, str) or not external.strip():
+        return None
     return DataModelVersionInfo(
         version_label=str(raw_label) if raw_label else str(version_number),
         version_number=version_number,
-        external_version_number=str(external) if external else None,
+        external_version_number=external.strip(),
         is_default=bool(item.get("is_default", False)),
     )
 
 
 def _version_info_from_label(version_label: str, is_default: bool = False) -> DataModelVersionInfo:
+    """Compatibility adapter for older SDK objects that only expose version_label."""
     return DataModelVersionInfo(
         version_label=version_label,
         version_number=_int_or_none(version_label) or 1,
+        external_version_number=version_label,
         is_default=is_default,
     )
 
 
-def fetch_cdes(data_model_key: str, version: str) -> list[CDEInfo]:
+def fetch_cdes(data_model_key: str, external_version_number: str) -> list[CDEInfo]:
     """Why: converts SDK CDE tuples to domain CDEInfo list.
 
     Initial cde_type is decided by classify_cde with has_pvs=None (PVs not
@@ -142,13 +133,18 @@ def fetch_cdes(data_model_key: str, version: str) -> list[CDEInfo]:
     client = get_netrias_client()
     if client is None:
         return []
-    sdk_cdes = client.list_cdes(data_model_key, version, include_description=True)
+    dms_version = _dms_version_for_external(client, data_model_key, external_version_number)
+    sdk_cdes = client.list_cdes(
+        model_key=data_model_key,
+        version=dms_version,
+        include_description=True,
+    )
     return [
         CDEInfo(
             cde_id=c.cde_id,
             cde_key=c.cde_key,
             description=c.description,
-            version_label=version,
+            version_label=external_version_number,
             cde_type=classify_cde(has_pvs=None),
         )
         for c in sdk_cdes
@@ -156,9 +152,9 @@ def fetch_cdes(data_model_key: str, version: str) -> list[CDEInfo]:
 
 
 def refine_cde_types_from_pvs(
-    cdes: list[CDEInfo],
-    pv_sets: dict[str, frozenset[str]],
-) -> list[CDEInfo]:
+    catalog: CdeCatalog,
+    pv_sets: CdePvCatalog,
+) -> CdeCatalog:
     """Re-classify CDEs once PVs are known.
 
     For every CDE whose PV set has been fetched, the type is now decidable:
@@ -166,11 +162,11 @@ def refine_cde_types_from_pvs(
     Returns a new list — domain types are frozen.
     """
     refined: list[CDEInfo] = []
-    for cde in cdes:
-        if cde.cde_key not in pv_sets:
+    for cde in catalog:
+        if not pv_sets.has(cde.cde_key):
             refined.append(cde)
             continue
-        has_pvs = bool(pv_sets[cde.cde_key])
+        has_pvs = bool(pv_sets.get(cde.cde_key))
         new_type = classify_cde(has_pvs=has_pvs)
         if new_type == cde.cde_type:
             refined.append(cde)
@@ -184,19 +180,23 @@ def refine_cde_types_from_pvs(
                     cde_type=new_type,
                 )
             )
-    return refined
+    return CdeCatalog.from_cdes(refined)
 
 
-async def fetch_all_pvs_async(data_model_key: str, version: str) -> dict[str, frozenset[str]]:
+async def fetch_all_pvs_async(data_model_key: str, external_version_number: str) -> CdePvCatalog:
     """Fetch all PVs for a model version in one request, grouped by CDE key."""
     client = get_netrias_client()
     if client is None:
-        return {}
+        return CdePvCatalog.empty()
     config = _data_model_store_config(client)
     if config is None:
-        return {}
+        return CdePvCatalog.empty()
+    dms_version = await _dms_version_for_external_async(config, data_model_key, external_version_number)
 
-    path = f"/data-models/{quote(data_model_key, safe='')}/versions/{quote(version, safe='')}/pvs"
+    path = (
+        f"/data-models/{quote(data_model_key, safe='')}"
+        f"/versions/{quote(dms_version, safe='')}/pvs"
+    )
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(config.timeout)) as http_client:
             response = await http_client.get(
@@ -212,7 +212,7 @@ async def fetch_all_pvs_async(data_model_key: str, version: str) -> dict[str, fr
     return _pv_map_from_all_pvs_response(body)
 
 
-def _pv_map_from_all_pvs_response(body: Mapping[str, object]) -> dict[str, frozenset[str]]:
+def _pv_map_from_all_pvs_response(body: Mapping[str, object]) -> CdePvCatalog:
     grouped: dict[str, set[str]] = {}
     for item in _list_or_empty(body.get("items")):
         if not isinstance(item, Mapping):
@@ -221,7 +221,68 @@ def _pv_map_from_all_pvs_response(body: Mapping[str, object]) -> dict[str, froze
         pv_value = item.get("pv_value")
         if isinstance(cde_key, str) and isinstance(pv_value, str):
             grouped.setdefault(cde_key, set()).add(pv_value)
-    return {cde_key: frozenset(values) for cde_key, values in grouped.items()}
+    return CdePvCatalog({cde_key: frozenset(values) for cde_key, values in grouped.items()})
+
+
+def _dms_version_for_external(client: NetriasClient, data_model_key: str, external_version_number: str) -> str:
+    config = _data_model_store_config(client)
+    if config is None:
+        return external_version_number
+    summaries = _list_data_model_summaries_direct(config)
+    return _find_dms_version_number(
+        summaries=summaries,
+        data_model_key=data_model_key,
+        external_version_number=external_version_number,
+    )
+
+
+async def _dms_version_for_external_async(
+    config: _DataModelStoreConfig,
+    data_model_key: str,
+    external_version_number: str,
+) -> str:
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(config.timeout)) as http_client:
+            response = await http_client.get(
+                f"{config.base_url.rstrip('/')}/data-models",
+                headers={"x-api-key": config.api_key},
+                params={"include_versions": "true"},
+            )
+    except httpx.TimeoutException as exc:
+        raise NetriasAPIUnavailable("data model store request timed out") from exc
+    except httpx.HTTPError as exc:
+        raise NetriasAPIUnavailable(f"data model store request failed: {exc}") from exc
+
+    body = _response_json(response)
+    items = body.get("items")
+    summaries = (
+        [_summary_from_item(item) for item in items if isinstance(item, Mapping)]
+        if isinstance(items, list)
+        else []
+    )
+    return _find_dms_version_number(
+        summaries=summaries,
+        data_model_key=data_model_key,
+        external_version_number=external_version_number,
+    )
+
+
+def _find_dms_version_number(
+    *,
+    summaries: list[DataModelSummary],
+    data_model_key: str,
+    external_version_number: str,
+) -> str:
+    for summary in summaries:
+        if summary.data_model_key != data_model_key:
+            continue
+        for version in summary.versions:
+            if version.external_version_number == external_version_number:
+                return str(version.version_number)
+    raise DataModelStoreError(
+        "data model store version lookup failed: "
+        f"no version_number found for {data_model_key} external version {external_version_number}"
+    )
 
 
 def _data_model_store_config(client: object) -> _DataModelStoreConfig | None:

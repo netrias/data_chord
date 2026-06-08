@@ -31,7 +31,8 @@ const NO_MAP_OPTION_VALUE = '__none__';
 const stageThreeUrl = config.stageThreeUrl ?? '/stage-3';
 const columnDetailBase = config.columnDetailBase ?? '/stage-2/column-detail';
 const mappingChoicesEndpoint = config.mappingChoicesEndpoint ?? '/stage-2/choices';
-const targetVersionNumber = config.targetVersionNumber ?? null;
+const dataModelKey = config.dataModelKey ?? '';
+const externalVersionNumber = config.externalVersionNumber ?? null;
 
 const cdeCatalog = (config.cdeCatalog ?? []).map((c) => ({
   key: c.cde_key,
@@ -1260,8 +1261,8 @@ const _persistStageThreePayload = (body) => {
     context: {
       fileName: state.payload?.file_name || 'Uploaded dataset',
       totalRows: state.payload?.total_rows ?? null,
-      targetSchema: config.targetSchema,
-      targetVersionNumber: state.payload?.target_version_number ?? targetVersionNumber,
+      dataModelKey,
+      externalVersionNumber: state.payload?.external_version_number ?? externalVersionNumber,
     },
   };
   return writeToSession(STAGE_3_PAYLOAD_KEY, payloadForStageThree);
@@ -1321,8 +1322,8 @@ const _submitHarmonize = async () => {
   }
   const body = {
     file_id: fileId,
-    target_schema: config.targetSchema,
-    target_version_number: state.payload?.target_version_number ?? targetVersionNumber,
+    data_model_key: dataModelKey,
+    external_version_number: state.payload?.external_version_number ?? externalVersionNumber,
     manual_overrides: overrides,
     column_renames: columnRenames,
   };
@@ -1345,8 +1346,10 @@ const _submitHarmonize = async () => {
   }
   const url = new URL(stageThreeUrl, window.location.origin);
   url.searchParams.set('file_id', fileId);
-  url.searchParams.set('target_schema', config.targetSchema);
-  if (body.target_version_number) url.searchParams.set('version_number', String(body.target_version_number));
+  url.searchParams.set('data_model_key', dataModelKey);
+  if (body.external_version_number) {
+    url.searchParams.set('external_version_number', body.external_version_number);
+  }
   advanceMaxReachedStage('harmonize');
   window.location.assign(url.toString());
 };
@@ -1354,15 +1357,15 @@ const _submitHarmonize = async () => {
 /* ─── Bootstrap ──────────────────────────────────────────── */
 const _payloadIsCurrent = (payload) => payload != null && 'column_summaries' in payload;
 
-const _fetchPayload = async (fileId, targetSchema) => {
+const _fetchPayload = async (fileId, requestDataModelKey) => {
   if (!fileId) return null;
   const response = await fetch(config.analyzeEndpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       file_id: fileId,
-      target_schema: targetSchema || config.targetSchema,
-      target_version_number: targetVersionNumber,
+      data_model_key: requestDataModelKey || dataModelKey,
+      external_version_number: externalVersionNumber,
     }),
   });
   const payload = await response.json().catch((err) => {
@@ -1401,10 +1404,10 @@ const _init = async () => {
   let payload = _readPayloadFromStorage();
   const params = new URLSearchParams(window.location.search);
   const fileId = params.get('file_id') || payload?.file_id;
-  const schema = params.get('schema') || config.targetSchema;
+  const requestDataModelKey = params.get('data_model_key') || dataModelKey;
   if (!_payloadIsCurrent(payload)) {
     try {
-      payload = await _fetchPayload(fileId, schema);
+      payload = await _fetchPayload(fileId, requestDataModelKey);
     } catch (err) {
       console.error(err);
     }

@@ -11,7 +11,7 @@ dependencies = [
     "uvicorn[standard]>=0.30.0",
     "boto3>=1.40.69",
     "cryptography>=47.0.0",
-    "netrias_client @ git+https://github.com/netrias/netrias_client.git@a341c65",
+    "netrias_client @ git+https://github.com/netrias/netrias_client.git@6ba6ed9c6714ac613d7be0f19d13c92db6867aae",
     "openpyxl>=3.1.5",
     "python-dotenv>=1.2.2",
     "pyarrow>=23.0.1,<24",  # PYSEC-2026-113
@@ -33,7 +33,7 @@ dev = [
     "httpx>=0.27",
     "bandit>=1.7",
     "pip-audit>=2.7",
-    "pip>=26.1",  # CVE remediation for the audited virtualenv pip package
+    "pip>=26.1.2",  # CVE remediation for the audited virtualenv pip package
     "pre-commit>=3.8",
     "pytest-playwright>=0.6.2",
     # transitive dep pin for security (CVE remediation)

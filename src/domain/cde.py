@@ -29,13 +29,13 @@ def is_rename_only(cde_type: CdeType) -> bool:
 class DataModelVersionInfo:
     version_label: str
     version_number: int
-    external_version_number: str | None = None
+    external_version_number: str
     is_default: bool = False
 
 
 @dataclass(frozen=True)
 class DataModelSummary:
-    key: str
+    data_model_key: str
     label: str
     versions: list[DataModelVersionInfo]
 

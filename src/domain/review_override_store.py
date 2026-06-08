@@ -5,10 +5,9 @@ Axis of change: how mutable Stage 4 review state is loaded, saved, and cleared.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from datetime import UTC, datetime
 
-from src.domain.review_overrides import ReviewOverrides
+from src.domain.review_overrides import ReviewOverrides, ReviewProgressState
 from src.domain.storage import UserContext, WorkflowFile, WorkflowNotFoundError, WorkflowStorage
 
 
@@ -36,7 +35,7 @@ def save_review_overrides_state(
     *,
     file_id: str,
     overrides: object,
-    review_state: object,
+    review_state: ReviewProgressState,
 ) -> ReviewOverrides:
     now = datetime.now(UTC)
     try:
@@ -52,7 +51,7 @@ def save_review_overrides_state(
         created_at=current.created_at if current else now,
         updated_at=now,
         overrides=overrides,
-        review_state=review_state if isinstance(review_state, Mapping) else {},
+        review_state=review_state,
     )
     storage.write_json(
         user,

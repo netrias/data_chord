@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 
 from fastapi.concurrency import run_in_threadpool
 
 from src.domain import dependencies
-from src.domain.cde import CDEInfo, CdeType
+from src.domain.cde import CdeType
+from src.domain.cde_catalog import CdeCatalog
+from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.column_profile import (
     ColumnProfile,
     build_column_profile_from_tabular,
@@ -22,6 +23,7 @@ from src.domain.data_model_adapter import (
 from src.domain.data_model_cache import SessionCache, get_session_cache
 from src.domain.match_counts import compute_column_overlap_by_cde, compute_match_counts
 from src.domain.storage import UserContext, WorkflowStorage
+from src.domain.workflow_state import ConfirmedMappingChoices
 from src.domain.workflow_state_store import (
     WorkflowStateConflictError,
     WorkflowStateNotFoundError,
@@ -47,12 +49,12 @@ class MappingWorkflowStateConflictError(Exception):
 class CdeCatalogSnapshot:
     """CDE metadata plus PV sets as known at one point in a session."""
 
-    cdes: list[CDEInfo]
-    pv_sets: dict[str, frozenset[str]]
+    catalog: CdeCatalog
+    pv_sets: CdePvCatalog
 
     @property
     def cde_types(self) -> dict[str, str]:
-        return {cde.cde_key: cde.cde_type.value for cde in self.cdes}
+        return self.catalog.cde_types_payload()
 
 
 async def compute_column_detail(
@@ -65,7 +67,7 @@ async def compute_column_detail(
     cache = get_session_cache(file_id)
     profile = await _get_or_build_column_profile(cache, file_id, source_column_key)
     catalog = await _get_cde_catalog_snapshot(cache)
-    if not catalog.cdes:
+    if catalog.catalog.is_empty():
         # CDEs not yet populated by the Stage 2 page. Return an empty match
         # map; the frontend can retry once the page-load completes.
         return ColumnDetailResponse(
@@ -77,10 +79,10 @@ async def compute_column_detail(
     return ColumnDetailResponse(
         column_key=str(source_column_key),
         profile=column_profile_to_payload(profile),
-        match_counts=compute_match_counts(distinct, catalog.cdes, catalog.pv_sets),
-        overlap_by_cde=compute_column_overlap_by_cde(distinct, catalog.cdes, catalog.pv_sets),
+        match_counts=compute_match_counts(distinct, catalog.catalog, catalog.pv_sets),
+        overlap_by_cde=compute_column_overlap_by_cde(distinct, catalog.catalog, catalog.pv_sets),
         cde_types=catalog.cde_types,
-        selected_pvs=_selected_pvs(selected_cde_key, catalog.cdes, catalog.pv_sets),
+        selected_pvs=_selected_pvs(selected_cde_key, catalog.catalog, catalog.pv_sets),
     )
 
 
@@ -91,13 +93,13 @@ def save_confirmed_mapping_choices(
     payload: SaveMappingChoicesRequest,
 ) -> SaveMappingChoicesResponse:
     """Persist confirmed Stage 2 choices as durable workflow state."""
+    choices = ConfirmedMappingChoices.from_raw(payload.manual_overrides, payload.column_renames)
     try:
         save_confirmed_mapping_choices_to_state(
             workflow_storage,
             user,
             payload.file_id,
-            payload.manual_overrides,
-            payload.column_renames,
+            choices,
         )
     except WorkflowStateNotFoundError as exc:
         raise MappingWorkflowStateNotFoundError() from exc
@@ -133,15 +135,15 @@ async def _get_or_build_column_profile(
 
 
 async def _get_cde_catalog_snapshot(cache: SessionCache) -> CdeCatalogSnapshot:
-    cdes = cache.get_all_cdes()
-    if not cdes:
-        return CdeCatalogSnapshot(cdes=[], pv_sets={})
+    catalog = cache.get_cde_catalog()
+    if catalog.is_empty():
+        return CdeCatalogSnapshot(catalog=CdeCatalog.empty(), pv_sets=CdePvCatalog.empty())
 
     await _ensure_pv_sets_fetched(cache)
     pv_sets = cache.get_all_pvs()
-    refined = refine_cde_types_from_pvs(cdes, pv_sets)
-    cache.replace_cdes(refined)
-    return CdeCatalogSnapshot(cdes=refined, pv_sets=pv_sets)
+    refined = refine_cde_types_from_pvs(catalog, pv_sets)
+    cache.replace_cde_catalog(refined)
+    return CdeCatalogSnapshot(catalog=refined, pv_sets=pv_sets)
 
 
 async def _ensure_pv_sets_fetched(cache: SessionCache) -> None:
@@ -149,22 +151,22 @@ async def _ensure_pv_sets_fetched(cache: SessionCache) -> None:
     missing_keys = cache.cde_keys_missing_pvs()
     if not missing_keys:
         return
-    selection = cache.get_model_selection()
-    if selection is None:
+    data_model_version = cache.get_data_model_version()
+    if data_model_version is None:
         return
-    all_pvs = await fetch_all_pvs_async(selection.key, selection.version_label)
-    cache.set_pvs_batch({key: all_pvs.get(key, frozenset()) for key in missing_keys})
+    all_pvs = await fetch_all_pvs_async(data_model_version.data_model_key, data_model_version.external_version_number)
+    cache.set_pvs_batch(all_pvs.with_defaults(missing_keys))
 
 
 def _selected_pvs(
     selected_cde_key: str | None,
-    cdes: list[CDEInfo],
-    pv_sets: Mapping[str, frozenset[str]],
+    catalog: CdeCatalog,
+    pv_sets: CdePvCatalog,
 ) -> list[str] | None:
     """Return PVs sorted for display, or None for non-PV / unselected CDEs."""
     if not selected_cde_key:
         return None
-    cde = next((c for c in cdes if c.cde_key == selected_cde_key), None)
+    cde = catalog.get(selected_cde_key)
     if cde is None or cde.cde_type != CdeType.PV:
         return None
     pvs = pv_sets.get(selected_cde_key)
