@@ -40,7 +40,7 @@ class _ExternalVersionMappingClient(Protocol):
         *,
         source_path: Path,
         target_schema: str,
-        target_version: str,
+        external_version_number: str,
         confidence_threshold: float,
         sheet_name: str | None,
     ) -> ManifestPayload: ...
@@ -69,7 +69,7 @@ class MappingDiscoveryService:
             raw_manifest = external_version_client.discover_mapping_from_tabular(
                 source_path=csv_path,
                 target_schema=data_model_key,
-                target_version=external_version_number,
+                external_version_number=external_version_number,
                 confidence_threshold=0.7,
                 sheet_name=sheet_name,
             )

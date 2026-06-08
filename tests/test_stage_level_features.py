@@ -521,7 +521,7 @@ async def test_stage1_analyze_uses_selected_version_and_primes_reference_cache(
     # Then: discovery and the session cache use the selected external version
     assert response.status_code == 200
     assert response.json()["external_version_number"] == "11.0.4"
-    assert mock_netrias_client.discover_mapping_from_tabular.call_args.kwargs["target_version"] == "11.0.4"
+    assert mock_netrias_client.discover_mapping_from_tabular.call_args.kwargs["external_version_number"] == "11.0.4"
     data_model_version = cache.get_data_model_version()
     assert data_model_version is not None
     assert data_model_version.data_model_key == "gc"

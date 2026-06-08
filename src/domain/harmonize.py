@@ -52,7 +52,7 @@ class _ExternalVersionHarmonizeClient(Protocol):
         *,
         source_path: Path,
         target_schema: str,
-        target_version: str,
+        external_version_number: str,
         sheet_name: str | None,
     ) -> ManifestPayload: ...
 
@@ -146,7 +146,7 @@ class HarmonizeService:
         raw_cde_map = external_version_client.discover_mapping_from_tabular(
             source_path=file_path,
             target_schema=data_model_key,
-            target_version=external_version_number,
+            external_version_number=external_version_number,
             sheet_name=sheet_name,
         )
         cde_map = ColumnMappingManifest.from_payload(raw_cde_map)

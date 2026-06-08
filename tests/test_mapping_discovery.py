@@ -66,17 +66,17 @@ def test_discover_returns_manifest_from_client(
     assert column_mappings["col_0000"]["cde_key"] == "organism_species"
     assert column_mappings["col_0001"]["cde_key"] == "primary_diagnosis"
     mock_client.discover_mapping_from_tabular.assert_called_once()
-    assert mock_client.discover_mapping_from_tabular.call_args.kwargs["target_version"] == "11.0.4"
+    assert mock_client.discover_mapping_from_tabular.call_args.kwargs["external_version_number"] == "11.0.4"
 
 
-def test_discover_passes_selected_target_version(
+def test_discover_passes_selected_external_version(
     service_with_mock_client: tuple[MappingDiscoveryService, MagicMock],
     tmp_path: Path,
 ) -> None:
     """
     Given: a selected model version from the Stage 1 popup
     When: MappingDiscoveryService.discover() is called with that version
-    Then: the discovery API receives the same target_version
+    Then: the discovery API receives the same external_version_number
     """
     svc, mock_client = service_with_mock_client
 
@@ -92,7 +92,7 @@ def test_discover_passes_selected_target_version(
     svc.discover(csv_path=csv_path, data_model_key="ccdi", external_version_number="11.0.4")
 
     # Then
-    assert mock_client.discover_mapping_from_tabular.call_args.kwargs["target_version"] == "11.0.4"
+    assert mock_client.discover_mapping_from_tabular.call_args.kwargs["external_version_number"] == "11.0.4"
 
 
 # ---------------------------------------------------------------------------
@@ -298,12 +298,12 @@ def test_discover_preserves_duplicate_headers_with_column_keys(
         *,
         source_path: Path,
         target_schema: str,
-        target_version: str,
+        external_version_number: str,
         confidence_threshold: float,
         sheet_name: str | None = None,
     ) -> dict[str, object]:
         assert source_path.name == "dupes.csv"
-        assert target_version == "11.0.4"
+        assert external_version_number == "11.0.4"
         assert sheet_name is None
         return {
             "column_mappings": {

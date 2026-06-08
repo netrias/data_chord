@@ -269,6 +269,43 @@ def test_harmonize_sends_source_file_and_column_keyed_manifest(tmp_path: Path) -
     assert harmonize_kwargs["source_path"].name == "dupes.csv"
 
 
+def test_harmonize_discovery_uses_external_version_keyword(tmp_path: Path) -> None:
+    """Fallback discovery speaks the current Netrias client external-version contract."""
+
+    # Given: harmonization needs to discover a manifest because none was supplied
+    from src.domain import ColumnCdeOverrides, ColumnRenameSet
+    from src.domain.data_model_cache import SessionCache
+    from src.domain.harmonize import HarmonizeService
+
+    csv_path = tmp_path / "source.csv"
+    csv_path.write_text("diagnosis\nLung\n", encoding="utf-8")
+    mock_client = MagicMock()
+    mock_client.discover_mapping_from_tabular.return_value = {
+        "column_mappings": {"col_0000": {"column_name": "diagnosis", "cde_key": "primary_diagnosis", "cde_id": 11}}
+    }
+    mock_client.harmonize.return_value = MagicMock(status="succeeded", description="ok", job_id="job-1")
+    service = HarmonizeService(mock_client)
+
+    # When: harmonization runs without a stored manifest
+    result = service.run(
+        file_path=csv_path,
+        data_model_key=TEST_TARGET_SCHEMA,
+        column_overrides=ColumnCdeOverrides.from_strings({}),
+        column_renames=ColumnRenameSet.empty(),
+        cache=SessionCache(),
+        external_version_number="11.0.4",
+        manifest=None,
+    )
+
+    # Then: discovery uses the latest SDK keyword and the manifest is passed to harmonize
+    assert result.job_id == "job-1"
+    discovery_kwargs = mock_client.discover_mapping_from_tabular.call_args.kwargs
+    assert discovery_kwargs["external_version_number"] == "11.0.4"
+    assert "target_version" not in discovery_kwargs
+    sdk_manifest = mock_client.harmonize.call_args.kwargs["manifest"]
+    assert sdk_manifest["column_mappings"]["col_0000"]["cde_key"] == "primary_diagnosis"
+
+
 def test_harmonize_applies_column_renames_to_manifest(tmp_path: Path) -> None:
     """
     Given: Stage 2 submits a column rename for an existing mapped column
