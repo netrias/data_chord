@@ -57,7 +57,7 @@ class MappingDiscoveryService:
         self,
         *,
         csv_path: Path,
-        target_schema: str,
+        data_model_key: str,
         external_version_number: str,
         sheet_name: str | None = None,
     ) -> MappingDiscoveryResult:
@@ -68,7 +68,7 @@ class MappingDiscoveryService:
             external_version_client = cast(_ExternalVersionMappingClient, self._client)
             raw_manifest = external_version_client.discover_mapping_from_tabular(
                 source_path=csv_path,
-                target_schema=target_schema,
+                target_schema=data_model_key,
                 target_version=external_version_number,
                 confidence_threshold=0.7,
                 sheet_name=sheet_name,

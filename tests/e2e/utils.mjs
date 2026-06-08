@@ -181,7 +181,7 @@ export const mockDataModels = async (page) => {
   await page.route('**/stage-1/data-models', async (route) => {
     const models = [
       {
-        key: E2E_TARGET_MODEL,
+        data_model_key: E2E_TARGET_MODEL,
         label: 'Genomic Cancer',
         versions: [
           {
@@ -215,7 +215,7 @@ export const mockDataModelsWithVersionCount = async (page, count) => {
     }));
     const models = [
       {
-        key: 'test-data-model',
+        data_model_key: 'test-data-model',
         label: 'Test Data Model',
         versions,
       },

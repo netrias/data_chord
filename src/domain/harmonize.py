@@ -78,7 +78,7 @@ class HarmonizeService:
         self,
         *,
         file_path: Path,
-        target_schema: str,
+        data_model_key: str,
         column_overrides: ColumnCdeOverrides,
         column_renames: ColumnRenameSet,
         cache: SessionCache,
@@ -96,7 +96,7 @@ class HarmonizeService:
         try:
             cde_map = self._prepare_cde_map(
                 file_path,
-                target_schema,
+                data_model_key,
                 external_version_number,
                 manifest,
                 sheet_name,
@@ -106,7 +106,7 @@ class HarmonizeService:
                 file_path,
                 cde_map,
                 job_id,
-                target_schema,
+                data_model_key,
                 external_version_number,
                 output_path,
                 sheet_name,
@@ -118,7 +118,7 @@ class HarmonizeService:
     def _prepare_cde_map(
         self,
         file_path: Path,
-        target_schema: str,
+        data_model_key: str,
         external_version_number: str,
         manifest: ManifestPayload | None,
         sheet_name: str | None,
@@ -127,7 +127,7 @@ class HarmonizeService:
             return ColumnMappingManifest.from_payload(manifest)
         return self._discover_cde_map(
             file_path=file_path,
-            target_schema=target_schema,
+            data_model_key=data_model_key,
             external_version_number=external_version_number,
             sheet_name=sheet_name,
         )
@@ -136,7 +136,7 @@ class HarmonizeService:
         self,
         *,
         file_path: Path,
-        target_schema: str,
+        data_model_key: str,
         external_version_number: str,
         sheet_name: str | None,
     ) -> ColumnMappingManifest:
@@ -145,14 +145,14 @@ class HarmonizeService:
         external_version_client = cast(_ExternalVersionHarmonizeClient, self._client)
         raw_cde_map = external_version_client.discover_mapping_from_tabular(
             source_path=file_path,
-            target_schema=target_schema,
+            target_schema=data_model_key,
             target_version=external_version_number,
             sheet_name=sheet_name,
         )
         cde_map = ColumnMappingManifest.from_payload(raw_cde_map)
         logger.info(
             "Discovered CDE map for harmonization",
-            extra={"column_count": len(cde_map.records), "target_schema": target_schema},
+            extra={"column_count": len(cde_map.records), "data_model_key": data_model_key},
         )
         return cde_map
 
@@ -161,7 +161,7 @@ class HarmonizeService:
         file_path: Path,
         cde_map: ColumnMappingManifest,
         fallback_job_id: str,
-        target_schema: str,
+        data_model_key: str,
         external_version_number: str,
         output_path: Path | None,
         sheet_name: str | None,
@@ -173,7 +173,7 @@ class HarmonizeService:
         netrias_result = external_version_client.harmonize(
             source_path=file_path,
             manifest=cde_map.to_payload(),
-            data_commons_key=target_schema,
+            data_commons_key=data_model_key,
             external_version_number=external_version_number,
             output_path=output_path,
             sheet_name=sheet_name,

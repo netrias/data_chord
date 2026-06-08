@@ -10,7 +10,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, BeforeValidator, Field, PlainSerializer, WithJsonSchema
 
-from src.domain.data_model_selection import DataModelSelection
+from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.dataset_workflow_ids import (
     DATASET_WORKFLOW_ID_LENGTH,
     DATASET_WORKFLOW_ID_PATTERN,
@@ -52,10 +52,10 @@ class HarmonizeRequest(BaseModel):
     column_renames: dict[str, str] = Field(default_factory=dict)
     manifest: ManifestPayload | None = None
 
-    def data_model_selection(self) -> DataModelSelection:
-        return DataModelSelection.from_external_version_number(
-            self.target_schema,
-            self.target_external_version_number,
+    def data_model_version(self) -> DataModelVersionReference:
+        return DataModelVersionReference(
+            data_model_key=self.target_schema,
+            external_version_number=self.target_external_version_number,
         )
 
 

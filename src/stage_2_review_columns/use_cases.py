@@ -151,10 +151,10 @@ async def _ensure_pv_sets_fetched(cache: SessionCache) -> None:
     missing_keys = cache.cde_keys_missing_pvs()
     if not missing_keys:
         return
-    selection = cache.get_model_selection()
-    if selection is None:
+    data_model_version = cache.get_data_model_version()
+    if data_model_version is None:
         return
-    all_pvs = await fetch_all_pvs_async(selection.key, selection.external_version_number)
+    all_pvs = await fetch_all_pvs_async(data_model_version.data_model_key, data_model_version.external_version_number)
     cache.set_pvs_batch(all_pvs.with_defaults(missing_keys))
 
 

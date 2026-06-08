@@ -220,7 +220,7 @@ async def test_harmonize_without_client_returns_stubbed_job(
 
     result = service.run(
         file_path=Path("/tmp/test.csv"),
-        target_schema=TEST_TARGET_SCHEMA,
+        data_model_key=TEST_TARGET_SCHEMA,
         column_overrides=ColumnCdeOverrides.from_strings({}),
         column_renames=ColumnRenameSet.empty(),
         cache=SessionCache(),
@@ -251,7 +251,7 @@ def test_harmonize_sends_source_file_and_column_keyed_manifest(tmp_path: Path) -
     # When: harmonization is run
     result = service.run(
         file_path=csv_path,
-        target_schema=TEST_TARGET_SCHEMA,
+        data_model_key=TEST_TARGET_SCHEMA,
         column_overrides=ColumnCdeOverrides.from_strings({}),
         column_renames=ColumnRenameSet.empty(),
         cache=SessionCache(),
@@ -295,7 +295,7 @@ def test_harmonize_applies_column_renames_to_manifest(tmp_path: Path) -> None:
     # When
     result = service.run(
         file_path=csv_path,
-        target_schema=TEST_TARGET_SCHEMA,
+        data_model_key=TEST_TARGET_SCHEMA,
         column_overrides=ColumnCdeOverrides.from_strings({}),
         column_renames=ColumnRenameSet.from_dict({"col_0000": "Primary Diagnosis"}),
         cache=SessionCache(),

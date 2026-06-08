@@ -1017,7 +1017,7 @@ test('data model dropdown shares custom styling and custom dropdowns close on ou
       contentType: 'application/json',
       body: JSON.stringify([
         {
-          key: 'alpha',
+          data_model_key: 'alpha',
           label: 'Alpha Model',
           versions: [
             { version_label: 'v1', version_number: 1, external_version_number: '11.0.1', is_default: false },
@@ -1025,7 +1025,7 @@ test('data model dropdown shares custom styling and custom dropdowns close on ou
           ],
         },
         {
-          key: 'gc',
+          data_model_key: 'gc',
           label: 'Genomic Cancer',
           versions: [
             { version_label: 'v2', version_number: 2, external_version_number: '11.0.2', is_default: true },

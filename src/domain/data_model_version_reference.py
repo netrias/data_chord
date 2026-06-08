@@ -1,4 +1,4 @@
-"""Selected target data model version used across mapping and harmonization."""
+"""Data model identity plus selected external version."""
 
 from __future__ import annotations
 
@@ -8,20 +8,15 @@ _DISALLOWED_LATEST_VERSION = "latest"
 
 
 @dataclass(frozen=True)
-class DataModelSelection:
-    """Canonical representation for the chosen target data model version."""
+class DataModelVersionReference:
+    """Canonical reference to one selected data model version."""
 
-    key: str
+    data_model_key: str
     external_version_number: str
 
     def __post_init__(self) -> None:
         cleaned = _clean_external_version(self.external_version_number)
         object.__setattr__(self, "external_version_number", cleaned)
-
-    @classmethod
-    def from_external_version_number(cls, key: str, external_version_number: str) -> DataModelSelection:
-        return cls(key=key, external_version_number=external_version_number)
-
 
 def _clean_external_version(external_version_number: str) -> str:
     cleaned = external_version_number.strip()
@@ -32,4 +27,4 @@ def _clean_external_version(external_version_number: str) -> str:
     return cleaned
 
 
-__all__ = ["DataModelSelection"]
+__all__ = ["DataModelVersionReference"]

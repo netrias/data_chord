@@ -36,7 +36,7 @@ from src.domain.cde_mapping_persistence import save_cde_mapping_document
 from src.domain.column_cde_map import ColumnCdeMap
 from src.domain.data_model_adapter import fetch_all_pvs_async
 from src.domain.data_model_cache import SessionCache, get_session_cache, populate_cde_cache
-from src.domain.data_model_selection import DataModelSelection
+from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.dependencies import (
     get_harmonize_service,
 )
@@ -283,7 +283,7 @@ async def _run_harmonization_workflow(payload: HarmonizeRequest) -> HarmonizeRes
     mapping_choices = _mapping_choices_for_harmonize(workflow_state, payload)
     column_overrides = mapping_choices.column_overrides
     column_renames = mapping_choices.column_renames
-    target_selection = _data_model_selection_for_harmonize(workflow_state, payload)
+    data_model_version = _data_model_version_for_harmonize(workflow_state, payload)
     resolved_columns = await _resolved_columns_for_source(
         meta.saved_path,
         column_renames,
@@ -300,7 +300,7 @@ async def _run_harmonization_workflow(payload: HarmonizeRequest) -> HarmonizeRes
         column_renames,
         resolved_columns,
         cache,
-        target_selection,
+        data_model_version,
     )
     output_path = storage.harmonized_path_for(payload.file_id, meta.saved_path)
 
@@ -308,7 +308,7 @@ async def _run_harmonization_workflow(payload: HarmonizeRequest) -> HarmonizeRes
         _run_harmonization(
             cache,
             meta.saved_path,
-            target_selection,
+            data_model_version,
             column_overrides,
             column_renames,
             manifest.to_payload(),
@@ -320,7 +320,7 @@ async def _run_harmonization_workflow(payload: HarmonizeRequest) -> HarmonizeRes
         _fetch_pvs_for_session(
             payload.file_id,
             column_cde_map,
-            target_selection,
+            data_model_version,
         )
     )
 
@@ -399,13 +399,13 @@ def _column_cde_map_for_session(manifest: ColumnMappingManifest, column_override
     return manifest.column_cde_map().with_overrides(column_overrides)
 
 
-def _data_model_selection_for_harmonize(
+def _data_model_version_for_harmonize(
     workflow_state: WorkflowState | None,
     payload: HarmonizeRequest,
-) -> DataModelSelection:
+) -> DataModelVersionReference:
     if workflow_state is not None:
-        return workflow_state.data_model_selection
-    return payload.data_model_selection()
+        return workflow_state.data_model_version
+    return payload.data_model_version()
 
 
 def _mapping_choices_for_harmonize(
@@ -426,7 +426,7 @@ def _store_column_mappings_in_cache(cache: SessionCache, column_cde_map: ColumnC
 async def _run_harmonization(
     cache: SessionCache,
     file_path: Path,
-    target_selection: DataModelSelection,
+    data_model_version: DataModelVersionReference,
     column_overrides: ColumnCdeOverrides,
     column_renames: ColumnRenameSet,
     manifest: ManifestPayload | None,
@@ -438,11 +438,11 @@ async def _run_harmonization(
     return await run_in_threadpool(
         harmonizer.run,
         file_path=file_path,
-        target_schema=target_selection.key,
+        data_model_key=data_model_version.data_model_key,
         column_overrides=column_overrides,
         column_renames=column_renames,
         cache=cache,
-        external_version_number=target_selection.external_version_number,
+        external_version_number=data_model_version.external_version_number,
         manifest=manifest,
         output_path=output_path,
         sheet_name=sheet_name,
@@ -451,18 +451,18 @@ async def _run_harmonization(
 
 def _validate_pv_fetch_preconditions(
     cache: SessionCache, cde_keys: list[str], file_id: str
-) -> DataModelSelection | None:
+) -> DataModelVersionReference | None:
     """Early-exit checks consolidated here to keep the main fetch function simple."""
     if not cache.has_cdes():
         _router_logger.warning("No CDEs in cache for PV fetch", extra={"file_id": file_id})
         return None
     if not cde_keys:
         return None
-    selection = cache.get_model_selection()
-    if selection is None:
+    data_model_version = cache.get_data_model_version()
+    if data_model_version is None:
         _router_logger.warning("Missing model info for PV fetch", extra={"file_id": file_id})
         return None
-    return selection
+    return data_model_version
 
 
 async def _fetch_and_cache_pvs(
@@ -505,7 +505,7 @@ async def _fetch_and_cache_pvs(
 
 
 async def _fetch_pvs_for_session(
-    file_id: str, column_cde_map: ColumnCdeMap, target_selection: DataModelSelection
+    file_id: str, column_cde_map: ColumnCdeMap, data_model_version: DataModelVersionReference
 ) -> None:
     """Runs in parallel with harmonization to hide PV fetch latency."""
     cache = get_session_cache(file_id)
@@ -514,10 +514,10 @@ async def _fetch_pvs_for_session(
     # Server restart between Stage 2 and Stage 3 clears in-memory CDEs; re-fetch.
     if not cache.has_cdes():
         _router_logger.info("CDEs missing from cache; re-fetching from Data Model Store", extra={"file_id": file_id})
-        await run_in_threadpool(populate_cde_cache, file_id, target_selection)
+        await run_in_threadpool(populate_cde_cache, file_id, data_model_version)
 
-    model_info = _validate_pv_fetch_preconditions(cache, cde_keys, file_id)
-    if model_info is None:
+    cached_data_model_version = _validate_pv_fetch_preconditions(cache, cde_keys, file_id)
+    if cached_data_model_version is None:
         return
 
     try:
@@ -526,7 +526,13 @@ async def _fetch_pvs_for_session(
             # before durable workflow storage existed for this run.
             save_pv_manifest_to_disk(file_id, cache, cache.get_all_pvs())
             return
-        await _fetch_and_cache_pvs(cache, model_info.key, model_info.external_version_number, cde_keys, file_id)
+        await _fetch_and_cache_pvs(
+            cache,
+            cached_data_model_version.data_model_key,
+            cached_data_model_version.external_version_number,
+            cde_keys,
+            file_id,
+        )
     except Exception:
         _router_logger.exception("Failed to fetch PVs for session", extra={"file_id": file_id})
 

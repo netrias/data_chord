@@ -8,7 +8,7 @@ from typing import Final
 
 from src.domain.column_cde_map import ColumnCdeOverrides
 from src.domain.column_renames import ColumnRenameSet
-from src.domain.data_model_selection import DataModelSelection
+from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_value
 
 _FIELD_FILE_ID: Final = "file_id"
@@ -73,25 +73,29 @@ class WorkflowState:
     """Small durable record for workflow choices keyed by uploaded file."""
 
     file_id: DatasetWorkflowId
-    data_model_selection: DataModelSelection
+    data_model_version: DataModelVersionReference
     mapping_choices: ConfirmedMappingChoices | None = None
 
     @classmethod
-    def from_selection(cls, file_id: DatasetWorkflowId | str, selection: DataModelSelection) -> WorkflowState:
-        return cls(file_id=dataset_workflow_id_from_value(file_id), data_model_selection=selection)
+    def from_data_model_version(
+        cls,
+        file_id: DatasetWorkflowId | str,
+        data_model_version: DataModelVersionReference,
+    ) -> WorkflowState:
+        return cls(file_id=dataset_workflow_id_from_value(file_id), data_model_version=data_model_version)
 
     def with_mapping_choices(self, choices: ConfirmedMappingChoices) -> WorkflowState:
         return WorkflowState(
             file_id=self.file_id,
-            data_model_selection=self.data_model_selection,
+            data_model_version=self.data_model_version,
             mapping_choices=choices,
         )
 
     def to_store(self) -> dict[str, object]:
         payload: dict[str, object] = {
             _FIELD_FILE_ID: self.file_id,
-            _FIELD_DATA_MODEL_KEY: self.data_model_selection.key,
-            _FIELD_EXTERNAL_VERSION_NUMBER: self.data_model_selection.external_version_number,
+            _FIELD_DATA_MODEL_KEY: self.data_model_version.data_model_key,
+            _FIELD_EXTERNAL_VERSION_NUMBER: self.data_model_version.external_version_number,
         }
         if self.mapping_choices is not None:
             payload.update(self.mapping_choices.to_store())
@@ -107,22 +111,28 @@ class WorkflowState:
         data_model_key = payload.get(_FIELD_DATA_MODEL_KEY)
         if stored_file_id != dataset_workflow_id or not isinstance(data_model_key, str):
             return None
-        selection = _selection_from_store(data_model_key, payload)
-        if selection is None:
+        data_model_version = _data_model_version_from_store(data_model_key, payload)
+        if data_model_version is None:
             return None
 
         return cls(
             file_id=dataset_workflow_id,
-            data_model_selection=selection,
+            data_model_version=data_model_version,
             mapping_choices=ConfirmedMappingChoices.from_store(payload),
         )
 
 
-def _selection_from_store(data_model_key: str, payload: Mapping[str, object]) -> DataModelSelection | None:
+def _data_model_version_from_store(
+    data_model_key: str,
+    payload: Mapping[str, object],
+) -> DataModelVersionReference | None:
     external_version_number = payload.get(_FIELD_EXTERNAL_VERSION_NUMBER)
     if isinstance(external_version_number, str):
         try:
-            return DataModelSelection.from_external_version_number(data_model_key, external_version_number)
+            return DataModelVersionReference(
+                data_model_key=data_model_key,
+                external_version_number=external_version_number,
+            )
         except ValueError:
             return None
 

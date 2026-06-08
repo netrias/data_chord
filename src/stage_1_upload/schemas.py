@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from src.domain import ModelSuggestion
 from src.domain.column_profile import ColumnProfilePayload
-from src.domain.data_model_selection import DataModelSelection
+from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.manifest import ConfidenceBucket, ManifestPayload
 from src.domain.schemas import DatasetWorkflowIdField
 
@@ -38,10 +38,10 @@ class AnalyzeRequest(BaseModel):
     target_external_version_number: str = Field(..., min_length=1)
     sheet_name: str | None = None
 
-    def data_model_selection(self) -> DataModelSelection:
-        return DataModelSelection.from_external_version_number(
-            self.target_schema,
-            self.target_external_version_number,
+    def data_model_version(self) -> DataModelVersionReference:
+        return DataModelVersionReference(
+            data_model_key=self.target_schema,
+            external_version_number=self.target_external_version_number,
         )
 
 

@@ -522,10 +522,10 @@ async def test_stage1_analyze_uses_selected_version_and_primes_reference_cache(
     assert response.status_code == 200
     assert response.json()["target_external_version_number"] == "11.0.4"
     assert mock_netrias_client.discover_mapping_from_tabular.call_args.kwargs["target_version"] == "11.0.4"
-    selection = cache.get_model_selection()
-    assert selection is not None
-    assert selection.key == "gc"
-    assert selection.external_version_number == "11.0.4"
+    data_model_version = cache.get_data_model_version()
+    assert data_model_version is not None
+    assert data_model_version.data_model_key == "gc"
+    assert data_model_version.external_version_number == "11.0.4"
     assert cache.has_cdes()
     assert cache.has_any_pvs()
 
@@ -554,8 +554,8 @@ async def test_stage1_analyze_persists_selected_data_model_version(
     state = _load_workflow_state(file_id)
     assert state is not None
     assert state.file_id == file_id
-    assert state.data_model_selection.key == "gc"
-    assert state.data_model_selection.external_version_number == "11.0.4"
+    assert state.data_model_version.data_model_key == "gc"
+    assert state.data_model_version.external_version_number == "11.0.4"
 
 
 async def test_stage2_mapping_page_recovers_selected_model_from_workflow_state(
@@ -609,14 +609,14 @@ async def test_stage3_harmonize_prefers_stored_selection_over_stale_request(
 
     class StubHarmonizer:
         def __init__(self) -> None:
-            self.received_target_schema = None
+            self.received_data_model_key = None
             self.received_target_version = None
 
         def run(  # type: ignore[no-untyped-def]
             self,
             *,
             file_path,
-            target_schema,
+            data_model_key,
             column_overrides,
             column_renames,
             cache,
@@ -625,7 +625,7 @@ async def test_stage3_harmonize_prefers_stored_selection_over_stale_request(
             output_path,
             sheet_name,
         ):
-            self.received_target_schema = target_schema
+            self.received_data_model_key = data_model_key
             self.received_target_version = external_version_number
             return HarmonizeResult(job_id="job-selection", status=HarmonizeStatus.SUCCEEDED, detail="ok")
 
@@ -658,7 +658,7 @@ async def test_stage3_harmonize_prefers_stored_selection_over_stale_request(
 
     # Then: the harmonization service receives the stored selection instead
     assert response.status_code == 200
-    assert stub.received_target_schema == "gc"
+    assert stub.received_data_model_key == "gc"
     assert stub.received_target_version == "11.0.4"
 
 
@@ -672,7 +672,7 @@ async def test_stage3_harmonize_returns_queued_while_long_job_finishes(
             self,
             *,
             file_path,
-            target_schema,
+            data_model_key,
             column_overrides,
             column_renames,
             cache,
@@ -736,7 +736,7 @@ async def test_stage3_job_status_recovers_from_durable_state_after_cache_loss(
             self,
             *,
             file_path,
-            target_schema,
+            data_model_key,
             column_overrides,
             column_renames,
             cache,
@@ -867,7 +867,7 @@ async def test_stage3_harmonize_prefers_stored_mapping_choices_over_stale_reques
             self,
             *,
             file_path,
-            target_schema,
+            data_model_key,
             column_overrides,
             column_renames,
             cache,
@@ -934,7 +934,7 @@ async def test_stage3_applies_confirmed_column_renames_to_download(
             self,
             *,
             file_path,
-            target_schema,
+            data_model_key,
             column_overrides,
             column_renames,
             cache,
@@ -1032,7 +1032,7 @@ async def test_stage3_column_renames_propagate_when_output_name_matches_existing
             self,
             *,
             file_path,
-            target_schema,
+            data_model_key,
             column_overrides,
             column_renames,
             cache,
@@ -1243,7 +1243,7 @@ async def test_stage3_harmonize_uses_stored_manifest_when_payload_missing(
             self,
             *,
             file_path,
-            target_schema,
+            data_model_key,
             column_overrides,
             column_renames,
             cache,
@@ -1306,7 +1306,7 @@ async def test_stage3_harmonize_prefers_stored_manifest_over_payload_manifest(
             self,
             *,
             file_path,
-            target_schema,
+            data_model_key,
             column_overrides,
             column_renames,
             cache,

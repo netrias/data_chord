@@ -17,7 +17,7 @@ from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.column_cde_map import ColumnCdeMap
 from src.domain.column_profile import ColumnProfile
 from src.domain.columns import ColumnKey, column_key_from_string
-from src.domain.data_model_selection import DataModelSelection
+from src.domain.data_model_version_reference import DataModelVersionReference
 
 _logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ class SessionCache:
     """Thread-safe for concurrent access during async operations."""
 
     # Data model metadata
-    data_model_selection: DataModelSelection | None = None
+    data_model_version: DataModelVersionReference | None = None
 
     # CDE list (fetched in Stage 2)
     cde_catalog: CdeCatalog = field(default_factory=CdeCatalog.empty)
@@ -52,8 +52,8 @@ class SessionCache:
         external_version_number: str,
     ) -> None:
         with self._lock:
-            self.data_model_selection = DataModelSelection(
-                key=data_model_key,
+            self.data_model_version = DataModelVersionReference(
+                data_model_key=data_model_key,
                 external_version_number=external_version_number,
             )
             self.cde_catalog = CdeCatalog.from_cdes(cdes)
@@ -65,8 +65,8 @@ class SessionCache:
         external_version_number: str,
     ) -> None:
         with self._lock:
-            self.data_model_selection = DataModelSelection(
-                key=data_model_key,
+            self.data_model_version = DataModelVersionReference(
+                data_model_key=data_model_key,
                 external_version_number=external_version_number,
             )
             self.cde_catalog = catalog
@@ -151,21 +151,21 @@ class SessionCache:
         with self._lock:
             self.cde_catalog = catalog
 
-    def get_model_selection(self) -> DataModelSelection | None:
+    def get_data_model_version(self) -> DataModelVersionReference | None:
         with self._lock:
-            return self.data_model_selection
+            return self.data_model_version
 
 
-def populate_cde_cache(file_id: str, selection: DataModelSelection) -> None:
-    """PV validation in Stage 3+ requires model key and version; must run before PV fetch."""
+def populate_cde_cache(file_id: str, data_model_version: DataModelVersionReference) -> None:
+    """PV validation in Stage 3+ requires data model identity and version before PV fetch."""
     from src.domain.data_model_adapter import fetch_cdes
 
-    cdes = fetch_cdes(selection.key, selection.external_version_number)
+    cdes = fetch_cdes(data_model_version.data_model_key, data_model_version.external_version_number)
     cache = get_session_cache(file_id)
     cache.set_cdes(
         cdes,
-        data_model_key=selection.key,
-        external_version_number=selection.external_version_number,
+        data_model_key=data_model_version.data_model_key,
+        external_version_number=data_model_version.external_version_number,
     )
 
     _logger.info(
@@ -173,8 +173,8 @@ def populate_cde_cache(file_id: str, selection: DataModelSelection) -> None:
         extra={
             "file_id": file_id,
             "cde_count": len(cdes),
-            "data_model": selection.key,
-            "external_version_number": selection.external_version_number,
+            "data_model": data_model_version.data_model_key,
+            "external_version_number": data_model_version.external_version_number,
         },
     )
 

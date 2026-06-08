@@ -26,7 +26,7 @@ from src.domain.data_model_adapter import (
     refine_cde_types_from_pvs,
 )
 from src.domain.data_model_cache import get_session_cache
-from src.domain.data_model_selection import DataModelSelection
+from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.dataset_workflow_ids import new_dataset_workflow_id
 from src.domain.dependencies import (
     get_mapping_service,
@@ -219,7 +219,7 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
         storage,
         meta,
     )
-    target_selection = payload.data_model_selection()
+    data_model_version = payload.data_model_version()
     analysis_task = asyncio.create_task(
         run_in_threadpool(
             _analyze_columns_safe,
@@ -232,14 +232,14 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
         _discover_mappings(
             meta.saved_path,
             payload.file_id,
-            target_selection,
+            data_model_version,
             meta.selected_sheet,
         )
     )
     reference_task = asyncio.create_task(
         _prime_data_model_cache(
             payload.file_id,
-            target_selection,
+            data_model_version,
         )
     )
     try:
@@ -262,7 +262,7 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     save_initial_workflow_state(
         dependencies.get_workflow_storage(),
         user,
-        WorkflowState.from_selection(meta.dataset_workflow_id, target_selection),
+        WorkflowState.from_data_model_version(meta.dataset_workflow_id, data_model_version),
     )
     # Stash profiles in the session cache so the Stage 2 column-detail endpoint
     # can serve them without re-reading the file.
@@ -295,7 +295,7 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     return AnalyzeResponse(
         file_id=meta.file_id,
         file_name=meta.original_name,
-        target_external_version_number=target_selection.external_version_number,
+        target_external_version_number=data_model_version.external_version_number,
         total_rows=total_rows,
         columns=columns,
         column_summaries=column_summaries,
@@ -348,7 +348,7 @@ def _load_sheet_previews_safe(meta: UploadedFileMeta) -> dict[str, SheetPreview]
 async def _discover_mappings(
     csv_path: Path,
     file_id: str,
-    target_selection: DataModelSelection,
+    data_model_version: DataModelVersionReference,
     sheet_name: str | None,
 ) -> MappingDiscoveryResult:
     mapping_service = get_mapping_service()
@@ -361,8 +361,8 @@ async def _discover_mappings(
             outcome=WorkflowOutcome.STARTED,
             file_id=file_id,
             metadata={
-                "target_schema": target_selection.key,
-                "target_external_version_number": target_selection.external_version_number,
+                "target_schema": data_model_version.data_model_key,
+                "target_external_version_number": data_model_version.external_version_number,
             },
         ),
         user,
@@ -371,8 +371,8 @@ async def _discover_mappings(
         discovery = await run_in_threadpool(
             mapping_service.discover,
             csv_path=csv_path,
-            target_schema=target_selection.key,
-            external_version_number=target_selection.external_version_number,
+            data_model_key=data_model_version.data_model_key,
+            external_version_number=data_model_version.external_version_number,
             sheet_name=sheet_name,
         )
         log_workflow_event(
@@ -404,14 +404,14 @@ async def _discover_mappings(
         ) from exc
 
 
-async def _prime_data_model_cache(file_id: str, target_selection: DataModelSelection) -> None:
+async def _prime_data_model_cache(file_id: str, data_model_version: DataModelVersionReference) -> None:
     """Warm CDEs and all PVs while mapping discovery is running."""
     try:
         cdes_task = asyncio.create_task(
-            run_in_threadpool(fetch_cdes, target_selection.key, target_selection.external_version_number)
+            run_in_threadpool(fetch_cdes, data_model_version.data_model_key, data_model_version.external_version_number)
         )
         pvs_task = asyncio.create_task(
-            fetch_all_pvs_async(target_selection.key, target_selection.external_version_number)
+            fetch_all_pvs_async(data_model_version.data_model_key, data_model_version.external_version_number)
         )
         cdes, raw_pv_catalog = await asyncio.gather(cdes_task, pvs_task)
     except (DataModelStoreError, NetriasAPIUnavailable):
@@ -424,8 +424,8 @@ async def _prime_data_model_cache(file_id: str, target_selection: DataModelSelec
     refined = refine_cde_types_from_pvs(catalog, pv_catalog)
     cache.set_cde_catalog(
         refined,
-        data_model_key=target_selection.key,
-        external_version_number=target_selection.external_version_number,
+        data_model_key=data_model_version.data_model_key,
+        external_version_number=data_model_version.external_version_number,
     )
     cache.set_pvs_batch(pv_catalog)
 

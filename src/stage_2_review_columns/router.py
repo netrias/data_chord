@@ -20,7 +20,7 @@ import src.domain.dependencies as dependencies
 from src.domain import UILabel
 from src.domain.cde import CDEInfo
 from src.domain.data_model_cache import get_session_cache, populate_cde_cache
-from src.domain.data_model_selection import DataModelSelection
+from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.schemas import DatasetWorkflowIdField
 from src.domain.workflow_state_store import load_workflow_state
 
@@ -51,19 +51,19 @@ async def render_stage_two(
 ) -> HTMLResponse:
     cde_catalog: list[CDEInfo] = []
     try:
-        selection = _data_model_selection_for_request(file_id, schema, external_version_number)
+        data_model_version = _data_model_version_for_request(file_id, schema, external_version_number)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    if file_id and selection:
-        cde_catalog = await _get_cde_options_for_session(file_id, selection)
+    if file_id and data_model_version:
+        cde_catalog = await _get_cde_options_for_session(file_id, data_model_version)
 
     context = {
         "request": request,
-        "default_schema": selection.key if selection else schema or "",
+        "default_schema": data_model_version.data_model_key if data_model_version else schema or "",
         "default_external_version_number": (
-            selection.external_version_number
-            if selection
+            data_model_version.external_version_number
+            if data_model_version
             else external_version_number
         ),
         "cde_catalog": [_cde_catalog_item(cde) for cde in cde_catalog],
@@ -72,11 +72,11 @@ async def render_stage_two(
     return _templates.TemplateResponse(request, "stage_2_mappings.html", context)
 
 
-def _data_model_selection_for_request(
+def _data_model_version_for_request(
     file_id: str | None,
     target_schema: str | None,
     external_version_number: str | None,
-) -> DataModelSelection | None:
+) -> DataModelVersionReference | None:
     if file_id:
         state = load_workflow_state(
             dependencies.get_workflow_storage(),
@@ -84,24 +84,27 @@ def _data_model_selection_for_request(
             file_id,
         )
         if state is not None:
-            return state.data_model_selection
+            return state.data_model_version
     if target_schema is None:
         return None
     if external_version_number is not None:
-        return DataModelSelection.from_external_version_number(target_schema, external_version_number)
+        return DataModelVersionReference(
+            data_model_key=target_schema,
+            external_version_number=external_version_number,
+        )
     return None
 
 
 async def _get_cde_options_for_session(
     file_id: str,
-    selection: DataModelSelection,
+    data_model_version: DataModelVersionReference,
 ) -> list[CDEInfo]:
     """Returns empty list on API failure (graceful degradation)."""
     cache = get_session_cache(file_id)
 
     if not cache.has_cdes():
         try:
-            await run_in_threadpool(populate_cde_cache, file_id, selection)
+            await run_in_threadpool(populate_cde_cache, file_id, data_model_version)
         except (DataModelStoreError, NetriasAPIUnavailable):
             logger.warning("Data Model Store API unavailable; CDE options will be empty", extra={"file_id": file_id})
 

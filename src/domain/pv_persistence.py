@@ -108,13 +108,13 @@ def save_pv_manifest_to_disk(
     pv_map: CdePvCatalog | Mapping[str, frozenset[str]],
 ) -> None:
     """Persists PVs so Stage 4/5 can recover after server restart without re-running harmonization."""
-    selection = cache.get_model_selection()
-    if selection is None:
-        _logger.warning("Cannot save PV manifest without data model selection", extra={"file_id": file_id})
+    data_model_version = cache.get_data_model_version()
+    if data_model_version is None:
+        _logger.warning("Cannot save PV manifest without data model version", extra={"file_id": file_id})
         return
     manifest = PVManifest(
-        data_model_key=selection.key,
-        external_version_number=selection.external_version_number,
+        data_model_key=data_model_version.data_model_key,
+        external_version_number=data_model_version.external_version_number,
         column_to_cde_key=cache.get_column_mappings(),
         pvs=pv_map if isinstance(pv_map, CdePvCatalog) else CdePvCatalog.from_mapping(pv_map),
     )

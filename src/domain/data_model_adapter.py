@@ -40,7 +40,7 @@ def list_data_model_summaries() -> list[DataModelSummary]:
         return []
     config = _data_model_store_config(client)
     summaries = _list_data_model_summaries_direct(config) if config else _list_data_model_summaries_from_sdk(client)
-    summaries.sort(key=lambda s: (s.key != _PREFERRED_MODEL_KEY, s.key))
+    summaries.sort(key=lambda s: (s.data_model_key != _PREFERRED_MODEL_KEY, s.data_model_key))
     return summaries
 
 
@@ -48,7 +48,7 @@ def _list_data_model_summaries_from_sdk(client: NetriasClient) -> list[DataModel
     models = client.list_data_models(include_versions=True)
     return [
         DataModelSummary(
-            key=m.key,
+            data_model_key=m.key,
             label=m.name,
             versions=[
                 _version_info_from_label(
@@ -90,7 +90,7 @@ def _summary_from_item(item: Mapping[str, object]) -> DataModelSummary:
         if isinstance(raw, Mapping) and (version := _version_info_from_item(raw)) is not None
     ]
     return DataModelSummary(
-        key=str(item.get("key", "")),
+        data_model_key=str(item.get("key", "")),
         label=str(item.get("name", "")),
         versions=versions,
     )
@@ -274,7 +274,7 @@ def _find_dms_version_number(
     external_version_number: str,
 ) -> str:
     for summary in summaries:
-        if summary.key != data_model_key:
+        if summary.data_model_key != data_model_key:
             continue
         for version in summary.versions:
             if version.external_version_number == external_version_number:

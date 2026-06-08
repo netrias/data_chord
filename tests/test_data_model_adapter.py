@@ -84,11 +84,11 @@ def test_list_summaries_returns_preferred_model_first(
 
     # Then: "gc" is first despite alphabetical ordering of raw data
     assert len(summaries) == 2, f"Expected 2 summaries, got {len(summaries)}"
-    assert summaries[0].key == "gc"
+    assert summaries[0].data_model_key == "gc"
     assert summaries[0].label == "Genomic Commons"
     assert [v.external_version_number for v in summaries[0].versions] == ["11.0.3", "11.0.4"]
     assert [v.version_label for v in summaries[0].versions] == ["11.0.3", "11.0.4"]
-    assert summaries[1].key == "alpha"
+    assert summaries[1].data_model_key == "alpha"
 
 
 # ---------------------------------------------------------------------------

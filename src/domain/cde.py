@@ -35,7 +35,7 @@ class DataModelVersionInfo:
 
 @dataclass(frozen=True)
 class DataModelSummary:
-    key: str
+    data_model_key: str
     label: str
     versions: list[DataModelVersionInfo]
 

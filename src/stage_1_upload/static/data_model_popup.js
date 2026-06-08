@@ -183,8 +183,8 @@ function _createModelDropdown(dataModels, selectedKey) {
     hiddenControl: 'select',
     items: dataModels,
     selectedValue: selectedKey,
-    valueFor: (model) => model.key,
-    labelFor: (model) => model.label || model.key,
+    valueFor: (model) => model.data_model_key,
+    labelFor: (model) => model.label || model.data_model_key,
   });
 }
 
@@ -412,8 +412,8 @@ function _buildDialogDOM(dataModels) {
   const modelLabel = document.createElement('label');
   modelLabel.htmlFor = 'dataModelDropdownTrigger';
   modelLabel.textContent = 'Data Model';
-  const defaultModel = dataModels.find((m) => m.key === DEFAULT_DATA_MODEL) || dataModels[0];
-  const modelDropdown = _createModelDropdown(dataModels, defaultModel?.key);
+  const defaultModel = dataModels.find((m) => m.data_model_key === DEFAULT_DATA_MODEL) || dataModels[0];
+  const modelDropdown = _createModelDropdown(dataModels, defaultModel?.data_model_key);
   modelField.appendChild(modelLabel);
   modelField.appendChild(modelDropdown);
   body.appendChild(modelField);
@@ -489,7 +489,7 @@ function _setupModelChangeHandler(dialog, dataModels) {
 
   modelSelect.addEventListener('change', () => {
     _syncDropdownFromHidden(modelDropdown);
-    const selected = dataModels.find((m) => m.key === modelSelect.value);
+    const selected = dataModels.find((m) => m.data_model_key === modelSelect.value);
     const versions = selected?.versions ?? [];
     const latestVersion = _getLatestVersion(versions);
     _populateVersionDropdown(versionDropdown, versions, latestVersion);
