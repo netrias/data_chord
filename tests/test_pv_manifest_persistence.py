@@ -13,16 +13,16 @@ from unittest.mock import patch
 
 import pytest
 
-from src.domain.cde_pv_catalog import CdePvCatalog
-from src.domain.columns import column_key_from_string
-from src.domain.data_model_cache import (
+from src.app.session_cache import (
     SessionCache,
     clear_all_session_caches,
     get_session_cache,
 )
+from src.domain.cde_pv_catalog import CdePvCatalog
+from src.domain.columns import column_key_from_string
 from src.domain.dataset_workflow_ids import dataset_workflow_id_from_string
-from src.domain.pv_persistence import column_pv_sets, ensure_pvs_loaded, load_pv_manifest_from_disk
-from src.domain.storage import LocalWorkflowStorage, UserContext, WorkflowFile
+from src.persistence.pv_manifest_store import column_pv_sets, ensure_pvs_loaded, load_pv_manifest_from_disk
+from src.storage import LocalWorkflowStorage, UserContext, WorkflowFile
 
 
 def _pv_catalog(values: dict[str, frozenset[str]]) -> CdePvCatalog:
@@ -75,8 +75,8 @@ class TestPVManifestPersistenceFeature:
         # When: Stage 4/5 lazy-loads PVs from disk
         storage, user = _workflow_storage_with_pv_manifest(tmp_path, file_id, pv_manifest_data)
         with (
-            patch("src.domain.dependencies.get_workflow_storage", return_value=storage),
-            patch("src.domain.dependencies.get_user_context", return_value=user),
+            patch("src.app.dependencies.get_workflow_storage", return_value=storage),
+            patch("src.app.dependencies.get_user_context", return_value=user),
         ):
             load_pv_manifest_from_disk(file_id, cache)
 
@@ -113,8 +113,8 @@ class TestPVManifestPersistenceFeature:
         # When: Attempting to load from non-existent manifest
         storage, user = _workflow_storage_with_pv_manifest(tmp_path, file_id, None)
         with (
-            patch("src.domain.dependencies.get_workflow_storage", return_value=storage),
-            patch("src.domain.dependencies.get_user_context", return_value=user),
+            patch("src.app.dependencies.get_workflow_storage", return_value=storage),
+            patch("src.app.dependencies.get_user_context", return_value=user),
         ):
             # Then: No exception raised, cache remains empty
             load_pv_manifest_from_disk(file_id, cache)
@@ -159,8 +159,8 @@ class TestPVManifestPersistenceFeature:
         # When: ensure_pvs_loaded is called
         storage, user = _workflow_storage_with_pv_manifest(tmp_path, file_id, pv_manifest_data)
         with (
-            patch("src.domain.dependencies.get_workflow_storage", return_value=storage),
-            patch("src.domain.dependencies.get_user_context", return_value=user),
+            patch("src.app.dependencies.get_workflow_storage", return_value=storage),
+            patch("src.app.dependencies.get_user_context", return_value=user),
         ):
             cache = ensure_pvs_loaded(file_id)
 
@@ -184,8 +184,8 @@ class TestPVManifestPersistenceFeature:
         # When: Stage 4 asks for PV sets by source column key
         storage, user = _workflow_storage_with_pv_manifest(tmp_path, file_id, pv_manifest_data)
         with (
-            patch("src.domain.dependencies.get_workflow_storage", return_value=storage),
-            patch("src.domain.dependencies.get_user_context", return_value=user),
+            patch("src.app.dependencies.get_workflow_storage", return_value=storage),
+            patch("src.app.dependencies.get_user_context", return_value=user),
         ):
             pvs_by_column = column_pv_sets(file_id, ["col_0000"])
 

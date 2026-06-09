@@ -13,29 +13,30 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from netrias_client import DataModelStoreError, NetriasAPIUnavailable
 
-import src.domain.dependencies as dependencies
-from src.domain.cde import CDEInfo, DataModelSummary
-from src.domain.cde_catalog import CdeCatalog
-from src.domain.cde_pv_catalog import CdePvCatalog
-from src.domain.column_profile import ColumnProfile
-from src.domain.columns import column_key_from_string
-from src.domain.data_model_adapter import (
+import src.app.dependencies as dependencies
+from src.app.data_model_store import (
     fetch_all_pvs_async,
     fetch_cdes,
     list_data_model_summaries,
     refine_cde_types_from_pvs,
 )
-from src.domain.data_model_cache import get_session_cache
-from src.domain.data_model_version_reference import DataModelVersionReference
-from src.domain.dataset_workflow_ids import new_dataset_workflow_id
-from src.domain.dependencies import (
+from src.app.dependencies import (
     get_mapping_service,
     get_upload_constraints,
 )
+from src.app.session_cache import get_session_cache
+from src.domain.cde import CDEInfo, DataModelSummary
+from src.domain.cde_catalog import CdeCatalog
+from src.domain.cde_pv_catalog import CdePvCatalog
+from src.domain.column_profile import ColumnProfile
+from src.domain.columns import column_key_from_string
+from src.domain.data_model_version_reference import DataModelVersionReference
+from src.domain.dataset_workflow_ids import new_dataset_workflow_id
 from src.domain.manifest import ColumnMappingManifest
-from src.domain.mapping_service import MappingDiscoveryResult
 from src.domain.match_counts import column_value_overlap_ratio
-from src.domain.observability import (
+from src.domain.workflow_state import WorkflowState
+from src.integrations.netrias_mapping import MappingDiscoveryResult
+from src.observability.events import (
     WorkflowEvent,
     WorkflowEventName,
     WorkflowOperation,
@@ -43,7 +44,14 @@ from src.domain.observability import (
     WorkflowStage,
     log_workflow_event,
 )
-from src.domain.storage import (
+from src.persistence.workflow_artifacts import (
+    load_upload_artifact,
+    save_mapping_manifest,
+    save_upload_artifacts,
+    save_upload_metadata,
+)
+from src.persistence.workflow_state_store import create_workflow_record, save_initial_workflow_state
+from src.storage import (
     UnsupportedUploadError,
     UploadedFileMeta,
     UploadStorage,
@@ -51,14 +59,6 @@ from src.domain.storage import (
     UserContext,
     describe_constraints,
 )
-from src.domain.workflow_artifact_store import (
-    load_upload_artifact,
-    save_mapping_manifest,
-    save_upload_artifacts,
-    save_upload_metadata,
-)
-from src.domain.workflow_state import WorkflowState
-from src.domain.workflow_state_store import create_workflow_record, save_initial_workflow_state
 
 from .schemas import (
     AnalyzeRequest,

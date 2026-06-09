@@ -11,13 +11,13 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
-import src.domain.dependencies as dependencies
+import src.app.dependencies as dependencies
+from src.app.session_cache import SessionCache, get_session_cache
 from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.columns import ColumnKey, column_key_from_string
-from src.domain.data_model_cache import SessionCache, get_session_cache
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_value
 from src.domain.pv_manifest import PVManifest
-from src.domain.storage import WorkflowFile, WorkflowNotFoundError
+from src.storage import WorkflowFile, WorkflowNotFoundError
 
 _logger = logging.getLogger(__name__)
 

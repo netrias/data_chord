@@ -10,8 +10,8 @@ ROOT_DIR = Path(__file__).resolve().parents[3]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-import src.domain.dependencies as dependencies  # noqa: E402
-from src.domain.workflow_artifact_store import save_upload_metadata  # noqa: E402
+import src.app.dependencies as dependencies  # noqa: E402
+from src.persistence.workflow_artifacts import save_upload_metadata  # noqa: E402
 
 
 def main() -> None:

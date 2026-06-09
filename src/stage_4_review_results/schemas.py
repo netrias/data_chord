@@ -7,7 +7,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field, model_validator
 
-from src.domain.schemas import DatasetWorkflowIdField
+from src.api.schemas import DatasetWorkflowIdField
 
 
 class CellOverrideSchema(BaseModel):

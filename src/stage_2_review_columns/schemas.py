@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from src.api.schemas import DatasetWorkflowIdField
 from src.domain.column_profile import ColumnProfilePayload
-from src.domain.schemas import DatasetWorkflowIdField
 
 
 class ColumnDetailResponse(BaseModel):

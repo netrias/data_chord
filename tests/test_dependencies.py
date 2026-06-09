@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from netrias_client import Environment
 
-from src.domain import dependencies
+import src.app.dependencies as dependencies
 
 
 def test_upload_storage_uses_configured_scratch_dir(monkeypatch, tmp_path: Path) -> None:
@@ -34,7 +34,7 @@ def test_netrias_client_uses_configured_timeout(monkeypatch) -> None:
     monkeypatch.setattr(dependencies, "_netrias_client_initialized", False)
 
     # When: the shared Netrias client is initialized
-    with patch("src.domain.dependencies.NetriasClient") as client_class:
+    with patch("src.app.dependencies.NetriasClient") as client_class:
         client = dependencies.get_netrias_client()
 
     # Then: the SDK receives the configured timeout
@@ -51,7 +51,7 @@ def test_netrias_client_uses_configured_environment(monkeypatch) -> None:
     monkeypatch.setattr(dependencies, "_netrias_client_initialized", False)
 
     # When: the shared Netrias client is initialized
-    with patch("src.domain.dependencies.NetriasClient") as client_class:
+    with patch("src.app.dependencies.NetriasClient") as client_class:
         client = dependencies.get_netrias_client()
 
     # Then: the SDK is wired to prod endpoints

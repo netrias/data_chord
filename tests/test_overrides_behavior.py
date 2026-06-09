@@ -10,8 +10,8 @@ from io import BytesIO
 import pytest
 from httpx import AsyncClient
 
-from src.domain.manifest import read_manifest_parquet
-from src.domain.storage import UploadStorage
+from src.persistence.manifest_reader import read_manifest_parquet
+from src.storage import UploadStorage
 from tests.conftest import (
     create_csv_content,
     create_harmonized_csv,

@@ -10,9 +10,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from src.domain import ManifestSummarySchema
-from src.domain.harmonize import HarmonizeStatus
-from src.domain.storage import UserContext, WorkflowConflictError, WorkflowFile, WorkflowStorage
+from src.api.schemas import ManifestSummarySchema
+from src.integrations.netrias_harmonize import HarmonizeStatus
+from src.storage import UserContext, WorkflowConflictError, WorkflowFile, WorkflowStorage
 
 _FIELD_SCHEMA_VERSION = "schema_version"
 _FIELD_POLLING_JOB_ID = "polling_job_id"

@@ -41,8 +41,6 @@ from src.domain.manifest.models import (
 from src.domain.manifest.models import (
     AlternativeEntry as AlternativeEntry,
 )
-from src.domain.manifest.reader import read_manifest_parquet
-from src.domain.manifest.writer import add_manual_overrides_batch
 
 __all__ = [
     "AlternativeEntry",
@@ -72,12 +70,10 @@ __all__ = [
     "ManifestTermKey",
     "ManualOverride",
     "MappingAlternative",
-    "add_manual_overrides_batch",
     "completeness_bucket",
     "confidence_bucket",
     "get_latest_override_value",
     "get_manifest_schema",
     "is_value_changed",
     "normalize_manifest",
-    "read_manifest_parquet",
 ]

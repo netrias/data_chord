@@ -14,7 +14,13 @@ from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse, Response
 from starlette.types import Scope
 
-from src.domain.observability import (
+from src.auth.user_context import (
+    InvalidUserContextError,
+    bind_user_context,
+    current_user_context,
+    reset_user_context,
+)
+from src.observability.events import (
     REQUEST_ID_HEADER,
     RequestTrace,
     bind_request_id,
@@ -24,20 +30,14 @@ from src.domain.observability import (
     request_id_from_header,
     reset_request_id,
 )
-from src.domain.paths import PROJECT_ROOT, SHARED_STATIC_DIR, get_stage_static_dir
-from src.domain.storage import WorkflowAccessDeniedError, WorkflowNotFoundError
-from src.domain.user_context import (
-    InvalidUserContextError,
-    bind_user_context,
-    current_user_context,
-    reset_user_context,
-)
 from src.observability.router import observability_router
+from src.paths import PROJECT_ROOT, SHARED_STATIC_DIR, get_stage_static_dir
 from src.stage_1_upload.router import stage_one_router
 from src.stage_2_review_columns.router import stage_two_router
 from src.stage_3_harmonize.router import stage_three_router
 from src.stage_4_review_results.router import stage_four_router
 from src.stage_5_review_summary.router import stage_five_router
+from src.storage import WorkflowAccessDeniedError, WorkflowNotFoundError
 
 APP_TITLE = "Data Chord"
 APP_DESCRIPTION = "Data harmonization workflow bootstrap application."
@@ -109,7 +109,7 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Manage app lifecycle: shutdown cleanup for HTTP clients."""
     yield
     # Shutdown: clean up resources
-    from src.domain.dependencies import cleanup_services
+    from src.app.dependencies import cleanup_services
 
     cleanup_services()
 
@@ -119,7 +119,7 @@ def create_app() -> FastAPI:
     _configure_logging()
 
     # Validate required configuration at startup (fail-fast)
-    from src.domain.config import validate_required_config
+    from src.settings import validate_required_config
 
     validate_required_config()
 

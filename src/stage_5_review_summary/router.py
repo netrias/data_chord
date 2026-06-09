@@ -14,8 +14,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
-import src.domain.dependencies as dependencies
-from src.domain.storage import UploadStorage, UserContext, WorkflowStorage
+import src.app.dependencies as dependencies
 from src.stage_5_review_summary.schemas import StageFiveRequest, StageFiveSummaryResponse
 from src.stage_5_review_summary.use_cases import (
     DownloadDatasetUnreadableError,
@@ -27,6 +26,7 @@ from src.stage_5_review_summary.use_cases import (
     build_download_package,
     build_summary,
 )
+from src.storage import UploadStorage, UserContext, WorkflowStorage
 
 _MODULE_DIR = Path(__file__).parent
 _TEMPLATE_DIR = _MODULE_DIR / "templates"

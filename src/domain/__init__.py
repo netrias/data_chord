@@ -19,11 +19,6 @@ from src.domain.columns import ColumnKey as ColumnKey
 from src.domain.columns import column_key_for_index as column_key_for_index
 from src.domain.columns import column_key_from_string as column_key_from_string
 from src.domain.data_model_version_reference import DataModelVersionReference as DataModelVersionReference
-from src.domain.schemas import ColumnBreakdownSchema as ColumnBreakdownSchema
-from src.domain.schemas import ConfidenceBucketSchema as ConfidenceBucketSchema
-from src.domain.schemas import HarmonizeRequest as HarmonizeRequest
-from src.domain.schemas import HarmonizeResponse as HarmonizeResponse
-from src.domain.schemas import ManifestSummarySchema as ManifestSummarySchema
 from src.domain.session import SessionKey as SessionKey
 from src.domain.session import UILabel as UILabel
 from src.domain.workflow_state import ConfirmedMappingChoices as ConfirmedMappingChoices

@@ -13,7 +13,7 @@ from netrias_client import DataModel, DataModelVersion
 from src.domain.cde import CDEInfo, CdeType
 from src.domain.cde_catalog import CdeCatalog
 from src.domain.cde_pv_catalog import CdePvCatalog
-from src.domain.data_model_adapter import (
+from src.integrations.data_model_store import (
     _pv_map_from_all_pvs_response,
     fetch_cdes,
     list_data_model_summaries,
@@ -28,7 +28,7 @@ from src.domain.data_model_adapter import (
 @pytest.fixture(autouse=True)
 def _reset_netrias_singleton() -> Generator[None]:
     """Prevent inter-test leakage via the dependency singleton."""
-    import src.domain.dependencies as deps
+    import src.app.dependencies as deps
 
     saved_client = deps._netrias_client
     saved_init = deps._netrias_client_initialized
@@ -40,7 +40,7 @@ def _reset_netrias_singleton() -> Generator[None]:
 @pytest.fixture
 def mock_netrias() -> Generator[MagicMock]:
     """Why: inject a mock NetriasClient so tests never hit the real API."""
-    import src.domain.dependencies as deps
+    import src.app.dependencies as deps
 
     mock = MagicMock()
     deps._netrias_client = mock
@@ -80,7 +80,7 @@ def test_list_summaries_returns_preferred_model_first(
     )
 
     # When
-    summaries = list_data_model_summaries()
+    summaries = list_data_model_summaries(mock_netrias)
 
     # Then: "gc" is first despite alphabetical ordering of raw data
     assert len(summaries) == 2, f"Expected 2 summaries, got {len(summaries)}"
@@ -102,14 +102,8 @@ def test_list_summaries_returns_empty_when_client_unavailable() -> None:
     When: list_data_model_summaries() is called
     Then: empty list returned (graceful degradation)
     """
-    import src.domain.dependencies as deps
-
-    # Given: client is None
-    deps._netrias_client = None
-    deps._netrias_client_initialized = True
-
     # When
-    summaries = list_data_model_summaries()
+    summaries = list_data_model_summaries(None)
 
     # Then
     assert summaries == [], f"Expected empty list, got {summaries}"
@@ -167,7 +161,7 @@ def test_fetch_cdes_defaults_cde_type_to_pv(mock_netrias: MagicMock) -> None:
     assert fetched == []
 
     # When
-    fetched = fetch_cdes("gc", "1")
+    fetched = fetch_cdes(mock_netrias, "gc", "1")
 
     # Then: every CDE starts as PV (refinement happens later)
     assert {c.cde_type for c in fetched} == {CdeType.PV}
@@ -219,9 +213,9 @@ def test_fetch_cdes_translates_external_version_for_dms_boundary(
             request=httpx.Request("GET", url),
         )
 
-    monkeypatch.setattr("src.domain.data_model_adapter.httpx.get", _fake_get)
+    monkeypatch.setattr("src.integrations.data_model_store.httpx.get", _fake_get)
 
-    fetched = fetch_cdes("gc", "11.0.4")
+    fetched = fetch_cdes(mock_netrias, "gc", "11.0.4")
 
     assert [c.cde_key for c in fetched] == ["diagnosis"]
     mock_netrias.list_cdes.assert_called_once_with(

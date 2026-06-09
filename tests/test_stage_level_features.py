@@ -20,16 +20,16 @@ from netrias_client import TabularFormat, dataset_from_rows, write_tabular
 from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
-import src.domain.dependencies as dependencies
+import src.app.dependencies as dependencies
 import src.stage_3_harmonize.router as stage_three_router
+from src.app.session_cache import clear_session_cache, get_session_cache
 from src.domain.cde import CDEInfo
-from src.domain.data_model_cache import clear_session_cache, get_session_cache
-from src.domain.harmonize import HarmonizeResult, HarmonizeStatus
 from src.domain.manifest import ManifestPayload
-from src.domain.storage import UploadStorage, WorkflowFile
 from src.domain.workflow_state import WorkflowState
-from src.domain.workflow_state_store import load_workflow_state
+from src.integrations.netrias_harmonize import HarmonizeResult, HarmonizeStatus
+from src.persistence.workflow_state_store import load_workflow_state
 from src.stage_3_harmonize.job_state import StageThreeJobState
+from src.storage import UploadStorage, WorkflowFile
 from tests.conftest import (
     TEST_TARGET_SCHEMA,
     TEST_TSV_CONTENT_TYPE,

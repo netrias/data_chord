@@ -12,7 +12,11 @@ from typing import cast
 
 from netrias_client import Environment, NetriasClient
 
-from src.domain.config import (
+from src.auth.user_context import current_user_context
+from src.integrations.netrias_harmonize import HarmonizeService
+from src.integrations.netrias_mapping import MappingDiscoveryService
+from src.paths import PROJECT_ROOT
+from src.settings import (
     ConfigurationError,
     StorageBackend,
     get_netrias_api_key,
@@ -24,10 +28,7 @@ from src.domain.config import (
     get_workflow_s3_prefix,
     get_workflow_storage_dir,
 )
-from src.domain.harmonize import HarmonizeService
-from src.domain.mapping_service import MappingDiscoveryService
-from src.domain.paths import PROJECT_ROOT
-from src.domain.storage import (
+from src.storage import (
     LocalWorkflowStorage,
     S3WorkflowClient,
     S3WorkflowStorage,
@@ -36,7 +37,6 @@ from src.domain.storage import (
     UserContext,
     WorkflowStorage,
 )
-from src.domain.user_context import current_user_context
 
 logger = logging.getLogger(__name__)
 

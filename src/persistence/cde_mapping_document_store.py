@@ -15,17 +15,17 @@ from typing import Final, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, ValidationError, field_validator
 
-import src.domain.dependencies as dependencies
+import src.app.dependencies as dependencies
+from src.app.session_cache import SessionCache
 from src.domain.cde import CdeType, is_rename_only
 from src.domain.column_cde_map import ColumnCdeOverrides
 from src.domain.column_renames import ColumnRenameSet
 from src.domain.columns import ColumnKey, column_key_from_string
-from src.domain.data_model_cache import SessionCache
 from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_value
 from src.domain.manifest import ColumnMappingManifest, ColumnMappingRecord
-from src.domain.storage import UserContext, WorkflowFile, WorkflowNotFoundError, WorkflowStorage
 from src.domain.tabular_column_renames import ResolvedTabularColumn
+from src.storage import UserContext, WorkflowFile, WorkflowNotFoundError, WorkflowStorage
 
 MAPPING_SOURCE_AI: Final = "ai"
 MAPPING_SOURCE_USER_OVERRIDE: Final = "user_override"

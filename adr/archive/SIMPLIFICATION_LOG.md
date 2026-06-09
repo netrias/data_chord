@@ -277,7 +277,7 @@ behavior was protected, and what proof ran.
 15. Stage 4/5 configured storage dependency
 
    Aligned Stage 4 and Stage 5 with the Stage 3 storage pattern. These routes
-   now ask `src.domain.dependencies` for upload storage at request time instead
+   now ask `src.app.dependencies` for upload storage at request time instead
    of importing the storage getter directly. The shared app test fixture now
    patches only the dependency module and no longer reaches into Stage 4 or
    Stage 5 route modules for storage replacement.
@@ -304,7 +304,7 @@ behavior was protected, and what proof ran.
 16. Stage 1 configured storage dependency
 
    Removed the Stage 1 module-level upload storage object. Upload and analyze
-   now ask `src.domain.dependencies` for upload storage at request time, and
+   now ask `src.app.dependencies` for upload storage at request time, and
    the selected-sheet helper receives that storage explicitly. The shared app
    test fixture no longer patches private storage objects in any stage router.
 

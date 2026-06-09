@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 from httpx import AsyncClient
 
-from src.domain.storage import UploadStorage
+from src.storage import UploadStorage
 from tests.conftest import (
     create_harmonized_csv,
     store_test_harmonization_manifest,

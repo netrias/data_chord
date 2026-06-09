@@ -9,7 +9,8 @@ import pytest
 from netrias_client import CDE as SdkCDE
 from netrias_client import DataModel, DataModelVersion
 
-from src.domain.data_model_cache import clear_session_cache, get_session_cache, populate_cde_cache
+from src.app.data_model_store import populate_cde_cache
+from src.app.session_cache import clear_session_cache, get_session_cache
 from src.domain.data_model_version_reference import DataModelVersionReference
 
 # ---------------------------------------------------------------------------
@@ -26,7 +27,7 @@ def _clean_cache() -> None:
 @pytest.fixture
 def mock_netrias() -> Generator[MagicMock]:
     """Why: inject a mock NetriasClient into the adapter singleton."""
-    import src.domain.dependencies as deps
+    import src.app.dependencies as deps
 
     mock = MagicMock()
     mock.list_data_models.return_value = (

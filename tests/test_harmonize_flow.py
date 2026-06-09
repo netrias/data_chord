@@ -211,12 +211,12 @@ async def test_harmonize_without_client_returns_stubbed_job(
     _ = await upload_and_analyze(app_client, sample_csv_path)
 
     from src.domain import ColumnCdeOverrides, ColumnRenameSet
-    from src.domain.harmonize import HarmonizeService, HarmonizeStatus
+    from src.integrations.netrias_harmonize import HarmonizeService, HarmonizeStatus
 
     service = HarmonizeService(client=None)
 
     # When: Harmonization is attempted without the client
-    from src.domain.data_model_cache import SessionCache
+    from src.app.session_cache import SessionCache
 
     result = service.run(
         file_path=Path("/tmp/test.csv"),
@@ -237,9 +237,9 @@ def test_harmonize_sends_source_file_and_column_keyed_manifest(tmp_path: Path) -
     """Harmonize lets the SDK handle tabular format details directly."""
 
     # Given: a duplicate-header CSV and a manifest keyed by source column key
+    from src.app.session_cache import SessionCache
     from src.domain import ColumnCdeOverrides, ColumnRenameSet
-    from src.domain.data_model_cache import SessionCache
-    from src.domain.harmonize import HarmonizeService
+    from src.integrations.netrias_harmonize import HarmonizeService
 
     csv_path = tmp_path / "dupes.csv"
     csv_path.write_text("name,name\nAlice,Smith\n", encoding="utf-8")
@@ -273,9 +273,9 @@ def test_harmonize_discovery_uses_external_version_keyword(tmp_path: Path) -> No
     """Fallback discovery speaks the current Netrias client external-version contract."""
 
     # Given: harmonization needs to discover a manifest because none was supplied
+    from src.app.session_cache import SessionCache
     from src.domain import ColumnCdeOverrides, ColumnRenameSet
-    from src.domain.data_model_cache import SessionCache
-    from src.domain.harmonize import HarmonizeService
+    from src.integrations.netrias_harmonize import HarmonizeService
 
     csv_path = tmp_path / "source.csv"
     csv_path.write_text("diagnosis\nLung\n", encoding="utf-8")
@@ -312,9 +312,9 @@ def test_harmonize_applies_column_renames_to_manifest(tmp_path: Path) -> None:
     When: harmonization is run
     Then: the SDK manifest uses the renamed column_name while keeping the column key stable
     """
+    from src.app.session_cache import SessionCache
     from src.domain import ColumnCdeOverrides, ColumnRenameSet
-    from src.domain.data_model_cache import SessionCache
-    from src.domain.harmonize import HarmonizeService
+    from src.integrations.netrias_harmonize import HarmonizeService
 
     # Given
     csv_path = tmp_path / "source.csv"

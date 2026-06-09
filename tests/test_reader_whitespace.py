@@ -10,8 +10,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from src.domain.manifest.models import ManifestRow
-from src.domain.manifest.reader import read_manifest_parquet
-from src.domain.manifest.writer import _write_manifest_parquet
+from src.persistence.manifest_reader import read_manifest_parquet
+from src.persistence.manifest_writer import _write_manifest_parquet
 
 
 def _make_row(

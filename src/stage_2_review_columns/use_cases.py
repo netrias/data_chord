@@ -6,7 +6,12 @@ from dataclasses import dataclass
 
 from fastapi.concurrency import run_in_threadpool
 
-from src.domain import dependencies
+import src.app.dependencies as dependencies
+from src.app.data_model_store import (
+    fetch_all_pvs_async,
+    refine_cde_types_from_pvs,
+)
+from src.app.session_cache import SessionCache, get_session_cache
 from src.domain.cde import CdeType
 from src.domain.cde_catalog import CdeCatalog
 from src.domain.cde_pv_catalog import CdePvCatalog
@@ -16,19 +21,14 @@ from src.domain.column_profile import (
     column_profile_to_payload,
 )
 from src.domain.columns import ColumnKey, column_key_from_string
-from src.domain.data_model_adapter import (
-    fetch_all_pvs_async,
-    refine_cde_types_from_pvs,
-)
-from src.domain.data_model_cache import SessionCache, get_session_cache
 from src.domain.match_counts import compute_column_overlap_by_cde, compute_match_counts
-from src.domain.storage import UserContext, WorkflowStorage
 from src.domain.workflow_state import ConfirmedMappingChoices
-from src.domain.workflow_state_store import (
+from src.persistence.workflow_state_store import (
     WorkflowStateConflictError,
     WorkflowStateNotFoundError,
     save_confirmed_mapping_choices_to_state,
 )
+from src.storage import UserContext, WorkflowStorage
 
 from .schemas import ColumnDetailResponse, SaveMappingChoicesRequest, SaveMappingChoicesResponse
 

@@ -5,11 +5,11 @@ from __future__ import annotations
 import pytest
 from httpx import AsyncClient
 
-import src.domain.dependencies as dependencies
+import src.app.dependencies as dependencies
 from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.column_cde_map import ColumnCdeMap
 from src.domain.pv_manifest import PVManifest
-from src.domain.storage import UploadStorage, WorkflowFile
+from src.storage import UploadStorage, WorkflowFile
 from tests.conftest import (
     TEST_TARGET_SCHEMA,
     create_csv_content,

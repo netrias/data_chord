@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from src.domain.review_overrides import ReviewOverrides, ReviewProgressState
-from src.domain.storage import UserContext, WorkflowFile, WorkflowNotFoundError, WorkflowStorage
+from src.storage import UserContext, WorkflowFile, WorkflowNotFoundError, WorkflowStorage
 
 
 class ReviewOverridesWorkflowNotFoundError(Exception):

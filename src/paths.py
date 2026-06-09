@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-# Anchor from this file's location: src/domain/paths.py
+# Anchor from this file's location: src/paths.py
 _THIS_FILE = Path(__file__).resolve()
-_DOMAIN_DIR = _THIS_FILE.parent
-_SRC_DIR = _DOMAIN_DIR.parent
+_SRC_DIR = _THIS_FILE.parent
 PROJECT_ROOT = _SRC_DIR.parent
 
 # Shared static assets
