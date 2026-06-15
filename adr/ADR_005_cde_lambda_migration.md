@@ -128,8 +128,8 @@ class MappingClientProtocol(Protocol):
 Upgrade to netrias-client 0.1.0 and update all call sites to use the new API pattern.
 
 ### Affected Files
-- `src/domain/harmonize.py`: Client initialization and API calls
-- `src/domain/mapping_service.py`: Client initialization, protocol definition, dead production code removed (see git 6039810 for original)
+- `src/integrations/netrias_harmonize.py`: Client-backed harmonization API calls
+- `src/integrations/netrias_mapping.py`: Client-backed mapping discovery, protocol definition, dead production code removed (see git 6039810 for original)
 
 ### Demo Bypass (Resolved)
 

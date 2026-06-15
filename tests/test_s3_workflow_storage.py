@@ -10,7 +10,7 @@ import pytest
 from botocore.exceptions import ClientError
 
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_string
-from src.domain.storage import (
+from src.storage import (
     S3WorkflowStorage,
     UserContext,
     WorkflowAccessDeniedError,

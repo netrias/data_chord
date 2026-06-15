@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Response, status
 
-import src.domain.dependencies as dependencies
-from src.domain.observability import CLIENT_EVENTS_ENDPOINT, log_client_event
+import src.app.dependencies as dependencies
+from src.observability.events import CLIENT_EVENTS_ENDPOINT, log_client_event
 
 from .schemas import ClientEventRequest
 

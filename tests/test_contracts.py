@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 from httpx import AsyncClient
 
-import src.domain.dependencies as dependencies
-from src.domain.storage import UploadStorage, WorkflowFile
+import src.app.dependencies as dependencies
+from src.storage import UploadStorage, WorkflowFile
 from tests.conftest import (
     TEST_CSV_CONTENT_TYPE,
     TEST_TARGET_SCHEMA,

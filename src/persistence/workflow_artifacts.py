@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from src.domain.manifest import ManifestPayload, normalize_manifest
-from src.domain.storage import (
+from src.storage import (
     UploadedFileMeta,
     UploadStorage,
     UserContext,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from src.domain.schemas import DatasetWorkflowIdField
+from src.api.schemas import DatasetWorkflowIdField
 
 
 class StageFiveRequest(BaseModel):

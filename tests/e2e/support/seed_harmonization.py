@@ -19,19 +19,19 @@ if str(ROOT_DIR) not in sys.path:
 
 # noqa: E402 - ensure repo root is on sys.path before importing application modules.
 from src.domain.manifest import get_manifest_schema  # noqa: E402
-from src.domain.storage import UploadConstraints, UploadStorage  # noqa: E402
+from src.storage import UploadConstraints, UploadStorage  # noqa: E402
 
 
 def _resolve_upload_base_dir(raw: str | None) -> Path:
     if raw:
         return Path(raw).expanduser().resolve()
-    from src.domain.dependencies import UPLOAD_BASE_DIR
+    from src.app.dependencies import UPLOAD_BASE_DIR
 
     return UPLOAD_BASE_DIR
 
 
 def _upload_storage_for(upload_base_dir: Path) -> UploadStorage:
-    from src.domain.dependencies import MAX_UPLOAD_BYTES
+    from src.app.dependencies import MAX_UPLOAD_BYTES
 
     return UploadStorage(upload_base_dir, UploadConstraints(max_bytes=MAX_UPLOAD_BYTES))
 

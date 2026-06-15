@@ -10,13 +10,13 @@ from io import BytesIO
 import pytest
 from httpx import AsyncClient
 
-import src.domain.dependencies as dependencies
+import src.app.dependencies as dependencies
+from src.app.session_cache import clear_all_session_caches
+from src.auth.user_context import ALB_IDENTITY_HEADER
 from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.column_cde_map import ColumnCdeMap
-from src.domain.data_model_cache import clear_all_session_caches
 from src.domain.pv_manifest import PVManifest
-from src.domain.storage import UploadStorage, WorkflowFile
-from src.domain.user_context import ALB_IDENTITY_HEADER
+from src.storage import UploadStorage, WorkflowFile
 from tests.conftest import (
     TEST_TARGET_SCHEMA,
     create_csv_content,

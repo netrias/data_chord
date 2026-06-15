@@ -17,7 +17,7 @@ from enum import StrEnum
 from typing import Final
 from uuid import uuid4
 
-from src.domain.storage import UserContext
+from src.storage import UserContext
 
 REQUEST_ID_HEADER: Final = "X-Request-ID"
 CLIENT_EVENTS_ENDPOINT: Final = "/client-events"
@@ -27,7 +27,7 @@ _MAX_STRING_LENGTH: Final = 512
 _MAX_LIST_ITEMS: Final = 20
 _RESERVED_LOG_FIELDS = frozenset(logging.makeLogRecord({}).__dict__)
 _current_request_id: ContextVar[str | None] = ContextVar("request_id", default=None)
-_logger = logging.getLogger("src.domain.observability")
+_logger = logging.getLogger("src.observability.events")
 
 
 class WorkflowEventName(StrEnum):

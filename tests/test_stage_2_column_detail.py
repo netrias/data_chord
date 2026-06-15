@@ -8,13 +8,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.domain.cde import CDEInfo
-from src.domain.cde_pv_catalog import CdePvCatalog
-from src.domain.column_profile import ColumnProfile, DistinctValue
-from src.domain.data_model_cache import (
+from src.app.session_cache import (
     clear_all_session_caches,
     get_session_cache,
 )
+from src.domain.cde import CDEInfo
+from src.domain.cde_pv_catalog import CdePvCatalog
+from src.domain.column_profile import ColumnProfile, DistinctValue
 from src.stage_2_review_columns.use_cases import (
     ColumnDetailNotFound,
     compute_column_detail,
@@ -31,7 +31,7 @@ def _isolate_session_cache() -> Generator[None]:
 @pytest.fixture
 def mock_netrias() -> Generator[MagicMock]:
     """Inject a MagicMock NetriasClient that returns deterministic PVs."""
-    import src.domain.dependencies as deps
+    import src.app.dependencies as deps
 
     saved = deps._netrias_client, deps._netrias_client_initialized
     mock = MagicMock()
@@ -214,7 +214,7 @@ async def test_compute_column_detail_rebuilds_profile_when_cache_lost(
           returns it with the detail payload
     """
     import src.stage_2_review_columns.use_cases as use_cases
-    from src.domain.storage import UploadConstraints, UploadStorage
+    from src.storage import UploadConstraints, UploadStorage
 
     # Given
     storage = UploadStorage(tmp_path / "uploads", UploadConstraints(max_bytes=10_000))

@@ -17,8 +17,8 @@ from src.domain.dataset_workflow_ids import (
     DatasetWorkflowId,
     dataset_workflow_id_from_value,
 )
-from src.domain.harmonize import HarmonizeStatus
 from src.domain.manifest import ManifestPayload
+from src.integrations.netrias_harmonize import HarmonizeStatus
 
 FILE_ID_MIN_LENGTH = DATASET_WORKFLOW_ID_LENGTH
 

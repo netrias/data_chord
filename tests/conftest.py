@@ -18,7 +18,7 @@ from httpx import ASGITransport, AsyncClient
 from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
-from src.domain.storage import UploadConstraints, UploadStorage
+from src.storage import UploadConstraints, UploadStorage
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -104,7 +104,7 @@ def temp_storage(tmp_path: Path, test_constraints: UploadConstraints) -> UploadS
 @pytest.fixture
 def mock_netrias_client() -> Generator[MagicMock]:
     """why: avoid real network calls to Netrias Lambda and Data Model Store APIs."""
-    import src.domain.dependencies as deps
+    import src.app.dependencies as deps
 
     mock_client = MagicMock()
 
@@ -204,8 +204,8 @@ async def app_client(
     mock_netrias_client: MagicMock,
 ) -> AsyncGenerator[AsyncClient]:
     """why: provide an async HTTP client for testing the full API."""
-    import src.domain.dependencies as deps_module
-    from src.domain.storage import LocalWorkflowStorage
+    import src.app.dependencies as deps_module
+    from src.storage import LocalWorkflowStorage
 
     original_storage = deps_module._storage
     deps_module._storage = temp_storage

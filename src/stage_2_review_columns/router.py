@@ -16,13 +16,14 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from netrias_client import DataModelStoreError, NetriasAPIUnavailable
 
-import src.domain.dependencies as dependencies
+import src.app.dependencies as dependencies
+from src.api.schemas import DatasetWorkflowIdField
+from src.app.data_model_store import populate_cde_cache
+from src.app.session_cache import get_session_cache
 from src.domain import UILabel
 from src.domain.cde import CDEInfo
-from src.domain.data_model_cache import get_session_cache, populate_cde_cache
 from src.domain.data_model_version_reference import DataModelVersionReference
-from src.domain.schemas import DatasetWorkflowIdField
-from src.domain.workflow_state_store import load_workflow_state
+from src.persistence.workflow_state_store import load_workflow_state
 
 from .schemas import ColumnDetailResponse, SaveMappingChoicesRequest, SaveMappingChoicesResponse
 from .use_cases import (

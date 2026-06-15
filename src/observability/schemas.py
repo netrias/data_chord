@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from src.domain.observability import FILE_ID_PATTERN, ClientEventName
+from src.observability.events import FILE_ID_PATTERN, ClientEventName
 
 
 class ClientEventRequest(BaseModel):

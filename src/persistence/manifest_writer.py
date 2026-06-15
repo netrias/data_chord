@@ -19,7 +19,7 @@ import pyarrow.parquet as pq
 from src.domain.column_renames import ColumnRenameSet
 from src.domain.manifest.adjustments import ManifestManualOverride, ManifestPvAdjustment, ManifestTermKey
 from src.domain.manifest.models import ManifestRow, ManualOverride, get_manifest_schema
-from src.domain.manifest.reader import read_manifest_parquet
+from src.persistence.manifest_reader import read_manifest_parquet
 
 logger = logging.getLogger(__name__)
 

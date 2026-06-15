@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.domain.manifest import ColumnMappingManifest, ManifestPayload
-from src.domain.mapping_service import MappingDiscoveryService
+from src.integrations.netrias_mapping import MappingDiscoveryService
 
 # ---------------------------------------------------------------------------
 # Fixtures

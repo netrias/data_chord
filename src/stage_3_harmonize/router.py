@@ -22,25 +22,25 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from netrias_client import read_tabular, write_tabular
 
-import src.domain.dependencies as dependencies
-from src.domain import (
+import src.app.dependencies as dependencies
+from src.api.schemas import (
     ColumnBreakdownSchema,
-    ColumnCdeOverrides,
-    ColumnRenameSet,
     ConfidenceBucketSchema,
     HarmonizeRequest,
     HarmonizeResponse,
     ManifestSummarySchema,
 )
-from src.domain.cde_mapping_persistence import save_cde_mapping_document
-from src.domain.column_cde_map import ColumnCdeMap
-from src.domain.data_model_adapter import fetch_all_pvs_async
-from src.domain.data_model_cache import SessionCache, get_session_cache, populate_cde_cache
-from src.domain.data_model_version_reference import DataModelVersionReference
-from src.domain.dependencies import (
+from src.app.data_model_store import fetch_all_pvs_async, populate_cde_cache
+from src.app.dependencies import (
     get_harmonize_service,
 )
-from src.domain.harmonize import HarmonizeResult, HarmonizeStatus
+from src.app.session_cache import SessionCache, get_session_cache
+from src.domain import (
+    ColumnCdeOverrides,
+    ColumnRenameSet,
+)
+from src.domain.column_cde_map import ColumnCdeMap
+from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.manifest import (
     ColumnMappingManifest,
     ConfidenceBucket,
@@ -50,30 +50,32 @@ from src.domain.manifest import (
     ManifestSummary,
     confidence_bucket,
     is_value_changed,
-    read_manifest_parquet,
 )
-from src.domain.manifest.writer import apply_column_renames_batch, apply_pv_adjustments_batch
-from src.domain.pv_persistence import ColumnPvSets, save_pv_manifest_to_disk
 from src.domain.pv_validation import check_value_conformance, compute_pv_adjustment
-from src.domain.review_override_store import delete_review_overrides_state
-from src.domain.storage import UploadStorage, UserContext, WorkflowFile, WorkflowNotFoundError, WorkflowStorage
 from src.domain.tabular_column_renames import (
     ResolvedTabularColumn,
     apply_column_renames_to_dataset,
     resolve_tabular_columns,
 )
-from src.domain.workflow_artifact_store import (
+from src.domain.workflow_state import ConfirmedMappingChoices, WorkflowState
+from src.integrations.netrias_harmonize import HarmonizeResult, HarmonizeStatus
+from src.persistence.cde_mapping_document_store import save_cde_mapping_document
+from src.persistence.manifest_reader import read_manifest_parquet
+from src.persistence.manifest_writer import apply_column_renames_batch, apply_pv_adjustments_batch
+from src.persistence.pv_manifest_store import ColumnPvSets, save_pv_manifest_to_disk
+from src.persistence.review_override_store import delete_review_overrides_state
+from src.persistence.workflow_artifacts import (
     load_mapping_manifest,
     load_upload_artifact,
     save_harmonized_artifacts,
 )
-from src.domain.workflow_state import ConfirmedMappingChoices, WorkflowState
-from src.domain.workflow_state_store import load_workflow_state
+from src.persistence.workflow_state_store import load_workflow_state
 from src.stage_3_harmonize.job_state import (
     StageThreeJobState,
     load_stage_three_job_state,
     save_stage_three_job_state,
 )
+from src.storage import UploadStorage, UserContext, WorkflowFile, WorkflowNotFoundError, WorkflowStorage
 
 MODULE_DIR = Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"

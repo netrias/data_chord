@@ -27,10 +27,10 @@ initial implementation).
 2. **Environment URL registry**: Added `Environment` enum to `netrias_client`
    SDK with prod/staging URL presets. Consumers pass
    `environment=Environment.PROD` instead of configuring individual URLs.
-3. **Shared singleton**: One `NetriasClient` instance in `dependencies.py`,
+3. **Shared singleton**: One `NetriasClient` instance in `src/app/dependencies.py`,
    injected into `HarmonizeService`, `MappingDiscoveryService`, and the
    data model adapter.
-4. **Data model adapter**: Thin `data_model_adapter.py` converts SDK types
+4. **Data model adapter**: Thin `src/integrations/data_model_store.py` converts SDK types
    to domain types. Replaces the deleted `data_model_client.py`.
 5. **Threaded target_schema**: `populate_cde_cache()` now accepts
    `data_model_key` as a parameter (from the user's Stage 1 selection)
@@ -39,10 +39,10 @@ initial implementation).
 ## Files Changed
 
 - **Deleted**: `src/domain/data_model_client.py` (232 lines)
-- **Created**: `src/domain/data_model_adapter.py` — thin adapter wrapping SDK calls
-- **Modified**: `src/domain/dependencies.py` — single `NetriasClient` singleton
-- **Modified**: `src/domain/config.py` — stripped to `NETRIAS_API_KEY` only
-- **Modified**: `src/domain/data_model_cache.py` — `populate_cde_cache()` takes `data_model_key` param
+- **Created**: `src/integrations/data_model_store.py` — thin adapter wrapping SDK calls
+- **Modified**: `src/app/dependencies.py` — single `NetriasClient` singleton
+- **Modified**: `src/settings.py` — stripped to `NETRIAS_API_KEY` only
+- **Modified**: `src/app/data_model_store.py` — `populate_cde_cache()` takes `data_model_key` param
 - **Modified**: Stage 1/2/3 routers — thread `target_schema` from UI selection
 
 ## Related ADRs

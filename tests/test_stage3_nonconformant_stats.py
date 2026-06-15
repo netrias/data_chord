@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from typing import cast
 
+from src.app.session_cache import SessionCache
 from src.domain import ColumnCdeOverrides
-from src.domain.data_model_cache import SessionCache
 from src.domain.manifest import ColumnMappingManifest, ManifestPayload, ManifestRow, ManifestSummary
-from src.domain.pv_persistence import ColumnPvSets
+from src.persistence.pv_manifest_store import ColumnPvSets
 from src.stage_3_harmonize.router import (
     _column_cde_map_for_session,
     _compute_column_stats,
@@ -272,7 +272,7 @@ class TestManualOverridePropagation:
         Then: the null is preserved for the domain normalizer to remove the
               manifest mapping
         """
-        from src.domain.schemas import HarmonizeRequest
+        from src.api.schemas import HarmonizeRequest
 
         # Given
         payload = {
@@ -295,7 +295,7 @@ class TestManualOverridePropagation:
         When: the Stage 3 request model validates the payload
         Then: the rename map is preserved separately from CDE overrides
         """
-        from src.domain.schemas import HarmonizeRequest
+        from src.api.schemas import HarmonizeRequest
 
         # Given
         payload = {

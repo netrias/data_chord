@@ -9,8 +9,7 @@ import pytest
 
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_string
 from src.domain.manifest import normalize_manifest
-from src.domain.storage import LocalWorkflowStorage, UploadConstraints, UploadStorage, UserContext, WorkflowFile
-from src.domain.workflow_artifact_store import (
+from src.persistence.workflow_artifacts import (
     load_harmonization_manifest_path,
     load_harmonized_output_path,
     load_mapping_manifest,
@@ -19,6 +18,7 @@ from src.domain.workflow_artifact_store import (
     save_mapping_manifest,
     save_upload_artifacts,
 )
+from src.storage import LocalWorkflowStorage, UploadConstraints, UploadStorage, UserContext, WorkflowFile
 
 pytestmark = pytest.mark.asyncio
 

@@ -13,9 +13,8 @@ from fastapi import APIRouter, HTTPException, Path, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-import src.domain.dependencies as dependencies
-from src.domain.schemas import DatasetWorkflowIdField
-from src.domain.storage import UploadStorage
+import src.app.dependencies as dependencies
+from src.api.schemas import DatasetWorkflowIdField
 from src.stage_4_review_results.schemas import (
     DeleteOverridesResponse,
     NonConformantResponse,
@@ -42,6 +41,7 @@ from src.stage_4_review_results.use_cases import (
     get_review_overrides,
     save_review_overrides,
 )
+from src.storage import UploadStorage
 
 _MODULE_DIR = FilePath(__file__).parent
 _TEMPLATE_DIR = _MODULE_DIR / "templates"

@@ -7,7 +7,7 @@ from pathlib import Path
 from httpx import AsyncClient
 
 from src.domain.change import RecommendationType
-from src.domain.storage import UploadStorage
+from src.storage import UploadStorage
 from tests.conftest import (
     create_manifest_for_file,
     store_test_harmonization_manifest,

@@ -18,7 +18,6 @@ from src.domain.cde import CDEInfo, DataModelSummary, DataModelVersionInfo
 from src.domain.cde_catalog import CdeCatalog
 from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.cde_type_classification import classify_cde
-from src.domain.dependencies import get_netrias_client
 
 # GC is the primary user right now — surface it first so the UI defaults to it
 _PREFERRED_MODEL_KEY = "gc"
@@ -33,9 +32,8 @@ class _DataModelStoreConfig:
     timeout: float
 
 
-def list_data_model_summaries() -> list[DataModelSummary]:
+def list_data_model_summaries(client: NetriasClient | None) -> list[DataModelSummary]:
     """Why: decouples callers from SDK DataModel shape and versions tuple."""
-    client = get_netrias_client()
     if client is None:
         return []
     config = _data_model_store_config(client)
@@ -123,14 +121,17 @@ def _version_info_from_label(version_label: str, is_default: bool = False) -> Da
     )
 
 
-def fetch_cdes(data_model_key: str, external_version_number: str) -> list[CDEInfo]:
+def fetch_cdes(
+    client: NetriasClient | None,
+    data_model_key: str,
+    external_version_number: str,
+) -> list[CDEInfo]:
     """Why: converts SDK CDE tuples to domain CDEInfo list.
 
     Initial cde_type is decided by classify_cde with has_pvs=None (PVs not
     fetched yet); PV / PASSTHROUGH refinement happens later via
     ``refine_cde_types_from_pvs``.
     """
-    client = get_netrias_client()
     if client is None:
         return []
     dms_version = _dms_version_for_external(client, data_model_key, external_version_number)
@@ -183,9 +184,12 @@ def refine_cde_types_from_pvs(
     return CdeCatalog.from_cdes(refined)
 
 
-async def fetch_all_pvs_async(data_model_key: str, external_version_number: str) -> CdePvCatalog:
+async def fetch_all_pvs_async(
+    client: NetriasClient | None,
+    data_model_key: str,
+    external_version_number: str,
+) -> CdePvCatalog:
     """Fetch all PVs for a model version in one request, grouped by CDE key."""
-    client = get_netrias_client()
     if client is None:
         return CdePvCatalog.empty()
     config = _data_model_store_config(client)

@@ -156,29 +156,6 @@ class SessionCache:
             return self.data_model_version
 
 
-def populate_cde_cache(file_id: str, data_model_version: DataModelVersionReference) -> None:
-    """PV validation in Stage 3+ requires data model identity and version before PV fetch."""
-    from src.domain.data_model_adapter import fetch_cdes
-
-    cdes = fetch_cdes(data_model_version.data_model_key, data_model_version.external_version_number)
-    cache = get_session_cache(file_id)
-    cache.set_cdes(
-        cdes,
-        data_model_key=data_model_version.data_model_key,
-        external_version_number=data_model_version.external_version_number,
-    )
-
-    _logger.info(
-        "Populated CDE cache from Data Model Store API",
-        extra={
-            "file_id": file_id,
-            "cde_count": len(cdes),
-            "data_model": data_model_version.data_model_key,
-            "external_version_number": data_model_version.external_version_number,
-        },
-    )
-
-
 # Global session cache storage
 _session_caches: dict[str, SessionCache] = {}
 _global_lock = threading.Lock()
@@ -213,7 +190,6 @@ __all__ = [
     "SessionCache",
     "CdeCatalog",
     "CdePvCatalog",
-    "populate_cde_cache",
     "get_session_cache",
     "clear_session_cache",
     "clear_all_session_caches",

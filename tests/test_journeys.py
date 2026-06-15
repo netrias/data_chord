@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from httpx import AsyncClient
 
-from src.domain.storage import UploadStorage
+from src.storage import UploadStorage
 from tests.conftest import (
     TEST_CSV_CONTENT_TYPE,
     TEST_TARGET_SCHEMA,

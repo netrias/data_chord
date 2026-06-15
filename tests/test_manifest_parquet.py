@@ -11,7 +11,7 @@ from src.domain.manifest import (
     ManualOverride,
     get_manifest_schema,
 )
-from src.domain.manifest.writer import _write_manifest_parquet
+from src.persistence.manifest_writer import _write_manifest_parquet
 from src.stage_5_review_summary.use_cases import _manifest_to_json
 
 

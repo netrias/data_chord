@@ -6,14 +6,14 @@ Axis of change: how the backend stores and updates durable workflow progress.
 from __future__ import annotations
 
 from src.domain.dataset_workflow_ids import DatasetWorkflowId
-from src.domain.storage import (
+from src.domain.workflow_state import ConfirmedMappingChoices, WorkflowState
+from src.storage import (
     UserContext,
     WorkflowConflictError,
     WorkflowFile,
     WorkflowNotFoundError,
     WorkflowStorage,
 )
-from src.domain.workflow_state import ConfirmedMappingChoices, WorkflowState
 
 
 class WorkflowStateNotFoundError(Exception):

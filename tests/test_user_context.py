@@ -12,7 +12,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, utils
 from httpx import AsyncClient
 
-from src.domain.user_context import (
+from src.auth.user_context import (
     ALB_DATA_HEADER,
     ALB_IDENTITY_HEADER,
     LOCAL_USER_ID,
@@ -66,7 +66,7 @@ async def test_signed_alb_claims_control_workflow_ownership(monkeypatch: pytest.
     public_key = private_key.public_key()
     token = _signed_alb_token(private_key, alb_arn, {"sub": "alice", "email": "alice@example.test"})
     monkeypatch.setenv("DATA_CHORD_ALB_ARN", alb_arn)
-    monkeypatch.setattr("src.domain.user_context._public_key_for_header", lambda _key_id, _signer: public_key)
+    monkeypatch.setattr("src.auth.user_context._public_key_for_header", lambda _key_id, _signer: public_key)
 
     # When: the app binds user context from headers
     user = _user_context_from_headers({ALB_DATA_HEADER: token, ALB_IDENTITY_HEADER: "alice"})
@@ -95,7 +95,7 @@ async def test_signed_alb_claims_must_match_identity_header(monkeypatch: pytest.
     public_key = private_key.public_key()
     token = _signed_alb_token(private_key, alb_arn, {"sub": "alice"})
     monkeypatch.setenv("DATA_CHORD_ALB_ARN", alb_arn)
-    monkeypatch.setattr("src.domain.user_context._public_key_for_header", lambda _key_id, _signer: public_key)
+    monkeypatch.setattr("src.auth.user_context._public_key_for_header", lambda _key_id, _signer: public_key)
 
     # When / Then: the mismatch is rejected instead of trusting the spoofable value
     with pytest.raises(InvalidUserContextError):

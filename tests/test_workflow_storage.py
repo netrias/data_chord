@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_string
-from src.domain.storage import (
+from src.storage import (
     LocalWorkflowStorage,
     UserContext,
     WorkflowAccessDeniedError,
@@ -23,7 +23,7 @@ def dataset_workflow_id(raw: str = "a" * 32) -> DatasetWorkflowId:
 
 def test_workflow_storage_dependency_uses_local_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Given: local workflow storage is selected through environment config
-    import src.domain.dependencies as dependencies
+    import src.app.dependencies as dependencies
 
     original_workflow_storage = dependencies._workflow_storage
     try:

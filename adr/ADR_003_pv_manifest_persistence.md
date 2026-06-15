@@ -58,12 +58,12 @@ This lazy loading pattern:
 - Avoids loading PVs if the user never revisits review stages
 - Is transparent to the rest of the application
 
-### 3. Shared Loading Function in Domain Layer
+### 3. Shared Loading Function in Persistence Layer
 
-The `load_pv_manifest_into_cache` function lives in `src/domain/data_model_cache.py` (not duplicated in each stage) to:
+The PV recovery entry points live in `src/persistence/pv_manifest_store.py` (not duplicated in each stage) to:
 - Ensure consistent loading logic across stages
-- Maintain stage independence (stages depend on domain, not each other)
-- Keep the domain layer as the single source of truth for cache operations
+- Maintain stage independence (stages depend on persistence helpers, not each other)
+- Keep storage translation outside the domain model layer
 
 ### 4. Cache Clearing on New Upload
 
@@ -89,10 +89,10 @@ Session caches are cleared when a new file is uploaded (Stage 1), not when downl
 
 ## Files Changed
 
-**Domain Layer**:
-- `src/domain/data_model_cache.py` - Added `load_pv_manifest_into_cache()`, `get_column_mappings()`, `clear_all_session_caches()`
-- `src/domain/storage/file_types.py` - Added `PV_MANIFEST` file type
-- `src/domain/storage/serializers.py` - Added JSON serializer for PV_MANIFEST
+**Application and Persistence Layers**:
+- `src/app/session_cache.py` - Owns in-memory session cache state and cache operations
+- `src/persistence/pv_manifest_store.py` - Owns PV manifest save/load/recovery helpers
+- `src/storage/workflow_storage.py` - Owns the `PV_MANIFEST` workflow artifact type
 
 **Stage 1 (Upload)**:
 - `src/stage_1_upload/router.py` - Clear all caches on new upload

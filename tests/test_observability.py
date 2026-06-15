@@ -7,7 +7,7 @@ import logging
 import pytest
 from httpx import AsyncClient
 
-from src.domain.observability import REQUEST_ID_HEADER
+from src.observability.events import REQUEST_ID_HEADER
 from tests.conftest import TEST_CSV_CONTENT_TYPE, create_csv_content
 
 pytestmark = pytest.mark.asyncio

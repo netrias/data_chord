@@ -20,8 +20,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, utils
 from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey
 
-from src.domain.config import get_expected_alb_arn
-from src.domain.storage import UserContext
+from src.settings import get_expected_alb_arn
+from src.storage import UserContext
 
 ALB_IDENTITY_HEADER = "x-amzn-oidc-identity"
 ALB_DATA_HEADER = "x-amzn-oidc-data"

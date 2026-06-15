@@ -15,10 +15,10 @@ from uuid import uuid4
 
 from netrias_client import NetriasClient
 
+from src.app.session_cache import SessionCache
 from src.domain.column_cde_map import ColumnCdeOverrides
 from src.domain.column_renames import ColumnRenameSet
 from src.domain.columns import ColumnKey
-from src.domain.data_model_cache import SessionCache
 from src.domain.manifest import (
     DEFAULT_HARMONIZATION,
     ColumnMappingManifest,
