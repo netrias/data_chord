@@ -7,16 +7,16 @@ requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.135.4,<0.136.0",  # allows Starlette security fix line
     "jinja2>=3.1.4",
-    "python-multipart>=0.0.26",  # CVE remediation
+    "python-multipart>=0.0.31",  # CVE remediation
     "uvicorn[standard]>=0.30.0",
     "boto3>=1.40.69",
-    "cryptography>=47.0.0",
+    "cryptography>=48.0.1",
     "netrias_client @ git+https://github.com/netrias/netrias_client.git@466697475c99034ad6dc5a106b29baccd936e840",
     "openpyxl>=3.1.5",
     "python-dotenv>=1.2.2",
     "pyarrow>=23.0.1,<24",  # PYSEC-2026-113
     # transitive dep pins for security (CVE remediation)
-    "starlette>=1.0.1,<1.1.0",  # PYSEC-2026-161 (via fastapi); recent security exception
+    "starlette>=1.3.1,<1.4.0",  # Starlette security fixes via FastAPI
     "pygments>=2.20.0",   # CVE-2026-4539 (via rich/pytest)
     "requests>=2.33.0",   # CVE-2026-25645 (via boto3)
     "urllib3>=2.6.0",     # CVE-2025-66418, CVE-2025-66471 (via requests/boto3)

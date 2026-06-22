@@ -118,6 +118,8 @@ const state = {
 
 const OVERRIDE_SAVE_DELAY_MS = 400;
 let overrideSaveTimeout = null;
+let overrideSaveInFlight = null;
+let overrideSaveNeeded = false;
 
 /**
  * Get the state object for the current review mode.
@@ -240,23 +242,51 @@ const _buildSavePayload = () => ({
 
 /**
  * Save overrides to server.
- * @returns {Promise<void>}
+ * @returns {Promise<boolean>}
+ */
+const _sendOverrideSave = async () => {
+  const fileId = getFileIdFromUrl();
+  if (!fileId || !isValidFileId(fileId)) return true;
+
+  const response = await fetch('/stage-4/overrides', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(_buildSavePayload()),
+  });
+  if (!response.ok) {
+    throw new Error('Server returned an error');
+  }
+  return true;
+};
+
+/**
+ * Save overrides to server, serializing overlapping save requests.
+ * @returns {Promise<boolean>}
  */
 const saveOverrides = async () => {
-  const fileId = getFileIdFromUrl();
-  if (!fileId || !isValidFileId(fileId)) return;
+  overrideSaveNeeded = true;
+  if (overrideSaveInFlight) {
+    return overrideSaveInFlight;
+  }
+
+  overrideSaveInFlight = (async () => {
+    while (overrideSaveNeeded) {
+      overrideSaveNeeded = false;
+      try {
+        await _sendOverrideSave();
+      } catch (error) {
+        overrideSaveNeeded = true;
+        console.warn('Failed to save overrides:', error);
+        return false;
+      }
+    }
+    return true;
+  })();
 
   try {
-    const response = await fetch('/stage-4/overrides', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(_buildSavePayload()),
-    });
-    if (!response.ok) {
-      throw new Error('Server returned an error');
-    }
-  } catch (error) {
-    console.warn('Failed to save overrides:', error);
+    return await overrideSaveInFlight;
+  } finally {
+    overrideSaveInFlight = null;
   }
 };
 
@@ -265,6 +295,7 @@ const saveOverrides = async () => {
  * Clears any pending save and schedules a new one after OVERRIDE_SAVE_DELAY_MS.
  */
 const scheduleOverrideSave = () => {
+  overrideSaveNeeded = true;
   if (overrideSaveTimeout) {
     clearTimeout(overrideSaveTimeout);
   }
@@ -279,13 +310,15 @@ const scheduleOverrideSave = () => {
  * Must complete before page navigation so the server finishes the manifest write.
  */
 const flushPendingSaves = async () => {
+  const hadPendingDebounce = Boolean(overrideSaveTimeout);
   if (overrideSaveTimeout) {
     clearTimeout(overrideSaveTimeout);
     overrideSaveTimeout = null;
   }
-  if (Object.keys(state.pendingOverrides).length > 0) {
-    await saveOverrides();
+  if (hadPendingDebounce || overrideSaveInFlight || overrideSaveNeeded) {
+    return saveOverrides();
   }
+  return true;
 };
 
 /**
@@ -934,6 +967,11 @@ const handleAdvanceToStage5 = async () => {
   }
 
   try {
+    const saved = await flushPendingSaves();
+    if (!saved) {
+      return;
+    }
+
     const response = await fetch(`/stage-4/non-conformant/${encodeURIComponent(fileId)}`);
     if (!response.ok) {
       console.warn('Failed to check PV conformance, proceeding anyway');
