@@ -956,6 +956,63 @@ test('autosave persists overrides across reloads', async ({ page }) => {
   await expect(card.locator('.target-value-input')).toHaveValue('Persisted');
 });
 
+test('stage 5 advance waits for the latest override save', async ({ page }) => {
+  await mockHarmonizeSuccess(page);
+
+  // Given: a CSV with one harmonized term open for review
+  const fileId = await uploadAndAnalyze(page, fileFixture('basic.csv'));
+  const preOverrides = await page.request.get(`/stage-4/overrides/${fileId}`);
+  expect(await preOverrides.json()).toBeNull();
+  await clickHarmonize(page);
+  await expect(page.locator('#reviewButton')).toBeEnabled();
+  seedHarmonization(fileId, { 0: { col_a: 'Suggested' } });
+
+  await page.goto(`/stage-4?file_id=${fileId}`);
+  await waitForReviewRows(page);
+
+  const heldOverrideSaves = [];
+  let nonConformanceChecks = 0;
+
+  await page.route('**/stage-4/overrides', async (route) => {
+    if (route.request().method() === 'POST') {
+      heldOverrideSaves.push(route);
+      return;
+    }
+    await route.continue();
+  });
+  await page.route('**/stage-4/non-conformant/**', async (route) => {
+    nonConformanceChecks += 1;
+    await route.continue();
+  });
+
+  const card = page.locator('.column-mode-grid .row-cell', {
+    has: page.locator('.original-context-value', { hasText: 'Foo' }),
+  }).first();
+  const input = card.locator('.target-value-input');
+
+  // When: the user changes a value, changes it again, then immediately advances
+  await input.fill('Female');
+  await expect.poll(() => heldOverrideSaves.length).toBe(1);
+  await input.fill('Unknown');
+  await page.click('#stageFiveButton');
+
+  // Then: Stage 5 does not check PV conformance before the latest save is written
+  await page.waitForTimeout(100);
+  expect(nonConformanceChecks).toBe(0);
+
+  await heldOverrideSaves[0].continue();
+  await expect.poll(() => heldOverrideSaves.length).toBe(2);
+  const latestPayload = heldOverrideSaves[1].request().postDataJSON();
+  const latestHumanValues = Object.values(latestPayload.overrides)
+    .flatMap((columns) => Object.values(columns).map((override) => override.human_value));
+  expect(latestHumanValues).toContain('Unknown');
+  expect(latestHumanValues).not.toContain('Female');
+  expect(nonConformanceChecks).toBe(0);
+
+  await heldOverrideSaves[1].continue();
+  await expect.poll(() => nonConformanceChecks).toBe(1);
+});
+
 test('version dropdown panel renders below trigger and scrolls when versions overflow', async ({ page }) => {
   /*
    * Given: 20 versions exist for the default data model, exceeding the panel max-height
