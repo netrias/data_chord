@@ -82,10 +82,16 @@
 }
 
 .agent-file-input {
-  width: min(100%, 420px);
-  margin-top: var(--space-3);
-  color: var(--gray-700);
-  font-size: 0.9rem;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  border: 0;
+  white-space: nowrap;
 }
 
 .dropzone-copy {

@@ -1172,7 +1172,28 @@ test('Stage 1 exposes a browser-friendly file input for automation', async ({ pa
   await page.goto('/stage-1');
   const uploadInput = page.getByTestId('agent-file-input');
 
-  await expect(uploadInput).toBeVisible();
+  await expect(uploadInput).toBeAttached();
+  await expect(uploadInput).not.toHaveAttribute('hidden', '');
+  await expect(uploadInput).toHaveAttribute('aria-hidden', 'true');
+  await expect(uploadInput).toHaveAttribute('tabindex', '-1');
+  const inputPresentation = await uploadInput.evaluate((input) => {
+    const style = window.getComputedStyle(input);
+    const rect = input.getBoundingClientRect();
+    return {
+      display: style.display,
+      height: rect.height,
+      position: style.position,
+      visibility: style.visibility,
+      width: rect.width,
+    };
+  });
+  expect(inputPresentation.display).not.toBe('none');
+  expect(inputPresentation).toMatchObject({
+    height: 1,
+    position: 'absolute',
+    visibility: 'visible',
+    width: 1,
+  });
   await uploadInput.setInputFiles(fileFixture('basic.csv'));
 
   await expect(page.locator('#dropzoneFileStatus')).toHaveText('Uploaded');
