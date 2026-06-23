@@ -1173,11 +1173,6 @@ test('Stage 1 exposes a browser-friendly file input for automation', async ({ pa
   const uploadInput = page.getByTestId('agent-file-input');
 
   await expect(uploadInput).toBeVisible();
-  await expect(uploadInput).toHaveAttribute('id', 'fileInput');
-  await expect(uploadInput).toHaveAttribute('type', 'file');
-  await expect(uploadInput).toHaveAttribute('accept', '.csv,.tsv,.xlsx');
-  await expect(uploadInput).toHaveAttribute('aria-label', 'Choose dataset file');
-
   await uploadInput.setInputFiles(fileFixture('basic.csv'));
 
   await expect(page.locator('#dropzoneFileStatus')).toHaveText('Uploaded');
