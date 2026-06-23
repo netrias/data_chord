@@ -158,8 +158,9 @@ const _validateFile = (file) => {
 };
 
 const _handleFileSelection = (file) => {
-  /* Prevent race condition - ignore if already uploading. */
-  if (state.isUploading) {
+  /* Prevent race condition - ignore if a workflow step is already in flight. */
+  if (state.isUploading || state.isAnalyzing) {
+    if (fileInput) fileInput.value = '';
     return;
   }
   const issues = _validateFile(file);

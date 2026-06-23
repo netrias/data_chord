@@ -1251,7 +1251,15 @@ test('Stage 1 shows upload progress and keeps the Map button disabled until uplo
   await expect(page.locator('#dropzoneUploading')).toBeVisible();
   await expect(page.locator('#dropzoneUploading')).toContainText('Please wait while your file is uploaded');
   await expect(page.locator('#analyzeButton')).toBeDisabled();
-  await expect(page.getByTestId('agent-file-input')).toBeDisabled();
+  const uploadInput = page.getByTestId('agent-file-input');
+  await expect(uploadInput).toBeDisabled();
+
+  // When: automation tries to select another file while upload is still busy
+  await uploadInput.setInputFiles(fileFixture('multi-column.csv'));
+
+  // Then: the ignored selection does not linger in the native input state
+  await expect(uploadInput).toHaveJSProperty('files.length', 0);
+  await expect(page.locator('#uploadingFileName')).toHaveText('basic.csv');
 
   // When: upload completes
   releaseUpload();
@@ -1260,7 +1268,7 @@ test('Stage 1 shows upload progress and keeps the Map button disabled until uplo
   await expect(page.locator('#dropzoneFileStatus')).toHaveText('Uploaded');
   await expect(page.locator('#dropzoneUploading')).toBeHidden();
   await expect(page.locator('#analyzeButton')).toBeEnabled();
-  await expect(page.getByTestId('agent-file-input')).toBeEnabled();
+  await expect(uploadInput).toBeEnabled();
 });
 
 test('error handling: harmonize failure and missing manifest', async ({ page }) => {
