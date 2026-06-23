@@ -1200,6 +1200,32 @@ test('Stage 1 exposes a browser-friendly file input for automation', async ({ pa
   await expect(page.locator('#analyzeButton')).toBeEnabled();
 });
 
+test('Stage 1 ignores automation file changes while choosing a data model', async ({ page }) => {
+  await mockDataModels(page);
+  let uploadRequests = 0;
+  await page.route('**/stage-1/upload', async (route) => {
+    uploadRequests += 1;
+    await route.continue();
+  });
+
+  await page.goto('/stage-1');
+  const uploadInput = page.getByTestId('agent-file-input');
+  await uploadInput.setInputFiles(fileFixture('basic.csv'));
+  await expect(page.locator('#dropzoneFileStatus')).toHaveText('Uploaded');
+  await expect(page.locator('#analyzeButton')).toBeEnabled();
+  expect(uploadRequests).toBe(1);
+
+  await page.locator('#analyzeButton').click();
+  await page.locator('.data-model-dialog').waitFor({ state: 'visible' });
+  await expect(uploadInput).toBeDisabled();
+
+  await uploadInput.setInputFiles(fileFixture('multi-column.csv'));
+
+  await expect(uploadInput).toHaveJSProperty('files.length', 0);
+  await expect(page.locator('#dropzoneFileName')).toHaveText('basic.csv');
+  await expect.poll(() => uploadRequests).toBe(1);
+});
+
 test('error handling: wrong file type and oversize upload', async ({ page }) => {
   await mockDataModels(page);
 

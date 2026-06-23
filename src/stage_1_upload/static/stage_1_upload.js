@@ -33,6 +33,7 @@ const state = {
   sheetPreviews: {},
   selectedSheet: null,
   isUploading: false,
+  isChoosingDataModel: false,
   isAnalyzing: false,
 };
 
@@ -116,8 +117,10 @@ const _setFileInputDisabled = (disabled) => {
   if (fileInput) fileInput.disabled = disabled;
 };
 
+const _isFileSelectionLocked = () => state.isUploading || state.isChoosingDataModel || state.isAnalyzing;
+
 const _openFilePicker = () => {
-  if (!fileInput || state.isUploading || state.isAnalyzing) return;
+  if (!fileInput || _isFileSelectionLocked()) return;
   fileInput.value = '';
   fileInput.click();
 };
@@ -129,6 +132,7 @@ const _resetUploadState = () => {
   state.sheetPreviews = {};
   state.selectedSheet = null;
   state.isUploading = false;
+  state.isChoosingDataModel = false;
   state.isAnalyzing = false;
   _setFileInputDisabled(false);
   if (fileInput) fileInput.value = '';
@@ -159,7 +163,7 @@ const _validateFile = (file) => {
 
 const _handleFileSelection = (file) => {
   /* Prevent race condition - ignore if a workflow step is already in flight. */
-  if (state.isUploading || state.isAnalyzing) {
+  if (_isFileSelectionLocked()) {
     if (fileInput) fileInput.value = '';
     return;
   }
@@ -559,21 +563,28 @@ const _navigateToStageTwo = (fileId, dataModelKey, externalVersionNumber, payloa
 };
 
 const _analyzeDataset = async () => {
-  if (!state.uploaded || state.isAnalyzing) {
+  if (!state.uploaded) {
     _setStatus('Upload a file before analyzing.', 'error');
     return;
   }
+  if (state.isChoosingDataModel || state.isAnalyzing) return;
 
   /* Show data model selection popup before starting analysis. */
+  state.isChoosingDataModel = true;
+  _setFileInputDisabled(true);
   let selection;
   try {
     selection = await showDataModelPopup();
   } catch (err) {
     _setStatus(err.message, 'error');
+    state.isChoosingDataModel = false;
+    _setFileInputDisabled(false);
     return;
   }
+  state.isChoosingDataModel = false;
   if (!selection) {
     /* User cancelled - stay on Stage 1. */
+    _setFileInputDisabled(false);
     return;
   }
   state.isAnalyzing = true;
