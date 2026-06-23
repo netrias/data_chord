@@ -16,6 +16,7 @@ const E2E_TARGET_CDE_ID = 376;
 const E2E_SOURCE_COLUMN = 'col_a';
 
 export const fileFixture = (name) => path.join(fixturesDir, name);
+export const AGENT_FILE_INPUT = '[data-testid="agent-file-input"]';
 
 export const getFileIdFromUrl = (page) => {
   const url = new URL(page.url());
@@ -26,7 +27,7 @@ export const uploadAndAnalyze = async (page, filePath) => {
   await mockDataModels(page);
   await mockAnalyze(page);
   await page.goto('/stage-1');
-  await page.setInputFiles('#fileInput', filePath);
+  await page.setInputFiles(AGENT_FILE_INPUT, filePath);
   await page.locator('#analyzeButton').waitFor({ state: 'attached' });
   await page.locator('#analyzeButton').waitFor({ state: 'visible' });
   await page.waitForFunction(() => !document.querySelector('#analyzeButton')?.disabled);
@@ -43,7 +44,7 @@ export const uploadAndAnalyzeSheet = async (page, filePath, sheetName) => {
   await mockDataModels(page);
   await mockAnalyze(page);
   await page.goto('/stage-1');
-  await page.setInputFiles('#fileInput', filePath);
+  await page.setInputFiles(AGENT_FILE_INPUT, filePath);
   await page.locator('#analyzeButton').waitFor({ state: 'attached' });
   await page.locator('#analyzeButton').waitFor({ state: 'visible' });
   await page.waitForFunction(() => !document.querySelector('#analyzeButton')?.disabled);

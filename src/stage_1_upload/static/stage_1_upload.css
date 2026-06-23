@@ -81,6 +81,35 @@
   box-shadow: var(--shadow-sm), var(--shadow-md);
 }
 
+.agent-file-input {
+  width: min(100%, 420px);
+  margin-top: var(--space-3);
+  color: var(--gray-700);
+  font-size: 0.9rem;
+}
+
+.agent-file-input::file-selector-button {
+  margin-right: var(--space-3);
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius-md);
+  padding: 0.45rem 0.8rem;
+  background: var(--white);
+  color: var(--gray-900);
+  font: inherit;
+  cursor: pointer;
+}
+
+.agent-file-input::file-selector-button:hover {
+  border-color: var(--netrias-500);
+  color: var(--netrias-700);
+}
+
+.agent-file-input:disabled,
+.agent-file-input:disabled::file-selector-button {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .dropzone-copy {
   display: flex;
   flex-direction: column;

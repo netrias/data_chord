@@ -126,7 +126,10 @@ const _resetUploadState = () => {
   state.selectedSheet = null;
   state.isUploading = false;
   state.isAnalyzing = false;
-  if (fileInput) fileInput.value = '';
+  if (fileInput) {
+    fileInput.value = '';
+    fileInput.disabled = false;
+  }
   _setAnalyzeButtonEnabled(false);
   if (dropzone) {
     dropzone.classList.remove('has-file', 'is-uploading');
@@ -159,12 +162,14 @@ const _handleFileSelection = (file) => {
   }
   const issues = _validateFile(file);
   if (issues.length) {
+    if (fileInput) fileInput.value = '';
     _showDropzoneCopy();
     _setStatus(issues.join(' '), 'error');
     return;
   }
   _clearStaleSessionData();
   state.file = file;
+  if (fileInput) fileInput.value = '';
   state.uploaded = null;
   _showDropzoneSummary(file, 'Ready to upload');
   _setStatus('');
@@ -176,6 +181,7 @@ const _uploadDataset = async () => {
     return;
   }
   state.isUploading = true;
+  if (fileInput) fileInput.disabled = true;
   _setAnalyzeButtonEnabled(false);
   if (dropzone) {
     dropzone.classList.add('is-uploading');
@@ -227,6 +233,7 @@ const _uploadDataset = async () => {
     _setStatus(error.message, 'error');
   } finally {
     state.isUploading = false;
+    if (fileInput) fileInput.disabled = false;
     if (dropzone) {
       dropzone.classList.remove('is-uploading');
       dropzone.removeAttribute('aria-busy');

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  AGENT_FILE_INPUT,
   fileFixture,
   getFileIdFromUrl,
   uploadAndAnalyze,
@@ -1025,7 +1026,7 @@ test('version dropdown panel renders below trigger and scrolls when versions ove
   await mockAnalyze(page);
 
   await page.goto('/stage-1');
-  await page.setInputFiles('#fileInput', fileFixture('basic.csv'));
+  await page.setInputFiles(AGENT_FILE_INPUT, fileFixture('basic.csv'));
   await page.locator('#analyzeButton').waitFor({ state: 'visible' });
   await page.waitForFunction(() => !document.querySelector('#analyzeButton')?.disabled);
   await page.click('#analyzeButton');
@@ -1094,7 +1095,7 @@ test('data model dropdown shares custom styling and custom dropdowns close on ou
   await mockAnalyze(page);
 
   await page.goto('/stage-1');
-  await page.setInputFiles('#fileInput', fileFixture('basic.csv'));
+  await page.setInputFiles(AGENT_FILE_INPUT, fileFixture('basic.csv'));
   await page.locator('#analyzeButton').waitFor({ state: 'visible' });
   await page.waitForFunction(() => !document.querySelector('#analyzeButton')?.disabled);
   await page.click('#analyzeButton');
@@ -1165,13 +1166,31 @@ test('data model dropdown shares custom styling and custom dropdowns close on ou
   await expect(page.locator('.data-model-dropdown--version .data-model-dropdown-panel')).toBeHidden();
 });
 
+test('Stage 1 exposes a browser-friendly file input for automation', async ({ page }) => {
+  await mockDataModels(page);
+
+  await page.goto('/stage-1');
+  const uploadInput = page.getByTestId('agent-file-input');
+
+  await expect(uploadInput).toBeVisible();
+  await expect(uploadInput).toHaveAttribute('id', 'fileInput');
+  await expect(uploadInput).toHaveAttribute('type', 'file');
+  await expect(uploadInput).toHaveAttribute('accept', '.csv,.tsv,.xlsx');
+  await expect(uploadInput).toHaveAttribute('aria-label', 'Choose dataset file');
+
+  await uploadInput.setInputFiles(fileFixture('basic.csv'));
+
+  await expect(page.locator('#dropzoneFileStatus')).toHaveText('Uploaded');
+  await expect(page.locator('#analyzeButton')).toBeEnabled();
+});
+
 test('error handling: wrong file type and oversize upload', async ({ page }) => {
   await mockDataModels(page);
 
   // Given: a non-CSV file is uploaded
   await page.goto('/stage-1');
   await expect(page.locator('#statusMessage')).toBeEmpty();
-  await page.setInputFiles('#fileInput', fileFixture('not-csv.json'));
+  await page.setInputFiles(AGENT_FILE_INPUT, fileFixture('not-csv.json'));
 
   // Then: upload error is shown
   await expect(page.locator('#statusMessage')).toContainText(/Only CSV|Unsupported|Upload failed/i);
@@ -1184,7 +1203,7 @@ test('error handling: wrong file type and oversize upload', async ({ page }) => 
     fs.writeFileSync(oversizedPath, largeContent);
 
     // When: oversized file is uploaded
-    await page.setInputFiles('#fileInput', oversizedPath);
+    await page.setInputFiles(AGENT_FILE_INPUT, oversizedPath);
 
     // Then: size error is shown
     await expect(page.locator('#statusMessage')).toContainText(/exceeds|too large|Upload failed/i);
@@ -1230,7 +1249,7 @@ test('Stage 1 shows upload progress and keeps the Map button disabled until uplo
   await expect(page.locator('#dropzoneUploading')).toBeHidden();
 
   // When: the user selects a file and upload is still in flight
-  await page.setInputFiles('#fileInput', fileFixture('basic.csv'));
+  await page.setInputFiles(AGENT_FILE_INPUT, fileFixture('basic.csv'));
   await uploadStarted;
 
   // Then: the blocking upload indicator is visible and the action remains disabled
