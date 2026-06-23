@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 
 import pytest
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 
 from src.observability.events import REQUEST_ID_HEADER
 from tests.conftest import TEST_CSV_CONTENT_TYPE, create_csv_content
 
 pytestmark = pytest.mark.asyncio
+
+GENERIC_API_ERROR_DETAIL = "We couldn't process this request. Please try again."
 
 
 def _record_field(record: logging.LogRecord, field: str) -> object:
@@ -42,7 +45,7 @@ async def test_client_event_endpoint_logs_valid_browser_failure(
             "stage": "stage_1",
             "operation": "analyze",
             "path": "/stage-1/analyze",
-            "file_id": "abcdef1234567890",
+            "file_id": "abcdef0123456789abcdef0123456789",
             "error_name": "TypeError",
             "error_message": "Failed to fetch",
             "online": True,
@@ -56,7 +59,7 @@ async def test_client_event_endpoint_logs_valid_browser_failure(
         record for record in caplog.records if getattr(record, "event_name", None) == "client.fetch.failed"
     ]
     assert matching_records
-    assert _record_field(matching_records[-1], "file_id") == "abcdef1234567890"
+    assert _record_field(matching_records[-1], "file_id") == "abcdef0123456789abcdef0123456789"
     assert _record_field(matching_records[-1], "operation") == "analyze"
 
 
@@ -74,6 +77,76 @@ async def test_client_event_endpoint_rejects_full_url_path(app_client: AsyncClie
 
     # Then: the boundary rejects it instead of logging arbitrary external data
     assert response.status_code == 422
+    assert response.json()["detail"] == GENERIC_API_ERROR_DETAIL
+
+
+async def test_request_validation_failure_logs_diagnostic_fields(
+    app_client: AsyncClient,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Given: the browser sends a stale analyze payload that fails request validation
+    caplog.set_level(logging.INFO)
+
+    # When: FastAPI rejects the request before the route handler runs
+    response = await app_client.post(
+        "/stage-1/analyze",
+        json={
+            "file_id": "abcdef0123456789abcdef0123456789",
+            "data_model_key": "gc",
+        },
+    )
+
+    # Then: users get generic detail, while operators get structured validation detail in logs
+    assert response.status_code == 422
+    assert response.json()["detail"] == GENERIC_API_ERROR_DETAIL
+    assert response.headers[REQUEST_ID_HEADER]
+    matching_records = [
+        record for record in caplog.records if getattr(record, "event_name", None) == "api.request.failed"
+    ]
+    assert matching_records
+    record = matching_records[-1]
+    validation_error_locations = _record_field(record, "validation_error_locations")
+    validation_error_types = _record_field(record, "validation_error_types")
+    assert isinstance(validation_error_locations, Sequence)
+    assert isinstance(validation_error_types, Sequence)
+    assert _record_field(record, "path") == "/stage-1/analyze"
+    assert _record_field(record, "status_code") == 422
+    assert _record_field(record, "error_type") == "RequestValidationError"
+    assert _record_field(record, "request_id") == response.headers[REQUEST_ID_HEADER]
+    assert "body.external_version_number" in validation_error_locations
+    assert "missing" in validation_error_types
+
+
+async def test_http_exception_failure_returns_generic_detail_and_logs_route_detail(
+    app_client: AsyncClient,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Given: analyze receives a valid request shape for an upload that does not exist
+    caplog.set_level(logging.INFO)
+
+    # When: the route raises an HTTPException
+    response = await app_client.post(
+        "/stage-1/analyze",
+        json={
+            "file_id": "abcdef0123456789abcdef0123456789",
+            "data_model_key": "gc",
+            "external_version_number": "11.0.4",
+        },
+    )
+
+    # Then: the response is generic, while logs keep the route detail for investigation
+    assert response.status_code == 404
+    assert response.json()["detail"] == GENERIC_API_ERROR_DETAIL
+    matching_records = [
+        record for record in caplog.records if getattr(record, "event_name", None) == "api.request.failed"
+    ]
+    assert matching_records
+    record = matching_records[-1]
+    assert _record_field(record, "path") == "/stage-1/analyze"
+    assert _record_field(record, "status_code") == 404
+    assert _record_field(record, "error_type") == "HTTPException"
+    assert _record_field(record, "request_id") == response.headers[REQUEST_ID_HEADER]
+    assert _record_field(record, "error_detail") == "Upload not found. Please upload again."
 
 
 async def test_stage1_upload_emits_workflow_completion_event(
@@ -122,15 +195,29 @@ async def test_stage1_upload_logs_failure_after_file_storage(
     ]
 
     # When: the upload endpoint reaches the failed workflow-storage step
-    with pytest.raises(RuntimeError, match="workflow record unavailable"):
-        await app_client.post(
+    from backend.app.main import create_app
+
+    transport = ASGITransport(app=create_app(), raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as non_raising_client:
+        response = await non_raising_client.post(
             "/stage-1/upload",
             files={"file": ("observability.csv", content, TEST_CSV_CONTENT_TYPE)},
         )
 
     # Then: the workflow timeline still includes a searchable upload failure event
+    assert response.status_code == 500
+    assert response.json()["detail"] == GENERIC_API_ERROR_DETAIL
+    assert response.headers[REQUEST_ID_HEADER]
     matching_records = [
         record for record in caplog.records if getattr(record, "event_name", None) == "workflow.upload.failed"
     ]
     assert matching_records
     assert _record_field(matching_records[-1], "error_type") == "RuntimeError"
+    api_failure_records = [
+        record for record in caplog.records if getattr(record, "event_name", None) == "api.request.failed"
+    ]
+    assert api_failure_records
+    assert _record_field(api_failure_records[-1], "path") == "/stage-1/upload"
+    assert _record_field(api_failure_records[-1], "status_code") == 500
+    assert _record_field(api_failure_records[-1], "error_type") == "RuntimeError"
+    assert _record_field(api_failure_records[-1], "request_id") == response.headers[REQUEST_ID_HEADER]

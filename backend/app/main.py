@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse, Response
 from starlette.types import Scope
 
+from backend.app.error_handlers import register_api_error_handlers
 from src.auth.user_context import (
     InvalidUserContextError,
     bind_user_context,
@@ -133,6 +134,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.middleware("http")(_bind_user_context)
+    register_api_error_handlers(app)
     app.add_exception_handler(WorkflowAccessDeniedError, _workflow_access_denied)
     app.add_exception_handler(WorkflowNotFoundError, _workflow_not_found)
 
@@ -169,6 +171,7 @@ async def _healthz() -> dict[str, str]:
 
 async def _bind_user_context(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     request_id = request_id_from_header(request.headers.get(REQUEST_ID_HEADER))
+    request.state.request_id = request_id
     request_token = bind_request_id(request_id)
     started_at = time.perf_counter()
     status_code = 500

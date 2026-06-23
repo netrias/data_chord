@@ -9,17 +9,19 @@ from __future__ import annotations
 import json
 import logging
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
+from types import TracebackType
 from typing import Final
 from uuid import uuid4
 
 from src.storage import UserContext
 
 REQUEST_ID_HEADER: Final = "X-Request-ID"
+REQUEST_ID_PATTERN: Final = r"^[A-Za-z0-9_-]{8,64}$"
 CLIENT_EVENTS_ENDPOINT: Final = "/client-events"
 FILE_ID_PATTERN: Final = r"^[a-f0-9]{8,64}$"
 
@@ -184,6 +186,54 @@ def log_client_event(event_name: ClientEventName, payload: Mapping[str, object],
     )
 
 
+def log_api_request_failed(
+    *,
+    method: str,
+    path: str,
+    status_code: int,
+    error_type: str,
+    user: UserContext,
+    request_id: str | None = None,
+    validation_errors: Sequence[Mapping[str, object]] | None = None,
+    error_detail: object = None,
+    exc_info: bool | tuple[type[BaseException], BaseException, TracebackType | None] | None = None,
+) -> None:
+    """Log safe diagnostics for API failures while generic responses protect users from internals."""
+    extra: dict[str, object] = {
+        "event_name": "api.request.failed",
+        "method": method,
+        "path": path,
+        "status_code": status_code,
+        "user_id": user.user_id,
+        "error_type": error_type,
+    }
+    if request_id is not None:
+        extra["request_id"] = request_id
+    if validation_errors is not None:
+        extra.update(
+            {
+                "validation_error_count": len(validation_errors),
+                "validation_error_locations": [
+                    _validation_error_location(error.get("loc")) for error in validation_errors
+                ],
+                "validation_error_types": [
+                    _validation_error_text(error.get("type")) for error in validation_errors
+                ],
+                "validation_error_messages": [
+                    _validation_error_text(error.get("msg")) for error in validation_errors
+                ],
+            }
+        )
+    if error_detail is not None:
+        extra["error_detail"] = _validation_error_text(error_detail)
+
+    _logger.info(
+        "API request failed",
+        extra=extra,
+        exc_info=exc_info,
+    )
+
+
 def safe_log_metadata(metadata: Mapping[str, object]) -> dict[str, object]:
     return {key: _safe_log_value(value) for key, value in metadata.items() if _is_safe_key(key)}
 
@@ -210,6 +260,20 @@ def _is_safe_key(key: object) -> bool:
     return isinstance(key, str) and key.isidentifier() and not key.startswith("_")
 
 
+def _validation_error_location(value: object) -> str:
+    if isinstance(value, list | tuple):
+        return ".".join(str(part) for part in value)
+    return _validation_error_text(value)
+
+
+def _validation_error_text(value: object) -> str:
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return ""
+    return str(value)
+
+
 def _is_safe_request_id(value: str) -> bool:
     if not 8 <= len(value) <= 64:
         return False
@@ -220,6 +284,7 @@ __all__ = [
     "CLIENT_EVENTS_ENDPOINT",
     "FILE_ID_PATTERN",
     "REQUEST_ID_HEADER",
+    "REQUEST_ID_PATTERN",
     "ClientEventName",
     "JsonLogFormatter",
     "RequestTrace",
@@ -234,6 +299,7 @@ __all__ = [
     "elapsed_ms",
     "log_client_event",
     "log_request",
+    "log_api_request_failed",
     "log_workflow_event",
     "request_id_from_header",
     "reset_request_id",

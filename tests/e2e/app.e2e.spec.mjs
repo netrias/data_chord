@@ -1254,6 +1254,42 @@ test('error handling: wrong file type and oversize upload', async ({ page }) => 
   }
 });
 
+test('Stage 1 shows generic analyze errors for structured API failures', async ({ page }) => {
+  await mockDataModels(page);
+  await page.route('**/stage-1/analyze', async (route) => {
+    await route.fulfill({
+      status: 422,
+      contentType: 'application/json',
+      headers: { 'X-Request-ID': 'server-request-123' },
+      body: JSON.stringify({
+        detail: [
+          {
+            loc: ['body', 'external_version_number'],
+            msg: 'Field required',
+            type: 'missing',
+          },
+        ],
+      }),
+    });
+  });
+
+  // Given: a file has uploaded successfully and the user starts mapping
+  await page.goto('/stage-1');
+  await page.setInputFiles('#fileInput', fileFixture('basic.csv'));
+  await page.locator('#analyzeButton').waitFor({ state: 'visible' });
+  await page.waitForFunction(() => !document.querySelector('#analyzeButton')?.disabled);
+  await page.click('#analyzeButton');
+  await page.locator('.data-model-confirm-btn').click();
+
+  // Then: the user gets a stable message without backend validation details
+  await expect(page.locator('#statusMessage')).toContainText(
+    "We couldn't start mapping for this file. Please refresh the page and try again.",
+  );
+  await expect(page.locator('#statusMessage')).not.toContainText('[object Object]');
+  await expect(page.locator('#statusMessage')).not.toContainText('external_version_number');
+  await expect(page.locator('#statusMessage')).not.toContainText('Field required');
+});
+
 test('Stage 1 shows upload progress and keeps the Map button disabled until upload completes', async ({ page }) => {
   await mockDataModels(page);
   let releaseUpload;

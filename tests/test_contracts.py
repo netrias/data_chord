@@ -23,6 +23,8 @@ from tests.conftest import (
 
 pytestmark = pytest.mark.asyncio
 
+GENERIC_API_ERROR_DETAIL = "We couldn't process this request. Please try again."
+
 
 class TestUploadContract:
     """POST /stage-1/upload accepts CSVs and returns UploadResponse."""
@@ -666,9 +668,9 @@ class TestTermRowIndicesContract:
             json={"file_id": file_id, "column_key": "col_0000", "original_value": "Bad"},
         )
 
-        # Then: the endpoint reports the missing manifest
+        # Then: the endpoint preserves the 404 while hiding route internals
         assert response.status_code == 404
-        assert response.json()["detail"] == "Manifest not found"
+        assert response.json()["detail"] == GENERIC_API_ERROR_DETAIL
 
 
 class TestSummaryContract:

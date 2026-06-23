@@ -11,6 +11,7 @@ export const CLIENT_API_ERROR = 'client.api.error';
 
 const MAX_ERROR_MESSAGE_LENGTH = 512;
 const FILE_ID_PATTERN = /^[a-f0-9]{8,64}$/;
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
 
 const _truncate = (value, maxLength) => {
   if (typeof value !== 'string') return null;
@@ -27,6 +28,8 @@ const _pathForEndpoint = (endpoint) => {
 };
 
 const _safeFileId = (fileId) => (FILE_ID_PATTERN.test(fileId ?? '') ? fileId : null);
+
+const _safeRequestId = (requestId) => (REQUEST_ID_PATTERN.test(requestId ?? '') ? requestId : null);
 
 const _sendEvent = (payload) => {
   const body = JSON.stringify({
@@ -58,6 +61,7 @@ export const reportClientEvent = ({
   fileId = null,
   error = null,
   statusCode = null,
+  serverRequestId = null,
 }) => {
   _sendEvent({
     event_name: eventName,
@@ -68,6 +72,7 @@ export const reportClientEvent = ({
     error_name: _truncate(error?.name ?? null, 80),
     error_message: _truncate(error?.message ?? null, MAX_ERROR_MESSAGE_LENGTH),
     status_code: statusCode,
+    server_request_id: _safeRequestId(serverRequestId),
   });
 };
 
@@ -82,7 +87,14 @@ export const reportFetchFailure = ({ stage, operation, endpoint, fileId = null, 
   });
 };
 
-export const reportApiError = ({ stage, operation, endpoint, fileId = null, statusCode }) => {
+export const reportApiError = ({
+  stage,
+  operation,
+  endpoint,
+  fileId = null,
+  statusCode,
+  serverRequestId = null,
+}) => {
   reportClientEvent({
     eventName: CLIENT_API_ERROR,
     stage,
@@ -90,5 +102,6 @@ export const reportApiError = ({ stage, operation, endpoint, fileId = null, stat
     endpoint,
     fileId,
     statusCode,
+    serverRequestId,
   });
 };
