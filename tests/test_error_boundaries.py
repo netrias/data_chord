@@ -14,6 +14,7 @@ from tests.conftest import TEST_CSV_CONTENT_TYPE, TEST_TARGET_EXTERNAL_VERSION_N
 pytestmark = pytest.mark.asyncio
 
 INVALID_FILE_ID = "deadbeef12345678deadbeef12345678"
+GENERIC_API_ERROR_DETAIL = "We couldn't process this request. Please try again."
 
 
 class TestMissingFileErrors:
@@ -34,9 +35,9 @@ class TestMissingFileErrors:
             },
         )
 
-        # Then: 404 response with "not found" message
+        # Then: 404 response with generic user-facing detail
         assert response.status_code == 404
-        assert "not found" in response.json()["detail"].lower()
+        assert response.json()["detail"] == GENERIC_API_ERROR_DETAIL
 
     async def test_harmonize_missing_file(self, app_client: AsyncClient) -> None:
         """Harmonize returns 404 for unknown file_id."""
@@ -105,9 +106,9 @@ class TestMissingHarmonizedFileErrors:
             json={"file_id": file_id, "manual_columns": []},
         )
 
-        # Then: 404 response indicating manifest not found
+        # Then: 404 response with generic user-facing detail
         assert response.status_code == 404
-        assert "manifest" in response.json()["detail"].lower()
+        assert response.json()["detail"] == GENERIC_API_ERROR_DETAIL
 
     async def test_summary_missing_harmonized(
         self,
@@ -145,9 +146,9 @@ class TestDataModelServiceErrors:
         # When: GET /stage-1/data-models is called
         response = await app_client.get("/stage-1/data-models")
 
-        # Then: 503 response with user-friendly message
+        # Then: 503 response with generic user-facing detail
         assert response.status_code == 503
-        assert "currently unavailable" in response.json()["detail"]
+        assert response.json()["detail"] == GENERIC_API_ERROR_DETAIL
 
 
 class TestUploadValidationErrors:
@@ -170,9 +171,9 @@ class TestUploadValidationErrors:
             },
         )
 
-        # Then: 415 Unsupported Media Type response
+        # Then: 415 Unsupported Media Type response with generic user-facing detail
         assert response.status_code == 415
-        assert "workbook" in response.json()["detail"].lower()
+        assert response.json()["detail"] == GENERIC_API_ERROR_DETAIL
 
     async def test_unsupported_content_type_rejected(self, app_client: AsyncClient) -> None:
         """Upload rejects files with unsupported content types."""
@@ -200,6 +201,6 @@ class TestUploadValidationErrors:
             files={"file": ("large.csv", oversized_content, TEST_CSV_CONTENT_TYPE)},
         )
 
-        # Then: 413 Payload Too Large response
+        # Then: 413 Payload Too Large response with generic user-facing detail
         assert response.status_code == 413
-        assert "exceeds" in response.json()["detail"].lower()
+        assert response.json()["detail"] == GENERIC_API_ERROR_DETAIL

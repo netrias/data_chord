@@ -43,6 +43,8 @@ from tests.conftest import (
     upload_content,
 )
 
+GENERIC_API_ERROR_DETAIL = "We couldn't process this request. Please try again."
+
 pytestmark = pytest.mark.asyncio
 
 
@@ -848,9 +850,9 @@ async def test_stage2_save_mapping_choices_requires_workflow_state(
         },
     )
 
-    # Then: the endpoint preserves the existing missing-workflow-state contract
+    # Then: the endpoint preserves the 404 while hiding route internals
     assert response.status_code == 404
-    assert response.json()["detail"] == "Workflow state not found. Please rerun analysis."
+    assert response.json()["detail"] == GENERIC_API_ERROR_DETAIL
 
 
 async def test_stage3_harmonize_prefers_stored_mapping_choices_over_stale_request(

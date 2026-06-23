@@ -2,7 +2,7 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { JSDOM } from 'jsdom';
 
-import { CLIENT_EVENT_ENDPOINT, reportFetchFailure } from '../../src/shared/static/client-events.js';
+import { CLIENT_EVENT_ENDPOINT, reportApiError, reportFetchFailure } from '../../src/shared/static/client-events.js';
 
 describe('Client Event Reporter', () => {
   let dom;
@@ -66,5 +66,28 @@ describe('Client Event Reporter', () => {
     assert.strictEqual(payload.error_message, 'Failed to fetch');
     assert.strictEqual(payload.online, true);
     assert.ok(Number.isInteger(payload.timestamp_ms));
+  });
+
+  it('reports API failures with the server request id', async () => {
+    // Given: the server rejected a Stage 1 analyze request and returned a request id
+    reportApiError({
+      stage: 'stage_1',
+      operation: 'analyze',
+      endpoint: '/stage-1/analyze?token=not-for-logs',
+      fileId: 'abcdef1234567890',
+      statusCode: 422,
+      serverRequestId: 'server-request-123',
+    });
+
+    // Then: the client event carries safe correlation metadata only
+    assert.strictEqual(sendBeaconCalls.length, 1);
+    const payload = JSON.parse(await sendBeaconCalls[0].body.text());
+    assert.strictEqual(payload.event_name, 'client.api.error');
+    assert.strictEqual(payload.path, '/stage-1/analyze');
+    assert.strictEqual(payload.file_id, 'abcdef1234567890');
+    assert.strictEqual(payload.status_code, 422);
+    assert.strictEqual(payload.server_request_id, 'server-request-123');
+    assert.strictEqual(payload.error_name, null);
+    assert.strictEqual(payload.error_message, null);
   });
 });

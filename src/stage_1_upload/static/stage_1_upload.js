@@ -26,6 +26,9 @@ const sheetPreviewPopover = document.getElementById('sheetPreviewPopover');
 const sheetPreviewPopoverTitle = document.getElementById('sheetPreviewPopoverTitle');
 const sheetPreviewPopoverBody = document.getElementById('sheetPreviewPopoverBody');
 
+const UPLOAD_API_ERROR_MESSAGE = "We couldn't upload this file. Please try again, or choose a CSV, TSV, or XLSX file.";
+const ANALYZE_API_ERROR_MESSAGE = "We couldn't start mapping for this file. Please refresh the page and try again.";
+
 const state = {
   file: null,
   uploaded: null,
@@ -65,6 +68,8 @@ const _setStatus = (message = '', tone = '') => {
     statusMessage.classList.add(tone);
   }
 };
+
+const _responseRequestId = (response) => response.headers.get('X-Request-ID');
 
 const _setAnalyzeButtonEnabled = (enabled) => {
   if (!analyzeButton) return;
@@ -220,8 +225,9 @@ const _uploadDataset = async () => {
         operation: 'upload',
         endpoint: config.uploadEndpoint,
         statusCode: response.status,
+        serverRequestId: _responseRequestId(response),
       });
-      throw new Error(payload.detail || 'Upload failed.');
+      throw new Error(UPLOAD_API_ERROR_MESSAGE);
     }
     state.uploaded = payload;
     state.sheetNames = Array.isArray(payload.sheet_names) ? payload.sheet_names : [];
@@ -235,7 +241,7 @@ const _uploadDataset = async () => {
   } catch (error) {
     console.error(error);
     _showDropzoneSummary(state.file, 'Upload failed');
-    _setStatus(error.message, 'error');
+    _setStatus(UPLOAD_API_ERROR_MESSAGE, 'error');
   } finally {
     state.isUploading = false;
     _setFileInputDisabled(false);
@@ -626,8 +632,9 @@ const _analyzeDataset = async () => {
         endpoint: config.analyzeEndpoint,
         fileId: state.uploaded.file_id,
         statusCode: response.status,
+        serverRequestId: _responseRequestId(response),
       });
-      throw new Error(payload.detail || 'Analysis failed.');
+      throw new Error(ANALYZE_API_ERROR_MESSAGE);
     }
     // Keep overlay visible during navigation - browser will replace the page
     _navigateToStageTwo(
@@ -638,7 +645,7 @@ const _analyzeDataset = async () => {
     );
   } catch (error) {
     console.error(error);
-    _setStatus(error.message, 'error');
+    _setStatus(ANALYZE_API_ERROR_MESSAGE, 'error');
     _setAnalyzeButtonEnabled(true);
     _showDropzoneSummary(state.file, 'Uploaded');
     // Only hide overlay and reset state on error
