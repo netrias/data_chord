@@ -112,8 +112,12 @@ const _showDropzoneSummary = (file, statusText) => {
   if (dropzoneFileStatus) dropzoneFileStatus.textContent = statusText;
 };
 
+const _setFileInputDisabled = (disabled) => {
+  if (fileInput) fileInput.disabled = disabled;
+};
+
 const _openFilePicker = () => {
-  if (!fileInput || state.isUploading) return;
+  if (!fileInput || state.isUploading || state.isAnalyzing) return;
   fileInput.value = '';
   fileInput.click();
 };
@@ -126,6 +130,7 @@ const _resetUploadState = () => {
   state.selectedSheet = null;
   state.isUploading = false;
   state.isAnalyzing = false;
+  _setFileInputDisabled(false);
   if (fileInput) fileInput.value = '';
   _setAnalyzeButtonEnabled(false);
   if (dropzone) {
@@ -176,6 +181,7 @@ const _uploadDataset = async () => {
     return;
   }
   state.isUploading = true;
+  _setFileInputDisabled(true);
   _setAnalyzeButtonEnabled(false);
   if (dropzone) {
     dropzone.classList.add('is-uploading');
@@ -227,6 +233,7 @@ const _uploadDataset = async () => {
     _setStatus(error.message, 'error');
   } finally {
     state.isUploading = false;
+    _setFileInputDisabled(false);
     if (dropzone) {
       dropzone.classList.remove('is-uploading');
       dropzone.removeAttribute('aria-busy');
@@ -569,6 +576,7 @@ const _analyzeDataset = async () => {
     return;
   }
   state.isAnalyzing = true;
+  _setFileInputDisabled(true);
   _setAnalyzeButtonEnabled(false);
   _showDropzoneSummary(state.file, 'Analyzing columns…');
   if (analyzeOverlay) analyzeOverlay.classList.remove('hidden');
@@ -623,6 +631,7 @@ const _analyzeDataset = async () => {
     _showDropzoneSummary(state.file, 'Uploaded');
     // Only hide overlay and reset state on error
     state.isAnalyzing = false;
+    _setFileInputDisabled(false);
     if (analyzeOverlay) analyzeOverlay.classList.add('hidden');
   }
 };

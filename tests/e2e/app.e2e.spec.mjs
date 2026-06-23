@@ -1251,6 +1251,7 @@ test('Stage 1 shows upload progress and keeps the Map button disabled until uplo
   await expect(page.locator('#dropzoneUploading')).toBeVisible();
   await expect(page.locator('#dropzoneUploading')).toContainText('Please wait while your file is uploaded');
   await expect(page.locator('#analyzeButton')).toBeDisabled();
+  await expect(page.getByTestId('agent-file-input')).toBeDisabled();
 
   // When: upload completes
   releaseUpload();
@@ -1259,6 +1260,7 @@ test('Stage 1 shows upload progress and keeps the Map button disabled until uplo
   await expect(page.locator('#dropzoneFileStatus')).toHaveText('Uploaded');
   await expect(page.locator('#dropzoneUploading')).toBeHidden();
   await expect(page.locator('#analyzeButton')).toBeEnabled();
+  await expect(page.getByTestId('agent-file-input')).toBeEnabled();
 });
 
 test('error handling: harmonize failure and missing manifest', async ({ page }) => {
