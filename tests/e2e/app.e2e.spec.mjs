@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  AGENT_FILE_INPUT,
   fileFixture,
   getFileIdFromUrl,
   uploadAndAnalyze,
@@ -1025,7 +1026,7 @@ test('version dropdown panel renders below trigger and scrolls when versions ove
   await mockAnalyze(page);
 
   await page.goto('/stage-1');
-  await page.setInputFiles('#fileInput', fileFixture('basic.csv'));
+  await page.setInputFiles(AGENT_FILE_INPUT, fileFixture('basic.csv'));
   await page.locator('#analyzeButton').waitFor({ state: 'visible' });
   await page.waitForFunction(() => !document.querySelector('#analyzeButton')?.disabled);
   await page.click('#analyzeButton');
@@ -1094,7 +1095,7 @@ test('data model dropdown shares custom styling and custom dropdowns close on ou
   await mockAnalyze(page);
 
   await page.goto('/stage-1');
-  await page.setInputFiles('#fileInput', fileFixture('basic.csv'));
+  await page.setInputFiles(AGENT_FILE_INPUT, fileFixture('basic.csv'));
   await page.locator('#analyzeButton').waitFor({ state: 'visible' });
   await page.waitForFunction(() => !document.querySelector('#analyzeButton')?.disabled);
   await page.click('#analyzeButton');
@@ -1165,13 +1166,73 @@ test('data model dropdown shares custom styling and custom dropdowns close on ou
   await expect(page.locator('.data-model-dropdown--version .data-model-dropdown-panel')).toBeHidden();
 });
 
+test('Stage 1 exposes a browser-friendly file input for automation', async ({ page }) => {
+  await mockDataModels(page);
+
+  await page.goto('/stage-1');
+  const uploadInput = page.getByTestId('agent-file-input');
+
+  await expect(uploadInput).toBeAttached();
+  await expect(uploadInput).not.toHaveAttribute('hidden', '');
+  await expect(uploadInput).toHaveAttribute('aria-hidden', 'true');
+  await expect(uploadInput).toHaveAttribute('tabindex', '-1');
+  const inputPresentation = await uploadInput.evaluate((input) => {
+    const style = window.getComputedStyle(input);
+    const rect = input.getBoundingClientRect();
+    return {
+      display: style.display,
+      height: rect.height,
+      position: style.position,
+      visibility: style.visibility,
+      width: rect.width,
+    };
+  });
+  expect(inputPresentation.display).not.toBe('none');
+  expect(inputPresentation).toMatchObject({
+    height: 1,
+    position: 'absolute',
+    visibility: 'visible',
+    width: 1,
+  });
+  await uploadInput.setInputFiles(fileFixture('basic.csv'));
+
+  await expect(page.locator('#dropzoneFileStatus')).toHaveText('Uploaded');
+  await expect(page.locator('#analyzeButton')).toBeEnabled();
+});
+
+test('Stage 1 ignores automation file changes while choosing a data model', async ({ page }) => {
+  await mockDataModels(page);
+  let uploadRequests = 0;
+  await page.route('**/stage-1/upload', async (route) => {
+    uploadRequests += 1;
+    await route.continue();
+  });
+
+  await page.goto('/stage-1');
+  const uploadInput = page.getByTestId('agent-file-input');
+  await uploadInput.setInputFiles(fileFixture('basic.csv'));
+  await expect(page.locator('#dropzoneFileStatus')).toHaveText('Uploaded');
+  await expect(page.locator('#analyzeButton')).toBeEnabled();
+  expect(uploadRequests).toBe(1);
+
+  await page.locator('#analyzeButton').click();
+  await page.locator('.data-model-dialog').waitFor({ state: 'visible' });
+  await expect(uploadInput).toBeDisabled();
+
+  await uploadInput.setInputFiles(fileFixture('multi-column.csv'));
+
+  await expect(uploadInput).toHaveJSProperty('files.length', 0);
+  await expect(page.locator('#dropzoneFileName')).toHaveText('basic.csv');
+  await expect.poll(() => uploadRequests).toBe(1);
+});
+
 test('error handling: wrong file type and oversize upload', async ({ page }) => {
   await mockDataModels(page);
 
   // Given: a non-CSV file is uploaded
   await page.goto('/stage-1');
   await expect(page.locator('#statusMessage')).toBeEmpty();
-  await page.setInputFiles('#fileInput', fileFixture('not-csv.json'));
+  await page.setInputFiles(AGENT_FILE_INPUT, fileFixture('not-csv.json'));
 
   // Then: upload error is shown
   await expect(page.locator('#statusMessage')).toContainText(/Only CSV|Unsupported|Upload failed/i);
@@ -1184,7 +1245,7 @@ test('error handling: wrong file type and oversize upload', async ({ page }) => 
     fs.writeFileSync(oversizedPath, largeContent);
 
     // When: oversized file is uploaded
-    await page.setInputFiles('#fileInput', oversizedPath);
+    await page.setInputFiles(AGENT_FILE_INPUT, oversizedPath);
 
     // Then: size error is shown
     await expect(page.locator('#statusMessage')).toContainText(/exceeds|too large|Upload failed/i);
@@ -1230,13 +1291,22 @@ test('Stage 1 shows upload progress and keeps the Map button disabled until uplo
   await expect(page.locator('#dropzoneUploading')).toBeHidden();
 
   // When: the user selects a file and upload is still in flight
-  await page.setInputFiles('#fileInput', fileFixture('basic.csv'));
+  await page.setInputFiles(AGENT_FILE_INPUT, fileFixture('basic.csv'));
   await uploadStarted;
 
   // Then: the blocking upload indicator is visible and the action remains disabled
   await expect(page.locator('#dropzoneUploading')).toBeVisible();
   await expect(page.locator('#dropzoneUploading')).toContainText('Please wait while your file is uploaded');
   await expect(page.locator('#analyzeButton')).toBeDisabled();
+  const uploadInput = page.getByTestId('agent-file-input');
+  await expect(uploadInput).toBeDisabled();
+
+  // When: automation tries to select another file while upload is still busy
+  await uploadInput.setInputFiles(fileFixture('multi-column.csv'));
+
+  // Then: the ignored selection does not linger in the native input state
+  await expect(uploadInput).toHaveJSProperty('files.length', 0);
+  await expect(page.locator('#uploadingFileName')).toHaveText('basic.csv');
 
   // When: upload completes
   releaseUpload();
@@ -1245,6 +1315,7 @@ test('Stage 1 shows upload progress and keeps the Map button disabled until uplo
   await expect(page.locator('#dropzoneFileStatus')).toHaveText('Uploaded');
   await expect(page.locator('#dropzoneUploading')).toBeHidden();
   await expect(page.locator('#analyzeButton')).toBeEnabled();
+  await expect(uploadInput).toBeEnabled();
 });
 
 test('error handling: harmonize failure and missing manifest', async ({ page }) => {

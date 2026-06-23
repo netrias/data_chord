@@ -33,6 +33,7 @@ const state = {
   sheetPreviews: {},
   selectedSheet: null,
   isUploading: false,
+  isChoosingDataModel: false,
   isAnalyzing: false,
 };
 
@@ -112,8 +113,14 @@ const _showDropzoneSummary = (file, statusText) => {
   if (dropzoneFileStatus) dropzoneFileStatus.textContent = statusText;
 };
 
+const _setFileInputDisabled = (disabled) => {
+  if (fileInput) fileInput.disabled = disabled;
+};
+
+const _isFileSelectionLocked = () => state.isUploading || state.isChoosingDataModel || state.isAnalyzing;
+
 const _openFilePicker = () => {
-  if (!fileInput || state.isUploading) return;
+  if (!fileInput || _isFileSelectionLocked()) return;
   fileInput.value = '';
   fileInput.click();
 };
@@ -125,7 +132,9 @@ const _resetUploadState = () => {
   state.sheetPreviews = {};
   state.selectedSheet = null;
   state.isUploading = false;
+  state.isChoosingDataModel = false;
   state.isAnalyzing = false;
+  _setFileInputDisabled(false);
   if (fileInput) fileInput.value = '';
   _setAnalyzeButtonEnabled(false);
   if (dropzone) {
@@ -153,8 +162,9 @@ const _validateFile = (file) => {
 };
 
 const _handleFileSelection = (file) => {
-  /* Prevent race condition - ignore if already uploading. */
-  if (state.isUploading) {
+  /* Prevent race condition - ignore if a workflow step is already in flight. */
+  if (_isFileSelectionLocked()) {
+    if (fileInput) fileInput.value = '';
     return;
   }
   const issues = _validateFile(file);
@@ -176,6 +186,7 @@ const _uploadDataset = async () => {
     return;
   }
   state.isUploading = true;
+  _setFileInputDisabled(true);
   _setAnalyzeButtonEnabled(false);
   if (dropzone) {
     dropzone.classList.add('is-uploading');
@@ -227,6 +238,7 @@ const _uploadDataset = async () => {
     _setStatus(error.message, 'error');
   } finally {
     state.isUploading = false;
+    _setFileInputDisabled(false);
     if (dropzone) {
       dropzone.classList.remove('is-uploading');
       dropzone.removeAttribute('aria-busy');
@@ -551,24 +563,32 @@ const _navigateToStageTwo = (fileId, dataModelKey, externalVersionNumber, payloa
 };
 
 const _analyzeDataset = async () => {
-  if (!state.uploaded || state.isAnalyzing) {
+  if (!state.uploaded) {
     _setStatus('Upload a file before analyzing.', 'error');
     return;
   }
+  if (state.isChoosingDataModel || state.isAnalyzing) return;
 
   /* Show data model selection popup before starting analysis. */
+  state.isChoosingDataModel = true;
+  _setFileInputDisabled(true);
   let selection;
   try {
     selection = await showDataModelPopup();
   } catch (err) {
     _setStatus(err.message, 'error');
+    state.isChoosingDataModel = false;
+    _setFileInputDisabled(false);
     return;
   }
+  state.isChoosingDataModel = false;
   if (!selection) {
     /* User cancelled - stay on Stage 1. */
+    _setFileInputDisabled(false);
     return;
   }
   state.isAnalyzing = true;
+  _setFileInputDisabled(true);
   _setAnalyzeButtonEnabled(false);
   _showDropzoneSummary(state.file, 'Analyzing columns…');
   if (analyzeOverlay) analyzeOverlay.classList.remove('hidden');
@@ -623,6 +643,7 @@ const _analyzeDataset = async () => {
     _showDropzoneSummary(state.file, 'Uploaded');
     // Only hide overlay and reset state on error
     state.isAnalyzing = false;
+    _setFileInputDisabled(false);
     if (analyzeOverlay) analyzeOverlay.classList.add('hidden');
   }
 };

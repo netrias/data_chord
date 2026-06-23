@@ -56,7 +56,6 @@
         <div class="upload-grid">
           <div class="upload-column">
             <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Upload dataset">
-              <input id="fileInput" type="file" accept=".csv,.tsv,.xlsx" hidden />
               <div id="dropzoneCopy" class="dropzone-copy">
                 <div class="dropzone-icon" aria-hidden="true">
                   <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -93,6 +92,15 @@
                 <button id="changeFileButton" class="linklike" type="button">Change file</button>
               </div>
             </div>
+            <input
+              id="fileInput"
+              class="agent-file-input"
+              data-testid="agent-file-input"
+              type="file"
+              accept=".csv,.tsv,.xlsx"
+              aria-hidden="true"
+              tabindex="-1"
+            />
             <div id="sheetSelectorPanel" class="workbook-tabs hidden" aria-hidden="true">
               <div class="workbook-tabs-card">
                 <div class="workbook-tabs-header">

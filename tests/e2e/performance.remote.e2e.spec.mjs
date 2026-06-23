@@ -7,6 +7,7 @@ test.skip(process.env.RUN_REMOTE_PERF !== 'true', 'Set RUN_REMOTE_PERF=true to r
 
 const DEFAULT_ROWS = 20;
 const SAMPLE_FIXTURE = path.resolve('tests/fixtures/sample.csv');
+const AGENT_FILE_INPUT = '[data-testid="agent-file-input"]';
 const REMOTE_TIMEOUT_MS = 10 * 60 * 1000;
 
 test.setTimeout(REMOTE_TIMEOUT_MS);
@@ -110,7 +111,7 @@ const _uploadAndAnalyzeRemote = async (page, csvPath) => {
   }
 
   const uploadStart = _now();
-  await page.setInputFiles('#fileInput', csvPath);
+  await page.setInputFiles(AGENT_FILE_INPUT, csvPath);
   await page.locator('#analyzeButton').waitFor({ state: 'visible' });
   await page.waitForFunction(() => !document.querySelector('#analyzeButton')?.disabled);
   const uploadToReadyMs = _duration(uploadStart);
