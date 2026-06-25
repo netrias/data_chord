@@ -107,6 +107,9 @@ jobs:
       - name: Run ruff check
         run: uv run ruff check src/ tests/
 
+      - name: Run vulture
+        run: uv run vulture
+
   security:
     runs-on: ubuntu-latest
     steps:

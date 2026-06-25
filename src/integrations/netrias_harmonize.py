@@ -10,7 +10,6 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Protocol, cast
 from uuid import uuid4
 
 from netrias_client import NetriasClient
@@ -44,28 +43,6 @@ class HarmonizeResult:
     job_id_available: bool = False
     manifest_path: Path | None = None
     output_path: Path | None = None
-
-
-class _ExternalVersionHarmonizeClient(Protocol):
-    def discover_mapping_from_tabular(
-        self,
-        *,
-        source_path: Path,
-        target_schema: str,
-        external_version_number: str,
-        sheet_name: str | None,
-    ) -> ManifestPayload: ...
-
-    def harmonize(
-        self,
-        *,
-        source_path: Path,
-        manifest: ManifestPayload,
-        data_commons_key: str,
-        external_version_number: str,
-        output_path: Path | None,
-        sheet_name: str | None,
-    ) -> object: ...
 
 
 class HarmonizeService:
@@ -142,8 +119,7 @@ class HarmonizeService:
     ) -> ColumnMappingManifest:
         if not self._client:
             raise RuntimeError("Netrias client unavailable")
-        external_version_client = cast(_ExternalVersionHarmonizeClient, self._client)
-        raw_cde_map = external_version_client.discover_mapping_from_tabular(
+        raw_cde_map = self._client.discover_mapping_from_tabular(
             source_path=file_path,
             target_schema=data_model_key,
             external_version_number=external_version_number,
@@ -169,8 +145,7 @@ class HarmonizeService:
         if not self._client:
             raise RuntimeError("Netrias client unavailable")
 
-        external_version_client = cast(_ExternalVersionHarmonizeClient, self._client)
-        netrias_result = external_version_client.harmonize(
+        netrias_result = self._client.harmonize(
             source_path=file_path,
             manifest=cde_map.to_payload(),
             data_commons_key=data_model_key,

@@ -303,7 +303,9 @@ def test_discover_preserves_duplicate_headers_with_column_keys(
         sheet_name: str | None = None,
     ) -> dict[str, object]:
         assert source_path.name == "dupes.csv"
+        assert target_schema == "ccdi"
         assert external_version_number == "11.0.4"
+        assert confidence_threshold == 0.7
         assert sheet_name is None
         return {
             "column_mappings": {
