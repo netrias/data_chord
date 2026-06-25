@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, cast
 
 from netrias_client import NetriasClient
 
@@ -34,18 +33,6 @@ class MappingDiscoveryResult:
         return self.manifest.to_payload()
 
 
-class _ExternalVersionMappingClient(Protocol):
-    def discover_mapping_from_tabular(
-        self,
-        *,
-        source_path: Path,
-        target_schema: str,  # noqa: F841 - Netrias SDK keyword.
-        external_version_number: str,
-        confidence_threshold: float,  # noqa: F841 - Netrias SDK keyword.
-        sheet_name: str | None,
-    ) -> ManifestPayload: ...
-
-
 class MappingDiscoveryService:
 
     def __init__(self, client: NetriasClient | None) -> None:
@@ -65,8 +52,7 @@ class MappingDiscoveryService:
             raise RuntimeError("NetriasClient unavailable (missing NETRIAS_API_KEY)")
 
         try:
-            external_version_client = cast(_ExternalVersionMappingClient, self._client)
-            raw_manifest = external_version_client.discover_mapping_from_tabular(
+            raw_manifest = self._client.discover_mapping_from_tabular(
                 source_path=csv_path,
                 target_schema=data_model_key,
                 external_version_number=external_version_number,
