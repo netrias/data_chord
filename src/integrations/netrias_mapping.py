@@ -39,9 +39,9 @@ class _ExternalVersionMappingClient(Protocol):
         self,
         *,
         source_path: Path,
-        target_schema: str,
+        target_schema: str,  # noqa: F841 - Netrias SDK keyword.
         external_version_number: str,
-        confidence_threshold: float,
+        confidence_threshold: float,  # noqa: F841 - Netrias SDK keyword.
         sheet_name: str | None,
     ) -> ManifestPayload: ...
 

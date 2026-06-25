@@ -21,6 +21,7 @@ dependencies = [
     "requests>=2.33.0",   # CVE-2026-25645 (via boto3)
     "urllib3>=2.6.0",     # CVE-2025-66418, CVE-2025-66471 (via requests/boto3)
     "idna>=3.15",         # CVE-2026-45409 (via requests/httpx)
+    "msgpack>=1.2.1",     # GHSA-6v7p-g79w-8964
 ]
 
 [project.optional-dependencies]
@@ -38,6 +39,7 @@ dev = [
     "pytest-playwright>=0.6.2",
     # transitive dep pin for security (CVE remediation)
     "filelock>=3.20.1",  # CVE-2025-68146 (via virtualenv/pre-commit)
+    "vulture>=2.16",
 ]
 
 [tool.pytest.ini_options]
@@ -77,6 +79,10 @@ typeCheckingMode = "standard"
 [tool.bandit]
 exclude_dirs = ["tests"]
 skips = ["B101"]  # skip assert warnings (used in tests)
+
+[tool.vulture]
+paths = ["src", "tests"]
+min_confidence = 100
 
 [tool.uv]
 # Security: require Python packages to be at least 7 days old before resolution.

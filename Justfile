@@ -10,6 +10,9 @@ sync:
 lint:
 	uv run ruff check .
 
+dead-code:
+	uv run vulture
+
 typecheck:
 	uv run basedpyright
 

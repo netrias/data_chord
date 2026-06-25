@@ -51,7 +51,7 @@ class _ExternalVersionHarmonizeClient(Protocol):
         self,
         *,
         source_path: Path,
-        target_schema: str,
+        target_schema: str,  # noqa: F841 - Netrias SDK keyword.
         external_version_number: str,
         sheet_name: str | None,
     ) -> ManifestPayload: ...
@@ -61,7 +61,7 @@ class _ExternalVersionHarmonizeClient(Protocol):
         *,
         source_path: Path,
         manifest: ManifestPayload,
-        data_commons_key: str,
+        data_commons_key: str,  # noqa: F841 - Netrias SDK keyword.
         external_version_number: str,
         output_path: Path | None,
         sheet_name: str | None,
