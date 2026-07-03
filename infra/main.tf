@@ -609,7 +609,7 @@ resource "aws_ecs_task_definition" "app" {
         hostPort      = var.container_port
         protocol      = "tcp"
       }]
-      environment = [
+      environment = concat([
         {
           name  = "DATA_CHORD_STORAGE"
           value = "s3"
@@ -644,7 +644,10 @@ resource "aws_ecs_task_definition" "app" {
           name  = "CORS_ALLOW_ORIGINS"
           value = local.app_url
         }
-      ]
+        ], var.netrias_harmonization_url == "" ? [] : [{
+          name  = "DATA_CHORD_NETRIAS_HARMONIZATION_URL"
+          value = var.netrias_harmonization_url
+      }])
       secrets = [{
         name      = "NETRIAS_API_KEY"
         valueFrom = data.aws_secretsmanager_secret.netrias_api_key.arn

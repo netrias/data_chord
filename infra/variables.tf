@@ -60,6 +60,12 @@ variable "netrias_api_key_secret_name" {
   type        = string
 }
 
+variable "netrias_harmonization_url" {
+  description = "Optional Netrias harmonization endpoint override."
+  type        = string
+  default     = ""
+}
+
 variable "auth_bypass_cidrs" {
   description = "Trusted source CIDRs that can reach the app without Cognito auth. Loaded by deploy scripts from Secrets Manager."
   type        = list(string)

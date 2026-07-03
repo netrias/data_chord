@@ -57,3 +57,25 @@ def test_netrias_client_uses_configured_environment(monkeypatch) -> None:
     # Then: the SDK is wired to prod endpoints
     assert client is client_class.return_value
     client_class.assert_called_once_with(api_key="test-key", environment=Environment.PROD)
+
+
+def test_netrias_client_uses_configured_harmonization_url(monkeypatch) -> None:
+    # Given: staging runtime overrides only the harmonization backend
+    monkeypatch.setenv("NETRIAS_API_KEY", "test-key")
+    monkeypatch.setenv(
+        "DATA_CHORD_NETRIAS_HARMONIZATION_URL",
+        "https://pdyuq0vi4h.execute-api.us-east-2.amazonaws.com/prod",
+    )
+    monkeypatch.setattr(dependencies, "_netrias_client", None)
+    monkeypatch.setattr(dependencies, "_netrias_client_initialized", False)
+
+    # When: the shared Netrias client is initialized
+    with patch("src.app.dependencies.NetriasClient") as client_class:
+        client = dependencies.get_netrias_client()
+
+    # Then: Data Chord keeps the staging environment and overrides the harmonization endpoint only
+    assert client is client_class.return_value
+    client_class.assert_called_once_with(api_key="test-key", environment=Environment.STAGING)
+    client_class.return_value.configure.assert_called_once_with(
+        harmonization_url="https://pdyuq0vi4h.execute-api.us-east-2.amazonaws.com/prod"
+    )
