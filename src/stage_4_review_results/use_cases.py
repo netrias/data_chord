@@ -288,6 +288,8 @@ def _build_columns_from_manifest(
     for col_key in sorted(columns_map.keys(), key=lambda c: column_indices[c]):
         manifest_rows = columns_map[col_key]
         mapping_entry = cde_mappings_by_column.get(col_key)
+        if _is_unchanged_passthrough(mapping_entry, manifest_rows):
+            continue
         target_cde_key = _target_cde_key(mapping_entry)
         serialized_col_key = str(col_key)
         transformations = [
@@ -307,6 +309,17 @@ def _build_columns_from_manifest(
         ))
 
     return columns
+
+
+def _is_unchanged_passthrough(
+    mapping_entry: CdeMappingEntry | None,
+    manifest_rows: list[ManifestRow],
+) -> bool:
+    return (
+        mapping_entry is not None
+        and not mapping_entry.maps_values
+        and all(not is_value_changed(row.to_harmonize, _current_value_for_row(row)) for row in manifest_rows)
+    )
 
 
 def _target_cde_key(mapping_entry: CdeMappingEntry | None) -> str | None:

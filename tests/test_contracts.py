@@ -431,6 +431,82 @@ class TestRowsContract:
         assert first_column["targetCdeKey"] == "primary_diagnosis"
         assert first_column["targetCdeLabel"] == "primary_diagnosis"
 
+    async def test_stage4_omits_unchanged_passthrough_columns(
+        self,
+        app_client: AsyncClient,
+        temp_storage: UploadStorage,
+    ) -> None:
+        """Race and ethnicity pass-throughs are not selectable review columns."""
+
+        def _manifest_row(column_id: int, name: str, value: str) -> dict[str, object]:
+            return {
+                "column_id": column_id,
+                "column_name": name,
+                "to_harmonize": value,
+                "top_harmonization": "",
+                "row_indices": [0],
+            }
+
+        def _mapping_entry(
+            column_id: int,
+            name: str,
+            cde_key: str,
+            maps_values: bool,
+        ) -> dict[str, object]:
+            return {
+                "column_key": f"col_{column_id:04d}",
+                "source_column_name": name,
+                "output_column_name": name,
+                "cde_key": cde_key,
+                "mapping_source": "ai",
+                "maps_values": maps_values,
+            }
+
+        # Given: Race and ethnicity are unchanged pass-through mappings while
+        # diagnosis is a true value-mapping CDE with no AI recommendation.
+        upload_response = await app_client.post(
+            "/stage-1/upload",
+            files={
+                "file": (
+                    "demographics.csv",
+                    b"race,ethnicity,diagnosis\nAsian,Hispanic,Lung\n",
+                    TEST_CSV_CONTENT_TYPE,
+                ),
+            },
+        )
+        file_id = upload_response.json()["file_id"]
+        store_test_harmonization_manifest(
+            temp_storage,
+            file_id,
+            [
+                _manifest_row(0, "race", "Asian"),
+                _manifest_row(1, "ethnicity", "Hispanic"),
+                _manifest_row(2, "diagnosis", "Lung"),
+            ],
+        )
+        dependencies.get_workflow_storage().write_json(
+            dependencies.get_user_context(),
+            file_id,
+            WorkflowFile.CDE_MAPPING,
+            {
+                "file_id": file_id,
+                "mappings": [
+                    _mapping_entry(0, "race", "race", False),
+                    _mapping_entry(1, "ethnicity", "ethnicity", False),
+                    _mapping_entry(2, "diagnosis", "primary_diagnosis", True),
+                ],
+            },
+        )
+
+        # When: Stage 4 builds its selectable review columns.
+        response = await app_client.post("/stage-4/rows", json={"file_id": file_id})
+
+        # Then: unchanged pass-throughs are omitted, but the true
+        # no-recommendation harmonization remains reviewable.
+        assert response.status_code == 200
+        assert [column["columnLabel"] for column in response.json()["columns"]] == ["diagnosis"]
+        assert response.json()["columns"][0]["transformations"][0]["recommendationType"] == "no_recommendation"
+
     async def test_transformation_structure(
         self,
         app_client: AsyncClient,
