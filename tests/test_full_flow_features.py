@@ -132,8 +132,9 @@ async def test_full_flow_overrides_propagate_within_column(
     assert harmonize_response.status_code == 200
     meta = temp_storage.load(file_id)
     assert meta is not None
-    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
-    create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
+    changes = {0: {"col_a": "Suggested"}, 1: {"col_a": "Suggested"}}
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, changes)
+    create_manifest_for_file(temp_storage, file_id, meta.saved_path, changes)
 
     rows_response = await app_client.post("/stage-4/rows", json={"file_id": file_id, "manual_columns": []})
     assert rows_response.status_code == 200
@@ -154,7 +155,7 @@ async def test_full_flow_overrides_propagate_within_column(
     overrides_payload = {
         "file_id": file_id,
         "overrides": {
-            str(index): {col_a_key: {"ai_value": "Foo", "human_value": "Baz", "original_value": "Foo"}}
+            str(index): {col_a_key: {"ai_value": "Suggested", "human_value": "Baz", "original_value": "Foo"}}
             for index in row_indices
         },
         "review_state": review_state_payload(),
@@ -445,8 +446,9 @@ async def test_full_flow_bom_overrides_apply(
     assert harmonize_response.status_code == 200
     meta = temp_storage.load(file_id)
     assert meta is not None
-    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
-    create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
+    changes = {0: {"col_a": "Suggested"}, 1: {"col_a": "Suggested"}}
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, changes)
+    create_manifest_for_file(temp_storage, file_id, meta.saved_path, changes)
 
     rows_response = await app_client.post("/stage-4/rows", json={"file_id": file_id, "manual_columns": []})
     assert rows_response.status_code == 200
@@ -469,7 +471,9 @@ async def test_full_flow_bom_overrides_apply(
         json={
             "file_id": file_id,
             "overrides": {
-                str(index): {col_a_key: {"ai_value": "Foo", "human_value": "Bar", "original_value": "Foo"}}
+                str(index): {
+                    col_a_key: {"ai_value": "Suggested", "human_value": "Bar", "original_value": "Foo"},
+                }
                 for index in row_indices
             },
             "review_state": review_state_payload(),
