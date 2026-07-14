@@ -110,6 +110,18 @@ resource "aws_security_group" "secrets_endpoint" {
     security_groups = [aws_security_group.task.id]
   }
 
+  dynamic "ingress" {
+    for_each = var.additional_secretsmanager_client_security_group_ids
+
+    content {
+      description     = "Secrets Manager HTTPS from additional client"
+      from_port       = 443
+      to_port         = 443
+      protocol        = "tcp"
+      security_groups = [ingress.value]
+    }
+  }
+
   egress {
     description = "Outbound"
     from_port   = 0

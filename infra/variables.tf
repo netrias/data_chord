@@ -31,6 +31,20 @@ variable "secretsmanager_vpc_endpoint_id" {
   type        = string
 }
 
+variable "additional_secretsmanager_client_security_group_ids" {
+  description = "Additional security groups allowed to reach the shared Secrets Manager VPC endpoint."
+  type        = set(string)
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for security_group_id in var.additional_secretsmanager_client_security_group_ids :
+      can(regex("^sg-[0-9a-f]+$", security_group_id))
+    ])
+    error_message = "additional_secretsmanager_client_security_group_ids must contain valid security group ids."
+  }
+}
+
 variable "certificate_arn" {
   description = "Optional ACM certificate ARN for the HTTPS listener. Leave empty to create and validate one in hosted_zone_name."
   type        = string
