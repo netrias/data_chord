@@ -9,6 +9,7 @@ import pytest
 from httpx import AsyncClient
 from netrias_client import DataModelStoreError
 
+from src.domain.cde import DataModelSummary, DataModelVersionInfo
 from tests.conftest import TEST_CSV_CONTENT_TYPE, TEST_TARGET_EXTERNAL_VERSION_NUMBER, TEST_TARGET_SCHEMA, upload_file
 
 pytestmark = pytest.mark.asyncio
@@ -132,6 +133,34 @@ class TestMissingHarmonizedFileErrors:
 
 class TestDataModelServiceErrors:
     """Data model endpoint error handling."""
+
+    async def test_list_data_models_exposes_only_external_version_identity(
+        self, app_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Stage 1 does not leak Data Model Store internal version fields."""
+        monkeypatch.setattr(
+            "src.stage_1_upload.router.list_data_model_summaries",
+            MagicMock(
+                return_value=[
+                    DataModelSummary(
+                        data_model_key="gc",
+                        label="Genomic Commons",
+                        versions=[DataModelVersionInfo(external_version_number="11.0.4")],
+                    )
+                ]
+            ),
+        )
+
+        response = await app_client.get("/stage-1/data-models")
+
+        assert response.status_code == 200
+        assert response.json() == [
+            {
+                "data_model_key": "gc",
+                "label": "Genomic Commons",
+                "versions": [{"external_version_number": "11.0.4"}],
+            }
+        ]
 
     async def test_list_data_models_returns_503_when_api_unavailable(
         self, app_client: AsyncClient, monkeypatch: pytest.MonkeyPatch

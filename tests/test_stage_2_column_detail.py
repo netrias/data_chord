@@ -92,7 +92,7 @@ async def test_compute_column_detail_returns_pv_match_and_sorted_pvs(
         )
     })
     cache.set_cdes(
-        [CDEInfo(cde_id=1, cde_key="dx", description=None, version_label="1")],
+        [CDEInfo(cde_id=1, cde_key="dx", description=None)],
         data_model_key="gc",
         external_version_number="11.0.4",
     )
@@ -140,7 +140,7 @@ async def test_compute_column_detail_downgrades_to_passthrough_on_empty_pvs(
         )
     })
     cache.set_cdes(
-        [CDEInfo(cde_id=2, cde_key="notes", description=None, version_label="1")],
+        [CDEInfo(cde_id=2, cde_key="notes", description=None)],
         data_model_key="gc",
         external_version_number="11.0.4",
     )
@@ -242,7 +242,7 @@ async def test_compute_column_detail_rebuilds_profile_when_cache_lost(
     file_id = "abcdef0123456789abcdef0123456789"
     cache = get_session_cache(file_id)
     cache.set_cdes(
-        [CDEInfo(cde_id=1, cde_key="dx", description=None, version_label="1")],
+        [CDEInfo(cde_id=1, cde_key="dx", description=None)],
         data_model_key="gc",
         external_version_number="11.0.4",
     )

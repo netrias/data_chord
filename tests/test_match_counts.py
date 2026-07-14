@@ -263,7 +263,6 @@ def _make_cde(key: str, cde_type: CdeType) -> CDEInfo:
         cde_id=hash(key) & 0xFFFF,
         cde_key=key,
         description=None,
-        version_label="1",
         cde_type=cde_type,
     )
 

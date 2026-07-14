@@ -54,7 +54,7 @@ class TestPVManifestPersistenceFeature:
         file_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         pv_manifest_data = {
             "data_model_key": "cptac",
-            "version_label": "v2.1",
+            "external_version_number": "11.0.4",
             "column_to_cde_key": {
                 "primary_diagnosis": "primary_diagnosis_cde",
                 "tissue_type": "tissue_or_organ_of_origin",

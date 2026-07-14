@@ -110,6 +110,18 @@ resource "aws_security_group" "secrets_endpoint" {
     security_groups = [aws_security_group.task.id]
   }
 
+  dynamic "ingress" {
+    for_each = var.additional_secretsmanager_client_security_group_ids
+
+    content {
+      description     = "Secrets Manager HTTPS from additional client"
+      from_port       = 443
+      to_port         = 443
+      protocol        = "tcp"
+      security_groups = [ingress.value]
+    }
+  }
+
   egress {
     description = "Outbound"
     from_port   = 0
@@ -609,7 +621,7 @@ resource "aws_ecs_task_definition" "app" {
         hostPort      = var.container_port
         protocol      = "tcp"
       }]
-      environment = [
+      environment = concat([
         {
           name  = "DATA_CHORD_STORAGE"
           value = "s3"
@@ -644,7 +656,10 @@ resource "aws_ecs_task_definition" "app" {
           name  = "CORS_ALLOW_ORIGINS"
           value = local.app_url
         }
-      ]
+        ], var.netrias_harmonization_url == "" ? [] : [{
+          name  = "DATA_CHORD_NETRIAS_HARMONIZATION_URL"
+          value = var.netrias_harmonization_url
+      }])
       secrets = [{
         name      = "NETRIAS_API_KEY"
         valueFrom = data.aws_secretsmanager_secret.netrias_api_key.arn

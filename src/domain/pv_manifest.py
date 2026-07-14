@@ -24,9 +24,7 @@ class PVManifest:
         raw_pvs = payload.get("pvs")
         return cls(
             data_model_key=_string_or_empty(payload.get("data_model_key")),
-            external_version_number=_string_or_empty(
-                payload.get("external_version_number") or payload.get("version_label")
-            ),
+            external_version_number=_string_or_empty(payload.get("external_version_number")),
             column_to_cde_key=ColumnCdeMap.from_strings(_string_mapping(raw_mappings)),
             pvs=CdePvCatalog.from_mapping(_pv_mapping(raw_pvs)),
         )

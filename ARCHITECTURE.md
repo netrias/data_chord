@@ -32,7 +32,7 @@ data_chord/
 |   |     May not import stage modules.
 |   |   Shapes owned here:
 |   |     CDEInfo, CdeType, ModelSuggestion, DataModelSummary,
-|   |     DataModelSelection, ColumnKey, ColumnIdentity, ColumnCdeMap,
+|   |     DataModelVersionReference, ColumnKey, ColumnIdentity, ColumnCdeMap,
 |   |     ColumnCdeOverrides, ColumnRenameSet, ConfirmedMappingChoices,
 |   |     HarmonizeRequest, HarmonizeResponse, SessionCache, PVManifest,
 |   |     ReviewOverrides, WorkflowState, CellOverride, ChangeType,
@@ -206,9 +206,10 @@ Shared rules and adapters used by every stage:
   src/domain/columns.py             Stable ColumnKey and ColumnIdentity
   src/domain/column_cde_map.py      User mapping decisions keyed by ColumnKey
   src/domain/column_renames.py      Output names keyed by ColumnKey
-  src/domain/data_model_*.py        Data model/version/CDE/PV lookup and cache
+  src/domain/data_model_version_reference.py  External data model version identity
+  src/app/data_model_store.py       Data model/CDE/PV application operations
   src/domain/workflow_state.py      Durable selected model/version and confirmed mapping choices per upload
-  src/domain/pv_persistence.py      PV manifest recovery and column-keyed PV lookup
+  src/persistence/pv_manifest_store.py  PV manifest recovery and column-keyed PV lookup
   src/domain/pv_validation.py       PV conformance and adjustment selection
   src/domain/change.py              Change and recommendation classification
   src/domain/schemas.py             Cross-stage API contracts
@@ -388,24 +389,25 @@ CDE mapping artifact into a ZIP, then clears session cache.
 
 ### CDE Metadata (`cde.py`)
 
-`CDEInfo` holds CDE metadata (cde_id, cde_key, description, version_label)
+`CDEInfo` holds CDE metadata (cde_id, cde_key, description, cde_type)
 fetched dynamically from the Data Model Store API. `ColumnCdeMap` is the
 effective column-to-CDE mapping used for PV lookup, cache persistence, and
 manifest handoff. `ColumnCdeOverrides` represents Stage 2 user edits, including
 explicit "No Mapping" choices. `ColumnRenameSet` carries user-selected output
 column names separately from source column identity.
 
-### Data Model Integration (`data_model_adapter.py`, `data_model_cache.py`)
+### Data Model Integration (`integrations/data_model_store.py`, `app/session_cache.py`)
 
-`data_model_adapter` is a thin adapter that converts `netrias_client` SDK types
+`data_model_store` is a thin adapter that converts `netrias_client` SDK types
 to domain types (`DataModelSummary`, `CDEInfo`, PV frozensets). It uses the
-shared `NetriasClient` singleton from `dependencies.py`. `SessionCache` provides
-session-scoped, thread-safe caching of CDEs and PV sets (frozenset for O(1)
-membership testing), with disk persistence via `pv_persistence.py` for server
-restart recovery. `DataModelSelection` is the canonical domain object for the
-target model key plus optional numeric version; callers derive SDK
-`target_version` strings from it instead of rebuilding `"latest"`/numbered
-version logic in each stage.
+shared `NetriasClient` singleton from `app/dependencies.py`. `SessionCache`
+provides session-scoped, thread-safe caching of CDEs and PV sets (frozenset for
+O(1) membership testing), with durable recovery through
+`persistence/pv_manifest_store.py`. `DataModelVersionReference` is the
+canonical identity for a selected model version: a data-model key plus its
+`external_version_number`. Data Chord passes that external value unchanged to
+Netrias Client and Data Model Store operations; internal numeric version IDs
+and labels are not part of its public or persisted model-selection contract.
 
 ### PV Validation (`pv_validation.py`)
 
@@ -453,7 +455,7 @@ stay at the router boundary.
 |---|---|
 | `HarmonizeService` | Wraps `NetriasClient.harmonize()` with manifest merging and error handling |
 | `MappingDiscoveryService` | Wraps `NetriasClient.discover_mapping_from_tabular()` (confidence threshold 0.7) |
-| `data_model_adapter` | Thin adapter: SDK types → domain types (data model list, CDEs, PVs) |
+| `data_model_store` adapter | SDK and Data Model Store responses → domain types (data model list, CDEs, PVs) |
 
 Services degrade gracefully: missing API keys or client init failures are
 logged and produce stub results so the workflow can continue.
@@ -524,19 +526,21 @@ Vanilla ES6 modules with direct DOM manipulation. No bundler. Key patterns:
 
 ## External Integrations
 
-### Netrias Client SDK (`netrias-client 0.3.x`)
+### Netrias Client SDK (`netrias-client 0.7.0`)
 
 | Method | Used by |
 |---|---|
 | `discover_mapping_from_tabular()` | `MappingDiscoveryService` (CDE recommendations) |
 | `harmonize()` | `HarmonizeService` |
-| `list_data_models()` | `data_model_adapter` (data model list) |
-| `list_cdes()` | `data_model_adapter` (CDE metadata) |
-| model-version PV endpoints | `data_model_adapter` (permissible values) |
+| `list_data_models()` | `data_model_store` adapter (data model list) |
+| `list_cdes()` | `data_model_store` adapter (CDE metadata) |
+| model-version PV endpoints | `data_model_store` adapter (permissible values) |
 
-Configuration: `NETRIAS_API_KEY` environment variable (loaded from `.env`).
-The client is initialized with `Environment.STAGING` which resolves all service
-URLs (harmonization, discovery, Data Model Store) from a built-in registry.
+Configuration starts with `NETRIAS_API_KEY` and
+`DATA_CHORD_NETRIAS_ENVIRONMENT`. The selected environment resolves service
+URLs from the client's registry. `DATA_CHORD_NETRIAS_HARMONIZATION_URL` may
+override only the harmonization endpoint, leaving Data Model Store and mapping
+discovery on the selected environment.
 
 ---
 
