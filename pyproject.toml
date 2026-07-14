@@ -11,7 +11,7 @@ dependencies = [
     "uvicorn[standard]>=0.30.0",
     "boto3>=1.40.69",
     "cryptography>=48.0.1",
-    "netrias_client @ git+https://github.com/netrias/netrias_client.git@d225f61206582f73f017272f23c454d4e2171133",
+    "netrias_client @ git+https://github.com/netrias/netrias_client.git@8d98df0d17f476a722dfa71fccf698c70003e5e6",
     "openpyxl>=3.1.5",
     "python-dotenv>=1.2.2",
     "pyarrow>=23.0.1,<24",  # PYSEC-2026-113
