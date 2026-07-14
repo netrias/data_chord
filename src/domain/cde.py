@@ -27,10 +27,7 @@ def is_rename_only(cde_type: CdeType) -> bool:
 
 @dataclass(frozen=True)
 class DataModelVersionInfo:
-    version_label: str
-    version_number: int
     external_version_number: str
-    is_default: bool = False
 
 
 @dataclass(frozen=True)
@@ -47,7 +44,6 @@ class CDEInfo:
     cde_id: int
     cde_key: str
     description: str | None
-    version_label: str
     cde_type: CdeType = field(default=CdeType.PV)
 
 

@@ -1078,15 +1078,15 @@ test('data model dropdown shares custom styling and custom dropdowns close on ou
           data_model_key: 'alpha',
           label: 'Alpha Model',
           versions: [
-            { version_label: 'v1', version_number: 1, external_version_number: '11.0.1', is_default: false },
-            { version_label: 'v3', version_number: 3, external_version_number: '11.0.3', is_default: true },
+            { external_version_number: '11.0.1' },
+            { external_version_number: '11.0.3' },
           ],
         },
         {
           data_model_key: 'gc',
           label: 'Genomic Cancer',
           versions: [
-            { version_label: 'v2', version_number: 2, external_version_number: '11.0.2', is_default: true },
+            { external_version_number: '11.0.2' },
           ],
         },
       ]),

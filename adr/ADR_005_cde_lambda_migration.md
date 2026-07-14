@@ -1,7 +1,14 @@
 # ADR 005: CDE Lambda Migration (netrias-client 0.1.0)
 
 ## Status
-Accepted
+Superseded — retained as the historical record of the netrias-client 0.1.0
+migration.
+
+The current Data Chord contract uses `external_version_number` as the only data
+model version identity. Current mapping, harmonization, CDE, and PV calls pass
+that external value directly through Netrias Client or to the Data Model Store.
+The `target_version` and `"latest"` examples below describe the superseded 0.1.0
+transition and are not current integration guidance.
 
 ## Context
 

@@ -162,7 +162,6 @@ async def test_stage1_upload_preserves_other_session_cde_cache(app_client: Async
                     cde_id=1,
                     cde_key="primary_diagnosis",
                     description="Primary Diagnosis",
-                    version_label="1",
                 )
             ],
             data_model_key=TEST_TARGET_SCHEMA,
@@ -1154,8 +1153,8 @@ async def test_stage3_persists_cde_mapping_download_artifact(
     cache = get_session_cache(file_id)
     cache.set_cdes(
         [
-            CDEInfo(cde_id=2, cde_key="primary_diagnosis", description="Primary Diagnosis", version_label="1"),
-            CDEInfo(cde_id=1, cde_key="therapeutic_agents", description="Therapeutic Agents", version_label="1"),
+            CDEInfo(cde_id=2, cde_key="primary_diagnosis", description="Primary Diagnosis"),
+            CDEInfo(cde_id=1, cde_key="therapeutic_agents", description="Therapeutic Agents"),
         ],
         data_model_key=TEST_TARGET_SCHEMA,
         external_version_number="11.0.4",
@@ -1202,7 +1201,7 @@ async def test_stage2_mapping_page_renders_manual_options(
     file_id = "deadbeefdeadbeefdeadbeefdeadbeef"
     cache = get_session_cache(file_id)
     cache.set_cdes(
-        [CDEInfo(cde_id=2, cde_key="primary_diagnosis", description=None, version_label="v1")],
+        [CDEInfo(cde_id=2, cde_key="primary_diagnosis", description=None)],
         data_model_key="test-data-model",
         external_version_number="11.0.4",
     )

@@ -39,7 +39,7 @@ def test_cde_info_defaults_to_pv_type() -> None:
     Then: it defaults to PV (existing-code behavior preserved)
     """
     # Given: no cde_type was passed explicitly (negative assertion: not yet refined)
-    info = CDEInfo(cde_id=1, cde_key="diagnosis", description=None, version_label="1")
+    info = CDEInfo(cde_id=1, cde_key="diagnosis", description=None)
     assert info.cde_type != CdeType.PASSTHROUGH
 
     # When / Then
@@ -57,7 +57,6 @@ def test_cde_info_accepts_explicit_type() -> None:
         cde_id=2,
         cde_key="notes",
         description="free-text notes",
-        version_label="1",
         cde_type=CdeType.PASSTHROUGH,
     )
 

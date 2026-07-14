@@ -21,9 +21,10 @@ This data is fetched from the Data Model Store API during Stage 3 (Harmonization
 
 ## Decision
 
-### 1. Persist PV Manifest to Disk
+### 1. Persist PV Manifest to Durable Workflow Storage
 
-After fetching PVs in Stage 3, we persist them to disk alongside the harmonization manifest:
+After fetching PVs in Stage 3, we persist them through the workflow storage
+boundary alongside the harmonization manifest:
 
 **File Type**: `PV_MANIFEST` (JSON format)
 
@@ -31,7 +32,7 @@ After fetching PVs in Stage 3, we persist them to disk alongside the harmonizati
 ```json
 {
   "data_model_key": "cptac",
-  "version_label": "v2.1",
+  "external_version_number": "11.0.4",
   "column_to_cde_key": {
     "primary_diagnosis": "primary_diagnosis_cde",
     "tissue_type": "tissue_or_organ_of_origin"
@@ -43,9 +44,14 @@ After fetching PVs in Stage 3, we persist them to disk alongside the harmonizati
 }
 ```
 
+`external_version_number` is the only data-model version identity in this
+artifact. It records which external model version supplied the PV snapshot;
+cache recovery itself uses the persisted column mappings and PV values.
+
 ### 2. Lazy Loading on Cache Miss
 
-When Stage 4 or Stage 5 needs PV data and the cache is empty:
+When Stage 4 or Stage 5 needs PV data and the cache is empty, it reloads the
+durable manifest:
 
 ```python
 cache = get_session_cache(file_id)
