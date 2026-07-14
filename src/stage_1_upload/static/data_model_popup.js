@@ -66,12 +66,9 @@ function _compareVersions(a, b) {
  * the default (latest) sits last in the list the picker opens upward.
  */
 function _sortVersionsDescending(versions) {
-  return [...versions].sort((a, b) => {
-    const aNumber = Number(a.version_number);
-    const bNumber = Number(b.version_number);
-    if (Number.isFinite(aNumber) && Number.isFinite(bNumber)) return bNumber - aNumber;
-    return _compareVersions(b.version_label, a.version_label);
-  });
+  return [...versions].sort((a, b) => (
+    _compareVersions(b.external_version_number, a.external_version_number)
+  ));
 }
 
 function _getLatestVersion(versions) {
@@ -378,10 +375,7 @@ function _closeDropdown(wrap) {
 }
 
 function _versionDisplayLabel(version) {
-  if (version.external_version_number) {
-    return version.external_version_number;
-  }
-  return version.version_label || `v${version.version_number}`;
+  return version.external_version_number;
 }
 
 function _buildDialogDOM(dataModels) {
