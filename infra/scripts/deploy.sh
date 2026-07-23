@@ -85,9 +85,13 @@ ensure_deployable_git_state() {
 }
 
 init_tofu() {
-  log "Initializing OpenTofu backend for $ENV_NAME"
+  local state_bucket
+  state_bucket="$(resolve_state_bucket_name "$ENV_NAME")"
+  log "Initializing OpenTofu backend for $ENV_NAME (state bucket: $state_bucket)"
   tofu -chdir="$INFRA_DIR" init \
     -backend-config="$BACKEND_FILE" \
+    -backend-config="bucket=$state_bucket" \
+    -backend-config="region=$AWS_REGION_VALUE" \
     -input=false \
     -reconfigure
 }

@@ -1,5 +1,5 @@
-bucket       = "netrias-data-chord-tofu-state-084828580051-us-east-2"
+# bucket and region are resolved at deploy time from the active AWS account
+# and this environment's aws_region (see infra/scripts/lib.sh resolve_state_bucket_name).
 key          = "data-chord/staging/tofu.tfstate"
-region       = "us-east-2"
 encrypt      = true
 use_lockfile = true

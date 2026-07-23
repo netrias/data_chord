@@ -30,7 +30,10 @@ perf-staging base_url="":
 	url="{{base_url}}"; \
 	if [ -z "$url" ]; then url="${DATA_CHORD_STAGING_URL:-}"; fi; \
 	if [ -z "$url" ]; then \
-		tofu -chdir=infra init -backend-config=env/staging.backend.hcl -input=false >/dev/null; \
+		bucket="$(bash -c 'source infra/scripts/lib.sh && resolve_state_bucket_name staging')"; \
+		region="$(bash -c 'source infra/scripts/lib.sh && env_tfvar_value staging aws_region')"; \
+		tofu -chdir=infra init -backend-config=env/staging.backend.hcl \
+			-backend-config="bucket=$bucket" -backend-config="region=$region" -input=false >/dev/null; \
 		url="$(tofu -chdir=infra output -raw app_url)"; \
 	fi; \
 	echo "Running staging performance journey against $url"; \

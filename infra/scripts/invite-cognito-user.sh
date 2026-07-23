@@ -45,10 +45,14 @@ if [[ -n "$MESSAGE_ACTION" && "$MESSAGE_ACTION" != "resend" ]]; then
   fail "Unknown action: $MESSAGE_ACTION"
 fi
 
+STATE_BUCKET="$(resolve_state_bucket_name "$ENV_NAME")"
+
 log "Using AWS profile: $AWS_PROFILE"
-log "Initializing OpenTofu backend for $ENV_NAME"
+log "Initializing OpenTofu backend for $ENV_NAME (state bucket: $STATE_BUCKET)"
 tofu -chdir="$INFRA_DIR" init \
   -backend-config="$BACKEND_FILE" \
+  -backend-config="bucket=$STATE_BUCKET" \
+  -backend-config="region=$AWS_REGION_VALUE" \
   -input=false \
   -reconfigure >/dev/null
 

@@ -6,16 +6,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 ENV_NAME="$(require_env_name "${1:-}")"
-BACKEND_FILE="$(backend_config_path "$ENV_NAME")"
 
 require_command aws
-[[ -f "$BACKEND_FILE" ]] || fail "Missing backend config: $BACKEND_FILE"
 
-BUCKET="$(backend_value "$BACKEND_FILE" bucket)"
-REGION="$(backend_value "$BACKEND_FILE" region)"
-
-[[ -n "$BUCKET" ]] || fail "Backend bucket is missing in $BACKEND_FILE"
-[[ -n "$REGION" ]] || fail "Backend region is missing in $BACKEND_FILE"
+REGION="$(env_tfvar_value "$ENV_NAME" aws_region)"
+[[ -n "$REGION" ]] || fail "aws_region is missing for environment: $ENV_NAME"
+BUCKET="$(resolve_state_bucket_name "$ENV_NAME")"
 
 if aws s3api head-bucket --bucket "$BUCKET" >/dev/null 2>&1; then
   log "State bucket exists: $BUCKET"

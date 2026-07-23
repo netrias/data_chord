@@ -74,6 +74,25 @@ backend_value() {
   tfvar_value "$1" "$2"
 }
 
+resolve_aws_account_id() {
+  local account_id
+  account_id="$(aws sts get-caller-identity --query Account --output text 2>/dev/null)" || true
+  [[ -n "$account_id" && "$account_id" != "None" ]] \
+    || fail "Unable to determine AWS account id via 'aws sts get-caller-identity'. Check AWS_PROFILE/credentials."
+  printf '%s\n' "$account_id"
+}
+
+# State bucket name is derived, not hardcoded, so the same env config works
+# against whichever AWS account is currently authenticated.
+resolve_state_bucket_name() {
+  local env_name="$1"
+  local account_id region
+  account_id="$(resolve_aws_account_id)"
+  region="$(env_tfvar_value "$env_name" aws_region)"
+  [[ -n "$region" ]] || fail "aws_region is missing in ${env_name}.tfvars or common.tfvars"
+  printf 'netrias-data-chord-tofu-state-%s-%s\n' "$account_id" "$region"
+}
+
 tofu_output() {
   local output_name="$1"
   local output_json
