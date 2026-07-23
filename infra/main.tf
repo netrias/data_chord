@@ -97,47 +97,6 @@ resource "aws_security_group" "task" {
   tags = local.common_tags
 }
 
-resource "aws_security_group" "secrets_endpoint" {
-  name        = "${local.name_prefix}-secrets-endpoint"
-  description = "Secrets Manager VPC endpoint access from Data Chord tasks"
-  vpc_id      = var.vpc_id
-
-  ingress {
-    description     = "Secrets Manager HTTPS from app tasks"
-    from_port       = 443
-    to_port         = 443
-    protocol        = "tcp"
-    security_groups = [aws_security_group.task.id]
-  }
-
-  dynamic "ingress" {
-    for_each = var.additional_secretsmanager_client_security_group_ids
-
-    content {
-      description     = "Secrets Manager HTTPS from additional client"
-      from_port       = 443
-      to_port         = 443
-      protocol        = "tcp"
-      security_groups = [ingress.value]
-    }
-  }
-
-  egress {
-    description = "Outbound"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = local.common_tags
-}
-
-resource "aws_vpc_endpoint_security_group_association" "secretsmanager_tasks" {
-  vpc_endpoint_id   = var.secretsmanager_vpc_endpoint_id
-  security_group_id = aws_security_group.secrets_endpoint.id
-}
-
 resource "aws_s3_bucket" "workflow" {
   bucket = "${local.name_prefix}-workflow-${data.aws_caller_identity.current.account_id}-${var.aws_region}"
 

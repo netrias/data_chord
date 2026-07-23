@@ -7,33 +7,36 @@ source "$SCRIPT_DIR/lib.sh"
 
 usage() {
   cat >&2 <<'EOF'
-Usage: infra/scripts/invite-cognito-user.sh <staging|prod> <email> [resend]
+Usage: infra/scripts/invite-cognito-user.sh <target> <staging|prod> <email> [resend]
 
 Creates a Cognito user for Data Chord. Cognito emails the user a temporary
-password. Pass "resend" as the third argument to resend the invitation for an
+password. Pass "resend" as the fourth argument to resend the invitation for an
 existing user.
 EOF
 }
 
-ENV_NAME="$(require_env_name "${1:-}")"
-EMAIL="${2:-}"
-MESSAGE_ACTION="${3:-}"
-BACKEND_FILE="$(backend_config_path "$ENV_NAME")"
-COMMON_TFVARS_FILE="$(common_tfvars_path)"
-ENV_TFVARS_FILE="$(env_tfvars_path "$ENV_NAME")"
-
-export AWS_PROFILE="${AWS_PROFILE:-strides}"
-AWS_REGION_VALUE="$(env_tfvar_value "$ENV_NAME" aws_region)"
-[[ -n "$AWS_REGION_VALUE" ]] || fail "aws_region is missing in $COMMON_TFVARS_FILE or $ENV_TFVARS_FILE"
-export AWS_REGION="$AWS_REGION_VALUE"
-export AWS_DEFAULT_REGION="$AWS_REGION_VALUE"
+TARGET_NAME="$(require_deployment_target "${1:-}")"
+STAGE_NAME="$(require_stage_name "${2:-}")"
+EMAIL="${3:-}"
+MESSAGE_ACTION="${4:-}"
+BACKEND_FILE="$(backend_config_path "$TARGET_NAME" "$STAGE_NAME")"
+COMMON_TFVARS_FILE="$(common_tfvars_path "$TARGET_NAME")"
+STAGE_TFVARS_FILE="$(stage_tfvars_path "$TARGET_NAME" "$STAGE_NAME")"
 
 require_command aws
 require_command tofu
+require_aws_profile
 
 [[ -f "$BACKEND_FILE" ]] || fail "Missing backend config: $BACKEND_FILE"
 [[ -f "$COMMON_TFVARS_FILE" ]] || fail "Missing common config: $COMMON_TFVARS_FILE"
-[[ -f "$ENV_TFVARS_FILE" ]] || fail "Missing env config: $ENV_TFVARS_FILE"
+[[ -f "$STAGE_TFVARS_FILE" ]] || fail "Missing stage config: $STAGE_TFVARS_FILE"
+
+assert_expected_aws_account "$TARGET_NAME"
+
+AWS_REGION_VALUE="$(deployment_tfvar_value "$TARGET_NAME" "$STAGE_NAME" aws_region)"
+[[ -n "$AWS_REGION_VALUE" ]] || fail "aws_region is missing in $COMMON_TFVARS_FILE or $STAGE_TFVARS_FILE"
+export AWS_REGION="$AWS_REGION_VALUE"
+export AWS_DEFAULT_REGION="$AWS_REGION_VALUE"
 
 if [[ -z "$EMAIL" || "$EMAIL" != *@*.* ]]; then
   usage
@@ -45,8 +48,8 @@ if [[ -n "$MESSAGE_ACTION" && "$MESSAGE_ACTION" != "resend" ]]; then
   fail "Unknown action: $MESSAGE_ACTION"
 fi
 
-log "Using AWS profile: $AWS_PROFILE"
-log "Initializing OpenTofu backend for $ENV_NAME"
+log "Deployment target: $TARGET_NAME/$STAGE_NAME (AWS profile: $AWS_PROFILE)"
+log "Initializing OpenTofu backend for $TARGET_NAME/$STAGE_NAME"
 tofu -chdir="$INFRA_DIR" init \
   -backend-config="$BACKEND_FILE" \
   -input=false \
@@ -56,7 +59,7 @@ USER_POOL_ID="$(tofu_output cognito_user_pool_id)"
 APP_URL="$(tofu_output app_url)"
 GET_USER_OUTPUT=""
 USER_STATUS=""
-[[ -n "$USER_POOL_ID" ]] || fail "Cognito user pool is not available. Deploy $ENV_NAME first."
+[[ -n "$USER_POOL_ID" ]] || fail "Cognito user pool is not available. Deploy $TARGET_NAME/$STAGE_NAME first."
 
 if GET_USER_OUTPUT="$(aws cognito-idp admin-get-user \
   --user-pool-id "$USER_POOL_ID" \
@@ -66,7 +69,7 @@ if GET_USER_OUTPUT="$(aws cognito-idp admin-get-user \
   USER_STATUS="$GET_USER_OUTPUT"
 
   if [[ "$MESSAGE_ACTION" != "resend" ]]; then
-    log "User already exists in $ENV_NAME: $EMAIL ($USER_STATUS)"
+    log "User already exists in $TARGET_NAME/$STAGE_NAME: $EMAIL ($USER_STATUS)"
     [[ -z "$APP_URL" ]] || log "App URL: $APP_URL"
     exit 0
   fi
@@ -77,7 +80,7 @@ if GET_USER_OUTPUT="$(aws cognito-idp admin-get-user \
     fail "User is already confirmed: $EMAIL. Not resending an admin invite because that is only for temporary-password onboarding."
   fi
 
-  log "Resending Cognito invitation for $EMAIL in $ENV_NAME"
+  log "Resending Cognito invitation for $EMAIL in $TARGET_NAME/$STAGE_NAME"
   aws cognito-idp admin-create-user \
     --user-pool-id "$USER_POOL_ID" \
     --username "$EMAIL" \
@@ -89,7 +92,7 @@ else
     fail "Could not check Cognito user '$EMAIL': $GET_USER_OUTPUT"
   fi
 
-  log "Creating Cognito user for $EMAIL in $ENV_NAME"
+  log "Creating Cognito user for $EMAIL in $TARGET_NAME/$STAGE_NAME"
   aws cognito-idp admin-create-user \
     --user-pool-id "$USER_POOL_ID" \
     --username "$EMAIL" \

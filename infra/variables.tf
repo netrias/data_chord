@@ -16,6 +16,16 @@ variable "aws_region" {
   default     = "us-east-2"
 }
 
+variable "aws_account_id" {
+  description = "AWS account that owns this deployment target."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9]{12}$", var.aws_account_id))
+    error_message = "aws_account_id must be a 12-digit AWS account ID."
+  }
+}
+
 variable "vpc_id" {
   description = "Existing VPC id for the ALB and Fargate service."
   type        = string
@@ -24,25 +34,6 @@ variable "vpc_id" {
 variable "public_subnet_ids" {
   description = "Existing public subnet ids for the ALB and Fargate service. Use at least two availability zones."
   type        = list(string)
-}
-
-variable "secretsmanager_vpc_endpoint_id" {
-  description = "Existing Secrets Manager VPC endpoint id used by Fargate tasks to fetch NETRIAS_API_KEY."
-  type        = string
-}
-
-variable "additional_secretsmanager_client_security_group_ids" {
-  description = "Additional security groups allowed to reach the shared Secrets Manager VPC endpoint."
-  type        = set(string)
-  default     = []
-
-  validation {
-    condition = alltrue([
-      for security_group_id in var.additional_secretsmanager_client_security_group_ids :
-      can(regex("^sg-[0-9a-f]+$", security_group_id))
-    ])
-    error_message = "additional_secretsmanager_client_security_group_ids must contain valid security group ids."
-  }
 }
 
 variable "certificate_arn" {

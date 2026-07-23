@@ -74,9 +74,9 @@ Use the staging journey for deployed user-experience timing once you are on the
 company VPN and the timing instrumentation has been deployed:
 
 ```bash
-just perf-staging
+AWS_PROFILE=strides just perf-staging strides
 # or pass an explicit URL:
-just perf-staging https://your-staging-host.example.com
+just perf-staging strides https://your-staging-host.example.com
 ```
 
 The staging journey drives the real app flow and prints upload, analyze,

@@ -5,11 +5,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
-ENV_NAME="$(require_env_name "${1:-}")"
-BACKEND_FILE="$(backend_config_path "$ENV_NAME")"
+TARGET_NAME="$(require_deployment_target "${1:-}")"
+STAGE_NAME="$(require_stage_name "${2:-}")"
+BACKEND_FILE="$(backend_config_path "$TARGET_NAME" "$STAGE_NAME")"
 
 require_command aws
+require_aws_profile
 [[ -f "$BACKEND_FILE" ]] || fail "Missing backend config: $BACKEND_FILE"
+assert_expected_aws_account "$TARGET_NAME"
 
 BUCKET="$(backend_value "$BACKEND_FILE" bucket)"
 REGION="$(backend_value "$BACKEND_FILE" region)"
@@ -54,4 +57,4 @@ aws s3api put-bucket-encryption \
   '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}' \
   >/dev/null
 
-log "State backend is ready: s3://$BUCKET"
+log "State backend is ready for $TARGET_NAME/$STAGE_NAME: s3://$BUCKET"

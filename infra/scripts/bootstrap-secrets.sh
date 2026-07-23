@@ -5,17 +5,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
-ENV_NAME="$(require_env_name "${1:-}")"
-MODE="${2:-ensure}"
-COMMON_TFVARS_FILE="$(common_tfvars_path)"
-TFVARS_FILE="$(env_tfvars_path "$ENV_NAME")"
+TARGET_NAME="$(require_deployment_target "${1:-}")"
+STAGE_NAME="$(require_stage_name "${2:-}")"
+MODE="${3:-ensure}"
+COMMON_TFVARS_FILE="$(common_tfvars_path "$TARGET_NAME")"
+TFVARS_FILE="$(stage_tfvars_path "$TARGET_NAME" "$STAGE_NAME")"
 
 require_command aws
+require_aws_profile
 [[ -f "$COMMON_TFVARS_FILE" ]] || fail "Missing common config: $COMMON_TFVARS_FILE"
 [[ -f "$TFVARS_FILE" ]] || fail "Missing env config: $TFVARS_FILE"
+assert_expected_aws_account "$TARGET_NAME"
 
-SECRET_NAME="$(env_tfvar_value "$ENV_NAME" netrias_api_key_secret_name)"
-REGION="$(env_tfvar_value "$ENV_NAME" aws_region)"
+SECRET_NAME="$(deployment_tfvar_value "$TARGET_NAME" "$STAGE_NAME" netrias_api_key_secret_name)"
+REGION="$(deployment_tfvar_value "$TARGET_NAME" "$STAGE_NAME" aws_region)"
 
 [[ -n "$SECRET_NAME" ]] || fail "netrias_api_key_secret_name is missing in $TFVARS_FILE"
 [[ -n "$REGION" ]] || fail "aws_region is missing in $COMMON_TFVARS_FILE or $TFVARS_FILE"

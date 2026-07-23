@@ -1,5 +1,6 @@
-project_name = "data-chord"
-aws_region   = "us-east-2"
+project_name   = "data-chord"
+aws_region     = "us-east-2"
+aws_account_id = "084828580051"
 
 vpc_id = "vpc-0fce4109b9575d124"
 public_subnet_ids = [
@@ -7,8 +8,6 @@ public_subnet_ids = [
   "subnet-06a392e3c0aed038e",
   "subnet-046ea5c040e6fd135",
 ]
-secretsmanager_vpc_endpoint_id = "vpce-09e34dd0835d4c005"
-
 certificate_arn  = ""
 domain_name      = ""
 hosted_zone_name = "netriasbdf.cloud"
