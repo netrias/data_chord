@@ -25,12 +25,12 @@ test-e2e:
 perf-e2e:
 	npm run perf:e2e
 
-perf-staging base_url="":
+perf-staging target base_url="":
 	@set -euo pipefail; \
 	url="{{base_url}}"; \
 	if [ -z "$url" ]; then url="${DATA_CHORD_STAGING_URL:-}"; fi; \
 	if [ -z "$url" ]; then \
-		tofu -chdir=infra init -backend-config=env/staging.backend.hcl -input=false >/dev/null; \
+		tofu -chdir=infra init -backend-config=env/{{target}}/staging.backend.hcl -input=false >/dev/null; \
 		url="$(tofu -chdir=infra output -raw app_url)"; \
 	fi; \
 	echo "Running staging performance journey against $url"; \
@@ -59,38 +59,42 @@ js-check:
 infra-fmt:
 	tofu -chdir=infra fmt -recursive
 
+infra-config-test:
+	bash infra/tests/deployment-config-test.sh
+
 infra-validate:
+	bash infra/tests/deployment-config-test.sh
 	tofu -chdir=infra validate
 
-infra-plan env:
-	infra/scripts/deploy.sh {{env}} plan
+infra-plan target stage:
+	infra/scripts/deploy.sh {{target}} {{stage}} plan
 
-infra-apply env:
-	infra/scripts/deploy.sh {{env}} deploy-infra
+infra-apply target stage:
+	infra/scripts/deploy.sh {{target}} {{stage}} deploy-infra
 
-deploy env:
-	infra/scripts/deploy.sh {{env}}
+deploy target stage:
+	infra/scripts/deploy.sh {{target}} {{stage}}
 
-deploy-app env:
-	infra/scripts/deploy.sh {{env}} deploy-app
+deploy-app target stage:
+	infra/scripts/deploy.sh {{target}} {{stage}} deploy-app
 
-deploy-infra env:
-	infra/scripts/deploy.sh {{env}} deploy-infra
+deploy-infra target stage:
+	infra/scripts/deploy.sh {{target}} {{stage}} deploy-infra
 
-deploy-plan env:
-	infra/scripts/deploy.sh {{env}} plan
+deploy-plan target stage:
+	infra/scripts/deploy.sh {{target}} {{stage}} plan
 
-deploy-status env:
-	infra/scripts/deploy.sh {{env}} status
+deploy-status target stage:
+	infra/scripts/deploy.sh {{target}} {{stage}} status
 
-deploy-logs env:
-	infra/scripts/deploy.sh {{env}} logs
+deploy-logs target stage:
+	infra/scripts/deploy.sh {{target}} {{stage}} logs
 
-deploy-build env:
-	infra/scripts/deploy.sh {{env}} build
+deploy-build target stage:
+	infra/scripts/deploy.sh {{target}} {{stage}} build
 
-invite-user env email:
-	infra/scripts/invite-cognito-user.sh {{env}} {{email}}
+invite-user target stage email:
+	infra/scripts/invite-cognito-user.sh {{target}} {{stage}} {{email}}
 
-resend-user-invite env email:
-	infra/scripts/invite-cognito-user.sh {{env}} {{email}} resend
+resend-user-invite target stage email:
+	infra/scripts/invite-cognito-user.sh {{target}} {{stage}} {{email}} resend

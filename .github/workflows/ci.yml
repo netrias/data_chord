@@ -7,6 +7,17 @@ on:
     branches: [main]
 
 jobs:
+  infra-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Check deployment configuration routing
+        run: bash infra/tests/deployment-config-test.sh
+
+      - name: Check deployment script syntax
+        run: bash -n infra/scripts/*.sh infra/tests/*.sh
+
   js-check:
     runs-on: ubuntu-latest
     steps:

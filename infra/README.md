@@ -14,21 +14,42 @@ This stack is intentionally small. It creates:
 
 The app uses local container disk only as scratch. Durable workflow files go to S3 through `DATA_CHORD_STORAGE=s3`.
 
-## Environments
+## Deployment targets and stages
 
-Deployment config is checked in under `infra/env`.
+A deployment is identified by two explicit values:
 
-1. `infra/env/common.tfvars`
+1. The **target** selects the AWS account, network, DNS zone, and state bucket.
+   Checked-in targets are `strides` and `netrias`.
 
-2. `infra/env/staging.tfvars`
+2. The **stage** selects application settings such as secret names, DNS labels,
+   scaling, and alerts. Supported stages are `staging` and `prod`.
 
-3. `infra/env/prod.tfvars`
+Configuration is grouped by target:
 
-Each environment has a matching S3 backend config:
+```text
+infra/env/
+  strides/
+    common.tfvars
+    staging.tfvars
+    staging.backend.hcl
+    prod.tfvars
+    prod.backend.hcl
+  netrias/
+    common.tfvars
+    staging.tfvars
+    staging.backend.hcl
+    prod.tfvars
+    prod.backend.hcl
+```
 
-1. `infra/env/staging.backend.hcl`
+Each target's `common.tfvars` contains its expected AWS account ID. Deployment
+scripts compare that value with `sts:GetCallerIdentity` before they access the
+state bucket, secrets, or application infrastructure. `AWS_PROFILE` is required;
+there is no implicit default account.
 
-2. `infra/env/prod.backend.hcl`
+The Netrias target expects the public Route 53 zone `apps.netrias.com` to exist
+and be delegated before its first deployment. The stack manages the application
+records and ACM certificate beneath that zone.
 
 ## Deploy
 
@@ -41,19 +62,22 @@ git commit -> immutable image tag -> OpenTofu task definition -> ECS rollout
 CodeBuild does not update ECS directly. OpenTofu records the image tag in the
 task definition, so OpenTofu state and ECS agree on what is running.
 
-Use one command and specify the environment explicitly:
+Use one command and specify both target and stage:
 
 ```bash
-AWS_PROFILE=strides NETRIAS_API_KEY='replace-with-key' just deploy staging
+AWS_PROFILE=strides NETRIAS_API_KEY='replace-with-key' just deploy strides staging
 ```
 
-or:
+The equivalent Netrias deployment uses a profile that assumes the Netrias
+`DataChordDeployer` role:
 
 ```bash
-AWS_PROFILE=strides NETRIAS_API_KEY='replace-with-key' just deploy prod
+AWS_PROFILE=netrias-data-chord-deployer \
+  NETRIAS_API_KEY='replace-with-key' \
+  just deploy netrias staging
 ```
 
-`NETRIAS_API_KEY` is only required when the environment secret does not exist
+`NETRIAS_API_KEY` is only required when the stage secret does not exist
 yet, or when you want the deploy script to update it.
 
 The deploy script is idempotent. It creates or updates:
@@ -70,20 +94,20 @@ The deploy script is idempotent. It creates or updates:
 
 6. The OpenTofu-managed ECS task definition and rollout.
 
-`just deploy <env>` and `just deploy-app <env>` both build the current pushed
-Git commit, push only the short commit SHA image tag, apply OpenTofu with
-`image_tag=<sha>`, and then watch the ECS rollout.
+`just deploy <target> <stage>` and `just deploy-app <target> <stage>` both build
+the current pushed Git commit, push only the short commit SHA image tag, apply
+OpenTofu with `image_tag=<sha>`, and then watch the ECS rollout.
 
 Use an app-only deploy for normal code changes:
 
 ```bash
-AWS_PROFILE=strides just deploy-app staging
+AWS_PROFILE=strides just deploy-app strides staging
 ```
 
 Use an infra-only deploy when the image should stay the same:
 
 ```bash
-AWS_PROFILE=strides just deploy-infra staging
+AWS_PROFILE=strides just deploy-infra strides staging
 ```
 
 Infra-only deploys reuse the currently deployed ECS image tag. If there is no
@@ -91,23 +115,24 @@ current ECS service yet, set `DATA_CHORD_IMAGE_TAG` to an existing immutable ECR
 tag:
 
 ```bash
-AWS_PROFILE=strides DATA_CHORD_IMAGE_TAG=abc123def456 just deploy-infra staging
+AWS_PROFILE=strides DATA_CHORD_IMAGE_TAG=abc123def456 \
+  just deploy-infra strides staging
 ```
 
 ## Alerting
 
-Each environment creates its own CloudWatch alarms, EventBridge failure rules,
-and SNS topic. Alert names and messages include the environment name, for
+Each target and stage creates its own CloudWatch alarms, EventBridge failure
+rules, and SNS topic. Alert names and messages include the stage name, for
 example `STAGING` or `PROD`, so staging failures are easy to separate from
 production failures.
 
 Subscribe email recipients by setting `alert_email_addresses` in the matching
-environment tfvars file or with a deploy-time variable. AWS sends each address a
+stage tfvars file or with a deploy-time variable. AWS sends each address a
 confirmation email before it receives alerts.
 
-Production is the only environment subscribed by default. Staging still has
-alarms for manual inspection, but it does not send email unless a recipient is
-explicitly added to `infra/env/staging.tfvars`.
+Production is the only stage subscribed by default. Staging still has alarms for
+manual inspection, but it does not send email unless a recipient is explicitly
+added to the target's `staging.tfvars`.
 
 Only outage and user-visible failure alarms publish to email. Warning alarms
 such as high CPU, high memory, high response time, and app ERROR logs are kept
@@ -116,11 +141,11 @@ email, so deploys do not generate a recovery-message burst.
 
 ## Optional VPN Auth Bypass
 
-The HTTPS listener normally requires Cognito login. An environment can also
+The HTTPS listener normally requires Cognito login. A deployed stage can also
 trust specific VPN egress CIDRs by storing a JSON array in Secrets Manager:
 
 ```text
-data-chord/<environment>/auth-bypass-cidrs
+data-chord/<stage>/auth-bypass-cidrs
 ```
 
 For example:
@@ -150,7 +175,8 @@ If your local changes are unrelated to the deploy, you can bypass only the dirty
 working-tree check:
 
 ```bash
-DATA_CHORD_DEPLOY_ALLOW_DIRTY=1 just deploy staging
+AWS_PROFILE=strides DATA_CHORD_DEPLOY_ALLOW_DIRTY=1 \
+  just deploy strides staging
 ```
 
 That still deploys the current committed `HEAD`. It does not upload or build
@@ -162,26 +188,23 @@ The deploy path does not push or deploy `latest`.
 ## Manual Prerequisite: CodeBuild GitHub Access
 
 CodeBuild needs read access to `netrias/data_chord` before it can clone the repo
-and build the Docker image. This credential is a one-time AWS account and region
-bootstrap step. It is not stored in OpenTofu, Secrets Manager, or this repo.
+and build the Docker image. Source authorization is a one-time setup in each AWS
+account and region; it is not stored in OpenTofu, Secrets Manager, or this repo.
 
-Current target:
+Verify source authorization with the profile for the selected target:
 
-1. AWS profile: `strides`
+```bash
+AWS_PROFILE=strides aws codebuild list-source-credentials \
+  --region us-east-2 \
+  --output table
+```
 
-2. AWS account: `084828580051`
+The Netrias account currently uses a GitHub CodeConnections credential. Before
+the first deployment, confirm that connection can clone `netrias/data_chord`.
 
-3. Region: `us-east-2`
-
-4. Repo: `netrias/data_chord`
-
-Create a GitHub personal access token with enough access to clone the private
-repo. The current preferred short-term path is a classic token, because the
-fine-grained token approval flow can block deployment. Use the smallest classic
-scope that works for private repo clone access; GitHub commonly requires the
-classic `repo` scope for private repositories, which is broader than ideal.
-
-Import the token into CodeBuild:
+If an account does not have a usable connection, an account administrator can
+import a GitHub token with the smallest scope that can clone this private
+repository:
 
 ```bash
 AWS_PROFILE=strides aws codebuild import-source-credentials \
@@ -192,61 +215,40 @@ AWS_PROFILE=strides aws codebuild import-source-credentials \
   --token "$GITHUB_TOKEN"
 ```
 
-Verify that CodeBuild sees the credential:
-
-```bash
-AWS_PROFILE=strides aws codebuild list-source-credentials \
-  --region us-east-2 \
-  --output table
-```
-
-Expected non-secret result:
-
-```text
-serverType: GITHUB
-authType: PERSONAL_ACCESS_TOKEN
-arn: arn:aws:codebuild:us-east-2:084828580051:token/github
-```
-
 When the GitHub token expires, create a replacement token and rerun the import
 command. `--should-overwrite` replaces the existing CodeBuild source credential
 for GitHub in this AWS account and region.
-
-A pending fine-grained token named `CodeBuild data_chord source` may exist in
-GitHub from the first setup attempt. Once the classic token is imported and a
-CodeBuild clone succeeds, delete that pending token so there is only one active
-credential path to maintain.
 
 ## Troubleshooting
 
 Plan without deploying:
 
 ```bash
-just deploy-plan staging
+AWS_PROFILE=strides just deploy-plan strides staging
 ```
 
 Inspect current deployment status:
 
 ```bash
-just deploy-status staging
+AWS_PROFILE=strides just deploy-status strides staging
 ```
 
 Show recent app and build logs:
 
 ```bash
-just deploy-logs staging
+AWS_PROFILE=strides just deploy-logs strides staging
 ```
 
 Build and push the image without applying OpenTofu or rolling ECS:
 
 ```bash
-just deploy-build staging
+AWS_PROFILE=strides just deploy-build strides staging
 ```
 
 Redeploy a code change through OpenTofu:
 
 ```bash
-just deploy-app staging
+AWS_PROFILE=strides just deploy-app strides staging
 ```
 
 ## Giving Users Access
@@ -254,10 +256,10 @@ just deploy-app staging
 Cognito is configured so only admins can create users. Invite a user with:
 
 ```bash
-AWS_PROFILE=strides just invite-user staging user@example.com
+AWS_PROFILE=strides just invite-user strides staging user@example.com
 ```
 
-For production, use `prod` instead of `staging`.
+For another target or stage, change both explicit arguments.
 
 The command creates the Cognito user and Cognito emails them a temporary
 password. The email includes the Data Chord URL, a short description of the
@@ -273,7 +275,7 @@ If the user already exists and needs a fresh temporary password email, resend
 the invitation with:
 
 ```bash
-AWS_PROFILE=strides just resend-user-invite staging user@example.com
+AWS_PROFILE=strides just resend-user-invite strides staging user@example.com
 ```
 
 The resend command is only for users who are still in Cognito's temporary
