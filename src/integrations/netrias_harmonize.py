@@ -148,7 +148,7 @@ class HarmonizeService:
         netrias_result = self._client.harmonize(
             source_path=file_path,
             manifest=cde_map.to_payload(),
-            data_commons_key=data_model_key,
+            target_schema=data_model_key,
             external_version_number=external_version_number,
             output_path=output_path,
             sheet_name=sheet_name,

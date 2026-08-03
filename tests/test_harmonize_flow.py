@@ -267,7 +267,7 @@ def test_harmonize_sends_source_file_and_column_keyed_manifest(tmp_path: Path) -
     assert sdk_keys == ["col_0001"]
     assert sdk_manifest["column_mappings"]["col_0001"]["alternatives"] == []
     assert harmonize_kwargs["source_path"].name == "dupes.csv"
-    assert harmonize_kwargs["data_commons_key"] == TEST_TARGET_SCHEMA
+    assert harmonize_kwargs["target_schema"] == TEST_TARGET_SCHEMA
     assert harmonize_kwargs["external_version_number"] == "11.0.4"
 
 
