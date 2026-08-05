@@ -37,7 +37,6 @@ variable "application_role_path" {
 variable "environment" {
   description = "Deployment environment name, such as staging or prod."
   type        = string
-  default     = "staging"
 
   validation {
     condition     = contains(["dev", "qa", "staging", "prod"], var.environment)

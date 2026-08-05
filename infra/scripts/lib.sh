@@ -29,17 +29,26 @@ require_target_name() {
 }
 
 require_stage_name() {
-  local target_name="$1"
-  local stage_name="${2:-}"
+  local stage_name="${1:-}"
   case "$stage_name" in
     dev | qa | staging | prod)
-      [[ -f "$(stage_tfvars_path "$target_name" "$stage_name")" ]] || fail "Missing stage config: $(stage_tfvars_path "$target_name" "$stage_name")"
       printf '%s\n' "$stage_name"
       ;;
     *)
       fail "Choose a stage: dev, qa, staging, or prod."
       ;;
   esac
+}
+
+require_configured_deployment() {
+  local target_name="$1"
+  local stage_name="$2"
+  local common_file stage_file
+
+  common_file="$(common_tfvars_path "$target_name")"
+  stage_file="$(stage_tfvars_path "$target_name" "$stage_name")"
+  [[ -f "$common_file" ]] || fail "Missing target application config: $common_file"
+  [[ -f "$stage_file" ]] || fail "Data Chord is not configured for $target_name/$stage_name."
 }
 
 require_command() {
@@ -58,33 +67,8 @@ stage_tfvars_path() {
   printf '%s/env/%s/%s.tfvars\n' "$INFRA_DIR" "$1" "$2"
 }
 
-tfvar_value() {
-  local file="$1"
-  local key="$2"
-  awk -F= -v key="$key" '
-    $1 ~ "^[[:space:]]*" key "[[:space:]]*$" {
-      value = $2
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
-      gsub(/^"|"$/, "", value)
-      print value
-      exit
-    }
-  ' "$file"
-}
-
-deployment_tfvar_value() {
-  local target_name="$1"
-  local stage_name="$2"
-  local key="$3"
-  local stage_file common_file value
-
-  stage_file="$(stage_tfvars_path "$target_name" "$stage_name")"
-  common_file="$(common_tfvars_path "$target_name")"
-  value="$(tfvar_value "$stage_file" "$key")"
-  if [[ -z "$value" && -f "$common_file" ]]; then
-    value="$(tfvar_value "$common_file" "$key")"
-  fi
-  printf '%s\n' "$value"
+netrias_api_key_secret_name_for() {
+  printf 'data-chord/%s/netrias-api-key\n' "$1"
 }
 
 target_value() {

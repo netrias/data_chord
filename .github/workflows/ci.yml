@@ -30,7 +30,9 @@ jobs:
         run: tofu -chdir=infra test
 
       - name: Test deployment contract
-        run: bash infra/tests/deployment_contract_test.sh
+        run: |
+          bash infra/tests/deployment_contract_test.sh
+          bash infra/tests/deployment_flow_test.sh
 
       - name: Check shell syntax
         run: bash -n infra/scripts/*.sh infra/tests/*.sh

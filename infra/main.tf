@@ -7,6 +7,10 @@ data "aws_caller_identity" "current" {
   }
 }
 
+data "aws_iam_policy" "application_role_boundary" {
+  arn = var.application_role_boundary_arn
+}
+
 data "aws_secretsmanager_secret" "netrias_api_key" {
   name = var.netrias_api_key_secret_name
 }
@@ -535,7 +539,7 @@ resource "aws_cloudwatch_metric_alarm" "ecs_memory_high" {
 resource "aws_iam_role" "application_task_execution" {
   name                 = "${local.name_prefix}-application-task-exec"
   path                 = var.application_role_path
-  permissions_boundary = var.application_role_boundary_arn
+  permissions_boundary = data.aws_iam_policy.application_role_boundary.arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -575,7 +579,7 @@ resource "aws_iam_role_policy" "application_task_execution_secrets" {
 resource "aws_iam_role" "application_task" {
   name                 = "${local.name_prefix}-application-task"
   path                 = var.application_role_path
-  permissions_boundary = var.application_role_boundary_arn
+  permissions_boundary = data.aws_iam_policy.application_role_boundary.arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -1071,7 +1075,7 @@ resource "aws_sns_topic_policy" "alerts" {
 resource "aws_iam_role" "application_build" {
   name                 = "${local.name_prefix}-application-build"
   path                 = var.application_role_path
-  permissions_boundary = var.application_role_boundary_arn
+  permissions_boundary = data.aws_iam_policy.application_role_boundary.arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

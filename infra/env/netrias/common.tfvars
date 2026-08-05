@@ -2,9 +2,9 @@ project_name = "data-chord"
 
 vpc_id = "vpc-08c111f13ad3e8b44"
 public_subnet_ids = [
-  "subnet-048dc428f9192baff",
-  "subnet-0d468895242300491",
-  "subnet-0aa3315367c653ff2",
+  "subnet-048dc758402e95744",
+  "subnet-0d468bc4f14a6ac33",
+  "subnet-0aa3311feda432c84",
 ]
 secretsmanager_vpc_endpoint_id = ""
 

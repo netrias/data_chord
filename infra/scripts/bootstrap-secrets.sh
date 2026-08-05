@@ -6,20 +6,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 TARGET_NAME="$(require_target_name "${1:-}")"
-STAGE_NAME="$(require_stage_name "$TARGET_NAME" "${2:-}")"
+STAGE_NAME="$(require_stage_name "${2:-}")"
+require_configured_deployment "$TARGET_NAME" "$STAGE_NAME"
 MODE="${3:-ensure}"
-COMMON_TFVARS_FILE="$(common_tfvars_path "$TARGET_NAME")"
-TFVARS_FILE="$(stage_tfvars_path "$TARGET_NAME" "$STAGE_NAME")"
 
 require_command aws
 require_deployer_identity "$TARGET_NAME"
-[[ -f "$COMMON_TFVARS_FILE" ]] || fail "Missing common config: $COMMON_TFVARS_FILE"
-[[ -f "$TFVARS_FILE" ]] || fail "Missing env config: $TFVARS_FILE"
 
-SECRET_NAME="$(deployment_tfvar_value "$TARGET_NAME" "$STAGE_NAME" netrias_api_key_secret_name)"
+SECRET_NAME="$(netrias_api_key_secret_name_for "$STAGE_NAME")"
 REGION="$(target_value "$TARGET_NAME" aws_region)"
 
-[[ -n "$SECRET_NAME" ]] || fail "netrias_api_key_secret_name is missing in $TFVARS_FILE"
 [[ -n "$REGION" ]] || fail "aws_region is missing in $(target_config_path "$TARGET_NAME")"
 
 if aws secretsmanager describe-secret --region "$REGION" --secret-id "$SECRET_NAME" >/dev/null 2>&1; then

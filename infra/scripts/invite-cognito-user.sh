@@ -10,13 +10,14 @@ usage() {
 Usage: infra/scripts/invite-cognito-user.sh <bdf|netrias> <dev|qa|staging|prod> <email> [resend]
 
 Creates a Cognito user for Data Chord. Cognito emails the user a temporary
-password. Pass "resend" as the third argument to resend the invitation for an
+password. Pass "resend" as the fourth argument to resend the invitation for an
 existing user.
 EOF
 }
 
 TARGET_NAME="$(require_target_name "${1:-}")"
-STAGE_NAME="$(require_stage_name "$TARGET_NAME" "${2:-}")"
+STAGE_NAME="$(require_stage_name "${2:-}")"
+require_configured_deployment "$TARGET_NAME" "$STAGE_NAME"
 EMAIL="${3:-}"
 MESSAGE_ACTION="${4:-}"
 

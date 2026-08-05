@@ -6,7 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 TARGET_NAME="$(require_target_name "${1:-}")"
-STAGE_NAME="$(require_stage_name "$TARGET_NAME" "${2:-}")"
+STAGE_NAME="$(require_stage_name "${2:-}")"
+require_configured_deployment "$TARGET_NAME" "$STAGE_NAME"
 MODE="${3:-deploy}"
 TARGET_CONFIG_FILE="$(target_config_path "$TARGET_NAME")"
 COMMON_TFVARS_FILE="$(common_tfvars_path "$TARGET_NAME")"
@@ -31,6 +32,8 @@ tofu_args=(
   "-var=aws_region=$(target_value "$TARGET_NAME" aws_region)"
   "-var=application_role_boundary_arn=$(target_value "$TARGET_NAME" application_role_boundary_arn)"
   "-var=application_role_path=$(target_value "$TARGET_NAME" application_role_path)"
+  "-var=environment=$STAGE_NAME"
+  "-var=netrias_api_key_secret_name=$(netrias_api_key_secret_name_for "$STAGE_NAME")"
 )
 
 AUTH_BYPASS_CIDRS_SECRET_NAME="data-chord/$STAGE_NAME/auth-bypass-cidrs"
@@ -92,6 +95,32 @@ apply_stack() {
   require_immutable_image_tag "$image_tag"
   log "Applying OpenTofu stack for $TARGET_NAME/$STAGE_NAME with image tag $image_tag"
   tofu -chdir="$INFRA_DIR" apply -input=false -auto-approve "${tofu_args[@]}" "-var=image_tag=$image_tag"
+}
+
+apply_build_prerequisites() {
+  local image_tag="$1"
+  require_immutable_image_tag "$image_tag"
+  log "Creating missing build prerequisites for $TARGET_NAME/$STAGE_NAME"
+  tofu -chdir="$INFRA_DIR" apply \
+    -input=false \
+    -auto-approve \
+    "${tofu_args[@]}" \
+    "-var=image_tag=$image_tag" \
+    -target=aws_codebuild_project.app_image
+}
+
+ensure_build_prerequisites() {
+  local image_tag="$1"
+  local project_name
+
+  project_name="$(tofu_output codebuild_project_name)"
+  if [[ -n "$project_name" ]]; then
+    return 0
+  fi
+
+  apply_build_prerequisites "$image_tag"
+  project_name="$(tofu_output codebuild_project_name)"
+  [[ -n "$project_name" ]] || fail "Build prerequisites were applied, but the CodeBuild project output is still unavailable."
 }
 
 plan_stack() {
@@ -162,6 +191,26 @@ start_build() {
     --source-version "$commit" \
     --query "build.id" \
     --output text
+}
+
+ensure_image() {
+  local image_tag="$1"
+  local repository_url repository_name output build_id
+
+  repository_url="$(tofu_output ecr_repository_url)"
+  [[ -n "$repository_url" ]] || fail "ECR repository output is not available after the build-prerequisite apply."
+  repository_name="${repository_url##*/}"
+
+  if output="$(aws ecr describe-images --repository-name "$repository_name" --image-ids "imageTag=$image_tag" 2>&1)"; then
+    log "Immutable image already exists; reusing $repository_name:$image_tag"
+    return 0
+  fi
+  if [[ "$output" != *"ImageNotFoundException"* ]]; then
+    fail "Could not check ECR image '$repository_name:$image_tag': $output"
+  fi
+
+  build_id="$(start_build)"
+  watch_build "$build_id"
 }
 
 print_build_logs_hint() {
@@ -364,7 +413,7 @@ tail_logs() {
 }
 
 run_app_deploy() {
-  local build_id image_tag app_url
+  local image_tag app_url
 
   require_deployer_identity "$TARGET_NAME"
   log "Using AWS profile: $AWS_PROFILE"
@@ -374,8 +423,8 @@ run_app_deploy() {
   load_auth_bypass_cidrs
   init_tofu "$TARGET_NAME" "$STAGE_NAME"
 
-  build_id="$(start_build)"
-  watch_build "$build_id"
+  ensure_build_prerequisites "$image_tag"
+  ensure_image "$image_tag"
   apply_stack "$image_tag"
   watch_ecs_rollout
 
@@ -422,10 +471,10 @@ run_plan() {
 }
 
 case "$MODE" in
-  deploy | deploy-app | app)
+  deploy)
     run_app_deploy
     ;;
-  deploy-infra | infra)
+  deploy-infra)
     run_infra_deploy
     ;;
   plan)
