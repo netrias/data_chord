@@ -128,6 +128,14 @@ case " $args " in
   *" init "*)
     printf 'tofu init %s\n' "$args" >>"$MOCK_CALLS"
     ;;
+  *" state list "*)
+    printf 'tofu state-list %s\n' "$args" >>"$MOCK_CALLS"
+    if [[ "${MOCK_NO_STATE_FILE:-0}" == "1" ]]; then
+      printf 'No state file was found\n' >&2
+      exit 1
+    fi
+    [[ -z "${MOCK_STATE_ADDRESSES:-}" ]] || printf '%s\n' "$MOCK_STATE_ADDRESSES"
+    ;;
   *" output "*)
     output_name="${!#}"
     case "$output_name" in
@@ -194,6 +202,7 @@ run_first_deploy() {
       MOCK_CALLS="$calls_file" \
       MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
       MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+      MOCK_NO_STATE_FILE=1 \
       DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
       "$DEPLOY_SCRIPT" netrias staging deploy 2>&1
   )"; then
@@ -253,10 +262,12 @@ run_retry_after_image_build() {
     MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
     MOCK_FULL_APPLIED="$scenario_root/full-applied" \
     MOCK_IMAGE_EXISTS=1 \
+    MOCK_STATE_ADDRESSES=aws_s3_bucket.workflow \
     DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
     "$DEPLOY_SCRIPT" netrias staging deploy >/dev/null 2>&1
 
   assert_call_contains "tofu bootstrap-apply " "-target=aws_codebuild_project.app_image" "$calls_file"
+  assert_call_contains "tofu state-list " "state list" "$calls_file"
   assert_call_absent "aws start-build " "$calls_file"
   [[ -f "$scenario_root/full-applied" ]] || fail_test "Retry did not run the full application apply"
 }
@@ -354,6 +365,81 @@ run_existing_state_plan() {
   assert_call_contains "tofu plan " "-var=image_tag=deployed123456" "$calls_file"
 }
 
+run_legacy_state_guard() {
+  local legacy_addresses=(
+    aws_iam_role.task_execution
+    aws_iam_role_policy_attachment.task_execution
+    aws_iam_role_policy.task_execution_secrets
+    aws_iam_role.task
+    aws_iam_role_policy.task_workflow_storage
+    aws_iam_role.codebuild
+    aws_iam_role_policy.codebuild
+    aws_ecs_task_definition.app
+  )
+  local address calls_file scenario_root
+
+  for address in "${legacy_addresses[@]}"; do
+    scenario_root="$TEST_ROOT/legacy-${address//./-}"
+    calls_file="$scenario_root/calls"
+    mkdir -p "$scenario_root"
+    : >"$calls_file"
+
+    if PATH="$MOCK_BIN:$PATH" \
+      AWS_PROFILE=mock \
+      MOCK_ACCOUNT_ID=084828580051 \
+      MOCK_BUILD_READY="$scenario_root/build-ready" \
+      MOCK_CALLS="$calls_file" \
+      MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+      MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+      MOCK_STATE_ADDRESSES="$address" \
+      NETRIAS_API_KEY=guard-must-stop-before-secret-write \
+      DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+      "$DEPLOY_SCRIPT" bdf staging deploy >/dev/null 2>&1; then
+      fail_test "Normal deploy accepted legacy state address: $address"
+    fi
+
+    assert_call_absent "tofu bootstrap-apply " "$calls_file"
+    assert_call_absent "tofu full-apply " "$calls_file"
+    assert_call_absent "aws secret-write " "$calls_file"
+  done
+
+  scenario_root="$TEST_ROOT/legacy-infra-deploy"
+  calls_file="$scenario_root/calls"
+  mkdir -p "$scenario_root"
+  : >"$calls_file"
+  if PATH="$MOCK_BIN:$PATH" \
+    AWS_PROFILE=mock \
+    MOCK_ACCOUNT_ID=084828580051 \
+    MOCK_BUILD_READY="$scenario_root/build-ready" \
+    MOCK_CALLS="$calls_file" \
+    MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+    MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+    MOCK_STATE_ADDRESSES=aws_iam_role.codebuild \
+    NETRIAS_API_KEY=guard-must-stop-before-secret-write \
+    DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+    "$DEPLOY_SCRIPT" bdf staging deploy-infra >/dev/null 2>&1; then
+    fail_test "Infrastructure-only deploy accepted legacy state"
+  fi
+  assert_call_absent "tofu full-apply " "$calls_file"
+  assert_call_absent "aws secret-write " "$calls_file"
+
+  scenario_root="$TEST_ROOT/legacy-plan"
+  calls_file="$scenario_root/calls"
+  mkdir -p "$scenario_root"
+  : >"$calls_file"
+  PATH="$MOCK_BIN:$PATH" \
+    AWS_PROFILE=mock \
+    MOCK_ACCOUNT_ID=084828580051 \
+    MOCK_BUILD_READY="$scenario_root/build-ready" \
+    MOCK_CALLS="$calls_file" \
+    MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+    MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+    MOCK_STATE_ADDRESSES=aws_iam_role.codebuild \
+    DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+    "$DEPLOY_SCRIPT" bdf staging plan >/dev/null 2>&1
+  assert_call_contains "tofu plan " "-var=environment=staging" "$calls_file"
+}
+
 run_first_deploy
 run_failed_bootstrap
 run_retry_after_image_build
@@ -361,5 +447,6 @@ run_drifted_build_prerequisites
 run_empty_state_plan
 run_empty_state_infra_deploy_fails
 run_existing_state_plan
+run_legacy_state_guard
 
 printf 'Deployment flow tests passed.\n'

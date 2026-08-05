@@ -125,6 +125,32 @@ plan_stack() {
   tofu -chdir="$INFRA_DIR" plan -input=false "${tofu_args[@]}" "-var=image_tag=$image_tag"
 }
 
+require_application_state_handoff_complete() {
+  local state_addresses address
+
+  if ! state_addresses="$(tofu -chdir="$INFRA_DIR" state list 2>&1)"; then
+    if [[ "$state_addresses" == *"No state file was found"* ]]; then
+      return 0
+    fi
+    fail "Could not inspect application state before deploy: $state_addresses"
+  fi
+
+  while IFS= read -r address; do
+    case "$address" in
+      aws_iam_role.task_execution | \
+        aws_iam_role_policy_attachment.task_execution | \
+        aws_iam_role_policy.task_execution_secrets | \
+        aws_iam_role.task | \
+        aws_iam_role_policy.task_workflow_storage | \
+        aws_iam_role.codebuild | \
+        aws_iam_role_policy.codebuild | \
+        aws_ecs_task_definition.app)
+        fail "Legacy BDF application state is present. Complete the privileged saved-plan handoff in infra/README.md before deploy."
+        ;;
+    esac
+  done <<<"$state_addresses"
+}
+
 ensure_secret() {
   "$SCRIPT_DIR/bootstrap-secrets.sh" "$TARGET_NAME" "$STAGE_NAME" ensure
 }
@@ -427,9 +453,10 @@ run_app_deploy() {
   log "Using AWS profile: $AWS_PROFILE"
   ensure_deployable_git_state
   image_tag="$(git_image_tag)"
+  init_tofu "$TARGET_NAME" "$STAGE_NAME"
+  require_application_state_handoff_complete
   ensure_secret
   load_auth_bypass_cidrs
-  init_tofu "$TARGET_NAME" "$STAGE_NAME"
 
   ensure_build_prerequisites "$image_tag"
   ensure_image "$image_tag"
@@ -445,9 +472,10 @@ run_infra_deploy() {
 
   require_deployer_identity "$TARGET_NAME"
   log "Using AWS profile: $AWS_PROFILE"
+  init_tofu "$TARGET_NAME" "$STAGE_NAME"
+  require_application_state_handoff_complete
   ensure_secret
   load_auth_bypass_cidrs
-  init_tofu "$TARGET_NAME" "$STAGE_NAME"
 
   image_tag="$(infra_image_tag)"
   before_task_definition="$(current_task_definition_arn)"

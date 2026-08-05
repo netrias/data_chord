@@ -33,6 +33,7 @@ jobs:
         run: |
           bash infra/tests/deployment_contract_test.sh
           bash infra/tests/deployment_flow_test.sh
+          bash infra/tests/secret_preparation_test.sh
 
       - name: Check shell syntax
         run: bash -n infra/scripts/*.sh infra/tests/*.sh

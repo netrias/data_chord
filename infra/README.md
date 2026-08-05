@@ -115,9 +115,12 @@ AWS_PROFILE=datachord-netrias just deploy netrias staging
 ```
 
 `prepare-stage-secret` is idempotent. With `NETRIAS_API_KEY`, it creates the
-secret or updates its value. Without that variable, it verifies that the secret
-already exists. `deploy-plan` only checks the secret and does not create or
-update it, apply OpenTofu, or start a build.
+secret or updates its value. If Secrets Manager already has the desired value,
+the command does not write another version. A changed value uses a deterministic
+request token based on the current version, so a lost-response retry is safe
+and a later intentional revert gets a new token. Without `NETRIAS_API_KEY`, the
+command verifies that the secret already exists. `deploy-plan` only checks the
+secret and does not create or update it, apply OpenTofu, or start a build.
 
 The normal application flow is:
 
@@ -191,6 +194,8 @@ The normal foundation deployer cannot refresh the legacy IAM objects. Do not
 use the normal deploy command for the first BDF handoff. Do not use
 `-refresh=false` for the planned handoff. An approved BDF foundation
 administrator must create and apply a saved plan with normal refresh.
+Both deploy write modes inspect state without refresh and stop before apply if
+any legacy handoff address remains. Plan mode stays available for review.
 
 Use this sequence once for `staging` and once for `prod`:
 

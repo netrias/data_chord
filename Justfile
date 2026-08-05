@@ -65,6 +65,7 @@ infra-test:
 	tofu -chdir=infra test
 	bash infra/tests/deployment_contract_test.sh
 	bash infra/tests/deployment_flow_test.sh
+	bash infra/tests/secret_preparation_test.sh
 	bash -n infra/scripts/*.sh infra/tests/*.sh
 
 # Prepare or update the stage API secret. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required; NETRIAS_API_KEY creates or updates.
