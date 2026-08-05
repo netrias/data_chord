@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
+require_command python3
 TARGET_NAME="$(require_target_name "${1:-}")"
 STAGE_NAME="$(require_stage_name "${2:-}")"
 require_configured_deployment "$TARGET_NAME" "$STAGE_NAME"
@@ -19,7 +20,6 @@ REGION="$(target_value "$TARGET_NAME" aws_region)"
 secret_version_token() {
   local current_version_id="$1"
 
-  require_command python3
   DATA_CHORD_SECRET_IDENTITY="$SECRET_NAME" \
     DATA_CHORD_SECRET_VALUE="$NETRIAS_API_KEY" \
     DATA_CHORD_SECRET_VERSION="$current_version_id" \
@@ -35,8 +35,7 @@ print(hashlib.sha256(identity + b"\0" + version + b"\0" + value).hexdigest())
 
 if aws secretsmanager describe-secret --region "$REGION" --secret-id "$SECRET_NAME" >/dev/null 2>&1; then
   if [[ -n "${NETRIAS_API_KEY:-}" && "$MODE" == "ensure" ]]; then
-    # Treat NETRIAS_API_KEY as the desired value only during deploys; plan mode
-    # should verify presence without rotating a secret.
+    # Treat NETRIAS_API_KEY as the desired value only in explicit ensure mode.
     CURRENT_SECRET_JSON="$(
       aws secretsmanager get-secret-value \
         --region "$REGION" \
@@ -44,7 +43,6 @@ if aws secretsmanager describe-secret --region "$REGION" --secret-id "$SECRET_NA
         --query '{VersionId:VersionId,SecretString:SecretString}' \
         --output json
     )" || fail "Could not read current Secrets Manager value: $SECRET_NAME"
-    require_command python3
     CURRENT_VERSION_ID="$(
       DATA_CHORD_DESIRED_SECRET_VALUE="$NETRIAS_API_KEY" \
         python3 -c 'import json, os, sys
@@ -79,7 +77,7 @@ if [[ "$MODE" != "ensure" ]]; then
   fail "Missing Secrets Manager secret: $SECRET_NAME"
 fi
 
-[[ -n "${NETRIAS_API_KEY:-}" ]] || fail "Missing $SECRET_NAME. Set NETRIAS_API_KEY for the first deploy."
+[[ -n "${NETRIAS_API_KEY:-}" ]] || fail "Missing $SECRET_NAME. Set NETRIAS_API_KEY to create it."
 
 CLIENT_REQUEST_TOKEN="$(secret_version_token create)"
 log "Creating Secrets Manager secret: $SECRET_NAME"

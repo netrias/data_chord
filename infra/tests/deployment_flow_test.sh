@@ -91,6 +91,7 @@ case "${1:-} ${2:-}" in
     printf 'SUCCEEDED\tCOMPLETED\tNone\tNone\tNone\n'
     ;;
   "ecr describe-images")
+    printf 'aws image-check %s\n' "$*" >>"$MOCK_CALLS"
     if [[ "${MOCK_IMAGE_EXISTS:-0}" == "1" ]]; then
       printf '{}\n'
     else
@@ -203,6 +204,7 @@ run_first_deploy() {
       MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
       MOCK_FULL_APPLIED="$scenario_root/full-applied" \
       MOCK_NO_STATE_FILE=1 \
+      NETRIAS_API_KEY=must-not-write-during-deploy \
       DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
       "$DEPLOY_SCRIPT" netrias staging deploy 2>&1
   )"; then
@@ -221,6 +223,7 @@ run_first_deploy() {
   assert_call_contains "tofu full-apply " "-var=environment=staging" "$calls_file"
   assert_call_contains "tofu full-apply " "-var=netrias_api_key_secret_name=data-chord/staging/netrias-api-key" "$calls_file"
   assert_call_contains "tofu init " "-backend-config=key=datachord/netrias/staging/tofu.tfstate" "$calls_file"
+  assert_call_absent "aws secret-write " "$calls_file"
   [[ -f "$scenario_root/full-applied" ]] || fail_test "Full application apply did not complete"
 }
 
@@ -311,6 +314,7 @@ run_empty_state_plan() {
     MOCK_CALLS="$calls_file" \
     MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
     MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+    NETRIAS_API_KEY=must-not-write-during-plan \
     DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
     "$DEPLOY_SCRIPT" netrias staging plan >/dev/null 2>&1
 
@@ -363,6 +367,62 @@ run_existing_state_plan() {
     "$DEPLOY_SCRIPT" netrias staging plan >/dev/null 2>&1
 
   assert_call_contains "tofu plan " "-var=image_tag=deployed123456" "$calls_file"
+}
+
+run_plan_image_override() {
+  local scenario_root="$TEST_ROOT/plan-image-override"
+  local calls_file="$scenario_root/calls"
+  mkdir -p "$scenario_root"
+  : >"$calls_file"
+  touch "$scenario_root/full-applied"
+
+  PATH="$MOCK_BIN:$PATH" \
+    AWS_PROFILE=mock \
+    DATA_CHORD_IMAGE_TAG=operator123456 \
+    MOCK_ACCOUNT_ID=945365518758 \
+    MOCK_BUILD_READY="$scenario_root/build-ready" \
+    MOCK_CALLS="$calls_file" \
+    MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+    MOCK_DEPLOYED_IMAGE_TAG=deployed123456 \
+    MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+    DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+    "$DEPLOY_SCRIPT" netrias staging plan >/dev/null 2>&1
+
+  assert_call_contains "tofu plan " "-var=image_tag=operator123456" "$calls_file"
+}
+
+run_build_reuses_immutable_image() {
+  local scenario_root="$TEST_ROOT/build-image-reuse"
+  local calls_file="$scenario_root/calls"
+  local init_line state_line prerequisite_line image_line
+  mkdir -p "$scenario_root"
+  : >"$calls_file"
+
+  PATH="$MOCK_BIN:$PATH" \
+    AWS_PROFILE=mock \
+    MOCK_ACCOUNT_ID=945365518758 \
+    MOCK_BUILD_READY="$scenario_root/build-ready" \
+    MOCK_CALLS="$calls_file" \
+    MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+    MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+    MOCK_IMAGE_EXISTS=1 \
+    MOCK_STATE_ADDRESSES=aws_s3_bucket.workflow \
+    DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+    "$DEPLOY_SCRIPT" netrias staging build >/dev/null 2>&1
+
+  assert_call_contains "tofu state-list " "state list" "$calls_file"
+  assert_call_contains "tofu bootstrap-apply " "-target=aws_codebuild_project.app_image" "$calls_file"
+  assert_call_contains "aws image-check " "imageTag=0123456789ab" "$calls_file"
+  assert_call_absent "aws start-build " "$calls_file"
+  assert_call_absent "tofu full-apply " "$calls_file"
+  assert_call_absent "aws secret-write " "$calls_file"
+
+  init_line="$(grep -n '^tofu init ' "$calls_file" | cut -d: -f1)"
+  state_line="$(grep -n '^tofu state-list ' "$calls_file" | cut -d: -f1)"
+  prerequisite_line="$(grep -n '^tofu bootstrap-apply ' "$calls_file" | cut -d: -f1)"
+  image_line="$(grep -n '^aws image-check ' "$calls_file" | cut -d: -f1)"
+  (( init_line < state_line && state_line < prerequisite_line && prerequisite_line < image_line )) ||
+    fail_test "Image build did not initialize, inspect state, reconcile prerequisites, and check the image in order"
 }
 
 run_legacy_state_guard() {
@@ -423,6 +483,25 @@ run_legacy_state_guard() {
   assert_call_absent "tofu full-apply " "$calls_file"
   assert_call_absent "aws secret-write " "$calls_file"
 
+  scenario_root="$TEST_ROOT/legacy-build"
+  calls_file="$scenario_root/calls"
+  mkdir -p "$scenario_root"
+  : >"$calls_file"
+  if PATH="$MOCK_BIN:$PATH" \
+    AWS_PROFILE=mock \
+    MOCK_ACCOUNT_ID=084828580051 \
+    MOCK_BUILD_READY="$scenario_root/build-ready" \
+    MOCK_CALLS="$calls_file" \
+    MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+    MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+    MOCK_STATE_ADDRESSES=aws_iam_role.codebuild \
+    DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+    "$DEPLOY_SCRIPT" bdf staging build >/dev/null 2>&1; then
+    fail_test "Image build accepted legacy state"
+  fi
+  assert_call_absent "tofu bootstrap-apply " "$calls_file"
+  assert_call_absent "aws start-build " "$calls_file"
+
   scenario_root="$TEST_ROOT/legacy-plan"
   calls_file="$scenario_root/calls"
   mkdir -p "$scenario_root"
@@ -447,6 +526,8 @@ run_drifted_build_prerequisites
 run_empty_state_plan
 run_empty_state_infra_deploy_fails
 run_existing_state_plan
+run_plan_image_override
+run_build_reuses_immutable_image
 run_legacy_state_guard
 
 printf 'Deployment flow tests passed.\n'

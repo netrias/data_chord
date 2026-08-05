@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
+require_command python3
 usage() {
   cat >&2 <<'EOF'
 Usage: infra/scripts/invite-cognito-user.sh <bdf|netrias> <dev|qa|staging|prod> <email> [resend]

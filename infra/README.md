@@ -114,13 +114,15 @@ AWS_PROFILE=datachord-netrias just deploy-plan netrias staging
 AWS_PROFILE=datachord-netrias just deploy netrias staging
 ```
 
-`prepare-stage-secret` is idempotent. With `NETRIAS_API_KEY`, it creates the
+`prepare-stage-secret` is the only command that writes the stage API secret. It
+is idempotent. With `NETRIAS_API_KEY`, it creates the
 secret or updates its value. If Secrets Manager already has the desired value,
 the command does not write another version. A changed value uses a deterministic
 request token based on the current version, so a lost-response retry is safe
 and a later intentional revert gets a new token. Without `NETRIAS_API_KEY`, the
-command verifies that the secret already exists. `deploy-plan` only checks the
-secret and does not create or update it, apply OpenTofu, or start a build.
+command verifies that the secret already exists. Plan and deploy commands only
+check the secret, even when `NETRIAS_API_KEY` is present in the shell.
+`deploy-plan` does not apply OpenTofu or start a build.
 
 The normal application flow is:
 
@@ -142,6 +144,8 @@ as the immutable ECS image tag and then watches the ECS rollout.
 
 A plan uses the currently deployed image tag when one exists. For an empty
 state, it uses the current short commit SHA as the proposed first image tag.
+`DATA_CHORD_IMAGE_TAG` overrides both choices so plan and infrastructure-only
+deploy can select the same existing immutable image explicitly.
 That first plan requires the same named, clean, and pushed Git source as an app
 deploy, so the later build can produce the image shown in the plan.
 
@@ -175,6 +179,11 @@ AWS_PROFILE=datachord-bdf just deploy-logs bdf staging
 AWS_PROFILE=datachord-bdf just deploy-build bdf staging
 AWS_PROFILE=datachord-bdf just invite-user bdf staging user@example.com
 ```
+
+`deploy-build` uses the same current-commit image path as an app deploy. It
+checks the legacy BDF handoff state, reconciles the build prerequisites, and
+reuses the immutable image when it already exists. It does not run the full
+application apply.
 
 ## State and IAM handoff safety
 
@@ -329,6 +338,8 @@ AWS_PROFILE="$operator_profile" aws iam delete-role \
 
 After this cleanup, rollback application code or images through the current
 Data Chord configuration so the bounded application roles stay in use.
+After both BDF stages complete the handoff, rollback period, and old-role
+cleanup, remove `migration-handoff.tf` in a separate reviewed change.
 
 ## Optional VPN auth bypass
 

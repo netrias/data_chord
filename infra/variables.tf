@@ -83,6 +83,11 @@ variable "additional_secretsmanager_client_security_group_ids" {
     ])
     error_message = "additional_secretsmanager_client_security_group_ids must contain valid security group ids."
   }
+
+  validation {
+    condition     = var.secretsmanager_vpc_endpoint_id != "" || length(var.additional_secretsmanager_client_security_group_ids) == 0
+    error_message = "additional_secretsmanager_client_security_group_ids requires secretsmanager_vpc_endpoint_id."
+  }
 }
 
 variable "certificate_arn" {
@@ -100,7 +105,7 @@ variable "domain_name" {
 variable "hosted_zone_name" {
   description = "Route 53 hosted zone used to generate an obscure app hostname and validate ACM. Leave empty only if certificate_arn and domain_name are both supplied."
   type        = string
-  default     = "netriasbdf.cloud"
+  default     = ""
 }
 
 variable "domain_label" {

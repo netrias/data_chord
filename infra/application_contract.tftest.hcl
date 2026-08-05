@@ -134,3 +134,14 @@ run "endpoint_resources_attach_when_shared_endpoint_exists" {
     error_message = "Endpoint resources must attach when the target provides a shared endpoint."
   }
 }
+
+run "additional_endpoint_clients_require_shared_endpoint" {
+  command = plan
+
+  variables {
+    secretsmanager_vpc_endpoint_id                      = ""
+    additional_secretsmanager_client_security_group_ids = ["sg-0123456789abcdef0"]
+  }
+
+  expect_failures = [var.additional_secretsmanager_client_security_group_ids]
+}

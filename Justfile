@@ -92,7 +92,7 @@ deploy-status target stage:
 deploy-logs target stage:
 	infra/scripts/deploy.sh {{target}} {{stage}} logs
 
-# Build the current commit without an application apply. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
+# Build the current commit without the full application apply. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
 deploy-build target stage:
 	infra/scripts/deploy.sh {{target}} {{stage}} build
 

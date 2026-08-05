@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
+require_command python3
 TARGET_NAME="$(require_target_name "${1:-}")"
 STAGE_NAME="$(require_stage_name "${2:-}")"
 require_configured_deployment "$TARGET_NAME" "$STAGE_NAME"
@@ -149,10 +150,6 @@ require_application_state_handoff_complete() {
         ;;
     esac
   done <<<"$state_addresses"
-}
-
-ensure_secret() {
-  "$SCRIPT_DIR/bootstrap-secrets.sh" "$TARGET_NAME" "$STAGE_NAME" ensure
 }
 
 check_secret() {
@@ -342,6 +339,11 @@ infra_image_tag() {
 plan_image_tag() {
   local image_tag
 
+  if [[ -n "${DATA_CHORD_IMAGE_TAG:-}" ]]; then
+    printf '%s\n' "$DATA_CHORD_IMAGE_TAG"
+    return 0
+  fi
+
   image_tag="$(current_image_tag)"
   if [[ -n "$image_tag" ]]; then
     printf '%s\n' "$image_tag"
@@ -455,7 +457,7 @@ run_app_deploy() {
   image_tag="$(git_image_tag)"
   init_tofu "$TARGET_NAME" "$STAGE_NAME"
   require_application_state_handoff_complete
-  ensure_secret
+  check_secret
   load_auth_bypass_cidrs
 
   ensure_build_prerequisites "$image_tag"
@@ -474,7 +476,7 @@ run_infra_deploy() {
   log "Using AWS profile: $AWS_PROFILE"
   init_tofu "$TARGET_NAME" "$STAGE_NAME"
   require_application_state_handoff_complete
-  ensure_secret
+  check_secret
   load_auth_bypass_cidrs
 
   image_tag="$(infra_image_tag)"
@@ -492,6 +494,20 @@ run_infra_deploy() {
 
   app_url="$(tofu_output app_url)"
   log "Infra deploy complete: $app_url"
+}
+
+run_build() {
+  local image_tag
+
+  require_deployer_identity "$TARGET_NAME"
+  log "Using AWS profile: $AWS_PROFILE"
+  ensure_deployable_git_state
+  image_tag="$(git_image_tag)"
+  init_tofu "$TARGET_NAME" "$STAGE_NAME"
+  require_application_state_handoff_complete
+  ensure_build_prerequisites "$image_tag"
+  ensure_image "$image_tag"
+  log "Immutable image is ready. The full application stack has not been applied."
 }
 
 run_plan() {
@@ -527,12 +543,7 @@ case "$MODE" in
     tail_logs
     ;;
   build)
-    require_deployer_identity "$TARGET_NAME"
-    ensure_deployable_git_state
-    init_tofu "$TARGET_NAME" "$STAGE_NAME"
-    build_id="$(start_build)"
-    watch_build "$build_id"
-    log "Image build complete. OpenTofu has not been applied, so ECS was not rolled."
+    run_build
     ;;
   output-url)
     require_deployer_identity "$TARGET_NAME"
