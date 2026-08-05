@@ -231,7 +231,16 @@ set -Eeuo pipefail
 stage=staging
 operator_profile='<approved-privileged-profile>'
 umask 077
-migration_dir="$(mktemp -d)"
+migration_dir='<absolute-path-in-approved-protected-storage>'
+if [[ "$migration_dir" != /* ]]; then
+  printf 'migration_dir must be an operator-supplied absolute protected path.\n' >&2
+  exit 1
+fi
+if [[ -e "$migration_dir" ]]; then
+  printf 'migration_dir already exists: %s\n' "$migration_dir" >&2
+  exit 1
+fi
+mkdir -m 700 "$migration_dir"
 source infra/scripts/lib.sh
 require_configured_deployment bdf "$stage"
 
@@ -281,6 +290,8 @@ fi
 
 AWS_PROFILE="$operator_profile" tofu -chdir=infra apply \
   -input=false "$migration_dir/bdf-$stage.tfplan"
+
+printf '\nHandoff evidence: %s\nRetain this directory in approved protected storage through the rollback period.\n' "$migration_dir"
 BDF_HANDOFF
 ```
 
