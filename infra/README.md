@@ -222,7 +222,8 @@ Use this sequence once for `staging` and once for `prod`:
    secret exists, export its JSON array as `TF_VAR_auth_bypass_cidrs`. Otherwise,
    confirm that it is absent and use `[]`.
 
-5. Create a saved plan with normal refresh and all explicit deployment inputs:
+5. Create a saved plan with normal refresh, review it, and apply that exact
+   saved plan only after explicit confirmation:
 
 ```bash
 bash <<'BDF_HANDOFF'
@@ -270,19 +271,20 @@ AWS_PROFILE="$operator_profile" tofu -chdir=infra plan \
   -var="image_tag=$image_tag"
 
 tofu -chdir=infra show "$migration_dir/bdf-$stage.tfplan"
+
+printf '\nSTOP unless the plan forgets all eight legacy addresses without destroy, creates the three bounded application roles, and has no unexplained destroy or replacement.\n\n'
+read -r -p "Type apply to apply this exact saved plan: " confirmation </dev/tty
+if [[ "$confirmation" != "apply" ]]; then
+  printf 'Saved plan was not applied.\n' >&2
+  exit 1
+fi
+
+AWS_PROFILE="$operator_profile" tofu -chdir=infra apply \
+  -input=false "$migration_dir/bdf-$stage.tfplan"
 BDF_HANDOFF
 ```
 
-6. Stop unless the plan forgets all eight legacy addresses without destroy,
-   creates the three bounded application roles, and has no unexplained destroy
-   or replacement. Apply only the saved plan:
-
-```bash
-AWS_PROFILE="$operator_profile" tofu -chdir=infra apply \
-  -input=false "$migration_dir/bdf-$stage.tfplan"
-```
-
-7. Use the normal foundation-role `deploy` command for a new commit. Confirm
+6. Use the normal foundation-role `deploy` command for a new commit. Confirm
    the CodeBuild build succeeds and ECS is stable.
 
 Keep the old root-path roles through a rollback period. Before cleanup, a
