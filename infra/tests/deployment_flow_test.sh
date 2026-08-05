@@ -76,7 +76,14 @@ case "${1:-} ${2:-}" in
     printf 'ResourceNotFoundException: secret does not exist\n' >&2
     exit 254
     ;;
+  "secretsmanager create-secret" | "secretsmanager put-secret-value")
+    printf 'aws secret-write %s\n' "$*" >>"$MOCK_CALLS"
+    ;;
   "codebuild start-build")
+    [[ -z "${MOCK_RECONCILED_FILE:-}" || -f "$MOCK_RECONCILED_FILE" ]] || {
+      printf 'Build prerequisites were not reconciled\n' >&2
+      exit 24
+    }
     printf 'aws start-build %s\n' "$*" >>"$MOCK_CALLS"
     printf 'build-1\n'
     ;;
@@ -154,6 +161,7 @@ case " $args " in
       printf 'tofu bootstrap-apply %s\n' "$args" >>"$MOCK_CALLS"
       [[ "${MOCK_BOOTSTRAP_FAIL:-0}" != "1" ]] || exit 23
       touch "$MOCK_BUILD_READY"
+      [[ -z "${MOCK_RECONCILED_FILE:-}" ]] || touch "$MOCK_RECONCILED_FILE"
     else
       printf 'tofu full-apply %s\n' "$args" >>"$MOCK_CALLS"
       touch "$MOCK_FULL_APPLIED"
@@ -248,9 +256,35 @@ run_retry_after_image_build() {
     DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
     "$DEPLOY_SCRIPT" netrias staging deploy >/dev/null 2>&1
 
-  assert_call_absent "tofu bootstrap-apply " "$calls_file"
+  assert_call_contains "tofu bootstrap-apply " "-target=aws_codebuild_project.app_image" "$calls_file"
   assert_call_absent "aws start-build " "$calls_file"
   [[ -f "$scenario_root/full-applied" ]] || fail_test "Retry did not run the full application apply"
+}
+
+run_drifted_build_prerequisites() {
+  local scenario_root="$TEST_ROOT/drifted-build-prerequisites"
+  local calls_file="$scenario_root/calls"
+  local reconcile_line build_line full_apply_line
+  mkdir -p "$scenario_root"
+  : >"$calls_file"
+  touch "$scenario_root/build-ready"
+
+  PATH="$MOCK_BIN:$PATH" \
+    AWS_PROFILE=mock \
+    MOCK_ACCOUNT_ID=945365518758 \
+    MOCK_BUILD_READY="$scenario_root/build-ready" \
+    MOCK_CALLS="$calls_file" \
+    MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+    MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+    MOCK_RECONCILED_FILE="$scenario_root/aws-build-reconciled" \
+    DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+    "$DEPLOY_SCRIPT" netrias staging deploy >/dev/null 2>&1
+
+  reconcile_line="$(grep -n '^tofu bootstrap-apply ' "$calls_file" | cut -d: -f1)"
+  build_line="$(grep -n '^aws start-build ' "$calls_file" | cut -d: -f1)"
+  full_apply_line="$(grep -n '^tofu full-apply ' "$calls_file" | cut -d: -f1)"
+  (( reconcile_line < build_line && build_line < full_apply_line )) ||
+    fail_test "Stored build output did not reconcile before image build and full apply"
 }
 
 run_empty_state_plan() {
@@ -275,6 +309,7 @@ run_empty_state_plan() {
   assert_call_absent "tofu bootstrap-apply " "$calls_file"
   assert_call_absent "tofu full-apply " "$calls_file"
   assert_call_absent "aws start-build " "$calls_file"
+  assert_call_absent "aws secret-write " "$calls_file"
 }
 
 run_empty_state_infra_deploy_fails() {
@@ -322,6 +357,7 @@ run_existing_state_plan() {
 run_first_deploy
 run_failed_bootstrap
 run_retry_after_image_build
+run_drifted_build_prerequisites
 run_empty_state_plan
 run_empty_state_infra_deploy_fails
 run_existing_state_plan

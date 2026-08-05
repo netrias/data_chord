@@ -100,7 +100,7 @@ apply_stack() {
 apply_build_prerequisites() {
   local image_tag="$1"
   require_immutable_image_tag "$image_tag"
-  log "Creating missing build prerequisites for $TARGET_NAME/$STAGE_NAME"
+  log "Reconciling build prerequisites for $TARGET_NAME/$STAGE_NAME"
   tofu -chdir="$INFRA_DIR" apply \
     -input=false \
     -auto-approve \
@@ -112,11 +112,6 @@ apply_build_prerequisites() {
 ensure_build_prerequisites() {
   local image_tag="$1"
   local project_name
-
-  project_name="$(tofu_output codebuild_project_name)"
-  if [[ -n "$project_name" ]]; then
-    return 0
-  fi
 
   apply_build_prerequisites "$image_tag"
   project_name="$(tofu_output codebuild_project_name)"

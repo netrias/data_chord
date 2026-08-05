@@ -67,6 +67,10 @@ infra-test:
 	bash infra/tests/deployment_flow_test.sh
 	bash -n infra/scripts/*.sh infra/tests/*.sh
 
+# Prepare or update the stage API secret. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required; NETRIAS_API_KEY creates or updates.
+prepare-stage-secret target stage:
+	infra/scripts/bootstrap-secrets.sh {{target}} {{stage}} ensure
+
 # Deploy the app. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
 deploy target stage:
 	infra/scripts/deploy.sh {{target}} {{stage}}

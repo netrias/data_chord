@@ -86,53 +86,49 @@ stops role creation when the boundary does not exist. The permission must name
 only the foundation output `application_role_boundary_arn`; it does not permit
 changes to the policy.
 
-The account-access foundation has not yet been applied in either target.
-Read-only IAM checks found neither target's `/foundation/datachord-deployer`
-role nor its `datachord-application-role-boundary` policy. Apply and verify that
-foundation layer before a Data Chord plan or BDF handoff.
+Before a Data Chord plan or BDF handoff, verify these durable prerequisites:
 
-For Netrias, read-only checks confirmed account `945365518758`, default VPC
-`vpc-08c111f13ad3e8b44`, three public subnets in separate availability zones,
-an active internet-gateway route, and a GitHub CodeConnections source
-credential for CodeBuild. The checked-in Netrias subnet IDs match that evidence.
+- The account-access foundation exists, including the deployer role,
+  application-role boundary, application IAM path, and state bucket with
+  versioning and the required bucket policy.
+- The configured VPC and subnets exist in the target account and region. Public
+  application subnets must have the required address mapping and active route.
+- CodeBuild has approved access to the configured source repository.
+- If `hosted_zone_name` is set, the matching public Route 53 hosted zone exists.
+  Otherwise, the configured ACM certificate exists and covers `domain_name`.
+- Public DNS is delegated to the configured zone or records. External DNS
+  delegation remains an operator responsibility.
 
-- `us-east-2a`: `subnet-048dc758402e95744`
-- `us-east-2b`: `subnet-0d468bc4f14a6ac33`
-- `us-east-2c`: `subnet-0aa3311feda432c84`
-
-Each subnet maps public IPv4 addresses. The main route table has an active
-`0.0.0.0/0` route through internet gateway `igw-0f563ac40978db572`.
-
-The Netrias account has no Route 53 hosted zones. Public DNS for `netrias.com`
-uses external name servers, and `apps.netrias.com` is not delegated. An
-operator must provide the required public DNS zone or explicit certificate and
-domain inputs before a live Netrias staging plan. This PR does not create or
-delegate DNS.
-
-The Netrias state bucket exists but is empty. Foundation onboarding must enable
-and verify versioning and the required bucket policy before Data Chord uses it.
-These DNS and state controls remain external gates for the first Netrias
-deployment.
+Any change to VPC, subnet, DNS, certificate, domain, or other deployment input
+must be committed and pushed before deploy. The deploy command rejects dirty
+worktrees and commits that do not match the selected branch on `origin`.
 
 ## Plan and deploy
 
-Set `AWS_PROFILE` to the profile that assumes the target deployer role. Then
-select the target and stage explicitly:
+Set `AWS_PROFILE` to the profile that assumes the target deployer role. Before
+the first plan for a stage, prepare its application API secret:
 
 ```bash
-AWS_PROFILE=datachord-bdf just deploy-plan bdf staging
-AWS_PROFILE=datachord-bdf just deploy bdf staging
-AWS_PROFILE=datachord-bdf just deploy-infra bdf staging
+AWS_PROFILE=datachord-netrias NETRIAS_API_KEY='replace-with-key' just prepare-stage-secret netrias staging
+AWS_PROFILE=datachord-netrias just deploy-plan netrias staging
+AWS_PROFILE=datachord-netrias just deploy netrias staging
 ```
+
+`prepare-stage-secret` is idempotent. With `NETRIAS_API_KEY`, it creates the
+secret or updates its value. Without that variable, it verifies that the secret
+already exists. `deploy-plan` only checks the secret and does not create or
+update it, apply OpenTofu, or start a build.
 
 The normal application flow is:
 
 ```text
 foundation onboarding
   -> assume the shared deployer role
+  -> prepare the stage application API secret
   -> Data Chord selects its target and stage files
   -> Data Chord initializes its S3 state key
-  -> first deploy creates missing build prerequisites in the same state
+  -> review the Data Chord plan
+  -> app deploy reconciles build prerequisites in the same state
   -> CodeBuild builds the immutable image
   -> Data Chord applies its complete application stack
 ```
@@ -146,23 +142,22 @@ state, it uses the current short commit SHA as the proposed first image tag.
 That first plan requires the same named, clean, and pushed Git source as an app
 deploy, so the later build can produce the image shown in the plan.
 
-On the first deploy, the `deploy` command cannot start CodeBuild until its build
-resources exist. It therefore applies one target,
-`aws_codebuild_project.app_image`. The dependency graph creates the Data
-Chord-owned ECR repository, CodeBuild log group, bounded build role and policy,
-and CodeBuild project. It then starts the image build and runs the full apply.
-The targeted apply uses the same root, backend, and state as the full stack. It
-does not create a second stack.
+On every app deploy, the `deploy` command first applies one target,
+`aws_codebuild_project.app_image`. This idempotent apply creates missing build
+resources and reconciles drift before any image lookup or build. Its dependency
+graph contains the Data Chord-owned ECR repository, CodeBuild log group,
+bounded build role and policy, and CodeBuild project. The targeted apply uses
+the same root, backend, and state as the full stack. It does not create a second
+stack.
 
 If a previous attempt already pushed the same immutable commit image, a retry
 reuses that image and continues with the full apply. It does not try to overwrite
 or rebuild an immutable tag.
 
-`NETRIAS_API_KEY` is required only when the stage secret does not exist or when
-you want to replace its value:
+You can also prepare or replace the stage secret separately at any later time:
 
 ```bash
-AWS_PROFILE=datachord-bdf NETRIAS_API_KEY='replace-with-key' just deploy bdf staging
+AWS_PROFILE=datachord-bdf NETRIAS_API_KEY='replace-with-key' just prepare-stage-secret bdf staging
 ```
 
 An infrastructure-only deploy reuses the current ECS image. It is not the
@@ -181,9 +176,9 @@ AWS_PROFILE=datachord-bdf just invite-user bdf staging user@example.com
 ## State and IAM handoff safety
 
 The removed state-bucket bootstrap script was not represented in Data Chord
-OpenTofu state. Removing it cannot plan bucket destruction. The live BDF
-staging and production state files contain application resources only, and this
-repository keeps their current keys.
+OpenTofu state. Removing it cannot plan bucket destruction. The BDF staging and
+production state files contain application resources only, and this repository
+keeps their existing keys.
 
 The existing BDF application roles use the IAM root path and no permission
 boundary. The foundation deployer cannot delete those root-path roles. OpenTofu
@@ -329,11 +324,6 @@ AWS_PROFILE="$operator_profile" aws iam delete-role \
 
 After this cleanup, rollback application code or images through the current
 Data Chord configuration so the bounded application roles stay in use.
-
-No live apply, import, state mutation, IAM write, or bucket write was used to
-prepare this change. Live proof exists only for the current BDF staging and
-production state layout. It does not prove Netrias staging or any unconfigured
-target-stage pair in live AWS.
 
 ## Optional VPN auth bypass
 
