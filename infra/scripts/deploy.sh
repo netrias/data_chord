@@ -318,6 +318,19 @@ infra_image_tag() {
   fail "No deployed image tag is available. Run an app deploy after the base infrastructure exists, or set DATA_CHORD_IMAGE_TAG to an existing immutable image tag."
 }
 
+plan_image_tag() {
+  local image_tag
+
+  image_tag="$(current_image_tag)"
+  if [[ -n "$image_tag" ]]; then
+    printf '%s\n' "$image_tag"
+    return 0
+  fi
+
+  ensure_deployable_git_state
+  git_image_tag
+}
+
 print_target_health() {
   local target_group_arn
   target_group_arn="$(tofu_output target_group_arn)"
@@ -466,7 +479,7 @@ run_plan() {
   check_secret
   load_auth_bypass_cidrs
   init_tofu "$TARGET_NAME" "$STAGE_NAME"
-  image_tag="$(infra_image_tag)"
+  image_tag="$(plan_image_tag)"
   plan_stack "$image_tag"
 }
 

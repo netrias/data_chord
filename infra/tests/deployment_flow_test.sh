@@ -94,11 +94,16 @@ case "${1:-} ${2:-}" in
   "ecs describe-services")
     if [[ "$*" == *"deployments"* ]]; then
       printf 'COMPLETED\t1\t1\t0\n'
+    elif [[ -n "${MOCK_DEPLOYED_IMAGE_TAG:-}" && "$*" == *"taskDefinition"* ]]; then
+      printf 'arn:aws:ecs:us-east-2:945365518758:task-definition/data-chord-staging:1\n'
     elif [[ "$*" == *"events[0].message"* ]]; then
       printf 'None\n'
     else
       printf 'None\n'
     fi
+    ;;
+  "ecs describe-task-definition")
+    printf '945365518758.dkr.ecr.us-east-2.amazonaws.com/data-chord-staging:%s\n' "$MOCK_DEPLOYED_IMAGE_TAG"
     ;;
   *)
     printf 'Unexpected aws call: %s\n' "$*" >&2
@@ -153,6 +158,9 @@ case " $args " in
       printf 'tofu full-apply %s\n' "$args" >>"$MOCK_CALLS"
       touch "$MOCK_FULL_APPLIED"
     fi
+    ;;
+  *" plan "*)
+    printf 'tofu plan %s\n' "$args" >>"$MOCK_CALLS"
     ;;
   *)
     printf 'Unexpected tofu call: %s\n' "$args" >&2
@@ -245,8 +253,77 @@ run_retry_after_image_build() {
   [[ -f "$scenario_root/full-applied" ]] || fail_test "Retry did not run the full application apply"
 }
 
+run_empty_state_plan() {
+  local scenario_root="$TEST_ROOT/empty-state-plan"
+  local calls_file="$scenario_root/calls"
+  mkdir -p "$scenario_root"
+  : >"$calls_file"
+
+  PATH="$MOCK_BIN:$PATH" \
+    AWS_PROFILE=mock \
+    MOCK_ACCOUNT_ID=945365518758 \
+    MOCK_BUILD_READY="$scenario_root/build-ready" \
+    MOCK_CALLS="$calls_file" \
+    MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+    MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+    DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+    "$DEPLOY_SCRIPT" netrias staging plan >/dev/null 2>&1
+
+  assert_call_contains "tofu init " "-backend-config=key=datachord/netrias/staging/tofu.tfstate" "$calls_file"
+  assert_call_contains "tofu plan " "-var=environment=staging" "$calls_file"
+  assert_call_contains "tofu plan " "-var=image_tag=0123456789ab" "$calls_file"
+  assert_call_absent "tofu bootstrap-apply " "$calls_file"
+  assert_call_absent "tofu full-apply " "$calls_file"
+  assert_call_absent "aws start-build " "$calls_file"
+}
+
+run_empty_state_infra_deploy_fails() {
+  local scenario_root="$TEST_ROOT/empty-state-infra-deploy"
+  local calls_file="$scenario_root/calls"
+  mkdir -p "$scenario_root"
+  : >"$calls_file"
+
+  if PATH="$MOCK_BIN:$PATH" \
+    AWS_PROFILE=mock \
+    MOCK_ACCOUNT_ID=945365518758 \
+    MOCK_BUILD_READY="$scenario_root/build-ready" \
+    MOCK_CALLS="$calls_file" \
+    MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+    MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+    DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+    "$DEPLOY_SCRIPT" netrias staging deploy-infra >/dev/null 2>&1; then
+    fail_test "Infrastructure-only deployment accepted an empty state without an existing image tag"
+  fi
+
+  assert_call_absent "tofu full-apply " "$calls_file"
+}
+
+run_existing_state_plan() {
+  local scenario_root="$TEST_ROOT/existing-state-plan"
+  local calls_file="$scenario_root/calls"
+  mkdir -p "$scenario_root"
+  : >"$calls_file"
+  touch "$scenario_root/full-applied"
+
+  PATH="$MOCK_BIN:$PATH" \
+    AWS_PROFILE=mock \
+    MOCK_ACCOUNT_ID=945365518758 \
+    MOCK_BUILD_READY="$scenario_root/build-ready" \
+    MOCK_CALLS="$calls_file" \
+    MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+    MOCK_DEPLOYED_IMAGE_TAG=deployed123456 \
+    MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+    DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+    "$DEPLOY_SCRIPT" netrias staging plan >/dev/null 2>&1
+
+  assert_call_contains "tofu plan " "-var=image_tag=deployed123456" "$calls_file"
+}
+
 run_first_deploy
 run_failed_bootstrap
 run_retry_after_image_build
+run_empty_state_plan
+run_empty_state_infra_deploy_fails
+run_existing_state_plan
 
 printf 'Deployment flow tests passed.\n'

@@ -141,6 +141,11 @@ An app deploy requires a named branch, a clean worktree, and a matching commit
 on `origin`. CodeBuild builds that commit. OpenTofu records its short commit SHA
 as the immutable ECS image tag and then watches the ECS rollout.
 
+A plan uses the currently deployed image tag when one exists. For an empty
+state, it uses the current short commit SHA as the proposed first image tag.
+That first plan requires the same named, clean, and pushed Git source as an app
+deploy, so the later build can produce the image shown in the plan.
+
 On the first deploy, the `deploy` command cannot start CodeBuild until its build
 resources exist. It therefore applies one target,
 `aws_codebuild_project.app_image`. The dependency graph creates the Data
