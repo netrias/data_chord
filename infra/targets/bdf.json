@@ -1,0 +1,9 @@
+{
+  "target_slug": "bdf",
+  "expected_account_id": "084828580051",
+  "aws_region": "us-east-2",
+  "state_bucket_name": "netrias-data-chord-tofu-state-084828580051-us-east-2",
+  "deployer_role_arn": "arn:aws:iam::084828580051:role/foundation/datachord-deployer",
+  "application_role_boundary_arn": "arn:aws:iam::084828580051:policy/datachord-application-role-boundary",
+  "application_role_path": "/application/"
+}

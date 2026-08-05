@@ -1,5 +1,4 @@
 project_name = "data-chord"
-aws_region   = "us-east-2"
 
 vpc_id = "vpc-0fce4109b9575d124"
 public_subnet_ids = [

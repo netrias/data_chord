@@ -5,15 +5,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
-ENV_NAME="$(require_env_name "${1:-}")"
-MODE="${2:-deploy}"
-BACKEND_FILE="$(backend_config_path "$ENV_NAME")"
-COMMON_TFVARS_FILE="$(common_tfvars_path)"
-ENV_TFVARS_FILE="$(env_tfvars_path "$ENV_NAME")"
+TARGET_NAME="$(require_target_name "${1:-}")"
+STAGE_NAME="$(require_stage_name "$TARGET_NAME" "${2:-}")"
+MODE="${3:-deploy}"
+TARGET_CONFIG_FILE="$(target_config_path "$TARGET_NAME")"
+COMMON_TFVARS_FILE="$(common_tfvars_path "$TARGET_NAME")"
+STAGE_TFVARS_FILE="$(stage_tfvars_path "$TARGET_NAME" "$STAGE_NAME")"
 
-export AWS_PROFILE="${AWS_PROFILE:-strides}"
-AWS_REGION_VALUE="$(env_tfvar_value "$ENV_NAME" aws_region)"
-[[ -n "$AWS_REGION_VALUE" ]] || fail "aws_region is missing in $COMMON_TFVARS_FILE or $ENV_TFVARS_FILE"
+AWS_REGION_VALUE="$(target_value "$TARGET_NAME" aws_region)"
 export AWS_REGION="$AWS_REGION_VALUE"
 export AWS_DEFAULT_REGION="$AWS_REGION_VALUE"
 
@@ -21,16 +20,20 @@ require_command aws
 require_command git
 require_command tofu
 
-[[ -f "$BACKEND_FILE" ]] || fail "Missing backend config: $BACKEND_FILE"
+[[ -f "$TARGET_CONFIG_FILE" ]] || fail "Missing target contract: $TARGET_CONFIG_FILE"
 [[ -f "$COMMON_TFVARS_FILE" ]] || fail "Missing common config: $COMMON_TFVARS_FILE"
-[[ -f "$ENV_TFVARS_FILE" ]] || fail "Missing env config: $ENV_TFVARS_FILE"
+[[ -f "$STAGE_TFVARS_FILE" ]] || fail "Missing stage config: $STAGE_TFVARS_FILE"
 
 tofu_args=(
   "-var-file=$COMMON_TFVARS_FILE"
-  "-var-file=$ENV_TFVARS_FILE"
+  "-var-file=$STAGE_TFVARS_FILE"
+  "-var=expected_account_id=$(target_value "$TARGET_NAME" expected_account_id)"
+  "-var=aws_region=$(target_value "$TARGET_NAME" aws_region)"
+  "-var=application_role_boundary_arn=$(target_value "$TARGET_NAME" application_role_boundary_arn)"
+  "-var=application_role_path=$(target_value "$TARGET_NAME" application_role_path)"
 )
 
-AUTH_BYPASS_CIDRS_SECRET_NAME="data-chord/$ENV_NAME/auth-bypass-cidrs"
+AUTH_BYPASS_CIDRS_SECRET_NAME="data-chord/$STAGE_NAME/auth-bypass-cidrs"
 
 git_branch() {
   git -C "$REPO_DIR" branch --show-current
@@ -84,38 +87,26 @@ ensure_deployable_git_state() {
   log "Deploy source: $branch @ ${commit:0:12}"
 }
 
-init_tofu() {
-  log "Initializing OpenTofu backend for $ENV_NAME"
-  tofu -chdir="$INFRA_DIR" init \
-    -backend-config="$BACKEND_FILE" \
-    -input=false \
-    -reconfigure
-}
-
 apply_stack() {
   local image_tag="$1"
   require_immutable_image_tag "$image_tag"
-  log "Applying OpenTofu stack for $ENV_NAME with image tag $image_tag"
+  log "Applying OpenTofu stack for $TARGET_NAME/$STAGE_NAME with image tag $image_tag"
   tofu -chdir="$INFRA_DIR" apply -input=false -auto-approve "${tofu_args[@]}" "-var=image_tag=$image_tag"
 }
 
 plan_stack() {
   local image_tag="$1"
   require_immutable_image_tag "$image_tag"
-  log "Planning OpenTofu stack for $ENV_NAME with image tag $image_tag"
+  log "Planning OpenTofu stack for $TARGET_NAME/$STAGE_NAME with image tag $image_tag"
   tofu -chdir="$INFRA_DIR" plan -input=false "${tofu_args[@]}" "-var=image_tag=$image_tag"
 }
 
-bootstrap_state() {
-  "$SCRIPT_DIR/bootstrap-state.sh" "$ENV_NAME"
-}
-
 ensure_secret() {
-  "$SCRIPT_DIR/bootstrap-secrets.sh" "$ENV_NAME" ensure
+  "$SCRIPT_DIR/bootstrap-secrets.sh" "$TARGET_NAME" "$STAGE_NAME" ensure
 }
 
 check_secret() {
-  "$SCRIPT_DIR/bootstrap-secrets.sh" "$ENV_NAME" check
+  "$SCRIPT_DIR/bootstrap-secrets.sh" "$TARGET_NAME" "$STAGE_NAME" check
 }
 
 load_auth_bypass_cidrs() {
@@ -375,13 +366,13 @@ tail_logs() {
 run_app_deploy() {
   local build_id image_tag app_url
 
+  require_deployer_identity "$TARGET_NAME"
   log "Using AWS profile: $AWS_PROFILE"
   ensure_deployable_git_state
   image_tag="$(git_image_tag)"
-  bootstrap_state
   ensure_secret
   load_auth_bypass_cidrs
-  init_tofu
+  init_tofu "$TARGET_NAME" "$STAGE_NAME"
 
   build_id="$(start_build)"
   watch_build "$build_id"
@@ -395,11 +386,11 @@ run_app_deploy() {
 run_infra_deploy() {
   local before_task_definition after_task_definition image_tag app_url
 
+  require_deployer_identity "$TARGET_NAME"
   log "Using AWS profile: $AWS_PROFILE"
-  bootstrap_state
   ensure_secret
   load_auth_bypass_cidrs
-  init_tofu
+  init_tofu "$TARGET_NAME" "$STAGE_NAME"
 
   image_tag="$(infra_image_tag)"
   before_task_definition="$(current_task_definition_arn)"
@@ -421,11 +412,11 @@ run_infra_deploy() {
 run_plan() {
   local image_tag
 
+  require_deployer_identity "$TARGET_NAME"
   log "Using AWS profile: $AWS_PROFILE"
-  bootstrap_state
   check_secret
   load_auth_bypass_cidrs
-  init_tofu
+  init_tofu "$TARGET_NAME" "$STAGE_NAME"
   image_tag="$(infra_image_tag)"
   plan_stack "$image_tag"
 }
@@ -441,22 +432,27 @@ case "$MODE" in
     run_plan
     ;;
   status)
-    bootstrap_state
-    init_tofu
+    require_deployer_identity "$TARGET_NAME"
+    init_tofu "$TARGET_NAME" "$STAGE_NAME"
     print_status
     ;;
   logs)
-    bootstrap_state
-    init_tofu
+    require_deployer_identity "$TARGET_NAME"
+    init_tofu "$TARGET_NAME" "$STAGE_NAME"
     tail_logs
     ;;
   build)
+    require_deployer_identity "$TARGET_NAME"
     ensure_deployable_git_state
-    bootstrap_state
-    init_tofu
+    init_tofu "$TARGET_NAME" "$STAGE_NAME"
     build_id="$(start_build)"
     watch_build "$build_id"
     log "Image build complete. OpenTofu has not been applied, so ECS was not rolled."
+    ;;
+  output-url)
+    require_deployer_identity "$TARGET_NAME"
+    init_tofu "$TARGET_NAME" "$STAGE_NAME" >/dev/null
+    tofu_output app_url
     ;;
   *)
     fail "Unknown deploy mode: $MODE"

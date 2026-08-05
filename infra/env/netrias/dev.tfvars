@@ -1,0 +1,9 @@
+environment  = "dev"
+domain_label = "data-chord-dev"
+
+netrias_api_key_secret_name = "data-chord/dev/netrias-api-key"
+
+target_group_deregistration_delay_seconds  = 20
+target_group_health_check_interval_seconds = 10
+target_group_healthy_threshold             = 2
+target_group_unhealthy_threshold           = 2

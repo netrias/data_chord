@@ -7,6 +7,34 @@ on:
     branches: [main]
 
 jobs:
+  infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: 1.10.3
+
+      - name: Check OpenTofu format
+        run: tofu -chdir=infra fmt -check -recursive
+
+      - name: Initialize OpenTofu without a backend
+        run: tofu -chdir=infra init -backend=false -input=false
+
+      - name: Validate OpenTofu
+        run: tofu -chdir=infra validate
+
+      - name: Test OpenTofu behavior
+        run: tofu -chdir=infra test
+
+      - name: Test deployment contract
+        run: bash infra/tests/deployment_contract_test.sh
+
+      - name: Check shell syntax
+        run: bash -n infra/scripts/*.sh infra/tests/*.sh
+
   js-check:
     runs-on: ubuntu-latest
     steps:

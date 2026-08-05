@@ -1,4 +1,11 @@
-data "aws_caller_identity" "current" {}
+data "aws_caller_identity" "current" {
+  lifecycle {
+    postcondition {
+      condition     = self.account_id == var.expected_account_id
+      error_message = "AWS credentials do not resolve to the target account."
+    }
+  }
+}
 
 data "aws_secretsmanager_secret" "netrias_api_key" {
   name = var.netrias_api_key_secret_name
@@ -98,6 +105,8 @@ resource "aws_security_group" "task" {
 }
 
 resource "aws_security_group" "secrets_endpoint" {
+  count = var.secretsmanager_vpc_endpoint_id == "" ? 0 : 1
+
   name        = "${local.name_prefix}-secrets-endpoint"
   description = "Secrets Manager VPC endpoint access from Data Chord tasks"
   vpc_id      = var.vpc_id
@@ -134,8 +143,20 @@ resource "aws_security_group" "secrets_endpoint" {
 }
 
 resource "aws_vpc_endpoint_security_group_association" "secretsmanager_tasks" {
+  count = var.secretsmanager_vpc_endpoint_id == "" ? 0 : 1
+
   vpc_endpoint_id   = var.secretsmanager_vpc_endpoint_id
-  security_group_id = aws_security_group.secrets_endpoint.id
+  security_group_id = aws_security_group.secrets_endpoint[0].id
+}
+
+moved {
+  from = aws_security_group.secrets_endpoint
+  to   = aws_security_group.secrets_endpoint[0]
+}
+
+moved {
+  from = aws_vpc_endpoint_security_group_association.secretsmanager_tasks
+  to   = aws_vpc_endpoint_security_group_association.secretsmanager_tasks[0]
 }
 
 resource "aws_s3_bucket" "workflow" {
@@ -511,8 +532,10 @@ resource "aws_cloudwatch_metric_alarm" "ecs_memory_high" {
   tags = local.common_tags
 }
 
-resource "aws_iam_role" "task_execution" {
-  name = "${local.name_prefix}-task-exec"
+resource "aws_iam_role" "application_task_execution" {
+  name                 = "${local.name_prefix}-application-task-exec"
+  path                 = var.application_role_path
+  permissions_boundary = var.application_role_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -526,16 +549,17 @@ resource "aws_iam_role" "task_execution" {
   })
 
   tags = local.common_tags
+
 }
 
-resource "aws_iam_role_policy_attachment" "task_execution" {
-  role       = aws_iam_role.task_execution.name
+resource "aws_iam_role_policy_attachment" "application_task_execution" {
+  role       = aws_iam_role.application_task_execution.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
-resource "aws_iam_role_policy" "task_execution_secrets" {
+resource "aws_iam_role_policy" "application_task_execution_secrets" {
   name = "${local.name_prefix}-task-secrets"
-  role = aws_iam_role.task_execution.id
+  role = aws_iam_role.application_task_execution.id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -545,10 +569,13 @@ resource "aws_iam_role_policy" "task_execution_secrets" {
       Resource = data.aws_secretsmanager_secret.netrias_api_key.arn
     }]
   })
+
 }
 
-resource "aws_iam_role" "task" {
-  name = "${local.name_prefix}-task"
+resource "aws_iam_role" "application_task" {
+  name                 = "${local.name_prefix}-application-task"
+  path                 = var.application_role_path
+  permissions_boundary = var.application_role_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -562,11 +589,12 @@ resource "aws_iam_role" "task" {
   })
 
   tags = local.common_tags
+
 }
 
-resource "aws_iam_role_policy" "task_workflow_storage" {
+resource "aws_iam_role_policy" "application_task_workflow_storage" {
   name = "${local.name_prefix}-workflow-storage"
-  role = aws_iam_role.task.id
+  role = aws_iam_role.application_task.id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -594,6 +622,7 @@ resource "aws_iam_role_policy" "task_workflow_storage" {
       }
     ]
   })
+
 }
 
 resource "aws_ecs_cluster" "app" {
@@ -602,14 +631,20 @@ resource "aws_ecs_cluster" "app" {
   tags = local.common_tags
 }
 
-resource "aws_ecs_task_definition" "app" {
+resource "aws_ecs_task_definition" "application" {
   family                   = local.name_prefix
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = var.container_cpu
   memory                   = var.container_memory
-  execution_role_arn       = aws_iam_role.task_execution.arn
-  task_role_arn            = aws_iam_role.task.arn
+  execution_role_arn       = aws_iam_role.application_task_execution.arn
+  task_role_arn            = aws_iam_role.application_task.arn
+
+  depends_on = [
+    aws_iam_role_policy.application_task_execution_secrets,
+    aws_iam_role_policy.application_task_workflow_storage,
+    aws_iam_role_policy_attachment.application_task_execution,
+  ]
 
   container_definitions = jsonencode([
     {
@@ -881,7 +916,7 @@ resource "aws_route53_record" "app" {
 resource "aws_ecs_service" "app" {
   name            = local.name_prefix
   cluster         = aws_ecs_cluster.app.id
-  task_definition = aws_ecs_task_definition.app.arn
+  task_definition = aws_ecs_task_definition.application.arn
   desired_count   = var.desired_count
   launch_type     = "FARGATE"
 
@@ -1033,8 +1068,10 @@ resource "aws_sns_topic_policy" "alerts" {
   })
 }
 
-resource "aws_iam_role" "codebuild" {
-  name = "${local.name_prefix}-codebuild"
+resource "aws_iam_role" "application_build" {
+  name                 = "${local.name_prefix}-application-build"
+  path                 = var.application_role_path
+  permissions_boundary = var.application_role_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -1048,11 +1085,12 @@ resource "aws_iam_role" "codebuild" {
   })
 
   tags = local.common_tags
+
 }
 
-resource "aws_iam_role_policy" "codebuild" {
+resource "aws_iam_role_policy" "application_build" {
   name = "${local.name_prefix}-codebuild"
-  role = aws_iam_role.codebuild.id
+  role = aws_iam_role.application_build.id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -1080,12 +1118,15 @@ resource "aws_iam_role_policy" "codebuild" {
       }
     ]
   })
+
 }
 
 resource "aws_codebuild_project" "app_image" {
   name         = "${local.name_prefix}-image"
   description  = "Build and push the Data Chord container image"
-  service_role = aws_iam_role.codebuild.arn
+  service_role = aws_iam_role.application_build.arn
+
+  depends_on = [aws_iam_role_policy.application_build]
 
   artifacts {
     type = "NO_ARTIFACTS"

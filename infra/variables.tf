@@ -4,10 +4,45 @@ variable "project_name" {
   default     = "data-chord"
 }
 
+variable "expected_account_id" {
+  description = "AWS account that owns this application deployment."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9]{12}$", var.expected_account_id))
+    error_message = "expected_account_id must be a 12-digit AWS account id."
+  }
+}
+
+variable "application_role_boundary_arn" {
+  description = "Foundation-owned permission boundary applied to Data Chord application roles."
+  type        = string
+
+  validation {
+    condition     = can(regex("^arn:aws:iam::${var.expected_account_id}:policy/.+$", var.application_role_boundary_arn))
+    error_message = "application_role_boundary_arn must be an IAM policy in expected_account_id."
+  }
+}
+
+variable "application_role_path" {
+  description = "Foundation-owned IAM path for Data Chord application roles."
+  type        = string
+
+  validation {
+    condition     = can(regex("^/.+/$", var.application_role_path))
+    error_message = "application_role_path must start and end with a slash."
+  }
+}
+
 variable "environment" {
   description = "Deployment environment name, such as staging or prod."
   type        = string
   default     = "staging"
+
+  validation {
+    condition     = contains(["dev", "qa", "staging", "prod"], var.environment)
+    error_message = "environment must be dev, qa, staging, or prod."
+  }
 }
 
 variable "aws_region" {
@@ -27,8 +62,14 @@ variable "public_subnet_ids" {
 }
 
 variable "secretsmanager_vpc_endpoint_id" {
-  description = "Existing Secrets Manager VPC endpoint id used by Fargate tasks to fetch NETRIAS_API_KEY."
+  description = "Optional existing Secrets Manager VPC endpoint id used by Fargate tasks."
   type        = string
+  default     = ""
+
+  validation {
+    condition     = var.secretsmanager_vpc_endpoint_id == "" || can(regex("^vpce-[0-9a-f]+$", var.secretsmanager_vpc_endpoint_id))
+    error_message = "secretsmanager_vpc_endpoint_id must be empty or a valid VPC endpoint id."
+  }
 }
 
 variable "additional_secretsmanager_client_security_group_ids" {

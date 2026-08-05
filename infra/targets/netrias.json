@@ -1,0 +1,9 @@
+{
+  "target_slug": "netrias",
+  "expected_account_id": "945365518758",
+  "aws_region": "us-east-2",
+  "state_bucket_name": "netrias-data-chord-tofu-state-945365518758-us-east-2",
+  "deployer_role_arn": "arn:aws:iam::945365518758:role/foundation/datachord-deployer",
+  "application_role_boundary_arn": "arn:aws:iam::945365518758:policy/datachord-application-role-boundary",
+  "application_role_path": "/application/"
+}
