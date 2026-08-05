@@ -30,6 +30,7 @@ workflow_storage/
 
 # OpenTofu / Terraform local state and secrets
 .terraform/
+infra/.terraform-data/
 *.tfstate
 *.tfstate.*
 infra/terraform.tfvars

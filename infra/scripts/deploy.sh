@@ -5,15 +5,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
-ENV_NAME="$(require_env_name "${1:-}")"
-MODE="${2:-deploy}"
-BACKEND_FILE="$(backend_config_path "$ENV_NAME")"
-COMMON_TFVARS_FILE="$(common_tfvars_path)"
-ENV_TFVARS_FILE="$(env_tfvars_path "$ENV_NAME")"
+require_command python3
+TARGET_NAME="$(require_target_name "${1:-}")"
+STAGE_NAME="$(require_stage_name "${2:-}")"
+require_configured_deployment "$TARGET_NAME" "$STAGE_NAME"
+MODE="${3:-deploy}"
+TARGET_CONFIG_FILE="$(target_config_path "$TARGET_NAME")"
+COMMON_TFVARS_FILE="$(common_tfvars_path "$TARGET_NAME")"
+STAGE_TFVARS_FILE="$(stage_tfvars_path "$TARGET_NAME" "$STAGE_NAME")"
 
-export AWS_PROFILE="${AWS_PROFILE:-strides}"
-AWS_REGION_VALUE="$(env_tfvar_value "$ENV_NAME" aws_region)"
-[[ -n "$AWS_REGION_VALUE" ]] || fail "aws_region is missing in $COMMON_TFVARS_FILE or $ENV_TFVARS_FILE"
+AWS_REGION_VALUE="$(target_value "$TARGET_NAME" aws_region)"
 export AWS_REGION="$AWS_REGION_VALUE"
 export AWS_DEFAULT_REGION="$AWS_REGION_VALUE"
 
@@ -21,16 +22,22 @@ require_command aws
 require_command git
 require_command tofu
 
-[[ -f "$BACKEND_FILE" ]] || fail "Missing backend config: $BACKEND_FILE"
+[[ -f "$TARGET_CONFIG_FILE" ]] || fail "Missing target contract: $TARGET_CONFIG_FILE"
 [[ -f "$COMMON_TFVARS_FILE" ]] || fail "Missing common config: $COMMON_TFVARS_FILE"
-[[ -f "$ENV_TFVARS_FILE" ]] || fail "Missing env config: $ENV_TFVARS_FILE"
+[[ -f "$STAGE_TFVARS_FILE" ]] || fail "Missing stage config: $STAGE_TFVARS_FILE"
 
 tofu_args=(
   "-var-file=$COMMON_TFVARS_FILE"
-  "-var-file=$ENV_TFVARS_FILE"
+  "-var-file=$STAGE_TFVARS_FILE"
+  "-var=expected_account_id=$(target_value "$TARGET_NAME" expected_account_id)"
+  "-var=aws_region=$(target_value "$TARGET_NAME" aws_region)"
+  "-var=application_role_boundary_arn=$(target_value "$TARGET_NAME" application_role_boundary_arn)"
+  "-var=application_role_path=$(target_value "$TARGET_NAME" application_role_path)"
+  "-var=environment=$STAGE_NAME"
+  "-var=netrias_api_key_secret_name=$(netrias_api_key_secret_name_for "$STAGE_NAME")"
 )
 
-AUTH_BYPASS_CIDRS_SECRET_NAME="data-chord/$ENV_NAME/auth-bypass-cidrs"
+AUTH_BYPASS_CIDRS_SECRET_NAME="data-chord/$STAGE_NAME/auth-bypass-cidrs"
 
 git_branch() {
   git -C "$REPO_DIR" branch --show-current
@@ -84,38 +91,70 @@ ensure_deployable_git_state() {
   log "Deploy source: $branch @ ${commit:0:12}"
 }
 
-init_tofu() {
-  log "Initializing OpenTofu backend for $ENV_NAME"
-  tofu -chdir="$INFRA_DIR" init \
-    -backend-config="$BACKEND_FILE" \
-    -input=false \
-    -reconfigure
-}
-
 apply_stack() {
   local image_tag="$1"
   require_immutable_image_tag "$image_tag"
-  log "Applying OpenTofu stack for $ENV_NAME with image tag $image_tag"
+  log "Applying OpenTofu stack for $TARGET_NAME/$STAGE_NAME with image tag $image_tag"
   tofu -chdir="$INFRA_DIR" apply -input=false -auto-approve "${tofu_args[@]}" "-var=image_tag=$image_tag"
+}
+
+apply_build_prerequisites() {
+  local image_tag="$1"
+  require_immutable_image_tag "$image_tag"
+  log "Reconciling build prerequisites for $TARGET_NAME/$STAGE_NAME"
+  tofu -chdir="$INFRA_DIR" apply \
+    -input=false \
+    -auto-approve \
+    "${tofu_args[@]}" \
+    "-var=image_tag=$image_tag" \
+    -target=aws_codebuild_project.app_image
+}
+
+ensure_build_prerequisites() {
+  local image_tag="$1"
+  local project_name
+
+  apply_build_prerequisites "$image_tag"
+  project_name="$(tofu_output codebuild_project_name)"
+  [[ -n "$project_name" ]] || fail "Build prerequisites were applied, but the CodeBuild project output is still unavailable."
 }
 
 plan_stack() {
   local image_tag="$1"
   require_immutable_image_tag "$image_tag"
-  log "Planning OpenTofu stack for $ENV_NAME with image tag $image_tag"
+  log "Planning OpenTofu stack for $TARGET_NAME/$STAGE_NAME with image tag $image_tag"
   tofu -chdir="$INFRA_DIR" plan -input=false "${tofu_args[@]}" "-var=image_tag=$image_tag"
 }
 
-bootstrap_state() {
-  "$SCRIPT_DIR/bootstrap-state.sh" "$ENV_NAME"
-}
+require_application_state_handoff_complete() {
+  local handoff_file="$INFRA_DIR/migration-handoff.tf"
+  local legacy_addresses state_addresses address
 
-ensure_secret() {
-  "$SCRIPT_DIR/bootstrap-secrets.sh" "$ENV_NAME" ensure
+  if [[ -e "$handoff_file" ]]; then
+    [[ -r "$handoff_file" ]] || fail "Could not read migration handoff addresses: $handoff_file"
+    legacy_addresses="$(awk '$1 == "from" && $2 == "=" { print $3 }' "$handoff_file")" ||
+      fail "Could not read migration handoff addresses: $handoff_file"
+  else
+    legacy_addresses=""
+  fi
+
+  if ! state_addresses="$(tofu -chdir="$INFRA_DIR" state list 2>&1)"; then
+    if [[ "$state_addresses" == *"No state file was found"* ]]; then
+      return 0
+    fi
+    fail "Could not inspect application state before deploy: $state_addresses"
+  fi
+
+  while IFS= read -r address; do
+    [[ -n "$address" ]] || continue
+    if grep -Fqx -- "$address" <<<"$state_addresses"; then
+      fail "Legacy BDF application state is present. Complete the privileged saved-plan handoff in infra/README.md before deploy."
+    fi
+  done <<<"$legacy_addresses"
 }
 
 check_secret() {
-  "$SCRIPT_DIR/bootstrap-secrets.sh" "$ENV_NAME" check
+  "$SCRIPT_DIR/bootstrap-secrets.sh" "$TARGET_NAME" "$STAGE_NAME" check
 }
 
 load_auth_bypass_cidrs() {
@@ -173,6 +212,26 @@ start_build() {
     --output text
 }
 
+ensure_image() {
+  local image_tag="$1"
+  local repository_url repository_name output build_id
+
+  repository_url="$(tofu_output ecr_repository_url)"
+  [[ -n "$repository_url" ]] || fail "ECR repository output is not available after the build-prerequisite apply."
+  repository_name="${repository_url##*/}"
+
+  if output="$(aws ecr describe-images --repository-name "$repository_name" --image-ids "imageTag=$image_tag" 2>&1)"; then
+    log "Immutable image already exists; reusing $repository_name:$image_tag"
+    return 0
+  fi
+  if [[ "$output" != *"ImageNotFoundException"* ]]; then
+    fail "Could not check ECR image '$repository_name:$image_tag': $output"
+  fi
+
+  build_id="$(start_build)"
+  watch_build "$build_id"
+}
+
 print_build_logs_hint() {
   local group_name="$1"
   local stream_name="$2"
@@ -194,10 +253,11 @@ print_build_logs_hint() {
 watch_build() {
   local build_id="$1"
   local previous=""
-  local status phase group_name stream_name deep_link fields
+  local deadline status phase group_name stream_name deep_link fields
 
   log "Watching CodeBuild build: $build_id"
-  while true; do
+  deadline=$((SECONDS + (65 * 60)))
+  while (( SECONDS < deadline )); do
     fields="$(
       aws codebuild batch-get-builds \
         --ids "$build_id" \
@@ -223,6 +283,9 @@ watch_build() {
 
     sleep 10
   done
+
+  print_build_logs_hint "${group_name:-None}" "${stream_name:-None}" "${deep_link:-None}"
+  fail "Timed out waiting for CodeBuild after 65 minutes"
 }
 
 current_task_definition_arn() {
@@ -259,7 +322,7 @@ current_image_tag() {
   printf '%s\n' "${image##*:}"
 }
 
-infra_image_tag() {
+selected_existing_image_tag() {
   local image_tag
 
   if [[ -n "${DATA_CHORD_IMAGE_TAG:-}" ]]; then
@@ -269,13 +332,32 @@ infra_image_tag() {
 
   image_tag="$(current_image_tag)"
   if [[ -n "$image_tag" ]]; then
-    # Infra-only changes should keep the running app image unless the operator
-    # explicitly provides a replacement tag.
+    printf '%s\n' "$image_tag"
+  fi
+}
+
+infra_image_tag() {
+  local image_tag
+
+  image_tag="$(selected_existing_image_tag)"
+  if [[ -n "$image_tag" ]]; then
+    printf '%s\n' "$image_tag"
+    return 0
+  fi
+  fail "No deployed image tag is available. Run an app deploy after the base infrastructure exists, or set DATA_CHORD_IMAGE_TAG to an existing immutable image tag."
+}
+
+plan_image_tag() {
+  local image_tag
+
+  image_tag="$(selected_existing_image_tag)"
+  if [[ -n "$image_tag" ]]; then
     printf '%s\n' "$image_tag"
     return 0
   fi
 
-  fail "No deployed image tag is available. Run an app deploy after the base infrastructure exists, or set DATA_CHORD_IMAGE_TAG to an existing immutable image tag."
+  ensure_deployable_git_state
+  git_image_tag
 }
 
 print_target_health() {
@@ -373,18 +455,19 @@ tail_logs() {
 }
 
 run_app_deploy() {
-  local build_id image_tag app_url
+  local image_tag app_url
 
+  require_deployer_identity "$TARGET_NAME"
   log "Using AWS profile: $AWS_PROFILE"
   ensure_deployable_git_state
   image_tag="$(git_image_tag)"
-  bootstrap_state
-  ensure_secret
+  init_tofu "$TARGET_NAME" "$STAGE_NAME"
+  require_application_state_handoff_complete
+  check_secret
   load_auth_bypass_cidrs
-  init_tofu
 
-  build_id="$(start_build)"
-  watch_build "$build_id"
+  ensure_build_prerequisites "$image_tag"
+  ensure_image "$image_tag"
   apply_stack "$image_tag"
   watch_ecs_rollout
 
@@ -395,11 +478,13 @@ run_app_deploy() {
 run_infra_deploy() {
   local before_task_definition after_task_definition image_tag app_url
 
+  require_deployer_identity "$TARGET_NAME"
   log "Using AWS profile: $AWS_PROFILE"
-  bootstrap_state
-  ensure_secret
+  ensure_deployable_git_state
+  init_tofu "$TARGET_NAME" "$STAGE_NAME"
+  require_application_state_handoff_complete
+  check_secret
   load_auth_bypass_cidrs
-  init_tofu
 
   image_tag="$(infra_image_tag)"
   before_task_definition="$(current_task_definition_arn)"
@@ -418,45 +503,59 @@ run_infra_deploy() {
   log "Infra deploy complete: $app_url"
 }
 
+run_build() {
+  local image_tag
+
+  require_deployer_identity "$TARGET_NAME"
+  log "Using AWS profile: $AWS_PROFILE"
+  ensure_deployable_git_state
+  image_tag="$(git_image_tag)"
+  init_tofu "$TARGET_NAME" "$STAGE_NAME"
+  require_application_state_handoff_complete
+  ensure_build_prerequisites "$image_tag"
+  ensure_image "$image_tag"
+  log "Immutable image is ready. The full application stack has not been applied."
+}
+
 run_plan() {
   local image_tag
 
+  require_deployer_identity "$TARGET_NAME"
   log "Using AWS profile: $AWS_PROFILE"
-  bootstrap_state
   check_secret
   load_auth_bypass_cidrs
-  init_tofu
-  image_tag="$(infra_image_tag)"
+  init_tofu "$TARGET_NAME" "$STAGE_NAME"
+  image_tag="$(plan_image_tag)"
   plan_stack "$image_tag"
 }
 
 case "$MODE" in
-  deploy | deploy-app | app)
+  deploy)
     run_app_deploy
     ;;
-  deploy-infra | infra)
+  deploy-infra)
     run_infra_deploy
     ;;
   plan)
     run_plan
     ;;
   status)
-    bootstrap_state
-    init_tofu
+    require_deployer_identity "$TARGET_NAME"
+    init_tofu "$TARGET_NAME" "$STAGE_NAME"
     print_status
     ;;
   logs)
-    bootstrap_state
-    init_tofu
+    require_deployer_identity "$TARGET_NAME"
+    init_tofu "$TARGET_NAME" "$STAGE_NAME"
     tail_logs
     ;;
   build)
-    ensure_deployable_git_state
-    bootstrap_state
-    init_tofu
-    build_id="$(start_build)"
-    watch_build "$build_id"
-    log "Image build complete. OpenTofu has not been applied, so ECS was not rolled."
+    run_build
+    ;;
+  output-url)
+    require_deployer_identity "$TARGET_NAME"
+    init_tofu "$TARGET_NAME" "$STAGE_NAME" >/dev/null
+    tofu_output app_url
     ;;
   *)
     fail "Unknown deploy mode: $MODE"

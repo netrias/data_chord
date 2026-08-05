@@ -1,7 +1,4 @@
-environment  = "prod"
 domain_label = "netrias-data-chord"
-
-netrias_api_key_secret_name = "data-chord/prod/netrias-api-key"
 
 additional_secretsmanager_client_security_group_ids = ["sg-0a9e0f356c22abf67"]
 

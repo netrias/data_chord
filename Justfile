@@ -25,13 +25,12 @@ test-e2e:
 perf-e2e:
 	npm run perf:e2e
 
-perf-staging base_url="":
+perf-staging target="bdf" base_url="":
 	@set -euo pipefail; \
 	url="{{base_url}}"; \
 	if [ -z "$url" ]; then url="${DATA_CHORD_STAGING_URL:-}"; fi; \
 	if [ -z "$url" ]; then \
-		tofu -chdir=infra init -backend-config=env/staging.backend.hcl -input=false >/dev/null; \
-		url="$(tofu -chdir=infra output -raw app_url)"; \
+		url="$(infra/scripts/deploy.sh {{target}} staging output-url)"; \
 	fi; \
 	echo "Running staging performance journey against $url"; \
 	PLAYWRIGHT_BASE_URL="$url" npm run perf:staging
@@ -62,35 +61,45 @@ infra-fmt:
 infra-validate:
 	tofu -chdir=infra validate
 
-infra-plan env:
-	infra/scripts/deploy.sh {{env}} plan
+infra-test:
+	tofu -chdir=infra test
+	bash infra/tests/deployment_contract_test.sh
+	bash infra/tests/deployment_flow_test.sh
+	bash infra/tests/secret_preparation_test.sh
+	bash -n infra/scripts/*.sh infra/tests/*.sh
 
-infra-apply env:
-	infra/scripts/deploy.sh {{env}} deploy-infra
+# Prepare or update the stage API secret. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required; NETRIAS_API_KEY creates or updates.
+prepare-stage-secret target stage:
+	infra/scripts/bootstrap-secrets.sh {{target}} {{stage}} ensure
 
-deploy env:
-	infra/scripts/deploy.sh {{env}}
+# Deploy the app. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
+deploy target stage:
+	infra/scripts/deploy.sh {{target}} {{stage}}
 
-deploy-app env:
-	infra/scripts/deploy.sh {{env}} deploy-app
+# Apply infrastructure while keeping the deployed image. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
+deploy-infra target stage:
+	infra/scripts/deploy.sh {{target}} {{stage}} deploy-infra
 
-deploy-infra env:
-	infra/scripts/deploy.sh {{env}} deploy-infra
+# Plan infrastructure. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
+deploy-plan target stage:
+	infra/scripts/deploy.sh {{target}} {{stage}} plan
 
-deploy-plan env:
-	infra/scripts/deploy.sh {{env}} plan
+# Show deployment status. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
+deploy-status target stage:
+	infra/scripts/deploy.sh {{target}} {{stage}} status
 
-deploy-status env:
-	infra/scripts/deploy.sh {{env}} status
+# Show deployment logs. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
+deploy-logs target stage:
+	infra/scripts/deploy.sh {{target}} {{stage}} logs
 
-deploy-logs env:
-	infra/scripts/deploy.sh {{env}} logs
+# Build the current commit without the full application apply. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
+deploy-build target stage:
+	infra/scripts/deploy.sh {{target}} {{stage}} build
 
-deploy-build env:
-	infra/scripts/deploy.sh {{env}} build
+# Invite a user. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
+invite-user target stage email:
+	infra/scripts/invite-cognito-user.sh {{target}} {{stage}} {{email}}
 
-invite-user env email:
-	infra/scripts/invite-cognito-user.sh {{env}} {{email}}
-
-resend-user-invite env email:
-	infra/scripts/invite-cognito-user.sh {{env}} {{email}} resend
+# Resend an invite. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
+resend-user-invite target stage email:
+	infra/scripts/invite-cognito-user.sh {{target}} {{stage}} {{email}} resend
