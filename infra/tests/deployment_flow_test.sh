@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_SCRIPT="$TEST_DIR/../scripts/deploy.sh"
+HANDOFF_FILE="$TEST_DIR/../migration-handoff.tf"
 TEST_ROOT="$(mktemp -d)"
 MOCK_BIN="$TEST_ROOT/bin"
 mkdir -p "$MOCK_BIN"
@@ -31,6 +32,15 @@ assert_call_absent() {
   fi
 }
 
+assert_no_deploy_writes() {
+  local calls_file="$1"
+
+  assert_call_absent "tofu bootstrap-apply " "$calls_file"
+  assert_call_absent "tofu full-apply " "$calls_file"
+  assert_call_absent "aws start-build " "$calls_file"
+  assert_call_absent "aws secret-write " "$calls_file"
+}
+
 cat >"$MOCK_BIN/git" <<'MOCK_GIT'
 #!/usr/bin/env bash
 set -Eeuo pipefail
@@ -51,6 +61,9 @@ case "${1:-}" in
     fi
     ;;
   status)
+    if [[ "${MOCK_GIT_DIRTY:-0}" == "1" ]]; then
+      printf ' M infra/main.tf\n'
+    fi
     ;;
   ls-remote)
     printf '%s\trefs/heads/test-branch\n' "$MOCK_COMMIT"
@@ -391,6 +404,53 @@ run_plan_image_override() {
   assert_call_contains "tofu plan " "-var=image_tag=operator123456" "$calls_file"
 }
 
+run_infra_image_override() {
+  local scenario_root="$TEST_ROOT/infra-image-override"
+  local calls_file="$scenario_root/calls"
+  mkdir -p "$scenario_root"
+  : >"$calls_file"
+
+  PATH="$MOCK_BIN:$PATH" \
+    AWS_PROFILE=mock \
+    DATA_CHORD_IMAGE_TAG=operator123456 \
+    MOCK_ACCOUNT_ID=945365518758 \
+    MOCK_BUILD_READY="$scenario_root/build-ready" \
+    MOCK_CALLS="$calls_file" \
+    MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+    MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+    MOCK_STATE_ADDRESSES=aws_s3_bucket.workflow \
+    DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+    "$DEPLOY_SCRIPT" netrias staging deploy-infra >/dev/null 2>&1
+
+  assert_call_contains "tofu full-apply " "-var=image_tag=operator123456" "$calls_file"
+  assert_call_absent "tofu bootstrap-apply " "$calls_file"
+  assert_call_absent "aws start-build " "$calls_file"
+}
+
+run_dirty_infra_deploy_fails() {
+  local scenario_root="$TEST_ROOT/dirty-infra-deploy"
+  local calls_file="$scenario_root/calls"
+  mkdir -p "$scenario_root"
+  : >"$calls_file"
+
+  if PATH="$MOCK_BIN:$PATH" \
+    AWS_PROFILE=mock \
+    DATA_CHORD_IMAGE_TAG=operator123456 \
+    MOCK_ACCOUNT_ID=945365518758 \
+    MOCK_BUILD_READY="$scenario_root/build-ready" \
+    MOCK_CALLS="$calls_file" \
+    MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+    MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+    MOCK_GIT_DIRTY=1 \
+    DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+    "$DEPLOY_SCRIPT" netrias staging deploy-infra >/dev/null 2>&1; then
+    fail_test "Infrastructure-only deploy accepted a dirty worktree"
+  fi
+
+  assert_call_absent "tofu init " "$calls_file"
+  assert_no_deploy_writes "$calls_file"
+}
+
 run_build_reuses_immutable_image() {
   local scenario_root="$TEST_ROOT/build-image-reuse"
   local calls_file="$scenario_root/calls"
@@ -426,81 +486,40 @@ run_build_reuses_immutable_image() {
 }
 
 run_legacy_state_guard() {
-  local legacy_addresses=(
-    aws_iam_role.task_execution
-    aws_iam_role_policy_attachment.task_execution
-    aws_iam_role_policy.task_execution_secrets
-    aws_iam_role.task
-    aws_iam_role_policy.task_workflow_storage
-    aws_iam_role.codebuild
-    aws_iam_role_policy.codebuild
-    aws_ecs_task_definition.app
-  )
-  local address calls_file scenario_root
+  local legacy_addresses=()
+  local address calls_file mode scenario_root
+
+  [[ -e "$HANDOFF_FILE" ]] || return 0
+  [[ -r "$HANDOFF_FILE" ]] || fail_test "Migration handoff file is not readable"
+  while IFS= read -r address; do
+    [[ -z "$address" ]] || legacy_addresses+=("$address")
+  done < <(awk '$1 == "from" && $2 == "=" { print $3 }' "$HANDOFF_FILE")
+  (( ${#legacy_addresses[@]} > 0 )) || fail_test "Migration handoff file has no legacy addresses"
 
   for address in "${legacy_addresses[@]}"; do
-    scenario_root="$TEST_ROOT/legacy-${address//./-}"
-    calls_file="$scenario_root/calls"
-    mkdir -p "$scenario_root"
-    : >"$calls_file"
+    for mode in deploy deploy-infra build; do
+      scenario_root="$TEST_ROOT/legacy-${mode}-${address//./-}"
+      calls_file="$scenario_root/calls"
+      mkdir -p "$scenario_root"
+      : >"$calls_file"
 
-    if PATH="$MOCK_BIN:$PATH" \
-      AWS_PROFILE=mock \
-      MOCK_ACCOUNT_ID=084828580051 \
-      MOCK_BUILD_READY="$scenario_root/build-ready" \
-      MOCK_CALLS="$calls_file" \
-      MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
-      MOCK_FULL_APPLIED="$scenario_root/full-applied" \
-      MOCK_STATE_ADDRESSES="$address" \
-      NETRIAS_API_KEY=guard-must-stop-before-secret-write \
-      DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
-      "$DEPLOY_SCRIPT" bdf staging deploy >/dev/null 2>&1; then
-      fail_test "Normal deploy accepted legacy state address: $address"
-    fi
+      if PATH="$MOCK_BIN:$PATH" \
+        AWS_PROFILE=mock \
+        MOCK_ACCOUNT_ID=084828580051 \
+        MOCK_BUILD_READY="$scenario_root/build-ready" \
+        MOCK_CALLS="$calls_file" \
+        MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+        MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+        MOCK_STATE_ADDRESSES="$address" \
+        NETRIAS_API_KEY=guard-must-stop-before-secret-write \
+        DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+        "$DEPLOY_SCRIPT" bdf staging "$mode" >/dev/null 2>&1; then
+        fail_test "$mode accepted legacy state address: $address"
+      fi
 
-    assert_call_absent "tofu bootstrap-apply " "$calls_file"
-    assert_call_absent "tofu full-apply " "$calls_file"
-    assert_call_absent "aws secret-write " "$calls_file"
+      assert_no_deploy_writes "$calls_file"
+    done
   done
-
-  scenario_root="$TEST_ROOT/legacy-infra-deploy"
-  calls_file="$scenario_root/calls"
-  mkdir -p "$scenario_root"
-  : >"$calls_file"
-  if PATH="$MOCK_BIN:$PATH" \
-    AWS_PROFILE=mock \
-    MOCK_ACCOUNT_ID=084828580051 \
-    MOCK_BUILD_READY="$scenario_root/build-ready" \
-    MOCK_CALLS="$calls_file" \
-    MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
-    MOCK_FULL_APPLIED="$scenario_root/full-applied" \
-    MOCK_STATE_ADDRESSES=aws_iam_role.codebuild \
-    NETRIAS_API_KEY=guard-must-stop-before-secret-write \
-    DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
-    "$DEPLOY_SCRIPT" bdf staging deploy-infra >/dev/null 2>&1; then
-    fail_test "Infrastructure-only deploy accepted legacy state"
-  fi
-  assert_call_absent "tofu full-apply " "$calls_file"
-  assert_call_absent "aws secret-write " "$calls_file"
-
-  scenario_root="$TEST_ROOT/legacy-build"
-  calls_file="$scenario_root/calls"
-  mkdir -p "$scenario_root"
-  : >"$calls_file"
-  if PATH="$MOCK_BIN:$PATH" \
-    AWS_PROFILE=mock \
-    MOCK_ACCOUNT_ID=084828580051 \
-    MOCK_BUILD_READY="$scenario_root/build-ready" \
-    MOCK_CALLS="$calls_file" \
-    MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
-    MOCK_FULL_APPLIED="$scenario_root/full-applied" \
-    MOCK_STATE_ADDRESSES=aws_iam_role.codebuild \
-    DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
-    "$DEPLOY_SCRIPT" bdf staging build >/dev/null 2>&1; then
-    fail_test "Image build accepted legacy state"
-  fi
-  assert_call_absent "tofu bootstrap-apply " "$calls_file"
-  assert_call_absent "aws start-build " "$calls_file"
 
   scenario_root="$TEST_ROOT/legacy-plan"
   calls_file="$scenario_root/calls"
@@ -513,7 +532,7 @@ run_legacy_state_guard() {
     MOCK_CALLS="$calls_file" \
     MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
     MOCK_FULL_APPLIED="$scenario_root/full-applied" \
-    MOCK_STATE_ADDRESSES=aws_iam_role.codebuild \
+    MOCK_STATE_ADDRESSES="${legacy_addresses[0]}" \
     DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
     "$DEPLOY_SCRIPT" bdf staging plan >/dev/null 2>&1
   assert_call_contains "tofu plan " "-var=environment=staging" "$calls_file"
@@ -527,6 +546,8 @@ run_empty_state_plan
 run_empty_state_infra_deploy_fails
 run_existing_state_plan
 run_plan_image_override
+run_infra_image_override
+run_dirty_infra_deploy_fails
 run_build_reuses_immutable_image
 run_legacy_state_guard
 

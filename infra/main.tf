@@ -553,7 +553,6 @@ resource "aws_iam_role" "application_task_execution" {
   })
 
   tags = local.common_tags
-
 }
 
 resource "aws_iam_role_policy_attachment" "application_task_execution" {
@@ -573,7 +572,6 @@ resource "aws_iam_role_policy" "application_task_execution_secrets" {
       Resource = data.aws_secretsmanager_secret.netrias_api_key.arn
     }]
   })
-
 }
 
 resource "aws_iam_role" "application_task" {
@@ -593,7 +591,6 @@ resource "aws_iam_role" "application_task" {
   })
 
   tags = local.common_tags
-
 }
 
 resource "aws_iam_role_policy" "application_task_workflow_storage" {
@@ -626,7 +623,6 @@ resource "aws_iam_role_policy" "application_task_workflow_storage" {
       }
     ]
   })
-
 }
 
 resource "aws_ecs_cluster" "app" {
@@ -1089,7 +1085,6 @@ resource "aws_iam_role" "application_build" {
   })
 
   tags = local.common_tags
-
 }
 
 resource "aws_iam_role_policy" "application_build" {
@@ -1122,13 +1117,13 @@ resource "aws_iam_role_policy" "application_build" {
       }
     ]
   })
-
 }
 
 resource "aws_codebuild_project" "app_image" {
-  name         = "${local.name_prefix}-image"
-  description  = "Build and push the Data Chord container image"
-  service_role = aws_iam_role.application_build.arn
+  name          = "${local.name_prefix}-image"
+  description   = "Build and push the Data Chord container image"
+  service_role  = aws_iam_role.application_build.arn
+  build_timeout = 60
 
   depends_on = [aws_iam_role_policy.application_build]
 

@@ -91,6 +91,10 @@ Before a Data Chord plan or BDF handoff, verify these durable prerequisites:
 - The account-access foundation exists, including the deployer role,
   application-role boundary, application IAM path, and state bucket with
   versioning and the required bucket policy.
+- The deployer can use `secretsmanager:DescribeSecret`,
+  `secretsmanager:GetSecretValue`, `secretsmanager:CreateSecret`, and
+  `secretsmanager:PutSecretValue` for the stage API secret, and
+  `secretsmanager:GetSecretValue` for the optional auth-bypass secret.
 - The configured VPC and subnets exist in the target account and region. Public
   application subnets must have the required address mapping and active route.
 - CodeBuild has approved access to the configured source repository.
@@ -100,7 +104,7 @@ Before a Data Chord plan or BDF handoff, verify these durable prerequisites:
   delegation remains an operator responsibility.
 
 Any change to VPC, subnet, DNS, certificate, domain, or other deployment input
-must be committed and pushed before deploy. The deploy command rejects dirty
+must be committed and pushed before deploy. Deploy commands reject dirty
 worktrees and commits that do not match the selected branch on `origin`.
 
 ## Plan and deploy
@@ -187,10 +191,8 @@ application apply.
 
 ## State and IAM handoff safety
 
-The removed state-bucket bootstrap script was not represented in Data Chord
-OpenTofu state. Removing it cannot plan bucket destruction. The BDF staging and
-production state files contain application resources only, and this repository
-keeps their existing keys.
+The BDF staging and production state files contain application resources only,
+and this repository keeps their existing keys.
 
 The existing BDF application roles use the IAM root path and no permission
 boundary. The foundation deployer cannot delete those root-path roles. OpenTofu
@@ -203,8 +205,9 @@ The normal foundation deployer cannot refresh the legacy IAM objects. Do not
 use the normal deploy command for the first BDF handoff. Do not use
 `-refresh=false` for the planned handoff. An approved BDF foundation
 administrator must create and apply a saved plan with normal refresh.
-Both deploy write modes inspect state without refresh and stop before apply if
-any legacy handoff address remains. Plan mode stays available for review.
+Deploy and build write modes inspect state without refresh and stop before
+apply if any legacy handoff address remains. Plan mode stays available for
+review.
 
 Use this sequence once for `staging` and once for `prod`:
 
@@ -222,6 +225,8 @@ Use this sequence once for `staging` and once for `prod`:
 5. Create a saved plan with normal refresh and all explicit deployment inputs:
 
 ```bash
+bash <<'BDF_HANDOFF'
+set -Eeuo pipefail
 stage=staging
 operator_profile='<approved-privileged-profile>'
 umask 077
@@ -265,6 +270,7 @@ AWS_PROFILE="$operator_profile" tofu -chdir=infra plan \
   -var="image_tag=$image_tag"
 
 tofu -chdir=infra show "$migration_dir/bdf-$stage.tfplan"
+BDF_HANDOFF
 ```
 
 6. Stop unless the plan forgets all eight legacy addresses without destroy,

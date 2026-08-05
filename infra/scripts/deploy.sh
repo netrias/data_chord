@@ -127,7 +127,16 @@ plan_stack() {
 }
 
 require_application_state_handoff_complete() {
-  local state_addresses address
+  local handoff_file="$INFRA_DIR/migration-handoff.tf"
+  local legacy_addresses state_addresses address
+
+  if [[ -e "$handoff_file" ]]; then
+    [[ -r "$handoff_file" ]] || fail "Could not read migration handoff addresses: $handoff_file"
+    legacy_addresses="$(awk '$1 == "from" && $2 == "=" { print $3 }' "$handoff_file")" ||
+      fail "Could not read migration handoff addresses: $handoff_file"
+  else
+    legacy_addresses=""
+  fi
 
   if ! state_addresses="$(tofu -chdir="$INFRA_DIR" state list 2>&1)"; then
     if [[ "$state_addresses" == *"No state file was found"* ]]; then
@@ -137,19 +146,11 @@ require_application_state_handoff_complete() {
   fi
 
   while IFS= read -r address; do
-    case "$address" in
-      aws_iam_role.task_execution | \
-        aws_iam_role_policy_attachment.task_execution | \
-        aws_iam_role_policy.task_execution_secrets | \
-        aws_iam_role.task | \
-        aws_iam_role_policy.task_workflow_storage | \
-        aws_iam_role.codebuild | \
-        aws_iam_role_policy.codebuild | \
-        aws_ecs_task_definition.app)
-        fail "Legacy BDF application state is present. Complete the privileged saved-plan handoff in infra/README.md before deploy."
-        ;;
-    esac
-  done <<<"$state_addresses"
+    [[ -n "$address" ]] || continue
+    if grep -Fqx -- "$address" <<<"$state_addresses"; then
+      fail "Legacy BDF application state is present. Complete the privileged saved-plan handoff in infra/README.md before deploy."
+    fi
+  done <<<"$legacy_addresses"
 }
 
 check_secret() {
@@ -252,10 +253,11 @@ print_build_logs_hint() {
 watch_build() {
   local build_id="$1"
   local previous=""
-  local status phase group_name stream_name deep_link fields
+  local deadline status phase group_name stream_name deep_link fields
 
   log "Watching CodeBuild build: $build_id"
-  while true; do
+  deadline=$((SECONDS + (65 * 60)))
+  while (( SECONDS < deadline )); do
     fields="$(
       aws codebuild batch-get-builds \
         --ids "$build_id" \
@@ -281,6 +283,9 @@ watch_build() {
 
     sleep 10
   done
+
+  print_build_logs_hint "${group_name:-None}" "${stream_name:-None}" "${deep_link:-None}"
+  fail "Timed out waiting for CodeBuild after 65 minutes"
 }
 
 current_task_definition_arn() {
@@ -317,7 +322,7 @@ current_image_tag() {
   printf '%s\n' "${image##*:}"
 }
 
-infra_image_tag() {
+selected_existing_image_tag() {
   local image_tag
 
   if [[ -n "${DATA_CHORD_IMAGE_TAG:-}" ]]; then
@@ -327,24 +332,25 @@ infra_image_tag() {
 
   image_tag="$(current_image_tag)"
   if [[ -n "$image_tag" ]]; then
-    # Infra-only changes should keep the running app image unless the operator
-    # explicitly provides a replacement tag.
+    printf '%s\n' "$image_tag"
+  fi
+}
+
+infra_image_tag() {
+  local image_tag
+
+  image_tag="$(selected_existing_image_tag)"
+  if [[ -n "$image_tag" ]]; then
     printf '%s\n' "$image_tag"
     return 0
   fi
-
   fail "No deployed image tag is available. Run an app deploy after the base infrastructure exists, or set DATA_CHORD_IMAGE_TAG to an existing immutable image tag."
 }
 
 plan_image_tag() {
   local image_tag
 
-  if [[ -n "${DATA_CHORD_IMAGE_TAG:-}" ]]; then
-    printf '%s\n' "$DATA_CHORD_IMAGE_TAG"
-    return 0
-  fi
-
-  image_tag="$(current_image_tag)"
+  image_tag="$(selected_existing_image_tag)"
   if [[ -n "$image_tag" ]]; then
     printf '%s\n' "$image_tag"
     return 0
@@ -474,6 +480,7 @@ run_infra_deploy() {
 
   require_deployer_identity "$TARGET_NAME"
   log "Using AWS profile: $AWS_PROFILE"
+  ensure_deployable_git_state
   init_tofu "$TARGET_NAME" "$STAGE_NAME"
   require_application_state_handoff_complete
   check_secret
