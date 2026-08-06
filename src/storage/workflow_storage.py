@@ -100,7 +100,13 @@ class WorkflowMetadata:
         schema_version = payload.get(_FIELD_STORAGE_SCHEMA_VERSION)
         if not isinstance(file_id, str) or not isinstance(owner_user_id, str):
             return None
-        if created_at is None or not isinstance(schema_version, int):
+        if (
+            created_at is None
+            or isinstance(schema_version, bool)
+            or not isinstance(schema_version, int)
+        ):
+            return None
+        if schema_version != STORAGE_SCHEMA_VERSION:
             return None
         return cls(
             dataset_workflow_id=dataset_workflow_id_from_value(file_id),

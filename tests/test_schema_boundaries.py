@@ -21,7 +21,7 @@ from src.persistence.harmonization_job_store import (
     save_harmonization_job,
 )
 from src.persistence.workflow_state_store import save_initial_workflow_state
-from src.storage import LocalWorkflowStorage, UserContext, WorkflowFile
+from src.storage import LocalWorkflowStorage, UserContext, WorkflowFile, WorkflowMetadata
 
 _FILE_ID = dataset_workflow_id_from_string("abcdef0123456789abcdef0123456789")
 _OTHER_FILE_ID = dataset_workflow_id_from_string("0123456789abcdef0123456789abcdef")
@@ -33,6 +33,21 @@ def _workflow_state() -> WorkflowState:
         DataModelVersionReference("gc", "11.0.4"),
         ColumnMappingManifest.empty(),
     )
+
+
+def test_workflow_metadata_rejects_boolean_schema_version() -> None:
+    metadata = WorkflowMetadata.create(UserContext(user_id="user-1"), _FILE_ID).to_store()
+    metadata["storage_schema_version"] = True
+
+    assert WorkflowMetadata.from_store(metadata) is None
+
+
+def test_workflow_metadata_rejects_unsupported_schema_versions() -> None:
+    metadata = WorkflowMetadata.create(UserContext(user_id="user-1"), _FILE_ID).to_store()
+
+    for schema_version in (0, 2):
+        metadata["storage_schema_version"] = schema_version
+        assert WorkflowMetadata.from_store(metadata) is None
 
 
 def test_workflow_state_rejects_boolean_schema_version() -> None:

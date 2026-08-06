@@ -217,63 +217,17 @@ run "ecs_event_rules_use_the_managed_service_identity" {
   }
 }
 
-run "codebuild_uses_the_configured_github_connection" {
+run "codebuild_reads_the_public_repository_without_authentication" {
   command = plan
-
-  variables {
-    codebuild_connection_id = "00000000-0000-0000-0000-000000000000"
-  }
-
-  assert {
-    condition = length([
-      for statement in jsondecode(aws_iam_role_policy.application_build.policy).Statement : statement
-      if statement.Effect == "Allow" &&
-      try(statement.Resource == local.codebuild_connection_arn, false) &&
-      try(toset(statement.Action) == toset([
-        "codeconnections:GetConnection",
-        "codeconnections:GetConnectionToken",
-      ]), false)
-    ]) == 1
-    error_message = "The CodeBuild role must be allowed to use the configured source connection."
-  }
 
   assert {
     condition = (
-      aws_codebuild_project.app_image.source[0].auth[0].type == "CODECONNECTIONS" &&
-      aws_codebuild_project.app_image.source[0].auth[0].resource == local.codebuild_connection_arn
+      aws_codebuild_project.app_image.source[0].type == "GITHUB" &&
+      aws_codebuild_project.app_image.source[0].location == "https://github.com/netrias/data_chord.git" &&
+      length(aws_codebuild_project.app_image.source[0].auth) == 0
     )
-    error_message = "The CodeBuild source must use the configured source connection."
+    error_message = "CodeBuild must read the public Data Chord repository without account-specific source authentication."
   }
-}
-
-run "codebuild_omits_connection_access_when_none_is_configured" {
-  command = plan
-
-  assert {
-    condition     = length(aws_codebuild_project.app_image.source[0].auth) == 0
-    error_message = "CodeBuild source authentication must be absent when no connection is configured."
-  }
-
-  assert {
-    condition = length([
-      for statement in jsondecode(aws_iam_role_policy.application_build.policy).Statement : statement
-      if try(length([
-        for action in statement.Action : action
-        if startswith(action, "codeconnections:")
-      ]) > 0, false)
-    ]) == 0
-    error_message = "The CodeBuild role must not receive connection access when no connection is configured."
-  }
-}
-
-run "codebuild_connection_id_must_be_a_uuid" {
-  command = plan
-
-  variables {
-    codebuild_connection_id = "not-a-uuid"
-  }
-
-  expect_failures = [var.codebuild_connection_id]
 }
 
 run "endpoint_resources_are_absent_without_shared_endpoint" {
