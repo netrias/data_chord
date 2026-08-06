@@ -8,16 +8,21 @@ import pytest
 from httpx import AsyncClient
 
 import src.app.dependencies as dependencies
+from src.domain.columns import column_key_from_string
+from src.domain.manifest import ColumnMappingRecord
+from src.persistence.workflow_state_store import load_workflow_state, save_workflow_state
 from src.storage import UploadStorage, WorkflowFile
 from tests.conftest import (
     TEST_CSV_CONTENT_TYPE,
     TEST_TARGET_SCHEMA,
     TEST_TSV_CONTENT_TYPE,
     TEST_XLSX_CONTENT_TYPE,
+    create_csv_content,
     create_harmonized_csv,
     create_manifest_for_file,
     create_xlsx_content,
     store_test_harmonization_manifest,
+    upload_content,
     upload_file,
 )
 
@@ -382,39 +387,40 @@ class TestRowsContract:
             assert "termsWithChanges" in column
             assert "transformations" in column
 
-    async def test_column_includes_target_cde_label_from_mapping_artifact(
+    async def test_column_includes_target_cde_label_from_workflow_state(
         self,
         app_client: AsyncClient,
         temp_storage: UploadStorage,
         sample_csv_path: Path,
     ) -> None:
-        """Stage 4 columns expose the target CDE reviewers are selecting values against."""
+        """Stage 4 exposes the target CDE from the canonical workflow plan."""
 
-        # Given: a harmonized file has a saved mapping artifact for the first source column
+        # Given: a harmonized file whose canonical plan maps the first source column
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
         create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
         create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
-        dependencies.get_workflow_storage().write_json(
-            dependencies.get_user_context(),
-            file_id,
-            WorkflowFile.CDE_MAPPING,
-            {
-                "file_id": file_id,
-                "generated_at": "2026-06-02T00:00:00+00:00",
-                "data_model_key": TEST_TARGET_SCHEMA,
-                "external_version_number": "1",
-                "mappings": [{
-                    "column_key": "col_0000",
-                    "source_column_name": "col_a",
-                    "output_column_name": "col_a",
-                    "cde_key": "primary_diagnosis",
-                    "cde_description": "Primary Diagnosis",
-                    "mapping_source": "ai",
-                    "maps_values": True,
-                }],
-            },
+        workflow_storage = dependencies.get_workflow_storage()
+        user = dependencies.get_user_context()
+        loaded = load_workflow_state(workflow_storage, user, file_id)
+        assert loaded is not None
+        manifest = loaded.state.mapping_manifest
+        assert manifest is not None
+        column_key = column_key_from_string("col_0000")
+        updated_manifest = manifest.with_record(
+            ColumnMappingRecord(
+                column_key=column_key,
+                column_name="col_a",
+                cde_key="primary_diagnosis",
+                cde_id=2,
+            )
+        )
+        save_workflow_state(
+            workflow_storage,
+            user,
+            loaded.state.with_mapping_manifest(updated_manifest),
+            expected_version=loaded.version,
         )
 
         # When: rows are requested for review
@@ -752,59 +758,121 @@ class TestTermRowIndicesContract:
 class TestSummaryContract:
     """POST /stage-5/summary returns change statistics."""
 
-    async def test_response_contains_required_fields(
+    async def test_response_describes_current_output_in_source_column_order(
         self,
         app_client: AsyncClient,
         temp_storage: UploadStorage,
-        sample_csv_path: Path,
     ) -> None:
-        """Summary response includes all StageFiveSummaryResponse fields."""
+        """One complete response proves metadata, metrics, mappings, and order."""
 
-        # Given: An uploaded file with harmonized output and manifest available
-        file_id = await upload_file(app_client, sample_csv_path)
+        # Given: two source columns with one repeated changed value in the first column
+        content = create_csv_content([
+            ["later", "first"],
+            ["zeta", "Alpha"],
+            ["zeta", "Beta"],
+            ["eta", "Beta"],
+        ])
+        file_id = await upload_content(app_client, content, "contract.csv")
         meta = temp_storage.load(file_id)
         assert meta is not None
-        create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
-        create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
+        changes = {
+            0: {"later": "Zeta", "first": "Alpha"},
+            1: {"later": "Zeta"},
+        }
+        create_harmonized_csv(temp_storage, file_id, meta.saved_path, changes)
+        create_manifest_for_file(temp_storage, file_id, meta.saved_path, changes)
 
-        # When: Summary is requested
-        response = await app_client.post(
-            "/stage-5/summary",
-            json={"file_id": file_id},
-        )
+        # When: the current output summary is requested
+        response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
 
-        # Then: Response contains column summaries
+        # Then: the public response contains exact source-order outcomes
         assert response.status_code == 200
         data = response.json()
-        assert "column_summaries" in data
-        assert len(data["column_summaries"]) > 0
-
-    async def test_column_summary_structure(
-        self,
-        app_client: AsyncClient,
-        temp_storage: UploadStorage,
-        sample_csv_path: Path,
-    ) -> None:
-        """Each column summary has ColumnSummary fields."""
-
-        # Given: An uploaded file with harmonized output and manifest available
-        file_id = await upload_file(app_client, sample_csv_path)
-        meta = temp_storage.load(file_id)
-        assert meta is not None
-        create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
-        create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
-
-        # When: Summary is requested
-        response = await app_client.post(
-            "/stage-5/summary",
-            json={"file_id": file_id},
-        )
-
-        # Then: Each column summary contains required ColumnSummary fields
-        summaries = response.json()["column_summaries"]
-        assert len(summaries) > 0
-        for summary in summaries:
-            assert "column" in summary
-            assert "distinct_terms" in summary
-            assert "ai_changes" in summary
-            assert "manual_changes" in summary
+        assert data["dataset"] == {
+            "filename": "contract.csv",
+            "tabular_format": "csv",
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
+        }
+        assert data["column_summaries"] == [
+            {
+                "column": "later",
+                "column_key": "col_0000",
+                "source_column_index": 0,
+                "distinct_terms": 2,
+                "changed_distinct_values": 1,
+                "total_rows": 3,
+                "changed_rows": 2,
+                "reviewer_edited_rows": 0,
+                "non_conformant_values": 0,
+                "review_status": "not_checked",
+                "ai_changes": 1,
+                "manual_changes": 0,
+                "unchanged": 1,
+            },
+            {
+                "column": "first",
+                "column_key": "col_0001",
+                "source_column_index": 1,
+                "distinct_terms": 2,
+                "changed_distinct_values": 0,
+                "total_rows": 3,
+                "changed_rows": 0,
+                "reviewer_edited_rows": 0,
+                "non_conformant_values": 0,
+                "review_status": "not_checked",
+                "ai_changes": 0,
+                "manual_changes": 0,
+                "unchanged": 2,
+            },
+        ]
+        assert [
+            {
+                "column_key": mapping["column_key"],
+                "original_value": mapping["original_value"],
+                "final_value": mapping["final_value"],
+                "is_changed": mapping["is_changed"],
+                "final_value_source": mapping["final_value_source"],
+                "review_status": mapping["review_status"],
+                "row_count": mapping["row_count"],
+            }
+            for mapping in data["term_mappings"]
+        ] == [
+            {
+                "column_key": "col_0000",
+                "original_value": "eta",
+                "final_value": "eta",
+                "is_changed": False,
+                "final_value_source": "source",
+                "review_status": "not_checked",
+                "row_count": 1,
+            },
+            {
+                "column_key": "col_0000",
+                "original_value": "zeta",
+                "final_value": "Zeta",
+                "is_changed": True,
+                "final_value_source": "data_chord",
+                "review_status": "not_checked",
+                "row_count": 2,
+            },
+            {
+                "column_key": "col_0001",
+                "original_value": "Alpha",
+                "final_value": "Alpha",
+                "is_changed": False,
+                "final_value_source": "source",
+                "review_status": "not_checked",
+                "row_count": 1,
+            },
+            {
+                "column_key": "col_0001",
+                "original_value": "Beta",
+                "final_value": "Beta",
+                "is_changed": False,
+                "final_value_source": "source",
+                "review_status": "not_checked",
+                "row_count": 2,
+            },
+        ]
+        assert data["non_conformant_count"] == 0

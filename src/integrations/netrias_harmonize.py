@@ -1,38 +1,22 @@
 """
 Trigger harmonization jobs via the Netrias client SDK.
 
-Abstracts SDK initialization and provides graceful fallback when API key is missing.
+Accepts a prepared mapping manifest and isolates SDK response handling.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
 from uuid import uuid4
 
 from netrias_client import NetriasClient
 
-from src.app.session_cache import SessionCache
-from src.domain.column_cde_map import ColumnCdeOverrides
-from src.domain.column_renames import ColumnRenameSet
-from src.domain.columns import ColumnKey
-from src.domain.manifest import (
-    DEFAULT_HARMONIZATION,
-    ColumnMappingManifest,
-    ColumnMappingRecord,
-    ManifestPayload,
-    normalize_manifest,
-)
+from src.domain.harmonization import HarmonizeStatus
+from src.domain.manifest import ColumnMappingManifest
 
 logger = logging.getLogger(__name__)
-
-
-class HarmonizeStatus(str, Enum):
-    QUEUED = "queued"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
 
 
 @dataclass(frozen=True)
@@ -47,90 +31,38 @@ class HarmonizeResult:
 
 class HarmonizeService:
     def __init__(self, client: NetriasClient | None) -> None:
-        self._client = client
         if not client:
-            logger.warning("NetriasClient unavailable; harmonize calls will be stubbed.")
+            raise RuntimeError("NetriasClient unavailable")
+        self._client = client
 
     def run(
         self,
         *,
         file_path: Path,
         data_model_key: str,
-        column_overrides: ColumnCdeOverrides,
-        column_renames: ColumnRenameSet,
-        cache: SessionCache,
         external_version_number: str,
-        manifest: ManifestPayload | None = None,
+        prepared_manifest: ColumnMappingManifest,
         output_path: Path | None = None,
         sheet_name: str | None = None,
     ) -> HarmonizeResult:
         job_id = uuid4().hex
-        if not self._client:
-            detail = "Netrias client unavailable; returning a stubbed job."
-            logger.warning(detail, extra={"job_id": job_id})
-            return HarmonizeResult(job_id=job_id, status=HarmonizeStatus.QUEUED, detail=detail)
-
         try:
-            cde_map = self._prepare_cde_map(
-                file_path,
-                data_model_key,
-                external_version_number,
-                manifest,
-                sheet_name,
-            )
-            cde_map = _apply_column_updates(cde_map, column_overrides, column_renames, cache)
             return self._execute_harmonization(
                 file_path,
-                cde_map,
+                prepared_manifest,
                 job_id,
                 data_model_key,
                 external_version_number,
                 output_path,
                 sheet_name,
             )
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.exception("Harmonize call failed; falling back to stub", exc_info=exc)
-            return HarmonizeResult(job_id=job_id, status=HarmonizeStatus.FAILED, detail=str(exc))
-
-    def _prepare_cde_map(
-        self,
-        file_path: Path,
-        data_model_key: str,
-        external_version_number: str,
-        manifest: ManifestPayload | None,
-        sheet_name: str | None,
-    ) -> ColumnMappingManifest:
-        if manifest is not None:
-            return ColumnMappingManifest.from_payload(manifest)
-        return self._discover_cde_map(
-            file_path=file_path,
-            data_model_key=data_model_key,
-            external_version_number=external_version_number,
-            sheet_name=sheet_name,
-        )
-
-    def _discover_cde_map(
-        self,
-        *,
-        file_path: Path,
-        data_model_key: str,
-        external_version_number: str,
-        sheet_name: str | None,
-    ) -> ColumnMappingManifest:
-        if not self._client:
-            raise RuntimeError("Netrias client unavailable")
-        raw_cde_map = self._client.discover_mapping_from_tabular(
-            source_path=file_path,
-            target_schema=data_model_key,
-            external_version_number=external_version_number,
-            sheet_name=sheet_name,
-        )
-        cde_map = ColumnMappingManifest.from_payload(raw_cde_map)
-        logger.info(
-            "Discovered CDE map for harmonization",
-            extra={"column_count": len(cde_map.records), "data_model_key": data_model_key},
-        )
-        return cde_map
+        except Exception as exc:  # pragma: no cover - defensive SDK boundary
+            logger.exception("Harmonize provider call failed", exc_info=exc, extra={"job_id": job_id})
+            return HarmonizeResult(
+                job_id=job_id,
+                status=HarmonizeStatus.FAILED,
+                detail="Harmonization provider failed.",
+            )
 
     def _execute_harmonization(
         self,
@@ -142,9 +74,6 @@ class HarmonizeService:
         output_path: Path | None,
         sheet_name: str | None,
     ) -> HarmonizeResult:
-        if not self._client:
-            raise RuntimeError("Netrias client unavailable")
-
         netrias_result = self._client.harmonize(
             source_path=file_path,
             manifest=cde_map.to_payload(),
@@ -153,12 +82,18 @@ class HarmonizeService:
             output_path=output_path,
             sheet_name=sheet_name,
         )
-        detail = str(getattr(netrias_result, "description", "Harmonization completed."))
-        raw_status = str(getattr(netrias_result, "status", "succeeded"))
+        raw_status = getattr(netrias_result, "status", None)
+        if not isinstance(raw_status, str):
+            raise ValueError("Harmonization provider response has no status")
         try:
             status = HarmonizeStatus(raw_status)
-        except ValueError:
-            status = HarmonizeStatus.SUCCEEDED
+        except ValueError as exc:
+            raise ValueError("Harmonization provider returned an unknown status") from exc
+        detail = (
+            str(getattr(netrias_result, "description", "Harmonization completed."))
+            if status != HarmonizeStatus.FAILED
+            else "Harmonization provider failed."
+        )
         raw_job_id = getattr(netrias_result, "job_id", None)
         raw_mapping_id = getattr(netrias_result, "mapping_id", None)
         has_remote_job_id = bool(raw_job_id)
@@ -181,70 +116,6 @@ class HarmonizeService:
             manifest_path=manifest_path,
             output_path=output_path,
         )
-
-
-def _apply_column_updates(
-    manifest: ColumnMappingManifest,
-    overrides: ColumnCdeOverrides,
-    renames: ColumnRenameSet,
-    cache: SessionCache,
-) -> ColumnMappingManifest:
-    if overrides.is_empty and not renames.renames:
-        return manifest
-
-    applied = overrides.applied_items()
-    skipped = overrides.skipped_columns()
-    updated = manifest
-
-    for column_key, cde_key in applied:
-        updated = updated.with_record(
-            _build_mapping_record(updated.records.get(column_key), column_key, cde_key, cache)
-        )
-
-    for column_key in skipped:
-        updated = updated.without_column(column_key)
-
-    updated = updated.with_column_names(renames.renames)
-    _log_mapping_results(applied, [str(column_key) for column_key in skipped], renames)
-    return updated
-
-
-def _build_mapping_record(
-    existing: ColumnMappingRecord | None,
-    column_key: ColumnKey,
-    cde_key: str,
-    cache: SessionCache,
-) -> ColumnMappingRecord:
-    """Look up cde_id from session cache (populated in Stage 2)."""
-    cde_info = cache.get_cde_by_key(cde_key)
-    if cde_info is None:
-        raise ValueError(f"Unknown CDE key: {cde_key}")
-    return ColumnMappingRecord(
-        column_key=column_key,
-        cde_key=cde_key,
-        cde_id=cde_info.cde_id,
-        column_name=existing.column_name if existing else str(column_key),
-        harmonization=existing.harmonization if existing else DEFAULT_HARMONIZATION,
-        route=existing.route if existing else None,
-        alternatives=existing.alternatives if existing else (),
-    )
-
-
-def _log_mapping_results(
-    applied: list[tuple[ColumnKey, str]],
-    skipped: list[str],
-    renames: ColumnRenameSet,
-) -> None:
-    if applied:
-        logger.info(
-            "Applied column mappings",
-            extra={"mappings": {str(column_key): cde_key for column_key, cde_key in applied}},
-        )
-    if skipped:
-        logger.info("Skipped column mappings via 'No Mapping'", extra={"columns": skipped})
-    if renames.renames:
-        logger.info("Applied column renames", extra={"renames": renames.to_strings()})
-
 
 def _extract_manifest_path(netrias_result: object) -> Path | None:
     raw_path = getattr(netrias_result, "manifest_path", None)
@@ -270,6 +141,4 @@ def _existing_path_from_value(raw_path: object) -> Path | None:
 __all__ = [
     "HarmonizeResult",
     "HarmonizeService",
-    "HarmonizeStatus",
-    "normalize_manifest",
 ]

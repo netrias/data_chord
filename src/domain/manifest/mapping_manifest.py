@@ -7,7 +7,9 @@ from dataclasses import dataclass, replace
 from typing import Final
 
 from src.domain.cde import ModelSuggestion
-from src.domain.column_cde_map import ColumnCdeMap
+from src.domain.cde_catalog import CdeCatalog
+from src.domain.column_cde_map import ColumnCdeMap, ColumnCdeOverrides
+from src.domain.column_renames import ColumnRenameSet
 from src.domain.columns import ColumnKey, column_key_from_string
 from src.domain.manifest.models import AlternativeEntry, ColumnMappingEntry, ManifestPayload
 
@@ -27,6 +29,10 @@ MAPPING_FIELD_TARGET: Final = "target"
 # eligible for the harmonization workflow; unmapped/skipped columns are omitted
 # from ColumnMappingManifest instead of carrying another harmonization value.
 DEFAULT_HARMONIZATION: Final = "harmonizable"
+
+
+class InvalidMappingManifestError(Exception):
+    """Raised when a current-schema mapping manifest is malformed."""
 
 
 @dataclass(frozen=True)
@@ -158,6 +164,26 @@ class ColumnMappingManifest:
                 records[record.column_key] = record
         return cls(records=records)
 
+    @classmethod
+    def from_payload_strict(cls, payload: object) -> ColumnMappingManifest:
+        """Decode a current manifest without turning malformed data into an empty result."""
+        if not isinstance(payload, Mapping):
+            raise InvalidMappingManifestError("mapping manifest must be an object")
+        raw_mappings = payload.get(MANIFEST_FIELD_COLUMN_MAPPINGS)
+        if not isinstance(raw_mappings, Mapping):
+            raise InvalidMappingManifestError("mapping manifest column_mappings must be an object")
+
+        records: dict[ColumnKey, ColumnMappingRecord] = {}
+        for raw_key, raw_record in raw_mappings.items():
+            if not isinstance(raw_key, str) or not raw_key:
+                raise InvalidMappingManifestError("mapping manifest column keys must be non-empty strings")
+            _validate_current_record(raw_key, raw_record)
+            record = ColumnMappingRecord.from_payload(raw_key, raw_record)
+            if record is None:
+                raise InvalidMappingManifestError(f"mapping manifest record is invalid: {raw_key}")
+            records[record.column_key] = record
+        return cls(records=records)
+
     def to_payload(self) -> ManifestPayload:
         return {
             MANIFEST_FIELD_COLUMN_MAPPINGS: {
@@ -189,6 +215,34 @@ class ColumnMappingManifest:
     def suggestions_by_column(self) -> dict[str, list[ModelSuggestion]]:
         return {str(column_key): record.suggestions() for column_key, record in self.records.items()}
 
+    def apply_choices(
+        self,
+        overrides: ColumnCdeOverrides,
+        renames: ColumnRenameSet,
+        cde_catalog: CdeCatalog,
+    ) -> ColumnMappingManifest:
+        """Return the manifest the provider should receive after confirmed Stage 2 choices."""
+        updated = self
+        for column_key, cde_key in overrides.applied_items():
+            cde = cde_catalog.get(cde_key)
+            if cde is None:
+                raise ValueError(f"Unknown CDE key: {cde_key}")
+            existing = updated.records.get(column_key)
+            updated = updated.with_record(
+                ColumnMappingRecord(
+                    column_key=column_key,
+                    cde_key=cde_key,
+                    cde_id=cde.cde_id,
+                    column_name=existing.column_name if existing else str(column_key),
+                    harmonization=existing.harmonization if existing else DEFAULT_HARMONIZATION,
+                    route=existing.route if existing else None,
+                    alternatives=existing.alternatives if existing else (),
+                )
+            )
+        for column_key in overrides.skipped_columns():
+            updated = updated.without_column(column_key)
+        return updated.with_column_names(renames.renames)
+
 
 def normalize_manifest(payload: Mapping[str, object] | object | None) -> ManifestPayload:
     return ColumnMappingManifest.from_payload(payload).to_payload()
@@ -210,13 +264,51 @@ def _cde_key_from_payload(payload: Mapping[object, object]) -> str | None:
 
 def _score_from_payload(payload: Mapping[object, object]) -> float:
     confidence = payload.get(MAPPING_FIELD_CONFIDENCE)
-    if isinstance(confidence, (int, float)):
+    if not isinstance(confidence, bool) and isinstance(confidence, (int, float)):
         return float(confidence)
     return 0.0
 
 
 def _int_or_none(value: object) -> int | None:
-    return value if isinstance(value, int) else None
+    return value if not isinstance(value, bool) and isinstance(value, int) else None
+
+
+def _validate_current_record(column_key: str, value: object) -> None:
+    if not isinstance(value, Mapping):
+        raise InvalidMappingManifestError(f"mapping manifest record is invalid: {column_key}")
+    if (
+        _cde_key_from_payload(value) is None
+        or _int_or_none(value.get(MAPPING_FIELD_CDE_ID)) is None
+    ):
+        raise InvalidMappingManifestError(f"mapping manifest record is invalid: {column_key}")
+    for field in (MAPPING_FIELD_COLUMN_NAME, MAPPING_FIELD_HARMONIZATION, MAPPING_FIELD_ROUTE):
+        if field in value and _str_or_none(value.get(field)) is None:
+            raise InvalidMappingManifestError(f"mapping manifest {field} is invalid: {column_key}")
+
+    alternatives = value.get(MAPPING_FIELD_ALTERNATIVES)
+    if alternatives is None:
+        return
+    if not isinstance(alternatives, list):
+        raise InvalidMappingManifestError(f"mapping alternatives must be a list: {column_key}")
+    for alternative in alternatives:
+        _validate_current_alternative(column_key, alternative)
+
+
+def _validate_current_alternative(column_key: str, value: object) -> None:
+    if not isinstance(value, Mapping):
+        raise InvalidMappingManifestError(f"mapping alternative is invalid: {column_key}")
+    target = value.get(MAPPING_FIELD_TARGET)
+    confidence = value.get(MAPPING_FIELD_CONFIDENCE)
+    if not isinstance(target, str) or not target:
+        raise InvalidMappingManifestError(f"mapping alternative is invalid: {column_key}")
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+        raise InvalidMappingManifestError(f"mapping alternative confidence is invalid: {column_key}")
+    if MAPPING_FIELD_CDE_ID in value and _int_or_none(value.get(MAPPING_FIELD_CDE_ID)) is None:
+        raise InvalidMappingManifestError(f"mapping alternative cde_id is invalid: {column_key}")
+    if MAPPING_FIELD_HARMONIZATION in value and _str_or_none(
+        value.get(MAPPING_FIELD_HARMONIZATION)
+    ) is None:
+        raise InvalidMappingManifestError(f"mapping alternative harmonization is invalid: {column_key}")
 
 
 def _str_or_none(value: object) -> str | None:
@@ -240,6 +332,7 @@ __all__ = [
     "MAPPING_FIELD_HARMONIZATION",
     "MAPPING_FIELD_ROUTE",
     "MAPPING_FIELD_TARGET",
+    "InvalidMappingManifestError",
     "MappingAlternative",
     "normalize_manifest",
 ]

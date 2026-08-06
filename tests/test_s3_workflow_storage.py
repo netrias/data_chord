@@ -26,9 +26,12 @@ def dataset_workflow_id(raw: str = "a" * 32) -> DatasetWorkflowId:
 class FakeS3Client:
     def __init__(self) -> None:
         self.objects: dict[str, tuple[bytes, str]] = {}
+        self.failed_put_key: str | None = None
 
     def put_object(self, **kwargs: object) -> dict[str, object]:
         key = _key(kwargs)
+        if key == self.failed_put_key:
+            raise _client_error("InternalError")
         body = kwargs.get("Body")
         if not isinstance(body, bytes):
             raise AssertionError("FakeS3Client expects bytes bodies")
@@ -142,6 +145,26 @@ def test_s3_workflow_write_artifact_replaces_existing_object(tmp_path: Path) -> 
     # Then: materialization returns the newest bytes
     with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT) as path:
         assert path.read_text(encoding="utf-8") == "a\nnew\n"
+
+
+def test_failed_s3_artifact_replacement_preserves_last_complete_object(tmp_path: Path) -> None:
+    client = FakeS3Client()
+    storage = S3WorkflowStorage(bucket="bucket", prefix="app", client=client)
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    previous = tmp_path / "previous.csv"
+    replacement = tmp_path / "replacement.tsv"
+    previous.write_text("a\nold\n", encoding="utf-8")
+    replacement.write_text("a\tnew\n", encoding="utf-8")
+    storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, previous)
+    client.failed_put_key = "app/workflows/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/artifacts/harmonized_output.tsv"
+
+    with pytest.raises(ClientError):
+        storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, replacement)
+
+    with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT) as path:
+        assert path.suffix == ".csv"
+        assert path.read_text(encoding="utf-8") == "a\nold\n"
 
 
 def _key(kwargs: dict[str, object]) -> str:

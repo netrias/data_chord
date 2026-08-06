@@ -20,10 +20,10 @@ import src.app.dependencies as dependencies
 from src.api.schemas import DatasetWorkflowIdField
 from src.app.data_model_store import populate_cde_cache
 from src.app.session_cache import get_session_cache
-from src.domain import UILabel
-from src.domain.cde import CDEInfo
+from src.domain.cde import NO_MAPPING_SENTINEL, CDEInfo
 from src.domain.data_model_version_reference import DataModelVersionReference
-from src.persistence.workflow_state_store import load_workflow_state
+from src.persistence.workflow_state_store import WorkflowStateUnreadableError, load_workflow_state
+from src.storage import UserContext
 
 from .schemas import ColumnDetailResponse, SaveMappingChoicesRequest, SaveMappingChoicesResponse
 from .use_cases import (
@@ -55,9 +55,18 @@ async def render_stage_two(
         data_model_version = _data_model_version_for_request(file_id, data_model_key, external_version_number)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except WorkflowStateUnreadableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Workflow state is unreadable. Please rerun analysis.",
+        ) from exc
 
     if file_id and data_model_version:
-        cde_catalog = await _get_cde_options_for_session(file_id, data_model_version)
+        cde_catalog = await _get_cde_options_for_session(
+            file_id,
+            data_model_version,
+            dependencies.get_user_context(),
+        )
 
     context = {
         "request": request,
@@ -68,7 +77,7 @@ async def render_stage_two(
             else external_version_number
         ),
         "cde_catalog": [_cde_catalog_item(cde) for cde in cde_catalog],
-        "no_mapping_label": UILabel.NO_MAPPING.value,
+        "no_mapping_label": NO_MAPPING_SENTINEL,
     }
     return _templates.TemplateResponse(request, "stage_2_mappings.html", context)
 
@@ -83,9 +92,10 @@ def _data_model_version_for_request(
             dependencies.get_workflow_storage(),
             dependencies.get_user_context(),
             file_id,
+            legacy_upload_storage=dependencies.get_upload_storage(),
         )
         if state is not None:
-            return state.data_model_version
+            return state.state.data_model_version
     if data_model_key is None:
         return None
     if external_version_number is not None:
@@ -99,13 +109,19 @@ def _data_model_version_for_request(
 async def _get_cde_options_for_session(
     file_id: str,
     data_model_version: DataModelVersionReference,
+    user: UserContext,
 ) -> list[CDEInfo]:
     """Returns empty list on API failure (graceful degradation)."""
-    cache = get_session_cache(file_id)
+    cache = get_session_cache(file_id, owner_user_id=user.user_id)
 
     if not cache.has_cdes():
         try:
-            await run_in_threadpool(populate_cde_cache, file_id, data_model_version)
+            await run_in_threadpool(
+                populate_cde_cache,
+                file_id,
+                data_model_version,
+                owner_user_id=user.user_id,
+            )
         except (DataModelStoreError, NetriasAPIUnavailable):
             logger.warning("Data Model Store API unavailable; CDE options will be empty", extra={"file_id": file_id})
 
@@ -134,7 +150,14 @@ async def get_column_detail(
 ) -> ColumnDetailResponse:
     """Returns match counts, CDE types, and selected PVs for one column."""
     try:
-        return await compute_column_detail(file_id, column_key, selected_cde_key)
+        return await compute_column_detail(
+            upload_storage=dependencies.get_upload_storage(),
+            workflow_storage=dependencies.get_workflow_storage(),
+            user=dependencies.get_user_context(),
+            file_id=file_id,
+            column_key=column_key,
+            selected_cde_key=selected_cde_key,
+        )
     except ColumnDetailNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -151,6 +174,7 @@ async def save_mapping_choices(payload: SaveMappingChoicesRequest) -> SaveMappin
     try:
         return save_confirmed_mapping_choices(
             workflow_storage=dependencies.get_workflow_storage(),
+            upload_storage=dependencies.get_upload_storage(),
             user=dependencies.get_user_context(),
             payload=payload,
         )

@@ -17,10 +17,8 @@ from src.domain.dataset_workflow_ids import (
     DatasetWorkflowId,
     dataset_workflow_id_from_value,
 )
+from src.domain.harmonization import HarmonizationManifestSummary, HarmonizeStatus
 from src.domain.manifest import ManifestPayload
-from src.integrations.netrias_harmonize import HarmonizeStatus
-
-FILE_ID_MIN_LENGTH = DATASET_WORKFLOW_ID_LENGTH
 
 DatasetWorkflowIdField = Annotated[
     DatasetWorkflowId,
@@ -39,53 +37,24 @@ DatasetWorkflowIdField = Annotated[
     }),
 ]
 
-# Compatibility only. Public JSON fields may still be named file_id, but new
-# schemas should spell the internal type as DatasetWorkflowIdField.
-FileIdField = DatasetWorkflowIdField
-
-
 class HarmonizeRequest(BaseModel):
     file_id: DatasetWorkflowIdField
-    data_model_key: str
-    external_version_number: str = Field(..., min_length=1)
+    # Compatibility fields for callers that still seed legacy workflow state.
+    # Current workflows resolve the model from durable WorkflowState, so a
+    # retry only needs the workflow identity.
+    data_model_key: str | None = Field(default=None, min_length=1)
+    external_version_number: str | None = Field(default=None, min_length=1)
     manual_overrides: dict[str, str | None] = Field(default_factory=dict)
     column_renames: dict[str, str] = Field(default_factory=dict)
     manifest: ManifestPayload | None = None
 
     def data_model_version(self) -> DataModelVersionReference:
+        if self.data_model_key is None or self.external_version_number is None:
+            raise ValueError("A data model version is required to initialize legacy workflow state")
         return DataModelVersionReference(
             data_model_key=self.data_model_key,
             external_version_number=self.external_version_number,
         )
-
-
-class ConfidenceBucketSchema(BaseModel):
-    id: str
-    label: str
-    term_count: int
-
-
-class ColumnBreakdownSchema(BaseModel):
-    column_name: str
-    label: str
-    total_rows: int
-    changed_rows: int
-    unchanged_rows: int
-    unique_terms: int
-    unique_terms_changed: int
-    unique_terms_unchanged: int
-    non_conformant_terms: int = 0
-    confidence_buckets_changed: list[ConfidenceBucketSchema]
-
-
-class ManifestSummarySchema(BaseModel):
-    total_terms: int
-    changed_terms: int
-    high_confidence_count: int
-    medium_confidence_count: int
-    low_confidence_count: int
-    non_conformant_terms: int = 0
-    column_breakdowns: list[ColumnBreakdownSchema] = Field(default_factory=list)
 
 
 class HarmonizeResponse(BaseModel):
@@ -95,4 +64,4 @@ class HarmonizeResponse(BaseModel):
     next_stage_url: str
     job_id_available: bool = False
     elapsed_seconds: int | None = None
-    manifest_summary: ManifestSummarySchema | None = None
+    manifest_summary: HarmonizationManifestSummary | None = None

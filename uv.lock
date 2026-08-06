@@ -11,7 +11,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-07-27T21:36:09.709679Z"
+exclude-newer = "2026-07-30T17:26:24.987662Z"
 exclude-newer-span = "P7D"
 
 [[package]]
@@ -332,7 +332,6 @@ dependencies = [
     { name = "openpyxl" },
     { name = "pyarrow" },
     { name = "pygments" },
-    { name = "python-dotenv" },
     { name = "python-multipart" },
     { name = "requests" },
     { name = "starlette" },
@@ -385,7 +384,6 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
     { name = "pytest-playwright", marker = "extra == 'dev'", specifier = ">=0.6.2" },
-    { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "python-multipart", specifier = ">=0.0.31" },
     { name = "requests", specifier = ">=2.33.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.5" },

@@ -960,3 +960,115 @@ button.linklike {
     padding: var(--space-6);
   }
 }
+
+/* Shared source-column outcome table used by Stages 3 and 5. */
+.column-outcome-table-container {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-xl);
+  background: var(--white);
+  outline: none;
+}
+
+.column-outcome-table-container:focus-visible {
+  box-shadow: 0 0 0 3px var(--azure-100);
+  border-color: var(--azure-500);
+}
+
+.column-outcome-table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  font-size: 0.93rem;
+}
+
+.column-outcome-table th,
+.column-outcome-table td {
+  padding: 0.95rem 1rem;
+  border-bottom: 1px solid var(--gray-200);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.column-outcome-table th {
+  background: var(--gray-50);
+  color: var(--gray-600);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.045em;
+  line-height: 1.35;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.column-outcome-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.column-outcome-table tbody tr:hover {
+  background: var(--azure-50);
+}
+
+.column-outcome-name {
+  color: var(--gray-900);
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.column-outcome-metric {
+  color: var(--gray-700);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.column-outcome-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.75rem;
+  padding: 0.25rem 0.65rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  font-size: 0.82rem;
+  font-weight: 650;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.column-outcome-status--approved {
+  border-color: var(--success-200);
+  background: var(--success-50);
+  color: var(--success-700);
+}
+
+.column-outcome-status--attention {
+  border-color: var(--warning-300);
+  background: var(--warning-50);
+  color: var(--warning-700);
+}
+
+.column-outcome-status--unchecked {
+  border-color: var(--gray-200);
+  background: var(--gray-50);
+  color: var(--gray-600);
+}
+
+.column-outcome-empty {
+  margin: 0;
+  padding: var(--space-6);
+  border: 1px dashed var(--gray-300);
+  border-radius: var(--radius-lg);
+  color: var(--gray-600);
+  text-align: center;
+}
+
+@media (max-width: 720px) {
+  .column-outcome-table-container {
+    border-radius: var(--radius-lg);
+  }
+
+  .column-outcome-table th,
+  .column-outcome-table td {
+    padding: 0.8rem 0.85rem;
+  }
+}

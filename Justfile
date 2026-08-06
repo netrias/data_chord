@@ -47,7 +47,7 @@ app-reload:
 	DEV_MODE=true uv run uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload --reload-exclude .venv
 
 js-test:
-	cd tests/js && npm test
+	npm test
 
 # Syntax-check all frontend JavaScript files (catches duplicate declarations, syntax errors)
 js-check:

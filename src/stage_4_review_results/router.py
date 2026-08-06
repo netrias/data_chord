@@ -6,10 +6,12 @@ Maps review HTTP requests onto Stage 4 use cases.
 
 from __future__ import annotations
 
+import base64
+import binascii
 from pathlib import Path as FilePath
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Path, Request
+from fastapi import APIRouter, Header, HTTPException, Path, Request, Response, status
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
@@ -29,6 +31,7 @@ from src.stage_4_review_results.schemas import (
     TermRowIndicesResponse,
 )
 from src.stage_4_review_results.use_cases import (
+    ReviewStateConflictError,
     RowContextUploadNotFoundError,
     StageFourRowsManifestNotFoundError,
     StageFourRowsUploadNotFoundError,
@@ -41,7 +44,7 @@ from src.stage_4_review_results.use_cases import (
     get_review_overrides,
     save_review_overrides,
 )
-from src.storage import UploadStorage
+from src.storage import UploadStorage, VersionToken
 
 _MODULE_DIR = FilePath(__file__).parent
 _TEMPLATE_DIR = _MODULE_DIR / "templates"
@@ -86,25 +89,45 @@ DatasetWorkflowIdPath = Annotated[DatasetWorkflowIdField, Path()]
     response_model=ReviewOverridesSchema | None,
     name="stage_four_get_overrides",
 )
-async def get_overrides(file_id: DatasetWorkflowIdPath) -> ReviewOverridesSchema | None:
-    return get_review_overrides(
+async def get_overrides(
+    file_id: DatasetWorkflowIdPath,
+    response: Response,
+) -> ReviewOverridesSchema | None:
+    result = get_review_overrides(
         workflow_storage=dependencies.get_workflow_storage(),
         user=dependencies.get_user_context(),
         file_id=file_id,
     )
+    if result is None:
+        return None
+    response.headers["ETag"] = _review_state_etag(result.version)
+    return result.payload
 
 
 @stage_four_router.post("/overrides", response_model=SaveOverridesResponse, name="stage_four_save_overrides")
-async def save_overrides(payload: SaveOverridesRequest) -> SaveOverridesResponse:
+async def save_overrides(
+    payload: SaveOverridesRequest,
+    response: Response,
+    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+) -> SaveOverridesResponse:
     storage = dependencies.get_upload_storage()
-    result = save_review_overrides(
-        workflow_storage=dependencies.get_workflow_storage(),
-        user=dependencies.get_user_context(),
-        upload_storage=storage,
-        file_id=payload.file_id,
-        overrides=payload.overrides,
-        review_state=payload.review_state,
-    )
+    expected_version = _review_state_version_from_if_match(if_match)
+    try:
+        result = save_review_overrides(
+            workflow_storage=dependencies.get_workflow_storage(),
+            user=dependencies.get_user_context(),
+            upload_storage=storage,
+            file_id=payload.file_id,
+            overrides=payload.overrides,
+            review_state=payload.review_state,
+            expected_version=expected_version,
+        )
+    except ReviewStateConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Review state changed. Reload this page before saving again.",
+        ) from exc
+    response.headers["ETag"] = _review_state_etag(result.version)
     return SaveOverridesResponse(file_id=result.file_id, updated_at=result.updated_at)
 
 
@@ -176,3 +199,25 @@ async def get_term_row_indices(payload: TermRowIndicesRequest) -> TermRowIndices
         )
     except TermRowIndicesManifestNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Manifest not found") from exc
+
+
+def _review_state_etag(version: VersionToken) -> str:
+    """Encode the storage token as a standards-compliant opaque HTTP ETag."""
+    encoded = base64.urlsafe_b64encode(version.value.encode("utf-8")).decode("ascii")
+    return f'"{encoded}"'
+
+
+def _review_state_version_from_if_match(if_match: str | None) -> VersionToken | None:
+    """Decode the exact ETag emitted by the review-state endpoints."""
+    if if_match is None:
+        return None
+    if len(if_match) < 2 or not if_match.startswith('"') or not if_match.endswith('"'):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid review state version.")
+    try:
+        encoded = if_match[1:-1].encode("ascii")
+        value = base64.b64decode(encoded, altchars=b"-_", validate=True).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError, UnicodeEncodeError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid review state version.") from exc
+    if not value:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid review state version.")
+    return VersionToken(value)

@@ -6,13 +6,10 @@ import pytest
 from httpx import AsyncClient
 
 import src.app.dependencies as dependencies
-from src.domain.cde_pv_catalog import CdePvCatalog
-from src.domain.column_cde_map import ColumnCdeMap
-from src.domain.pv_manifest import PVManifest
-from src.storage import UploadStorage, WorkflowFile
+from src.storage import UploadStorage
 from tests.conftest import (
-    TEST_TARGET_SCHEMA,
     create_csv_content,
+    save_test_pvs_by_column,
     store_test_harmonization_manifest,
     upload_content,
 )
@@ -45,25 +42,7 @@ def _manifest_row(
 
 
 def _save_pv_manifest(file_id: str, pvs_by_column_key: dict[str, frozenset[str]]) -> None:
-    column_to_cde_key = {
-        column_key: f"cde_{index}"
-        for index, column_key in enumerate(pvs_by_column_key)
-    }
-    pvs = {
-        cde_key: pvs_by_column_key[column_key]
-        for column_key, cde_key in column_to_cde_key.items()
-    }
-    dependencies.get_workflow_storage().write_json(
-        dependencies.get_user_context(),
-        file_id,
-        WorkflowFile.PV_MANIFEST,
-        PVManifest(
-            data_model_key=TEST_TARGET_SCHEMA,
-            external_version_number="11.0.4",
-            column_to_cde_key=ColumnCdeMap.from_strings(column_to_cde_key),
-            pvs=CdePvCatalog.from_mapping(pvs),
-        ).to_store(),
-    )
+    save_test_pvs_by_column(file_id, pvs_by_column_key)
 
 
 async def _upload_file_with_manifest(

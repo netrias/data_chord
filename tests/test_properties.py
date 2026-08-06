@@ -13,7 +13,6 @@ from src.domain.column_cde_map import ColumnCdeOverrides
 from src.domain.manifest import normalize_manifest
 from src.domain.manifest.models import is_value_changed
 from src.domain.pv_validation import (
-    AdjustmentSource,
     check_value_conformance,
     compute_pv_adjustment,
     find_conformant_suggestion,
@@ -160,8 +159,8 @@ def test_find_conformant_with_matching_first(pv_list: list[str]) -> None:
 def test_compute_adjustment_conformant_when_top_in_pvs(original: str, pv_list: list[str]) -> None:
     """If top_harmonization is in PV set, result is conformant with no adjustment.
 
-    Note: Excludes cases where original is also in PV set (but differs from top),
-    because those trigger PV_OVERRIDE per ADR 004.
+    Excludes cases where the original is also valid but differs from the top
+    suggestion, because the original value takes precedence.
     """
     pv_set = frozenset(pv_list)
     top = pv_list[0]  # Use a known member
@@ -171,7 +170,6 @@ def test_compute_adjustment_conformant_when_top_in_pvs(original: str, pv_list: l
 
     assert result.is_conformant is True
     assert result.adjusted_value is None
-    assert result.adjustment_source is None
     assert result.attempted_value == top
 
 
@@ -185,8 +183,8 @@ def test_compute_adjustment_falls_back_to_suggestions(
 ) -> None:
     """If top is non-conformant but a suggestion is, adjustment is made.
 
-    Note: Excludes cases where original is in PV set, because those trigger
-    PV_OVERRIDE per ADR 004 (original-first validation).
+    Excludes cases where the original is valid because original-first
+    validation preserves it.
     """
     pv_set = frozenset(suggestion_pvs)
     assume(non_conformant_top not in pv_set)
@@ -197,7 +195,6 @@ def test_compute_adjustment_falls_back_to_suggestions(
 
     assert result.is_conformant is True
     assert result.adjusted_value == suggestion_pvs[0]
-    assert result.adjustment_source == AdjustmentSource.TOP_SUGGESTIONS
 
 
 @given(st.text(), st.text(), st.lists(st.text(), max_size=3))

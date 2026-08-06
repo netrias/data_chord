@@ -170,15 +170,18 @@ class S3WorkflowStorage:
         self._require_access(user, file_id)
         if not source_path.is_file():
             raise WorkflowArtifactNotFoundError(f"Source artifact not found: {source_path}")
-        # Mutable file artifacts are stored under one logical kind. Delete stale
-        # suffix variants before uploading the current file.
-        for key in self._existing_artifact_keys(file_id, kind):
-            self.client.delete_object(Bucket=self.bucket, Key=key)
+        # Upload first so a provider failure cannot erase the last complete
+        # artifact. Only stale suffix variants are removed after publication.
+        existing_keys = self._existing_artifact_keys(file_id, kind)
+        new_key = self._artifact_key(file_id, kind, source_path.suffix)
         response = self.client.put_object(
             Bucket=self.bucket,
-            Key=self._artifact_key(file_id, kind, source_path.suffix),
+            Key=new_key,
             Body=source_path.read_bytes(),
         )
+        for key in existing_keys:
+            if key != new_key:
+                self.client.delete_object(Bucket=self.bucket, Key=key)
         return StoredArtifact(kind=kind, version=_version_from_response(response), suffix=source_path.suffix)
 
     @contextmanager

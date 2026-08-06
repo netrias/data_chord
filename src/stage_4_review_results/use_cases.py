@@ -9,32 +9,37 @@ from datetime import datetime
 
 from netrias_client import read_tabular
 
-from src.domain import CONFIDENCE, RecommendationType
+from src.domain.change import CONFIDENCE, RecommendationType
 from src.domain.columns import ColumnIdentity, ColumnKey
 from src.domain.dataset_workflow_ids import DatasetWorkflowId
 from src.domain.manifest import (
     ConfidenceBucket,
+    ManifestManualOverride,
     ManifestRow,
     ManifestSummary,
+    ManifestTermKey,
     confidence_bucket,
     get_latest_override_value,
     is_value_changed,
 )
 from src.domain.pv_validation import check_value_conformance
-from src.domain.review_overrides import ReviewOverrides, ReviewProgressState
+from src.domain.review_overrides import ReviewProgressState
 from src.persistence.cde_mapping_document_store import CdeMappingEntry, load_cde_mapping_entries_by_column
 from src.persistence.manifest_reader import read_manifest_parquet
 from src.persistence.manifest_writer import add_manual_overrides_batch
-from src.persistence.pv_manifest_store import ColumnPvSets, column_pv_sets
+from src.persistence.pv_manifest_store import ColumnPvSets, column_pv_sets, effective_column_cde_map
 from src.persistence.review_override_store import (
+    ReviewOverridesStoreConflictError,
     delete_review_overrides_state,
-    load_review_overrides,
+    load_review_overrides_record,
     save_review_overrides_state,
 )
 from src.persistence.workflow_artifacts import (
     load_harmonization_manifest_path,
     load_upload_artifact,
 )
+from src.persistence.workflow_state_store import LoadedWorkflowState, load_workflow_state
+from src.stage_3_harmonize.job_state import StageThreeJobUnreadableError, load_stage_three_job_state
 from src.stage_4_review_results.schemas import (
     CellOverrideSchema,
     ColumnReviewData,
@@ -49,7 +54,7 @@ from src.stage_4_review_results.schemas import (
     TermRowIndicesResponse,
     Transformation,
 )
-from src.storage import UploadStorage, UserContext, WorkflowFile, WorkflowStorage
+from src.storage import UploadStorage, UserContext, VersionToken, WorkflowFile, WorkflowStorage
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +65,17 @@ ReviewOverridePayload = Mapping[str, Mapping[str, CellOverrideSchema]]
 class SaveReviewOverridesResult:
     file_id: DatasetWorkflowId
     updated_at: datetime
+    version: VersionToken
+
+
+@dataclass(frozen=True)
+class LoadedReviewOverridesResult:
+    payload: ReviewOverridesSchema
+    version: VersionToken
+
+
+class ReviewStateConflictError(Exception):
+    """Raised when active review state changed after the caller loaded it."""
 
 
 class StageFourRowsUploadNotFoundError(Exception):
@@ -96,10 +112,21 @@ def build_stage_four_rows(
         raise StageFourRowsManifestNotFoundError()
 
     column_info = _extract_columns_from_manifest(manifest)
-    column_pv_map = column_pv_sets(file_id, [col.key for col in column_info])
+    loaded_state = _load_workflow_state(upload_storage, workflow_storage, user, file_id)
+    column_pv_map = column_pv_sets(
+        workflow_storage,
+        user,
+        loaded_state,
+        [col.key for col in column_info],
+    )
     column_pvs = _build_column_pvs(column_info, column_pv_map, file_id)
     cde_mappings_by_column = load_cde_mapping_entries_by_column(file_id, workflow_storage, user)
-    columns = _build_columns_from_manifest(manifest, column_pv_map, cde_mappings_by_column)
+    columns = _build_columns_from_manifest(
+        manifest,
+        column_pv_map,
+        effective_column_cde_map(loaded_state).mappings,
+        cde_mappings_by_column,
+    )
 
     return StageFourResultsResponse(
         columns=columns,
@@ -120,7 +147,13 @@ def build_non_conformant_values(
     if manifest is None:
         return NonConformantResponse(count=0, items=[])
 
-    column_pv_map = column_pv_sets(file_id, [row.column_key for row in manifest.rows])
+    loaded_state = _load_workflow_state(upload_storage, workflow_storage, user, file_id)
+    column_pv_map = column_pv_sets(
+        workflow_storage,
+        user,
+        loaded_state,
+        [row.column_key for row in manifest.rows],
+    )
     non_conformant = _find_unique_non_conformant_values(manifest, column_pv_map)
     return NonConformantResponse(count=len(non_conformant), items=non_conformant)
 
@@ -173,11 +206,14 @@ def get_review_overrides(
     workflow_storage: WorkflowStorage,
     user: UserContext,
     file_id: DatasetWorkflowId,
-) -> ReviewOverridesSchema | None:
-    saved = load_review_overrides(workflow_storage, user, file_id)
-    if saved is None:
+) -> LoadedReviewOverridesResult | None:
+    record = load_review_overrides_record(workflow_storage, user, file_id)
+    if record is None:
         return None
-    return ReviewOverridesSchema.model_validate(saved.to_store())
+    return LoadedReviewOverridesResult(
+        payload=ReviewOverridesSchema.model_validate(record.value.to_store()),
+        version=record.version,
+    )
 
 
 def delete_review_overrides(
@@ -198,17 +234,36 @@ def save_review_overrides(
     file_id: DatasetWorkflowId,
     overrides: ReviewOverridePayload,
     review_state: ReviewStateSchema,
+    expected_version: VersionToken | None = None,
 ) -> SaveReviewOverridesResult:
     """Persist export overrides and append the matching manifest audit rows."""
-    saved = save_review_overrides_state(
+    try:
+        saved = save_review_overrides_state(
+            workflow_storage,
+            user,
+            file_id=file_id,
+            overrides=_override_payload_to_store(overrides),
+            review_state=ReviewProgressState.from_payload(review_state.model_dump(mode="json")),
+            expected_version=expected_version,
+        )
+    except ReviewOverridesStoreConflictError as exc:
+        raise ReviewStateConflictError(file_id) from exc
+
+    current_audit = saved.value.manual_override_batch()
+    audit_changes = saved.value.audit_changes_since(saved.previous)
+    _sync_override_audit(
+        upload_storage,
         workflow_storage,
         user,
-        file_id=file_id,
-        overrides=_override_payload_to_store(overrides),
-        review_state=ReviewProgressState.from_payload(review_state.model_dump(mode="json")),
+        saved.value.file_id,
+        current_audit,
+        audit_changes,
     )
-    _sync_override_audit(upload_storage, workflow_storage, user, saved)
-    return SaveReviewOverridesResult(file_id=file_id, updated_at=saved.updated_at)
+    return SaveReviewOverridesResult(
+        file_id=file_id,
+        updated_at=saved.value.updated_at,
+        version=saved.version,
+    )
 
 
 def _load_manifest(
@@ -221,6 +276,29 @@ def _load_manifest(
     if manifest_path is None:
         return None
     return read_manifest_parquet(manifest_path)
+
+
+def _load_workflow_state(
+    upload_storage: UploadStorage,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+    file_id: str,
+) -> LoadedWorkflowState:
+    loaded = load_workflow_state(
+        workflow_storage,
+        user,
+        file_id,
+        legacy_upload_storage=upload_storage,
+    )
+    if loaded is None or loaded.state.mapping_manifest is None:
+        raise StageFourRowsManifestNotFoundError()
+    try:
+        loaded_job = load_stage_three_job_state(workflow_storage, user, file_id)
+    except StageThreeJobUnreadableError as exc:
+        raise StageFourRowsManifestNotFoundError() from exc
+    if loaded_job is not None and not loaded_job.job.is_completed_for_plan(loaded.version.value):
+        raise StageFourRowsManifestNotFoundError()
+    return loaded
 
 
 def _extract_columns_from_manifest(manifest: ManifestSummary) -> list[ColumnIdentity]:
@@ -270,6 +348,7 @@ def _current_value_for_row(row: ManifestRow) -> str:
 def _build_columns_from_manifest(
     manifest: ManifestSummary,
     column_pv_map: ColumnPvSets,
+    target_cde_keys: Mapping[ColumnKey, str],
     cde_mappings_by_column: Mapping[ColumnKey, CdeMappingEntry],
 ) -> list[ColumnReviewData]:
     columns_map: dict[ColumnKey, list[ManifestRow]] = {}
@@ -290,7 +369,7 @@ def _build_columns_from_manifest(
         mapping_entry = cde_mappings_by_column.get(col_key)
         if _is_unchanged_passthrough(mapping_entry, manifest_rows):
             continue
-        target_cde_key = _target_cde_key(mapping_entry)
+        target_cde_key = target_cde_keys.get(col_key)
         serialized_col_key = str(col_key)
         transformations = [
             _build_transformation(row, column_pv_map.get(row.column_key)) for row in manifest_rows
@@ -320,12 +399,6 @@ def _is_unchanged_passthrough(
         and not mapping_entry.maps_values
         and all(not is_value_changed(row.to_harmonize, _current_value_for_row(row)) for row in manifest_rows)
     )
-
-
-def _target_cde_key(mapping_entry: CdeMappingEntry | None) -> str | None:
-    if mapping_entry is None:
-        return None
-    return mapping_entry.cde_key
 
 
 def _build_transformation(row: ManifestRow, pv_set: frozenset[str] | None) -> Transformation:
@@ -441,32 +514,62 @@ def _sync_override_audit(
     storage: UploadStorage,
     workflow_storage: WorkflowStorage,
     user: UserContext,
-    overrides: ReviewOverrides,
+    file_id: str,
+    current_audit: list[ManifestManualOverride],
+    audit_changes: list[ManifestManualOverride],
 ) -> None:
-    manifest_path = load_harmonization_manifest_path(storage, workflow_storage, user, overrides.file_id)
+    if not current_audit:
+        return
+
+    manifest_path = load_harmonization_manifest_path(storage, workflow_storage, user, file_id)
     if manifest_path is None:
-        logger.warning("Cannot sync overrides: manifest path not found", extra={"file_id": overrides.file_id})
+        logger.warning("Cannot sync overrides: manifest path not found", extra={"file_id": file_id})
         return
 
-    overrides_batch = overrides.manual_override_batch()
-    if not overrides_batch:
+    manifest = read_manifest_parquet(manifest_path)
+    if manifest is None:
+        logger.error("Cannot sync overrides: manifest is unreadable", extra={"file_id": file_id})
         return
 
-    # The parquet manifest is the Stage 5 audit source, so mirror saved review
-    # edits there instead of treating the override JSON as a separate truth.
+    latest_values = {
+        ManifestTermKey.from_row(row): get_latest_override_value(row.manual_overrides)
+        for row in manifest.rows
+    }
+    if not audit_changes:
+        desired_values = {
+            override.term_key: override.override_value
+            for override in current_audit
+        }
+        if all(latest_values.get(term_key) == value for term_key, value in desired_values.items()):
+            return
+        audit_changes = current_audit
+
+    pending_changes: list[ManifestManualOverride] = []
+    for override in audit_changes:
+        if latest_values.get(override.term_key) == override.override_value:
+            continue
+        pending_changes.append(override)
+        latest_values[override.term_key] = override.override_value
+    if not pending_changes:
+        return
+
+    # Active review JSON controls export. Parquet separately records term-level
+    # history, so only changed decisions belong in the append-only audit.
     success = add_manual_overrides_batch(
         manifest_path=manifest_path,
-        overrides=overrides_batch,
+        overrides=pending_changes,
         user_id=None,
     )
     if not success:
-        logger.error("Failed to sync overrides to manifest parquet", extra={"file_id": overrides.file_id})
+        logger.error("Failed to sync overrides to manifest parquet", extra={"file_id": file_id})
         return
 
-    workflow_storage.write_artifact(user, overrides.file_id, WorkflowFile.HARMONIZATION_MANIFEST_BASE, manifest_path)
+    workflow_storage.write_artifact(user, file_id, WorkflowFile.HARMONIZATION_MANIFEST_BASE, manifest_path)
 
 
 __all__ = [
+    "LoadedReviewOverridesResult",
+    "ReviewStateConflictError",
     "SaveReviewOverridesResult",
     "RowContextUploadNotFoundError",
     "StageFourRowsManifestNotFoundError",

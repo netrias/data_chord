@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Data Chord · Review</title>
     <link rel="stylesheet" href="/assets/shared/tokens.css?v={{ request.app.state.asset_version }}" />
-    <link rel="stylesheet" href="{{ request.url_for('stage_one_static', path='stage_1_upload.css') }}?v={{ request.app.state.asset_version }}" />
     <link rel="stylesheet" href="{{ request.url_for('stage_five_static', path='stage_5_review.css') }}?v={{ request.app.state.asset_version }}" />
   </head>
   <body>
@@ -52,41 +51,60 @@
     </nav>
 
     <main class="stage-shell stage-five-shell">
-      <section class="stage-card download-card">
-        <div class="download-action-container">
-          <button id="downloadResults" class="btn-3d" type="button">
-            <span class="btn-3d-shadow" aria-hidden="true"></span>
-            <span class="btn-3d-edge" aria-hidden="true"></span>
-            <span class="btn-3d-front">Download Harmonized Data</span>
-          </button>
+      <section class="stage-card quality-certificate" aria-labelledby="certificateTitle">
+        <div class="quality-certificate__main">
+          <div>
+            <h1 id="certificateTitle" class="quality-certificate__title">Harmonized data</h1>
+            <p id="datasetMetadata" class="quality-certificate__metadata">Loading details…</p>
+          </div>
+          <div class="quality-certificate__actions">
+            <span id="certificateStatus" class="certificate-status" aria-live="polite">Checking final values…</span>
+            <button id="downloadResults" class="btn-3d" type="button">
+              <span class="btn-3d-shadow" aria-hidden="true"></span>
+              <span class="btn-3d-edge" aria-hidden="true"></span>
+              <span class="btn-3d-front">Download data</span>
+            </button>
+          </div>
         </div>
-        <p id="downloadError" class="stage-error hidden"></p>
+        <p id="downloadError" class="stage-error hidden" role="alert"></p>
       </section>
 
-      <section class="stage-card summary-card">
+      <section class="stage-card summary-card" aria-labelledby="summaryTitle">
         <header class="summary-header">
-          <h2 class="summary-title">Harmonization Summary</h2>
+          <h2 id="summaryTitle" class="summary-title">Changes</h2>
         </header>
-        <div id="summaryGrid" class="summary-grid">
-          <p class="summary-loading">Loading summary...</p>
+        <div id="summaryGrid">
+          <p class="summary-loading">Loading final output…</p>
         </div>
       </section>
 
-      <section id="changesTableSection" class="stage-card changes-table-card hidden">
-        <header class="summary-header summary-header--with-control">
-          <h2 class="summary-title">Term Mappings</h2>
-          <div id="mappingsFilter" class="segmented-control hidden">
-            <button type="button" class="segmented-control__option active" data-filter="changed">Changed</button>
-            <button type="button" class="segmented-control__option" data-filter="all">All</button>
+      <section id="changesTableSection" class="stage-card changes-table-card hidden" aria-labelledby="mappingTitle">
+        <header class="mapping-header">
+          <h2 id="mappingTitle" class="summary-title">
+            Value details <span class="mapping-guidance">· Select a row to view history</span>
+          </h2>
+          <div id="mappingsFilter" class="segmented-control" role="group" aria-label="Filter value details">
+            <button type="button" class="segmented-control__option" data-filter="needs_attention" aria-pressed="false">Needs attention</button>
+            <button type="button" class="segmented-control__option" data-filter="changed" aria-pressed="false">Changed</button>
+            <button type="button" class="segmented-control__option" data-filter="reviewer" aria-pressed="false">Reviewer edits</button>
+            <button type="button" class="segmented-control__option" data-filter="all" aria-pressed="false">All</button>
           </div>
         </header>
-        <div class="changes-table-container">
+        <div class="changes-table-container" tabindex="0" role="region" aria-label="Value details">
           <table id="changesTable" class="changes-table">
             <thead>
               <tr>
-                <th>Column</th>
-                <th>Original Value</th>
-                <th>Final Value</th>
+                <th scope="col" aria-sort="none">
+                  <button type="button" class="table-sort" data-sort-key="column">Column <span class="sort-indicator" aria-hidden="true">↕</span></button>
+                </th>
+                <th scope="col" aria-sort="none">
+                  <button type="button" class="table-sort" data-sort-key="original_value">Source value <span class="sort-indicator" aria-hidden="true">↕</span></button>
+                </th>
+                <th scope="col" aria-sort="none">
+                  <button type="button" class="table-sort" data-sort-key="final_value">Current output <span class="sort-indicator" aria-hidden="true">↕</span></button>
+                </th>
+                <th scope="col">Source</th>
+                <th scope="col">Rows</th>
               </tr>
             </thead>
             <tbody id="changesTableBody"></tbody>
@@ -101,10 +119,10 @@
           <h2 id="startOverDialogTitle" class="start-over-dialog-title">Start over and harmonize more data?</h2>
         </div>
         <p class="start-over-dialog-copy">
-          This will clear the current browser workflow state. Your downloaded file will not be affected.
+          This clears the current browser workflow state. Your downloaded file is not affected.
         </p>
         <div class="start-over-dialog-actions">
-          <button id="startOverCancel" class="start-over-cancel" type="button">Cancel</button>
+          <button id="startOverCancel" class="ghost-btn" type="button">Cancel</button>
           <button id="startOverConfirm" class="btn-3d" type="button">
             <span class="btn-3d-shadow" aria-hidden="true"></span>
             <span class="btn-3d-edge" aria-hidden="true"></span>

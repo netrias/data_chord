@@ -22,14 +22,14 @@ export const STEP_INSTRUCTIONS = {
   },
   harmonize_complete: {
     short: "Your data has been transformed to match the target ontology.",
-    long: "The harmonization engine has processed your data, converting values to match the selected ontologies. Review the results to see how your data was transformed."
+    long: "The harmonization engine has processed your data. The source-column table shows exact distinct-value changes, affected rows, and which final values still need review. Continue to Verify to inspect individual values."
   },
   verify: {
     short: "Inspect harmonized values and override any AI suggestions as needed.",
     long: "Each card shows the original value at top, an arrow, then the AI-suggested harmonization below. Cards are color-coded by confidence level. Use the input field at the bottom of each card to enter a manual override if needed."
   },
   review: {
-    short: "Download your harmonized dataset and review the change summary.",
-    long: "Your harmonization is complete. Review the summary statistics showing AI changes vs manual overrides per column. Download the final harmonized dataset in the same file format you uploaded. You can also start a new harmonization workflow from here."
+    short: "Review the current output and download your harmonized dataset.",
+    long: "The certificate and source-column table describe the current downloadable output. Use Needs attention to find final values outside approved sets, or open Decision history to inspect how a value reached its current output."
   }
 };

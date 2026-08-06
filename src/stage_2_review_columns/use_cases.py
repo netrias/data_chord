@@ -6,15 +6,14 @@ from dataclasses import dataclass
 
 from fastapi.concurrency import run_in_threadpool
 
-import src.app.dependencies as dependencies
 from src.app.data_model_store import (
     fetch_all_pvs_async,
-    refine_cde_types_from_pvs,
 )
 from src.app.session_cache import SessionCache, get_session_cache
 from src.domain.cde import CdeType
 from src.domain.cde_catalog import CdeCatalog
 from src.domain.cde_pv_catalog import CdePvCatalog
+from src.domain.cde_type_classification import refine_cde_types_from_pvs
 from src.domain.column_profile import (
     ColumnProfile,
     build_column_profile_from_tabular,
@@ -23,12 +22,15 @@ from src.domain.column_profile import (
 from src.domain.columns import ColumnKey, column_key_from_string
 from src.domain.match_counts import compute_column_overlap_by_cde, compute_match_counts
 from src.domain.workflow_state import ConfirmedMappingChoices
+from src.persistence.workflow_artifacts import load_upload_artifact
 from src.persistence.workflow_state_store import (
     WorkflowStateConflictError,
     WorkflowStateNotFoundError,
+    WorkflowStateUnreadableError,
+    load_workflow_state,
     save_confirmed_mapping_choices_to_state,
 )
-from src.storage import UserContext, WorkflowStorage
+from src.storage import UploadStorage, UserContext, WorkflowStorage
 
 from .schemas import ColumnDetailResponse, SaveMappingChoicesRequest, SaveMappingChoicesResponse
 
@@ -58,14 +60,35 @@ class CdeCatalogSnapshot:
 
 
 async def compute_column_detail(
+    *,
+    upload_storage: UploadStorage,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
     file_id: str,
     column_key: str,
     selected_cde_key: str | None,
 ) -> ColumnDetailResponse:
     """Build the takeover's column-detail payload."""
+    # Durable state establishes both workflow existence and ownership before a
+    # process-local cache can reveal anything about the workflow.
+    loaded_state = load_workflow_state(
+        workflow_storage,
+        user,
+        file_id,
+        legacy_upload_storage=upload_storage,
+    )
+    if loaded_state is None:
+        raise ColumnDetailNotFound(f"No workflow found for {file_id}")
     source_column_key = column_key_from_string(column_key)
-    cache = get_session_cache(file_id)
-    profile = await _get_or_build_column_profile(cache, file_id, source_column_key)
+    cache = get_session_cache(file_id, owner_user_id=user.user_id)
+    profile = await _get_or_build_column_profile(
+        cache,
+        upload_storage,
+        workflow_storage,
+        user,
+        file_id,
+        source_column_key,
+    )
     catalog = await _get_cde_catalog_snapshot(cache)
     if catalog.catalog.is_empty():
         # CDEs not yet populated by the Stage 2 page. Return an empty match
@@ -89,6 +112,7 @@ async def compute_column_detail(
 def save_confirmed_mapping_choices(
     *,
     workflow_storage: WorkflowStorage,
+    upload_storage: UploadStorage,
     user: UserContext,
     payload: SaveMappingChoicesRequest,
 ) -> SaveMappingChoicesResponse:
@@ -100,16 +124,20 @@ def save_confirmed_mapping_choices(
             user,
             payload.file_id,
             choices,
+            legacy_upload_storage=upload_storage,
         )
     except WorkflowStateNotFoundError as exc:
         raise MappingWorkflowStateNotFoundError() from exc
-    except WorkflowStateConflictError as exc:
+    except (WorkflowStateConflictError, WorkflowStateUnreadableError) as exc:
         raise MappingWorkflowStateConflictError() from exc
     return SaveMappingChoicesResponse(file_id=payload.file_id)
 
 
 async def _get_or_build_column_profile(
     cache: SessionCache,
+    upload_storage: UploadStorage,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
     file_id: str,
     column_key: ColumnKey,
 ) -> ColumnProfile:
@@ -117,8 +145,7 @@ async def _get_or_build_column_profile(
     if profile is not None:
         return profile
 
-    storage = dependencies.get_upload_storage()
-    meta = storage.load(file_id)
+    meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
     if meta is None:
         raise ColumnDetailNotFound(f"No upload found for {file_id}")
 
@@ -155,7 +182,7 @@ async def _ensure_pv_sets_fetched(cache: SessionCache) -> None:
     if data_model_version is None:
         return
     all_pvs = await fetch_all_pvs_async(data_model_version.data_model_key, data_model_version.external_version_number)
-    cache.set_pvs_batch(all_pvs.with_defaults(missing_keys))
+    cache.set_pvs_batch(all_pvs.with_defaults(missing_keys), expected_version=data_model_version)
 
 
 def _selected_pvs(

@@ -52,8 +52,6 @@ class WorkflowFile(str, Enum):
     STAGE_THREE_JOB = "stage_three_job"
     WORKFLOW_STATE = "workflow_state"
     REVIEW_OVERRIDES = "review_overrides"
-    REVIEW_AUDIT = "review_audit"
-    FINAL_BUNDLE = "final_bundle"
 
     @property
     def is_json(self) -> bool:
@@ -65,7 +63,6 @@ class WorkflowFile(str, Enum):
             WorkflowFile.STAGE_THREE_JOB,
             WorkflowFile.WORKFLOW_STATE,
             WorkflowFile.REVIEW_OVERRIDES,
-            WorkflowFile.REVIEW_AUDIT,
         }
 
     @property
@@ -80,7 +77,6 @@ class WorkflowFile(str, Enum):
             WorkflowFile.PV_MANIFEST,
             WorkflowFile.WORKFLOW_STATE,
             WorkflowFile.REVIEW_OVERRIDES,
-            WorkflowFile.REVIEW_AUDIT,
         }
 
 
@@ -320,12 +316,12 @@ class LocalWorkflowStorage:
             raise WorkflowArtifactNotFoundError(f"Source artifact not found: {source_path}")
         path = self._artifact_path(file_id, kind, source_path.suffix)
         path.parent.mkdir(parents=True, exist_ok=True)
-        # A mutable artifact may change suffix after processing, so remove stale
-        # siblings before writing the replacement named by the new source file.
+        # Publish the replacement before removing stale suffix variants. A
+        # failed copy must leave the last complete artifact recoverable.
+        self._copy_artifact_atomic(source_path, path)
         for existing_path in self._existing_artifact_paths(file_id, kind):
             if existing_path != path:
                 existing_path.unlink(missing_ok=True)
-        self._copy_artifact_atomic(source_path, path)
         return StoredArtifact(kind=kind, version=_version_for_file(path), suffix=path.suffix)
 
     @contextmanager
@@ -404,8 +400,11 @@ class LocalWorkflowStorage:
     def _copy_artifact_atomic(self, source_path: Path, path: Path) -> None:
         with NamedTemporaryFile("wb", dir=path.parent, delete=False) as temp_file:
             temp_path = Path(temp_file.name)
-        shutil.copy2(source_path, temp_path)
-        temp_path.replace(path)
+        try:
+            shutil.copy2(source_path, temp_path)
+            temp_path.replace(path)
+        finally:
+            temp_path.unlink(missing_ok=True)
 
     def _require_json_kind(self, kind: WorkflowFile) -> None:
         if not kind.is_json:

@@ -174,6 +174,31 @@ def test_file_artifact_materializes_as_local_path(tmp_path: Path) -> None:
         assert materialized.read_text(encoding="utf-8") == "a,b\n1,2\n"
 
 
+def test_failed_local_artifact_replacement_preserves_last_complete_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = LocalWorkflowStorage(tmp_path / "storage")
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    previous = tmp_path / "previous.csv"
+    replacement = tmp_path / "replacement.tsv"
+    previous.write_text("a\nold\n", encoding="utf-8")
+    replacement.write_text("a\tnew\n", encoding="utf-8")
+    storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, previous)
+
+    def _fail_copy(_source: Path, _destination: Path) -> None:
+        raise OSError("simulated copy failure")
+
+    monkeypatch.setattr(storage, "_copy_artifact_atomic", _fail_copy)
+    with pytest.raises(OSError, match="simulated copy failure"):
+        storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, replacement)
+
+    with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT) as path:
+        assert path.suffix == ".csv"
+        assert path.read_text(encoding="utf-8") == "a\nold\n"
+
+
 def test_json_and_file_artifact_operations_are_not_interchangeable(tmp_path: Path) -> None:
     # Given: a workflow with no artifacts
     storage = LocalWorkflowStorage(tmp_path / "storage")

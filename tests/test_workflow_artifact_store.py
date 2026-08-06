@@ -151,3 +151,31 @@ async def test_generated_artifacts_restore_into_new_scratch_space(tmp_path: Path
     assert restored_output.read_bytes() == b"diagnosis\nbeta\n"
     assert restored_manifest is not None
     assert restored_manifest.read_bytes() == b"fake parquet bytes"
+
+
+async def test_durable_stage_three_artifacts_override_unpublished_scratch(tmp_path: Path) -> None:
+    """A stale worker's local files cannot replace the last completed run."""
+    user = UserContext(user_id="alice")
+    workflow_storage = LocalWorkflowStorage(tmp_path / "workflow")
+    scratch = UploadStorage(tmp_path / "scratch", UploadConstraints(max_bytes=10_000))
+    meta = await scratch.store(InMemoryUpload(b"diagnosis\nalpha\n"), dataset_workflow_id())
+    workflow_storage.create_workflow(user, meta.dataset_workflow_id)
+    save_upload_artifacts(workflow_storage, user, scratch, meta)
+
+    output_path = scratch.harmonized_path_for(meta.file_id, meta.saved_path)
+    generated_manifest = tmp_path / "generated.parquet"
+    output_path.write_bytes(b"diagnosis\napproved\n")
+    generated_manifest.write_bytes(b"approved manifest")
+    manifest_path = scratch.save_harmonization_manifest(meta.file_id, generated_manifest)
+    save_harmonized_artifacts(workflow_storage, user, meta.file_id, output_path, manifest_path)
+
+    output_path.write_bytes(b"diagnosis\nstale worker\n")
+    manifest_path.write_bytes(b"stale manifest")
+
+    restored_output = load_harmonized_output_path(scratch, workflow_storage, user, meta.file_id, meta)
+    restored_manifest = load_harmonization_manifest_path(scratch, workflow_storage, user, meta.file_id)
+
+    assert restored_output is not None
+    assert restored_output.read_bytes() == b"diagnosis\napproved\n"
+    assert restored_manifest is not None
+    assert restored_manifest.read_bytes() == b"approved manifest"

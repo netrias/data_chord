@@ -14,12 +14,16 @@ from dataclasses import dataclass, field
 from src.domain.cde import CDEInfo
 from src.domain.cde_catalog import CdeCatalog
 from src.domain.cde_pv_catalog import CdePvCatalog
-from src.domain.column_cde_map import ColumnCdeMap
 from src.domain.column_profile import ColumnProfile
 from src.domain.columns import ColumnKey, column_key_from_string
 from src.domain.data_model_version_reference import DataModelVersionReference
 
 _logger = logging.getLogger(__name__)
+_LOCAL_CACHE_OWNER = "local-user"
+
+
+class ReferenceDataVersionMismatchError(Exception):
+    """Raised when reference facts are added to a cache for another model version."""
 
 
 @dataclass
@@ -31,9 +35,6 @@ class SessionCache:
 
     # CDE list (fetched in Stage 2)
     cde_catalog: CdeCatalog = field(default_factory=CdeCatalog.empty)
-
-    # Column -> CDE mappings (set in Stage 2/3, used for PV lookup)
-    column_to_cde_key: ColumnCdeMap = field(default_factory=ColumnCdeMap.empty)
 
     # PV sets keyed by cde_key (fetched in Stage 3)
     pvs: CdePvCatalog = field(default_factory=CdePvCatalog.empty)
@@ -51,12 +52,11 @@ class SessionCache:
         data_model_key: str,
         external_version_number: str,
     ) -> None:
-        with self._lock:
-            self.data_model_version = DataModelVersionReference(
-                data_model_key=data_model_key,
-                external_version_number=external_version_number,
-            )
-            self.cde_catalog = CdeCatalog.from_cdes(cdes)
+        self.set_cde_catalog(
+            CdeCatalog.from_cdes(cdes),
+            data_model_key=data_model_key,
+            external_version_number=external_version_number,
+        )
 
     def set_cde_catalog(
         self,
@@ -64,12 +64,27 @@ class SessionCache:
         data_model_key: str,
         external_version_number: str,
     ) -> None:
+        version = DataModelVersionReference(
+            data_model_key=data_model_key,
+            external_version_number=external_version_number,
+        )
         with self._lock:
-            self.data_model_version = DataModelVersionReference(
-                data_model_key=data_model_key,
-                external_version_number=external_version_number,
-            )
+            if self.data_model_version != version:
+                self.pvs = CdePvCatalog.empty()
+            self.data_model_version = version
             self.cde_catalog = catalog
+
+    def install_reference_data(
+        self,
+        data_model_version: DataModelVersionReference,
+        cde_catalog: CdeCatalog,
+        pvs: CdePvCatalog,
+    ) -> None:
+        """Atomically replace all model-version-scoped reference facts."""
+        with self._lock:
+            self.data_model_version = data_model_version
+            self.cde_catalog = cde_catalog
+            self.pvs = pvs
 
     def get_cde_by_key(self, cde_key: str) -> CDEInfo | None:
         with self._lock:
@@ -87,29 +102,18 @@ class SessionCache:
         with self._lock:
             return not self.cde_catalog.is_empty()
 
-    def set_column_mappings(self, mappings: ColumnCdeMap | dict[str, str]) -> None:
-        """Full replacement prevents stale keys from previous mapping passes."""
+    def set_pvs_batch(
+        self,
+        pv_map: CdePvCatalog,
+        *,
+        expected_version: DataModelVersionReference,
+    ) -> None:
         with self._lock:
-            if isinstance(mappings, ColumnCdeMap):
-                self.column_to_cde_key = mappings
-                return
-            self.column_to_cde_key = ColumnCdeMap.from_strings(mappings)
-
-    def get_column_mappings(self) -> ColumnCdeMap:
-        """Thread-safe copy of column-to-CDE mappings for serialization."""
-        with self._lock:
-            return ColumnCdeMap(dict(self.column_to_cde_key.mappings))
-
-    def set_pvs_batch(self, pv_map: CdePvCatalog) -> None:
-        with self._lock:
+            if self.data_model_version != expected_version:
+                raise ReferenceDataVersionMismatchError(
+                    f"Reference data changed while fetching PVs for {expected_version.data_model_key}"
+                )
             self.pvs = self.pvs.with_values(pv_map.values)
-
-    def get_pvs_for_column(self, column_key: ColumnKey | str) -> frozenset[str] | None:
-        with self._lock:
-            cde_key = self.column_to_cde_key.mappings.get(column_key_from_string(str(column_key)))
-            if cde_key is None:
-                return None
-            return self.pvs.get(cde_key)
 
     def has_any_pvs(self) -> bool:
         with self._lock:
@@ -141,11 +145,6 @@ class SessionCache:
         with self._lock:
             return self.column_profiles.get(column_key_from_string(str(column_key)))
 
-    def replace_cdes(self, cdes: list[CDEInfo]) -> None:
-        """Swap the CDE list in place — used to apply post-PV-fetch type refinement."""
-        with self._lock:
-            self.cde_catalog = CdeCatalog.from_cdes(cdes)
-
     def replace_cde_catalog(self, catalog: CdeCatalog) -> None:
         """Swap the CDE catalog in place after post-PV-fetch type refinement."""
         with self._lock:
@@ -157,22 +156,27 @@ class SessionCache:
 
 
 # Global session cache storage
-_session_caches: dict[str, SessionCache] = {}
+_session_caches: dict[tuple[str, str], SessionCache] = {}
 _global_lock = threading.Lock()
 
 
-def get_session_cache(file_id: str) -> SessionCache:
+def get_session_cache(file_id: str, *, owner_user_id: str = _LOCAL_CACHE_OWNER) -> SessionCache:
     """Lazy initialization avoids pre-allocating caches for sessions that may never use PVs."""
+    cache_key = (owner_user_id, file_id)
     with _global_lock:
-        if file_id not in _session_caches:
-            _session_caches[file_id] = SessionCache()
-        return _session_caches[file_id]
+        if cache_key not in _session_caches:
+            _session_caches[cache_key] = SessionCache()
+        return _session_caches[cache_key]
 
 
-def clear_session_cache(file_id: str) -> None:
+def clear_session_cache(file_id: str, *, owner_user_id: str | None = None) -> None:
     """Prevents memory growth by releasing cache when session is complete."""
     with _global_lock:
-        _session_caches.pop(file_id, None)
+        if owner_user_id is not None:
+            _session_caches.pop((owner_user_id, file_id), None)
+            return
+        for cache_key in [key for key in _session_caches if key[1] == file_id]:
+            _session_caches.pop(cache_key, None)
 
 
 def clear_all_session_caches() -> None:
@@ -181,15 +185,16 @@ def clear_all_session_caches() -> None:
         _session_caches.clear()
 
 
-def has_session_cache(file_id: str) -> bool:
+def has_session_cache(file_id: str, *, owner_user_id: str | None = None) -> bool:
     with _global_lock:
-        return file_id in _session_caches
+        if owner_user_id is not None:
+            return (owner_user_id, file_id) in _session_caches
+        return any(cache_file_id == file_id for _, cache_file_id in _session_caches)
 
 
 __all__ = [
     "SessionCache",
-    "CdeCatalog",
-    "CdePvCatalog",
+    "ReferenceDataVersionMismatchError",
     "get_session_cache",
     "clear_session_cache",
     "clear_all_session_caches",

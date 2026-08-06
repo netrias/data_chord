@@ -53,6 +53,30 @@ class ReviewProgressState:
     def from_payload(cls, payload: object) -> ReviewProgressState:
         if not isinstance(payload, Mapping):
             return cls()
+        # Old durable records used flat batch keys; normalize them before constructing trusted state.
+        if not {"review_mode", "column_mode", "row_mode"} & payload.keys():
+            if {"completed_batches", "flagged_batches", "current_batch", "batch_size"} & payload.keys():
+                payload = {
+                    "review_mode": "row",
+                    "sort_mode": payload.get("sort_mode", "original"),
+                    "scroll_mode": payload.get("scroll_mode", False),
+                    "column_mode": {},
+                    "row_mode": {
+                        "current_unit": payload.get("current_batch", 1),
+                        "completed_units": payload.get("completed_batches", []),
+                        "flagged_units": payload.get("flagged_batches", []),
+                        "batch_size": payload.get("batch_size", 5),
+                    },
+                }
+            elif {"batch_size", "sort_mode", "scroll_mode"} & payload.keys():
+                batch_size = payload.get("batch_size", 5)
+                payload = {
+                    "review_mode": "column",
+                    "sort_mode": payload.get("sort_mode", "original"),
+                    "scroll_mode": payload.get("scroll_mode", False),
+                    "column_mode": {"batch_size": batch_size},
+                    "row_mode": {"batch_size": batch_size},
+                }
         return cls(
             review_mode=_string_or_default(payload.get("review_mode"), "column"),
             sort_mode=_string_or_default(payload.get("sort_mode"), "original"),
@@ -182,6 +206,28 @@ class ReviewOverrides:
                     ManifestManualOverride.from_raw(column_key, override.original_value, override.human_value)
                 )
         return batch
+
+    def audit_changes_since(self, previous: ReviewOverrides | None) -> list[ManifestManualOverride]:
+        """Return term decisions that differ from the previously saved active state."""
+        current = self.manual_override_batch()
+        if previous is None:
+            return current
+
+        previous_batch = previous.manual_override_batch()
+        if set(current) == set(previous_batch):
+            return []
+
+        latest_values = {
+            override.term_key: override.override_value
+            for override in previous_batch
+        }
+        changes: list[ManifestManualOverride] = []
+        for override in current:
+            if latest_values.get(override.term_key) == override.override_value:
+                continue
+            changes.append(override)
+            latest_values[override.term_key] = override.override_value
+        return changes
 
     def apply_to_rows(self, rows: list[list[str]], dataset: TabularDataset) -> list[list[str]]:
         """Row keys are 1-indexed to match Stage 4 UI numbering."""

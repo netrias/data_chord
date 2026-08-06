@@ -28,7 +28,6 @@ class ConfidenceThresholds:
 
     HIGH: float = 0.9
     LOW: float = 0.3
-    MANUAL: float = 0.2
 
 
 CONFIDENCE = ConfidenceThresholds()

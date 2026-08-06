@@ -100,6 +100,7 @@ const _stage2HarnessHtml = (cdeCatalog) => `
       </div>
       <div id="mappingRows"></div>
       <div id="mappingEmptyState" class="hidden"></div>
+      <p id="harmonizeError" class="hidden" role="alert"></p>
     </main>
     <div class="takeover hidden" id="takeover">
       <div class="takeover-backdrop" data-action="close-takeover"></div>
@@ -113,7 +114,8 @@ const _stage2HarnessHtml = (cdeCatalog) => `
         externalVersionNumber: "11.0.4",
         cdeCatalog: ${JSON.stringify(cdeCatalog)},
         noMappingLabel: "No Mapping",
-        stageThreeUrl: "/stage-3"
+        stageThreeUrl: "/stage-3",
+        harmonizeEndpoint: "/stage-3/harmonize"
       };
     </script>
     <script type="module" src="/assets/stage-2/stage_2_mappings.js"></script>
@@ -135,7 +137,26 @@ test('happy path flow: upload → analyze → harmonize → review → summary �
   // Then: harmonize completes and review can continue
   await expect(page.locator('#reviewButton')).toBeEnabled();
 
-  seedHarmonization(fileId, { 0: { col_a: 'Baz' } });
+  seedHarmonization(fileId, {
+    0: { col_a: 'Baz' },
+    1: { col_a: 'Baz' },
+  });
+
+  // The completed Stage 3 view uses the durable production-shaped summary.
+  const durableJobId = `e2e-job-${fileId}`;
+  await page.goto(`/stage-3?file_id=${fileId}&job_id=${durableJobId}`);
+  const stageThreeTable = page.locator('[data-column-outcome-table] .column-outcome-table');
+  await expect(stageThreeTable).toBeVisible();
+  await expect(stageThreeTable.getByRole('columnheader')).toHaveText([
+    'Source column',
+    'Distinct values changed',
+    'Rows affected',
+    'Final-value status',
+  ]);
+  const stageThreeOutcome = stageThreeTable.locator('tbody tr').filter({ hasText: 'col_a' });
+  await expect(stageThreeOutcome).toContainText('1 / 2 · 50%');
+  await expect(stageThreeOutcome).toContainText('2 / 3 · 66.7%');
+  await expect(page.getByText('Confidence', { exact: true })).toHaveCount(0);
 
   await page.click('#reviewButton');
   await page.waitForURL(/\/stage-4/);
@@ -143,7 +164,11 @@ test('happy path flow: upload → analyze → harmonize → review → summary �
 
   await page.click('#stageFiveButton');
   await page.waitForURL(/\/stage-5/);
-  await page.locator('#summaryGrid').waitFor({ state: 'visible' });
+  await expect(page.locator('.quality-certificate')).toBeVisible();
+  await expect(page.locator('[data-impact-metric="total_values"]')).toContainText('2');
+  await expect(page.locator('[data-impact-metric="unique_values"]')).toContainText('1');
+  await expect(page.locator('[data-impact-metric="manual_values"]')).toContainText('0');
+  await expect(page.locator('.provenance-line')).toHaveCount(0);
 
   const rows = await downloadCsvRows(page, fileId);
   expect(rows[0].col_a).toBe('Baz');
@@ -201,14 +226,12 @@ test('Stage 5 confirms start-over after successful download and clears browser w
   const keysBeforeStartOver = await page.evaluate(() => ({
     currentFileSession: sessionStorage.getItem('currentFileSession'),
     stage2Payload: sessionStorage.getItem('stage2Payload'),
-    stage3HarmonizePayload: sessionStorage.getItem('stage3HarmonizePayload'),
     stage3HarmonizeJob: sessionStorage.getItem('stage3HarmonizeJob'),
     maxReachedStage: sessionStorage.getItem('maxReachedStage'),
     unrelatedKey: sessionStorage.getItem('unrelatedKey'),
   }));
   expect(keysBeforeStartOver.currentFileSession).not.toBeNull();
   expect(keysBeforeStartOver.stage2Payload).not.toBeNull();
-  expect(keysBeforeStartOver.stage3HarmonizePayload).not.toBeNull();
   expect(keysBeforeStartOver.stage3HarmonizeJob).not.toBeNull();
   expect(keysBeforeStartOver.maxReachedStage).not.toBeNull();
   expect(keysBeforeStartOver.unrelatedKey).toBe('keep-me');
@@ -238,7 +261,6 @@ test('Stage 5 confirms start-over after successful download and clears browser w
   const keysAfterCancel = await page.evaluate(() => ({
     currentFileSession: sessionStorage.getItem('currentFileSession'),
     stage2Payload: sessionStorage.getItem('stage2Payload'),
-    stage3HarmonizePayload: sessionStorage.getItem('stage3HarmonizePayload'),
     stage3HarmonizeJob: sessionStorage.getItem('stage3HarmonizeJob'),
     maxReachedStage: sessionStorage.getItem('maxReachedStage'),
     unrelatedKey: sessionStorage.getItem('unrelatedKey'),
@@ -256,7 +278,6 @@ test('Stage 5 confirms start-over after successful download and clears browser w
   const keysAfterConfirm = await page.evaluate(() => ({
     currentFileSession: sessionStorage.getItem('currentFileSession'),
     stage2Payload: sessionStorage.getItem('stage2Payload'),
-    stage3HarmonizePayload: sessionStorage.getItem('stage3HarmonizePayload'),
     stage3HarmonizeJob: sessionStorage.getItem('stage3HarmonizeJob'),
     maxReachedStage: sessionStorage.getItem('maxReachedStage'),
     unrelatedKey: sessionStorage.getItem('unrelatedKey'),
@@ -264,7 +285,6 @@ test('Stage 5 confirms start-over after successful download and clears browser w
   expect(keysAfterConfirm).toEqual({
     currentFileSession: null,
     stage2Payload: null,
-    stage3HarmonizePayload: null,
     stage3HarmonizeJob: null,
     maxReachedStage: null,
     unrelatedKey: 'keep-me',
@@ -589,7 +609,8 @@ test('Stage 2 submits selected column renames for harmonization', async ({ page 
   /*
    * Given: Stage 2 has a mapped column whose CDE label differs from the source header.
    * When:  the user enables rename-to-standard and continues to harmonization.
-   * Then:  the Stage 3 handoff includes column_renames separately from CDE overrides.
+   * Then:  one request durably saves the choices and queues Stage 3, with
+   *        column_renames separate from CDE overrides.
    */
   const payload = {
     file_id: 'abcdef0123456789abcdef0123456789',
@@ -630,6 +651,22 @@ test('Stage 2 submits selected column renames for harmonization', async ({ page 
       body: _stage2HarnessHtml(cdeCatalog),
     });
   });
+  const harmonizeRequests = [];
+  await page.route('**/stage-3/harmonize', async (route) => {
+    harmonizeRequests.push(route.request().postDataJSON?.() ?? {});
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        job_id: 'rename-job',
+        status: 'succeeded',
+        detail: 'Harmonization completed.',
+        next_stage_url: '/stage-4',
+        job_id_available: true,
+        manifest_summary: null,
+      }),
+    });
+  });
 
   await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&data_model_key=gc&external_version_number=11.0.4');
 
@@ -643,11 +680,16 @@ test('Stage 2 submits selected column renames for harmonization', async ({ page 
   await page.locator('#harmonizeButton').click();
   await page.waitForURL(/\/stage-3/);
 
-  const handoff = await page.evaluate(() => JSON.parse(sessionStorage.getItem('stage3HarmonizePayload')));
-  expect(handoff.request.manual_overrides).toEqual({});
-  expect(handoff.request.column_renames).toEqual({ col_0000: 'Primary Diagnosis' });
-  expect(handoff.request).not.toHaveProperty('manifest');
-  expect(handoff).not.toHaveProperty('manifest');
+  expect(harmonizeRequests).toHaveLength(1);
+  expect(harmonizeRequests[0].manual_overrides).toEqual({});
+  expect(harmonizeRequests[0].column_renames).toEqual({ col_0000: 'Primary Diagnosis' });
+  expect(harmonizeRequests[0]).not.toHaveProperty('manifest');
+  const durableJobIdentity = await page.evaluate(() => JSON.parse(sessionStorage.getItem('stage3HarmonizeJob')));
+  expect(durableJobIdentity).toMatchObject({
+    job_id: 'rename-job',
+    file_id: 'abcdef0123456789abcdef0123456789',
+  });
+  expect(new URL(page.url()).searchParams.get('job_id')).toBe('rename-job');
 });
 
 test('Stage 2 picker surfaces all AI candidates as separate rows', async ({ page }) => {
@@ -910,7 +952,7 @@ test('BOM headers do not break overrides', async ({ page }) => {
   expect(rows[1].col_a).toBe('Bar');
 });
 
-test('no-change flow shows empty review state and zero summary', async ({ page }) => {
+test('no-change flow shows empty review state and zero outcome metrics', async ({ page }) => {
   await mockHarmonizeSuccess(page);
 
   // Given: a CSV with no harmonization changes
@@ -925,9 +967,125 @@ test('no-change flow shows empty review state and zero summary', async ({ page }
   await page.goto(`/stage-4?file_id=${fileId}`);
   await expect(page.locator('.review-empty')).toBeVisible();
 
-  // Then: summary shows no changes
+  // Then: the final certificate reports an explicit zero-change aggregate
   await page.goto(`/stage-5?file_id=${fileId}`);
-  await expect(page.locator('#summaryGrid .summary-empty')).toBeVisible();
+  await expect(page.locator('.quality-certificate')).toBeVisible();
+  await expect(page.locator('[data-impact-metric="total_values"]')).toContainText('0');
+  await expect(page.locator('[data-impact-metric="unique_values"]')).toContainText('0');
+  await expect(page.locator('[data-impact-metric="manual_values"]')).toContainText('0');
+});
+
+test('Stage 5 aggregates change impact and keeps filters keyboard accessible', async ({ page }) => {
+  const fileId = '0123456789abcdef0123456789abcdef';
+  const history = [{
+    value: 'Bad',
+    source: 'original',
+    timestamp: null,
+    user_id: null,
+    is_pv_conformant: false,
+  }];
+  await page.route('**/stage-5/summary', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        dataset: {
+          filename: 'attention.csv',
+          tabular_format: 'csv',
+          data_model_key: 'gc',
+          external_version_number: '11.0.4',
+        },
+        column_summaries: [
+          {
+            column: 'diagnosis',
+            column_key: 'col_0000',
+            source_column_index: 0,
+            distinct_terms: 3,
+            changed_distinct_values: 2,
+            total_rows: 3,
+            changed_rows: 2,
+            reviewer_edited_rows: 1,
+            non_conformant_values: 1,
+            review_status: 'needs_attention',
+            ai_changes: 1,
+            manual_changes: 1,
+            unchanged: 1,
+          },
+          {
+            column: 'gender',
+            column_key: 'col_0001',
+            source_column_index: 1,
+            distinct_terms: 1,
+            changed_distinct_values: 1,
+            total_rows: 3,
+            changed_rows: 3,
+            reviewer_edited_rows: 0,
+            non_conformant_values: 0,
+            review_status: 'clear',
+            ai_changes: 1,
+            manual_changes: 0,
+            unchanged: 0,
+          },
+        ],
+        term_mappings: [
+          {
+            column: 'diagnosis', column_key: 'col_0000', source_column_index: 0,
+            original_value: 'Bad', final_value: 'Bad', is_changed: false,
+            final_value_source: 'source', review_status: 'needs_attention', row_count: 1,
+            is_pv_conformant: false, history,
+          },
+          {
+            column: 'diagnosis', column_key: 'col_0000', source_column_index: 0,
+            original_value: 'A', final_value: 'B', is_changed: true,
+            final_value_source: 'data_chord', review_status: 'clear', row_count: 1,
+            is_pv_conformant: true, history: [],
+          },
+          {
+            column: 'diagnosis', column_key: 'col_0000', source_column_index: 0,
+            original_value: 'C', final_value: 'D', is_changed: true,
+            final_value_source: 'reviewer', review_status: 'clear', row_count: 1,
+            is_pv_conformant: true, history: [],
+          },
+        ],
+        non_conformant_count: 1,
+      }),
+    });
+  });
+
+  await page.goto(`/stage-5?file_id=${fileId}`);
+  await expect(page.getByRole('heading', { level: 1, name: 'attention.csv' })).toBeVisible();
+  await expect(page.locator('#datasetMetadata')).toHaveText('gc 11.0.4 · CSV');
+  await expect(page.getByRole('button', { name: 'Download data' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: 'Changes' })).toBeVisible();
+  await expect(page.locator('[data-impact-metric="unique_values"]')).toContainText('3');
+  await expect(page.locator('[data-impact-metric="unique_values"]')).toContainText('Unique values changed');
+  await expect(page.locator('[data-impact-metric="total_values"]')).toContainText('5');
+  await expect(page.locator('[data-impact-metric="total_values"]')).toContainText('Total values changed');
+  await expect(page.locator('[data-impact-metric="manual_values"]')).toContainText('1');
+  await expect(page.locator('[data-impact-metric="manual_values"]')).toContainText('Values manually changed');
+  await expect(page.locator('#mappingTitle')).toHaveText('Value details · Select a row to view history');
+  const attention = page.getByRole('button', { name: 'Needs attention' });
+  await expect(attention).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#changesTableBody tr.needs-attention')).toContainText('Bad');
+  await expect(page.locator('#changesTableBody tr')).toHaveCount(1);
+
+  const changed = page.getByRole('button', { name: 'Changed', exact: true });
+  await changed.focus();
+  await changed.press('Enter');
+  await expect(changed).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#changesTableBody tr[data-history-row]')).toHaveCount(2);
+
+  const reviewer = page.getByRole('button', { name: 'Reviewer edits' });
+  await reviewer.press('Enter');
+  await expect(reviewer).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#changesTableBody tr')).toContainText('C');
+
+  await page.getByRole('button', { name: 'All', exact: true }).press('Enter');
+  await expect(page.locator('#changesTableBody tr[data-history-row]')).toHaveCount(3);
+
+  const sortButton = page.getByRole('button', { name: /Source value/ });
+  await sortButton.press('Enter');
+  await expect(sortButton.locator('xpath=ancestor::th')).toHaveAttribute('aria-sort', 'ascending');
 });
 
 test('autosave persists overrides across reloads', async ({ page }) => {
@@ -946,15 +1104,41 @@ test('autosave persists overrides across reloads', async ({ page }) => {
   const card = page.locator('.column-mode-grid .row-cell', {
     has: page.locator('.original-context-value', { hasText: 'Foo' }),
   }).first();
+  const initialSavePromise = page.waitForResponse(
+    (response) => response.request().method() === 'POST'
+      && response.url().includes('/stage-4/overrides')
+      && response.ok(),
+  );
   await card.locator('.target-value-input').fill('Persisted');
-  await page.waitForResponse((response) => response.url().includes('/stage-4/overrides') && response.ok());
+  const initialSave = await initialSavePromise;
+  expect(initialSave.headers().etag).toBeTruthy();
 
   // When: the page is reloaded
+  const loadPromise = page.waitForResponse(
+    (response) => response.request().method() === 'GET'
+      && response.url().includes(`/stage-4/overrides/${fileId}`)
+      && response.ok(),
+  );
   await page.reload();
+  const loaded = await loadPromise;
   await waitForReviewRows(page);
 
-  // Then: the override value is restored
+  // Then: the override is restored and the next autosave protects that loaded version
   await expect(card.locator('.target-value-input')).toHaveValue('Persisted');
+  const version = loaded.headers().etag;
+  expect(version).toBeTruthy();
+  const versionedSavePromise = page.waitForRequest(
+    (request) => request.method() === 'POST' && request.url().includes('/stage-4/overrides'),
+  );
+  const versionedSaveResponsePromise = page.waitForResponse(
+    (response) => response.request().method() === 'POST'
+      && response.url().includes('/stage-4/overrides')
+      && response.ok(),
+  );
+  await card.locator('.target-value-input').fill('Persisted again');
+  const versionedSave = await versionedSavePromise;
+  expect(versionedSave.headers()['if-match']).toBe(version);
+  await versionedSaveResponsePromise;
 });
 
 test('stage 5 advance waits for the latest override save', async ({ page }) => {
@@ -1363,10 +1547,14 @@ test('error handling: harmonize failure and missing manifest', async ({ page }) 
   expect(await preOverrides.json()).toBeNull();
 
   // When: harmonize fails
-  await clickHarmonize(page);
-  await expect(page.locator('#stageThreeError')).toBeVisible();
+  await page.locator('#harmonizeButton').click();
 
-  // Then: review shows missing manifest warning
+  // Then: Stage 2 keeps the user with their choices and shows a retryable error.
+  await expect(page).toHaveURL(/\/stage-2/);
+  await expect(page.locator('#harmonizeError')).toBeVisible();
+  await expect(page.locator('#harmonizeButton')).toBeEnabled();
+
+  // And: review shows the missing-manifest state because no job was accepted.
   await page.goto(`/stage-4?file_id=${fileId}`);
   await expect(page.locator('.review-empty')).toBeVisible();
 
@@ -1460,14 +1648,9 @@ test('Stage 2 locks and Stage 5 is reachable after Stage 3 completes', async ({ 
   expect(stageFiveUrl.searchParams.get('file_id')).toBe(fileId);
   await page.locator('#summaryGrid').waitFor({ state: 'visible' });
 
-  // And: Stage 5 can load from the URL alone
-  const savedStageThreePayload = await page.evaluate(() => sessionStorage.getItem('stage3HarmonizePayload'));
-  await page.evaluate(() => sessionStorage.removeItem('stage3HarmonizePayload'));
+  // And: Stage 5 can load from the durable workflow id in the URL alone
   await page.reload();
   await expect(page.locator('#summaryGrid')).not.toContainText('Unable to locate harmonization context.');
-  await page.evaluate((payload) => {
-    if (payload) sessionStorage.setItem('stage3HarmonizePayload', payload);
-  }, savedStageThreePayload);
 
   // When: the user goes back to Stage 2
   await page.click('.progress-track .step[data-stage="mapping"]');
@@ -1476,8 +1659,6 @@ test('Stage 2 locks and Stage 5 is reachable after Stage 3 completes', async ({ 
   // Then: mapping is inspection-only for the completed harmonization
   const stageTwoUrl = new URL(page.url());
   expect(stageTwoUrl.searchParams.get('file_id')).toBe(fileId);
-  expect(stageTwoUrl.searchParams.get('data_model_key')).toBe('gc');
-  expect(stageTwoUrl.searchParams.get('external_version_number')).toBe('11.0.4');
   await expect(page.locator('#mappingLockBanner')).toBeVisible();
   await expect(page.locator('#harmonizeButton')).toContainText('Verify');
 
@@ -1493,50 +1674,57 @@ test('Stage 2 locks and Stage 5 is reachable after Stage 3 completes', async ({ 
   expect(harmonizeRequests).toBe(1);
 });
 
-test('Stage 3 ignores stale session payload when URL points at a new file', async ({ page }) => {
+test('Stage 3 resumes a durable job and retries with only the workflow id', async ({ page }) => {
+  const currentFileId = '22222222abcdef0022222222abcdef00';
+  const durableJobId = 'durable-job';
   let harmonizePayload = null;
-  const currentFileId = '22222222abcdef00';
+  let pollRequests = 0;
 
+  await page.route(`**/stage-3/jobs/${durableJobId}**`, async (route) => {
+    pollRequests += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        job_id: durableJobId,
+        status: 'failed',
+        detail: 'Harmonization failed. Please retry.',
+        next_stage_url: '/stage-4',
+        job_id_available: false,
+        manifest_summary: null,
+      }),
+    });
+  });
   await page.route('**/stage-3/harmonize', async (route) => {
     harmonizePayload = route.request().postDataJSON?.() ?? {};
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        job_id: 'e2e-job-current-file',
+        job_id: 'retry-job',
         status: 'succeeded',
         detail: 'Harmonization completed.',
-        next_stage_url: `/stage-4?file_id=${currentFileId}&job_id=e2e-job-current-file&status=succeeded`,
+        next_stage_url: `/stage-4?file_id=${currentFileId}&job_id=retry-job&status=succeeded`,
         job_id_available: true,
         manifest_summary: null,
       }),
     });
   });
 
-  // Given: the browser has a Stage 3 payload for a previous workflow
-  await page.goto('/stage-1');
-  await page.evaluate(() => {
-    sessionStorage.setItem(
-      'stage3HarmonizePayload',
-      JSON.stringify({
-        request: {
-          file_id: '11111111abcdef00',
-          data_model_key: 'stale',
-          external_version_number: '99.0.0',
-          manual_overrides: {},
-        },
-      }),
-    );
-  });
+  // Given: only durable workflow and job identity are present in the URL.
+  await page.goto(`/stage-3?file_id=${currentFileId}&job_id=${durableJobId}`);
 
-  // When: Stage 3 is opened for a different file from the URL alone
-  await page.goto(`/stage-3?file_id=${currentFileId}&data_model_key=gc&external_version_number=11.0.4`);
+  // Then: Stage 3 polls that durable job without launching another run.
+  await expect(page.locator('#stageThreeError')).toBeVisible();
+  expect(pollRequests).toBe(1);
+  expect(harmonizePayload).toBeNull();
+
+  // When: the user retries the failed durable job.
+  await page.locator('#retryButton').click();
+
+  // Then: the retry needs only the workflow id; model and mapping choices stay server-owned.
   await expect(page.locator('#reviewButton')).toBeEnabled();
-
-  // Then: harmonization starts with the current URL file, not the stale session file
-  expect(harmonizePayload?.file_id).toBe(currentFileId);
-  expect(harmonizePayload?.data_model_key).toBe('gc');
-  expect(harmonizePayload?.external_version_number).toBe('11.0.4');
+  expect(harmonizePayload).toEqual({ file_id: currentFileId });
 });
 
 test('multiple columns with changes show as separate tabs', async ({ page }) => {
@@ -1650,7 +1838,7 @@ test('changing file clears previous session', async ({ page }) => {
   expect(fileId2).not.toBe(fileId1);
 });
 
-test('history dialog shows transformation summary and steps', async ({ page }) => {
+test('history dialog separates current output from accessible decision history', async ({ page }) => {
   await mockHarmonizeSuccess(page);
 
   // Given: a file with harmonization changes
@@ -1661,97 +1849,30 @@ test('history dialog shows transformation summary and steps', async ({ page }) =
 
   // Navigate to Stage 5
   await page.goto(`/stage-5?file_id=${fileId}`);
-  await page.locator('#summaryGrid').waitFor({ state: 'visible' });
-  await page.locator('#changesTableBody tr').first().waitFor({ state: 'visible' });
+  await expect(page.locator('.quality-certificate')).toBeVisible();
+  const historyRow = page.locator('#changesTableBody tr[data-history-row]').first();
+  await expect(historyRow).toBeVisible();
+  await expect(page.getByRole('button', { name: 'View history' })).toHaveCount(0);
 
-  // When: User clicks a row in the changes table
-  await page.click('#changesTableBody tr.clickable-row');
-  const dialog = page.locator('.history-dialog');
-  await dialog.waitFor({ state: 'visible' });
+  // When: the keyboard reviewer opens history from the value row itself
+  await historyRow.focus();
+  await historyRow.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Current Output and Decision History' });
+  await expect(dialog).toBeVisible();
 
-  // Then: Dialog shows title and column name
-  await expect(dialog.locator('.history-dialog-title')).toContainText('Transformation History');
-  await expect(dialog.locator('.history-dialog-subtitle')).toBeVisible();
+  // Then: current output is separate from the historical event list
+  await expect(dialog.locator('.history-current')).toContainText('Current output');
+  await expect(dialog.locator('.history-timeline')).toBeVisible();
 
-  // And: Dialog shows original→final summary
-  await expect(dialog.locator('.history-dialog-transform')).toBeVisible();
-
-  // And: Each step has value, attribution, and timestamp on separate lines
-  const steps = dialog.locator('.history-step');
-  await expect(steps.first()).toBeVisible();
-  await expect(steps.first().locator('.history-step__value-line')).toBeVisible();
-  await expect(steps.first().locator('.history-step__attribution')).toBeVisible();
-  await expect(steps.first().locator('.history-step__timestamp')).toBeVisible();
-
-  // Close dialog
-  await dialog.locator('button:has-text("Close")').click();
-  await expect(dialog).toBeHidden();
-});
-
-test('history dialog shows PV conformance icons with tooltips', async ({ page }) => {
-  await mockHarmonizeSuccess(page);
-
-  // Given: a file with harmonization changes (some may be non-conformant)
-  const fileId = await uploadAndAnalyze(page, fileFixture('basic.csv'));
-  await clickHarmonize(page);
-  await expect(page.locator('#reviewButton')).toBeEnabled();
-  seedHarmonization(fileId, { 0: { col_a: 'Changed Value' } });
-
-  // Navigate to Stage 5
-  await page.goto(`/stage-5?file_id=${fileId}`);
-  await page.locator('#summaryGrid').waitFor({ state: 'visible' });
-  await page.locator('#changesTableBody tr').first().waitFor({ state: 'visible' });
-
-  // When: User opens history dialog
-  await page.click('#changesTableBody tr.clickable-row');
-  const dialog = page.locator('.history-dialog');
-  await dialog.waitFor({ state: 'visible' });
-
-  // Then: Steps show PV conformance icons
-  const steps = dialog.locator('.history-step');
-  await expect(steps.first()).toBeVisible();
-
-  // Each step value line should have a PV icon (either conformant ✓ or warning ⚠)
-  const pvIcons = dialog.locator('.history-step__pv-icon');
-  await expect(pvIcons.first()).toBeVisible();
-
-  // Icons should have tooltip on hover (data-tooltip attribute)
-  const firstIcon = pvIcons.first();
-  await expect(firstIcon).toHaveAttribute('data-tooltip');
-
-  // Close dialog
-  await dialog.locator('button:has-text("Close")').click();
-});
-
-test('history dialog shows correct attribution labels', async ({ page }) => {
-  await mockHarmonizeSuccess(page);
-
-  // Given: a file with AI changes
-  const fileId = await uploadAndAnalyze(page, fileFixture('basic.csv'));
-  await clickHarmonize(page);
-  await expect(page.locator('#reviewButton')).toBeEnabled();
-  seedHarmonization(fileId, { 0: { col_a: 'AI Changed' } });
-
-  // Navigate to Stage 5
-  await page.goto(`/stage-5?file_id=${fileId}`);
-  await page.locator('#summaryGrid').waitFor({ state: 'visible' });
-  await page.locator('#changesTableBody tr').first().waitFor({ state: 'visible' });
-
-  // When: User opens history dialog
-  await page.click('#changesTableBody tr.clickable-row');
-  const dialog = page.locator('.history-dialog');
-  await dialog.waitFor({ state: 'visible' });
-
-  // Then: Original step shows "Original value"
   const originalStep = dialog.locator('.history-step[data-source="original"]');
-  await expect(originalStep.locator('.history-step__attribution')).toContainText('Original value');
-
-  // And: AI step shows "Changed by Data Chord"
+  await expect(originalStep).toContainText('Source value');
   const aiStep = dialog.locator('.history-step[data-source="ai"]');
   if (await aiStep.count() > 0) {
-    await expect(aiStep.locator('.history-step__attribution')).toContainText('Changed by Data Chord');
+    await expect(aiStep).toContainText('Data Chord');
   }
 
-  // Close dialog
-  await dialog.locator('button:has-text("Close")').click();
+  // Closing returns focus to the row that opened the dialog.
+  await dialog.getByRole('button', { name: 'Close' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(historyRow).toBeFocused();
 });

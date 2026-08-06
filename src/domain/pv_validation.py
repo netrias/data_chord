@@ -7,13 +7,6 @@ Validation logic is kept pure (no I/O) to enable testing without mocks.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
-
-
-class AdjustmentSource(str, Enum):
-    TOP_SUGGESTIONS = "top_suggestions"
-    ORIGINAL = "original"
-    PV_OVERRIDE = "pv_override"
 
 
 @dataclass(frozen=True)
@@ -21,8 +14,7 @@ class PVValidationResult:
     is_conformant: bool
     original_value: str
     attempted_value: str  # What we tried to validate
-    adjusted_value: str | None  # If non-conformant, what we adjusted to
-    adjustment_source: AdjustmentSource | None
+    adjusted_value: str | None  # Replacement for the attempted value, when needed
 
 
 def validate_against_pvs(value: str, pv_set: frozenset[str]) -> bool:
@@ -58,14 +50,12 @@ def compute_pv_adjustment(
                 original_value=original_value,
                 attempted_value=top_harmonization,
                 adjusted_value=original_value,
-                adjustment_source=AdjustmentSource.PV_OVERRIDE,
             )
         return PVValidationResult(
             is_conformant=True,
             original_value=original_value,
             attempted_value=top_harmonization,
             adjusted_value=None,
-            adjustment_source=None,
         )
 
     if validate_against_pvs(top_harmonization, pv_set):
@@ -74,7 +64,6 @@ def compute_pv_adjustment(
             original_value=original_value,
             attempted_value=top_harmonization,
             adjusted_value=None,
-            adjustment_source=None,
         )
 
     alt = find_conformant_suggestion(top_suggestions, pv_set)
@@ -84,7 +73,6 @@ def compute_pv_adjustment(
             original_value=original_value,
             attempted_value=top_harmonization,
             adjusted_value=alt,
-            adjustment_source=AdjustmentSource.TOP_SUGGESTIONS,
         )
 
     return PVValidationResult(
@@ -92,7 +80,6 @@ def compute_pv_adjustment(
         original_value=original_value,
         attempted_value=top_harmonization,
         adjusted_value=None,
-        adjustment_source=None,
     )
 
 

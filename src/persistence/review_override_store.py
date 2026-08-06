@@ -5,14 +5,43 @@ Axis of change: how mutable Stage 4 review state is loaded, saved, and cleared.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from src.domain.review_overrides import ReviewOverrides, ReviewProgressState
-from src.storage import UserContext, WorkflowFile, WorkflowNotFoundError, WorkflowStorage
+from src.storage import (
+    UserContext,
+    VersionToken,
+    WorkflowConflictError,
+    WorkflowFile,
+    WorkflowNotFoundError,
+    WorkflowStorage,
+)
 
 
 class ReviewOverridesWorkflowNotFoundError(Exception):
     """Raised when review overrides are saved for an unknown workflow."""
+
+
+class ReviewOverridesStoreConflictError(Exception):
+    """Raised when review override state changed after the caller read it."""
+
+
+@dataclass(frozen=True)
+class ReviewOverridesRecord:
+    """Decoded active review overrides and their opaque storage version."""
+
+    value: ReviewOverrides
+    version: VersionToken
+
+
+@dataclass(frozen=True)
+class SavedReviewOverrides:
+    """Successful active-state write plus the state it replaced."""
+
+    value: ReviewOverrides
+    version: VersionToken
+    previous: ReviewOverrides | None
 
 
 def load_review_overrides(
@@ -20,13 +49,25 @@ def load_review_overrides(
     user: UserContext,
     file_id: str,
 ) -> ReviewOverrides | None:
+    record = load_review_overrides_record(storage, user, file_id)
+    return record.value if record is not None else None
+
+
+def load_review_overrides_record(
+    storage: WorkflowStorage,
+    user: UserContext,
+    file_id: str,
+) -> ReviewOverridesRecord | None:
     try:
         stored = storage.read_json(user, file_id, WorkflowFile.REVIEW_OVERRIDES)
     except WorkflowNotFoundError:
         return None
     if stored is None:
         return None
-    return ReviewOverrides.from_store(stored.data, file_id)
+    value = ReviewOverrides.from_store(stored.data, file_id)
+    if value is None:
+        return None
+    return ReviewOverridesRecord(value=value, version=stored.version)
 
 
 def save_review_overrides_state(
@@ -36,7 +77,8 @@ def save_review_overrides_state(
     file_id: str,
     overrides: object,
     review_state: ReviewProgressState,
-) -> ReviewOverrides:
+    expected_version: VersionToken | None = None,
+) -> SavedReviewOverrides:
     now = datetime.now(UTC)
     try:
         existing = storage.read_json(user, file_id, WorkflowFile.REVIEW_OVERRIDES)
@@ -53,14 +95,18 @@ def save_review_overrides_state(
         overrides=overrides,
         review_state=review_state,
     )
-    storage.write_json(
-        user,
-        file_id,
-        WorkflowFile.REVIEW_OVERRIDES,
-        saved.to_store(),
-        expected_version=existing.version if existing is not None else None,
-    )
-    return saved
+    write_version = expected_version if expected_version is not None else existing.version if existing else None
+    try:
+        stored = storage.write_json(
+            user,
+            file_id,
+            WorkflowFile.REVIEW_OVERRIDES,
+            saved.to_store(),
+            expected_version=write_version,
+        )
+    except WorkflowConflictError as exc:
+        raise ReviewOverridesStoreConflictError(file_id) from exc
+    return SavedReviewOverrides(value=saved, version=stored.version, previous=current)
 
 
 def delete_review_overrides_state(
@@ -75,8 +121,12 @@ def delete_review_overrides_state(
 
 
 __all__ = [
+    "ReviewOverridesRecord",
+    "ReviewOverridesStoreConflictError",
     "ReviewOverridesWorkflowNotFoundError",
+    "SavedReviewOverrides",
     "delete_review_overrides_state",
     "load_review_overrides",
+    "load_review_overrides_record",
     "save_review_overrides_state",
 ]

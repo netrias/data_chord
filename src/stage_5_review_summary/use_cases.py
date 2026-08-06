@@ -7,11 +7,9 @@ import io
 import json
 import tempfile
 import zipfile
-from collections import defaultdict
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import NamedTuple
 
 from netrias_client import (
     TabularDataset,
@@ -22,14 +20,15 @@ from netrias_client import (
 )
 
 from src.app.session_cache import clear_session_cache
-from src.domain import ChangeType
-from src.domain.manifest import (
-    ManifestRow,
-    ManifestSummary,
-    get_latest_override_value,
+from src.domain.column_outcomes import (
+    FinalizedValueOutcome,
+    FinalValueReviewStatus,
+    FinalValueSource,
+    summarize_column_outcomes,
 )
+from src.domain.manifest import ManifestRow, ManifestSummary
 from src.domain.pv_validation import check_value_conformance
-from src.domain.review_overrides import ReviewOverrides
+from src.domain.review_overrides import CellOverride, ReviewOverrides
 from src.persistence.cde_mapping_document_store import load_cde_mapping_json
 from src.persistence.manifest_reader import read_manifest_parquet
 from src.persistence.pv_manifest_store import ColumnPvSets, column_pv_sets
@@ -39,8 +38,11 @@ from src.persistence.workflow_artifacts import (
     load_harmonized_output_path,
     load_upload_artifact,
 )
+from src.persistence.workflow_state_store import LoadedWorkflowState, load_workflow_state
+from src.stage_3_harmonize.job_state import StageThreeJobUnreadableError, load_stage_three_job_state
 from src.stage_5_review_summary.schemas import (
     ColumnSummary,
+    DatasetSummary,
     StageFiveSummaryResponse,
     TermMapping,
     TransformationStep,
@@ -105,6 +107,8 @@ def build_download_package(
     workflow_storage: WorkflowStorage,
     user: UserContext,
 ) -> DownloadPackage:
+    if _load_completed_workflow_state(upload_storage, workflow_storage, user, file_id) is None:
+        raise HarmonizedOutputNotFoundError(file_id)
     meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
     if meta is None:
         raise UploadNotFoundError(file_id)
@@ -123,45 +127,9 @@ def build_download_package(
     zip_buffer = _create_zip_buffer(base_name, final_dataset, manifest_path, meta.saved_path, mapping_content)
 
     # Session complete: release in-memory cache to prevent unbounded growth.
-    clear_session_cache(file_id)
+    clear_session_cache(file_id, owner_user_id=user.user_id)
 
     return DownloadPackage(base_name=base_name, content=zip_buffer)
-
-
-def _normalize_for_metrics(value: str | None) -> str:
-    """Collapse cosmetic variations for summary counts only.
-
-    Unlike PV conformance checks (which are character-exact per domain rules),
-    summary metrics group case/whitespace variants to avoid inflating change
-    counts in the UI. The actual exported data preserves exact values.
-    """
-    if value is None:
-        return ""
-    return value.strip().lower()
-
-
-def _classify_change(row: ManifestRow) -> ChangeType:
-    original = row.to_harmonize
-    ai_value = row.top_harmonization
-    latest_override = get_latest_override_value(row.manual_overrides)
-
-    original_norm = _normalize_for_metrics(original)
-    ai_norm = _normalize_for_metrics(ai_value)
-    override_norm = _normalize_for_metrics(latest_override) if latest_override is not None else None
-    final_norm = override_norm if latest_override is not None else ai_norm
-
-    if original_norm == final_norm:
-        return ChangeType.UNCHANGED
-
-    if latest_override is not None and override_norm != ai_norm:
-        return ChangeType.MANUAL_OVERRIDE
-
-    return ChangeType.AI_HARMONIZED
-
-
-def _get_final_value(row: ManifestRow) -> str:
-    override = get_latest_override_value(row.manual_overrides)
-    return override if override is not None else row.top_harmonization
 
 
 def _build_history(
@@ -181,14 +149,17 @@ def _build_history(
         source="original",
         timestamp=upload_ts_str,
         is_pv_conformant=check_value_conformance(row.to_harmonize, pv_set),
+        review_status=_value_review_status(row.to_harmonize, pv_set),
     ))
 
-    if row.top_harmonization != row.to_harmonize:
+    effective_ai_value = _effective_ai_value(row)
+    if effective_ai_value != row.to_harmonize:
         steps.append(TransformationStep(
-            value=row.top_harmonization,
+            value=effective_ai_value,
             source="ai",
             timestamp=upload_ts_str,
-            is_pv_conformant=check_value_conformance(row.top_harmonization, pv_set),
+            is_pv_conformant=check_value_conformance(effective_ai_value, pv_set),
+            review_status=_value_review_status(effective_ai_value, pv_set),
         ))
 
     last_override_value: str | None = None
@@ -203,10 +174,22 @@ def _build_history(
                 timestamp=override.timestamp,
                 user_id=override.user_id,
                 is_pv_conformant=check_value_conformance(override.value, pv_set),
+                review_status=_value_review_status(override.value, pv_set),
             )
         )
 
     return _sort_steps_chronologically(steps)
+
+
+def _value_review_status(
+    value: str,
+    pv_set: frozenset[str] | None,
+) -> FinalValueReviewStatus:
+    if not pv_set:
+        return FinalValueReviewStatus.NOT_CHECKED
+    if check_value_conformance(value, pv_set):
+        return FinalValueReviewStatus.CLEAR
+    return FinalValueReviewStatus.NEEDS_ATTENTION
 
 
 def _sort_steps_chronologically(steps: list[TransformationStep]) -> list[TransformationStep]:
@@ -232,45 +215,49 @@ def _sort_steps_chronologically(steps: list[TransformationStep]) -> list[Transfo
     return [original, *sorted_rest]
 
 
-class _MappingInfo(NamedTuple):
-    """Immutable container for conformance result and transformation history."""
+@dataclass
+class _MappingInfo:
+    """Current mapping facts plus the manifest's independent audit history."""
 
     is_conformant: bool
     history: list[TransformationStep]
+    row_count: int
 
 
 @dataclass(frozen=True, order=True)
 class _UniqueTermMapping:
-    """Identity for one column/original/final value mapping in the summary."""
+    """Identity for one current column/original/final output mapping."""
 
+    source_column_index: int
     column_key: str
     column_label: str
     original_value: str
     final_value: str
+    final_value_source: FinalValueSource
+    review_status: FinalValueReviewStatus
 
 
-def _process_manifest_row(
-    row: ManifestRow,
-    ai_counts: dict[int, int],
-    manual_counts: dict[int, int],
-    unchanged_counts: dict[int, int],
-    unique_mappings: dict[_UniqueTermMapping, _MappingInfo],
-    column_pv_map: ColumnPvSets,
-    upload_timestamp: datetime | None,
-) -> None:
-    col_id = row.column_id
-    change_type = _classify_change(row)
-
-    match change_type:
-        case ChangeType.AI_HARMONIZED:
-            ai_counts[col_id] += 1
-        case ChangeType.MANUAL_OVERRIDE:
-            manual_counts[col_id] += 1
-        case ChangeType.UNCHANGED:
-            unchanged_counts[col_id] += 1
-
-    # Track all rows for conformance checking, not just changed ones.
-    _track_mapping(unique_mappings, row, column_pv_map, upload_timestamp)
+def _load_completed_workflow_state(
+    upload_storage: UploadStorage,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+    file_id: str,
+) -> LoadedWorkflowState | None:
+    loaded_state = load_workflow_state(
+        workflow_storage,
+        user,
+        file_id,
+        legacy_upload_storage=upload_storage,
+    )
+    if loaded_state is None or loaded_state.state.mapping_manifest is None:
+        return None
+    try:
+        loaded_job = load_stage_three_job_state(workflow_storage, user, file_id)
+    except StageThreeJobUnreadableError:
+        return None
+    if loaded_job is not None and not loaded_job.job.is_completed_for_plan(loaded_state.version.value):
+        return None
+    return loaded_state
 
 
 def _build_summary_from_manifest(
@@ -280,37 +267,49 @@ def _build_summary_from_manifest(
     workflow_storage: WorkflowStorage,
     user: UserContext,
 ) -> StageFiveSummaryResponse:
-    column_pv_map = column_pv_sets(file_id, [row.column_key for row in summary.rows])
+    loaded_state = _load_completed_workflow_state(upload_storage, workflow_storage, user, file_id)
+    if loaded_state is None:
+        raise SummaryManifestUnreadableError(file_id)
+    column_pv_map = column_pv_sets(
+        workflow_storage,
+        user,
+        loaded_state,
+        [row.column_key for row in summary.rows],
+    )
     meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
     upload_timestamp = meta.uploaded_at if meta else None
+    review_overrides = load_review_overrides(workflow_storage, user, file_id)
 
-    ai_counts: dict[int, int] = defaultdict(int)
-    manual_counts: dict[int, int] = defaultdict(int)
-    unchanged_counts: dict[int, int] = defaultdict(int)
-    distinct_terms: dict[int, int] = defaultdict(int)
-    column_names: dict[int, str] = {}
+    finalized_outcomes: list[FinalizedValueOutcome] = []
     unique_mappings: dict[_UniqueTermMapping, _MappingInfo] = {}
-
     for row in summary.rows:
-        distinct_terms[row.column_id] += 1
-        column_names[row.column_id] = row.column_name
-        _process_manifest_row(
+        row_outcomes = _finalized_outcomes_for_manifest_row(
             row,
-            ai_counts,
-            manual_counts,
-            unchanged_counts,
+            column_pv_map,
+            review_overrides,
+        )
+        finalized_outcomes.extend(row_outcomes)
+        _track_current_mappings(
             unique_mappings,
+            row,
+            row_outcomes,
             column_pv_map,
             upload_timestamp,
         )
 
-    column_ids = sorted(distinct_terms.keys())
-    sorted_mappings = sorted(unique_mappings.items(), key=lambda x: x[0])
+    column_outcomes = summarize_column_outcomes(finalized_outcomes)
+    sorted_mappings = sorted(unique_mappings.items())
     term_mappings = [
         TermMapping(
             column=key.column_label,
+            column_key=key.column_key,
+            source_column_index=key.source_column_index,
             original_value=key.original_value,
             final_value=key.final_value,
+            is_changed=key.original_value != key.final_value,
+            final_value_source=key.final_value_source,
+            review_status=key.review_status,
+            row_count=info.row_count,
             is_pv_conformant=info.is_conformant,
             history=info.history,
         )
@@ -318,39 +317,136 @@ def _build_summary_from_manifest(
     ]
 
     return StageFiveSummaryResponse(
+        dataset=DatasetSummary(
+            filename=meta.original_name if meta else None,
+            tabular_format=meta.tabular_format.value if meta else None,
+            data_model_key=loaded_state.state.data_model_version.data_model_key,
+            external_version_number=(
+                loaded_state.state.data_model_version.external_version_number
+            ),
+        ),
         column_summaries=[
             ColumnSummary(
-                column=column_names[col_id],
-                distinct_terms=distinct_terms[col_id],
-                ai_changes=ai_counts[col_id],
-                manual_changes=manual_counts[col_id],
-                unchanged=unchanged_counts[col_id],
+                column=outcome.column_label,
+                column_key=str(outcome.column_key),
+                source_column_index=outcome.source_column_index,
+                distinct_terms=outcome.total_distinct_values,
+                changed_distinct_values=outcome.changed_distinct_values,
+                total_rows=outcome.total_rows,
+                changed_rows=outcome.changed_rows,
+                reviewer_edited_rows=outcome.reviewer_edited_rows,
+                non_conformant_values=outcome.non_conformant_distinct_values,
+                review_status=outcome.review_status,
+                ai_changes=outcome.data_chord_changed_distinct_values,
+                manual_changes=outcome.reviewer_changed_distinct_values,
+                unchanged=outcome.total_distinct_values - outcome.changed_distinct_values,
             )
-            for col_id in column_ids
+            for outcome in column_outcomes
         ],
         term_mappings=term_mappings,
-        non_conformant_count=sum(1 for info in unique_mappings.values() if not info.is_conformant),
+        non_conformant_count=sum(
+            outcome.non_conformant_distinct_values for outcome in column_outcomes
+        ),
     )
 
 
-def _track_mapping(
+def _finalized_outcomes_for_manifest_row(
+    row: ManifestRow,
+    column_pv_map: ColumnPvSets,
+    review_overrides: ReviewOverrides | None,
+) -> list[FinalizedValueOutcome]:
+    """Resolve active per-cell overrides into the same output Stage 5 downloads."""
+    pv_set = column_pv_map.get(row.column_key)
+    effective_ai_value = _effective_ai_value(row)
+    row_indices: list[int | None] = list(row.row_indices) if row.row_indices else [None]
+    occurrence_counts: dict[tuple[str, FinalValueSource], int] = {}
+    for row_index in row_indices:
+        current_value = _resolve_current_value(
+            row,
+            row_index,
+            effective_ai_value,
+            review_overrides,
+        )
+        occurrence_counts[current_value] = occurrence_counts.get(current_value, 0) + 1
+
+    return [
+        FinalizedValueOutcome(
+            column_key=row.column_key,
+            source_column_index=row.column_id,
+            column_label=row.column_name,
+            original_value=row.to_harmonize,
+            final_value=final_value,
+            final_value_source=final_value_source,
+            occurrence_count=occurrence_count,
+            pv_set_available=bool(pv_set),
+            is_pv_conformant=check_value_conformance(final_value, pv_set),
+        )
+        for (final_value, final_value_source), occurrence_count in occurrence_counts.items()
+    ]
+
+
+def _resolve_current_value(
+    row: ManifestRow,
+    row_index: int | None,
+    effective_ai_value: str,
+    review_overrides: ReviewOverrides | None,
+) -> tuple[str, FinalValueSource]:
+    active_override = _active_cell_override(review_overrides, row, row_index)
+    if active_override is not None:
+        return active_override.human_value, FinalValueSource.REVIEWER
+    if effective_ai_value != row.to_harmonize:
+        return effective_ai_value, FinalValueSource.DATA_CHORD
+    return row.to_harmonize, FinalValueSource.SOURCE
+
+
+def _active_cell_override(
+    review_overrides: ReviewOverrides | None,
+    row: ManifestRow,
+    row_index: int | None,
+) -> CellOverride | None:
+    if review_overrides is None or row_index is None:
+        return None
+    row_overrides = review_overrides.overrides.get(str(row_index + 1))
+    return row_overrides.get(row.column_key) if row_overrides is not None else None
+
+
+def _effective_ai_value(row: ManifestRow) -> str:
+    """A blank provider recommendation is a source pass-through, as in Stage 3."""
+    return row.top_harmonization if row.top_harmonization.strip() else row.to_harmonize
+
+
+def _track_current_mappings(
     mappings: dict[_UniqueTermMapping, _MappingInfo],
     row: ManifestRow,
+    row_outcomes: list[FinalizedValueOutcome],
     column_pv_map: ColumnPvSets,
     upload_timestamp: datetime | None,
 ) -> None:
-    """Deduplicates by (column, original, final) so we check conformance once per unique mapping."""
+    """Group current term mappings while keeping manifest events as audit history."""
     # Empty string means no data; whitespace-only values pass through as semantically significant.
     if not row.to_harmonize:
         return
-    final = _get_final_value(row)
-    key = _UniqueTermMapping(str(row.column_key), row.column_name, row.to_harmonize, final)
-    if key in mappings:
-        return
     pv_set = column_pv_map.get(row.column_key)
-    is_conformant = check_value_conformance(final, pv_set)
     history = _build_history(row, upload_timestamp, pv_set)
-    mappings[key] = _MappingInfo(is_conformant, history)
+    for outcome in row_outcomes:
+        key = _UniqueTermMapping(
+            source_column_index=outcome.source_column_index,
+            column_key=str(outcome.column_key),
+            column_label=outcome.column_label,
+            original_value=outcome.original_value,
+            final_value=outcome.final_value,
+            final_value_source=outcome.final_value_source,
+            review_status=outcome.review_status,
+        )
+        existing = mappings.get(key)
+        if existing is None:
+            mappings[key] = _MappingInfo(
+                is_conformant=outcome.is_pv_conformant,
+                history=history,
+                row_count=outcome.occurrence_count,
+            )
+        else:
+            existing.row_count += outcome.occurrence_count
 
 
 def _load_harmonized_path(

@@ -18,6 +18,7 @@ from src.domain.manifest.models import (
     ManifestSummary,
     ManualOverride,
     confidence_bucket,
+    get_manifest_schema,
     is_value_changed,
 )
 
@@ -31,11 +32,21 @@ def read_manifest_parquet(manifest_path: Path) -> ManifestSummary | None:
 
     try:
         table = pq.read_table(manifest_path)
+        _validate_manifest_schema(table.schema)
         rows = _parse_manifest_rows(table)
         return _summarize_manifest(rows)
     except Exception as exc:
         logger.exception("Failed to read manifest parquet", exc_info=exc, extra={"path": str(manifest_path)})
         return None
+
+
+def _validate_manifest_schema(actual: pa.Schema) -> None:
+    """Require the provider fields while allowing Arrow's compatible numeric widths."""
+    required_fields = set(get_manifest_schema().names) - {"manual_overrides"}
+    missing_fields = required_fields - set(actual.names)
+    if missing_fields:
+        missing = ", ".join(sorted(missing_fields))
+        raise ValueError(f"Manifest is missing required fields: {missing}")
 
 
 def _parse_manifest_rows(table: pa.Table) -> list[ManifestRow]:

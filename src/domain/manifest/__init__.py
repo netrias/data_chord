@@ -18,6 +18,7 @@ from src.domain.manifest.mapping_manifest import (
     MAPPING_FIELD_TARGET,
     ColumnMappingManifest,
     ColumnMappingRecord,
+    InvalidMappingManifestError,
     MappingAlternative,
     normalize_manifest,
 )
@@ -49,6 +50,7 @@ __all__ = [
     "ColumnMappingEntry",
     "ColumnMappingManifest",
     "ColumnMappingRecord",
+    "InvalidMappingManifestError",
     "ConfidenceBucket",
     "DEFAULT_HARMONIZATION",
     "HIGH_CONFIDENCE_THRESHOLD",

@@ -1,5 +1,5 @@
 import { initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
-import { STAGE_2_PAYLOAD_KEY, STAGE_3_PAYLOAD_KEY, STAGE_3_JOB_KEY, CURRENT_FILE_SESSION_KEY, removeFromSession, writeToSession, readFromSession } from '/assets/shared/storage-keys.js';
+import { STAGE_2_PAYLOAD_KEY, STAGE_3_JOB_KEY, CURRENT_FILE_SESSION_KEY, removeFromSession, writeToSession, readFromSession } from '/assets/shared/storage-keys.js';
 import { reportApiError, reportFetchFailure } from '/assets/shared/client-events.js';
 import { showDataModelPopup, preloadDataModels } from './data_model_popup.js';
 
@@ -254,7 +254,6 @@ const _uploadDataset = async () => {
 
 const _clearStaleSessionData = () => {
   removeFromSession(STAGE_2_PAYLOAD_KEY);
-  removeFromSession(STAGE_3_PAYLOAD_KEY);
   removeFromSession(STAGE_3_JOB_KEY);
   removeFromSession(CURRENT_FILE_SESSION_KEY);
 };

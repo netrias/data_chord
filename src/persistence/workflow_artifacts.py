@@ -11,6 +11,7 @@ from pathlib import Path
 
 from src.domain.manifest import ManifestPayload, normalize_manifest
 from src.storage import (
+    LocalWorkflowStorage,
     UploadedFileMeta,
     UploadStorage,
     UserContext,
@@ -58,15 +59,16 @@ def load_upload_artifact(
     user: UserContext,
     file_id: str,
 ) -> UploadedFileMeta | None:
-    local_meta = upload_storage.load(file_id)
     try:
         stored = workflow_storage.read_json(user, file_id, WorkflowFile.UPLOAD_METADATA)
     except WorkflowNotFoundError:
-        # Older local workflows may predate durable metadata; keep them usable
-        # instead of forcing users to re-upload.
-        return local_meta
+        # Ownerless scratch data is only a local-development compatibility path.
+        # Hosted storage must never let a caller establish ownership by knowing
+        # an old file id.
+        return upload_storage.load(file_id) if _allow_ownerless_local_fallback(workflow_storage, user) else None
+    local_meta = upload_storage.load(file_id)
     if stored is None or not isinstance(stored.data, Mapping):
-        return local_meta
+        return local_meta if _allow_ownerless_local_fallback(workflow_storage, user) else None
     if local_meta is not None and local_meta.saved_path.exists():
         # Prefer the existing local file when present to avoid copying large
         # artifacts back out of durable storage on every stage transition.
@@ -93,18 +95,17 @@ def load_mapping_manifest(
     user: UserContext,
     file_id: str,
 ) -> ManifestPayload | None:
-    local_manifest = upload_storage.load_manifest(file_id)
-    if local_manifest is not None:
-        return local_manifest
     try:
         stored = workflow_storage.read_json(user, file_id, WorkflowFile.MAPPING_MANIFEST)
     except WorkflowNotFoundError:
+        if _allow_ownerless_local_fallback(workflow_storage, user):
+            return upload_storage.load_manifest(file_id)
         return None
-    if stored is None:
-        return None
-    manifest = normalize_manifest(stored.data)
-    upload_storage.save_manifest(file_id, manifest)
-    return manifest
+    if stored is not None:
+        return normalize_manifest(stored.data)
+    if _allow_ownerless_local_fallback(workflow_storage, user):
+        return upload_storage.load_manifest(file_id)
+    return None
 
 
 def save_harmonized_artifacts(
@@ -126,9 +127,13 @@ def load_harmonized_output_path(
     file_id: str,
     meta: UploadedFileMeta,
 ) -> Path | None:
-    path = upload_storage.load_harmonized_path(file_id)
-    if path is not None:
-        return path
+    # Authorize against durable workflow metadata before consulting scratch.
+    try:
+        workflow_storage.read_json(user, file_id, WorkflowFile.UPLOAD_METADATA)
+    except WorkflowNotFoundError:
+        if _allow_ownerless_local_fallback(workflow_storage, user):
+            return upload_storage.load_harmonized_path(file_id)
+        raise
     try:
         with workflow_storage.materialize_artifact(user, file_id, WorkflowFile.HARMONIZED_OUTPUT) as source_path:
             return upload_storage.restore_harmonized_output(file_id, meta.saved_path, source_path)
@@ -142,9 +147,13 @@ def load_harmonization_manifest_path(
     user: UserContext,
     file_id: str,
 ) -> Path | None:
-    path = upload_storage.load_harmonization_manifest_path(file_id)
-    if path is not None:
-        return path
+    # Authorize against durable workflow metadata before consulting scratch.
+    try:
+        workflow_storage.read_json(user, file_id, WorkflowFile.UPLOAD_METADATA)
+    except WorkflowNotFoundError:
+        if _allow_ownerless_local_fallback(workflow_storage, user):
+            return upload_storage.load_harmonization_manifest_path(file_id)
+        raise
     try:
         with workflow_storage.materialize_artifact(
             user,
@@ -168,6 +177,13 @@ def _upsert_json(
     existing = workflow_storage.read_json(user, file_id, kind)
     expected_version = existing.version if existing is not None else None
     workflow_storage.write_json(user, file_id, kind, data, expected_version=expected_version)
+
+
+def _allow_ownerless_local_fallback(
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+) -> bool:
+    return isinstance(workflow_storage, LocalWorkflowStorage) and user.user_id == "local-user"
 
 
 __all__ = [

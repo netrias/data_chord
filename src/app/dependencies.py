@@ -48,8 +48,6 @@ MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024
 _upload_constraints: UploadConstraints | None = None
 _storage: UploadStorage | None = None
 _workflow_storage: WorkflowStorage | None = None
-_mapping_discovery: MappingDiscoveryService | None = None
-_harmonizer: HarmonizeService | None = None
 _netrias_client: NetriasClient | None = None
 _netrias_client_initialized: bool = False
 
@@ -137,19 +135,11 @@ def _netrias_environment() -> Environment:
 
 
 def get_mapping_service() -> MappingDiscoveryService:
-    global _mapping_discovery  # noqa: PLW0603 - intentional singleton
-    if _mapping_discovery is None:
-        logger.info("Initializing mapping discovery service")
-        _mapping_discovery = MappingDiscoveryService(get_netrias_client())
-    return _mapping_discovery
+    return MappingDiscoveryService(get_netrias_client())
 
 
 def get_harmonize_service() -> HarmonizeService:
-    global _harmonizer  # noqa: PLW0603 - intentional singleton
-    if _harmonizer is None:
-        logger.info("Initializing harmonization service")
-        _harmonizer = HarmonizeService(get_netrias_client())
-    return _harmonizer
+    return HarmonizeService(get_netrias_client())
 
 
 def cleanup_services() -> None:

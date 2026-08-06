@@ -15,12 +15,8 @@ import httpx
 from netrias_client import DataModelStoreError, NetriasAPIUnavailable, NetriasClient
 
 from src.domain.cde import CDEInfo, DataModelSummary, DataModelVersionInfo
-from src.domain.cde_catalog import CdeCatalog
 from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.cde_type_classification import classify_cde
-
-# GC is the primary user right now — surface it first so the UI defaults to it
-_PREFERRED_MODEL_KEY = "gc"
 
 
 @dataclass(frozen=True)
@@ -37,7 +33,7 @@ def list_data_model_summaries(client: NetriasClient | None) -> list[DataModelSum
     if client is None:
         return []
     models = client.list_data_models(include_versions=True)
-    summaries = [
+    return [
         DataModelSummary(
             data_model_key=m.key,
             label=m.name,
@@ -48,8 +44,6 @@ def list_data_model_summaries(client: NetriasClient | None) -> list[DataModelSum
         )
         for m in models
     ]
-    summaries.sort(key=lambda s: (s.data_model_key != _PREFERRED_MODEL_KEY, s.data_model_key))
-    return summaries
 
 
 def fetch_cdes(
@@ -59,9 +53,8 @@ def fetch_cdes(
 ) -> list[CDEInfo]:
     """Why: converts SDK CDE tuples to domain CDEInfo list.
 
-    Initial cde_type is decided by classify_cde with has_pvs=None (PVs not
-    fetched yet); PV / PASSTHROUGH refinement happens later via
-    ``refine_cde_types_from_pvs``.
+    Initial cde_type is decided by classify_cde with has_pvs=None. The domain
+    refines it after PV lookup.
     """
     if client is None:
         return []
@@ -81,37 +74,6 @@ def fetch_cdes(
     ]
 
 
-def refine_cde_types_from_pvs(
-    catalog: CdeCatalog,
-    pv_sets: CdePvCatalog,
-) -> CdeCatalog:
-    """Re-classify CDEs once PVs are known.
-
-    For every CDE whose PV set has been fetched, the type is now decidable:
-    non-empty PVs → ``PV``; empty → ``PASSTHROUGH``.
-    Returns a new list — domain types are frozen.
-    """
-    refined: list[CDEInfo] = []
-    for cde in catalog:
-        if not pv_sets.has(cde.cde_key):
-            refined.append(cde)
-            continue
-        has_pvs = bool(pv_sets.get(cde.cde_key))
-        new_type = classify_cde(has_pvs=has_pvs)
-        if new_type == cde.cde_type:
-            refined.append(cde)
-        else:
-            refined.append(
-                CDEInfo(
-                    cde_id=cde.cde_id,
-                    cde_key=cde.cde_key,
-                    description=cde.description,
-                    cde_type=new_type,
-                )
-            )
-    return CdeCatalog.from_cdes(refined)
-
-
 async def fetch_all_pvs_async(
     client: NetriasClient | None,
     data_model_key: str,
@@ -119,10 +81,10 @@ async def fetch_all_pvs_async(
 ) -> CdePvCatalog:
     """Fetch all PVs for a model version in one request, grouped by CDE key."""
     if client is None:
-        return CdePvCatalog.empty()
+        raise NetriasAPIUnavailable("data model store client is unavailable")
     config = _data_model_store_config(client)
     if config is None:
-        return CdePvCatalog.empty()
+        raise DataModelStoreError("data model store client configuration is incomplete")
 
     path = (
         f"/data-models/{quote(data_model_key, safe='')}"
@@ -144,14 +106,18 @@ async def fetch_all_pvs_async(
 
 
 def _pv_map_from_all_pvs_response(body: Mapping[str, object]) -> CdePvCatalog:
+    raw_items = body.get("items")
+    if not isinstance(raw_items, list):
+        raise DataModelStoreError("unexpected PV response format: items must be a list")
     grouped: dict[str, set[str]] = {}
-    for item in _list_or_empty(body.get("items")):
+    for index, item in enumerate(raw_items):
         if not isinstance(item, Mapping):
-            continue
+            raise DataModelStoreError(f"unexpected PV response item at index {index}: expected object")
         cde_key = item.get("cde_key")
         pv_value = item.get("pv_value")
-        if isinstance(cde_key, str) and isinstance(pv_value, str):
-            grouped.setdefault(cde_key, set()).add(pv_value)
+        if not isinstance(cde_key, str) or not cde_key or not isinstance(pv_value, str):
+            raise DataModelStoreError(f"unexpected PV response item at index {index}: invalid cde_key or pv_value")
+        grouped.setdefault(cde_key, set()).add(pv_value)
     return CdePvCatalog({cde_key: frozenset(values) for cde_key, values in grouped.items()})
 
 
@@ -195,7 +161,3 @@ def _error_message(response: httpx.Response) -> str:
             if value:
                 return str(value)
     return response.text[:200] or f"HTTP {response.status_code}"
-
-
-def _list_or_empty(value: object) -> list[object]:
-    return value if isinstance(value, list) else []

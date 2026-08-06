@@ -136,11 +136,5 @@ init_tofu() {
 
 tofu_output() {
   local output_name="$1"
-  local output_json
-  output_json="$(tofu -chdir="$INFRA_DIR" output -json "$output_name" 2>/dev/null)" || return 0
-  python3 -c 'import json, sys
-data = json.load(sys.stdin)
-value = data["value"] if isinstance(data, dict) and "value" in data else data
-print(json.dumps(value) if isinstance(value, (dict, list)) else value)
-' <<<"$output_json" 2>/dev/null || true
+  tofu -chdir="$INFRA_DIR" output -raw "$output_name" 2>/dev/null || true
 }

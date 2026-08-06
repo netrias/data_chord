@@ -7,30 +7,18 @@ Axis of change: CDE recommendation service integration and response normalizatio
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from pathlib import Path
 
 from netrias_client import NetriasClient
 
-from src.domain.cde import ModelSuggestion
-from src.domain.manifest import ColumnMappingManifest, ManifestPayload
+from src.domain.manifest import ColumnMappingManifest
 
 logger = logging.getLogger(__name__)
+_UNAVAILABLE_MESSAGE = "Mapping discovery is unavailable."
 
 
-@dataclass(frozen=True)
-class MappingDiscoveryResult:
-    """Domain result of mapping discovery, with payload views derived at the edge."""
-
-    manifest: ColumnMappingManifest
-
-    @property
-    def cde_targets(self) -> dict[str, list[ModelSuggestion]]:
-        return self.manifest.suggestions_by_column()
-
-    @property
-    def manifest_payload(self) -> ManifestPayload:
-        return self.manifest.to_payload()
+class MappingDiscoveryUnavailableError(RuntimeError):
+    """The mapping provider could not complete a request."""
 
 
 class MappingDiscoveryService:
@@ -47,9 +35,9 @@ class MappingDiscoveryService:
         data_model_key: str,
         external_version_number: str,
         sheet_name: str | None = None,
-    ) -> MappingDiscoveryResult:
+    ) -> ColumnMappingManifest:
         if not self._client:
-            raise RuntimeError("NetriasClient unavailable (missing NETRIAS_API_KEY)")
+            raise MappingDiscoveryUnavailableError(_UNAVAILABLE_MESSAGE)
 
         try:
             raw_manifest = self._client.discover_mapping_from_tabular(
@@ -60,10 +48,13 @@ class MappingDiscoveryService:
                 sheet_name=sheet_name,
             )
         except Exception as exc:
-            raise RuntimeError(f"CDE discovery failed: {exc}") from exc
+            logger.warning(
+                "Mapping discovery provider call failed",
+                extra={"error_type": type(exc).__name__},
+            )
+            raise MappingDiscoveryUnavailableError(_UNAVAILABLE_MESSAGE) from exc
 
-        manifest = ColumnMappingManifest.from_payload(raw_manifest)
-        return MappingDiscoveryResult(manifest=manifest)
+        return ColumnMappingManifest.from_payload_strict(raw_manifest)
 
 
-__all__ = ["MappingDiscoveryResult", "MappingDiscoveryService"]
+__all__ = ["MappingDiscoveryService", "MappingDiscoveryUnavailableError"]

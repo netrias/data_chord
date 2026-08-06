@@ -1,6 +1,4 @@
-/**
- * Stage 5 Download - Final step to download harmonized data with manual overrides applied.
- */
+/** Stage 5 presents the current downloadable output and its separate decision history. */
 
 import {
   initStepInstruction,
@@ -10,20 +8,17 @@ import {
 } from '/assets/shared/step-instruction-ui.js';
 import { markAfterPaint, markTiming, measureTiming } from '/assets/shared/performance-timing.js';
 import {
-  STAGE_3_PAYLOAD_KEY,
   clearWorkflowSession,
   isValidFileId,
   isSafeFilename,
-  readFromSession,
 } from '/assets/shared/storage-keys.js';
 
 const _DEFAULT_SUMMARY_ENDPOINT = '/stage-5/summary';
 const _DEFAULT_DOWNLOAD_ENDPOINT = '/stage-5/download';
 const _DEFAULT_ZIP_FILENAME = 'harmonized_data.zip';
-/** Delay before revoking blob URL to allow browser to initiate download. */
 const _REVOKE_DELAY_MS = 100;
-/** Allowed segment types for bar visualization and labels. */
-const _VALID_SEGMENT_TYPES = ['ai', 'manual', 'unchanged'];
+const _FILTERS = new Set(['needs_attention', 'changed', 'reviewer', 'all']);
+const _SORT_KEYS = new Set(['column', 'original_value', 'final_value']);
 
 const _config = window.stageFiveConfig ?? {};
 const _summaryEndpoint = _config.summaryEndpoint ?? _DEFAULT_SUMMARY_ENDPOINT;
@@ -31,8 +26,11 @@ const _downloadEndpoint = _config.downloadEndpoint ?? _DEFAULT_DOWNLOAD_ENDPOINT
 
 const _downloadBtn = document.getElementById('downloadResults');
 const _downloadError = document.getElementById('downloadError');
+const _certificateTitle = document.getElementById('certificateTitle');
+const _datasetMetadata = document.getElementById('datasetMetadata');
+const _certificateStatus = document.getElementById('certificateStatus');
 const _summaryGrid = document.getElementById('summaryGrid');
-const _startOverAction = document.getElementById('uploadNavAction') ?? document.getElementById('startOverAction');
+const _startOverAction = document.getElementById('uploadNavAction');
 const _startOverButton = document.getElementById('startOverButton');
 const _startOverDialog = document.getElementById('startOverDialog');
 const _startOverCancel = document.getElementById('startOverCancel');
@@ -51,14 +49,13 @@ const _state = {
   filter: 'changed',
 };
 
-const _safeNumber = (value) => {
-  const num = Number(value);
-  return Number.isFinite(num) ? num : 0;
+const _safeCount = (value) => {
+  const count = Number(value);
+  return Number.isFinite(count) && count >= 0 ? Math.trunc(count) : 0;
 };
 
 const _extractFilename = (disposition) => {
   let filename = null;
-
   const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/);
   if (utf8Match) {
     try {
@@ -67,27 +64,17 @@ const _extractFilename = (disposition) => {
       filename = null;
     }
   }
-
   if (!filename) {
-    const basicMatch = disposition.match(/filename="([^"]+)"/);
-    if (basicMatch) {
-      filename = basicMatch[1];
-    }
+    filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? null;
   }
-
-  if (filename && isSafeFilename(filename)) {
-    return filename;
-  }
-
-  return _DEFAULT_ZIP_FILENAME;
+  return filename && isSafeFilename(filename) ? filename : _DEFAULT_ZIP_FILENAME;
 };
 
 const _setDownloadButtonState = (isLoading) => {
   if (!_downloadBtn) return;
   _downloadBtn.disabled = isLoading;
-  const frontEl = _downloadBtn.querySelector('.btn-3d-front');
-  const textTarget = frontEl ?? _downloadBtn;
-  textTarget.textContent = isLoading ? 'Preparing download...' : 'Download Harmonized Data';
+  const textTarget = _downloadBtn.querySelector('.btn-3d-front') ?? _downloadBtn;
+  textTarget.textContent = isLoading ? 'Preparing download...' : 'Download data';
 };
 
 const _triggerBrowserDownload = (blob, filename) => {
@@ -106,34 +93,20 @@ const _showError = (message) => {
 };
 
 const _hideError = () => {
-  if (_downloadError) {
-    _downloadError.classList.add('hidden');
-  }
+  _downloadError?.classList.add('hidden');
 };
 
 const _loadSourceContext = () => {
-  const params = new URLSearchParams(window.location.search);
-  const fromUrl = params.get('file_id');
-  if (isValidFileId(fromUrl)) {
-    return { fileId: fromUrl };
-  }
-
-  const stored = readFromSession(STAGE_3_PAYLOAD_KEY);
-  if (!stored) return null;
-  const id = stored?.request?.file_id;
-  if (!id || !isValidFileId(id)) return null;
-  return { fileId: id };
+  const fileId = new URLSearchParams(window.location.search).get('file_id');
+  return isValidFileId(fileId) ? { fileId } : null;
 };
 
 const _showStartOverAction = () => {
-  if (_startOverAction) {
-    _startOverAction.classList.remove('hidden');
-  }
+  _startOverAction?.classList.remove('hidden');
 };
 
 const _openStartOverDialog = () => {
-  if (!_startOverDialog) return;
-  if (_startOverDialog.hasAttribute('open')) return;
+  if (!_startOverDialog || _startOverDialog.hasAttribute('open')) return;
   if (_startOverDialog.showModal) {
     _startOverDialog.showModal();
   } else {
@@ -159,14 +132,13 @@ const _confirmStartOver = () => {
 
 const _handleDownload = async () => {
   if (!_state.fileId) {
-    _showError('Unable to locate file. Please restart the harmonization process.');
+    _showError('Unable to locate this file. Restart the harmonization workflow.');
     return;
   }
 
   _hideError();
   _setDownloadButtonState(true);
   markTiming('stage5.download.start');
-
   try {
     const response = await fetch(_downloadEndpoint, {
       method: 'POST',
@@ -175,24 +147,18 @@ const _handleDownload = async () => {
     });
     markTiming('stage5.download.response', { status: response.status });
     measureTiming('stage5.download.request', 'stage5.download.start', 'stage5.download.response');
-
-    if (!response.ok) {
-      throw new Error('Download failed.');
-    }
+    if (!response.ok) throw new Error('Download failed.');
 
     const blob = await response.blob();
     markTiming('stage5.download.blob_ready', { bytes: blob.size });
     measureTiming('stage5.download.blob', 'stage5.download.response', 'stage5.download.blob_ready', {
       bytes: blob.size,
     });
-    const disposition = response.headers.get('Content-Disposition') ?? '';
-    const filename = _extractFilename(disposition);
-
-    _triggerBrowserDownload(blob, filename);
+    _triggerBrowserDownload(blob, _extractFilename(response.headers.get('Content-Disposition') ?? ''));
     _showStartOverAction();
   } catch (error) {
     console.error('Download failed:', error);
-    _showError('Download failed. Please try again.');
+    _showError('Download failed. Try again.');
   } finally {
     _setDownloadButtonState(false);
     await markAfterPaint('stage5.download.usable');
@@ -200,523 +166,389 @@ const _handleDownload = async () => {
   }
 };
 
-const _createBarSegment = (type, percent) => {
-  const safeType = _VALID_SEGMENT_TYPES.includes(type) ? type : 'unchanged';
-  const segment = document.createElement('div');
-  segment.className = `summary-bar__segment summary-bar__segment--${safeType}`;
-  segment.style.width = `${percent}%`;
-  return segment;
+const _datasetDetails = (dataset) => {
+  const parts = [];
+  const model = [dataset?.data_model_key, dataset?.external_version_number]
+    .filter(Boolean)
+    .join(' ');
+  if (model) parts.push(model);
+  if (dataset?.tabular_format) parts.push(String(dataset.tabular_format).toUpperCase());
+  return parts.join(' · ');
 };
 
-const _createLabel = (type, text, count) => {
-  const safeType = _VALID_SEGMENT_TYPES.includes(type) ? type : 'unchanged';
-  const label = document.createElement('div');
-  label.className = 'summary-label';
-
-  const indicator = document.createElement('span');
-  indicator.className = `summary-label__indicator summary-label__indicator--${safeType}`;
-  label.appendChild(indicator);
-
-  const textSpan = document.createElement('span');
-  textSpan.className = 'summary-label__text';
-  textSpan.textContent = text;
-  label.appendChild(textSpan);
-
-  const countSpan = document.createElement('span');
-  countSpan.className = 'summary-label__count';
-  countSpan.textContent = _safeNumber(count).toLocaleString();
-  label.appendChild(countSpan);
-
-  return label;
-};
-
-const _createColumnCard = (col) => {
-  const article = document.createElement('article');
-  article.className = 'summary-column-card';
-
-  const aiCount = _safeNumber(col.ai_changes);
-  const manualCount = _safeNumber(col.manual_changes);
-  const unchangedCount = _safeNumber(col.unchanged);
-  const total = _safeNumber(col.distinct_terms);
-
-  const aiPercent = total > 0 ? (aiCount / total) * 100 : 0;
-  const manualPercent = total > 0 ? (manualCount / total) * 100 : 0;
-  /* Calculate unchanged as remainder to ensure percentages sum to 100% and avoid floating-point gaps in the bar. */
-  const unchangedPercent = total > 0 ? Math.max(0, 100 - aiPercent - manualPercent) : 0;
-
-  const header = document.createElement('div');
-  header.className = 'summary-column-header';
-
-  const h4 = document.createElement('h4');
-  h4.className = 'summary-column-name';
-  h4.textContent = col.column;
-  header.appendChild(h4);
-
-  const termsSpan = document.createElement('span');
-  termsSpan.className = 'summary-column-terms';
-  termsSpan.textContent = `${total.toLocaleString()} terms`;
-  header.appendChild(termsSpan);
-
-  article.appendChild(header);
-
-  const barContainer = document.createElement('div');
-  barContainer.className = 'summary-bar-container';
-
-  const bar = document.createElement('div');
-  bar.className = 'summary-bar';
-
-  if (aiPercent > 0) {
-    bar.appendChild(_createBarSegment('ai', aiPercent));
+const _renderCertificate = (dataset, nonConformantCount) => {
+  if (_certificateTitle) {
+    _certificateTitle.textContent = dataset?.filename || 'Harmonized data';
   }
-  if (manualPercent > 0) {
-    bar.appendChild(_createBarSegment('manual', manualPercent));
+  if (_datasetMetadata) {
+    _datasetMetadata.textContent = _datasetDetails(dataset) || 'Ready to download';
   }
-  if (unchangedPercent > 0) {
-    bar.appendChild(_createBarSegment('unchanged', unchangedPercent));
-  }
-
-  barContainer.appendChild(bar);
-  article.appendChild(barContainer);
-
-  const labels = document.createElement('div');
-  labels.className = 'summary-labels';
-
-  if (aiCount > 0) {
-    labels.appendChild(_createLabel('ai', 'AI Harmonized:', aiCount));
-  }
-  if (manualCount > 0) {
-    labels.appendChild(_createLabel('manual', 'Manual Override:', manualCount));
-  }
-  if (unchangedCount > 0) {
-    labels.appendChild(_createLabel('unchanged', 'Unchanged:', unchangedCount));
-  }
-
-  article.appendChild(labels);
-
-  return article;
-};
-
-const _createNonConformantBanner = (count) => {
-  const banner = document.createElement('div');
-  banner.className = 'non-conformant-banner';
-
-  const icon = document.createElement('span');
-  icon.className = 'non-conformant-banner__icon';
-  icon.textContent = '⚠';
-  icon.setAttribute('aria-hidden', 'true');
-  banner.appendChild(icon);
-
-  const text = document.createElement('p');
-  text.className = 'non-conformant-banner__text';
-  const countSpan = document.createElement('span');
-  countSpan.className = 'non-conformant-banner__count';
-  countSpan.textContent = count.toLocaleString();
-  text.appendChild(countSpan);
-  text.appendChild(document.createTextNode(
-    ` value${count === 1 ? '' : 's'} do not match permissible values for the target ontology.`
-  ));
-  banner.appendChild(text);
-
-  return banner;
-};
-
-const _renderSummary = (columnSummaries, nonConformantCount) => {
-  if (!_summaryGrid) return;
-
-  _summaryGrid.replaceChildren();
-
+  if (!_certificateStatus) return;
   if (nonConformantCount > 0) {
-    _summaryGrid.appendChild(_createNonConformantBanner(nonConformantCount));
-  }
-
-  const changed = columnSummaries.filter((col) => col.ai_changes > 0 || col.manual_changes > 0);
-
-  if (changed.length === 0) {
-    const emptyMsg = document.createElement('p');
-    emptyMsg.className = 'summary-empty';
-    emptyMsg.textContent = 'No columns were modified during harmonization.';
-    _summaryGrid.appendChild(emptyMsg);
-    return;
-  }
-
-  for (const col of changed) {
-    _summaryGrid.appendChild(_createColumnCard(col));
+    _certificateStatus.className = 'certificate-status certificate-status--attention';
+    _certificateStatus.textContent = `${nonConformantCount.toLocaleString()} ${nonConformantCount === 1 ? 'value needs' : 'values need'} review`;
+  } else {
+    _certificateStatus.className = 'certificate-status certificate-status--ready';
+    _certificateStatus.textContent = 'Ready to download';
   }
 };
 
-const _showEmptyMessage = (message) => {
+const _appendImpactMetric = (ledger, key, value, label) => {
+  const metric = document.createElement('div');
+  metric.className = 'change-impact__metric';
+  metric.dataset.impactMetric = key;
+
+  const term = document.createElement('dt');
+  term.className = 'change-impact__label';
+  term.textContent = label;
+  metric.appendChild(term);
+
+  const count = document.createElement('dd');
+  count.className = 'change-impact__value';
+  count.textContent = value.toLocaleString();
+  metric.appendChild(count);
+  ledger.appendChild(metric);
+};
+
+const _renderSummary = (columnSummaries) => {
+  if (!_summaryGrid) return;
+  const totals = columnSummaries.reduce(
+    (aggregate, column) => ({
+      totalValues: aggregate.totalValues + _safeCount(column.changed_rows),
+      uniqueValues: aggregate.uniqueValues + _safeCount(column.changed_distinct_values),
+      manualValues: aggregate.manualValues + _safeCount(column.reviewer_edited_rows),
+    }),
+    { totalValues: 0, uniqueValues: 0, manualValues: 0 },
+  );
+
+  const ledger = document.createElement('dl');
+  ledger.className = 'change-impact';
+  ledger.setAttribute('aria-label', 'Changes');
+  _appendImpactMetric(ledger, 'unique_values', totals.uniqueValues, 'Unique values changed');
+  _appendImpactMetric(ledger, 'total_values', totals.totalValues, 'Total values changed');
+  _appendImpactMetric(ledger, 'manual_values', totals.manualValues, 'Values manually changed');
+  _summaryGrid.replaceChildren(ledger);
+};
+
+const _showSummaryError = (message) => {
   if (!_summaryGrid) return;
   _summaryGrid.replaceChildren();
-  const emptyMsg = document.createElement('p');
-  emptyMsg.className = 'summary-empty';
-  emptyMsg.textContent = message;
-  _summaryGrid.appendChild(emptyMsg);
+  const error = document.createElement('p');
+  error.className = 'summary-empty';
+  error.textContent = message;
+  _summaryGrid.appendChild(error);
 };
 
-const _SORT_KEYS = ['column', 'original_value', 'final_value'];
-
-const _getAttribution = (step) => {
-  switch (step.source) {
+const _sourceLabel = (source) => {
+  switch (source) {
     case 'original':
-      return 'Original value';
+    case 'source': return 'Source value';
+    case 'data_chord':
     case 'ai':
-    case 'system':
-      return 'Changed by Data Chord';
-    case 'user':
-      return step.user_id ? `Changed by ${step.user_id}` : 'Changed by user';
-    default:
-      return step.source;
+    case 'system': return 'Data Chord';
+    case 'reviewer':
+    case 'user': return 'Reviewer';
+    default: return 'Unknown';
+  }
+};
+
+const _reviewStatusLabel = (status) => {
+  switch (status) {
+    case 'clear': return 'Matches approved values';
+    case 'needs_attention': return 'Needs review';
+    case 'not_checked': return 'Not checked against approved values';
+    default: return 'Review status unavailable';
   }
 };
 
 const _formatTimestamp = (isoString) => {
   if (!isoString) return null;
-  try {
-    const date = new Date(isoString);
-    if (isNaN(date.getTime())) return null;
-    return date.toLocaleString(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-  } catch {
-    return null;
-  }
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 };
 
-const _createHistoryStep = (step, isLast) => {
-  const stepEl = document.createElement('div');
-  stepEl.className = 'history-step';
-  if (isLast) {
-    stepEl.classList.add('history-step--final');
-  }
-  stepEl.dataset.source = step.source;
+const _createHistoryStep = (step) => {
+  const item = document.createElement('li');
+  item.className = 'history-step';
+  item.dataset.source = step.source ?? '';
 
-  /* Line 1: Value + PV conformance icon */
-  const valueLine = document.createElement('div');
-  valueLine.className = 'history-step__value-line';
+  const value = document.createElement('p');
+  value.className = 'history-step__value';
+  value.textContent = `"${step.value ?? ''}"`;
+  item.appendChild(value);
 
-  const valueEl = document.createElement('span');
-  valueEl.className = 'history-step__value';
-  valueEl.textContent = `"${step.value}"`;
-  valueLine.appendChild(valueEl);
-
-  const pvIcon = document.createElement('span');
-  pvIcon.className = 'history-step__pv-icon';
-  if (step.is_pv_conformant !== false) {
-    pvIcon.classList.add('history-step__pv-icon--conformant');
-    pvIcon.textContent = '\u2713'; /* ✓ */
-    pvIcon.dataset.tooltip = 'Matches permissible values';
-  } else {
-    pvIcon.classList.add('history-step__pv-icon--warning');
-    pvIcon.textContent = '\u26A0'; /* ⚠ */
-    pvIcon.dataset.tooltip = 'Does not match permissible values';
-  }
-  valueLine.appendChild(pvIcon);
-
-  stepEl.appendChild(valueLine);
-
-  /* Line 2: Attribution */
-  const attrEl = document.createElement('div');
-  attrEl.className = 'history-step__attribution';
-  attrEl.textContent = _getAttribution(step);
-  stepEl.appendChild(attrEl);
-
-  /* Line 3: Timestamp */
+  const detail = document.createElement('p');
+  detail.className = 'history-step__detail';
+  const actor = step.source === 'user' && step.user_id
+    ? `Reviewer ${step.user_id}`
+    : _sourceLabel(step.source);
   const timestamp = _formatTimestamp(step.timestamp);
-  const tsEl = document.createElement('div');
-  tsEl.className = 'history-step__timestamp';
-  tsEl.textContent = timestamp ?? '';
-  stepEl.appendChild(tsEl);
+  detail.textContent = timestamp ? `${actor} · ${timestamp}` : actor;
+  item.appendChild(detail);
 
-  return stepEl;
+  const conformance = document.createElement('p');
+  conformance.className = step.review_status === 'needs_attention'
+    ? 'history-step__status history-step__status--attention'
+    : 'history-step__status';
+  conformance.textContent = _reviewStatusLabel(step.review_status);
+  item.appendChild(conformance);
+  return item;
 };
 
-const _showHistoryDialog = (mapping) => {
+const _showHistoryDialog = (mapping, trigger) => {
   const dialog = document.createElement('dialog');
   dialog.className = 'history-dialog';
+  dialog.setAttribute('aria-labelledby', 'historyDialogTitle');
 
   const content = document.createElement('div');
   content.className = 'history-dialog-content';
 
-  /* Header */
-  const headerEl = document.createElement('div');
-  headerEl.className = 'history-dialog-header';
-
-  const title = document.createElement('h3');
+  const header = document.createElement('header');
+  header.className = 'history-dialog-header';
+  const eyebrow = document.createElement('p');
+  eyebrow.className = 'history-dialog-eyebrow';
+  eyebrow.textContent = mapping.column ?? 'Source column';
+  header.appendChild(eyebrow);
+  const title = document.createElement('h2');
+  title.id = 'historyDialogTitle';
   title.className = 'history-dialog-title';
-  title.textContent = 'Transformation History';
-  headerEl.appendChild(title);
+  title.textContent = 'Current Output and Decision History';
+  header.appendChild(title);
+  content.appendChild(header);
 
-  const subtitle = document.createElement('div');
-  subtitle.className = 'history-dialog-subtitle';
-  subtitle.textContent = mapping.column;
-  headerEl.appendChild(subtitle);
+  const current = document.createElement('section');
+  current.className = 'history-current';
+  const currentTitle = document.createElement('h3');
+  currentTitle.textContent = 'Current output';
+  current.appendChild(currentTitle);
 
-  content.appendChild(headerEl);
-
-  /* Transformation summary: original → final */
-  const transformEl = document.createElement('div');
-  transformEl.className = 'history-dialog-transform';
-
-  const origItem = document.createElement('div');
-  origItem.className = 'history-dialog-transform__item';
-  const origLabel = document.createElement('span');
-  origLabel.className = 'history-dialog-transform__label';
-  origLabel.textContent = 'original';
-  origItem.appendChild(origLabel);
-  const origVal = document.createElement('span');
-  origVal.className = 'history-dialog-transform__value';
-  origVal.textContent = `"${mapping.original_value}"`;
-  origItem.appendChild(origVal);
-  transformEl.appendChild(origItem);
-
-  const arrow = document.createElement('span');
-  arrow.className = 'history-dialog-transform__arrow';
-  arrow.textContent = '\u2192'; /* → */
-  transformEl.appendChild(arrow);
-
-  const finalItem = document.createElement('div');
-  finalItem.className = 'history-dialog-transform__item';
-  const finalLabel = document.createElement('span');
-  finalLabel.className = 'history-dialog-transform__label';
-  finalLabel.textContent = 'final';
-  finalItem.appendChild(finalLabel);
-  const finalVal = document.createElement('span');
-  finalVal.className = 'history-dialog-transform__value history-dialog-transform__value--final';
-  finalVal.textContent = `"${mapping.final_value}"`;
-  finalItem.appendChild(finalVal);
-  transformEl.appendChild(finalItem);
-
-  content.appendChild(transformEl);
-
-  /* Body */
-  const body = document.createElement('div');
-  body.className = 'history-dialog-body';
-
-  const timeline = document.createElement('div');
-  timeline.className = 'history-timeline';
-
-  const history = mapping.history ?? [];
-  if (history.length === 0) {
-    const emptyMsg = document.createElement('p');
-    emptyMsg.className = 'history-empty';
-    emptyMsg.textContent = 'No transformation history available.';
-    timeline.appendChild(emptyMsg);
-  } else {
-    for (let i = 0; i < history.length; i++) {
-      const isLast = i === history.length - 1;
-      timeline.appendChild(_createHistoryStep(history[i], isLast));
-    }
+  const values = document.createElement('div');
+  values.className = 'history-current__values';
+  for (const [label, value] of [
+    ['Source', mapping.original_value],
+    ['Output', mapping.final_value],
+  ]) {
+    const group = document.createElement('div');
+    const labelElement = document.createElement('span');
+    labelElement.className = 'history-current__label';
+    labelElement.textContent = label;
+    group.appendChild(labelElement);
+    const valueElement = document.createElement('span');
+    valueElement.className = 'history-current__value';
+    valueElement.textContent = `"${value ?? ''}"`;
+    group.appendChild(valueElement);
+    values.appendChild(group);
   }
+  current.appendChild(values);
 
-  body.appendChild(timeline);
-  content.appendChild(body);
+  const currentMeta = document.createElement('p');
+  currentMeta.className = mapping.review_status === 'needs_attention'
+    ? 'history-current__meta history-current__meta--attention'
+    : 'history-current__meta';
+  currentMeta.textContent = `${_sourceLabel(mapping.final_value_source)} · ${_reviewStatusLabel(mapping.review_status)}`;
+  current.appendChild(currentMeta);
+  content.appendChild(current);
 
-  /* Footer */
-  const footer = document.createElement('div');
+  const historySection = document.createElement('section');
+  historySection.className = 'history-dialog-body';
+  const historyTitle = document.createElement('h3');
+  historyTitle.textContent = 'Decision history';
+  historySection.appendChild(historyTitle);
+  const history = document.createElement('ol');
+  history.className = 'history-timeline';
+  const steps = Array.isArray(mapping.history) ? mapping.history : [];
+  if (steps.length === 0) {
+    const empty = document.createElement('li');
+    empty.className = 'history-empty';
+    empty.textContent = 'No recorded decisions are available.';
+    history.appendChild(empty);
+  } else {
+    for (const step of steps) history.appendChild(_createHistoryStep(step));
+  }
+  historySection.appendChild(history);
+  content.appendChild(historySection);
+
+  const footer = document.createElement('footer');
   footer.className = 'history-dialog-footer';
-
-  const closeBtn = document.createElement('button');
-  closeBtn.className = 'btn-secondary';
-  closeBtn.textContent = 'Close';
-  closeBtn.addEventListener('click', () => {
-    dialog.close();
-    dialog.remove();
-  });
-  footer.appendChild(closeBtn);
-
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'ghost-btn';
+  close.textContent = 'Close';
+  close.addEventListener('click', () => dialog.close());
+  footer.appendChild(close);
   content.appendChild(footer);
   dialog.appendChild(content);
 
   dialog.addEventListener('click', (event) => {
-    if (event.target === dialog) {
-      dialog.close();
-      dialog.remove();
-    }
+    if (event.target === dialog) dialog.close();
   });
-
   dialog.addEventListener('close', () => {
     dialog.remove();
+    trigger?.focus();
   });
-
   document.body.appendChild(dialog);
   dialog.showModal();
 };
 
-const _sortMappings = (mappings, column, direction) => {
-  const sorted = [...mappings];
-  sorted.sort((a, b) => {
-    const aVal = (a[column] ?? '').toLowerCase();
-    const bVal = (b[column] ?? '').toLowerCase();
-    const cmp = aVal.localeCompare(bVal);
-    return direction === 'asc' ? cmp : -cmp;
-  });
-  return sorted;
+const _appendCell = (row, text, className = '') => {
+  const cell = document.createElement('td');
+  cell.textContent = text;
+  if (className) cell.className = className;
+  row.appendChild(cell);
+  return cell;
 };
 
 const _renderTableRows = (mappings) => {
   if (!_changesTableBody) return;
-
   _changesTableBody.replaceChildren();
+
+  if (mappings.length === 0) {
+    const row = document.createElement('tr');
+    const cell = document.createElement('td');
+    cell.colSpan = 5;
+    cell.className = 'changes-table-empty';
+    cell.textContent = 'No values match this view.';
+    row.appendChild(cell);
+    _changesTableBody.appendChild(row);
+    return;
+  }
 
   for (const mapping of mappings) {
     const row = document.createElement('tr');
-    row.classList.add('clickable-row');
-    row.setAttribute('tabindex', '0');
-    row.addEventListener('click', () => _showHistoryDialog(mapping));
-    row.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        _showHistoryDialog(mapping);
-      }
+    row.dataset.historyRow = '';
+    row.tabIndex = 0;
+    row.setAttribute(
+      'aria-label',
+      `View decision history for ${mapping.column ?? 'source column'}`,
+    );
+    if (mapping.review_status === 'needs_attention') row.classList.add('needs-attention');
+    _appendCell(row, mapping.column ?? 'Unnamed column', 'changes-table__column');
+    _appendCell(row, mapping.original_value ?? '');
+
+    const outputCell = _appendCell(row, mapping.final_value ?? '', 'changes-table__output');
+    if (mapping.review_status === 'needs_attention') {
+      const status = document.createElement('span');
+      status.className = 'mapping-status mapping-status--attention';
+      status.textContent = 'Needs review';
+      outputCell.appendChild(status);
+    }
+
+    _appendCell(row, _sourceLabel(mapping.final_value_source));
+    _appendCell(row, _safeCount(mapping.row_count).toLocaleString(), 'changes-table__count');
+    const openHistory = () => _showHistoryDialog(mapping, row);
+    row.addEventListener('click', openHistory);
+    row.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      openHistory();
     });
-
-    if (mapping.is_pv_conformant === false) {
-      row.classList.add('non-conformant');
-    }
-
-    const colCell = document.createElement('td');
-    colCell.textContent = mapping.column;
-    row.appendChild(colCell);
-
-    const origCell = document.createElement('td');
-    origCell.textContent = mapping.original_value;
-    row.appendChild(origCell);
-
-    const finalCell = document.createElement('td');
-
-    if (mapping.is_pv_conformant === false) {
-      const warningIcon = document.createElement('span');
-      warningIcon.className = 'pv-warning-icon';
-      warningIcon.textContent = '⚠';
-      warningIcon.dataset.tooltip = 'This value is not in the permissible values list for this field.';
-      warningIcon.setAttribute('aria-label', 'Warning: value not in permissible values');
-      finalCell.appendChild(warningIcon);
-    }
-
-    const textNode = document.createTextNode(mapping.final_value);
-    finalCell.appendChild(textNode);
-
-    row.appendChild(finalCell);
-
     _changesTableBody.appendChild(row);
   }
 };
 
-const _updateSortIndicators = () => {
-  if (!_changesTable) return;
-
-  const headers = _changesTable.querySelectorAll('th');
-  headers.forEach((th, index) => {
-    const key = _SORT_KEYS[index];
-    th.classList.remove('sorted', 'sorted-asc', 'sorted-desc');
-
-    if (_state.sortColumn === key) {
-      th.classList.add('sorted', `sorted-${_state.sortDirection}`);
-    }
-  });
+const _getFilteredMappings = () => {
+  switch (_state.filter) {
+    case 'needs_attention':
+      return _state.termMappings.filter((mapping) => mapping.review_status === 'needs_attention');
+    case 'changed':
+      return _state.termMappings.filter((mapping) => mapping.is_changed === true);
+    case 'reviewer':
+      return _state.termMappings.filter((mapping) => mapping.final_value_source === 'reviewer');
+    case 'all':
+    default:
+      return _state.termMappings;
+  }
 };
 
-const _handleSort = (columnIndex) => {
-  const key = _SORT_KEYS[columnIndex];
+const _sortMappings = (mappings, column, direction) => [...mappings].sort((left, right) => {
+  const leftValue = String(left[column] ?? '');
+  const rightValue = String(right[column] ?? '');
+  const comparison = leftValue.localeCompare(rightValue, undefined, { sensitivity: 'base' });
+  return direction === 'asc' ? comparison : -comparison;
+});
 
+const _visibleMappings = () => {
+  const mappings = _getFilteredMappings();
+  return _state.sortColumn
+    ? _sortMappings(mappings, _state.sortColumn, _state.sortDirection)
+    : mappings;
+};
+
+const _updateFilterButtons = () => {
+  if (!_mappingsFilter) return;
+  for (const button of _mappingsFilter.querySelectorAll('[data-filter]')) {
+    const isActive = button.dataset.filter === _state.filter;
+    button.classList.toggle('active', isActive);
+    button.setAttribute('aria-pressed', String(isActive));
+  }
+};
+
+const _updateSortButtons = () => {
+  if (!_changesTable) return;
+  for (const button of _changesTable.querySelectorAll('[data-sort-key]')) {
+    const key = button.dataset.sortKey;
+    const header = button.closest('th');
+    const indicator = button.querySelector('.sort-indicator');
+    const active = key === _state.sortColumn;
+    header?.setAttribute('aria-sort', active ? `${_state.sortDirection}ending` : 'none');
+    if (indicator) indicator.textContent = active ? (_state.sortDirection === 'asc' ? '▲' : '▼') : '↕';
+  }
+};
+
+const _renderMappingView = () => {
+  _updateFilterButtons();
+  _updateSortButtons();
+  _renderTableRows(_visibleMappings());
+};
+
+const _applyFilter = (filter) => {
+  if (!_FILTERS.has(filter)) return;
+  _state.filter = filter;
+  _renderMappingView();
+};
+
+const _handleSort = (key) => {
+  if (!_SORT_KEYS.has(key)) return;
   if (_state.sortColumn === key) {
     _state.sortDirection = _state.sortDirection === 'asc' ? 'desc' : 'asc';
   } else {
     _state.sortColumn = key;
     _state.sortDirection = 'asc';
   }
-
-  const sorted = _sortMappings(_getFilteredMappings(), _state.sortColumn, _state.sortDirection);
-  _renderTableRows(sorted);
-  _updateSortIndicators();
+  _renderMappingView();
 };
 
-const _setupSortableHeaders = () => {
-  if (!_changesTable) return;
-
-  const headers = _changesTable.querySelectorAll('th');
-  headers.forEach((th, index) => {
-    /* Guard against duplicate indicators if _setupSortableHeaders is called multiple times. */
-    if (!th.querySelector('.sort-indicator')) {
-      const indicator = document.createElement('span');
-      indicator.className = 'sort-indicator';
-      th.appendChild(indicator);
-    }
-
-    th.addEventListener('click', () => _handleSort(index));
-  });
-};
-
-/** Returns mappings filtered by current filter state. */
-const _getFilteredMappings = () => {
-  if (_state.filter === 'all') {
-    return _state.termMappings;
+const _setupMappingControls = () => {
+  for (const button of _mappingsFilter?.querySelectorAll('[data-filter]') ?? []) {
+    button.addEventListener('click', () => _applyFilter(button.dataset.filter));
   }
-  return _state.termMappings.filter((m) => m.original_value !== m.final_value);
-};
-
-/** Updates filter state, re-renders table, and updates button active states. */
-const _applyFilter = (filter) => {
-  _state.filter = filter;
-
-  if (_mappingsFilter) {
-    for (const btn of _mappingsFilter.querySelectorAll('.segmented-control__option')) {
-      btn.classList.toggle('active', btn.dataset.filter === filter);
-    }
-  }
-
-  let mappings = _getFilteredMappings();
-  if (_state.sortColumn) {
-    mappings = _sortMappings(mappings, _state.sortColumn, _state.sortDirection);
-  }
-  _renderTableRows(mappings);
-};
-
-const _setupFilterControl = () => {
-  if (!_mappingsFilter) return;
-
-  for (const btn of _mappingsFilter.querySelectorAll('.segmented-control__option')) {
-    btn.addEventListener('click', () => {
-      const filter = btn.dataset.filter;
-      if (filter && filter !== _state.filter) {
-        _applyFilter(filter);
-      }
-    });
+  for (const button of _changesTable?.querySelectorAll('[data-sort-key]') ?? []) {
+    button.addEventListener('click', () => _handleSort(button.dataset.sortKey));
   }
 };
 
-const _renderChangesTable = (termMappings) => {
-  if (!_changesTableSection || !_changesTableBody) return;
-
-  if (!termMappings || termMappings.length === 0) {
-    return;
-  }
-
-  _state.termMappings = termMappings;
+const _renderMappings = (termMappings) => {
+  if (!_changesTableSection) return;
+  _state.termMappings = Array.isArray(termMappings) ? termMappings : [];
   _state.sortColumn = null;
   _state.sortDirection = 'asc';
-
-  _setupFilterControl();
-  if (_mappingsFilter) {
-    _mappingsFilter.classList.remove('hidden');
-  }
-
-  _renderTableRows(_getFilteredMappings());
-  _setupSortableHeaders();
+  _renderMappingView();
   _changesTableSection.classList.remove('hidden');
 };
 
 const _fetchSummary = async () => {
   const context = _loadSourceContext();
   if (!context) {
-    _showEmptyMessage('Unable to locate harmonization context.');
+    _showSummaryError('Unable to locate this harmonization workflow.');
     return;
   }
-
   _state.fileId = context.fileId;
 
   try {
@@ -728,10 +560,7 @@ const _fetchSummary = async () => {
     });
     markTiming('stage5.summary.fetch.response', { status: response.status });
     measureTiming('stage5.summary.request', 'stage5.summary.fetch.start', 'stage5.summary.fetch.response');
-
-    if (!response.ok) {
-      throw new Error('Unable to load summary.');
-    }
+    if (!response.ok) throw new Error('Unable to load summary.');
 
     const data = await response.json();
     markTiming('stage5.summary.fetch.parsed', {
@@ -740,9 +569,13 @@ const _fetchSummary = async () => {
     });
     measureTiming('stage5.summary.parse', 'stage5.summary.fetch.response', 'stage5.summary.fetch.parsed');
     markTiming('stage5.summary.render.start');
-    _state.nonConformantCount = data.non_conformant_count ?? 0;
-    _renderSummary(data.column_summaries ?? [], _state.nonConformantCount);
-    _renderChangesTable(data.term_mappings ?? []);
+
+    _state.nonConformantCount = _safeCount(data.non_conformant_count);
+    _state.filter = _state.nonConformantCount > 0 ? 'needs_attention' : 'changed';
+    _renderCertificate(data.dataset, _state.nonConformantCount);
+    _renderSummary(data.column_summaries ?? []);
+    _renderMappings(data.term_mappings ?? []);
+
     markTiming('stage5.summary.render.dom_complete');
     measureTiming('stage5.summary.render.dom', 'stage5.summary.render.start', 'stage5.summary.render.dom_complete', {
       term_mapping_count: data.term_mappings?.length ?? 0,
@@ -751,7 +584,7 @@ const _fetchSummary = async () => {
     measureTiming('stage5.init_to_usable', 'stage5.init.start', 'stage5.usable');
   } catch (error) {
     console.error('Failed to fetch summary:', error);
-    _showEmptyMessage('Unable to load harmonization summary.');
+    _showSummaryError('Unable to load the harmonization summary. Refresh the page to try again.');
   }
 };
 
@@ -760,21 +593,13 @@ const _init = () => {
   setActiveStage('review');
   initStepInstruction('review');
   initNavigationEvents();
+  _setupMappingControls();
 
-  if (_downloadBtn) {
-    _downloadBtn.addEventListener('click', _handleDownload);
-  }
-  if (_startOverButton) {
-    _startOverButton.addEventListener('click', _openStartOverDialog);
-  }
-  if (_startOverCancel) {
-    _startOverCancel.addEventListener('click', _closeStartOverDialog);
-  }
-  if (_startOverConfirm) {
-    _startOverConfirm.addEventListener('click', _confirmStartOver);
-  }
-
-  _fetchSummary();
+  _downloadBtn?.addEventListener('click', _handleDownload);
+  _startOverButton?.addEventListener('click', _openStartOverDialog);
+  _startOverCancel?.addEventListener('click', _closeStartOverDialog);
+  _startOverConfirm?.addEventListener('click', _confirmStartOver);
+  void _fetchSummary();
 };
 
 _init();

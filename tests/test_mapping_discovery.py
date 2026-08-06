@@ -1,4 +1,4 @@
-"""Tests for MappingDiscoveryService — real NetriasClient integration."""
+"""Tests for the mapping-discovery provider boundary with a controlled client."""
 
 from __future__ import annotations
 
@@ -8,8 +8,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.domain.manifest import ColumnMappingManifest, ManifestPayload
-from src.integrations.netrias_mapping import MappingDiscoveryService
+from src.domain.manifest import ColumnMappingManifest, InvalidMappingManifestError, ManifestPayload
+from src.integrations.netrias_mapping import (
+    MappingDiscoveryService,
+    MappingDiscoveryUnavailableError,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -57,14 +60,28 @@ def test_discover_returns_manifest_from_client(
     csv_path.write_text("breed,diagnosis\nLabrador,Cancer\n")
 
     # When
-    discovery = svc.discover(csv_path=csv_path, data_model_key="ccdi", external_version_number="11.0.4")
+    manifest = svc.discover(csv_path=csv_path, data_model_key="ccdi", external_version_number="11.0.4")
 
-    # Then: manifest contains both columns
-    column_mappings = discovery.manifest_payload.get("column_mappings", {})
-    assert "col_0000" in column_mappings
-    assert "col_0001" in column_mappings
-    assert column_mappings["col_0000"]["cde_key"] == "organism_species"
-    assert column_mappings["col_0001"]["cde_key"] == "primary_diagnosis"
+    # Then: callers receive the typed manifest rather than a service-specific wrapper
+    assert isinstance(manifest, ColumnMappingManifest)
+    assert manifest.to_payload() == {
+        "column_mappings": {
+            "col_0000": {
+                "column_name": "col_0000",
+                "cde_key": "organism_species",
+                "cde_id": 131,
+                "harmonization": "harmonizable",
+                "alternatives": [],
+            },
+            "col_0001": {
+                "column_name": "col_0001",
+                "cde_key": "primary_diagnosis",
+                "cde_id": 2,
+                "harmonization": "harmonizable",
+                "alternatives": [],
+            },
+        }
+    }
     mock_client.discover_mapping_from_tabular.assert_called_once()
     assert mock_client.discover_mapping_from_tabular.call_args.kwargs["external_version_number"] == "11.0.4"
 
@@ -100,7 +117,7 @@ def test_discover_passes_selected_external_version(
 # ---------------------------------------------------------------------------
 
 
-def test_discover_builds_cde_targets_from_manifest(
+def test_discovered_manifest_exposes_ranked_suggestions(
     service_with_mock_client: tuple[MappingDiscoveryService, MagicMock],
     tmp_path: Path,
 ) -> None:
@@ -122,14 +139,12 @@ def test_discover_builds_cde_targets_from_manifest(
     csv_path.write_text("breed,diagnosis\nLabrador,Cancer\n")
 
     # When
-    discovery = svc.discover(csv_path=csv_path, data_model_key="ccdi", external_version_number="11.0.4")
+    manifest = svc.discover(csv_path=csv_path, data_model_key="ccdi", external_version_number="11.0.4")
 
-    # Then: cde_targets has entries for both columns
-    cde_targets = discovery.cde_targets
-    assert "col_0000" in cde_targets
-    assert "col_0001" in cde_targets
-    assert cde_targets["col_0000"][0].target == "organism_species"
-    assert cde_targets["col_0001"][0].target == "primary_diagnosis"
+    # Then: the canonical manifest API exposes suggestions for both columns
+    suggestions = manifest.suggestions_by_column()
+    assert suggestions["col_0000"][0].target == "organism_species"
+    assert suggestions["col_0001"][0].target == "primary_diagnosis"
 
 
 # ---------------------------------------------------------------------------
@@ -168,14 +183,16 @@ def test_discover_raises_when_client_unavailable() -> None:
     """
     Given: MappingDiscoveryService with no client (None)
     When: discover() is called
-    Then: RuntimeError is raised
+    Then: the safe provider-unavailable error is raised
     """
-    # Given: no client → None
+    # Given: no provider client
     svc = MappingDiscoveryService(None)
-    assert svc._client is None
 
     # When/Then
-    with pytest.raises(RuntimeError, match="NetriasClient unavailable"):
+    with pytest.raises(
+        MappingDiscoveryUnavailableError,
+        match=r"^Mapping discovery is unavailable\.$",
+    ):
         svc.discover(csv_path=Path("/fake.csv"), data_model_key="ccdi", external_version_number="11.0.4")
 
 
@@ -258,28 +275,68 @@ def test_cde_targets_falls_back_to_target_field_when_alternatives_empty() -> Non
 
 
 # ---------------------------------------------------------------------------
-# Test 7: discover wraps SDK errors as RuntimeError
+# Test 7: provider failures cross the boundary as a safe typed error
 # ---------------------------------------------------------------------------
 
 
-def test_discover_wraps_sdk_errors_as_runtime_error(
+def test_discover_hides_provider_error_details(
     service_with_mock_client: tuple[MappingDiscoveryService, MagicMock],
     tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """
     Given: a NetriasClient that raises an exception during discovery
     When: discover() is called
-    Then: RuntimeError is raised wrapping the original error
+    Then: a safe typed error is raised without provider details in text or logs
     """
     svc, mock_client = service_with_mock_client
 
     # Given: client raises
-    mock_client.discover_mapping_from_tabular.side_effect = Exception("connection refused")
+    provider_secret = "provider-token-123 at https://private.example.test"
+    mock_client.discover_mapping_from_tabular.side_effect = Exception(provider_secret)
     csv_path = tmp_path / "test.csv"
     csv_path.write_text("a,b\n1,2\n")
 
     # When/Then
-    with pytest.raises(RuntimeError, match="CDE discovery failed.*connection refused"):
+    with pytest.raises(
+        MappingDiscoveryUnavailableError,
+        match=r"^Mapping discovery is unavailable\.$",
+    ):
+        svc.discover(csv_path=csv_path, data_model_key="ccdi", external_version_number="11.0.4")
+    assert provider_secret not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "provider_payload",
+    [
+        None,
+        {},
+        {"column_mappings": []},
+        {"column_mappings": {"col_0000": {"cde_key": "diagnosis"}}},
+        {
+            "column_mappings": {
+                "col_0000": {
+                    "cde_key": "diagnosis",
+                    "cde_id": 11,
+                    "alternatives": [{"confidence": 0.9}],
+                }
+            }
+        },
+    ],
+)
+def test_discover_rejects_malformed_provider_manifests(
+    service_with_mock_client: tuple[MappingDiscoveryService, MagicMock],
+    tmp_path: Path,
+    provider_payload: object,
+) -> None:
+    """Malformed provider data is reported instead of becoming an empty mapping."""
+
+    svc, mock_client = service_with_mock_client
+    mock_client.discover_mapping_from_tabular.return_value = provider_payload
+    csv_path = tmp_path / "test.csv"
+    csv_path.write_text("diagnosis\nLung\n")
+
+    with pytest.raises(InvalidMappingManifestError):
         svc.discover(csv_path=csv_path, data_model_key="ccdi", external_version_number="11.0.4")
 
 
@@ -318,10 +375,11 @@ def test_discover_preserves_duplicate_headers_with_column_keys(
     csv_path = tmp_path / "dupes.csv"
     csv_path.write_text("name,name\nAlice,Smith\n")
 
-    discovery = svc.discover(csv_path=csv_path, data_model_key="ccdi", external_version_number="11.0.4")
+    manifest = svc.discover(csv_path=csv_path, data_model_key="ccdi", external_version_number="11.0.4")
 
-    column_mappings = discovery.manifest_payload.get("column_mappings", {})
+    column_mappings = manifest.to_payload()["column_mappings"]
     assert column_mappings["col_0000"]["cde_key"] == "first_name"
     assert column_mappings["col_0001"]["cde_key"] == "last_name"
-    assert discovery.cde_targets["col_0000"][0].target == "first_name"
-    assert discovery.cde_targets["col_0001"][0].target == "last_name"
+    suggestions = manifest.suggestions_by_column()
+    assert suggestions["col_0000"][0].target == "first_name"
+    assert suggestions["col_0001"][0].target == "last_name"

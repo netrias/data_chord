@@ -10,6 +10,8 @@ from httpx import AsyncClient
 from netrias_client import DataModelStoreError
 
 from src.domain.cde import DataModelSummary, DataModelVersionInfo
+from src.integrations.netrias_mapping import MappingDiscoveryUnavailableError
+from src.storage import WorkflowConflictError
 from tests.conftest import TEST_CSV_CONTENT_TYPE, TEST_TARGET_EXTERNAL_VERSION_NUMBER, TEST_TARGET_SCHEMA, upload_file
 
 pytestmark = pytest.mark.asyncio
@@ -178,6 +180,59 @@ class TestDataModelServiceErrors:
         # Then: 503 response with generic user-facing detail
         assert response.status_code == 503
         assert response.json()["detail"] == GENERIC_API_ERROR_DETAIL
+
+    async def test_analyze_hides_mapping_provider_failure_details(
+        self,
+        app_client: AsyncClient,
+        sample_csv_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A provider failure becomes a generic 503 response."""
+        file_id = await upload_file(app_client, sample_csv_path)
+        mapping_service = MagicMock()
+        mapping_service.discover.side_effect = MappingDiscoveryUnavailableError(
+            "Mapping discovery is unavailable."
+        )
+        monkeypatch.setattr(
+            "src.stage_1_upload.router.get_mapping_service",
+            MagicMock(return_value=mapping_service),
+        )
+
+        response = await app_client.post(
+            "/stage-1/analyze",
+            json={
+                "file_id": file_id,
+                "data_model_key": TEST_TARGET_SCHEMA,
+                "external_version_number": TEST_TARGET_EXTERNAL_VERSION_NUMBER,
+            },
+        )
+
+        assert response.status_code == 503
+        assert response.json() == {"detail": GENERIC_API_ERROR_DETAIL}
+
+
+async def test_workflow_write_conflicts_are_globally_reported_as_retryable(
+    app_client: AsyncClient,
+    sample_csv_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    file_id = await upload_file(app_client, sample_csv_path)
+    monkeypatch.setattr(
+        "src.stage_1_upload.router.save_initial_workflow_state",
+        MagicMock(side_effect=WorkflowConflictError(file_id)),
+    )
+
+    response = await app_client.post(
+        "/stage-1/analyze",
+        json={
+            "file_id": file_id,
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": TEST_TARGET_EXTERNAL_VERSION_NUMBER,
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == GENERIC_API_ERROR_DETAIL
 
 
 class TestUploadValidationErrors:

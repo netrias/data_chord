@@ -94,6 +94,17 @@ variable "certificate_arn" {
   description = "Optional ACM certificate ARN for the HTTPS listener. Leave empty to create and validate one in hosted_zone_name."
   type        = string
   default     = ""
+
+  validation {
+    condition = (
+      (var.certificate_arn == "" && var.domain_name == "" && trimspace(trimsuffix(var.hosted_zone_name, ".")) != "") ||
+      (
+        trimspace(var.certificate_arn) != "" && var.certificate_arn == trimspace(var.certificate_arn) &&
+        trimspace(var.domain_name) != "" && var.domain_name == trimspace(var.domain_name)
+      )
+    )
+    error_message = "Choose one TLS mode: leave certificate_arn and domain_name empty and provide hosted_zone_name, or provide nonblank certificate_arn and domain_name values without surrounding whitespace."
+  }
 }
 
 variable "domain_name" {

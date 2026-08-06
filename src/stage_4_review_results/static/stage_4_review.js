@@ -120,6 +120,7 @@ const OVERRIDE_SAVE_DELAY_MS = 400;
 let overrideSaveTimeout = null;
 let overrideSaveInFlight = null;
 let overrideSaveNeeded = false;
+let overrideVersion = null;
 
 /**
  * Get the state object for the current review mode.
@@ -199,7 +200,9 @@ const fetchOverrides = async (fileId) => {
   try {
     const response = await fetch(`/stage-4/overrides/${encodeURIComponent(fileId)}`);
     if (response.ok) {
-      return await response.json();
+      const stored = await response.json();
+      overrideVersion = response.headers.get('ETag');
+      return stored;
     }
     if (response.status === 404) {
       return null;
@@ -248,14 +251,22 @@ const _sendOverrideSave = async () => {
   const fileId = getFileIdFromUrl();
   if (!fileId || !isValidFileId(fileId)) return true;
 
+  const headers = { 'Content-Type': 'application/json' };
+  if (overrideVersion) {
+    headers['If-Match'] = overrideVersion;
+  }
   const response = await fetch('/stage-4/overrides', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(_buildSavePayload()),
   });
+  if (response.status === 409) {
+    throw new Error('Review state changed in another tab. Reload this page before saving again.');
+  }
   if (!response.ok) {
     throw new Error('Server returned an error');
   }
+  overrideVersion = response.headers.get('ETag') ?? overrideVersion;
   return true;
 };
 

@@ -6,17 +6,22 @@ import csv
 import io
 import zipfile
 from io import BytesIO
+from unittest.mock import patch
 
 import pytest
 from httpx import AsyncClient
 
+import src.app.dependencies as dependencies
 from src.persistence.manifest_reader import read_manifest_parquet
-from src.storage import UploadStorage
+from src.storage import UploadStorage, WorkflowFile
 from tests.conftest import (
+    TEST_TARGET_EXTERNAL_VERSION_NUMBER,
+    TEST_TARGET_SCHEMA,
     create_csv_content,
     create_harmonized_csv,
     create_manifest_for_file,
     review_state_payload,
+    store_test_completed_harmonization,
     store_test_harmonization_manifest,
     upload_content,
 )
@@ -31,6 +36,76 @@ def _read_downloaded_csv(response_bytes: bytes) -> list[dict[str, str]]:
     return list(csv.DictReader(io.StringIO(csv_content)))
 
 
+async def _analyze_for_review(app_client: AsyncClient, file_id: str) -> None:
+    """Create the canonical mapping plan required by Stage 4 and Stage 5."""
+    response = await app_client.post(
+        "/stage-1/analyze",
+        json={
+            "file_id": file_id,
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": TEST_TARGET_EXTERNAL_VERSION_NUMBER,
+        },
+    )
+    assert response.status_code == 200
+
+
+async def test_stage4_loads_legacy_persisted_review_progress(
+    app_client: AsyncClient,
+) -> None:
+    """A returning reviewer resumes progress saved before the current state shape."""
+
+    # Given: durable review state still uses the old flat batch-progress keys
+    file_id = await upload_content(
+        app_client,
+        create_csv_content([["col_a"], ["alpha"]]),
+        "legacy-review-progress.csv",
+    )
+    dependencies.get_workflow_storage().write_json(
+        dependencies.get_user_context(),
+        file_id,
+        WorkflowFile.REVIEW_OVERRIDES,
+        {
+            "file_id": file_id,
+            "created_at": "2026-07-01T12:00:00+00:00",
+            "updated_at": "2026-07-02T12:00:00+00:00",
+            "overrides": {},
+            "review_state": {
+                "current_batch": 7,
+                "completed_batches": [1, 2, 3],
+                "flagged_batches": [4],
+                "batch_size": 10,
+                "sort_mode": "confidence",
+                "scroll_mode": True,
+            },
+        },
+    )
+
+    # When: the reviewer returns through the public Stage 4 API
+    response = await app_client.get(f"/stage-4/overrides/{file_id}")
+
+    # Then: the response preserves their progress in the current state shape
+    assert response.status_code == 200
+    assert response.json()["review_state"] == {
+        "review_mode": "row",
+        "sort_mode": "confidence",
+        "scroll_mode": True,
+        "show_case_only_changes": False,
+        "show_unchanged_values": False,
+        "column_mode": {
+            "current_unit": 1,
+            "completed_units": [],
+            "flagged_units": [],
+            "batch_size": 5,
+        },
+        "row_mode": {
+            "current_unit": 7,
+            "completed_units": [1, 2, 3],
+            "flagged_units": [4],
+            "batch_size": 10,
+        },
+    }
+
+
 async def test_stage4_rows_include_grouped_indices(
     app_client: AsyncClient,
     temp_storage: UploadStorage,
@@ -41,6 +116,7 @@ async def test_stage4_rows_include_grouped_indices(
         ["Foo", "Bar"],
     ]
     file_id = await upload_content(app_client, create_csv_content(rows), "dupes.csv")
+    await _analyze_for_review(app_client, file_id)
     meta = temp_storage.load(file_id)
     assert meta is not None
     create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
@@ -70,7 +146,8 @@ async def test_download_applies_override_per_column_term(
     file_id = await upload_content(app_client, create_csv_content(rows), "terms.csv")
     meta = temp_storage.load(file_id)
     assert meta is not None
-    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
+    harmonized_path = create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
+    store_test_completed_harmonization(temp_storage, file_id, harmonized_path)
 
     overrides_payload = {
         "file_id": file_id,
@@ -107,6 +184,7 @@ async def test_stage4_save_writes_export_overrides_and_summary_audit(
     # Given: a harmonized file has no saved review overrides and no manual audit history
     rows = [["col_a"], ["alpha"]]
     file_id = await upload_content(app_client, create_csv_content(rows), "override-contract.csv")
+    await _analyze_for_review(app_client, file_id)
     meta = temp_storage.load(file_id)
     assert meta is not None
     create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"col_a": "beta"}})
@@ -153,6 +231,181 @@ async def test_stage4_save_writes_export_overrides_and_summary_audit(
     assert [step["value"] for step in user_steps] == ["gamma"]
 
 
+async def test_stage4_identical_autosave_does_not_duplicate_summary_audit(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """Retrying the same active review state records one historical decision."""
+
+    # Given: one term is ready for review and has no manual history
+    rows = [["col_a"], ["alpha"]]
+    file_id = await upload_content(app_client, create_csv_content(rows), "override-idempotence.csv")
+    meta = temp_storage.load(file_id)
+    assert meta is not None
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"col_a": "beta"}})
+    create_manifest_for_file(temp_storage, file_id, meta.saved_path, {0: {"col_a": "beta"}})
+    payload = {
+        "file_id": file_id,
+        "overrides": {
+            "1": {"col_0000": {"ai_value": "beta", "human_value": "gamma", "original_value": "alpha"}},
+        },
+        "review_state": review_state_payload(),
+    }
+
+    # When: browser autosave sends the identical state twice
+    first_response = await app_client.post("/stage-4/overrides", json=payload)
+    second_response = await app_client.post("/stage-4/overrides", json=payload)
+
+    # Then: both compatible saves succeed, but history contains one user decision
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    manifest_path = temp_storage.load_harmonization_manifest_path(file_id)
+    assert manifest_path is not None
+    saved = read_manifest_parquet(manifest_path)
+    assert saved is not None
+    assert [override.value for override in saved.rows[0].manual_overrides] == ["gamma"]
+
+
+async def test_stage4_identical_autosave_repairs_failed_summary_audit(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """Retrying an active save repairs history when its first audit write failed."""
+
+    # Given: active review state can save, but the first audit write fails
+    rows = [["col_a"], ["alpha"]]
+    file_id = await upload_content(app_client, create_csv_content(rows), "override-audit-retry.csv")
+    meta = temp_storage.load(file_id)
+    assert meta is not None
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"col_a": "beta"}})
+    create_manifest_for_file(temp_storage, file_id, meta.saved_path, {0: {"col_a": "beta"}})
+    payload = {
+        "file_id": file_id,
+        "overrides": {
+            "1": {"col_0000": {"ai_value": "beta", "human_value": "gamma", "original_value": "alpha"}},
+        },
+        "review_state": review_state_payload(),
+    }
+    with patch("src.stage_4_review_results.use_cases.add_manual_overrides_batch", return_value=False):
+        first_response = await app_client.post("/stage-4/overrides", json=payload)
+    assert first_response.status_code == 200
+
+    # When: autosave retries the identical active state
+    retry_response = await app_client.post("/stage-4/overrides", json=payload)
+
+    # Then: the missing historical decision is repaired exactly once
+    assert retry_response.status_code == 200
+    manifest_path = temp_storage.load_harmonization_manifest_path(file_id)
+    assert manifest_path is not None
+    saved = read_manifest_parquet(manifest_path)
+    assert saved is not None
+    assert [override.value for override in saved.rows[0].manual_overrides] == ["gamma"]
+
+
+async def test_stage4_review_version_rejects_stale_save_without_losing_current_state(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """A second tab cannot overwrite a newer review save with an old ETag."""
+
+    # Given: a reviewer creates state and both tabs observe its version
+    rows = [["col_a"], ["alpha"]]
+    file_id = await upload_content(app_client, create_csv_content(rows), "override-version.csv")
+    meta = temp_storage.load(file_id)
+    assert meta is not None
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"col_a": "beta"}})
+    create_manifest_for_file(temp_storage, file_id, meta.saved_path, {0: {"col_a": "beta"}})
+    initial_payload = {
+        "file_id": file_id,
+        "overrides": {
+            "1": {"col_0000": {"ai_value": "beta", "human_value": "gamma", "original_value": "alpha"}},
+        },
+        "review_state": review_state_payload(),
+    }
+    initial_save = await app_client.post("/stage-4/overrides", json=initial_payload)
+    assert initial_save.status_code == 200
+    initial_version = initial_save.headers.get("etag")
+    assert initial_version
+    loaded = await app_client.get(f"/stage-4/overrides/{file_id}")
+    assert loaded.status_code == 200
+    assert loaded.headers.get("etag") == initial_version
+
+    newer_payload = {
+        **initial_payload,
+        "overrides": {
+            "1": {"col_0000": {"ai_value": "beta", "human_value": "delta", "original_value": "alpha"}},
+        },
+    }
+    newer_save = await app_client.post(
+        "/stage-4/overrides",
+        headers={"If-Match": initial_version},
+        json=newer_payload,
+    )
+    assert newer_save.status_code == 200
+    assert newer_save.headers.get("etag")
+
+    # When: the stale tab tries to save using the version it originally loaded
+    stale_payload = {
+        **initial_payload,
+        "overrides": {
+            "1": {"col_0000": {"ai_value": "beta", "human_value": "epsilon", "original_value": "alpha"}},
+        },
+    }
+    stale_save = await app_client.post(
+        "/stage-4/overrides",
+        headers={"If-Match": initial_version},
+        json=stale_payload,
+    )
+
+    # Then: the caller gets a conflict and the newer active/audit state remains intact
+    assert stale_save.status_code == 409
+    current = await app_client.get(f"/stage-4/overrides/{file_id}")
+    assert current.status_code == 200
+    assert current.json()["overrides"]["1"]["col_0000"]["human_value"] == "delta"
+    manifest_path = temp_storage.load_harmonization_manifest_path(file_id)
+    assert manifest_path is not None
+    saved = read_manifest_parquet(manifest_path)
+    assert saved is not None
+    assert [override.value for override in saved.rows[0].manual_overrides] == ["gamma", "delta"]
+
+
+async def test_stage4_tokenless_save_remains_compatible_after_versioned_save(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """Existing API callers may continue saving without an If-Match header."""
+
+    # Given: existing review state has a current ETag
+    rows = [["col_a"], ["alpha"]]
+    file_id = await upload_content(app_client, create_csv_content(rows), "override-tokenless.csv")
+    meta = temp_storage.load(file_id)
+    assert meta is not None
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"col_a": "beta"}})
+    create_manifest_for_file(temp_storage, file_id, meta.saved_path, {0: {"col_a": "beta"}})
+    payload = {
+        "file_id": file_id,
+        "overrides": {
+            "1": {"col_0000": {"ai_value": "beta", "human_value": "gamma", "original_value": "alpha"}},
+        },
+        "review_state": review_state_payload(),
+    }
+    first_save = await app_client.post("/stage-4/overrides", json=payload)
+    assert first_save.status_code == 200
+    assert first_save.headers.get("etag")
+
+    # When: an older caller saves a new choice without a version header
+    payload["overrides"] = {
+        "1": {"col_0000": {"ai_value": "beta", "human_value": "delta", "original_value": "alpha"}},
+    }
+    tokenless_save = await app_client.post("/stage-4/overrides", json=payload)
+
+    # Then: compatibility is retained and the new state receives a version
+    assert tokenless_save.status_code == 200
+    assert tokenless_save.headers.get("etag")
+    current = await app_client.get(f"/stage-4/overrides/{file_id}")
+    assert current.json()["overrides"]["1"]["col_0000"]["human_value"] == "delta"
+
+
 async def test_stage4_delete_clears_export_overrides_but_preserves_summary_audit(
     app_client: AsyncClient,
     temp_storage: UploadStorage,
@@ -162,6 +415,7 @@ async def test_stage4_delete_clears_export_overrides_but_preserves_summary_audit
     # Given: a saved override exists in both review state and manifest audit history
     rows = [["col_a"], ["alpha"]]
     file_id = await upload_content(app_client, create_csv_content(rows), "override-delete.csv")
+    await _analyze_for_review(app_client, file_id)
     meta = temp_storage.load(file_id)
     assert meta is not None
     create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"col_a": "beta"}})
@@ -184,7 +438,7 @@ async def test_stage4_delete_clears_export_overrides_but_preserves_summary_audit
     # When: the saved review override state is deleted
     delete_response = await app_client.delete(f"/stage-4/overrides/{file_id}")
 
-    # Then: export returns to harmonized data, while the Stage 5 summary still shows audit history
+    # Then: export and the current summary return to AI output, while audit history remains
     assert delete_response.status_code == 200
     assert delete_response.json()["deleted"] is True
     after_delete = await app_client.get(f"/stage-4/overrides/{file_id}")
@@ -199,7 +453,16 @@ async def test_stage4_delete_clears_export_overrides_but_preserves_summary_audit
     summary_response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
     assert summary_response.status_code == 200
     summary = summary_response.json()
-    assert summary["column_summaries"][0]["manual_changes"] == 1
+    assert summary["column_summaries"][0]["manual_changes"] == 0
+    assert summary["column_summaries"][0]["ai_changes"] == 1
+    assert [
+        {
+            "column": mapping["column"],
+            "original_value": mapping["original_value"],
+            "final_value": mapping["final_value"],
+        }
+        for mapping in summary["term_mappings"]
+    ] == [{"column": "col_a", "original_value": "alpha", "final_value": "beta"}]
     user_steps = [
         step
         for mapping in summary["term_mappings"]
@@ -218,6 +481,7 @@ async def test_stage4_preserves_whitespace_values_in_overrides(
         ["  Foo "],
     ]
     file_id = await upload_content(app_client, create_csv_content(rows), "whitespace.csv")
+    await _analyze_for_review(app_client, file_id)
     meta = temp_storage.load(file_id)
     assert meta is not None
     create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
@@ -255,6 +519,7 @@ async def test_stage4_handles_bom_headers(
 ) -> None:
     content = "\ufeffrecord_id,col_a\nRID-1,Foo\n".encode()
     file_id = await upload_content(app_client, content, "bom.csv")
+    await _analyze_for_review(app_client, file_id)
     meta = temp_storage.load(file_id)
     assert meta is not None
     create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
@@ -271,7 +536,7 @@ async def test_stage4_handles_bom_headers(
     assert col_a["transformations"][0]["originalValue"] == "Foo"
 
 
-async def test_summary_ignores_case_whitespace_changes(
+async def test_summary_counts_case_and_whitespace_changes_exactly(
     app_client: AsyncClient,
     temp_storage: UploadStorage,
 ) -> None:
@@ -280,6 +545,7 @@ async def test_summary_ignores_case_whitespace_changes(
         ["Foo"],
     ]
     file_id = await upload_content(app_client, create_csv_content(rows), "metrics.csv")
+    await _analyze_for_review(app_client, file_id)
 
     store_test_harmonization_manifest(
         temp_storage,
@@ -302,5 +568,48 @@ async def test_summary_ignores_case_whitespace_changes(
     summary_response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
     assert summary_response.status_code == 200
     column_summary = summary_response.json()["column_summaries"][0]
-    assert column_summary["ai_changes"] == 0
+    assert column_summary["changed_distinct_values"] == 1
+    assert column_summary["changed_rows"] == 1
+    assert column_summary["ai_changes"] == 1
     assert column_summary["manual_changes"] == 0
+
+
+async def test_summary_history_omits_blank_provider_pass_through(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """A blank recommendation is not presented as a Data Chord decision."""
+    file_id = await upload_content(
+        app_client,
+        create_csv_content([["col_a"], ["Foo"]]),
+        "blank-provider-history.csv",
+    )
+    await _analyze_for_review(app_client, file_id)
+    store_test_harmonization_manifest(
+        temp_storage,
+        file_id,
+        [{
+            "job_id": f"test-job-{file_id}",
+            "column_id": 0,
+            "column_name": "col_a",
+            "to_harmonize": "Foo",
+            "top_harmonization": "",
+            "ontology_id": None,
+            "top_harmonizations": [],
+            "confidence_score": 0.9,
+            "error": None,
+            "row_indices": [0],
+            "manual_overrides": [],
+        }],
+    )
+
+    response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
+
+    assert response.status_code == 200
+    mapping = response.json()["term_mappings"][0]
+    assert mapping["original_value"] == "Foo"
+    assert mapping["final_value"] == "Foo"
+    assert mapping["final_value_source"] == "source"
+    assert [(step["source"], step["value"]) for step in mapping["history"]] == [
+        ("original", "Foo"),
+    ]

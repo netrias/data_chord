@@ -6,7 +6,7 @@
  * values can be selected.
  */
 
-import { escapeHtml as _escapeHtml } from './shared_review_utils.js';
+import { escapeHtml } from '/assets/shared/html.js';
 
 /**
  * Build the HTML structure for the PV selection modal.
@@ -19,10 +19,10 @@ import { escapeHtml as _escapeHtml } from './shared_review_utils.js';
  * @returns {string}
  */
 const _buildModalHTML = ({ originalValue, currentValue, targetCdeLabel, suggestions, pvValues }) => {
-  const safeOriginal = _escapeHtml(originalValue);
-  const safeCurrent = _escapeHtml(currentValue);
+  const safeOriginal = escapeHtml(originalValue);
+  const safeCurrent = escapeHtml(currentValue);
   const targetCdeHTML = targetCdeLabel
-    ? `<p class="pv-selection-subtitle">Target common data element: <span>${_escapeHtml(targetCdeLabel)}</span></p>`
+    ? `<p class="pv-selection-subtitle">Target common data element: <span>${escapeHtml(targetCdeLabel)}</span></p>`
     : '';
 
   // Build suggestion options HTML
@@ -31,7 +31,7 @@ const _buildModalHTML = ({ originalValue, currentValue, targetCdeLabel, suggesti
   const suggestionOptionsHTML = suggestions.map((s) => {
     const disabledClass = s.isPVConformant ? '' : ' pv-selection-option--disabled';
     const tooltipAttr = s.isPVConformant ? '' : ` data-tooltip="${nonConformantTooltip}"`;
-    const safeValue = _escapeHtml(s.value);
+    const safeValue = escapeHtml(s.value);
     return `<div class="pv-selection-option${disabledClass}" data-value="${safeValue}" data-type="suggestion" data-conformant="${s.isPVConformant}"${tooltipAttr}>${safeValue}</div>`;
   }).join('');
 
@@ -39,7 +39,7 @@ const _buildModalHTML = ({ originalValue, currentValue, targetCdeLabel, suggesti
   const pvOptionsHTML = pvValues
     .filter((pv) => !suggestionValuesSet.has(pv))
     .map((pv) => {
-      const safeValue = _escapeHtml(pv);
+      const safeValue = escapeHtml(pv);
       return `<div class="pv-selection-option" data-value="${safeValue}" data-type="pv" data-conformant="true">${safeValue}</div>`;
     }).join('');
 

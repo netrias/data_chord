@@ -5,6 +5,9 @@
 
 import { createPVCombobox } from './pv_combobox.js';
 import { determineCardState } from './card-state.js';
+import { escapeHtml } from '/assets/shared/html.js';
+
+export { escapeHtml };
 
 /** @type {Record<string, string>} */
 export const CONFIDENCE_SYMBOLS = {
@@ -99,17 +102,6 @@ export const toExcelRowNumber = (dataRowNumber) => dataRowNumber + 1;
 export const getFileIdFromUrl = () => {
   const params = new URLSearchParams(window.location.search);
   return params.get('file_id');
-};
-
-/**
- * Escape HTML special characters to prevent XSS.
- * @param {string} str
- * @returns {string}
- */
-export const escapeHtml = (str) => {
-  if (typeof str !== 'string') return String(str);
-  const escapeMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-  return str.replace(/[&<>"']/g, (c) => escapeMap[c]);
 };
 
 /**

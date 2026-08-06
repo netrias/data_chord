@@ -6,17 +6,14 @@ even when the AI suggestion is also a valid PV.
 
 from __future__ import annotations
 
-from src.domain.pv_validation import (
-    AdjustmentSource,
-    compute_pv_adjustment,
-)
+from src.domain.pv_validation import compute_pv_adjustment
 
 
-class TestPVOverrideProtection:
+class TestOriginalValueProtection:
     """Original values in PV set should be preserved, not replaced by AI."""
 
-    def test_original_valid_ai_different_returns_pv_override(self) -> None:
-        """When original is valid but AI suggests different value, revert to original."""
+    def test_original_valid_ai_different_preserves_original(self) -> None:
+        """When original is valid but AI suggests different value, preserve the original."""
         # Given: Original "lung cancer" is valid, AI suggests "Lung Cancer"
         pv_set = frozenset(["lung cancer", "Lung Cancer", "breast cancer"])
 
@@ -28,10 +25,9 @@ class TestPVOverrideProtection:
             pv_set=pv_set,
         )
 
-        # Then: Reverts to original with PV_OVERRIDE source
+        # Then: Reverts to the original value
         assert result.is_conformant is True
         assert result.adjusted_value == "lung cancer"
-        assert result.adjustment_source == AdjustmentSource.PV_OVERRIDE
         assert result.attempted_value == "Lung Cancer"
 
     def test_original_valid_ai_same_no_adjustment(self) -> None:
@@ -50,7 +46,6 @@ class TestPVOverrideProtection:
         # Then: Conformant with no adjustment
         assert result.is_conformant is True
         assert result.adjusted_value is None
-        assert result.adjustment_source is None
 
     def test_original_invalid_ai_valid_uses_ai(self) -> None:
         """When original is invalid but AI is valid, use AI suggestion."""
@@ -68,7 +63,6 @@ class TestPVOverrideProtection:
         # Then: Uses AI suggestion (no adjustment record since top_harmonization is used)
         assert result.is_conformant is True
         assert result.adjusted_value is None
-        assert result.adjustment_source is None
 
     def test_original_invalid_ai_invalid_alt_valid_uses_alt(self) -> None:
         """When original and AI are invalid but alternative is valid, use alternative."""
@@ -86,7 +80,6 @@ class TestPVOverrideProtection:
         # Then: Uses first valid alternative from suggestions
         assert result.is_conformant is True
         assert result.adjusted_value == "Lung Cancer"
-        assert result.adjustment_source == AdjustmentSource.TOP_SUGGESTIONS
 
     def test_all_invalid_returns_non_conformant(self) -> None:
         """When nothing is valid, mark as non-conformant."""
@@ -104,7 +97,6 @@ class TestPVOverrideProtection:
         # Then: Non-conformant, no adjustment
         assert result.is_conformant is False
         assert result.adjusted_value is None
-        assert result.adjustment_source is None
 
 
 class TestPVOverrideWhitespaceSensitivity:
@@ -126,7 +118,6 @@ class TestPVOverrideWhitespaceSensitivity:
         # Then: Keeps original (with trailing space)
         assert result.is_conformant is True
         assert result.adjusted_value == "Lung Cancer "
-        assert result.adjustment_source == AdjustmentSource.PV_OVERRIDE
 
     def test_case_difference_triggers_override(self) -> None:
         """Case differences are significant - original lowercase kept if valid."""
@@ -143,7 +134,6 @@ class TestPVOverrideWhitespaceSensitivity:
 
         # Then: Keeps original lowercase
         assert result.adjusted_value == "lung cancer"
-        assert result.adjustment_source == AdjustmentSource.PV_OVERRIDE
 
 
 class TestPVOverrideEdgeCases:
@@ -181,7 +171,6 @@ class TestPVOverrideEdgeCases:
 
         # Then: Non-conformant (nothing matches empty set)
         assert result.is_conformant is False
-        assert result.adjustment_source is None
 
     def test_empty_top_suggestions_with_invalid_ai(self) -> None:
         """Empty top_suggestions falls through to non-conformant when AI is also invalid."""
@@ -199,4 +188,3 @@ class TestPVOverrideEdgeCases:
         # Then: Non-conformant (no valid alternatives to try)
         assert result.is_conformant is False
         assert result.adjusted_value is None
-        assert result.adjustment_source is None

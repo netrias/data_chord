@@ -7,7 +7,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from src.api.schemas import DatasetWorkflowIdField
-from src.domain import ModelSuggestion
+from src.domain.cde import ModelSuggestion
 from src.domain.column_profile import ColumnProfilePayload
 from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.manifest import ConfidenceBucket, ManifestPayload

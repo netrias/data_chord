@@ -50,7 +50,6 @@ class ManifestPvAdjustment:
 
     term_key: ManifestTermKey
     adjusted_value: str
-    source: str
 
     @classmethod
     def from_raw(
@@ -58,12 +57,10 @@ class ManifestPvAdjustment:
         column_key: ColumnKey | str,
         original_value: str,
         adjusted_value: str,
-        source: str,
     ) -> ManifestPvAdjustment:
         return cls(
             term_key=ManifestTermKey.from_raw(column_key, original_value),
             adjusted_value=adjusted_value,
-            source=source,
         )
 
 

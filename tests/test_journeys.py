@@ -14,6 +14,7 @@ from tests.conftest import (
     create_harmonized_csv,
     create_manifest_for_file,
     create_manifest_with_manual_override,
+    store_test_completed_harmonization,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -249,9 +250,9 @@ async def test_manual_overrides_counted_in_summary(
     temp_storage: UploadStorage,
     sample_csv_path: Path,
 ) -> None:
-    """Manual overrides in manifest are correctly categorized in summary statistics."""
+    """Active reviewer overrides are categorized in current summary statistics."""
 
-    # Given: An uploaded file with a manifest containing manual overrides
+    # Given: An uploaded file with audit history and the corresponding active override
     upload_response = await app_client.post(
         "/stage-1/upload",
         files={"file": (sample_csv_path.name, sample_csv_path.read_bytes(), TEST_CSV_CONTENT_TYPE)},
@@ -262,6 +263,23 @@ async def test_manual_overrides_counted_in_summary(
     assert meta is not None
     create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"primary_diagnosis": "User Manual Override"}})
     create_manifest_with_manual_override(temp_storage, file_id, meta.saved_path)
+    save_response = await app_client.post(
+        "/stage-4/overrides",
+        json={
+            "file_id": file_id,
+            "overrides": {
+                "1": {
+                    "col_0000": {
+                        "ai_value": "AI Harmonized Value",
+                        "human_value": "User Manual Override",
+                        "original_value": "R001",
+                    }
+                }
+            },
+            "review_state": {},
+        },
+    )
+    assert save_response.status_code == 200
 
     # When: Summary is requested
     summary_response = await app_client.post(
@@ -293,9 +311,10 @@ async def test_download_returns_zip_with_csv(
     file_id = upload_response.json()["file_id"]
     meta = temp_storage.load(file_id)
     assert meta is not None
-    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {
+    harmonized_path = create_harmonized_csv(temp_storage, file_id, meta.saved_path, {
         0: {"primary_diagnosis": "Harmonized Value"},
     })
+    store_test_completed_harmonization(temp_storage, file_id, harmonized_path)
 
     # When: User requests download
     download_response = await app_client.post(

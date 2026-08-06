@@ -14,7 +14,6 @@ import {
 } from '/assets/shared/step-instruction-ui.js';
 import {
   STAGE_2_PAYLOAD_KEY,
-  STAGE_3_PAYLOAD_KEY,
   STAGE_3_JOB_KEY,
   isValidFileId,
   removeFromSession,
@@ -29,8 +28,8 @@ const NO_MAPPING_OPTION = config.noMappingLabel ?? 'No Mapping';
 const NO_MAP = null;
 const NO_MAP_OPTION_VALUE = '__none__';
 const stageThreeUrl = config.stageThreeUrl ?? '/stage-3';
+const harmonizeEndpoint = config.harmonizeEndpoint ?? '/stage-3/harmonize';
 const columnDetailBase = config.columnDetailBase ?? '/stage-2/column-detail';
-const mappingChoicesEndpoint = config.mappingChoicesEndpoint ?? '/stage-2/choices';
 const dataModelKey = config.dataModelKey ?? '';
 const externalVersionNumber = config.externalVersionNumber ?? null;
 
@@ -78,7 +77,6 @@ const RENAME_ONLY_SECTION_LABEL = 'Common data elements with no permissible valu
 const MSG_NO_ANALYSIS_DATA = 'No analysis data found. Upload a file on Stage 1 to begin.';
 const MSG_NO_COLUMNS = 'No columns to display.';
 const MSG_INVALID_FILE = 'Invalid file reference. Please restart the upload process.';
-const MSG_STORAGE_ERROR = 'Unable to prepare harmonization request. Please enable browser storage and retry.';
 const MSG_LOCKED_MAPPING =
   'These mappings created the current harmonized dataset. To change mappings, start over from upload.';
 const COMPLETE_STATUSES = new Set(['completed', 'succeeded', 'success', 'done']);
@@ -90,6 +88,7 @@ const rowsEl = document.getElementById('mappingRows');
 const emptyState = document.getElementById('mappingEmptyState');
 const harmonizeButton = document.getElementById('harmonizeButton');
 const harmonizeButtonText = harmonizeButton?.querySelector('.btn-3d-front');
+const harmonizeError = document.getElementById('harmonizeError');
 const takeoverEl = document.getElementById('takeover');
 const takeoverCardEl = document.getElementById('takeoverCard');
 const lockBanner = document.getElementById('mappingLockBanner');
@@ -135,10 +134,7 @@ const _completedJobForFile = (fileId) => {
   if (!fileId) return null;
   const job = readFromSession(STAGE_3_JOB_KEY);
   if (!job || !_isCompleteStatus(job.status)) return null;
-
-  const stageThreePayload = readFromSession(STAGE_3_PAYLOAD_KEY);
-  const jobFileId = job.file_id ?? stageThreePayload?.request?.file_id ?? null;
-  return jobFileId === fileId ? job : null;
+  return job.file_id === fileId ? job : null;
 };
 
 const _persistReviewChoices = () => {
@@ -1255,19 +1251,6 @@ document.addEventListener('keydown', (e) => {
 takeoverEl.querySelector('.takeover-backdrop').addEventListener('click', () => closeTakeover());
 
 /* ─── Harmonize submission ───────────────────────────────── */
-const _persistStageThreePayload = (body) => {
-  const payloadForStageThree = {
-    request: body,
-    context: {
-      fileName: state.payload?.file_name || 'Uploaded dataset',
-      totalRows: state.payload?.total_rows ?? null,
-      dataModelKey,
-      externalVersionNumber: state.payload?.external_version_number ?? externalVersionNumber,
-    },
-  };
-  return writeToSession(STAGE_3_PAYLOAD_KEY, payloadForStageThree);
-};
-
 const _verificationUrlForCompletedJob = () => {
   const serverUrl = state.completedJob?.next_stage_url;
   if (isSafeRelativeUrl(serverUrl)) return serverUrl;
@@ -1281,23 +1264,16 @@ const _returnToCompletedHarmonization = () => {
   window.location.assign(_verificationUrlForCompletedJob());
 };
 
-const _saveConfirmedMappingChoices = async (body) => {
-  try {
-    const response = await fetch(mappingChoicesEndpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        file_id: body.file_id,
-        manual_overrides: body.manual_overrides,
-        column_renames: body.column_renames,
-      }),
-    });
-    if (!response.ok) {
-      console.warn('Unable to save mapping choices before harmonization', response.status);
-    }
-  } catch (error) {
-    console.warn('Unable to save mapping choices before harmonization', error);
-  }
+const _showHarmonizeError = (message = '') => {
+  if (!harmonizeError) return;
+  harmonizeError.textContent = message;
+  harmonizeError.classList.toggle('hidden', !message);
+};
+
+const _resetHarmonizeButton = () => {
+  state.isSubmitting = false;
+  if (harmonizeButton) harmonizeButton.disabled = false;
+  if (harmonizeButtonText) harmonizeButtonText.textContent = HARMONIZE_BUTTON_LABEL;
 };
 
 const _submitHarmonize = async () => {
@@ -1307,6 +1283,7 @@ const _submitHarmonize = async () => {
     return;
   }
   state.isSubmitting = true;
+  _showHarmonizeError();
   if (harmonizeButton) harmonizeButton.disabled = true;
   if (harmonizeButtonText) harmonizeButtonText.textContent = 'Preparing…';
 
@@ -1314,10 +1291,13 @@ const _submitHarmonize = async () => {
   const columnRenames = _columnRenamesPayload();
   const fileId = state.payload.file_id;
   if (!isValidFileId(fileId)) {
-    state.isSubmitting = false;
-    if (harmonizeButton) harmonizeButton.disabled = false;
-    if (harmonizeButtonText) harmonizeButtonText.textContent = HARMONIZE_BUTTON_LABEL;
-    console.error(MSG_INVALID_FILE);
+    _resetHarmonizeButton();
+    _showHarmonizeError(MSG_INVALID_FILE);
+    return;
+  }
+  if (!isSafeRelativeUrl(stageThreeUrl)) {
+    _resetHarmonizeButton();
+    _showHarmonizeError('Unable to open the harmonization page. Please refresh and retry.');
     return;
   }
   const body = {
@@ -1327,29 +1307,34 @@ const _submitHarmonize = async () => {
     manual_overrides: overrides,
     column_renames: columnRenames,
   };
-  await _saveConfirmedMappingChoices(body);
+
+  let job;
+  try {
+    const response = await fetch(harmonizeEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    job = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(job.detail || 'Unable to start harmonization. Please try again.');
+    }
+    if (!job.job_id) {
+      throw new Error('The harmonization service did not return a job reference. Please try again.');
+    }
+  } catch (error) {
+    console.error(error);
+    _resetHarmonizeButton();
+    _showHarmonizeError(error.message || 'Unable to start harmonization. Please try again.');
+    return;
+  }
+
+  const jobForSession = { ...job, file_id: fileId };
   removeFromSession(STAGE_3_JOB_KEY);
-  const ok = _persistStageThreePayload({ ...body });
-  if (!ok) {
-    state.isSubmitting = false;
-    if (harmonizeButton) harmonizeButton.disabled = false;
-    if (harmonizeButtonText) harmonizeButtonText.textContent = HARMONIZE_BUTTON_LABEL;
-    console.error(MSG_STORAGE_ERROR);
-    return;
-  }
-  if (!isSafeRelativeUrl(stageThreeUrl)) {
-    state.isSubmitting = false;
-    if (harmonizeButton) harmonizeButton.disabled = false;
-    if (harmonizeButtonText) harmonizeButtonText.textContent = HARMONIZE_BUTTON_LABEL;
-    console.error('Invalid stage three URL');
-    return;
-  }
+  writeToSession(STAGE_3_JOB_KEY, jobForSession);
   const url = new URL(stageThreeUrl, window.location.origin);
   url.searchParams.set('file_id', fileId);
-  url.searchParams.set('data_model_key', dataModelKey);
-  if (body.external_version_number) {
-    url.searchParams.set('external_version_number', body.external_version_number);
-  }
+  url.searchParams.set('job_id', job.job_id);
   advanceMaxReachedStage('harmonize');
   window.location.assign(url.toString());
 };
