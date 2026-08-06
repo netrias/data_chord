@@ -16,8 +16,9 @@ data "aws_secretsmanager_secret" "netrias_api_key" {
 }
 
 locals {
-  name_prefix      = substr(lower(replace("${var.project_name}-${var.environment}", "_", "-")), 0, 32)
-  hosted_zone_name = trimsuffix(var.hosted_zone_name, ".")
+  name_prefix              = substr(lower(replace("${var.project_name}-${var.environment}", "_", "-")), 0, 32)
+  hosted_zone_name         = trimsuffix(var.hosted_zone_name, ".")
+  codebuild_connection_arn = var.codebuild_connection_id == "" ? "" : "arn:aws:codeconnections:${var.aws_region}:${var.expected_account_id}:connection/${var.codebuild_connection_id}"
   # Prefer a managed subdomain when the caller supplies a hosted zone but not a
   # final domain name; this keeps staging/prod setup small for internal deploys.
   use_managed_dns     = var.domain_name == "" && local.hosted_zone_name != ""
@@ -1115,14 +1116,14 @@ resource "aws_iam_role_policy" "application_build" {
         ]
         Resource = "*"
       }
-      ], var.codebuild_connection_arn == "" ? [] : [
+      ], local.codebuild_connection_arn == "" ? [] : [
       {
         Effect = "Allow"
         Action = [
           "codeconnections:GetConnection",
           "codeconnections:GetConnectionToken",
         ]
-        Resource = var.codebuild_connection_arn
+        Resource = local.codebuild_connection_arn
       },
     ])
   })
@@ -1188,7 +1189,7 @@ resource "aws_codebuild_project" "app_image" {
     buildspec = "infra/buildspec.yml"
 
     dynamic "auth" {
-      for_each = var.codebuild_connection_arn == "" ? [] : [var.codebuild_connection_arn]
+      for_each = local.codebuild_connection_arn == "" ? [] : [local.codebuild_connection_arn]
 
       content {
         type     = "CODECONNECTIONS"

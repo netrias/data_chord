@@ -293,17 +293,17 @@ variable "codebuild_source_location" {
   default     = "https://github.com/netrias/data_chord.git"
 }
 
-variable "codebuild_connection_arn" {
-  description = "Optional CodeConnections ARN used by CodeBuild to read the GitHub source repository."
+variable "codebuild_connection_id" {
+  description = "Optional CodeConnections UUID used by CodeBuild to read GitHub. The ARN is derived from the target account and region."
   type        = string
   default     = ""
 
   validation {
     condition = (
-      var.codebuild_connection_arn == "" ||
-      can(regex("^arn:aws:codeconnections:${var.aws_region}:${var.expected_account_id}:connection/[0-9a-f-]+$", var.codebuild_connection_arn))
+      var.codebuild_connection_id == "" ||
+      can(regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", var.codebuild_connection_id))
     )
-    error_message = "codebuild_connection_arn must be empty or a CodeConnections ARN in the target account and region."
+    error_message = "codebuild_connection_id must be empty or a lowercase UUID."
   }
 }
 
