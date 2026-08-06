@@ -293,6 +293,20 @@ variable "codebuild_source_location" {
   default     = "https://github.com/netrias/data_chord.git"
 }
 
+variable "codebuild_connection_arn" {
+  description = "Optional CodeConnections ARN used by CodeBuild to read the GitHub source repository."
+  type        = string
+  default     = ""
+
+  validation {
+    condition = (
+      var.codebuild_connection_arn == "" ||
+      can(regex("^arn:aws:codeconnections:${var.aws_region}:${var.expected_account_id}:connection/[0-9a-f-]+$", var.codebuild_connection_arn))
+    )
+    error_message = "codebuild_connection_arn must be empty or a CodeConnections ARN in the target account and region."
+  }
+}
+
 variable "cognito_domain_prefix" {
   description = "Optional globally unique Cognito hosted UI domain prefix. Leave empty to use a generated prefix."
   type        = string

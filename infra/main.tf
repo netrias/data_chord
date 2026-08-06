@@ -1093,7 +1093,7 @@ resource "aws_iam_role_policy" "application_build" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
+    Statement = concat([
       {
         Effect = "Allow"
         Action = [
@@ -1115,7 +1115,16 @@ resource "aws_iam_role_policy" "application_build" {
         ]
         Resource = "*"
       }
-    ]
+      ], var.codebuild_connection_arn == "" ? [] : [
+      {
+        Effect = "Allow"
+        Action = [
+          "codeconnections:GetConnection",
+          "codeconnections:GetConnectionToken",
+        ]
+        Resource = var.codebuild_connection_arn
+      },
+    ])
   })
 }
 
@@ -1177,6 +1186,15 @@ resource "aws_codebuild_project" "app_image" {
     type      = var.codebuild_source_type
     location  = var.codebuild_source_location
     buildspec = "infra/buildspec.yml"
+
+    dynamic "auth" {
+      for_each = var.codebuild_connection_arn == "" ? [] : [var.codebuild_connection_arn]
+
+      content {
+        type     = "CODECONNECTIONS"
+        resource = auth.value
+      }
+    }
   }
 
   tags = local.common_tags

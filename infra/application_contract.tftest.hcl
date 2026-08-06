@@ -103,6 +103,37 @@ run "application_role_names_are_owned_by_data_chord" {
   }
 }
 
+run "codebuild_uses_the_configured_github_connection" {
+  command = plan
+
+  variables {
+    codebuild_connection_arn = "arn:aws:codeconnections:us-east-2:084828580051:connection/00000000-0000-0000-0000-000000000000"
+  }
+
+  assert {
+    condition = contains(
+      jsondecode(aws_iam_role_policy.application_build.policy).Statement,
+      {
+        Action = [
+          "codeconnections:GetConnection",
+          "codeconnections:GetConnectionToken",
+        ]
+        Effect   = "Allow"
+        Resource = var.codebuild_connection_arn
+      },
+    )
+    error_message = "The CodeBuild role must be allowed to use the configured source connection."
+  }
+
+  assert {
+    condition = (
+      aws_codebuild_project.app_image.source[0].auth[0].type == "CODECONNECTIONS" &&
+      aws_codebuild_project.app_image.source[0].auth[0].resource == var.codebuild_connection_arn
+    )
+    error_message = "The CodeBuild source must use the configured source connection."
+  }
+}
+
 run "endpoint_resources_are_absent_without_shared_endpoint" {
   command = plan
 
