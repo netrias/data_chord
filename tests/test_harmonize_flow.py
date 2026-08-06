@@ -10,9 +10,9 @@ import pytest
 from httpx import AsyncClient
 
 from src.domain.harmonization import HarmonizeStatus
-from src.domain.manifest import ColumnMappingManifest, ManifestPayload
+from src.domain.manifest import ColumnMappingManifest
 from src.integrations.netrias_harmonize import HarmonizeService
-from tests.conftest import TEST_TARGET_SCHEMA, MockHarmonizeResult, upload_and_analyze
+from tests.conftest import TEST_TARGET_SCHEMA, MockHarmonizeResult, confirm_mapping_choices, upload_and_analyze
 
 
 def test_harmonize_status_values_remain_stable() -> None:
@@ -36,12 +36,7 @@ async def test_harmonize_returns_job_id(
     # When: Harmonization is triggered
     response = await app_client.post(
         "/stage-3/harmonize",
-        json={
-            "file_id": file_id,
-            "data_model_key": TEST_TARGET_SCHEMA,
-            "external_version_number": "11.0.4",
-                "manual_overrides": {},
-        },
+        json={"file_id": file_id},
     )
 
     # Then: Response contains a job_id for tracking progress
@@ -63,12 +58,7 @@ async def test_harmonize_returns_status(
     # When: Harmonization is triggered
     response = await app_client.post(
         "/stage-3/harmonize",
-        json={
-            "file_id": file_id,
-            "data_model_key": TEST_TARGET_SCHEMA,
-            "external_version_number": "11.0.4",
-                "manual_overrides": {},
-        },
+        json={"file_id": file_id},
     )
 
     # Then: Response contains status indicating success
@@ -96,17 +86,13 @@ async def test_harmonize_with_manual_overrides(
 
     # Given: An uploaded and analyzed CSV file with manual column overrides
     file_id = await upload_and_analyze(app_client, sample_csv_path)
-    overrides = {"primary_diagnosis": "primary_diagnosis"}
+    overrides = {"col_0000": "primary_diagnosis"}
+    await confirm_mapping_choices(app_client, file_id, manual_overrides=overrides)
 
     # When: Harmonization is triggered with manual overrides
     response = await app_client.post(
         "/stage-3/harmonize",
-        json={
-            "file_id": file_id,
-            "data_model_key": TEST_TARGET_SCHEMA,
-            "external_version_number": "11.0.4",
-                "manual_overrides": overrides,
-        },
+        json={"file_id": file_id},
     )
 
     # Then: Harmonization succeeds with the manual overrides applied
@@ -127,50 +113,10 @@ async def test_harmonize_uses_stored_mapping_manifest_when_request_omits_manifes
     # When: the browser triggers harmonization without carrying the manifest body
     response = await app_client.post(
         "/stage-3/harmonize",
-        json={
-            "file_id": file_id,
-            "data_model_key": TEST_TARGET_SCHEMA,
-            "external_version_number": "11.0.4",
-                "manual_overrides": {},
-        },
+        json={"file_id": file_id},
     )
 
     # Then: harmonization uses the stored column-keyed manifest
-    assert response.status_code == 200
-    sdk_manifest = mock_netrias_client.harmonize.call_args.kwargs["manifest"]
-    assert sdk_manifest["column_mappings"]["col_0000"]["cde_key"] == "primary_diagnosis"
-    assert sdk_manifest["column_mappings"]["col_0001"]["cde_key"] == "therapeutic_agents"
-
-
-async def test_harmonize_prefers_stored_mapping_manifest_over_stale_request_manifest(
-    app_client: AsyncClient,
-    sample_csv_path: Path,
-    mock_netrias_client: MagicMock,
-) -> None:
-    """The durable analysis result is the backend source of truth for mappings."""
-
-    # Given: Stage 1 has saved the current mapping manifest, and the request carries stale browser data
-    file_id = await upload_and_analyze(app_client, sample_csv_path)
-    stale_manifest: ManifestPayload = {
-        "column_mappings": {
-            "col_0000": {"column_name": "primary_diagnosis", "cde_key": "therapeutic_agents", "cde_id": 1},
-        },
-    }
-    assert not mock_netrias_client.harmonize.called
-
-    # When: harmonization is triggered with the stale manifest still present in the request
-    response = await app_client.post(
-        "/stage-3/harmonize",
-        json={
-            "file_id": file_id,
-            "data_model_key": TEST_TARGET_SCHEMA,
-            "external_version_number": "11.0.4",
-                "manual_overrides": {},
-            "manifest": stale_manifest,
-        },
-    )
-
-    # Then: Stage 3 ignores the stale copy and uses the manifest saved after analysis
     assert response.status_code == 200
     sdk_manifest = mock_netrias_client.harmonize.call_args.kwargs["manifest"]
     assert sdk_manifest["column_mappings"]["col_0000"]["cde_key"] == "primary_diagnosis"
@@ -186,12 +132,7 @@ async def test_harmonize_file_not_found(app_client: AsyncClient) -> None:
     # When: Harmonization is triggered with invalid file_id
     response = await app_client.post(
         "/stage-3/harmonize",
-        json={
-            "file_id": invalid_file_id,
-            "data_model_key": TEST_TARGET_SCHEMA,
-            "external_version_number": "11.0.4",
-                "manual_overrides": {},
-        },
+        json={"file_id": invalid_file_id},
     )
 
     # Then: 404 Not Found response
@@ -210,12 +151,7 @@ async def test_harmonize_returns_next_stage_url(
     # When: Harmonization is triggered
     response = await app_client.post(
         "/stage-3/harmonize",
-        json={
-            "file_id": file_id,
-            "data_model_key": TEST_TARGET_SCHEMA,
-            "external_version_number": "11.0.4",
-                "manual_overrides": {},
-        },
+        json={"file_id": file_id},
     )
 
     # Then: Response contains URL to stage 4 (review)
@@ -257,8 +193,8 @@ async def test_failed_retry_does_not_reopen_previous_successful_artifacts(
 
     assert failed.status_code == 200
     assert failed.json()["status"] == "failed"
-    assert (await app_client.post("/stage-4/rows", json={"file_id": file_id})).status_code == 404
-    assert (await app_client.post("/stage-5/download", json={"file_id": file_id})).status_code == 404
+    assert (await app_client.post("/stage-4/rows", json={"file_id": file_id})).status_code == 409
+    assert (await app_client.post("/stage-5/download", json={"file_id": file_id})).status_code == 409
 
 
 def test_harmonize_requires_a_provider_client() -> None:

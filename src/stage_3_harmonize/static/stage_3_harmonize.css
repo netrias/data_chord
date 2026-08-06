@@ -13,13 +13,6 @@
   margin: 0;
 }
 
-.stage-job-id {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-  font-size: 0.8rem;
-  color: var(--gray-500);
-  margin: var(--space-2) 0 var(--space-4) 0;
-}
-
 /* Loading state - uses card system */
 .loading-state {
   display: flex;

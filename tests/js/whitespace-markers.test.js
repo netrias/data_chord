@@ -7,10 +7,8 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import {
-  escapeHtml,
-  formatWhitespaceMarkers,
-} from '../../src/stage_4_review_results/static/shared_review_utils.js';
+import { escapeHtml } from '../../src/shared/static/html.js';
+import { formatWhitespaceMarkers } from '../../src/stage_4_review_results/static/shared_review_utils.js';
 
 const MARKER = '<span class="ws-marker">\u00B7</span>';
 

@@ -245,7 +245,7 @@ const _sourceLabel = (source) => {
     case 'source': return 'Source value';
     case 'data_chord':
     case 'ai':
-    case 'system': return 'Data Chord';
+      return 'Data Chord';
     case 'reviewer':
     case 'user': return 'Reviewer';
     default: return 'Unknown';

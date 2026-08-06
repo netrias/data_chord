@@ -104,6 +104,19 @@ def get_expected_alb_arn() -> str | None:
 
 
 def validate_required_config() -> None:
-    """Call at startup or Docker build to fail fast on missing config."""
-    if not get_netrias_api_key():
+    """Validate all runtime configuration before service clients are created."""
+    api_key = get_netrias_api_key()
+    if api_key is None or not api_key.strip():
         raise ConfigurationError(f"{_NETRIAS_API_KEY_VAR} environment variable is required")
+
+    storage_backend = get_storage_backend()
+    if storage_backend is StorageBackend.S3:
+        bucket = get_workflow_s3_bucket()
+        if bucket is None or not bucket.strip():
+            raise ConfigurationError(
+                f"{_DATA_CHORD_S3_BUCKET_VAR} is required when "
+                f"{_DATA_CHORD_STORAGE_VAR}={StorageBackend.S3.value}"
+            )
+
+    get_netrias_environment_name()
+    get_netrias_timeout_seconds()

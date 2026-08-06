@@ -38,7 +38,6 @@ from src.domain.workflow_state import WorkflowState
 from src.integrations.netrias_mapping import MappingDiscoveryUnavailableError
 from src.observability.events import (
     WorkflowEvent,
-    WorkflowEventName,
     WorkflowOperation,
     WorkflowOutcome,
     WorkflowStage,
@@ -49,7 +48,7 @@ from src.persistence.workflow_artifacts import (
     save_upload_artifacts,
     save_upload_metadata,
 )
-from src.persistence.workflow_state_store import create_workflow_record, save_initial_workflow_state
+from src.persistence.workflow_state_store import save_initial_workflow_state
 from src.storage import (
     UnsupportedUploadError,
     UploadedFileMeta,
@@ -84,7 +83,6 @@ async def render_stage_one(request: Request) -> HTMLResponse:
     context = {
         "request": request,
         "ui_constraints": describe_constraints(_upload_constraints),
-        "default_data_model_key": None,
     }
     return _templates.TemplateResponse(request, "stage_1_upload.html", context)
 
@@ -118,7 +116,6 @@ async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadRespon
     dataset_workflow_id = new_dataset_workflow_id()
     log_workflow_event(
         WorkflowEvent(
-            event_name=WorkflowEventName.UPLOAD_STARTED,
             stage=WorkflowStage.STAGE_1,
             operation=WorkflowOperation.UPLOAD,
             outcome=WorkflowOutcome.STARTED,
@@ -129,11 +126,7 @@ async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadRespon
     )
     try:
         meta = await storage.store(file, dataset_workflow_id)
-        create_workflow_record(
-            dependencies.get_workflow_storage(),
-            user,
-            meta.dataset_workflow_id,
-        )
+        dependencies.get_workflow_storage().create_workflow(user, meta.dataset_workflow_id)
         save_upload_artifacts(
             dependencies.get_workflow_storage(),
             user,
@@ -151,7 +144,6 @@ async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadRespon
         raise
     log_workflow_event(
         WorkflowEvent(
-            event_name=WorkflowEventName.UPLOAD_COMPLETED,
             stage=WorkflowStage.STAGE_1,
             operation=WorkflowOperation.UPLOAD,
             outcome=WorkflowOutcome.COMPLETED,
@@ -189,7 +181,6 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     user = dependencies.get_user_context()
     log_workflow_event(
         WorkflowEvent(
-            event_name=WorkflowEventName.ANALYZE_STARTED,
             stage=WorkflowStage.STAGE_1,
             operation=WorkflowOperation.ANALYZE,
             outcome=WorkflowOutcome.STARTED,
@@ -245,7 +236,6 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     try:
         total_rows, columns, profiles = await analysis_task
         mapping_manifest = await discovery_task
-        manifest = mapping_manifest.to_payload()
         await reference_task
     except Exception as exc:
         _log_analyze_failed(user, payload.file_id, type(exc).__name__)
@@ -273,7 +263,6 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     _log_analysis_results(payload.file_id, total_rows, columns, mapping_manifest)
     log_workflow_event(
         WorkflowEvent(
-            event_name=WorkflowEventName.ANALYZE_COMPLETED,
             stage=WorkflowStage.STAGE_1,
             operation=WorkflowOperation.ANALYZE,
             outcome=WorkflowOutcome.COMPLETED,
@@ -296,10 +285,6 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
         columns=columns,
         column_summaries=column_summaries,
         cde_targets=cde_targets,
-        next_stage="mapping",
-        next_step_hint="Review AI-suggested column mappings once ready.",
-        manual_overrides={},
-        manifest=manifest,
     )
 
 
@@ -351,7 +336,6 @@ async def _discover_mappings(
     user = dependencies.get_user_context()
     log_workflow_event(
         WorkflowEvent(
-            event_name=WorkflowEventName.MAPPING_STARTED,
             stage=WorkflowStage.STAGE_1,
             operation=WorkflowOperation.MAPPING,
             outcome=WorkflowOutcome.STARTED,
@@ -373,7 +357,6 @@ async def _discover_mappings(
         )
         log_workflow_event(
             WorkflowEvent(
-                event_name=WorkflowEventName.MAPPING_COMPLETED,
                 stage=WorkflowStage.STAGE_1,
                 operation=WorkflowOperation.MAPPING,
                 outcome=WorkflowOutcome.COMPLETED,
@@ -490,7 +473,6 @@ def _log_analysis_results(
 def _log_upload_failed(user: UserContext, file_id: str, error_type: str) -> None:
     log_workflow_event(
         WorkflowEvent(
-            event_name=WorkflowEventName.UPLOAD_FAILED,
             stage=WorkflowStage.STAGE_1,
             operation=WorkflowOperation.UPLOAD,
             outcome=WorkflowOutcome.FAILED,
@@ -504,7 +486,6 @@ def _log_upload_failed(user: UserContext, file_id: str, error_type: str) -> None
 def _log_analyze_failed(user: UserContext, file_id: str, error_type: str) -> None:
     log_workflow_event(
         WorkflowEvent(
-            event_name=WorkflowEventName.ANALYZE_FAILED,
             stage=WorkflowStage.STAGE_1,
             operation=WorkflowOperation.ANALYZE,
             outcome=WorkflowOutcome.FAILED,
@@ -518,7 +499,6 @@ def _log_analyze_failed(user: UserContext, file_id: str, error_type: str) -> Non
 def _log_mapping_failed(user: UserContext, file_id: str, error_type: str) -> None:
     log_workflow_event(
         WorkflowEvent(
-            event_name=WorkflowEventName.MAPPING_FAILED,
             stage=WorkflowStage.STAGE_1,
             operation=WorkflowOperation.MAPPING,
             outcome=WorkflowOutcome.FAILED,

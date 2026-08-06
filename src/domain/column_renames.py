@@ -19,10 +19,6 @@ class ColumnRenameSet:
         object.__setattr__(self, "renames", MappingProxyType(dict(self.renames)))
 
     @classmethod
-    def empty(cls) -> ColumnRenameSet:
-        return cls(renames={})
-
-    @classmethod
     def from_dict(cls, renames: Mapping[str, str]) -> ColumnRenameSet:
         return cls(
             renames={

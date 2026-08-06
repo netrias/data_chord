@@ -39,7 +39,10 @@ const _changesFor = (rowCount, headers) => {
   const changes = {};
   for (let row = 0; row < rowCount; row += 1) {
     changes[row] = Object.fromEntries(
-      headers.map((header) => [header, `${header}_harmonized_${row + 1}`]),
+      headers.map((header, index) => [
+        `col_${String(index).padStart(4, '0')}`,
+        `${header}_harmonized_${row + 1}`,
+      ]),
     );
   }
   return changes;

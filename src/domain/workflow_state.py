@@ -24,7 +24,7 @@ _FIELD_MAPPING_MANIFEST: Final = "mapping_manifest"
 
 
 class WorkflowStateSchemaError(Exception):
-    """Raised when a current or newer workflow-state record cannot be decoded safely."""
+    """Raised when a stored workflow state is not the current canonical schema."""
 
 
 @dataclass(frozen=True)
@@ -47,28 +47,36 @@ class ConfirmedMappingChoices:
 
     @classmethod
     def from_store(cls, payload: Mapping[str, object]) -> ConfirmedMappingChoices | None:
+        overrides_present = _FIELD_MANUAL_OVERRIDES in payload
+        renames_present = _FIELD_COLUMN_RENAMES in payload
+        if not overrides_present and not renames_present:
+            return None
+        if not overrides_present or not renames_present:
+            raise WorkflowStateSchemaError("workflow state has invalid mapping choices")
+
         raw_overrides = payload.get(_FIELD_MANUAL_OVERRIDES)
         raw_renames = payload.get(_FIELD_COLUMN_RENAMES)
-        if raw_overrides is None and raw_renames is None:
-            return None
         if not isinstance(raw_overrides, Mapping) or not isinstance(raw_renames, Mapping):
-            return None
+            raise WorkflowStateSchemaError("workflow state has invalid mapping choices")
 
         manual_overrides: dict[str, str | None] = {}
         for column_key, cde_key in raw_overrides.items():
             if not isinstance(column_key, str):
-                return None
+                raise WorkflowStateSchemaError("workflow state has invalid mapping choices")
             if cde_key is not None and not isinstance(cde_key, str):
-                return None
+                raise WorkflowStateSchemaError("workflow state has invalid mapping choices")
             manual_overrides[column_key] = cde_key
 
         column_renames: dict[str, str] = {}
         for column_key, output_name in raw_renames.items():
             if not isinstance(column_key, str) or not isinstance(output_name, str):
-                return None
+                raise WorkflowStateSchemaError("workflow state has invalid mapping choices")
             column_renames[column_key] = output_name
 
-        return cls.from_raw(manual_overrides, column_renames)
+        try:
+            return cls.from_raw(manual_overrides, column_renames)
+        except ValueError as exc:
+            raise WorkflowStateSchemaError("workflow state has invalid mapping choices") from exc
 
     def to_store(self) -> dict[str, object]:
         return {
@@ -83,7 +91,7 @@ class WorkflowState:
 
     file_id: DatasetWorkflowId
     data_model_version: DataModelVersionReference
-    mapping_manifest: ColumnMappingManifest | None = None
+    mapping_manifest: ColumnMappingManifest
     mapping_choices: ConfirmedMappingChoices | None = None
 
     @classmethod
@@ -91,7 +99,7 @@ class WorkflowState:
         cls,
         file_id: DatasetWorkflowId | str,
         data_model_version: DataModelVersionReference,
-        mapping_manifest: ColumnMappingManifest | None = None,
+        mapping_manifest: ColumnMappingManifest,
     ) -> WorkflowState:
         return cls(
             file_id=dataset_workflow_id_from_value(file_id),
@@ -122,33 +130,34 @@ class WorkflowState:
             _FIELD_DATA_MODEL_KEY: self.data_model_version.data_model_key,
             _FIELD_EXTERNAL_VERSION_NUMBER: self.data_model_version.external_version_number,
         }
-        if self.mapping_manifest is not None:
-            payload[_FIELD_MAPPING_MANIFEST] = self.mapping_manifest.to_payload()
+        payload[_FIELD_MAPPING_MANIFEST] = self.mapping_manifest.to_payload()
         if self.mapping_choices is not None:
             payload.update(self.mapping_choices.to_store())
         return payload
 
     @classmethod
-    def from_store(cls, payload: object, file_id: DatasetWorkflowId | str) -> WorkflowState | None:
+    def from_store(cls, payload: object, file_id: DatasetWorkflowId | str) -> WorkflowState:
         if not isinstance(payload, Mapping):
-            return None
+            raise WorkflowStateSchemaError("workflow state must be an object")
         dataset_workflow_id = dataset_workflow_id_from_value(file_id)
 
-        schema_version = payload.get(_FIELD_SCHEMA_VERSION, 1)
-        if isinstance(schema_version, bool) or not isinstance(schema_version, int) or schema_version < 1:
+        schema_version = payload.get(_FIELD_SCHEMA_VERSION)
+        if isinstance(schema_version, bool) or not isinstance(schema_version, int):
             raise WorkflowStateSchemaError("workflow state has an invalid schema version")
-        if schema_version > _CURRENT_SCHEMA_VERSION:
+        if schema_version != _CURRENT_SCHEMA_VERSION:
             raise WorkflowStateSchemaError(f"workflow state schema {schema_version} is not supported")
 
         stored_file_id = payload.get(_FIELD_FILE_ID)
         data_model_key = payload.get(_FIELD_DATA_MODEL_KEY)
-        if stored_file_id != dataset_workflow_id or not isinstance(data_model_key, str):
-            return None
+        if stored_file_id != dataset_workflow_id:
+            raise WorkflowStateSchemaError("workflow state file identity does not match")
+        if not isinstance(data_model_key, str):
+            raise WorkflowStateSchemaError("workflow state is missing its data model key")
         data_model_version = _data_model_version_from_store(data_model_key, payload)
         if data_model_version is None:
-            return None
+            raise WorkflowStateSchemaError("workflow state has an invalid data model version")
 
-        mapping_manifest = _mapping_manifest_from_store(payload, schema_version)
+        mapping_manifest = _mapping_manifest_from_store(payload)
         return cls(
             file_id=dataset_workflow_id,
             data_model_version=data_model_version,
@@ -159,13 +168,10 @@ class WorkflowState:
 
 def _mapping_manifest_from_store(
     payload: Mapping[str, object],
-    schema_version: int,
-) -> ColumnMappingManifest | None:
+) -> ColumnMappingManifest:
     stored_manifest = payload.get(_FIELD_MAPPING_MANIFEST)
     if stored_manifest is None:
-        if schema_version >= _CURRENT_SCHEMA_VERSION:
-            raise WorkflowStateSchemaError("workflow state is missing mapping_manifest")
-        return None
+        raise WorkflowStateSchemaError("workflow state is missing mapping_manifest")
     try:
         return ColumnMappingManifest.from_payload_strict(stored_manifest)
     except InvalidMappingManifestError as exc:

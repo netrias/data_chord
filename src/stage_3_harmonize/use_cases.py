@@ -9,24 +9,19 @@ from uuid import uuid4
 
 from src.api.schemas import HarmonizeRequest, HarmonizeResponse
 from src.domain.harmonization import HarmonizeStatus
-from src.domain.manifest import ColumnMappingManifest, InvalidMappingManifestError
-from src.domain.workflow_state import ConfirmedMappingChoices, WorkflowState
-from src.persistence.workflow_artifacts import load_mapping_manifest, load_upload_artifact
+from src.persistence.harmonization_job_store import (
+    HarmonizationJobConflictError,
+    HarmonizationJobState,
+    HarmonizationJobUnreadableError,
+    LoadedHarmonizationJob,
+    load_harmonization_job,
+    save_harmonization_job,
+)
+from src.persistence.workflow_artifacts import load_upload_artifact
 from src.persistence.workflow_state_store import (
     LoadedWorkflowState,
-    WorkflowStateConflictError,
     WorkflowStateUnreadableError,
     load_workflow_state,
-    save_confirmed_mapping_choices_to_state,
-    save_initial_workflow_state,
-)
-from src.stage_3_harmonize.job_state import (
-    LoadedStageThreeJobState,
-    StageThreeJobConflictError,
-    StageThreeJobState,
-    StageThreeJobUnreadableError,
-    load_stage_three_job_state,
-    save_stage_three_job_state,
 )
 from src.storage import UploadStorage, UserContext, WorkflowStorage
 
@@ -51,7 +46,7 @@ class StaleStageThreeWorkerError(Exception):
 
 @dataclass(frozen=True)
 class HarmonizationStart:
-    loaded_job: LoadedStageThreeJobState
+    loaded_job: LoadedHarmonizationJob
     loaded_state: LoadedWorkflowState
     should_run: bool
 
@@ -62,32 +57,30 @@ def start_harmonization(
     workflow_storage: WorkflowStorage,
     user: UserContext,
     payload: HarmonizeRequest,
-    next_stage_url: str,
 ) -> HarmonizationStart:
-    """Persist choices and an accepted run before the endpoint returns success."""
+    """Persist an accepted run before the endpoint returns success."""
     if load_upload_artifact(upload_storage, workflow_storage, user, payload.file_id) is None:
         raise HarmonizationWorkflowNotFoundError(payload.file_id)
 
-    loaded_state = _load_or_seed_workflow_state(
-        upload_storage=upload_storage,
+    loaded_state = _load_current_workflow_state(
         workflow_storage=workflow_storage,
         user=user,
         payload=payload,
     )
     try:
-        existing = load_stage_three_job_state(workflow_storage, user, payload.file_id)
-    except StageThreeJobUnreadableError as exc:
+        existing = load_harmonization_job(workflow_storage, user, payload.file_id)
+    except HarmonizationJobUnreadableError as exc:
         raise HarmonizationWorkflowUnreadableError(payload.file_id) from exc
 
     if existing is not None and existing.job.lease_expired():
         try:
-            existing = save_stage_three_job_state(
+            existing = save_harmonization_job(
                 workflow_storage,
                 user,
                 existing.job.interrupted(),
                 expected_version=existing.version,
             )
-        except StageThreeJobConflictError as exc:
+        except HarmonizationJobConflictError as exc:
             raise HarmonizationStartConflictError(payload.file_id) from exc
 
     if existing is not None and existing.job.is_active():
@@ -96,21 +89,20 @@ def start_harmonization(
         raise HarmonizationStartConflictError(payload.file_id)
 
     polling_job_id = uuid4().hex
-    job = StageThreeJobState.queued(
+    job = HarmonizationJobState.queued(
         polling_job_id=polling_job_id,
         file_id=str(payload.file_id),
         plan_version=loaded_state.version.value,
         worker_id=uuid4().hex,
-        next_stage_url=next_stage_url,
     )
     try:
-        loaded_job = save_stage_three_job_state(
+        loaded_job = save_harmonization_job(
             workflow_storage,
             user,
             job,
             expected_version=existing.version if existing is not None else None,
         )
-    except StageThreeJobConflictError as exc:
+    except HarmonizationJobConflictError as exc:
         raise HarmonizationStartConflictError(payload.file_id) from exc
     return HarmonizationStart(loaded_job, loaded_state, should_run=True)
 
@@ -121,24 +113,24 @@ def load_authorized_job(
     user: UserContext,
     file_id: str,
     requested_job_id: str,
-) -> LoadedStageThreeJobState | None:
+) -> LoadedHarmonizationJob | None:
     """Authorize through durable storage and recover expired process-owned runs."""
     try:
-        loaded = load_stage_three_job_state(workflow_storage, user, file_id)
-    except StageThreeJobUnreadableError as exc:
+        loaded = load_harmonization_job(workflow_storage, user, file_id)
+    except HarmonizationJobUnreadableError as exc:
         raise HarmonizationWorkflowUnreadableError(file_id) from exc
     if loaded is None or not loaded.job.matches_request(requested_job_id):
         return None
     if not loaded.job.lease_expired():
         return loaded
     try:
-        return save_stage_three_job_state(
+        return save_harmonization_job(
             workflow_storage,
             user,
             loaded.job.interrupted(),
             expected_version=loaded.version,
         )
-    except StageThreeJobConflictError as exc:
+    except HarmonizationJobConflictError as exc:
         raise HarmonizationStartConflictError(file_id) from exc
 
 
@@ -149,14 +141,14 @@ class RunAuthority:
         self,
         workflow_storage: WorkflowStorage,
         user: UserContext,
-        accepted_job: StageThreeJobState,
+        accepted_job: HarmonizationJobState,
     ) -> None:
         self._workflow_storage = workflow_storage
         self._user = user
         self._accepted_job = accepted_job
 
-    def require_current(self) -> LoadedStageThreeJobState:
-        loaded = load_stage_three_job_state(
+    def require_current(self) -> LoadedHarmonizationJob:
+        loaded = load_harmonization_job(
             self._workflow_storage,
             self._user,
             self._accepted_job.file_id,
@@ -180,7 +172,7 @@ async def heartbeat_stage_three_job(
     *,
     workflow_storage: WorkflowStorage,
     user: UserContext,
-    accepted_job: StageThreeJobState,
+    accepted_job: HarmonizationJobState,
     stop: asyncio.Event,
 ) -> None:
     """Extend the process-owned lease while the provider operation is alive."""
@@ -190,17 +182,17 @@ async def heartbeat_stage_three_job(
             return
         except TimeoutError:
             pass
-        loaded = load_stage_three_job_state(workflow_storage, user, accepted_job.file_id)
+        loaded = load_harmonization_job(workflow_storage, user, accepted_job.file_id)
         if loaded is None or not _same_worker(loaded.job, accepted_job) or not loaded.job.is_active():
             return
         try:
-            save_stage_three_job_state(
+            save_harmonization_job(
                 workflow_storage,
                 user,
                 loaded.job.with_heartbeat(),
                 expected_version=loaded.version,
             )
-        except StageThreeJobConflictError:
+        except HarmonizationJobConflictError:
             return
 
 
@@ -208,10 +200,9 @@ def complete_stage_three_job(
     *,
     workflow_storage: WorkflowStorage,
     user: UserContext,
-    accepted_job: StageThreeJobState,
+    accepted_job: HarmonizationJobState,
     response: HarmonizeResponse,
-    next_stage_url: str,
-) -> LoadedStageThreeJobState:
+) -> LoadedHarmonizationJob:
     authority = RunAuthority(workflow_storage, user, accepted_job)
     loaded = authority.require_current()
     authority.require_plan_current()
@@ -220,19 +211,18 @@ def complete_stage_three_job(
         job_id=response.job_id,
         status=response.status,
         detail=_safe_detail(response.status, response.detail),
-        next_stage_url=next_stage_url,
         job_id_available=response.job_id_available,
         manifest_summary=response.manifest_summary,
         lease_expires_at=datetime.now(UTC),
     )
     try:
-        return save_stage_three_job_state(
+        return save_harmonization_job(
             workflow_storage,
             user,
             completed,
             expected_version=loaded.version,
         )
-    except StageThreeJobConflictError as exc:
+    except HarmonizationJobConflictError as exc:
         raise StaleStageThreeWorkerError(accepted_job.polling_job_id) from exc
 
 
@@ -240,8 +230,7 @@ def fail_stage_three_job(
     *,
     workflow_storage: WorkflowStorage,
     user: UserContext,
-    accepted_job: StageThreeJobState,
-    next_stage_url: str,
+    accepted_job: HarmonizationJobState,
 ) -> None:
     try:
         loaded = RunAuthority(workflow_storage, user, accepted_job).require_current()
@@ -249,79 +238,39 @@ def fail_stage_three_job(
             loaded.job,
             status=HarmonizeStatus.FAILED,
             detail="Harmonization failed. Please retry.",
-            next_stage_url=next_stage_url,
             job_id_available=False,
             lease_expires_at=datetime.now(UTC),
         )
-        save_stage_three_job_state(
+        save_harmonization_job(
             workflow_storage,
             user,
             failed,
             expected_version=loaded.version,
         )
-    except (StageThreeJobConflictError, StaleStageThreeWorkerError):
+    except (HarmonizationJobConflictError, StaleStageThreeWorkerError):
         return
 
 
-def _load_or_seed_workflow_state(
+def _load_current_workflow_state(
     *,
-    upload_storage: UploadStorage,
     workflow_storage: WorkflowStorage,
     user: UserContext,
     payload: HarmonizeRequest,
 ) -> LoadedWorkflowState:
     try:
-        loaded = load_workflow_state(
-            workflow_storage,
-            user,
-            payload.file_id,
-            legacy_upload_storage=upload_storage,
-        )
+        loaded = load_workflow_state(workflow_storage, user, payload.file_id)
     except WorkflowStateUnreadableError as exc:
         raise HarmonizationWorkflowUnreadableError(payload.file_id) from exc
 
     if loaded is None:
-        manifest_payload = load_mapping_manifest(upload_storage, workflow_storage, user, payload.file_id)
-        manifest_payload = manifest_payload or payload.manifest
-        if manifest_payload is None:
-            raise HarmonizationWorkflowNotFoundError(payload.file_id)
-        try:
-            manifest = ColumnMappingManifest.from_payload_strict(manifest_payload)
-        except InvalidMappingManifestError as exc:
-            raise HarmonizationWorkflowUnreadableError(payload.file_id) from exc
-        try:
-            data_model_version = payload.data_model_version()
-        except ValueError as exc:
-            raise HarmonizationWorkflowNotFoundError(payload.file_id) from exc
-        state = WorkflowState.from_data_model_version(
-            payload.file_id,
-            data_model_version,
-            manifest,
-        ).with_mapping_choices(
-            ConfirmedMappingChoices.from_raw(payload.manual_overrides, payload.column_renames)
-        )
-        try:
-            return save_initial_workflow_state(workflow_storage, user, state)
-        except WorkflowStateConflictError as exc:
-            raise HarmonizationStartConflictError(payload.file_id) from exc
+        raise HarmonizationWorkflowNotFoundError(payload.file_id)
 
-    if loaded.state.mapping_manifest is None:
-        raise HarmonizationWorkflowUnreadableError(payload.file_id)
-    if loaded.state.mapping_choices is not None:
-        return loaded
-    try:
-        return save_confirmed_mapping_choices_to_state(
-            workflow_storage,
-            user,
-            payload.file_id,
-            ConfirmedMappingChoices.from_raw(payload.manual_overrides, payload.column_renames),
-            legacy_upload_storage=upload_storage,
-        )
-    except (WorkflowStateConflictError, WorkflowStateUnreadableError) as exc:
-        raise HarmonizationStartConflictError(payload.file_id) from exc
+    if loaded.state.mapping_choices is None:
+        raise HarmonizationStartConflictError(payload.file_id)
+    return loaded
 
 
-def _same_worker(current: StageThreeJobState, accepted: StageThreeJobState) -> bool:
+def _same_worker(current: HarmonizationJobState, accepted: HarmonizationJobState) -> bool:
     return (
         current.polling_job_id == accepted.polling_job_id
         and current.worker_id == accepted.worker_id

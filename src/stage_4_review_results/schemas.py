@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.schemas import DatasetWorkflowIdField
 
@@ -13,7 +13,8 @@ from src.api.schemas import DatasetWorkflowIdField
 class CellOverrideSchema(BaseModel):
     """Single cell override from human review."""
 
-    ai_value: str | None
+    model_config = ConfigDict(extra="forbid")
+
     human_value: str
     original_value: str | None
 
@@ -21,17 +22,19 @@ class CellOverrideSchema(BaseModel):
 class ReviewModeStateSchema(BaseModel):
     """Review progress state for a single mode (column or row)."""
 
-    current_unit: int = 1
-    completed_units: list[int] = Field(default_factory=list)
-    flagged_units: list[int] = Field(default_factory=list)
-    batch_size: int = 5
+    model_config = ConfigDict(extra="forbid")
+
+    current_unit: Annotated[int, Field(ge=1)] = 1
+    batch_size: Annotated[int, Field(ge=1)] = 5
 
 
 class ReviewStateSchema(BaseModel):
     """Review progress state across column and row modes."""
 
-    review_mode: str = "column"
-    sort_mode: str = "original"
+    model_config = ConfigDict(extra="forbid")
+
+    review_mode: Literal["column", "row"] = "column"
+    sort_mode: Literal["original", "confidence-asc", "confidence-desc"] = "original"
     scroll_mode: bool = False
     show_case_only_changes: bool = False
     show_unchanged_values: bool = False
@@ -42,6 +45,9 @@ class ReviewStateSchema(BaseModel):
 class ReviewOverridesSchema(BaseModel):
     """Complete review overrides for a file."""
 
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1]
     file_id: DatasetWorkflowIdField
     created_at: datetime
     updated_at: datetime
@@ -51,6 +57,8 @@ class ReviewOverridesSchema(BaseModel):
 
 class SaveOverridesRequest(BaseModel):
     """Request payload for saving review overrides."""
+
+    model_config = ConfigDict(extra="forbid")
 
     file_id: DatasetWorkflowIdField
     overrides: dict[str, dict[str, CellOverrideSchema]]
@@ -62,13 +70,6 @@ class SaveOverridesResponse(BaseModel):
 
     file_id: DatasetWorkflowIdField
     updated_at: datetime
-
-
-class DeleteOverridesResponse(BaseModel):
-    """Response after deleting review overrides."""
-
-    file_id: DatasetWorkflowIdField
-    deleted: bool
 
 
 class StageFourResultsRequest(BaseModel):
@@ -106,20 +107,6 @@ class RowContextResponse(BaseModel):
     rows: list[list[str]]
 
 
-class TermRowIndicesRequest(BaseModel):
-    """Request payload for fetching all source rows for one manifest term."""
-
-    file_id: DatasetWorkflowIdField
-    column_key: str
-    original_value: str
-
-
-class TermRowIndicesResponse(BaseModel):
-    """0-based original spreadsheet row indices for one manifest term."""
-
-    row_indices: list[int]
-
-
 class SuggestionInfo(BaseModel):
     """AI suggestion with PV conformance flag for dropdown display."""
 
@@ -139,8 +126,7 @@ class Transformation(BaseModel):
     isPVConformant: bool
     pvSetAvailable: bool
     topSuggestions: list[SuggestionInfo]
-    rowIndices: list[int]  # 1-based, truncated to 10 when rowCount > 50
-    rowCount: int
+    rowIndices: list[int]  # 1-based source row indices
     manualOverride: str | None = None
 
 
@@ -168,7 +154,6 @@ class StageFourResultsResponse(BaseModel):
 __all__ = [
     "CellOverrideSchema",
     "ColumnReviewData",
-    "DeleteOverridesResponse",
     "NonConformantItem",
     "NonConformantResponse",
     "ReviewOverridesSchema",
@@ -180,7 +165,5 @@ __all__ = [
     "StageFourResultsRequest",
     "StageFourResultsResponse",
     "SuggestionInfo",
-    "TermRowIndicesRequest",
-    "TermRowIndicesResponse",
     "Transformation",
 ]

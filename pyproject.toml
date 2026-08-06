@@ -35,7 +35,6 @@ dev = [
     "pip-audit>=2.7",
     "pip>=26.1.2",  # CVE remediation for the audited virtualenv pip package
     "pre-commit>=3.8",
-    "pytest-playwright>=0.6.2",
     # transitive dep pin for security (CVE remediation)
     "filelock>=3.20.1",  # CVE-2025-68146 (via virtualenv/pre-commit)
     "vulture>=2.16",
@@ -46,11 +45,6 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 pythonpath = ["."]
-# Exclude E2E tests by default - they require Playwright browsers and run separately in CI
-addopts = "--ignore=tests/e2e"
-markers = [
-    "e2e: end-to-end browser tests requiring Playwright",
-]
 
 [tool.ruff]
 target-version = "py313"
@@ -87,8 +81,3 @@ min_confidence = 100
 # Security: require Python packages to be at least 7 days old before resolution.
 # This is an important supply-chain protection against newly published compromised packages.
 exclude-newer = "7 days"
-
-[dependency-groups]
-dev = [
-    "pytest>=9.0.3",
-]

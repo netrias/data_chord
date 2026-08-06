@@ -42,7 +42,6 @@ class TransformationStep(BaseModel):
     source: str  # "original", "ai", "user"
     timestamp: str | None = None
     user_id: str | None = None
-    is_pv_conformant: bool = True
     review_status: FinalValueReviewStatus = FinalValueReviewStatus.NOT_CHECKED
 
 
@@ -56,7 +55,6 @@ class TermMapping(BaseModel):
     final_value_source: FinalValueSource
     review_status: FinalValueReviewStatus
     row_count: int
-    is_pv_conformant: bool = True
     history: list[TransformationStep] = Field(default_factory=list)
 
 

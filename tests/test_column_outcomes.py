@@ -45,7 +45,6 @@ def test_case_and_whitespace_differences_are_changes(final: str) -> None:
 
     assert summary.changed_distinct_values == 1
     assert summary.changed_rows == 3
-    assert summary.data_chord_changed_rows == 3
 
 
 def test_repeated_value_weights_rows_without_inflating_distinct_values() -> None:

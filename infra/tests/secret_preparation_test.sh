@@ -18,6 +18,8 @@ cat >"$MOCK_BIN/aws" <<'MOCK_AWS'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+[[ -z "${MOCK_AWS_STARTED_FILE:-}" ]] || touch "$MOCK_AWS_STARTED_FILE"
+
 case "${1:-} ${2:-}" in
   "sts get-caller-identity")
     printf '945365518758\tarn:aws:sts::945365518758:assumed-role/datachord-deployer/test\n'
@@ -85,5 +87,39 @@ revert_token="$(sed -n '3s/^[^ ]* //p' "$MOCK_CALLS")"
 [[ "$(sed -n '3s/ .*//p' "$MOCK_CALLS")" == "put-secret-value" ]] || fail_test "Reverted value did not request an update"
 [[ "$changed_token" =~ ^[0-9a-f]{64}$ ]] || fail_test "Secret version token is not a 64-character SHA-256 value"
 [[ "$create_token" != "$revert_token" ]] || fail_test "Reverting to a previous value reused its old version token"
+
+invalid_mode_output=""
+aws_started_file="$TEST_ROOT/aws-started"
+if invalid_mode_output="$(
+  PATH="$MOCK_BIN:$PATH" \
+    MOCK_AWS_STARTED_FILE="$aws_started_file" \
+    "$SECRET_SCRIPT" netrias staging invalid 2>&1
+)"; then
+  fail_test "Invalid secret mode succeeded"
+fi
+[[ "$invalid_mode_output" == *"Choose a secret mode: ensure or check"* ]] || fail_test "Invalid secret mode did not produce a useful error"
+[[ ! -e "$aws_started_file" ]] || fail_test "Invalid secret mode reached AWS"
+
+check_secret_value="must-not-appear-in-output"
+check_output="$(
+  PATH="$MOCK_BIN:$PATH" \
+    AWS_PROFILE=mock \
+    MOCK_CALLS="$MOCK_CALLS" \
+    MOCK_SECRET_EXISTS=1 \
+    NETRIAS_API_KEY="$check_secret_value" \
+    "$SECRET_SCRIPT" netrias staging check 2>&1
+)"
+[[ "$check_output" != *"$check_secret_value"* ]] || fail_test "Secret check printed the secret value"
+[[ "$(wc -l <"$MOCK_CALLS" | tr -d ' ')" == "3" ]] || fail_test "Secret check wrote a secret value"
+
+if PATH="$MOCK_BIN:$PATH" \
+  AWS_PROFILE=mock \
+  MOCK_CALLS="$MOCK_CALLS" \
+  MOCK_SECRET_EXISTS=0 \
+  NETRIAS_API_KEY=must-not-create-during-check \
+  "$SECRET_SCRIPT" netrias staging check >/dev/null 2>&1; then
+  fail_test "Secret check accepted a missing secret"
+fi
+[[ "$(wc -l <"$MOCK_CALLS" | tr -d ' ')" == "3" ]] || fail_test "Missing-secret check created a secret"
 
 printf 'Secret preparation tests passed.\n'

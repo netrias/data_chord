@@ -18,9 +18,6 @@ class CdePvCatalog:
     def __post_init__(self) -> None:
         object.__setattr__(self, "values", MappingProxyType(dict(self.values)))
 
-    def __contains__(self, cde_key: object) -> bool:
-        return isinstance(cde_key, str) and cde_key in self.values
-
     def __len__(self) -> int:
         return len(self.values)
 
@@ -51,15 +48,5 @@ class CdePvCatalog:
 
     def missing_for(self, catalog: CdeCatalog) -> list[str]:
         return [cde.cde_key for cde in catalog if cde.cde_key not in self.values]
-
-    def counts(self) -> dict[str, int]:
-        return {cde_key: len(values) for cde_key, values in self.values.items()}
-
-    def total_count(self) -> int:
-        return sum(len(values) for values in self.values.values())
-
-    def to_mapping(self) -> dict[str, frozenset[str]]:
-        return dict(self.values)
-
 
 __all__ = ["CdePvCatalog"]

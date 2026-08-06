@@ -9,7 +9,6 @@ const AI_SUGGESTION = 'Lung Cancer';
 const PV_SET = new Set(['Lung Cancer', 'Breast Cancer', 'Colon Cancer']);
 
 const createInput = (overrides = {}) => ({
-  originalValue: 'lung cancer',
   aiSuggestedValue: AI_SUGGESTION,
   overrideValue: '',
   hasPVs: true,

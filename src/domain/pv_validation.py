@@ -4,83 +4,23 @@ Pure functions for validating values against permissible value sets.
 Validation logic is kept pure (no I/O) to enable testing without mocks.
 """
 
-from __future__ import annotations
-
-from dataclasses import dataclass
-
-
-@dataclass(frozen=True)
-class PVValidationResult:
-    is_conformant: bool
-    original_value: str
-    attempted_value: str  # What we tried to validate
-    adjusted_value: str | None  # Replacement for the attempted value, when needed
-
-
-def validate_against_pvs(value: str, pv_set: frozenset[str]) -> bool:
-    """Whitespace-sensitive comparison (per domain rules in CLAUDE.md)."""
-    return value in pv_set
-
-
-def find_conformant_suggestion(
-    top_suggestions: list[str],
-    pv_set: frozenset[str],
-) -> str | None:
-    for suggestion in top_suggestions:
-        if suggestion in pv_set:
-            return suggestion
-    return None
-
-
 def compute_pv_adjustment(
     original_value: str,
     top_harmonization: str,
     top_suggestions: list[str],
     pv_set: frozenset[str],
-) -> PVValidationResult:
-    """Never convert a valid original value to something else.
+) -> str | None:
+    """Return a PV-safe replacement, or None when the provider value stays.
 
-    If the user's original value is already in the PV set, we keep it regardless
-    of what the AI suggested. This prevents "correcting" valid data.
+    A valid original value takes priority over a different provider value. If
+    neither the provider value nor a suggestion is valid, later review stages
+    report the provider value as non-conformant instead of inventing a value.
     """
-    if validate_against_pvs(original_value, pv_set):
-        if original_value != top_harmonization:
-            return PVValidationResult(
-                is_conformant=True,
-                original_value=original_value,
-                attempted_value=top_harmonization,
-                adjusted_value=original_value,
-            )
-        return PVValidationResult(
-            is_conformant=True,
-            original_value=original_value,
-            attempted_value=top_harmonization,
-            adjusted_value=None,
-        )
-
-    if validate_against_pvs(top_harmonization, pv_set):
-        return PVValidationResult(
-            is_conformant=True,
-            original_value=original_value,
-            attempted_value=top_harmonization,
-            adjusted_value=None,
-        )
-
-    alt = find_conformant_suggestion(top_suggestions, pv_set)
-    if alt is not None:
-        return PVValidationResult(
-            is_conformant=True,
-            original_value=original_value,
-            attempted_value=top_harmonization,
-            adjusted_value=alt,
-        )
-
-    return PVValidationResult(
-        is_conformant=False,
-        original_value=original_value,
-        attempted_value=top_harmonization,
-        adjusted_value=None,
-    )
+    if original_value in pv_set:
+        return original_value if original_value != top_harmonization else None
+    if top_harmonization in pv_set:
+        return None
+    return next((suggestion for suggestion in top_suggestions if suggestion in pv_set), None)
 
 
 def check_value_conformance(

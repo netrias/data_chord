@@ -6,6 +6,7 @@ import { STEP_INSTRUCTIONS, STAGE_ORDER } from './step-instructions.js';
 import {
   CURRENT_FILE_SESSION_KEY,
   MAX_REACHED_STAGE_KEY,
+  readFromSession,
 } from './storage-keys.js';
 
 /**
@@ -53,16 +54,7 @@ function _getFileIdForNavigation() {
   const fromUrl = urlParams.get('file_id');
   if (fromUrl) return fromUrl;
 
-  try {
-    const session = sessionStorage.getItem(CURRENT_FILE_SESSION_KEY);
-    if (session) {
-      const parsed = JSON.parse(session);
-      return parsed.file_id || null;
-    }
-  } catch {
-    /* ignore parse errors */
-  }
-  return null;
+  return readFromSession(CURRENT_FILE_SESSION_KEY)?.file_id ?? null;
 }
 
 /* why: append file_id to navigation URLs so stages can access the active session. */

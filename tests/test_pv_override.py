@@ -26,9 +26,7 @@ class TestOriginalValueProtection:
         )
 
         # Then: Reverts to the original value
-        assert result.is_conformant is True
-        assert result.adjusted_value == "lung cancer"
-        assert result.attempted_value == "Lung Cancer"
+        assert result == "lung cancer"
 
     def test_original_valid_ai_same_no_adjustment(self) -> None:
         """When original equals AI suggestion, no adjustment needed."""
@@ -44,8 +42,7 @@ class TestOriginalValueProtection:
         )
 
         # Then: Conformant with no adjustment
-        assert result.is_conformant is True
-        assert result.adjusted_value is None
+        assert result is None
 
     def test_original_invalid_ai_valid_uses_ai(self) -> None:
         """When original is invalid but AI is valid, use AI suggestion."""
@@ -61,8 +58,7 @@ class TestOriginalValueProtection:
         )
 
         # Then: Uses AI suggestion (no adjustment record since top_harmonization is used)
-        assert result.is_conformant is True
-        assert result.adjusted_value is None
+        assert result is None
 
     def test_original_invalid_ai_invalid_alt_valid_uses_alt(self) -> None:
         """When original and AI are invalid but alternative is valid, use alternative."""
@@ -78,11 +74,10 @@ class TestOriginalValueProtection:
         )
 
         # Then: Uses first valid alternative from suggestions
-        assert result.is_conformant is True
-        assert result.adjusted_value == "Lung Cancer"
+        assert result == "Lung Cancer"
 
-    def test_all_invalid_returns_non_conformant(self) -> None:
-        """When nothing is valid, mark as non-conformant."""
+    def test_all_invalid_values_produce_no_replacement(self) -> None:
+        """When nothing is valid, leave the provider value for later review."""
         # Given: Nothing matches PV set
         pv_set = frozenset(["Lung Cancer", "breast cancer"])
 
@@ -94,9 +89,8 @@ class TestOriginalValueProtection:
             pv_set=pv_set,
         )
 
-        # Then: Non-conformant, no adjustment
-        assert result.is_conformant is False
-        assert result.adjusted_value is None
+        # Then: no valid replacement is available
+        assert result is None
 
 
 class TestPVOverrideWhitespaceSensitivity:
@@ -116,8 +110,7 @@ class TestPVOverrideWhitespaceSensitivity:
         )
 
         # Then: Keeps original (with trailing space)
-        assert result.is_conformant is True
-        assert result.adjusted_value == "Lung Cancer "
+        assert result == "Lung Cancer "
 
     def test_case_difference_triggers_override(self) -> None:
         """Case differences are significant - original lowercase kept if valid."""
@@ -133,7 +126,7 @@ class TestPVOverrideWhitespaceSensitivity:
         )
 
         # Then: Keeps original lowercase
-        assert result.adjusted_value == "lung cancer"
+        assert result == "lung cancer"
 
 
 class TestPVOverrideEdgeCases:
@@ -153,11 +146,10 @@ class TestPVOverrideEdgeCases:
         )
 
         # Then: Uses AI suggestion (empty string not in PV set)
-        assert result.is_conformant is True
-        assert result.adjusted_value is None
+        assert result is None
 
-    def test_empty_pv_set_falls_through(self) -> None:
-        """Empty PV set means nothing is conformant."""
+    def test_empty_pv_set_produces_no_replacement(self) -> None:
+        """An empty PV set cannot supply a replacement."""
         # Given: Empty PV set
         pv_set: frozenset[str] = frozenset()
 
@@ -169,11 +161,11 @@ class TestPVOverrideEdgeCases:
             pv_set=pv_set,
         )
 
-        # Then: Non-conformant (nothing matches empty set)
-        assert result.is_conformant is False
+        # Then: nothing matches the empty set
+        assert result is None
 
-    def test_empty_top_suggestions_with_invalid_ai(self) -> None:
-        """Empty top_suggestions falls through to non-conformant when AI is also invalid."""
+    def test_empty_top_suggestions_produce_no_replacement(self) -> None:
+        """No replacement is available when the provider value is invalid."""
         # Given: No alternative suggestions, and AI is not in PV set
         pv_set = frozenset(["Lung Cancer", "breast cancer"])
 
@@ -185,6 +177,5 @@ class TestPVOverrideEdgeCases:
             pv_set=pv_set,
         )
 
-        # Then: Non-conformant (no valid alternatives to try)
-        assert result.is_conformant is False
-        assert result.adjusted_value is None
+        # Then: there are no alternatives to try
+        assert result is None

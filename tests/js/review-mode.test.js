@@ -2,7 +2,10 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { SORT_MODE } from '../../src/stage_4_review_results/static/shared_review_utils.js';
+import {
+  formatRowReference,
+  SORT_MODE,
+} from '../../src/stage_4_review_results/static/shared_review_utils.js';
 import {
   getCurrentEntries as getColumnCurrentEntries,
   getTotalUnits as getColumnTotalUnits,
@@ -36,7 +39,6 @@ const createTransformation = ({
   pvSetAvailable: false,
   topSuggestions: [],
   rowIndices,
-  rowCount: rowIndices.length,
   manualOverride: null,
 });
 
@@ -67,6 +69,16 @@ describe('empty review results', () => {
 });
 
 describe('column review navigation', () => {
+  it('bounds the row tooltip for a large repeated term', () => {
+    const rowIndices = Array.from({ length: 100_000 }, (_, index) => index + 1);
+
+    assert.deepEqual(formatRowReference(rowIndices), {
+      labelText: '100000 rows',
+      tooltipText: 'Rows: 2, 3, 4, 5, 6... (100000 total)',
+    });
+    assert.equal(rowIndices.length, 100_000, 'the full row group remains available');
+  });
+
   it('batches terms within a column before moving to the next column', () => {
     const columns = [
       createColumn('diagnosis', [

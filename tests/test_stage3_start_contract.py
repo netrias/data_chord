@@ -14,15 +14,15 @@ import src.app.dependencies as dependencies
 import src.stage_3_harmonize.router as stage_three_router
 from src.domain.harmonization import HarmonizeStatus
 from src.integrations.netrias_harmonize import HarmonizeResult
+from src.persistence.harmonization_job_store import load_harmonization_job
 from src.persistence.workflow_state_store import load_workflow_state
-from src.stage_3_harmonize.job_state import load_stage_three_job_state
 from src.storage import WorkflowArtifactNotFoundError, WorkflowFile
-from tests.conftest import create_csv_content, create_test_manifest_parquet, upload_content
+from tests.conftest import confirm_mapping_choices, create_csv_content, create_test_manifest_parquet, upload_content
 
 pytestmark = pytest.mark.asyncio
 
 
-async def test_one_harmonize_post_saves_choices_and_file_only_retry_reuses_job(
+async def test_confirmed_choices_and_file_only_retry_reuse_job(
     app_client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -50,16 +50,17 @@ async def test_one_harmonize_post_saves_choices_and_file_only_retry_reuses_job(
 
     monkeypatch.setattr(stage_three_router, "_run_stage_three_job", _hold_accepted_job)
 
-    # When: Stage 2 submits the user's choices to the harmonize operation once.
+    await confirm_mapping_choices(
+        app_client,
+        file_id,
+        manual_overrides={"col_0000": None},
+        column_renames={"col_0000": "Primary Diagnosis"},
+    )
+
+    # When: Stage 3 accepts the confirmed plan.
     accepted = await app_client.post(
         "/stage-3/harmonize",
-        json={
-            "file_id": file_id,
-            "data_model_key": "gc",
-            "external_version_number": "11.0.4",
-            "manual_overrides": {"col_0000": None},
-            "column_renames": {"col_0000": "Primary Diagnosis"},
-        },
+        json={"file_id": file_id},
     )
 
     # Then: the response exposes durable job identity and both records exist.
@@ -70,7 +71,7 @@ async def test_one_harmonize_post_saves_choices_and_file_only_retry_reuses_job(
         dependencies.get_user_context(),
         file_id,
     )
-    loaded_job = load_stage_three_job_state(
+    loaded_job = load_harmonization_job(
         dependencies.get_workflow_storage(),
         dependencies.get_user_context(),
         file_id,
@@ -83,6 +84,13 @@ async def test_one_harmonize_post_saves_choices_and_file_only_retry_reuses_job(
     }
     assert loaded_job is not None
     assert loaded_job.job.polling_job_id == accepted_job_id
+    stored_job = dependencies.get_workflow_storage().read_json(
+        dependencies.get_user_context(),
+        file_id,
+        WorkflowFile.STAGE_THREE_JOB,
+    )
+    assert stored_job is not None
+    assert stored_job.data == loaded_job.job.to_store()
 
     # When: Stage 3 retries/resumes with only the workflow id.
     resumed = await app_client.post("/stage-3/harmonize", json={"file_id": file_id})
@@ -138,6 +146,7 @@ async def test_worker_with_superseded_plan_cannot_publish_scratch_results(
         json={"file_id": file_id, "data_model_key": "gc", "external_version_number": "11.0.4"},
     )
     assert analysis.status_code == 200
+    await confirm_mapping_choices(app_client, file_id)
     monkeypatch.setattr(stage_three_router, "get_harmonize_service", lambda: BlockingHarmonizer())
 
     accepted = await app_client.post("/stage-3/harmonize", json={"file_id": file_id})
@@ -176,4 +185,4 @@ async def test_worker_with_superseded_plan_cannot_publish_scratch_results(
         with pytest.raises(WorkflowArtifactNotFoundError):
             with workflow_storage.materialize_artifact(user, file_id, kind):
                 pass
-    assert (await app_client.post("/stage-4/rows", json={"file_id": file_id})).status_code == 404
+    assert (await app_client.post("/stage-4/rows", json={"file_id": file_id})).status_code == 409

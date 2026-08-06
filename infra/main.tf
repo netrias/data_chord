@@ -37,8 +37,7 @@ locals {
     app_url            = local.app_url
     invite_environment = local.invite_environment
   })
-  alert_actions   = [aws_sns_topic.alerts.arn]
-  ecs_service_arn = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/${aws_ecs_cluster.app.name}/${local.name_prefix}"
+  alert_actions = [aws_sns_topic.alerts.arn]
   common_tags = merge(var.tags, {
     Project     = var.project_name
     Environment = var.environment
@@ -950,7 +949,7 @@ resource "aws_cloudwatch_event_rule" "ecs_service_error" {
   event_pattern = jsonencode({
     source        = ["aws.ecs"]
     "detail-type" = ["ECS Service Action"]
-    resources     = [local.ecs_service_arn]
+    resources     = [aws_ecs_service.app.arn]
     detail = {
       clusterArn = [aws_ecs_cluster.app.arn]
       eventType  = ["ERROR"]
@@ -981,7 +980,7 @@ resource "aws_cloudwatch_event_rule" "ecs_deployment_failed" {
   event_pattern = jsonencode({
     source        = ["aws.ecs"]
     "detail-type" = ["ECS Deployment State Change"]
-    resources     = [local.ecs_service_arn]
+    resources     = [aws_ecs_service.app.arn]
     detail = {
       eventName = ["SERVICE_DEPLOYMENT_FAILED"]
       eventType = ["ERROR"]
@@ -1184,8 +1183,8 @@ resource "aws_codebuild_project" "app_image" {
   }
 
   source {
-    type      = var.codebuild_source_type
-    location  = var.codebuild_source_location
+    type      = "GITHUB"
+    location  = "https://github.com/netrias/data_chord.git"
     buildspec = "infra/buildspec.yml"
 
     dynamic "auth" {

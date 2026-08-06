@@ -6,7 +6,7 @@ import csv
 import os
 import shutil
 import tempfile
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator, Generator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -42,14 +42,10 @@ def review_state_payload() -> dict[str, object]:
         "sort_mode": "original",
         "column_mode": {
             "current_unit": 1,
-            "completed_units": [],
-            "flagged_units": [],
             "batch_size": 5,
         },
         "row_mode": {
             "current_unit": 1,
-            "completed_units": [],
-            "flagged_units": [],
             "batch_size": 5,
         },
     }
@@ -305,9 +301,9 @@ async def upload_content(
 
 
 async def upload_and_analyze(client: AsyncClient, csv_path: Path) -> str:
-    """why: upload and analyze a file, returning file_id for harmonization tests."""
+    """Upload, analyze, and confirm the current mapping plan."""
     file_id = await upload_file(client, csv_path)
-    await client.post(
+    analysis = await client.post(
         "/stage-1/analyze",
         json={
             "file_id": file_id,
@@ -315,7 +311,30 @@ async def upload_and_analyze(client: AsyncClient, csv_path: Path) -> str:
             "external_version_number": TEST_TARGET_EXTERNAL_VERSION_NUMBER,
         },
     )
+    assert analysis.status_code == 200
+    await confirm_mapping_choices(client, file_id)
     return file_id
+
+
+async def confirm_mapping_choices(
+    client: AsyncClient,
+    file_id: str,
+    *,
+    manual_overrides: Mapping[str, str | None] | None = None,
+    column_renames: Mapping[str, str] | None = None,
+    headers: Mapping[str, str] | None = None,
+) -> None:
+    """Confirm the current Stage 2 plan before a Stage 3 request."""
+    response = await client.post(
+        "/stage-2/choices",
+        headers=headers,
+        json={
+            "file_id": file_id,
+            "manual_overrides": manual_overrides or {},
+            "column_renames": column_renames or {},
+        },
+    )
+    assert response.status_code == 200, response.text
 
 
 def create_harmonized_csv(
@@ -348,7 +367,7 @@ def create_test_manifest_parquet(
     rows: list[dict[str, Any]],
 ) -> Path:
     """why: create a test manifest.parquet file using the canonical schema."""
-    from src.domain.manifest import get_manifest_schema
+    from src.persistence.manifest_schema import get_manifest_schema
 
     schema = get_manifest_schema()
 
@@ -385,8 +404,8 @@ def store_test_harmonization_manifest(
     harmonized_path = storage.load_harmonized_path(file_id)
     if harmonized_path is None:
         _store_test_harmonization_manifest(file_id, stored_path)
-    else:
-        _store_test_stage_three_artifacts(file_id, harmonized_path, stored_path)
+    elif _store_test_stage_three_artifacts(file_id, harmonized_path, stored_path):
+        _store_test_completed_stage_three_job(file_id)
     return stored_path
 
 
@@ -421,12 +440,7 @@ def _seed_test_workflow_state(file_id: str, rows: list[dict[str, Any]]) -> bool:
     workflow_storage = dependencies.get_workflow_storage()
     user = dependencies.get_user_context()
     try:
-        loaded = load_workflow_state(
-            workflow_storage,
-            user,
-            file_id,
-            legacy_upload_storage=dependencies.get_upload_storage(),
-        )
+        loaded = load_workflow_state(workflow_storage, user, file_id)
         if loaded is not None:
             return True
         records: dict[ColumnKey, ColumnMappingRecord] = {}
@@ -529,12 +543,12 @@ def _store_test_completed_stage_three_job(file_id: str) -> None:
 
     import src.app.dependencies as dependencies
     from src.domain.harmonization import HarmonizeStatus
-    from src.persistence.workflow_state_store import load_workflow_state
-    from src.stage_3_harmonize.job_state import (
-        StageThreeJobState,
-        load_stage_three_job_state,
-        save_stage_three_job_state,
+    from src.persistence.harmonization_job_store import (
+        HarmonizationJobState,
+        load_harmonization_job,
+        save_harmonization_job,
     )
+    from src.persistence.workflow_state_store import load_workflow_state
     from src.storage import WorkflowStorageError
 
     workflow_storage = dependencies.get_workflow_storage()
@@ -543,16 +557,15 @@ def _store_test_completed_stage_three_job(file_id: str) -> None:
         loaded_state = load_workflow_state(workflow_storage, user, file_id)
         if loaded_state is None:
             return
-        existing_job = load_stage_three_job_state(workflow_storage, user, file_id)
+        existing_job = load_harmonization_job(workflow_storage, user, file_id)
         now = datetime.now(UTC)
         job_id = f"test-job-{file_id}"
         completed_job = replace(
-            StageThreeJobState.queued(
+            HarmonizationJobState.queued(
                 polling_job_id=job_id,
                 file_id=file_id,
                 plan_version=loaded_state.version.value,
                 worker_id="test-fixture-worker",
-                next_stage_url=f"/stage-4?file_id={file_id}",
                 now=now,
             ),
             status=HarmonizeStatus.SUCCEEDED,
@@ -560,7 +573,7 @@ def _store_test_completed_stage_three_job(file_id: str) -> None:
             job_id_available=True,
             lease_expires_at=now,
         )
-        save_stage_three_job_state(
+        save_harmonization_job(
             workflow_storage,
             user,
             completed_job,

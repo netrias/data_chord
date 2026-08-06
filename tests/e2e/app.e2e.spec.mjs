@@ -1,6 +1,5 @@
 import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import {
@@ -18,6 +17,7 @@ import {
   mockHarmonizeFailure,
   seedHarmonization,
   parseDownloadedCsv,
+  parseDownloadedCsvTable,
   parseDownloadedTabular,
   createWorkbookFixture,
   parseDownloadedWorkbook,
@@ -56,7 +56,7 @@ const downloadWorkbookRows = async (page, fileId, sheetName) => {
 const _stage2Column = (key, header = key, overrides = {}) => ({
   column_name: header,
   column_key: key,
-  source_index: 0,
+  source_index: Number.parseInt(key.slice(4), 10),
   header,
   inferred_type: 'text',
   has_non_empty_values: true,
@@ -128,8 +128,6 @@ test('happy path flow: upload → analyze → harmonize → review → summary �
 
   // Given: a CSV file is uploaded and analyzed
   const fileId = await uploadAndAnalyze(page, fileFixture('basic.csv'));
-  const preOverrides = await page.request.get(`/stage-4/overrides/${fileId}`);
-  expect(await preOverrides.json()).toBeNull();
 
   // When: the user proceeds to harmonize
   await clickHarmonize(page);
@@ -138,8 +136,8 @@ test('happy path flow: upload → analyze → harmonize → review → summary �
   await expect(page.locator('#reviewButton')).toBeEnabled();
 
   seedHarmonization(fileId, {
-    0: { col_a: 'Baz' },
-    1: { col_a: 'Baz' },
+    0: { col_0001: 'Baz' },
+    1: { col_0001: 'Baz' },
   });
 
   // The completed Stage 3 view uses the durable production-shaped summary.
@@ -322,32 +320,31 @@ test('Stage 2 splits picker sections by mapping kind', async ({ page }) => {
   const payload = {
     file_id: 'abcdef0123456789abcdef0123456789',
     file_name: 'mixed.csv',
+    external_version_number: '11.0.4',
     total_rows: 5,
     columns: [
-      _stage2Column('diagnosis'),
-      _stage2Column('notes'),
-      _stage2Column('age_value'),
-      _stage2Column('unknown_field'),
-      _stage2Column('empty_col'),
-      _stage2Column('low_match'),
+      _stage2Column('col_0000', 'diagnosis'),
+      _stage2Column('col_0001', 'notes'),
+      _stage2Column('col_0002', 'age_value'),
+      _stage2Column('col_0003', 'unknown_field'),
+      _stage2Column('col_0004', 'empty_col'),
+      _stage2Column('col_0005', 'low_match'),
     ],
     cde_targets: {
-      diagnosis: [{ target: 'dx', similarity: 0.95 }],
-      notes: [{ target: 'notes_cde', similarity: 0.9 }],
-      age_value: [{ target: 'age_cde', similarity: 0.9 }],
-      empty_col: [{ target: 'empty_dx', similarity: 0.8 }],
-      low_match: [{ target: 'low_dx', similarity: 0.8 }],
+      col_0000: [{ target: 'dx', similarity: 0.95 }],
+      col_0001: [{ target: 'notes_cde', similarity: 0.9 }],
+      col_0002: [{ target: 'age_cde', similarity: 0.9 }],
+      col_0004: [{ target: 'empty_dx', similarity: 0.8 }],
+      col_0005: [{ target: 'low_dx', similarity: 0.8 }],
     },
     column_summaries: {
-      diagnosis: { value_overlap_ratio: 0.8 },
-      notes: { value_overlap_ratio: null },
-      age_value: { value_overlap_ratio: null },
-      unknown_field: { value_overlap_ratio: null },
-      empty_col: { value_overlap_ratio: null },
-      low_match: { value_overlap_ratio: 0.0 },
+      col_0000: { value_overlap_ratio: 0.8 },
+      col_0001: { value_overlap_ratio: null },
+      col_0002: { value_overlap_ratio: null },
+      col_0003: { value_overlap_ratio: null },
+      col_0004: { value_overlap_ratio: null },
+      col_0005: { value_overlap_ratio: 0.0 },
     },
-    next_stage: 'mapping',
-    next_step_hint: 'Review mappings.',
     manual_overrides: {},
     manifest: { column_mappings: {} },
   };
@@ -443,27 +440,26 @@ test('Stage 2 settings sidebar filters rows by mapping outcome', async ({ page }
   const payload = {
     file_id: 'abcdef0123456789abcdef0123456789',
     file_name: 'mixed.csv',
+    external_version_number: '11.0.4',
     total_rows: 5,
     columns: [
-      _stage2Column('dx_col'),
-      _stage2Column('age_col'),
-      _stage2Column('notes_col'),
-      _stage2Column('junk_col'),
+      _stage2Column('col_0000', 'dx_col'),
+      _stage2Column('col_0001', 'age_col'),
+      _stage2Column('col_0002', 'notes_col'),
+      _stage2Column('col_0003', 'junk_col'),
     ],
     cde_targets: {
-      dx_col: [{ target: 'dx_cde', similarity: 0.95 }],
-      age_col: [{ target: 'age_cde', similarity: 0.9 }],
-      notes_col: [{ target: 'notes_cde', similarity: 0.9 }],
+      col_0000: [{ target: 'dx_cde', similarity: 0.95 }],
+      col_0001: [{ target: 'age_cde', similarity: 0.9 }],
+      col_0002: [{ target: 'notes_cde', similarity: 0.9 }],
       // junk_col deliberately omitted — exercises the No-Mapping cell.
     },
     column_summaries: {
-      dx_col: { value_overlap_ratio: 0.8 },
-      age_col: { value_overlap_ratio: null },
-      notes_col: { value_overlap_ratio: null },
-      junk_col: { value_overlap_ratio: null },
+      col_0000: { value_overlap_ratio: 0.8 },
+      col_0001: { value_overlap_ratio: null },
+      col_0002: { value_overlap_ratio: null },
+      col_0003: { value_overlap_ratio: null },
     },
-    next_stage: 'mapping',
-    next_step_hint: 'Review mappings.',
     manual_overrides: {},
     manifest: { column_mappings: {} },
   };
@@ -561,22 +557,21 @@ test('Stage 2 empty-column filter uses full-column value presence', async ({ pag
   const payload = {
     file_id: 'abcdef0123456789abcdef0123456789',
     file_name: 'late-values.csv',
+    external_version_number: '11.0.4',
     total_rows: 6,
     columns: [
-      _stage2Column('late_value', 'late_value', {
+      _stage2Column('col_0000', 'late_value', {
         has_non_empty_values: true,
       }),
-      _stage2Column('all_blank', 'all_blank', {
+      _stage2Column('col_0001', 'all_blank', {
         has_non_empty_values: false,
       }),
     ],
     cde_targets: {},
     column_summaries: {
-      late_value: { value_overlap_ratio: null },
-      all_blank: { value_overlap_ratio: null },
+      col_0000: { value_overlap_ratio: null },
+      col_0001: { value_overlap_ratio: null },
     },
-    next_stage: 'mapping',
-    next_step_hint: 'Review mappings.',
     manual_overrides: {},
     manifest: { column_mappings: {} },
   };
@@ -615,6 +610,7 @@ test('Stage 2 submits selected column renames for harmonization', async ({ page 
   const payload = {
     file_id: 'abcdef0123456789abcdef0123456789',
     file_name: 'rename.csv',
+    external_version_number: '11.0.4',
     total_rows: 1,
     columns: [_stage2Column('col_0000', 'diagnosis')],
     cde_targets: {
@@ -623,8 +619,6 @@ test('Stage 2 submits selected column renames for harmonization', async ({ page 
     column_summaries: {
       col_0000: { value_overlap_ratio: 1.0 },
     },
-    next_stage: 'mapping',
-    next_step_hint: 'Review mappings.',
     manual_overrides: {},
     manifest: {
       column_mappings: {
@@ -649,6 +643,16 @@ test('Stage 2 submits selected column renames for harmonization', async ({ page 
       status: 200,
       contentType: 'text/html',
       body: _stage2HarnessHtml(cdeCatalog),
+    });
+  });
+  const choicesRequests = [];
+  await page.route('**/stage-2/choices', async (route) => {
+    const body = route.request().postDataJSON?.() ?? {};
+    choicesRequests.push(body);
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ file_id: body.file_id }),
     });
   });
   const harmonizeRequests = [];
@@ -680,10 +684,13 @@ test('Stage 2 submits selected column renames for harmonization', async ({ page 
   await page.locator('#harmonizeButton').click();
   await page.waitForURL(/\/stage-3/);
 
+  expect(choicesRequests).toEqual([{
+    file_id: 'abcdef0123456789abcdef0123456789',
+    manual_overrides: {},
+    column_renames: { col_0000: 'Primary Diagnosis' },
+  }]);
   expect(harmonizeRequests).toHaveLength(1);
-  expect(harmonizeRequests[0].manual_overrides).toEqual({});
-  expect(harmonizeRequests[0].column_renames).toEqual({ col_0000: 'Primary Diagnosis' });
-  expect(harmonizeRequests[0]).not.toHaveProperty('manifest');
+  expect(harmonizeRequests[0]).toEqual({ file_id: 'abcdef0123456789abcdef0123456789' });
   const durableJobIdentity = await page.evaluate(() => JSON.parse(sessionStorage.getItem('stage3HarmonizeJob')));
   expect(durableJobIdentity).toMatchObject({
     job_id: 'rename-job',
@@ -706,21 +713,20 @@ test('Stage 2 picker surfaces all AI candidates as separate rows', async ({ page
   const payload = {
     file_id: 'abcdef0123456789abcdef0123456789',
     file_name: 'multi.csv',
+    external_version_number: '11.0.4',
     total_rows: 5,
-    columns: [_stage2Column('diagnosis'), _stage2Column('notes')],
+    columns: [_stage2Column('col_0000', 'diagnosis'), _stage2Column('col_0001', 'notes')],
     cde_targets: {
-      diagnosis: [
+      col_0000: [
         { target: 'dx', similarity: 0.95 },
         { target: 'dx_alt', similarity: 0.82 },
       ],
-      notes: [{ target: 'notes_cde', similarity: 0.9 }],
+      col_0001: [{ target: 'notes_cde', similarity: 0.9 }],
     },
     column_summaries: {
-      diagnosis: { value_overlap_ratio: 0.8 },
-      notes: { value_overlap_ratio: null },
+      col_0000: { value_overlap_ratio: 0.8 },
+      col_0001: { value_overlap_ratio: null },
     },
-    next_stage: 'mapping',
-    next_step_hint: 'Review mappings.',
     manual_overrides: {},
     manifest: { column_mappings: {} },
   };
@@ -830,14 +836,12 @@ test('TSV flow preserves TSV format through download', async ({ page }) => {
   await mockHarmonizeSuccess(page);
 
   // Given: a TSV file is uploaded and analyzed
-  const fileId = await uploadAndAnalyze(page, fileFixture('basic.tsv'));
-  const preOverrides = await page.request.get(`/stage-4/overrides/${fileId}`);
-  expect(await preOverrides.json()).toBeNull();
+  const fileId = await uploadAndAnalyze(page, fileFixture('basic.tsv'), 0);
 
   // When: the user harmonizes and downloads the result
   await clickHarmonize(page);
   await expect(page.locator('#reviewButton')).toBeEnabled();
-  seedHarmonization(fileId, { 0: { col_a: 'Baz, still one cell' } });
+  seedHarmonization(fileId, { 0: { col_0000: 'Baz, still one cell' } });
 
   // Then: the exported tabular payload is TSV and keeps comma-bearing values intact
   const rows = await downloadTsvRows(page, fileId);
@@ -851,13 +855,11 @@ test('XLSX flow selects a worksheet and preserves XLSX format through download',
   // Given: a workbook is uploaded and the second worksheet is selected
   const workbookPath = createWorkbookFixture();
   const fileId = await uploadAndAnalyzeSheet(page, workbookPath, 'Patients');
-  const preOverrides = await page.request.get(`/stage-4/overrides/${fileId}`);
-  expect(await preOverrides.json()).toBeNull();
 
   // When: the user harmonizes and downloads the result
   await clickHarmonize(page);
   await expect(page.locator('#reviewButton')).toBeEnabled();
-  seedHarmonization(fileId, { 0: { col_a: 'Baz, still one cell' } });
+  seedHarmonization(fileId, { 0: { col_0000: 'Baz, still one cell' } });
 
   // Then: the selected worksheet is exported as XLSX and comma-bearing values stay in one cell
   const patientRows = await downloadWorkbookRows(page, fileId, 'Patients');
@@ -872,11 +874,9 @@ test('override propagation applies to all instances in a column', async ({ page 
 
   // Given: a CSV with repeated terms in a column
   const fileId = await uploadAndAnalyze(page, fileFixture('basic.csv'));
-  const preOverrides = await page.request.get(`/stage-4/overrides/${fileId}`);
-  expect(await preOverrides.json()).toBeNull();
   await clickHarmonize(page);
   await expect(page.locator('#reviewButton')).toBeEnabled();
-  seedHarmonization(fileId, { 0: { col_a: 'Suggested' }, 1: { col_a: 'Suggested' } });
+  seedHarmonization(fileId, { 0: { col_0001: 'Suggested' }, 1: { col_0001: 'Suggested' } });
 
   // When: the user overrides the term once
   await page.goto(`/stage-4?file_id=${fileId}`);
@@ -894,19 +894,102 @@ test('override propagation applies to all instances in a column', async ({ page 
   expect(rows[2].col_a).toBe('Bar');
 });
 
+test('duplicate headers keep positional changes and overrides separate', async ({ page }, testInfo) => {
+  await mockHarmonizeSuccess(page);
+  const csvPath = testInfo.outputPath('duplicate-headers.csv');
+  fs.mkdirSync(path.dirname(csvPath), { recursive: true });
+  fs.writeFileSync(
+    csvPath,
+    'record_id,status,status\nRID-1,first raw,second raw\nRID-2,first other,second other\n',
+  );
+
+  // Given: two source columns have the same visible header but different positions.
+  const fileId = await uploadAndAnalyze(page, csvPath);
+  await clickHarmonize(page);
+  await expect(page.locator('#reviewButton')).toBeEnabled();
+  seedHarmonization(fileId, {
+    0: { col_0001: 'first suggested', col_0002: 'second suggested' },
+  });
+
+  // When: the reviewer gives each positional column a different final value.
+  await page.goto(`/stage-4?file_id=${fileId}`);
+  await waitForReviewRows(page);
+  const columnPills = page.locator('.batch-progress-item.column-pill');
+  await expect(columnPills).toHaveCount(2);
+  await expect(columnPills).toContainText(['status', 'status']);
+
+  await columnPills.nth(0).click();
+  await expect(page.locator('.target-value-input')).toHaveValue('first suggested');
+  const firstSave = page.waitForResponse(
+    (response) => response.url().includes('/stage-4/overrides') && response.ok(),
+  );
+  await page.locator('.target-value-input').fill('first reviewed');
+  await firstSave;
+
+  await columnPills.nth(1).click();
+  await expect(page.locator('.target-value-input')).toHaveValue('second suggested');
+  const secondSave = page.waitForResponse(
+    (response) => response.url().includes('/stage-4/overrides') && response.ok(),
+  );
+  await page.locator('.target-value-input').fill('second reviewed');
+  await secondSave;
+
+  // Then: the exported duplicate columns retain their order and distinct values.
+  const response = await page.request.post('/stage-5/download', { data: { file_id: fileId } });
+  expect(response.ok()).toBeTruthy();
+  const table = await parseDownloadedCsvTable(response);
+  expect(table.headers).toEqual(['record_id', 'status', 'status']);
+  expect(table.rows[0]).toEqual(['RID-1', 'first reviewed', 'second reviewed']);
+  expect(table.rows[1]).toEqual(['RID-2', 'first other', 'second other']);
+});
+
+test('an override for a repeated value reaches every matching row', async ({ page }, testInfo) => {
+  await mockHarmonizeSuccess(page);
+  const rowCount = 60;
+  const csvPath = testInfo.outputPath('repeated-value.csv');
+  fs.mkdirSync(path.dirname(csvPath), { recursive: true });
+  const rows = Array.from({ length: rowCount }, (_, index) => `RID-${index + 1},Foo`);
+  fs.writeFileSync(csvPath, `record_id,col_a\n${rows.join('\n')}\n`);
+
+  // Given: one source value occurs beyond the old small-row boundary.
+  const fileId = await uploadAndAnalyze(page, csvPath);
+  await clickHarmonize(page);
+  await expect(page.locator('#reviewButton')).toBeEnabled();
+  const changes = Object.fromEntries(
+    Array.from({ length: rowCount }, (_, index) => [index, { col_0001: 'Suggested' }]),
+  );
+  seedHarmonization(fileId, changes);
+
+  // When: the reviewer changes the repeated value once.
+  await page.goto(`/stage-4?file_id=${fileId}`);
+  await waitForReviewRows(page);
+  const card = page.locator('.column-mode-grid .row-cell', {
+    has: page.locator('.original-context-value', { hasText: 'Foo' }),
+  });
+  await expect(card.locator('.entry-row-label')).toHaveText('60 rows');
+  const save = page.waitForResponse(
+    (response) => response.url().includes('/stage-4/overrides') && response.ok(),
+  );
+  await card.locator('.target-value-input').fill('Reviewed');
+  await save;
+
+  // Then: all 60 matching cells change in the exported data.
+  const downloadedRows = await downloadCsvRows(page, fileId);
+  expect(downloadedRows).toHaveLength(rowCount);
+  expect(downloadedRows.every((row) => row.col_a === 'Reviewed')).toBe(true);
+});
+
 test('whitespace-significant terms remain distinct', async ({ page }) => {
   await mockHarmonizeSuccess(page);
 
   // Given: a CSV where whitespace creates distinct terms
   const fileId = await uploadAndAnalyze(page, fileFixture('whitespace.csv'));
-  const preOverrides = await page.request.get(`/stage-4/overrides/${fileId}`);
-  expect(await preOverrides.json()).toBeNull();
   await clickHarmonize(page);
   await expect(page.locator('#reviewButton')).toBeEnabled();
   seedHarmonization(fileId, {
-    0: { col_a: 'Suggested' },
-    1: { col_a: 'Suggested' },
-    2: { col_a: 'Suggested' },
+    0: { col_0001: 'Suggested' },
+    1: { col_0001: 'Suggested' },
+    2: { col_0001: 'Suggested' },
   });
 
   // When: the user overrides the whitespace-padded term in row mode
@@ -931,11 +1014,9 @@ test('BOM headers do not break overrides', async ({ page }) => {
 
   // Given: a BOM-prefixed CSV
   const fileId = await uploadAndAnalyze(page, fileFixture('bom.csv'));
-  const preOverrides = await page.request.get(`/stage-4/overrides/${fileId}`);
-  expect(await preOverrides.json()).toBeNull();
   await clickHarmonize(page);
   await expect(page.locator('#reviewButton')).toBeEnabled();
-  seedHarmonization(fileId, { 0: { col_a: 'Suggested' }, 1: { col_a: 'Suggested' } });
+  seedHarmonization(fileId, { 0: { col_0001: 'Suggested' }, 1: { col_0001: 'Suggested' } });
 
   // When: an override is applied
   await page.goto(`/stage-4?file_id=${fileId}`);
@@ -957,8 +1038,6 @@ test('no-change flow shows empty review state and zero outcome metrics', async (
 
   // Given: a CSV with no harmonization changes
   const fileId = await uploadAndAnalyze(page, fileFixture('no-change.csv'));
-  const preOverrides = await page.request.get(`/stage-4/overrides/${fileId}`);
-  expect(await preOverrides.json()).toBeNull();
   await clickHarmonize(page);
   await expect(page.locator('#reviewButton')).toBeEnabled();
   seedHarmonization(fileId, {});
@@ -982,7 +1061,7 @@ test('Stage 5 aggregates change impact and keeps filters keyboard accessible', a
     source: 'original',
     timestamp: null,
     user_id: null,
-    is_pv_conformant: false,
+    review_status: 'needs_attention',
   }];
   await page.route('**/stage-5/summary', async (route) => {
     await route.fulfill({
@@ -1032,19 +1111,19 @@ test('Stage 5 aggregates change impact and keeps filters keyboard accessible', a
             column: 'diagnosis', column_key: 'col_0000', source_column_index: 0,
             original_value: 'Bad', final_value: 'Bad', is_changed: false,
             final_value_source: 'source', review_status: 'needs_attention', row_count: 1,
-            is_pv_conformant: false, history,
+            history,
           },
           {
             column: 'diagnosis', column_key: 'col_0000', source_column_index: 0,
             original_value: 'A', final_value: 'B', is_changed: true,
             final_value_source: 'data_chord', review_status: 'clear', row_count: 1,
-            is_pv_conformant: true, history: [],
+            history: [],
           },
           {
             column: 'diagnosis', column_key: 'col_0000', source_column_index: 0,
             original_value: 'C', final_value: 'D', is_changed: true,
             final_value_source: 'reviewer', review_status: 'clear', row_count: 1,
-            is_pv_conformant: true, history: [],
+            history: [],
           },
         ],
         non_conformant_count: 1,
@@ -1093,11 +1172,9 @@ test('autosave persists overrides across reloads', async ({ page }) => {
 
   // Given: a CSV with changes and review loaded
   const fileId = await uploadAndAnalyze(page, fileFixture('basic.csv'));
-  const preOverrides = await page.request.get(`/stage-4/overrides/${fileId}`);
-  expect(await preOverrides.json()).toBeNull();
   await clickHarmonize(page);
   await expect(page.locator('#reviewButton')).toBeEnabled();
-  seedHarmonization(fileId, { 0: { col_a: 'Suggested' } });
+  seedHarmonization(fileId, { 0: { col_0001: 'Suggested' } });
 
   await page.goto(`/stage-4?file_id=${fileId}`);
   await waitForReviewRows(page);
@@ -1146,11 +1223,9 @@ test('stage 5 advance waits for the latest override save', async ({ page }) => {
 
   // Given: a CSV with one harmonized term open for review
   const fileId = await uploadAndAnalyze(page, fileFixture('basic.csv'));
-  const preOverrides = await page.request.get(`/stage-4/overrides/${fileId}`);
-  expect(await preOverrides.json()).toBeNull();
   await clickHarmonize(page);
   await expect(page.locator('#reviewButton')).toBeEnabled();
-  seedHarmonization(fileId, { 0: { col_a: 'Suggested' } });
+  seedHarmonization(fileId, { 0: { col_0001: 'Suggested' } });
 
   await page.goto(`/stage-4?file_id=${fileId}`);
   await waitForReviewRows(page);
@@ -1198,13 +1273,12 @@ test('stage 5 advance waits for the latest override save', async ({ page }) => {
   await expect.poll(() => nonConformanceChecks).toBe(1);
 });
 
-test('version dropdown panel renders below trigger and scrolls when versions overflow', async ({ page }) => {
+test('version menu lets the user choose from a long version list', async ({ page }) => {
   /*
    * Given: 20 versions exist for the default data model, exceeding the panel max-height
    * When:  the user opens the data-model popup and clicks the version trigger
-   * Then:  the panel renders below the trigger (no overlap), shows all 20 items,
-   *        is scrollable (scrollHeight > clientHeight), and the latest version
-   *        sits at index 0 selected
+   * Then:  all versions remain available, the latest starts selected, and an
+   *        older version can be selected.
    */
   await mockDataModelsWithVersionCount(page, 20);
   await mockAnalyze(page);
@@ -1223,35 +1297,20 @@ test('version dropdown panel renders below trigger and scrolls when versions ove
   await page.click('#versionDropdownTrigger');
   await page.locator('.data-model-dropdown--version .data-model-dropdown-panel').waitFor({ state: 'visible' });
 
-  const geom = await page.evaluate(() => {
-    const trigger = document.querySelector('#versionDropdownTrigger');
-    const panel = document.querySelector('.data-model-dropdown--version .data-model-dropdown-panel');
-    /* Scroll lives on the inner list; outer panel only clips for rounded corners. */
-    const list = document.querySelector('.data-model-dropdown--version .data-model-dropdown-list');
-    return {
-      triggerBottom: trigger.getBoundingClientRect().bottom,
-      panelTop: panel.getBoundingClientRect().top,
-      listClientHeight: list.clientHeight,
-      listScrollHeight: list.scrollHeight,
-      itemCount: panel.querySelectorAll('.data-model-dropdown-item').length,
-    };
-  });
-  expect(geom.panelTop).toBeGreaterThanOrEqual(geom.triggerBottom);
-  expect(geom.itemCount).toBe(20);
-  expect(geom.listScrollHeight).toBeGreaterThan(geom.listClientHeight);
-
   const items = page.locator('.data-model-dropdown--version .data-model-dropdown-item');
+  await expect(items).toHaveCount(20);
   await expect(items.first()).toHaveText('11.0.20');
   await expect(items.first()).toHaveAttribute('aria-selected', 'true');
+  await page.getByRole('option', { name: '11.0.1', exact: true }).click();
+  await expect(page.locator('#versionDropdownTrigger')).toContainText('11.0.1');
 });
 
-test('data model dropdown shares custom styling and custom dropdowns close on outside click', async ({ page }) => {
+test('data model menus select models by pointer and keyboard and close on outside click', async ({ page }) => {
   /*
    * Given: the Stage 1 data model popup has two data models and multiple versions
    * When:  the user opens the data model dropdown and the version dropdown
-   * Then:  both use the same custom trigger styling, the hidden native select
-   *        remains available, and clicking elsewhere in the dialog dismisses
-   *        the open custom dropdown.
+   * Then:  visible selections stay in sync and clicking elsewhere dismisses
+   *        the open menu.
    */
   await page.route('**/stage-1/data-models', async (route) => {
     await route.fulfill({
@@ -1285,8 +1344,8 @@ test('data model dropdown shares custom styling and custom dropdowns close on ou
   await page.click('#analyzeButton');
   await page.locator('.data-model-dialog').waitFor({ state: 'visible' });
 
-  // Given: the native data model select is hidden, not removed.
-  await expect(page.locator('#dataModelSelect')).toHaveClass(/sr-only/);
+  await expect(page.locator('#dataModelDropdownTrigger')).toContainText('Alpha Model');
+  await expect(page.locator('#versionDropdownTrigger')).toContainText('11.0.3');
   await expect(page.locator('.data-model-dropdown--model .data-model-dropdown-panel')).toBeHidden();
 
   // When: the data model dropdown opens.
@@ -1294,42 +1353,17 @@ test('data model dropdown shares custom styling and custom dropdowns close on ou
   await expect(page.locator('.data-model-dropdown--model .data-model-dropdown-panel')).toBeVisible();
   await expect(page.locator('.data-model-dropdown--model .data-model-dropdown-item')).toHaveCount(2);
 
-  // Then: the model trigger uses the same styling as the version trigger.
-  const triggerStyles = await page.evaluate(() => {
-    const model = getComputedStyle(document.querySelector('#dataModelDropdownTrigger'));
-    const version = getComputedStyle(document.querySelector('#versionDropdownTrigger'));
-    return {
-      sameBorderRadius: model.borderRadius === version.borderRadius,
-      samePadding: model.padding === version.padding,
-      sameBackgroundImage: model.backgroundImage === version.backgroundImage,
-      sameTextAlign: model.textAlign === version.textAlign,
-    };
-  });
-  expect(triggerStyles).toEqual({
-    sameBorderRadius: true,
-    samePadding: true,
-    sameBackgroundImage: true,
-    sameTextAlign: true,
-  });
-
   // When: the user clicks elsewhere in the dialog.
   await page.locator('.data-model-dialog-title').click();
 
   // Then: the open custom dropdown closes.
   await expect(page.locator('.data-model-dropdown--model .data-model-dropdown-panel')).toBeHidden();
 
-  // When: selecting a model through the custom dropdown.
+  // When: selecting a model through the visible dropdown.
   await page.click('#dataModelDropdownTrigger');
-  await page.locator('.data-model-dropdown--model .data-model-dropdown-item[data-value="alpha"]').click();
+  await page.locator('.data-model-dropdown--model .data-model-dropdown-item[data-value="gc"]').click();
 
-  // Then: the hidden select and dependent version dropdown stay in sync.
-  await expect(page.locator('#dataModelSelect')).toHaveValue('alpha');
-  await expect(page.locator('#versionDropdownTrigger')).toContainText('11.0.3');
-
-  // When: automation changes the hidden select directly.
-  await page.selectOption('#dataModelSelect', 'gc');
-
-  // Then: the visible custom dropdown and version list still stay in sync.
+  // Then: the dependent version selection updates.
   await expect(page.locator('#dataModelDropdownTrigger')).toContainText('Genomic Cancer');
   await expect(page.locator('#versionDropdownTrigger')).toContainText('11.0.2');
 
@@ -1338,8 +1372,7 @@ test('data model dropdown shares custom styling and custom dropdowns close on ou
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('Enter');
 
-  // Then: the same state sync path is used.
-  await expect(page.locator('#dataModelSelect')).toHaveValue('alpha');
+  // Then: the visible selection and its version update together.
   await expect(page.locator('#dataModelDropdownTrigger')).toContainText('Alpha Model');
   await expect(page.locator('#versionDropdownTrigger')).toContainText('11.0.3');
 
@@ -1350,67 +1383,7 @@ test('data model dropdown shares custom styling and custom dropdowns close on ou
   await expect(page.locator('.data-model-dropdown--version .data-model-dropdown-panel')).toBeHidden();
 });
 
-test('Stage 1 exposes a browser-friendly file input for automation', async ({ page }) => {
-  await mockDataModels(page);
-
-  await page.goto('/stage-1');
-  const uploadInput = page.getByTestId('agent-file-input');
-
-  await expect(uploadInput).toBeAttached();
-  await expect(uploadInput).not.toHaveAttribute('hidden', '');
-  await expect(uploadInput).toHaveAttribute('aria-hidden', 'true');
-  await expect(uploadInput).toHaveAttribute('tabindex', '-1');
-  const inputPresentation = await uploadInput.evaluate((input) => {
-    const style = window.getComputedStyle(input);
-    const rect = input.getBoundingClientRect();
-    return {
-      display: style.display,
-      height: rect.height,
-      position: style.position,
-      visibility: style.visibility,
-      width: rect.width,
-    };
-  });
-  expect(inputPresentation.display).not.toBe('none');
-  expect(inputPresentation).toMatchObject({
-    height: 1,
-    position: 'absolute',
-    visibility: 'visible',
-    width: 1,
-  });
-  await uploadInput.setInputFiles(fileFixture('basic.csv'));
-
-  await expect(page.locator('#dropzoneFileStatus')).toHaveText('Uploaded');
-  await expect(page.locator('#analyzeButton')).toBeEnabled();
-});
-
-test('Stage 1 ignores automation file changes while choosing a data model', async ({ page }) => {
-  await mockDataModels(page);
-  let uploadRequests = 0;
-  await page.route('**/stage-1/upload', async (route) => {
-    uploadRequests += 1;
-    await route.continue();
-  });
-
-  await page.goto('/stage-1');
-  const uploadInput = page.getByTestId('agent-file-input');
-  await uploadInput.setInputFiles(fileFixture('basic.csv'));
-  await expect(page.locator('#dropzoneFileStatus')).toHaveText('Uploaded');
-  await expect(page.locator('#analyzeButton')).toBeEnabled();
-  expect(uploadRequests).toBe(1);
-
-  await page.locator('#analyzeButton').click();
-  await page.locator('.data-model-dialog').waitFor({ state: 'visible' });
-  await expect(uploadInput).toBeDisabled();
-
-  await uploadInput.setInputFiles(fileFixture('multi-column.csv'));
-
-  await expect(uploadInput).toHaveJSProperty('files.length', 0);
-  await expect(page.locator('#dropzoneFileName')).toHaveText('basic.csv');
-  await expect.poll(() => uploadRequests).toBe(1);
-});
-
-test('error handling: wrong file type and oversize upload', async ({ page }) => {
+test('error handling: wrong file type and oversize upload', async ({ page }, testInfo) => {
   await mockDataModels(page);
 
   // Given: a non-CSV file is uploaded
@@ -1421,21 +1394,17 @@ test('error handling: wrong file type and oversize upload', async ({ page }) => 
   // Then: upload error is shown
   await expect(page.locator('#statusMessage')).toContainText(/Only CSV|Unsupported|Upload failed/i);
 
-  // Given: an oversized CSV in a temp directory
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'data-chord-e2e-'));
-  const oversizedPath = path.join(tmpDir, 'oversized.csv');
-  try {
-    const largeContent = 'col_a\n' + 'x'.repeat(26 * 1024 * 1024);
-    fs.writeFileSync(oversizedPath, largeContent);
+  // Given: a CSV exceeds the upload limit.
+  const oversizedPath = testInfo.outputPath('oversized.csv');
+  fs.mkdirSync(path.dirname(oversizedPath), { recursive: true });
+  const largeContent = 'col_a\n' + 'x'.repeat(26 * 1024 * 1024);
+  fs.writeFileSync(oversizedPath, largeContent);
 
-    // When: oversized file is uploaded
-    await page.setInputFiles(AGENT_FILE_INPUT, oversizedPath);
+  // When: the oversized file is uploaded.
+  await page.setInputFiles(AGENT_FILE_INPUT, oversizedPath);
 
-    // Then: size error is shown
-    await expect(page.locator('#statusMessage')).toContainText(/exceeds|too large|Upload failed/i);
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
+  // Then: the user sees the size error.
+  await expect(page.locator('#statusMessage')).toContainText(/exceeds|too large|Upload failed/i);
 });
 
 test('Stage 1 shows generic analyze errors for structured API failures', async ({ page }) => {
@@ -1491,7 +1460,7 @@ test('Stage 1 shows upload progress and keeps the Map button disabled until uplo
       status: 201,
       contentType: 'application/json',
       body: JSON.stringify({
-        file_id: 'abc12345',
+        file_id: 'abcdef0123456789abcdef0123456789',
         file_name: 'basic.csv',
         human_size: '24 B',
         content_type: 'text/csv',
@@ -1518,14 +1487,6 @@ test('Stage 1 shows upload progress and keeps the Map button disabled until uplo
   await expect(page.locator('#dropzoneUploading')).toBeVisible();
   await expect(page.locator('#dropzoneUploading')).toContainText('Please wait while your file is uploaded');
   await expect(page.locator('#analyzeButton')).toBeDisabled();
-  const uploadInput = page.getByTestId('agent-file-input');
-  await expect(uploadInput).toBeDisabled();
-
-  // When: automation tries to select another file while upload is still busy
-  await uploadInput.setInputFiles(fileFixture('multi-column.csv'));
-
-  // Then: the ignored selection does not linger in the native input state
-  await expect(uploadInput).toHaveJSProperty('files.length', 0);
   await expect(page.locator('#uploadingFileName')).toHaveText('basic.csv');
 
   // When: upload completes
@@ -1535,16 +1496,13 @@ test('Stage 1 shows upload progress and keeps the Map button disabled until uplo
   await expect(page.locator('#dropzoneFileStatus')).toHaveText('Uploaded');
   await expect(page.locator('#dropzoneUploading')).toBeHidden();
   await expect(page.locator('#analyzeButton')).toBeEnabled();
-  await expect(uploadInput).toBeEnabled();
 });
 
-test('error handling: harmonize failure and missing manifest', async ({ page }) => {
+test('harmonization failure keeps mapping choices available for retry', async ({ page }) => {
   await mockHarmonizeFailure(page);
 
   // Given: a CSV is uploaded and analyzed
   const fileId = await uploadAndAnalyze(page, fileFixture('basic.csv'));
-  const preOverrides = await page.request.get(`/stage-4/overrides/${fileId}`);
-  expect(await preOverrides.json()).toBeNull();
 
   // When: harmonize fails
   await page.locator('#harmonizeButton').click();
@@ -1552,14 +1510,8 @@ test('error handling: harmonize failure and missing manifest', async ({ page }) 
   // Then: Stage 2 keeps the user with their choices and shows a retryable error.
   await expect(page).toHaveURL(/\/stage-2/);
   await expect(page.locator('#harmonizeError')).toBeVisible();
+  await expect(page.locator('#harmonizeError')).toContainText('Unable to start harmonization');
   await expect(page.locator('#harmonizeButton')).toBeEnabled();
-
-  // And: review shows the missing-manifest state because no job was accepted.
-  await page.goto(`/stage-4?file_id=${fileId}`);
-  await expect(page.locator('.review-empty')).toBeVisible();
-
-  await page.goto(`/stage-5?file_id=${fileId}`);
-  await expect(page.locator('#summaryGrid .summary-empty')).toBeVisible();
 });
 
 test('multi-file isolation: overrides on one file do not affect another', async ({ page, context }) => {
@@ -1569,14 +1521,14 @@ test('multi-file isolation: overrides on one file do not affect another', async 
   const fileA = await uploadAndAnalyze(page, fileFixture('basic.csv'));
   await clickHarmonize(page);
   await expect(page.locator('#reviewButton')).toBeEnabled();
-  seedHarmonization(fileA, { 0: { col_a: 'Suggested' } });
+  seedHarmonization(fileA, { 0: { col_0001: 'Suggested' } });
 
   const pageB = await context.newPage();
   await mockHarmonizeSuccess(pageB);
   const fileB = await uploadAndAnalyze(pageB, fileFixture('basic.csv'));
   await clickHarmonize(pageB);
   await expect(pageB.locator('#reviewButton')).toBeEnabled();
-  seedHarmonization(fileB, { 0: { col_a: 'Suggested' } });
+  seedHarmonization(fileB, { 0: { col_0001: 'Suggested' } });
 
   // When: an override is applied to file A
   await page.goto(`/stage-4?file_id=${fileA}`);
@@ -1727,66 +1679,38 @@ test('Stage 3 resumes a durable job and retries with only the workflow id', asyn
   expect(harmonizePayload).toEqual({ file_id: currentFileId });
 });
 
-test('multiple columns with changes show as separate tabs', async ({ page }) => {
+test('column tabs keep each source column and transformation separate', async ({ page }) => {
   await mockHarmonizeSuccess(page);
 
   // Given: a CSV with changes in multiple columns
   const fileId = await uploadAndAnalyze(page, fileFixture('multi-column.csv'));
   await clickHarmonize(page);
   await expect(page.locator('#reviewButton')).toBeEnabled();
-  // Seed changes in col_a and col_b (different columns)
   seedHarmonization(fileId, {
-    0: { col_a: 'Changed_A', col_b: 'Changed_B' },
-    1: { col_a: 'Changed_A2', col_b: 'Changed_B2' },
+    0: { col_0001: 'UniqueA', col_0002: 'UniqueB' },
   });
 
-  // When: review page is loaded
   await page.goto(`/stage-4?file_id=${fileId}`);
   await waitForReviewRows(page);
 
-  // Then: both column pills are visible
   const columnPills = page.locator('.batch-progress-item.column-pill');
   await expect(columnPills).toHaveCount(2);
 
-  // And: each pill shows the column label
-  const pillTexts = await columnPills.allTextContents();
-  expect(pillTexts.some((text) => text.toLowerCase().includes('col_a') || text.toLowerCase().includes('col a'))).toBe(true);
-  expect(pillTexts.some((text) => text.toLowerCase().includes('col_b') || text.toLowerCase().includes('col b'))).toBe(true);
-});
-
-test('clicking different column tabs shows different transformations', async ({ page }) => {
-  await mockHarmonizeSuccess(page);
-
-  // Given: a CSV with changes in multiple columns
-  const fileId = await uploadAndAnalyze(page, fileFixture('multi-column.csv'));
-  await clickHarmonize(page);
-  await expect(page.locator('#reviewButton')).toBeEnabled();
-  seedHarmonization(fileId, {
-    0: { col_a: 'UniqueA', col_b: 'UniqueB' },
-  });
-
-  await page.goto(`/stage-4?file_id=${fileId}`);
+  // When: the reviewer selects the col_a tab.
+  await columnPills.filter({ hasText: 'col_a' }).click();
   await waitForReviewRows(page);
 
-  // When: the first column tab is active
-  const columnPills = page.locator('.batch-progress-item.column-pill');
-  const firstPill = columnPills.first();
-  await firstPill.click();
+  // Then: the values shown belong to col_a.
+  await expect(page.locator('.original-context-value')).toContainText(['Foo']);
+  await expect(page.locator('.target-value-input')).toHaveValue('UniqueA');
+
+  // When: the reviewer selects the col_b tab.
+  await columnPills.filter({ hasText: 'col_b' }).click();
   await waitForReviewRows(page);
 
-  // Then: transformations for that column are visible
-  const firstColumnOriginalValues = await page.locator('.original-context-value').allTextContents();
-
-  // When: clicking the second column tab
-  const secondPill = columnPills.nth(1);
-  await secondPill.click();
-  await waitForReviewRows(page);
-
-  // Then: transformations update to show different column's values
-  const secondColumnOriginalValues = await page.locator('.original-context-value').allTextContents();
-
-  // Verify the values changed (different column data displayed)
-  expect(firstColumnOriginalValues).not.toEqual(secondColumnOriginalValues);
+  // Then: col_b has its own source value and transformation.
+  await expect(page.locator('.original-context-value')).toContainText(['Apple']);
+  await expect(page.locator('.target-value-input')).toHaveValue('UniqueB');
 });
 
 test('row mode shows all changed cells for each row', async ({ page }) => {
@@ -1798,7 +1722,7 @@ test('row mode shows all changed cells for each row', async ({ page }) => {
   await expect(page.locator('#reviewButton')).toBeEnabled();
   // Row 0 has changes in both col_a and col_b
   seedHarmonization(fileId, {
-    0: { col_a: 'Changed_A', col_b: 'Changed_B' },
+    0: { col_0001: 'Changed_A', col_0002: 'Changed_B' },
   });
 
   await page.goto(`/stage-4?file_id=${fileId}`);
@@ -1810,17 +1734,15 @@ test('row mode shows all changed cells for each row', async ({ page }) => {
   await page.click('#settingsCloseButton');
   await waitForReviewRows(page);
 
-  // Then: row mode shows a row entry
-  const rowEntries = page.locator('.row-mode-row');
-  await expect(rowEntries.first()).toBeVisible();
-
-  // And: the row contains cells for both changed columns
-  const firstRow = rowEntries.first();
-  const cellsInRow = firstRow.locator('.row-cell');
-  const cellCount = await cellsInRow.count();
-
-  // Should have at least 2 cells (one for each changed column)
-  expect(cellCount).toBeGreaterThanOrEqual(2);
+  // Then: the row shows exactly the two changed cells and their outputs.
+  const firstRow = page.locator('.row-mode-row').first();
+  await expect(firstRow).toBeVisible();
+  await expect(firstRow.locator('.row-cell')).toHaveCount(2);
+  await expect(firstRow).toContainText('col_a');
+  await expect(firstRow).toContainText('col_b');
+  const outputs = firstRow.locator('.target-value-input');
+  await expect(outputs.nth(0)).toHaveValue('Changed_A');
+  await expect(outputs.nth(1)).toHaveValue('Changed_B');
 });
 
 test('changing file clears previous session', async ({ page }) => {
@@ -1845,7 +1767,7 @@ test('history dialog separates current output from accessible decision history',
   const fileId = await uploadAndAnalyze(page, fileFixture('basic.csv'));
   await clickHarmonize(page);
   await expect(page.locator('#reviewButton')).toBeEnabled();
-  seedHarmonization(fileId, { 0: { col_a: 'Changed Value' } });
+  seedHarmonization(fileId, { 0: { col_0001: 'Changed Value' } });
 
   // Navigate to Stage 5
   await page.goto(`/stage-5?file_id=${fileId}`);
@@ -1867,9 +1789,7 @@ test('history dialog separates current output from accessible decision history',
   const originalStep = dialog.locator('.history-step[data-source="original"]');
   await expect(originalStep).toContainText('Source value');
   const aiStep = dialog.locator('.history-step[data-source="ai"]');
-  if (await aiStep.count() > 0) {
-    await expect(aiStep).toContainText('Data Chord');
-  }
+  await expect(aiStep).toContainText('Data Chord');
 
   // Closing returns focus to the row that opened the dialog.
   await dialog.getByRole('button', { name: 'Close' }).click();

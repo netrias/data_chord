@@ -151,6 +151,10 @@ case " $args " in
     [[ -z "${MOCK_STATE_ADDRESSES:-}" ]] || printf '%s\n' "$MOCK_STATE_ADDRESSES"
     ;;
   *" output "*)
+    if [[ "${MOCK_OUTPUT_COMMAND_FAIL:-0}" == "1" ]]; then
+      printf 'AccessDenied: backend state is not readable\n' >&2
+      exit 1
+    fi
     output_name="${!#}"
     case "$output_name" in
       codebuild_project_name)
@@ -170,6 +174,10 @@ case " $args " in
         printf '"data-chord-staging"\n'
         ;;
       app_url)
+        if [[ "${MOCK_APP_URL_ABSENT:-0}" == "1" ]]; then
+          printf 'Error: Output "app_url" not found\n' >&2
+          exit 1
+        fi
         [[ -f "$MOCK_FULL_APPLIED" ]] || exit 1
         printf '"https://data-chord-staging.apps.netrias.com"\n'
         ;;
@@ -259,6 +267,7 @@ run_failed_bootstrap() {
     fail_test "Deployment succeeded after the build-prerequisite apply failed"
   fi
 
+  assert_call_contains "tofu bootstrap-apply " "-target=aws_codebuild_project.app_image" "$calls_file"
   assert_call_absent "aws start-build " "$calls_file"
   assert_call_absent "tofu full-apply " "$calls_file"
 }
@@ -409,6 +418,7 @@ run_infra_image_override() {
   local calls_file="$scenario_root/calls"
   mkdir -p "$scenario_root"
   : >"$calls_file"
+  touch "$scenario_root/build-ready"
 
   PATH="$MOCK_BIN:$PATH" \
     AWS_PROFILE=mock \
@@ -418,13 +428,44 @@ run_infra_image_override() {
     MOCK_CALLS="$calls_file" \
     MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
     MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+    MOCK_IMAGE_EXISTS=1 \
     MOCK_STATE_ADDRESSES=aws_s3_bucket.workflow \
     DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
     "$DEPLOY_SCRIPT" netrias staging deploy-infra >/dev/null 2>&1
 
   assert_call_contains "tofu full-apply " "-var=image_tag=operator123456" "$calls_file"
+  assert_call_contains "aws image-check " "imageTag=operator123456" "$calls_file"
   assert_call_absent "tofu bootstrap-apply " "$calls_file"
   assert_call_absent "aws start-build " "$calls_file"
+}
+
+run_infra_deploy_rejects_missing_image() {
+  local scenario_root="$TEST_ROOT/infra-missing-image"
+  local calls_file="$scenario_root/calls"
+  local output
+  mkdir -p "$scenario_root"
+  : >"$calls_file"
+  touch "$scenario_root/build-ready"
+
+  if output="$(
+    PATH="$MOCK_BIN:$PATH" \
+      AWS_PROFILE=mock \
+      DATA_CHORD_IMAGE_TAG=missing123456 \
+      MOCK_ACCOUNT_ID=945365518758 \
+      MOCK_BUILD_READY="$scenario_root/build-ready" \
+      MOCK_CALLS="$calls_file" \
+      MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+      MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+      MOCK_STATE_ADDRESSES=aws_s3_bucket.workflow \
+      DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+      "$DEPLOY_SCRIPT" netrias staging deploy-infra 2>&1
+  )"; then
+    fail_test "Infrastructure-only deploy accepted a missing ECR image"
+  fi
+
+  [[ "$output" == *"does not exist"* ]] || fail_test "Missing ECR image did not produce a useful error"
+  assert_call_contains "aws image-check " "imageTag=missing123456" "$calls_file"
+  assert_no_deploy_writes "$calls_file"
 }
 
 run_dirty_infra_deploy_fails() {
@@ -436,6 +477,7 @@ run_dirty_infra_deploy_fails() {
   if PATH="$MOCK_BIN:$PATH" \
     AWS_PROFILE=mock \
     DATA_CHORD_IMAGE_TAG=operator123456 \
+    DATA_CHORD_DEPLOY_ALLOW_DIRTY=1 \
     MOCK_ACCOUNT_ID=945365518758 \
     MOCK_BUILD_READY="$scenario_root/build-ready" \
     MOCK_CALLS="$calls_file" \
@@ -449,6 +491,60 @@ run_dirty_infra_deploy_fails() {
 
   assert_call_absent "tofu init " "$calls_file"
   assert_no_deploy_writes "$calls_file"
+}
+
+run_output_url_contract() {
+  local scenario_root="$TEST_ROOT/output-url"
+  local calls_file="$scenario_root/calls"
+  local output
+  mkdir -p "$scenario_root"
+  : >"$calls_file"
+  touch "$scenario_root/full-applied"
+
+  output="$(
+    PATH="$MOCK_BIN:$PATH" \
+      AWS_PROFILE=mock \
+      MOCK_ACCOUNT_ID=945365518758 \
+      MOCK_BUILD_READY="$scenario_root/build-ready" \
+      MOCK_CALLS="$calls_file" \
+      MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+      MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+      DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+      "$DEPLOY_SCRIPT" netrias staging output-url 2>/dev/null
+  )"
+  [[ "$output" == *"https://data-chord-staging.apps.netrias.com"* ]] || fail_test "output-url did not return the application URL"
+
+  if output="$(
+    PATH="$MOCK_BIN:$PATH" \
+      AWS_PROFILE=mock \
+      MOCK_ACCOUNT_ID=945365518758 \
+      MOCK_APP_URL_ABSENT=1 \
+      MOCK_BUILD_READY="$scenario_root/build-ready" \
+      MOCK_CALLS="$calls_file" \
+      MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+      MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+      DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+      "$DEPLOY_SCRIPT" netrias staging output-url 2>&1
+  )"; then
+    fail_test "output-url accepted an absent app_url output"
+  fi
+  [[ "$output" == *"output 'app_url' is unavailable"* ]] || fail_test "Absent app_url was not identified as unavailable"
+
+  if output="$(
+    PATH="$MOCK_BIN:$PATH" \
+      AWS_PROFILE=mock \
+      MOCK_ACCOUNT_ID=945365518758 \
+      MOCK_BUILD_READY="$scenario_root/build-ready" \
+      MOCK_CALLS="$calls_file" \
+      MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+      MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+      MOCK_OUTPUT_COMMAND_FAIL=1 \
+      DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+      "$DEPLOY_SCRIPT" netrias staging output-url 2>&1
+  )"; then
+    fail_test "output-url hid an OpenTofu output failure"
+  fi
+  [[ "$output" == *"Could not read OpenTofu output 'app_url'"* ]] || fail_test "OpenTofu output failure was reported as a missing URL"
 }
 
 run_build_reuses_immutable_image() {
@@ -547,7 +643,9 @@ run_empty_state_infra_deploy_fails
 run_existing_state_plan
 run_plan_image_override
 run_infra_image_override
+run_infra_deploy_rejects_missing_image
 run_dirty_infra_deploy_fails
+run_output_url_contract
 run_build_reuses_immutable_image
 run_legacy_state_guard
 

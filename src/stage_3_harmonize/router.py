@@ -63,6 +63,7 @@ from src.domain.tabular_column_renames import (
 )
 from src.integrations.netrias_harmonize import HarmonizeResult
 from src.persistence.cde_mapping_document_store import save_cde_mapping_document
+from src.persistence.harmonization_job_store import HarmonizationJobState
 from src.persistence.manifest_reader import read_manifest_parquet
 from src.persistence.manifest_writer import apply_column_renames_batch, apply_pv_adjustments_batch
 from src.persistence.pv_manifest_store import ColumnPvSets, save_pv_snapshot
@@ -72,7 +73,6 @@ from src.persistence.workflow_artifacts import (
     save_harmonized_artifacts,
 )
 from src.persistence.workflow_state_store import LoadedWorkflowState
-from src.stage_3_harmonize.job_state import StageThreeJobState
 from src.stage_3_harmonize.use_cases import (
     HarmonizationStart,
     HarmonizationStartConflictError,
@@ -134,11 +134,6 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
             workflow_storage=workflow_storage,
             user=user,
             payload=payload,
-            next_stage_url=_next_stage_url(
-                file_id=payload.file_id,
-                job_id="",
-                job_status=HarmonizeStatus.QUEUED,
-            ),
         )
     except HarmonizationWorkflowNotFoundError as exc:
         raise HTTPException(
@@ -227,11 +222,6 @@ async def _run_stage_three_job(
             user=user,
             accepted_job=accepted_job,
             response=response,
-            next_stage_url=_next_stage_url(
-                file_id=payload.file_id,
-                job_id=response.job_id,
-                job_status=response.status,
-            ),
         )
     except StaleStageThreeWorkerError:
         _router_logger.warning(
@@ -242,11 +232,6 @@ async def _run_stage_three_job(
             workflow_storage=workflow_storage,
             user=user,
             accepted_job=accepted_job,
-            next_stage_url=_next_stage_url(
-                file_id=payload.file_id,
-                job_id=accepted_job.polling_job_id,
-                job_status=HarmonizeStatus.FAILED,
-            ),
         )
     except Exception:  # pragma: no cover - defensive job boundary
         _router_logger.exception("Stage 3 background harmonization failed", extra={"file_id": payload.file_id})
@@ -254,23 +239,22 @@ async def _run_stage_three_job(
             workflow_storage=workflow_storage,
             user=user,
             accepted_job=accepted_job,
-            next_stage_url=_next_stage_url(
-                file_id=payload.file_id,
-                job_id=accepted_job.polling_job_id,
-                job_status=HarmonizeStatus.FAILED,
-            ),
         )
     finally:
         stop_heartbeat.set()
         await heartbeat
 
 
-def _response_from_job(job: StageThreeJobState) -> HarmonizeResponse:
+def _response_from_job(job: HarmonizationJobState) -> HarmonizeResponse:
     return HarmonizeResponse(
         job_id=job.job_id,
         status=job.status,
         detail=job.detail,
-        next_stage_url=job.next_stage_url,
+        next_stage_url=_next_stage_url(
+            file_id=job.file_id,
+            job_id=job.job_id,
+            job_status=job.status,
+        ),
         job_id_available=job.job_id_available,
         elapsed_seconds=job.elapsed_seconds(),
         manifest_summary=job.manifest_summary,
@@ -355,10 +339,9 @@ async def _run_harmonization_workflow(
         # or publish it if this worker or its workflow plan was superseded.
         run_authority.require_current()
         run_authority.require_plan_current()
-    effective_column_renames = column_renames
     harmonized_output_path = result.output_path or output_path
     if result.status == HarmonizeStatus.SUCCEEDED:
-        effective_column_renames = await _apply_column_renames_to_output(
+        await _apply_column_renames_to_output(
             harmonized_output_path,
             column_renames,
             meta.selected_sheet,
@@ -383,7 +366,7 @@ async def _run_harmonization_workflow(
         payload.file_id,
         result.manifest_path,
         storage,
-        effective_column_renames,
+        column_renames,
         ColumnPvSets({
             column_key: pv_catalog.get(cde_key)
             for column_key, cde_key in column_cde_map.mappings.items()
@@ -502,8 +485,8 @@ async def _fetch_and_cache_pvs(
     cache.set_pvs_batch(pv_catalog, expected_version=data_model_version)
     refined = refine_cde_types_from_pvs(cache.get_cde_catalog(), cache.get_all_pvs())
     cache.replace_cde_catalog(refined)
-    pv_counts = pv_catalog.counts()
-    total_pvs = pv_catalog.total_count()
+    pv_counts = {cde_key: len(values) for cde_key, values in pv_catalog.values.items()}
+    total_pvs = sum(pv_counts.values())
 
     _router_logger.info(
         "Fetched PVs for session",
@@ -523,7 +506,7 @@ async def _fetch_and_cache_pvs(
             },
         )
 
-    return cache.get_all_pvs()
+    return pv_catalog
 
 
 async def _fetch_pvs_for_session(
@@ -602,14 +585,13 @@ async def _apply_column_renames_to_output(
     output_path: Path,
     column_renames: ColumnRenameSet,
     sheet_name: str | None,
-) -> ColumnRenameSet:
+) -> None:
     if not column_renames.renames or not output_path.exists():
-        return column_renames
+        return
 
     dataset = await run_in_threadpool(read_tabular, output_path, sheet_name)
     renamed = apply_column_renames_to_dataset(dataset, column_renames)
     await run_in_threadpool(write_tabular, output_path, renamed, output_path)
-    return column_renames
 
 
 async def _resolved_columns_for_source(
@@ -638,18 +620,18 @@ async def _apply_column_renames_to_manifest(manifest_path: Path, column_renames:
 def _compute_row_adjustment(
     row: ManifestRow, pv_set: frozenset[str]
 ) -> ManifestPvAdjustment | None:
-    result = compute_pv_adjustment(
+    adjusted_value = compute_pv_adjustment(
         original_value=row.to_harmonize,
         top_harmonization=row.top_harmonization,
         top_suggestions=row.top_harmonizations,
         pv_set=pv_set,
     )
-    if result.adjusted_value is None:
+    if adjusted_value is None:
         return None
     return ManifestPvAdjustment.from_raw(
         row.column_key,
         row.to_harmonize,
-        result.adjusted_value,
+        adjusted_value,
     )
 
 

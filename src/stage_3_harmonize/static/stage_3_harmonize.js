@@ -9,7 +9,6 @@ const stageTwoUrl = config.stageTwoUrl ?? '/stage-2';
 const JOB_POLL_INTERVAL_MS = 3000;
 
 const loadingState = document.getElementById('loadingState');
-const jobIdDisplay = document.getElementById('jobIdDisplay');
 const reviewButton = document.getElementById('reviewButton');
 const retryButton = document.getElementById('retryButton');
 const emptyState = document.getElementById('stageThreeEmptyState');
@@ -126,7 +125,6 @@ const _handleRetry = () => {
   reviewButton.disabled = true;
   retryButton.classList.add('hidden');
   _clearError();
-  _hideJobMeta();
   _startHarmonize({ file_id: fileId });
 };
 
@@ -155,12 +153,6 @@ const _updateTitleForStatus = (status) => {
     return;
   }
   if (stageThreeTitle) stageThreeTitle.textContent = 'Harmonizing';
-};
-
-const _hideJobMeta = () => {
-  if (jobIdDisplay) {
-    jobIdDisplay.classList.add('hidden');
-  }
 };
 
 const _formatElapsed = (elapsedSeconds) => {
@@ -200,13 +192,6 @@ const _clearPollTimer = () => {
   }
 };
 
-const _showJobId = (jobId) => {
-  if (jobIdDisplay && jobId) {
-    jobIdDisplay.textContent = `Job ID: ${jobId}`;
-    jobIdDisplay.classList.remove('hidden');
-  }
-};
-
 /* why: extract file_id from URL for job and payload validation. */
 const _getFileIdFromUrl = () => {
   const params = new URLSearchParams(window.location.search);
@@ -227,7 +212,6 @@ const _renderJob = (job) => {
   const jobForSession = _jobWithCurrentFile(job);
   state.job = jobForSession;
   _persistJobMeta(jobForSession);
-  _showJobId(jobForSession.job_id);
 
   /* Default to 'running' when status is missing - job is in progress. */
   const status = jobForSession.status ?? 'running';
@@ -305,13 +289,11 @@ const _startHarmonize = async (payloadOverride = null) => {
   if (!fileId) {
     _toggleLoadingState(false);
     _toggleEmptyState(true);
-    _hideJobMeta();
     _hideMetricsDashboard();
     return;
   }
   const payload = { file_id: fileId };
 
-  _hideJobMeta();
   state.requestBody = payload;
 
   _clearError();
@@ -339,7 +321,6 @@ const _startHarmonize = async (payloadOverride = null) => {
     console.error(error);
     _showError(error.message || 'Unexpected error while launching harmonization.');
     _toggleLoadingState(false);
-    _hideJobMeta();
     retryButton.classList.remove('hidden');
   } finally {
     state.isProcessing = false;
@@ -378,7 +359,6 @@ const _resumeJobFromUrl = () => {
   state.requestBody = { file_id: fileId };
   _toggleEmptyState(false);
   _toggleLoadingState(true);
-  _showJobId(jobId);
   void _pollJob(jobId);
   return true;
 };

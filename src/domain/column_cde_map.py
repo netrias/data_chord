@@ -25,10 +25,6 @@ class ColumnCdeMap:
         object.__setattr__(self, "mappings", MappingProxyType(dict(self.mappings)))
 
     @classmethod
-    def empty(cls) -> ColumnCdeMap:
-        return cls(mappings={})
-
-    @classmethod
     def from_strings(cls, mappings: Mapping[str, str | None]) -> ColumnCdeMap:
         return cls(
             mappings={
@@ -50,10 +46,6 @@ class ColumnCdeMap:
     def cde_keys(self) -> list[str]:
         return sorted(set(self.mappings.values()))
 
-    def to_strings(self) -> dict[str, str]:
-        return {str(column_key): cde_key for column_key, cde_key in self.mappings.items()}
-
-
 @dataclass(frozen=True)
 class ColumnCdeOverrides:
     """User edits to a column-to-CDE map.
@@ -68,10 +60,6 @@ class ColumnCdeOverrides:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "overrides", MappingProxyType(dict(self.overrides)))
-
-    @classmethod
-    def empty(cls) -> ColumnCdeOverrides:
-        return cls(overrides={})
 
     @classmethod
     def from_strings(cls, overrides: Mapping[str, str | None]) -> ColumnCdeOverrides:

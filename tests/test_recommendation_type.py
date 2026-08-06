@@ -9,10 +9,21 @@ from httpx import AsyncClient
 from src.domain.change import RecommendationType
 from src.storage import UploadStorage
 from tests.conftest import (
+    create_harmonized_csv,
     create_manifest_for_file,
     store_test_harmonization_manifest,
     upload_file,
 )
+
+
+def _create_completed_manifest(
+    storage: UploadStorage,
+    file_id: str,
+    original_path: Path,
+    changes: dict[int, dict[str, str]],
+) -> None:
+    create_harmonized_csv(storage, file_id, original_path, changes)
+    create_manifest_for_file(storage, file_id, original_path, changes)
 
 
 class TestRecommendationTypeEnum:
@@ -72,12 +83,12 @@ class TestStage4RecommendationTypeContract:
         # Given: uploaded file with manifest containing harmonization data
         file_id = await upload_file(app_client, sample_csv_path)
         changes = {0: {"primary_diagnosis": "Harmonized Value"}}
-        create_manifest_for_file(temp_storage, file_id, sample_csv_path, changes)
+        _create_completed_manifest(temp_storage, file_id, sample_csv_path, changes)
 
         # When: requesting rows from Stage 4
         response = await app_client.post(
             "/stage-4/rows",
-            json={"file_id": file_id, "manual_columns": []},
+            json={"file_id": file_id},
         )
 
         # Then: response is successful and transformations include recommendationType
@@ -109,12 +120,12 @@ class TestStage4RecommendationTypeContract:
         file_id = await upload_file(app_client, sample_csv_path)
         # Change original value to something different
         changes = {0: {"primary_diagnosis": "Different Harmonized Value"}}
-        create_manifest_for_file(temp_storage, file_id, sample_csv_path, changes)
+        _create_completed_manifest(temp_storage, file_id, sample_csv_path, changes)
 
         # When: requesting rows from Stage 4
         response = await app_client.post(
             "/stage-4/rows",
-            json={"file_id": file_id, "manual_columns": []},
+            json={"file_id": file_id},
         )
 
         # Then: the changed transformation has recommendationType = ai_changed
@@ -136,12 +147,12 @@ class TestStage4RecommendationTypeContract:
         file_id = await upload_file(app_client, sample_csv_path)
         # No changes - AI keeps original values
         changes: dict[int, dict[str, str]] = {}
-        create_manifest_for_file(temp_storage, file_id, sample_csv_path, changes)
+        _create_completed_manifest(temp_storage, file_id, sample_csv_path, changes)
 
         # When: requesting rows from Stage 4
         response = await app_client.post(
             "/stage-4/rows",
-            json={"file_id": file_id, "manual_columns": []},
+            json={"file_id": file_id},
         )
 
         # Then: transformations where original == harmonized have recommendationType = ai_unchanged
@@ -167,6 +178,7 @@ class TestStage4RecommendationTypeContract:
 
         # Given: uploaded file with a manifest row whose AI value has no useful text
         file_id = await upload_file(app_client, sample_csv_path)
+        create_harmonized_csv(temp_storage, file_id, sample_csv_path, {})
         store_test_harmonization_manifest(
             temp_storage,
             file_id,
@@ -188,7 +200,7 @@ class TestStage4RecommendationTypeContract:
         # When: requesting rows from Stage 4
         response = await app_client.post(
             "/stage-4/rows",
-            json={"file_id": file_id, "manual_columns": []},
+            json={"file_id": file_id},
         )
 
         # Then: the public response marks the row as no recommendation

@@ -100,10 +100,11 @@ variable "certificate_arn" {
       (var.certificate_arn == "" && var.domain_name == "" && trimspace(trimsuffix(var.hosted_zone_name, ".")) != "") ||
       (
         trimspace(var.certificate_arn) != "" && var.certificate_arn == trimspace(var.certificate_arn) &&
-        trimspace(var.domain_name) != "" && var.domain_name == trimspace(var.domain_name)
+        trimspace(var.domain_name) != "" && var.domain_name == trimspace(var.domain_name) &&
+        var.hosted_zone_name == ""
       )
     )
-    error_message = "Choose one TLS mode: leave certificate_arn and domain_name empty and provide hosted_zone_name, or provide nonblank certificate_arn and domain_name values without surrounding whitespace."
+    error_message = "Choose one TLS mode: leave certificate_arn and domain_name empty and provide hosted_zone_name, or leave hosted_zone_name empty and provide nonblank certificate_arn and domain_name values without surrounding whitespace."
   }
 }
 
@@ -290,18 +291,6 @@ variable "target_group_unhealthy_threshold" {
     condition     = var.target_group_unhealthy_threshold >= 2 && var.target_group_unhealthy_threshold <= 10
     error_message = "target_group_unhealthy_threshold must be between 2 and 10."
   }
-}
-
-variable "codebuild_source_type" {
-  description = "CodeBuild source type. GITHUB is the simplest default for the public repo."
-  type        = string
-  default     = "GITHUB"
-}
-
-variable "codebuild_source_location" {
-  description = "Repository URL CodeBuild should build."
-  type        = string
-  default     = "https://github.com/netrias/data_chord.git"
 }
 
 variable "codebuild_connection_id" {

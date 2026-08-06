@@ -9,6 +9,12 @@ from datetime import datetime
 
 from netrias_client import read_tabular
 
+from src.app.harmonization_readiness import (
+    REVIEW_STATE_RECOVERY_DETAIL,
+    HarmonizationNotReadyError,
+    load_readable_review_overrides_record,
+    require_ready_harmonization_workflow,
+)
 from src.domain.change import CONFIDENCE, RecommendationType
 from src.domain.columns import ColumnIdentity, ColumnKey
 from src.domain.dataset_workflow_ids import DatasetWorkflowId
@@ -23,27 +29,23 @@ from src.domain.manifest import (
     is_value_changed,
 )
 from src.domain.pv_validation import check_value_conformance
-from src.domain.review_overrides import ReviewProgressState
+from src.domain.review_overrides import ReviewOverrides, ReviewProgressState
 from src.persistence.cde_mapping_document_store import CdeMappingEntry, load_cde_mapping_entries_by_column
 from src.persistence.manifest_reader import read_manifest_parquet
 from src.persistence.manifest_writer import add_manual_overrides_batch
 from src.persistence.pv_manifest_store import ColumnPvSets, column_pv_sets, effective_column_cde_map
 from src.persistence.review_override_store import (
     ReviewOverridesStoreConflictError,
-    delete_review_overrides_state,
-    load_review_overrides_record,
+    ReviewOverridesUnreadableError,
     save_review_overrides_state,
 )
 from src.persistence.workflow_artifacts import (
     load_harmonization_manifest_path,
     load_upload_artifact,
 )
-from src.persistence.workflow_state_store import LoadedWorkflowState, load_workflow_state
-from src.stage_3_harmonize.job_state import StageThreeJobUnreadableError, load_stage_three_job_state
 from src.stage_4_review_results.schemas import (
     CellOverrideSchema,
     ColumnReviewData,
-    DeleteOverridesResponse,
     NonConformantItem,
     NonConformantResponse,
     ReviewOverridesSchema,
@@ -51,7 +53,6 @@ from src.stage_4_review_results.schemas import (
     RowContextResponse,
     StageFourResultsResponse,
     SuggestionInfo,
-    TermRowIndicesResponse,
     Transformation,
 )
 from src.storage import UploadStorage, UserContext, VersionToken, WorkflowFile, WorkflowStorage
@@ -78,22 +79,6 @@ class ReviewStateConflictError(Exception):
     """Raised when active review state changed after the caller loaded it."""
 
 
-class StageFourRowsUploadNotFoundError(Exception):
-    """Raised when Stage 4 rows are requested for an unknown upload."""
-
-
-class StageFourRowsManifestNotFoundError(Exception):
-    """Raised when Stage 4 rows are requested before Stage 3 stores a manifest."""
-
-
-class RowContextUploadNotFoundError(Exception):
-    """Raised when row context is requested for an unknown upload."""
-
-
-class TermRowIndicesManifestNotFoundError(Exception):
-    """Raised when term row indices are requested before Stage 3 stores a manifest."""
-
-
 def build_stage_four_rows(
     *,
     file_id: DatasetWorkflowId,
@@ -101,18 +86,20 @@ def build_stage_four_rows(
     workflow_storage: WorkflowStorage,
     user: UserContext,
 ) -> StageFourResultsResponse:
+    loaded_state = require_ready_harmonization_workflow(workflow_storage, user, file_id)
     meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
     if not meta:
-        raise StageFourRowsUploadNotFoundError()
+        raise HarmonizationNotReadyError("Upload not found. Return to Stage 1 and upload it again.")
 
     original_dataset = read_tabular(meta.saved_path, sheet_name=meta.selected_sheet)
 
     manifest = _load_manifest(upload_storage, workflow_storage, user, file_id)
     if manifest is None:
-        raise StageFourRowsManifestNotFoundError()
+        raise HarmonizationNotReadyError(
+            "Harmonization results are incomplete. Return to Stage 3 and run harmonization again."
+        )
 
     column_info = _extract_columns_from_manifest(manifest)
-    loaded_state = _load_workflow_state(upload_storage, workflow_storage, user, file_id)
     column_pv_map = column_pv_sets(
         workflow_storage,
         user,
@@ -143,18 +130,27 @@ def build_non_conformant_values(
     user: UserContext,
 ) -> NonConformantResponse:
     """Build the Stage 4 gating list from the current manifest values and durable PV state."""
+    loaded_state = require_ready_harmonization_workflow(workflow_storage, user, file_id)
+
     manifest = _load_manifest(upload_storage, workflow_storage, user, file_id)
     if manifest is None:
-        return NonConformantResponse(count=0, items=[])
+        raise HarmonizationNotReadyError(
+            "Harmonization results are incomplete. Return to Stage 3 and run harmonization again."
+        )
 
-    loaded_state = _load_workflow_state(upload_storage, workflow_storage, user, file_id)
     column_pv_map = column_pv_sets(
         workflow_storage,
         user,
         loaded_state,
         [row.column_key for row in manifest.rows],
     )
-    non_conformant = _find_unique_non_conformant_values(manifest, column_pv_map)
+    review_record = load_readable_review_overrides_record(workflow_storage, user, file_id)
+    review_overrides = review_record.value if review_record is not None else None
+    non_conformant = _find_unique_non_conformant_values(
+        manifest,
+        column_pv_map,
+        review_overrides,
+    )
     return NonConformantResponse(count=len(non_conformant), items=non_conformant)
 
 
@@ -167,9 +163,10 @@ def build_row_context(
     user: UserContext,
 ) -> RowContextResponse:
     """Load original spreadsheet rows for the on-demand review context popup."""
+    require_ready_harmonization_workflow(workflow_storage, user, file_id)
     meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
     if meta is None:
-        raise RowContextUploadNotFoundError()
+        raise HarmonizationNotReadyError("Upload not found. Return to Stage 1 and upload it again.")
 
     dataset = read_tabular(meta.saved_path, sheet_name=meta.selected_sheet)
     selected_rows = [
@@ -180,50 +177,20 @@ def build_row_context(
     return RowContextResponse(headers=dataset.headers, rows=selected_rows)
 
 
-def find_term_row_indices(
-    *,
-    file_id: str,
-    column_key: str,
-    original_value: str,
-    upload_storage: UploadStorage,
-    workflow_storage: WorkflowStorage,
-    user: UserContext,
-) -> TermRowIndicesResponse:
-    """Look up full 0-based source row indices for a manifest term."""
-    manifest = _load_manifest(upload_storage, workflow_storage, user, file_id)
-    if manifest is None:
-        raise TermRowIndicesManifestNotFoundError()
-
-    for row in manifest.rows:
-        if str(row.column_key) == column_key and row.to_harmonize == original_value:
-            return TermRowIndicesResponse(row_indices=row.row_indices)
-
-    return TermRowIndicesResponse(row_indices=[])
-
-
 def get_review_overrides(
     *,
     workflow_storage: WorkflowStorage,
     user: UserContext,
     file_id: DatasetWorkflowId,
 ) -> LoadedReviewOverridesResult | None:
-    record = load_review_overrides_record(workflow_storage, user, file_id)
+    require_ready_harmonization_workflow(workflow_storage, user, file_id)
+    record = load_readable_review_overrides_record(workflow_storage, user, file_id)
     if record is None:
         return None
     return LoadedReviewOverridesResult(
         payload=ReviewOverridesSchema.model_validate(record.value.to_store()),
         version=record.version,
     )
-
-
-def delete_review_overrides(
-    *,
-    workflow_storage: WorkflowStorage,
-    user: UserContext,
-    file_id: DatasetWorkflowId,
-) -> DeleteOverridesResponse:
-    existed = delete_review_overrides_state(workflow_storage, user, file_id)
-    return DeleteOverridesResponse(file_id=file_id, deleted=existed)
 
 
 def save_review_overrides(
@@ -237,6 +204,7 @@ def save_review_overrides(
     expected_version: VersionToken | None = None,
 ) -> SaveReviewOverridesResult:
     """Persist export overrides and append the matching manifest audit rows."""
+    require_ready_harmonization_workflow(workflow_storage, user, file_id)
     try:
         saved = save_review_overrides_state(
             workflow_storage,
@@ -248,16 +216,15 @@ def save_review_overrides(
         )
     except ReviewOverridesStoreConflictError as exc:
         raise ReviewStateConflictError(file_id) from exc
+    except ReviewOverridesUnreadableError as exc:
+        raise HarmonizationNotReadyError(REVIEW_STATE_RECOVERY_DETAIL) from exc
 
-    current_audit = saved.value.manual_override_batch()
-    audit_changes = saved.value.audit_changes_since(saved.previous)
     _sync_override_audit(
         upload_storage,
         workflow_storage,
         user,
         saved.value.file_id,
-        current_audit,
-        audit_changes,
+        saved.value.manual_override_batch(),
     )
     return SaveReviewOverridesResult(
         file_id=file_id,
@@ -278,29 +245,6 @@ def _load_manifest(
     return read_manifest_parquet(manifest_path)
 
 
-def _load_workflow_state(
-    upload_storage: UploadStorage,
-    workflow_storage: WorkflowStorage,
-    user: UserContext,
-    file_id: str,
-) -> LoadedWorkflowState:
-    loaded = load_workflow_state(
-        workflow_storage,
-        user,
-        file_id,
-        legacy_upload_storage=upload_storage,
-    )
-    if loaded is None or loaded.state.mapping_manifest is None:
-        raise StageFourRowsManifestNotFoundError()
-    try:
-        loaded_job = load_stage_three_job_state(workflow_storage, user, file_id)
-    except StageThreeJobUnreadableError as exc:
-        raise StageFourRowsManifestNotFoundError() from exc
-    if loaded_job is not None and not loaded_job.job.is_completed_for_plan(loaded.version.value):
-        raise StageFourRowsManifestNotFoundError()
-    return loaded
-
-
 def _extract_columns_from_manifest(manifest: ManifestSummary) -> list[ColumnIdentity]:
     seen: set[str] = set()
     columns: list[ColumnIdentity] = []
@@ -308,36 +252,53 @@ def _extract_columns_from_manifest(manifest: ManifestSummary) -> list[ColumnIden
         col_key = str(row.column_key)
         if col_key not in seen:
             seen.add(col_key)
-            columns.append(ColumnIdentity(key=row.column_key, index=row.column_id, header=row.column_name))
+            columns.append(ColumnIdentity(key=row.column_key, header=row.column_name))
     return columns
 
 
 def _find_unique_non_conformant_values(
     manifest: ManifestSummary,
     column_pv_map: ColumnPvSets,
+    review_overrides: ReviewOverrides | None,
 ) -> list[NonConformantItem]:
     seen: set[tuple[str, str, str]] = set()
     non_conformant: list[NonConformantItem] = []
 
     for row in manifest.rows:
-        current_value = _current_value_for_row(row)
-        col_key = str(row.column_key)
-        # Gate once per unique term/current value pair; repeated source rows
-        # should not make reviewers resolve the same problem more than once.
-        key = (col_key, row.to_harmonize, current_value or "")
-        if key in seen:
-            continue
-        seen.add(key)
-
         pv_set = column_pv_map.get(row.column_key)
-        if pv_set and current_value and not check_value_conformance(current_value, pv_set):
-            non_conformant.append(NonConformantItem(
-                column=row.column_name,
-                value=current_value,
-                original=row.to_harmonize,
-            ))
+        for current_value in _active_values_for_row(row, review_overrides):
+            col_key = str(row.column_key)
+            # Gate once per unique term/current value pair; repeated source rows
+            # should not make reviewers resolve the same problem more than once.
+            key = (col_key, row.to_harmonize, current_value)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            if pv_set and current_value and not check_value_conformance(current_value, pv_set):
+                non_conformant.append(NonConformantItem(
+                    column=row.column_name,
+                    value=current_value,
+                    original=row.to_harmonize,
+                ))
 
     return non_conformant
+
+
+def _active_values_for_row(
+    row: ManifestRow,
+    review_overrides: ReviewOverrides | None,
+) -> list[str]:
+    ai_value = row.top_harmonization if row.top_harmonization.strip() else row.to_harmonize
+    if review_overrides is None or not row.row_indices:
+        return [ai_value]
+
+    values: list[str] = []
+    for row_index in row.row_indices:
+        row_overrides = review_overrides.overrides.get(str(row_index + 1))
+        active_override = row_overrides.get(row.column_key) if row_overrides is not None else None
+        values.append(active_override.human_value if active_override is not None else ai_value)
+    return values
 
 
 def _current_value_for_row(row: ManifestRow) -> str:
@@ -417,8 +378,6 @@ def _build_transformation(row: ManifestRow, pv_set: frozenset[str] | None) -> Tr
     manual_override = get_latest_override_value(row.manual_overrides)
     current_value = manual_override if manual_override is not None else harmonized_value
     manifest_indices_full = [idx + 1 for idx in row.row_indices]
-    row_count = len(manifest_indices_full)
-
     return Transformation(
         originalValue=original_value,
         harmonizedValue=harmonized_value,
@@ -430,8 +389,7 @@ def _build_transformation(row: ManifestRow, pv_set: frozenset[str] | None) -> Tr
         isPVConformant=check_value_conformance(current_value, pv_set),
         pvSetAvailable=pv_set is not None and len(pv_set) > 0,
         topSuggestions=_build_suggestions_with_conformance(row.top_harmonizations, pv_set),
-        rowIndices=manifest_indices_full if row_count <= 50 else manifest_indices_full[:10],
-        rowCount=row_count,
+        rowIndices=manifest_indices_full,
     )
 
 
@@ -500,7 +458,6 @@ def _override_payload_to_store(
     return {
         row_key: {
             column_key: {
-                "ai_value": override.ai_value,
                 "human_value": override.human_value,
                 "original_value": override.original_value,
             }
@@ -516,7 +473,6 @@ def _sync_override_audit(
     user: UserContext,
     file_id: str,
     current_audit: list[ManifestManualOverride],
-    audit_changes: list[ManifestManualOverride],
 ) -> None:
     if not current_audit:
         return
@@ -535,17 +491,8 @@ def _sync_override_audit(
         ManifestTermKey.from_row(row): get_latest_override_value(row.manual_overrides)
         for row in manifest.rows
     }
-    if not audit_changes:
-        desired_values = {
-            override.term_key: override.override_value
-            for override in current_audit
-        }
-        if all(latest_values.get(term_key) == value for term_key, value in desired_values.items()):
-            return
-        audit_changes = current_audit
-
     pending_changes: list[ManifestManualOverride] = []
-    for override in audit_changes:
+    for override in current_audit:
         if latest_values.get(override.term_key) == override.override_value:
             continue
         pending_changes.append(override)
@@ -571,15 +518,9 @@ __all__ = [
     "LoadedReviewOverridesResult",
     "ReviewStateConflictError",
     "SaveReviewOverridesResult",
-    "RowContextUploadNotFoundError",
-    "StageFourRowsManifestNotFoundError",
-    "StageFourRowsUploadNotFoundError",
-    "TermRowIndicesManifestNotFoundError",
     "build_non_conformant_values",
     "build_row_context",
     "build_stage_four_rows",
-    "delete_review_overrides",
-    "find_term_row_indices",
     "get_review_overrides",
     "save_review_overrides",
 ]

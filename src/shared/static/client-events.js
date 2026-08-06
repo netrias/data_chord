@@ -10,7 +10,7 @@ export const CLIENT_FETCH_FAILED = 'client.fetch.failed';
 export const CLIENT_API_ERROR = 'client.api.error';
 
 const MAX_ERROR_MESSAGE_LENGTH = 512;
-const FILE_ID_PATTERN = /^[a-f0-9]{8,64}$/;
+const FILE_ID_PATTERN = /^[a-f0-9]{32}$/;
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
 
 const _truncate = (value, maxLength) => {

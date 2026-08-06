@@ -12,9 +12,9 @@ import pyarrow.parquet as pq
 from src.domain.manifest import (
     ManifestRow,
     ManualOverride,
-    get_manifest_schema,
 )
 from src.persistence.manifest_reader import read_manifest_parquet
+from src.persistence.manifest_schema import get_manifest_schema
 from src.persistence.manifest_writer import _write_manifest_parquet
 from src.stage_5_review_summary.use_cases import _manifest_to_json
 
@@ -41,6 +41,28 @@ class TestManifestParquetSchema:
         field_names = [field.name for field in schema]
 
         assert "pv_adjustment" not in field_names
+
+    def test_schema_preserves_the_provider_field_types(self) -> None:
+        schema = get_manifest_schema()
+        override_struct = pa.struct([
+            ("user_id", pa.string()),
+            ("timestamp", pa.string()),
+            ("value", pa.string()),
+        ])
+
+        assert schema == pa.schema([
+            ("job_id", pa.string()),
+            ("column_id", pa.int64()),
+            ("column_name", pa.string()),
+            ("to_harmonize", pa.string()),
+            ("top_harmonization", pa.string()),
+            ("ontology_id", pa.string()),
+            ("top_harmonizations", pa.list_(pa.string())),
+            ("confidence_score", pa.float64()),
+            ("error", pa.string()),
+            ("row_indices", pa.list_(pa.int64())),
+            ("manual_overrides", pa.list_(override_struct)),
+        ])
 
     def test_reader_rejects_partial_provider_schema(self, tmp_path: Path) -> None:
         """A valid Parquet container is not a valid harmonization manifest by accident."""

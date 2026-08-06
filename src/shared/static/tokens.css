@@ -63,9 +63,6 @@
   --netrias-glow-strong: rgba(115, 179, 6, 0.35);
   --netrias-glow-intense: rgba(115, 179, 6, 0.4);
 
-  /* Legacy alias - prefer --netrias-500 for new code */
-  --green-500: var(--netrias-500);
-
   /* ==========================================================================
      SUPPORTING COLORS
      ========================================================================== */
@@ -75,9 +72,6 @@
   --teal-600: #009199;
   --teal-500: #00a7b3;
   --teal-50: #f0fdfa;
-
-  /* Purple - legacy CTA color, prefer --netrias-500 for primary actions */
-  --purple-500: #6c63ff;
 
   /* Gray scale - unified palette */
   --gray-900: #0f172a;
@@ -191,42 +185,6 @@ body {
   border: 0;
 }
 
-/* ==========================================================================
-   TYPOGRAPHY UTILITIES
-   For application labels only - do NOT use on data values from the backend.
-   ========================================================================== */
-
-/* Table/section headers - uppercase, small, spaced
-   Use for column headers, form labels, and section dividers.
-   Prefer this utility over inline uppercase styling in stage CSS. */
-.text-header {
-  text-transform: uppercase;
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  color: var(--gray-500);
-}
-
-/* Section titles - larger, bold */
-.text-title {
-  font-size: 1.15rem;
-  font-weight: 600;
-  color: var(--gray-900);
-}
-
-/* Subtle labels - small, medium weight */
-.text-label {
-  font-size: 0.85rem;
-  font-weight: 500;
-  color: var(--gray-600);
-}
-
-/* Emphasized text within content */
-.text-emphasis {
-  font-weight: 600;
-  color: var(--gray-900);
-}
-
 /* Shared button styles */
 button {
   border: none;
@@ -243,15 +201,9 @@ button:disabled {
   cursor: not-allowed;
 }
 
-button.cta {
-  background: var(--purple-500);
-  color: var(--white);
-  box-shadow: 0 10px 30px rgba(108, 99, 255, 0.25);
-}
-
 button.linklike {
   background: transparent;
-  color: var(--purple-500);
+  color: var(--netrias-500);
   padding: 0;
   font-size: 0.9rem;
 }
@@ -334,40 +286,6 @@ button.linklike {
     0 1px 0 var(--netrias-700),
     0 2px 8px var(--netrias-glow-medium),
     inset 0 1px 3px rgba(0, 0, 0, 0.15);
-}
-
-/* Warning actions (Flag for review) - soft yellow 3D button matching batch indicator */
-.warning-btn {
-  position: relative;
-  background: linear-gradient(180deg, var(--warning-200) 0%, var(--warning-300) 50%, var(--warning-400) 100%);
-  color: var(--warning-700);
-  border: none;
-  font-weight: 600;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
-  box-shadow:
-    0 4px 0 var(--warning-500),
-    0 6px 16px rgba(251, 191, 36, 0.25),
-    inset 0 2px 0 rgba(255, 255, 255, 0.5),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.05);
-  transition: transform var(--transition-fast), box-shadow var(--transition-fast), filter var(--transition-fast);
-}
-
-.warning-btn:hover:enabled {
-  transform: translateY(-3px);
-  filter: brightness(102%);
-  box-shadow:
-    0 6px 0 var(--warning-500),
-    0 10px 24px rgba(251, 191, 36, 0.35),
-    inset 0 2px 0 rgba(255, 255, 255, 0.5),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.05);
-}
-
-.warning-btn:active:enabled {
-  transform: translateY(1px);
-  box-shadow:
-    0 1px 0 var(--warning-500),
-    0 2px 8px rgba(251, 191, 36, 0.2),
-    inset 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 /* Progress tracker */
@@ -576,9 +494,9 @@ button.linklike {
 }
 
 .step.complete .step-index {
-  background: var(--green-500);
+  background: var(--netrias-500);
   color: transparent;
-  border-color: var(--green-500);
+  border-color: var(--netrias-500);
   border-width: 2px;
 }
 
@@ -621,7 +539,7 @@ button.linklike {
 }
 
 .connector.complete {
-  background: linear-gradient(to right, var(--green-500), var(--teal-500));
+  background: linear-gradient(to right, var(--netrias-500), var(--teal-500));
 }
 
 /* Step instruction text - shown to left of progress tracker */
@@ -761,80 +679,13 @@ button.linklike {
   padding: var(--space-12) var(--space-6) 4rem;
 }
 
-/* ==========================================================================
-   CARD SYSTEM
-   Unified card styles based on Stage 1's curved dropzone design.
-   Use .card as base, add modifiers for variants.
-   ========================================================================== */
-
-/* Base card - the foundation for all card-like containers */
-.card {
-  background: var(--white);
-  border: 1px solid var(--gray-200);
-  border-radius: var(--radius-2xl);
-  box-shadow: var(--shadow-sm), var(--shadow-md);
-  transition: border-color var(--transition-fast),
-              box-shadow var(--transition-fast),
-              transform var(--transition-fast);
-}
-
-/* Interactive card - hover effects for clickable/actionable cards */
-.card--interactive:hover {
-  border-color: var(--netrias-500);
-  box-shadow: var(--shadow-md), var(--shadow-lg);
-  transform: translateY(-2px);
-}
-
-/* Static card - no hover effects, for display-only content */
-.card--static {
-  cursor: default;
-}
-
-/* Inset card - for nested cards inside a parent card */
-.card--inset {
-  background: var(--gray-50);
-  box-shadow: var(--shadow-sm);
-}
-
-/* Padded card variants */
-.card--pad-sm {
-  padding: var(--space-4);
-}
-
-.card--pad-md {
-  padding: var(--space-6);
-}
-
-.card--pad-lg {
-  padding: var(--space-8);
-}
-
-.card--pad-xl {
-  padding: var(--space-10);
-}
-
-/* Stage card - legacy class, now extends .card system */
+/* Shared stage card */
 .stage-card {
   background: var(--white);
   border-radius: var(--radius-2xl);
   padding: var(--space-10);
   box-shadow: var(--shadow-lg);
   margin-bottom: var(--space-8);
-}
-
-.stage-pill {
-  display: inline-flex;
-  padding: 0.2rem 0.7rem;
-  border-radius: var(--radius-full);
-  background: rgba(0, 124, 136, 0.12);
-  color: var(--teal-700);
-  font-weight: 600;
-  font-size: 0.9rem;
-}
-
-.stage-subtitle {
-  color: var(--gray-600);
-  margin: 0.5rem 0 0;
 }
 
 /* Status messages */
@@ -903,7 +754,7 @@ button.linklike {
   margin: 0 auto;
   border-radius: 50%;
   border: 5px solid var(--gray-200);
-  border-top-color: var(--green-500);
+  border-top-color: var(--netrias-500);
   animation: spin 1s linear infinite;
 }
 

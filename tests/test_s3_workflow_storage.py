@@ -147,17 +147,74 @@ def test_s3_workflow_write_artifact_replaces_existing_object(tmp_path: Path) -> 
         assert path.read_text(encoding="utf-8") == "a\nnew\n"
 
 
+def test_s3_workflow_artifact_rejects_suffix_change_and_similar_prefix(tmp_path: Path) -> None:
+    client = FakeS3Client()
+    storage = S3WorkflowStorage(bucket="bucket", prefix="app", client=client)
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    current = tmp_path / "current.csv"
+    different = tmp_path / "different.tsv"
+    current.write_text("a\ncurrent\n", encoding="utf-8")
+    different.write_text("a\trejected\n", encoding="utf-8")
+    storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, current)
+    similar_key = "app/workflows/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/artifacts/harmonized_output_backup.csv"
+    client.objects[similar_key] = (b"a\nstale\n", _etag(b"a\nstale\n"))
+
+    with pytest.raises(WorkflowConflictError, match="suffix"):
+        storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, different)
+
+    with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT) as path:
+        assert path.read_text(encoding="utf-8") == "a\ncurrent\n"
+
+
+def test_s3_original_upload_is_create_once_across_suffixes_and_write(tmp_path: Path) -> None:
+    client = FakeS3Client()
+    storage = S3WorkflowStorage(bucket="bucket", prefix="app", client=client)
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    original = tmp_path / "original.csv"
+    different = tmp_path / "different.tsv"
+    replacement = tmp_path / "replacement.csv"
+    original.write_text("a\nold\n", encoding="utf-8")
+    different.write_text("a\tother\n", encoding="utf-8")
+    replacement.write_text("a\nnew\n", encoding="utf-8")
+    storage.create_artifact(user, workflow.dataset_workflow_id, WorkflowFile.ORIGINAL_UPLOAD, original)
+
+    with pytest.raises(WorkflowConflictError, match="already exists"):
+        storage.create_artifact(user, workflow.dataset_workflow_id, WorkflowFile.ORIGINAL_UPLOAD, different)
+    with pytest.raises(WorkflowConflictError, match="create-once"):
+        storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.ORIGINAL_UPLOAD, replacement)
+
+    with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.ORIGINAL_UPLOAD) as path:
+        assert path.read_text(encoding="utf-8") == "a\nold\n"
+
+
+def test_s3_artifact_rejects_multiple_exact_variants(tmp_path: Path) -> None:
+    client = FakeS3Client()
+    storage = S3WorkflowStorage(bucket="bucket", prefix="app", client=client)
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    csv_key = "app/workflows/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/artifacts/harmonized_output.csv"
+    tsv_key = "app/workflows/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/artifacts/harmonized_output.tsv"
+    client.objects[csv_key] = (b"csv", _etag(b"csv"))
+    client.objects[tsv_key] = (b"tsv", _etag(b"tsv"))
+
+    with pytest.raises(WorkflowConflictError, match="multiple"):
+        with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT):
+            pass
+
+
 def test_failed_s3_artifact_replacement_preserves_last_complete_object(tmp_path: Path) -> None:
     client = FakeS3Client()
     storage = S3WorkflowStorage(bucket="bucket", prefix="app", client=client)
     user = UserContext(user_id="alice")
     workflow = storage.create_workflow(user, dataset_workflow_id())
     previous = tmp_path / "previous.csv"
-    replacement = tmp_path / "replacement.tsv"
+    replacement = tmp_path / "replacement.csv"
     previous.write_text("a\nold\n", encoding="utf-8")
     replacement.write_text("a\tnew\n", encoding="utf-8")
     storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, previous)
-    client.failed_put_key = "app/workflows/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/artifacts/harmonized_output.tsv"
+    client.failed_put_key = "app/workflows/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/artifacts/harmonized_output.csv"
 
     with pytest.raises(ClientError):
         storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, replacement)
@@ -165,6 +222,11 @@ def test_failed_s3_artifact_replacement_preserves_last_complete_object(tmp_path:
     with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT) as path:
         assert path.suffix == ".csv"
         assert path.read_text(encoding="utf-8") == "a\nold\n"
+
+    client.failed_put_key = None
+    storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, replacement)
+    with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT) as path:
+        assert path.read_text(encoding="utf-8") == "a\tnew\n"
 
 
 def _key(kwargs: dict[str, object]) -> str:

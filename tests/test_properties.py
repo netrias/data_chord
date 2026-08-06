@@ -15,8 +15,6 @@ from src.domain.manifest.models import is_value_changed
 from src.domain.pv_validation import (
     check_value_conformance,
     compute_pv_adjustment,
-    find_conformant_suggestion,
-    validate_against_pvs,
 )
 
 # =============================================================================
@@ -73,22 +71,6 @@ def test_whitespace_differences_are_significant(base: str, ws: str) -> None:
 
 
 @given(st.text(), st.lists(st.text(), min_size=1))
-def test_validate_against_pvs_is_membership(value: str, pv_list: list[str]) -> None:
-    """Validation is strict set membership."""
-    pv_set = frozenset(pv_list)
-    result = validate_against_pvs(value, pv_set)
-    assert result == (value in pv_set)
-
-
-@given(st.lists(st.text(), min_size=1))
-def test_validate_member_always_passes(pv_list: list[str]) -> None:
-    """A value that is in the PV set always validates."""
-    pv_set = frozenset(pv_list)
-    member = pv_list[0]
-    assert validate_against_pvs(member, pv_set) is True
-
-
-@given(st.text(), st.lists(st.text(), min_size=1))
 def test_check_conformance_matches_membership(value: str, pv_list: list[str]) -> None:
     """check_value_conformance agrees with set membership for non-empty values."""
     pv_set = frozenset(pv_list)
@@ -113,41 +95,6 @@ def test_conformance_empty_value_is_always_true(pv_list: list[str]) -> None:
 
 
 # =============================================================================
-# Find Conformant Suggestion Properties
-# =============================================================================
-
-
-@given(st.lists(st.text(), min_size=1), st.lists(st.text(), min_size=1))
-def test_find_conformant_returns_first_match(suggestions: list[str], pvs: list[str]) -> None:
-    """Returns first suggestion that appears in PV set, or None."""
-    pv_set = frozenset(pvs)
-    result = find_conformant_suggestion(suggestions, pv_set)
-
-    if result is not None:
-        # Result must be in both suggestions and pvs
-        assert result in suggestions
-        assert result in pv_set
-        # And it must be the first such match
-        for s in suggestions:
-            if s in pv_set:
-                assert result == s
-                break
-    else:
-        # No suggestion is in the pv_set
-        for s in suggestions:
-            assert s not in pv_set
-
-
-@given(st.lists(st.text(), min_size=1))
-def test_find_conformant_with_matching_first(pv_list: list[str]) -> None:
-    """When first suggestion is conformant, it is returned."""
-    pv_set = frozenset(pv_list)
-    first_pv = pv_list[0]
-    suggestions = [first_pv, "other", "values"]
-    assert find_conformant_suggestion(suggestions, pv_set) == first_pv
-
-
-# =============================================================================
 # Compute PV Adjustment Properties
 # =============================================================================
 
@@ -168,9 +115,7 @@ def test_compute_adjustment_conformant_when_top_in_pvs(original: str, pv_list: l
 
     result = compute_pv_adjustment(original, top, [], pv_set)
 
-    assert result.is_conformant is True
-    assert result.adjusted_value is None
-    assert result.attempted_value == top
+    assert result is None
 
 
 @given(
@@ -193,15 +138,14 @@ def test_compute_adjustment_falls_back_to_suggestions(
 
     result = compute_pv_adjustment(original, non_conformant_top, suggestions, pv_set)
 
-    assert result.is_conformant is True
-    assert result.adjusted_value == suggestion_pvs[0]
+    assert result == suggestion_pvs[0]
 
 
 @given(st.text(), st.text(), st.lists(st.text(), max_size=3))
-def test_compute_adjustment_non_conformant_when_no_match(
+def test_compute_adjustment_returns_none_when_no_replacement_matches(
     original: str, top: str, suggestions: list[str]
 ) -> None:
-    """If nothing matches PV set, result is non-conformant."""
+    """If nothing matches the PV set, no replacement is available."""
     # Create a PV set with values that won't match
     pv_set = frozenset(["__definitely_not_matching_1__", "__definitely_not_matching_2__"])
     assume(top not in pv_set)
@@ -209,10 +153,7 @@ def test_compute_adjustment_non_conformant_when_no_match(
 
     result = compute_pv_adjustment(original, top, suggestions, pv_set)
 
-    assert result.is_conformant is False
-    assert result.adjusted_value is None
-    assert result.original_value == original
-    assert result.attempted_value == top
+    assert result is None
 
 
 # =============================================================================

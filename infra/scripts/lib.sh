@@ -138,3 +138,18 @@ tofu_output() {
   local output_name="$1"
   tofu -chdir="$INFRA_DIR" output -raw "$output_name" 2>/dev/null || true
 }
+
+required_tofu_output() {
+  local output_name="$1"
+  local output
+
+  if ! output="$(tofu -chdir="$INFRA_DIR" output -raw "$output_name" 2>&1)"; then
+    if [[ "$output" == *"Output \"$output_name\" not found"* || "$output" == *"No outputs found"* ]]; then
+      fail "OpenTofu output '$output_name' is unavailable. Apply the application stack first."
+    fi
+    fail "Could not read OpenTofu output '$output_name': $output"
+  fi
+
+  [[ -n "$output" ]] || fail "OpenTofu output '$output_name' is unavailable. Apply the application stack first."
+  printf '%s\n' "$output"
+}

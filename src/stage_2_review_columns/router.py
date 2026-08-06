@@ -20,7 +20,7 @@ import src.app.dependencies as dependencies
 from src.api.schemas import DatasetWorkflowIdField
 from src.app.data_model_store import populate_cde_cache
 from src.app.session_cache import get_session_cache
-from src.domain.cde import NO_MAPPING_SENTINEL, CDEInfo
+from src.domain.cde import CDEInfo
 from src.domain.data_model_version_reference import DataModelVersionReference
 from src.persistence.workflow_state_store import WorkflowStateUnreadableError, load_workflow_state
 from src.storage import UserContext
@@ -77,7 +77,6 @@ async def render_stage_two(
             else external_version_number
         ),
         "cde_catalog": [_cde_catalog_item(cde) for cde in cde_catalog],
-        "no_mapping_label": NO_MAPPING_SENTINEL,
     }
     return _templates.TemplateResponse(request, "stage_2_mappings.html", context)
 
@@ -92,7 +91,6 @@ def _data_model_version_for_request(
             dependencies.get_workflow_storage(),
             dependencies.get_user_context(),
             file_id,
-            legacy_upload_storage=dependencies.get_upload_storage(),
         )
         if state is not None:
             return state.state.data_model_version
@@ -131,7 +129,6 @@ async def _get_cde_options_for_session(
 def _cde_catalog_item(cde: CDEInfo) -> dict[str, object]:
     """Project the domain CDE into the small browser picker payload."""
     return {
-        "cde_id": cde.cde_id,
         "cde_key": cde.cde_key,
         "description": cde.description or "",
         "cde_type": cde.cde_type.value,
@@ -174,7 +171,6 @@ async def save_mapping_choices(payload: SaveMappingChoicesRequest) -> SaveMappin
     try:
         return save_confirmed_mapping_choices(
             workflow_storage=dependencies.get_workflow_storage(),
-            upload_storage=dependencies.get_upload_storage(),
             user=dependencies.get_user_context(),
             payload=payload,
         )

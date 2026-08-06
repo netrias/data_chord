@@ -31,7 +31,7 @@ class _DataModelStoreConfig:
 def list_data_model_summaries(client: NetriasClient | None) -> list[DataModelSummary]:
     """Why: decouples callers from SDK DataModel shape and versions tuple."""
     if client is None:
-        return []
+        raise NetriasAPIUnavailable("data model store client is unavailable")
     models = client.list_data_models(include_versions=True)
     return [
         DataModelSummary(
@@ -57,7 +57,7 @@ def fetch_cdes(
     refines it after PV lookup.
     """
     if client is None:
-        return []
+        raise NetriasAPIUnavailable("data model store client is unavailable")
     sdk_cdes = client.list_cdes(
         model_key=data_model_key,
         version=external_version_number,

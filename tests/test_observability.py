@@ -8,7 +8,17 @@ from collections.abc import Sequence
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from src.observability.events import REQUEST_ID_HEADER
+import src.app.dependencies as dependencies
+from src.observability.events import (
+    REQUEST_ID_HEADER,
+    WorkflowEvent,
+    WorkflowOperation,
+    WorkflowOutcome,
+    WorkflowStage,
+    log_workflow_event,
+    request_id_from_header,
+)
+from src.storage import UserContext
 from tests.conftest import TEST_CSV_CONTENT_TYPE, create_csv_content
 
 pytestmark = pytest.mark.asyncio
@@ -18,6 +28,35 @@ GENERIC_API_ERROR_DETAIL = "We couldn't process this request. Please try again."
 
 def _record_field(record: logging.LogRecord, field: str) -> object:
     return record.__dict__[field]
+
+
+async def test_request_id_rejects_unicode_alphanumeric_text() -> None:
+    supplied = "éééééééé"
+
+    assert request_id_from_header(supplied) != supplied
+
+
+@pytest.mark.parametrize("operation", list(WorkflowOperation))
+@pytest.mark.parametrize("outcome", list(WorkflowOutcome))
+async def test_workflow_event_name_is_derived_from_operation_and_outcome(
+    operation: WorkflowOperation,
+    outcome: WorkflowOutcome,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO)
+
+    log_workflow_event(
+        WorkflowEvent(
+            stage=WorkflowStage.STAGE_1,
+            operation=operation,
+            outcome=outcome,
+        ),
+        UserContext(user_id="operator-test"),
+    )
+
+    assert _record_field(caplog.records[-1], "event_name") == (
+        f"workflow.{operation.value}.{outcome.value}"
+    )
 
 
 async def test_request_id_header_is_returned(app_client: AsyncClient) -> None:
@@ -185,10 +224,11 @@ async def test_stage1_upload_logs_failure_after_file_storage(
     # Given: the uploaded file is accepted, but workflow ownership cannot be recorded
     caplog.set_level(logging.INFO)
 
-    def fail_create_workflow_record(*_args: object) -> None:
+    def fail_create_workflow(*_args: object) -> None:
         raise RuntimeError("workflow record unavailable")
 
-    monkeypatch.setattr("src.stage_1_upload.router.create_workflow_record", fail_create_workflow_record)
+    workflow_storage = dependencies.get_workflow_storage()
+    monkeypatch.setattr(workflow_storage, "create_workflow", fail_create_workflow)
     content = create_csv_content([["col_a"], ["alpha"]])
     assert not [
         record for record in caplog.records if getattr(record, "event_name", None) == "workflow.upload.failed"

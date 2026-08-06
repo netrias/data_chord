@@ -4,37 +4,39 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 
 from netrias_client import TabularDataset
 
 from src.domain.columns import ColumnKey, column_key_from_string
 from src.domain.manifest import ManifestManualOverride
 
+REVIEW_OVERRIDES_SCHEMA_VERSION = 1
+
+
+class InvalidReviewOverridesError(ValueError):
+    """Raised when stored review state does not match the current contract."""
+
 
 @dataclass(frozen=True)
 class ReviewModeProgress:
     current_unit: int = 1
-    completed_units: tuple[int, ...] = ()
-    flagged_units: tuple[int, ...] = ()
     batch_size: int = 5
 
     @classmethod
     def from_payload(cls, payload: object) -> ReviewModeProgress:
         if not isinstance(payload, Mapping):
-            return cls()
+            raise InvalidReviewOverridesError("Review mode progress must be an object.")
+        if set(payload) != {"current_unit", "batch_size"}:
+            raise InvalidReviewOverridesError("Review mode progress fields are invalid.")
         return cls(
-            current_unit=_int_or_default(payload.get("current_unit"), 1),
-            completed_units=_int_tuple(payload.get("completed_units")),
-            flagged_units=_int_tuple(payload.get("flagged_units")),
-            batch_size=_int_or_default(payload.get("batch_size"), 5),
+            current_unit=_positive_int(payload.get("current_unit"), "current_unit"),
+            batch_size=_positive_int(payload.get("batch_size"), "batch_size"),
         )
 
     def to_payload(self) -> dict[str, object]:
         return {
             "current_unit": self.current_unit,
-            "completed_units": list(self.completed_units),
-            "flagged_units": list(self.flagged_units),
             "batch_size": self.batch_size,
         }
 
@@ -52,37 +54,41 @@ class ReviewProgressState:
     @classmethod
     def from_payload(cls, payload: object) -> ReviewProgressState:
         if not isinstance(payload, Mapping):
-            return cls()
-        # Old durable records used flat batch keys; normalize them before constructing trusted state.
-        if not {"review_mode", "column_mode", "row_mode"} & payload.keys():
-            if {"completed_batches", "flagged_batches", "current_batch", "batch_size"} & payload.keys():
-                payload = {
-                    "review_mode": "row",
-                    "sort_mode": payload.get("sort_mode", "original"),
-                    "scroll_mode": payload.get("scroll_mode", False),
-                    "column_mode": {},
-                    "row_mode": {
-                        "current_unit": payload.get("current_batch", 1),
-                        "completed_units": payload.get("completed_batches", []),
-                        "flagged_units": payload.get("flagged_batches", []),
-                        "batch_size": payload.get("batch_size", 5),
-                    },
-                }
-            elif {"batch_size", "sort_mode", "scroll_mode"} & payload.keys():
-                batch_size = payload.get("batch_size", 5)
-                payload = {
-                    "review_mode": "column",
-                    "sort_mode": payload.get("sort_mode", "original"),
-                    "scroll_mode": payload.get("scroll_mode", False),
-                    "column_mode": {"batch_size": batch_size},
-                    "row_mode": {"batch_size": batch_size},
-                }
+            raise InvalidReviewOverridesError("Review progress must be an object.")
+        expected_fields = {
+            "review_mode",
+            "sort_mode",
+            "scroll_mode",
+            "show_case_only_changes",
+            "show_unchanged_values",
+            "column_mode",
+            "row_mode",
+        }
+        if set(payload) != expected_fields:
+            raise InvalidReviewOverridesError("Review progress fields are invalid.")
+
+        review_mode = payload.get("review_mode")
+        if not isinstance(review_mode, str) or review_mode not in {"column", "row"}:
+            raise InvalidReviewOverridesError("Review mode is invalid.")
+        sort_mode = payload.get("sort_mode")
+        if not isinstance(sort_mode, str) or sort_mode not in {
+            "original",
+            "confidence-asc",
+            "confidence-desc",
+        }:
+            raise InvalidReviewOverridesError("Review sort mode is invalid.")
         return cls(
-            review_mode=_string_or_default(payload.get("review_mode"), "column"),
-            sort_mode=_string_or_default(payload.get("sort_mode"), "original"),
-            scroll_mode=_bool_or_default(payload.get("scroll_mode"), False),
-            show_case_only_changes=_bool_or_default(payload.get("show_case_only_changes"), False),
-            show_unchanged_values=_bool_or_default(payload.get("show_unchanged_values"), False),
+            review_mode=review_mode,
+            sort_mode=sort_mode,
+            scroll_mode=_required_bool(payload.get("scroll_mode"), "scroll_mode"),
+            show_case_only_changes=_required_bool(
+                payload.get("show_case_only_changes"),
+                "show_case_only_changes",
+            ),
+            show_unchanged_values=_required_bool(
+                payload.get("show_unchanged_values"),
+                "show_unchanged_values",
+            ),
             column_mode=ReviewModeProgress.from_payload(payload.get("column_mode")),
             row_mode=ReviewModeProgress.from_payload(payload.get("row_mode")),
         )
@@ -101,26 +107,28 @@ class ReviewProgressState:
 
 @dataclass(frozen=True)
 class CellOverride:
-    ai_value: str | None
     human_value: str
     original_value: str | None
 
     @classmethod
-    def from_payload(cls, payload: object) -> CellOverride | None:
+    def from_payload(cls, payload: object) -> CellOverride:
         if not isinstance(payload, Mapping):
-            return None
+            raise InvalidReviewOverridesError("A cell override must be an object.")
+        if set(payload) != {"human_value", "original_value"}:
+            raise InvalidReviewOverridesError("Cell override fields are invalid.")
         human_value = payload.get("human_value")
         if not isinstance(human_value, str):
-            return None
+            raise InvalidReviewOverridesError("A cell override human value must be text.")
+        original_value = payload.get("original_value")
+        if original_value is not None and not isinstance(original_value, str):
+            raise InvalidReviewOverridesError("A cell override original value must be text or null.")
         return cls(
-            ai_value=_optional_string(payload.get("ai_value")),
             human_value=human_value,
-            original_value=_optional_string(payload.get("original_value")),
+            original_value=original_value,
         )
 
     def to_payload(self) -> dict[str, str | None]:
         return {
-            "ai_value": self.ai_value,
             "human_value": self.human_value,
             "original_value": self.original_value,
         }
@@ -153,24 +161,44 @@ class ReviewOverrides:
         )
 
     @classmethod
-    def from_store(cls, payload: object, fallback_file_id: str) -> ReviewOverrides | None:
+    def from_store(cls, payload: object, expected_file_id: str) -> ReviewOverrides:
         if not isinstance(payload, Mapping):
-            return None
+            raise InvalidReviewOverridesError("Stored review overrides must be an object.")
+        expected_fields = {
+            "schema_version",
+            "file_id",
+            "created_at",
+            "updated_at",
+            "overrides",
+            "review_state",
+        }
+        if set(payload) != expected_fields:
+            raise InvalidReviewOverridesError("Stored review override fields are invalid.")
+        schema_version = payload.get("schema_version")
+        if (
+            not isinstance(schema_version, int)
+            or isinstance(schema_version, bool)
+            or schema_version != REVIEW_OVERRIDES_SCHEMA_VERSION
+        ):
+            raise InvalidReviewOverridesError("Stored review override schema version is invalid.")
         file_id = payload.get("file_id")
+        if file_id != expected_file_id:
+            raise InvalidReviewOverridesError("Stored review override file identity is invalid.")
         created_at = _datetime_from_payload(payload.get("created_at"))
         updated_at = _datetime_from_payload(payload.get("updated_at"))
-        overrides = payload.get("overrides")
-        review_state = payload.get("review_state")
+        if created_at > updated_at:
+            raise InvalidReviewOverridesError("Stored review override timestamps are out of order.")
         return cls(
-            file_id=file_id if isinstance(file_id, str) else fallback_file_id,
+            file_id=expected_file_id,
             created_at=created_at,
             updated_at=updated_at,
-            overrides=_parse_overrides(overrides if isinstance(overrides, Mapping) else {}),
-            review_state=ReviewProgressState.from_payload(review_state),
+            overrides=_parse_overrides(payload.get("overrides")),
+            review_state=ReviewProgressState.from_payload(payload.get("review_state")),
         )
 
     def to_store(self) -> dict[str, object]:
         return {
+            "schema_version": REVIEW_OVERRIDES_SCHEMA_VERSION,
             "file_id": self.file_id,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
@@ -207,28 +235,6 @@ class ReviewOverrides:
                 )
         return batch
 
-    def audit_changes_since(self, previous: ReviewOverrides | None) -> list[ManifestManualOverride]:
-        """Return term decisions that differ from the previously saved active state."""
-        current = self.manual_override_batch()
-        if previous is None:
-            return current
-
-        previous_batch = previous.manual_override_batch()
-        if set(current) == set(previous_batch):
-            return []
-
-        latest_values = {
-            override.term_key: override.override_value
-            for override in previous_batch
-        }
-        changes: list[ManifestManualOverride] = []
-        for override in current:
-            if latest_values.get(override.term_key) == override.override_value:
-                continue
-            changes.append(override)
-            latest_values[override.term_key] = override.override_value
-        return changes
-
     def apply_to_rows(self, rows: list[list[str]], dataset: TabularDataset) -> list[list[str]]:
         """Row keys are 1-indexed to match Stage 4 UI numbering."""
         row_overrides = self.human_values_by_row()
@@ -243,11 +249,13 @@ class ReviewOverrides:
 
 def _parse_overrides(payload: object) -> dict[str, dict[ColumnKey, CellOverride]]:
     if not isinstance(payload, Mapping):
-        return {}
+        raise InvalidReviewOverridesError("Review overrides must be an object.")
     parsed: dict[str, dict[ColumnKey, CellOverride]] = {}
     for raw_row_key, raw_columns in payload.items():
         if not isinstance(raw_row_key, str) or not isinstance(raw_columns, Mapping):
-            continue
+            raise InvalidReviewOverridesError("Review override row fields are invalid.")
+        if not raw_row_key.isdecimal() or int(raw_row_key) < 1:
+            raise InvalidReviewOverridesError("Review override row identity is invalid.")
         parsed[raw_row_key] = _parse_row_overrides(raw_columns)
     return parsed
 
@@ -255,11 +263,10 @@ def _parse_overrides(payload: object) -> dict[str, dict[ColumnKey, CellOverride]
 def _parse_row_overrides(payload: Mapping[object, object]) -> dict[ColumnKey, CellOverride]:
     parsed: dict[ColumnKey, CellOverride] = {}
     for raw_column_key, raw_override in payload.items():
-        if not isinstance(raw_column_key, str):
-            continue
+        if not isinstance(raw_column_key, str) or not raw_column_key:
+            raise InvalidReviewOverridesError("Review override column identity is invalid.")
         override = CellOverride.from_payload(raw_override)
-        if override is not None:
-            parsed[column_key_from_string(raw_column_key)] = override
+        parsed[column_key_from_string(raw_column_key)] = override
     return parsed
 
 
@@ -278,39 +285,34 @@ def _apply_row_override(
     return result
 
 
-def _optional_string(value: object) -> str | None:
-    return value if isinstance(value, str) else None
+def _required_bool(value: object, field: str) -> bool:
+    if not isinstance(value, bool):
+        raise InvalidReviewOverridesError(f"Review progress {field} must be true or false.")
+    return value
 
 
-def _string_or_default(value: object, default: str) -> str:
-    return value if isinstance(value, str) else default
-
-
-def _bool_or_default(value: object, default: bool) -> bool:
-    return value if isinstance(value, bool) else default
-
-
-def _int_or_default(value: object, default: int) -> int:
-    return value if isinstance(value, int) and not isinstance(value, bool) else default
-
-
-def _int_tuple(value: object) -> tuple[int, ...]:
-    if not isinstance(value, list):
-        return ()
-    return tuple(item for item in value if isinstance(item, int) and not isinstance(item, bool))
+def _positive_int(value: object, field: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise InvalidReviewOverridesError(f"Review progress {field} must be a positive integer.")
+    return value
 
 
 def _datetime_from_payload(value: object) -> datetime:
     if not isinstance(value, str):
-        return datetime.now(UTC)
+        raise InvalidReviewOverridesError("Review override timestamps must be text.")
     try:
-        return datetime.fromisoformat(value)
+        parsed = datetime.fromisoformat(value)
     except ValueError:
-        return datetime.now(UTC)
+        raise InvalidReviewOverridesError("Review override timestamps must be valid ISO timestamps.") from None
+    if parsed.utcoffset() is None:
+        raise InvalidReviewOverridesError("Review override timestamps must include a time zone.")
+    return parsed
 
 
 __all__ = [
     "CellOverride",
+    "InvalidReviewOverridesError",
+    "REVIEW_OVERRIDES_SCHEMA_VERSION",
     "ReviewModeProgress",
     "ReviewOverrides",
     "ReviewProgressState",

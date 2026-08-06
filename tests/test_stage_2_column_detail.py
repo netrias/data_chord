@@ -22,6 +22,7 @@ from src.domain.manifest import ColumnMappingManifest
 from src.domain.workflow_state import WorkflowState
 from src.persistence.workflow_artifacts import save_upload_artifacts
 from src.persistence.workflow_state_store import save_initial_workflow_state
+from src.stage_2_review_columns.router import _cde_catalog_item
 from src.stage_2_review_columns.use_cases import (
     ColumnDetailNotFound,
     compute_column_detail,
@@ -29,6 +30,16 @@ from src.stage_2_review_columns.use_cases import (
 from src.storage import LocalWorkflowStorage, UploadConstraints, UploadStorage, UserContext
 
 FILE_ID = dataset_workflow_id_from_string("abcdef0123456789abcdef0123456789")
+
+
+def test_cde_catalog_item_contains_only_browser_fields() -> None:
+    cde = CDEInfo(cde_id=7, cde_key="diagnosis", description="Diagnosis")
+
+    assert _cde_catalog_item(cde) == {
+        "cde_key": "diagnosis",
+        "description": "Diagnosis",
+        "cde_type": "pv",
+    }
 
 
 @dataclass(frozen=True)

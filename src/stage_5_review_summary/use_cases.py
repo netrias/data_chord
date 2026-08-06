@@ -19,6 +19,11 @@ from netrias_client import (
     write_tabular,
 )
 
+from src.app.harmonization_readiness import (
+    HarmonizationNotReadyError,
+    load_readable_review_overrides_record,
+    require_ready_harmonization_workflow,
+)
 from src.app.session_cache import clear_session_cache
 from src.domain.column_outcomes import (
     FinalizedValueOutcome,
@@ -32,14 +37,12 @@ from src.domain.review_overrides import CellOverride, ReviewOverrides
 from src.persistence.cde_mapping_document_store import load_cde_mapping_json
 from src.persistence.manifest_reader import read_manifest_parquet
 from src.persistence.pv_manifest_store import ColumnPvSets, column_pv_sets
-from src.persistence.review_override_store import load_review_overrides
 from src.persistence.workflow_artifacts import (
     load_harmonization_manifest_path,
     load_harmonized_output_path,
     load_upload_artifact,
 )
-from src.persistence.workflow_state_store import LoadedWorkflowState, load_workflow_state
-from src.stage_3_harmonize.job_state import StageThreeJobUnreadableError, load_stage_three_job_state
+from src.persistence.workflow_state_store import LoadedWorkflowState
 from src.stage_5_review_summary.schemas import (
     ColumnSummary,
     DatasetSummary,
@@ -48,32 +51,6 @@ from src.stage_5_review_summary.schemas import (
     TransformationStep,
 )
 from src.storage import UploadedFileMeta, UploadStorage, UserContext, WorkflowStorage
-
-
-class DownloadPackageError(RuntimeError):
-    """Base error for Stage 5 download package construction."""
-
-    pass
-
-
-class UploadNotFoundError(DownloadPackageError):
-    pass
-
-
-class HarmonizedOutputNotFoundError(DownloadPackageError):
-    pass
-
-
-class DownloadDatasetUnreadableError(DownloadPackageError):
-    pass
-
-
-class SummaryManifestNotFoundError(RuntimeError):
-    pass
-
-
-class SummaryManifestUnreadableError(RuntimeError):
-    pass
 
 
 @dataclass(frozen=True)
@@ -89,15 +66,28 @@ def build_summary(
     workflow_storage: WorkflowStorage,
     user: UserContext,
 ) -> StageFiveSummaryResponse:
+    loaded_state = require_ready_harmonization_workflow(workflow_storage, user, file_id)
+
     manifest_path = load_harmonization_manifest_path(upload_storage, workflow_storage, user, file_id)
     if manifest_path is None:
-        raise SummaryManifestNotFoundError(file_id)
+        raise HarmonizationNotReadyError(
+            "Harmonization results are incomplete. Return to Stage 3 and run harmonization again."
+        )
 
     manifest_summary = read_manifest_parquet(manifest_path)
     if manifest_summary is None:
-        raise SummaryManifestUnreadableError(file_id)
+        raise HarmonizationNotReadyError(
+            "Harmonization results cannot be read. Return to Stage 3 and run harmonization again."
+        )
 
-    return _build_summary_from_manifest(manifest_summary, file_id, upload_storage, workflow_storage, user)
+    return _build_summary_from_manifest(
+        manifest_summary,
+        loaded_state,
+        file_id,
+        upload_storage,
+        workflow_storage,
+        user,
+    )
 
 
 def build_download_package(
@@ -107,20 +97,22 @@ def build_download_package(
     workflow_storage: WorkflowStorage,
     user: UserContext,
 ) -> DownloadPackage:
-    if _load_completed_workflow_state(upload_storage, workflow_storage, user, file_id) is None:
-        raise HarmonizedOutputNotFoundError(file_id)
+    require_ready_harmonization_workflow(workflow_storage, user, file_id)
     meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
     if meta is None:
-        raise UploadNotFoundError(file_id)
+        raise HarmonizationNotReadyError("Upload not found. Return to Stage 1 and upload it again.")
 
     harmonized_path = _load_harmonized_path(upload_storage, workflow_storage, user, file_id, meta)
     manifest_path = load_harmonization_manifest_path(upload_storage, workflow_storage, user, file_id)
     original_dataset = read_tabular(meta.saved_path, sheet_name=meta.selected_sheet)
     harmonized_dataset = read_tabular(harmonized_path, sheet_name=meta.selected_sheet)
     if not original_dataset.columns or not harmonized_dataset.columns:
-        raise DownloadDatasetUnreadableError(file_id)
+        raise HarmonizationNotReadyError(
+            "The harmonized dataset cannot be read. Return to Stage 3 and run harmonization again."
+        )
 
-    overrides = load_review_overrides(workflow_storage, user, file_id)
+    review_record = load_readable_review_overrides_record(workflow_storage, user, file_id)
+    overrides = review_record.value if review_record is not None else None
     final_dataset = _apply_review_overrides(harmonized_dataset, original_dataset, overrides)
     base_name = _download_base_name(meta, file_id)
     mapping_content = load_cde_mapping_json(file_id, workflow_storage, user)
@@ -148,7 +140,6 @@ def _build_history(
         value=row.to_harmonize,
         source="original",
         timestamp=upload_ts_str,
-        is_pv_conformant=check_value_conformance(row.to_harmonize, pv_set),
         review_status=_value_review_status(row.to_harmonize, pv_set),
     ))
 
@@ -158,7 +149,6 @@ def _build_history(
             value=effective_ai_value,
             source="ai",
             timestamp=upload_ts_str,
-            is_pv_conformant=check_value_conformance(effective_ai_value, pv_set),
             review_status=_value_review_status(effective_ai_value, pv_set),
         ))
 
@@ -173,7 +163,6 @@ def _build_history(
                 source="user",
                 timestamp=override.timestamp,
                 user_id=override.user_id,
-                is_pv_conformant=check_value_conformance(override.value, pv_set),
                 review_status=_value_review_status(override.value, pv_set),
             )
         )
@@ -219,7 +208,6 @@ def _sort_steps_chronologically(steps: list[TransformationStep]) -> list[Transfo
 class _MappingInfo:
     """Current mapping facts plus the manifest's independent audit history."""
 
-    is_conformant: bool
     history: list[TransformationStep]
     row_count: int
 
@@ -237,39 +225,14 @@ class _UniqueTermMapping:
     review_status: FinalValueReviewStatus
 
 
-def _load_completed_workflow_state(
-    upload_storage: UploadStorage,
-    workflow_storage: WorkflowStorage,
-    user: UserContext,
-    file_id: str,
-) -> LoadedWorkflowState | None:
-    loaded_state = load_workflow_state(
-        workflow_storage,
-        user,
-        file_id,
-        legacy_upload_storage=upload_storage,
-    )
-    if loaded_state is None or loaded_state.state.mapping_manifest is None:
-        return None
-    try:
-        loaded_job = load_stage_three_job_state(workflow_storage, user, file_id)
-    except StageThreeJobUnreadableError:
-        return None
-    if loaded_job is not None and not loaded_job.job.is_completed_for_plan(loaded_state.version.value):
-        return None
-    return loaded_state
-
-
 def _build_summary_from_manifest(
     summary: ManifestSummary,
+    loaded_state: LoadedWorkflowState,
     file_id: str,
     upload_storage: UploadStorage,
     workflow_storage: WorkflowStorage,
     user: UserContext,
 ) -> StageFiveSummaryResponse:
-    loaded_state = _load_completed_workflow_state(upload_storage, workflow_storage, user, file_id)
-    if loaded_state is None:
-        raise SummaryManifestUnreadableError(file_id)
     column_pv_map = column_pv_sets(
         workflow_storage,
         user,
@@ -278,7 +241,8 @@ def _build_summary_from_manifest(
     )
     meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
     upload_timestamp = meta.uploaded_at if meta else None
-    review_overrides = load_review_overrides(workflow_storage, user, file_id)
+    review_record = load_readable_review_overrides_record(workflow_storage, user, file_id)
+    review_overrides = review_record.value if review_record is not None else None
 
     finalized_outcomes: list[FinalizedValueOutcome] = []
     unique_mappings: dict[_UniqueTermMapping, _MappingInfo] = {}
@@ -310,7 +274,6 @@ def _build_summary_from_manifest(
             final_value_source=key.final_value_source,
             review_status=key.review_status,
             row_count=info.row_count,
-            is_pv_conformant=info.is_conformant,
             history=info.history,
         )
         for key, info in sorted_mappings
@@ -441,7 +404,6 @@ def _track_current_mappings(
         existing = mappings.get(key)
         if existing is None:
             mappings[key] = _MappingInfo(
-                is_conformant=outcome.is_pv_conformant,
                 history=history,
                 row_count=outcome.occurrence_count,
             )
@@ -458,7 +420,9 @@ def _load_harmonized_path(
 ) -> Path:
     path = load_harmonized_output_path(storage, workflow_storage, user, file_id, meta)
     if path is None:
-        raise HarmonizedOutputNotFoundError(file_id)
+        raise HarmonizationNotReadyError(
+            "Harmonized output is missing. Return to Stage 3 and run harmonization again."
+        )
     return path
 
 
@@ -534,12 +498,7 @@ def _tabular_bytes(dataset: TabularDataset, template_path: Path | None) -> bytes
 
 
 __all__ = [
-    "DownloadDatasetUnreadableError",
     "DownloadPackage",
-    "HarmonizedOutputNotFoundError",
-    "SummaryManifestNotFoundError",
-    "SummaryManifestUnreadableError",
-    "UploadNotFoundError",
     "build_summary",
     "build_download_package",
 ]

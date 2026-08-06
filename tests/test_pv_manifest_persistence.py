@@ -10,7 +10,6 @@ from src.app.session_cache import ReferenceDataVersionMismatchError, SessionCach
 from src.domain.cde import CDEInfo
 from src.domain.cde_catalog import CdeCatalog
 from src.domain.cde_pv_catalog import CdePvCatalog
-from src.domain.column_cde_map import ColumnCdeMap
 from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.dataset_workflow_ids import dataset_workflow_id_from_string
 from src.domain.manifest import ColumnMappingManifest
@@ -61,17 +60,22 @@ def test_pv_manifest_round_trip_uses_current_boundary_schema() -> None:
     manifest = PVManifest(
         data_model_version=MODEL_A,
         workflow_state_version="workflow-state-v1",
-        column_to_cde_key=ColumnCdeMap.from_strings({"col_0000": "diagnosis"}),
         pvs=CdePvCatalog.from_mapping({"diagnosis": frozenset({"Glioma"})}),
     )
 
     stored = manifest.to_store()
 
-    assert stored["schema_version"] == 2
+    assert stored == {
+        "schema_version": 2,
+        "data_model_key": "cptac",
+        "external_version_number": "11.0.4",
+        "workflow_state_version": "workflow-state-v1",
+        "pvs": {"diagnosis": ["Glioma"]},
+    }
     assert PVManifest.from_store(stored) == manifest
 
 
-def test_pv_manifest_reads_legacy_schema_but_always_writes_current_schema() -> None:
+def test_pv_manifest_rejects_old_boundary_schema() -> None:
     legacy_stored = {
         "schema_version": 1,
         "data_model_key": MODEL_A.data_model_key,
@@ -81,15 +85,14 @@ def test_pv_manifest_reads_legacy_schema_but_always_writes_current_schema() -> N
         "pvs": {"diagnosis": ["Glioma"]},
     }
 
-    manifest = PVManifest.from_store(legacy_stored)
-
-    assert manifest is not None
-    assert manifest.to_store()["schema_version"] == 2
-
-
-def test_pv_manifest_rejects_future_boundary_schema() -> None:
     with pytest.raises(PvManifestSchemaError, match="not supported"):
-        PVManifest.from_store({"schema_version": 3})
+        PVManifest.from_store(legacy_stored)
+
+
+@pytest.mark.parametrize("schema_version", [2.0, 3, None])
+def test_pv_manifest_rejects_non_current_boundary_schema(schema_version: object) -> None:
+    with pytest.raises(PvManifestSchemaError, match="not supported"):
+        PVManifest.from_store({"schema_version": schema_version})
 
 
 def test_stage_four_recovers_pvs_after_process_cache_loss(tmp_path: Path) -> None:
@@ -179,7 +182,7 @@ def test_model_switch_clears_pvs_and_rejects_late_fetch() -> None:
         external_version_number=MODEL_B.external_version_number,
     )
 
-    assert cache.get_all_pvs().to_mapping() == {}
+    assert cache.get_all_pvs().values == {}
     with pytest.raises(ReferenceDataVersionMismatchError):
         cache.set_pvs_batch(
             CdePvCatalog.from_mapping({"diagnosis": frozenset({"Stale"})}),

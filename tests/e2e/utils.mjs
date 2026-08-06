@@ -22,9 +22,10 @@ export const getFileIdFromUrl = (page) => {
   return url.searchParams.get('file_id');
 };
 
-export const uploadAndAnalyze = async (page, filePath) => {
+export const uploadAndAnalyze = async (page, filePath, sourceColumnIndex = 1) => {
   await mockDataModels(page);
-  await mockAnalyze(page);
+  await mockAnalyze(page, sourceColumnIndex);
+  await _mockMappingChoices(page);
   await page.goto('/stage-1');
   await page.setInputFiles(AGENT_FILE_INPUT, filePath);
   await page.locator('#analyzeButton').waitFor({ state: 'attached' });
@@ -41,7 +42,8 @@ export const uploadAndAnalyze = async (page, filePath) => {
 
 export const uploadAndAnalyzeSheet = async (page, filePath, sheetName) => {
   await mockDataModels(page);
-  await mockAnalyze(page);
+  await mockAnalyze(page, 0);
+  await _mockMappingChoices(page);
   await page.goto('/stage-1');
   await page.setInputFiles(AGENT_FILE_INPUT, filePath);
   await page.locator('#analyzeButton').waitFor({ state: 'attached' });
@@ -81,6 +83,14 @@ export const clickHarmonize = async (page) => {
 export const mockHarmonizeSuccess = async (page) => {
   await page.route('**/stage-3/harmonize', async (route) => {
     const payload = route.request().postDataJSON?.() ?? {};
+    if (Object.keys(payload).length !== 1 || typeof payload.file_id !== 'string') {
+      await route.fulfill({
+        status: 400,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'Stage 3 accepts only the workflow id.' }),
+      });
+      return;
+    }
     const fileId = payload.file_id ?? '';
     const response = {
       job_id: 'e2e-job-1',
@@ -98,7 +108,8 @@ export const mockHarmonizeSuccess = async (page) => {
   });
 };
 
-export const mockAnalyze = async (page) => {
+export const mockAnalyze = async (page, sourceColumnIndex = 1) => {
+  const sourceColumnKey = `col_${String(sourceColumnIndex).padStart(4, '0')}`;
   await page.route('**/stage-1/analyze', async (route) => {
     const payload = route.request().postDataJSON?.() ?? {};
     const fileId = payload.file_id ?? '';
@@ -108,12 +119,13 @@ export const mockAnalyze = async (page) => {
     const response = {
       file_id: fileId,
       file_name: 'test.csv',
+      external_version_number: E2E_TARGET_EXTERNAL_VERSION_NUMBER,
       total_rows: 3,
       columns: [
         {
           column_name: E2E_SOURCE_COLUMN,
-          column_key: E2E_SOURCE_COLUMN,
-          source_index: 0,
+          column_key: sourceColumnKey,
+          source_index: sourceColumnIndex,
           header: E2E_SOURCE_COLUMN,
           inferred_type: 'text',
           has_non_empty_values: true,
@@ -122,17 +134,19 @@ export const mockAnalyze = async (page) => {
         },
       ],
       cde_targets: {
-        [E2E_SOURCE_COLUMN]: [{ target: E2E_TARGET_CDE, similarity: 0.95 }],
+        [sourceColumnKey]: [{ target: E2E_TARGET_CDE, similarity: 0.95 }],
       },
       column_summaries: {
-        [E2E_SOURCE_COLUMN]: { value_overlap_ratio: 0.5 },
+        [sourceColumnKey]: { value_overlap_ratio: 0.5 },
       },
-      next_stage: 'mapping',
-      next_step_hint: 'Review AI-suggested column mappings once ready.',
       manual_overrides: {},
       manifest: {
         column_mappings: {
-          [E2E_SOURCE_COLUMN]: { cde_key: E2E_TARGET_CDE, cde_id: E2E_TARGET_CDE_ID },
+          [sourceColumnKey]: {
+            column_name: E2E_SOURCE_COLUMN,
+            cde_key: E2E_TARGET_CDE,
+            cde_id: E2E_TARGET_CDE_ID,
+          },
         },
       },
     };
@@ -140,6 +154,27 @@ export const mockAnalyze = async (page) => {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify(response),
+    });
+  });
+};
+
+const _mockMappingChoices = async (page) => {
+  await page.route('**/stage-2/choices', async (route) => {
+    const payload = route.request().postDataJSON?.() ?? {};
+    const fields = Object.keys(payload).sort();
+    const expectedFields = ['column_renames', 'file_id', 'manual_overrides'];
+    if (JSON.stringify(fields) !== JSON.stringify(expectedFields)) {
+      await route.fulfill({
+        status: 400,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'Stage 2 must save the current mapping choices.' }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ file_id: payload.file_id }),
     });
   });
 };
@@ -232,7 +267,7 @@ export const mockHarmonizeFailure = async (page) => {
   });
 };
 
-export const seedHarmonization = (fileId, changes = {}, options = {}) => {
+export const seedHarmonization = (fileId, changes = {}) => {
   const args = [
     'run',
     'python',
@@ -245,9 +280,6 @@ export const seedHarmonization = (fileId, changes = {}, options = {}) => {
   const hasChanges = Object.keys(changes).length > 0;
   if (hasChanges) {
     args.push('--changes', JSON.stringify(changes));
-  }
-  if (options.noManifest) {
-    args.push('--no-manifest');
   }
   execFileSync('uv', args, { env: e2eEnv, stdio: 'inherit' });
 };
@@ -297,7 +329,18 @@ export const parseDownloadedCsv = async (response) => {
   return parseDownloadedTabular(response, '.csv', ',');
 };
 
+export const parseDownloadedCsvTable = async (response) => {
+  return parseDownloadedTabularTable(response, '.csv', ',');
+};
+
 export const parseDownloadedTabular = async (response, suffix, delimiter) => {
+  const table = await parseDownloadedTabularTable(response, suffix, delimiter);
+  return table.rows.map((values) => (
+    Object.fromEntries(table.headers.map((header, idx) => [header, values[idx] ?? '']))
+  ));
+};
+
+const parseDownloadedTabularTable = async (response, suffix, delimiter) => {
   const buffer = await response.body();
   const zip = new AdmZip(Buffer.from(buffer));
   const entries = zip.getEntries();
@@ -313,13 +356,13 @@ export const parseDownloadedTabular = async (response, suffix, delimiter) => {
   }
   const headerLine = lines.shift();
   if (!headerLine) {
-    return [];
+    return { headers: [], rows: [] };
   }
   const headers = parseDelimitedLine(headerLine, delimiter);
-  return lines.map((line) => {
-    const values = parseDelimitedLine(line, delimiter);
-    return Object.fromEntries(headers.map((header, idx) => [header, values[idx] ?? '']));
-  });
+  return {
+    headers,
+    rows: lines.map((line) => parseDelimitedLine(line, delimiter)),
+  };
 };
 
 const parseDelimitedLine = (line, delimiter) => {

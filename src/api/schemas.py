@@ -8,9 +8,8 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from pydantic import BaseModel, BeforeValidator, Field, PlainSerializer, WithJsonSchema
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PlainSerializer, WithJsonSchema
 
-from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.dataset_workflow_ids import (
     DATASET_WORKFLOW_ID_LENGTH,
     DATASET_WORKFLOW_ID_PATTERN,
@@ -18,7 +17,6 @@ from src.domain.dataset_workflow_ids import (
     dataset_workflow_id_from_value,
 )
 from src.domain.harmonization import HarmonizationManifestSummary, HarmonizeStatus
-from src.domain.manifest import ManifestPayload
 
 DatasetWorkflowIdField = Annotated[
     DatasetWorkflowId,
@@ -38,23 +36,9 @@ DatasetWorkflowIdField = Annotated[
 ]
 
 class HarmonizeRequest(BaseModel):
-    file_id: DatasetWorkflowIdField
-    # Compatibility fields for callers that still seed legacy workflow state.
-    # Current workflows resolve the model from durable WorkflowState, so a
-    # retry only needs the workflow identity.
-    data_model_key: str | None = Field(default=None, min_length=1)
-    external_version_number: str | None = Field(default=None, min_length=1)
-    manual_overrides: dict[str, str | None] = Field(default_factory=dict)
-    column_renames: dict[str, str] = Field(default_factory=dict)
-    manifest: ManifestPayload | None = None
+    model_config = ConfigDict(extra="forbid")
 
-    def data_model_version(self) -> DataModelVersionReference:
-        if self.data_model_key is None or self.external_version_number is None:
-            raise ValueError("A data model version is required to initialize legacy workflow state")
-        return DataModelVersionReference(
-            data_model_key=self.data_model_key,
-            external_version_number=self.external_version_number,
-        )
+    file_id: DatasetWorkflowIdField
 
 
 class HarmonizeResponse(BaseModel):

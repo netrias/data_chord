@@ -34,9 +34,6 @@ class ColumnPvSets:
     def get(self, column_key: ColumnKey | str) -> frozenset[str] | None:
         return self.values.get(column_key_from_string(str(column_key)))
 
-    def to_strings(self) -> dict[str, frozenset[str] | None]:
-        return {str(column_key): pv_set for column_key, pv_set in self.values.items()}
-
 
 def load_pv_snapshot(
     workflow_storage: WorkflowStorage,
@@ -52,14 +49,9 @@ def load_pv_snapshot(
         manifest = PVManifest.from_store(stored.data)
     except PvManifestSchemaError as exc:
         raise PvSnapshotUnreadableError(state.file_id) from exc
-    if manifest is None:
-        raise PvSnapshotUnreadableError(state.file_id)
     if manifest.data_model_version != state.data_model_version:
         raise PvSnapshotMismatchError(state.file_id)
-    if (
-        manifest.workflow_state_version is not None
-        and manifest.workflow_state_version != loaded_state.version.value
-    ):
+    if manifest.workflow_state_version != loaded_state.version.value:
         raise PvSnapshotMismatchError(state.file_id)
     return manifest.pvs
 
@@ -99,12 +91,11 @@ def save_pv_snapshot(
     loaded_state: LoadedWorkflowState,
     pv_map: CdePvCatalog | Mapping[str, frozenset[str]],
 ) -> None:
-    """Persist PVs with exact plan identity and an old-reader mapping projection."""
+    """Persist PVs with their exact workflow plan and model identity."""
     state = loaded_state.state
     manifest = PVManifest(
         data_model_version=state.data_model_version,
         workflow_state_version=loaded_state.version.value,
-        column_to_cde_key=effective_column_cde_map(loaded_state),
         pvs=pv_map if isinstance(pv_map, CdePvCatalog) else CdePvCatalog.from_mapping(pv_map),
     )
     existing = workflow_storage.read_json(user, state.file_id, WorkflowFile.PV_MANIFEST)

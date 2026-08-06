@@ -43,14 +43,13 @@ const _appendCell = (row, text, className = '') => {
   return cell;
 };
 
-const _createHeader = (includeReviewerEdits) => {
+const _createHeader = () => {
   const head = document.createElement('thead');
   const row = document.createElement('tr');
   const labels = [
     'Source column',
     'Distinct values changed',
     'Rows affected',
-    ...(includeReviewerEdits ? ['Reviewer-edited rows'] : []),
     'Final-value status',
   ];
 
@@ -64,7 +63,7 @@ const _createHeader = (includeReviewerEdits) => {
   return head;
 };
 
-const _createBody = (columns, includeReviewerEdits) => {
+const _createBody = (columns) => {
   const body = document.createElement('tbody');
   for (const column of columns) {
     const row = document.createElement('tr');
@@ -81,14 +80,6 @@ const _createBody = (columns, includeReviewerEdits) => {
       _formatCount(column.changedRows, column.totalRows),
       'column-outcome-metric',
     );
-    if (includeReviewerEdits) {
-      _appendCell(
-        row,
-        _formatCount(column.reviewerEditedRows, column.totalRows),
-        'column-outcome-metric',
-      );
-    }
-
     const status = _statusContent(column);
     const statusCell = document.createElement('td');
     const statusLabel = document.createElement('span');
@@ -107,7 +98,6 @@ const _createBody = (columns, includeReviewerEdits) => {
 export const renderColumnOutcomeTable = ({
   container,
   columns,
-  includeReviewerEdits = false,
 }) => {
   if (!container) return null;
   container.replaceChildren();
@@ -133,11 +123,9 @@ export const renderColumnOutcomeTable = ({
   caption.className = 'sr-only';
   caption.textContent = 'Exact changes and final review status for each source column';
   table.appendChild(caption);
-  table.appendChild(_createHeader(includeReviewerEdits));
-  table.appendChild(_createBody(columns, includeReviewerEdits));
+  table.appendChild(_createHeader());
+  table.appendChild(_createBody(columns));
   wrapper.appendChild(table);
   container.appendChild(wrapper);
   return wrapper;
 };
-
-export default renderColumnOutcomeTable;

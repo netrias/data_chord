@@ -18,8 +18,9 @@ import pyarrow.parquet as pq
 
 from src.domain.column_renames import ColumnRenameSet
 from src.domain.manifest.adjustments import ManifestManualOverride, ManifestPvAdjustment, ManifestTermKey
-from src.domain.manifest.models import ManifestRow, ManualOverride, get_manifest_schema
+from src.domain.manifest.models import ManifestRow, ManualOverride
 from src.persistence.manifest_reader import read_manifest_parquet
+from src.persistence.manifest_schema import MANUAL_OVERRIDES_FIELD, get_manifest_schema
 
 logger = logging.getLogger(__name__)
 
@@ -157,28 +158,21 @@ def _write_manifest_parquet(manifest_path: Path, rows: list[ManifestRow]) -> boo
         return False
 
 
-_MANIFEST_FIELDS = (
-    "job_id",
-    "column_id",
-    "column_name",
-    "to_harmonize",
-    "top_harmonization",
-    "ontology_id",
-    "top_harmonizations",
-    "confidence_score",
-    "error",
-    "row_indices",
+_MANIFEST_FIELDS = tuple(
+    field_name
+    for field_name in get_manifest_schema().names
+    if field_name != MANUAL_OVERRIDES_FIELD
 )
 
 
 def _rows_to_table(rows: list[ManifestRow]) -> pa.Table:
     data: dict[str, list[Any]] = {field: [] for field in _MANIFEST_FIELDS}
-    data["manual_overrides"] = []
+    data[MANUAL_OVERRIDES_FIELD] = []
 
     for row in rows:
         for field in _MANIFEST_FIELDS:
             data[field].append(getattr(row, field))
-        data["manual_overrides"].append([asdict(o) for o in row.manual_overrides])
+        data[MANUAL_OVERRIDES_FIELD].append([asdict(override) for override in row.manual_overrides])
 
     return pa.Table.from_pydict(data, schema=get_manifest_schema())
 

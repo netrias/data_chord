@@ -17,19 +17,18 @@ from tests.conftest import (
     TEST_TARGET_SCHEMA,
     TEST_TSV_CONTENT_TYPE,
     TEST_XLSX_CONTENT_TYPE,
+    confirm_mapping_choices,
     create_csv_content,
     create_harmonized_csv,
     create_manifest_for_file,
     create_xlsx_content,
+    store_test_completed_harmonization,
     store_test_harmonization_manifest,
     upload_content,
     upload_file,
 )
 
 pytestmark = pytest.mark.asyncio
-
-GENERIC_API_ERROR_DETAIL = "We couldn't process this request. Please try again."
-
 
 class TestUploadContract:
     """POST /stage-1/upload accepts CSVs and returns UploadResponse."""
@@ -161,8 +160,6 @@ class TestAnalyzeContract:
         assert "total_rows" in data
         assert "columns" in data
         assert "cde_targets" in data
-        assert "next_stage" in data
-        assert "manifest" in data
 
     async def test_columns_have_required_fields(
         self,
@@ -272,16 +269,12 @@ class TestHarmonizeContract:
             "/stage-1/analyze",
             json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
         )
+        await confirm_mapping_choices(app_client, file_id)
 
         # When: Harmonization is triggered
         response = await app_client.post(
             "/stage-3/harmonize",
-            json={
-                "file_id": file_id,
-                "data_model_key": TEST_TARGET_SCHEMA,
-                "external_version_number": "11.0.4",
-                "manual_overrides": {},
-            },
+            json={"file_id": file_id},
         )
 
         # Then: Response contains all required HarmonizeResponse fields
@@ -306,16 +299,12 @@ class TestHarmonizeContract:
             "/stage-1/analyze",
             json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
         )
+        await confirm_mapping_choices(app_client, file_id)
 
         # When: Harmonization is triggered
         response = await app_client.post(
             "/stage-3/harmonize",
-            json={
-                "file_id": file_id,
-                "data_model_key": TEST_TARGET_SCHEMA,
-                "external_version_number": "11.0.4",
-                "manual_overrides": {},
-            },
+            json={"file_id": file_id},
         )
 
         # Then: Status is one of the valid harmonization states
@@ -344,7 +333,7 @@ class TestRowsContract:
         # When: Rows are requested for review
         response = await app_client.post(
             "/stage-4/rows",
-            json={"file_id": file_id, "manual_columns": []},
+            json={"file_id": file_id},
         )
 
         # Then: Response contains columns array (not rows)
@@ -373,7 +362,7 @@ class TestRowsContract:
         # When: Rows are requested for review
         response = await app_client.post(
             "/stage-4/rows",
-            json={"file_id": file_id, "manual_columns": []},
+            json={"file_id": file_id},
         )
 
         # Then: Each column contains required ColumnReviewData fields
@@ -399,7 +388,7 @@ class TestRowsContract:
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
-        create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
+        harmonized_path = create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
         create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
         workflow_storage = dependencies.get_workflow_storage()
         user = dependencies.get_user_context()
@@ -422,11 +411,12 @@ class TestRowsContract:
             loaded.state.with_mapping_manifest(updated_manifest),
             expected_version=loaded.version,
         )
+        store_test_completed_harmonization(temp_storage, file_id, harmonized_path)
 
         # When: rows are requested for review
         response = await app_client.post(
             "/stage-4/rows",
-            json={"file_id": file_id, "manual_columns": []},
+            json={"file_id": file_id},
         )
 
         # Then: the column carries both stable identity and reviewer-facing label
@@ -481,6 +471,9 @@ class TestRowsContract:
             },
         )
         file_id = upload_response.json()["file_id"]
+        meta = temp_storage.load(file_id)
+        assert meta is not None
+        create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
         store_test_harmonization_manifest(
             temp_storage,
             file_id,
@@ -531,7 +524,7 @@ class TestRowsContract:
         # When: Rows are requested for review
         response = await app_client.post(
             "/stage-4/rows",
-            json={"file_id": file_id, "manual_columns": []},
+            json={"file_id": file_id},
         )
 
         # Then: Each transformation contains required Transformation fields
@@ -547,7 +540,6 @@ class TestRowsContract:
             assert "isChanged" in t
             assert "recommendationType" in t
             assert "rowIndices" in t
-            assert "rowCount" in t
 
 
 class TestRowContextContract:
@@ -556,12 +548,17 @@ class TestRowContextContract:
     async def test_response_contains_required_fields(
         self,
         app_client: AsyncClient,
+        temp_storage: UploadStorage,
         sample_csv_path: Path,
     ) -> None:
         """Row context response includes headers and rows arrays."""
 
         # Given: An uploaded CSV file
         file_id = await upload_file(app_client, sample_csv_path)
+        meta = temp_storage.load(file_id)
+        assert meta is not None
+        harmonized_path = create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
+        store_test_completed_harmonization(temp_storage, file_id, harmonized_path)
 
         # Negative assertion: no rows have been fetched yet
         # (this is the first request for row context)
@@ -585,12 +582,17 @@ class TestRowContextContract:
     async def test_row_values_match_headers(
         self,
         app_client: AsyncClient,
+        temp_storage: UploadStorage,
         sample_csv_path: Path,
     ) -> None:
         """Each row has same number of values as headers."""
 
         # Given: An uploaded CSV file
         file_id = await upload_file(app_client, sample_csv_path)
+        meta = temp_storage.load(file_id)
+        assert meta is not None
+        harmonized_path = create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
+        store_test_completed_harmonization(temp_storage, file_id, harmonized_path)
 
         # When: Row context is requested
         response = await app_client.post(
@@ -609,7 +611,7 @@ class TestRowContextContract:
         self,
         app_client: AsyncClient,
     ) -> None:
-        """Non-existent file_id returns 404."""
+        """Non-existent workflow returns recovery guidance."""
 
         # Given: A file_id that doesn't exist
         fake_file_id = "deadbeef12345678deadbeef12345678"
@@ -620,8 +622,7 @@ class TestRowContextContract:
             json={"file_id": fake_file_id, "row_indices": [0]},
         )
 
-        # Then: Server returns 404
-        assert response.status_code == 404
+        assert response.status_code == 409
 
     async def test_negative_row_index_rejected(
         self,
@@ -645,12 +646,17 @@ class TestRowContextContract:
     async def test_out_of_bounds_indices_filtered(
         self,
         app_client: AsyncClient,
+        temp_storage: UploadStorage,
         sample_csv_path: Path,
     ) -> None:
         """Out-of-bounds indices are silently filtered, returning available rows."""
 
         # Given: An uploaded CSV file (sample.csv has 10 rows)
         file_id = await upload_file(app_client, sample_csv_path)
+        meta = temp_storage.load(file_id)
+        assert meta is not None
+        harmonized_path = create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
+        store_test_completed_harmonization(temp_storage, file_id, harmonized_path)
 
         # When: Row context is requested with mix of valid and out-of-bounds indices
         response = await app_client.post(
@@ -662,97 +668,6 @@ class TestRowContextContract:
         assert response.status_code == 200
         data = response.json()
         assert len(data["rows"]) == 2
-
-
-class TestTermRowIndicesContract:
-    """POST /stage-4/term-row-indices returns all manifest row indices for one term."""
-
-    async def test_matching_term_returns_manifest_row_indices(
-        self,
-        app_client: AsyncClient,
-        temp_storage: UploadStorage,
-        sample_csv_path: Path,
-    ) -> None:
-        """Term row indices preserve the 0-based manifest contract used by the browser."""
-
-        # Given: A manifest has grouped source rows for one original term
-        file_id = await upload_file(app_client, sample_csv_path)
-        assert temp_storage.load_harmonization_manifest_path(file_id) is None
-        store_test_harmonization_manifest(
-            temp_storage,
-            file_id,
-            [{
-                "column_id": 0,
-                "column_name": "diagnosis",
-                "to_harmonize": "Bad",
-                "top_harmonization": "Allowed",
-                "row_indices": [0, 5, 8],
-            }],
-        )
-
-        # When: the browser asks for full row indices for that term
-        response = await app_client.post(
-            "/stage-4/term-row-indices",
-            json={"file_id": file_id, "column_key": "col_0000", "original_value": "Bad"},
-        )
-
-        # Then: the exact 0-based manifest row indices are returned
-        assert response.status_code == 200
-        assert response.json() == {"row_indices": [0, 5, 8]}
-
-    async def test_unknown_term_returns_empty_indices(
-        self,
-        app_client: AsyncClient,
-        temp_storage: UploadStorage,
-        sample_csv_path: Path,
-    ) -> None:
-        """A valid manifest with no matching term returns an empty list."""
-
-        # Given: A manifest exists for a different original term
-        file_id = await upload_file(app_client, sample_csv_path)
-        assert temp_storage.load_harmonization_manifest_path(file_id) is None
-        store_test_harmonization_manifest(
-            temp_storage,
-            file_id,
-            [{
-                "column_id": 0,
-                "column_name": "diagnosis",
-                "to_harmonize": "Different",
-                "top_harmonization": "Allowed",
-                "row_indices": [1],
-            }],
-        )
-
-        # When: the browser asks for an unknown term
-        response = await app_client.post(
-            "/stage-4/term-row-indices",
-            json={"file_id": file_id, "column_key": "col_0000", "original_value": "Bad"},
-        )
-
-        # Then: the endpoint returns an empty list rather than an error
-        assert response.status_code == 200
-        assert response.json() == {"row_indices": []}
-
-    async def test_missing_manifest_returns_404(
-        self,
-        app_client: AsyncClient,
-        sample_csv_path: Path,
-    ) -> None:
-        """The endpoint preserves the current 404 when Stage 3 has not stored a manifest."""
-
-        # Given: An uploaded file has no harmonization manifest yet
-        file_id = await upload_file(app_client, sample_csv_path)
-        assert dependencies.get_upload_storage().load_harmonization_manifest_path(file_id) is None
-
-        # When: the browser asks for term row indices
-        response = await app_client.post(
-            "/stage-4/term-row-indices",
-            json={"file_id": file_id, "column_key": "col_0000", "original_value": "Bad"},
-        )
-
-        # Then: the endpoint preserves the 404 while hiding route internals
-        assert response.status_code == 404
-        assert response.json()["detail"] == GENERIC_API_ERROR_DETAIL
 
 
 class TestSummaryContract:

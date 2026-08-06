@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from fastapi.concurrency import run_in_threadpool
+from netrias_client import read_tabular
 
 from src.app.data_model_store import (
     fetch_all_pvs_async,
@@ -16,7 +18,7 @@ from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.cde_type_classification import refine_cde_types_from_pvs
 from src.domain.column_profile import (
     ColumnProfile,
-    build_column_profile_from_tabular,
+    build_column_profile,
     column_profile_to_payload,
 )
 from src.domain.columns import ColumnKey, column_key_from_string
@@ -75,7 +77,6 @@ async def compute_column_detail(
         workflow_storage,
         user,
         file_id,
-        legacy_upload_storage=upload_storage,
     )
     if loaded_state is None:
         raise ColumnDetailNotFound(f"No workflow found for {file_id}")
@@ -112,7 +113,6 @@ async def compute_column_detail(
 def save_confirmed_mapping_choices(
     *,
     workflow_storage: WorkflowStorage,
-    upload_storage: UploadStorage,
     user: UserContext,
     payload: SaveMappingChoicesRequest,
 ) -> SaveMappingChoicesResponse:
@@ -124,7 +124,6 @@ def save_confirmed_mapping_choices(
             user,
             payload.file_id,
             choices,
-            legacy_upload_storage=upload_storage,
         )
     except WorkflowStateNotFoundError as exc:
         raise MappingWorkflowStateNotFoundError() from exc
@@ -150,7 +149,7 @@ async def _get_or_build_column_profile(
         raise ColumnDetailNotFound(f"No upload found for {file_id}")
 
     profile = await run_in_threadpool(
-        build_column_profile_from_tabular,
+        _build_column_profile_from_tabular,
         meta.saved_path,
         column_key,
         meta.selected_sheet,
@@ -159,6 +158,25 @@ async def _get_or_build_column_profile(
         raise ColumnDetailNotFound(f"No profile available for {file_id}/{column_key}")
     cache.set_column_profile(profile)
     return profile
+
+
+def _build_column_profile_from_tabular(
+    tabular_path: Path,
+    column_key: ColumnKey,
+    sheet_name: str | None,
+) -> ColumnProfile | None:
+    """Read the Stage 1 artifact and convert one source column into a profile."""
+    dataset = read_tabular(tabular_path, sheet_name=sheet_name)
+    column = next(
+        (candidate for candidate in dataset.columns if candidate.key == str(column_key)),
+        None,
+    )
+    if column is None:
+        return None
+    return build_column_profile(
+        column.key,
+        (row[column.index] if column.index < len(row) else "" for row in dataset.rows),
+    )
 
 
 async def _get_cde_catalog_snapshot(cache: SessionCache) -> CdeCatalogSnapshot:

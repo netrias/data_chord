@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
+from src.app.harmonization_readiness import HarmonizationNotReadyError
 from src.auth.user_context import current_user_context
 from src.observability.events import (
     CLIENT_EVENTS_ENDPOINT,
@@ -25,6 +26,7 @@ GENERIC_API_ERROR_DETAIL = "We couldn't process this request. Please try again."
 def register_api_error_handlers(app: FastAPI) -> None:
     """Keep API error response policy in one place instead of scattering it through routes."""
     app.add_exception_handler(WorkflowConflictError, _workflow_conflict)
+    app.add_exception_handler(HarmonizationNotReadyError, _harmonization_not_ready)
     app.add_exception_handler(RequestValidationError, _request_validation_failed)
     app.add_exception_handler(StarletteHTTPException, _http_request_failed)
     app.add_exception_handler(Exception, _unexpected_api_request_failed)
@@ -43,6 +45,26 @@ async def _workflow_conflict(request: Request, exc: Exception) -> Response:
         user=current_user_context(),
     )
     return _generic_api_error_response(status.HTTP_409_CONFLICT, request)
+
+
+async def _harmonization_not_ready(request: Request, exc: Exception) -> Response:
+    """Return safe recovery guidance for a known workflow readiness state."""
+    if not isinstance(exc, HarmonizationNotReadyError):
+        raise exc
+    log_api_request_failed(
+        method=request.method,
+        path=request.url.path,
+        status_code=status.HTTP_409_CONFLICT,
+        error_type=type(exc).__name__,
+        request_id=_request_id_for_log(request),
+        error_detail=exc.detail,
+        user=current_user_context(),
+    )
+    response = JSONResponse({"detail": exc.detail}, status_code=status.HTTP_409_CONFLICT)
+    request_id = _request_id_for_log(request)
+    if request_id is not None:
+        response.headers[REQUEST_ID_HEADER] = request_id
+    return response
 
 
 async def _request_validation_failed(request: Request, exc: Exception) -> Response:

@@ -109,58 +109,7 @@ class TestSummaryAggregation:
         assert later.changed_rows == 2
 
 
-class TestManualOverridePropagation:
-    """Manual overrides must merge into column-CDE mappings for PV lookup."""
-
-    def test_harmonize_request_accepts_null_manual_override(self) -> None:
-        """
-        Given: Stage 2 sends null for an explicit No Mapping choice
-        When: the Stage 3 request model validates the payload
-        Then: the null is preserved for the domain normalizer to remove the
-              manifest mapping
-        """
-        from src.api.schemas import HarmonizeRequest
-
-        # Given
-        payload = {
-            "file_id": "abcdef0123456789abcdef0123456789",
-            "data_model_key": "CCDI",
-            "external_version_number": "11.0.4",
-            "manual_overrides": {"col": None},
-        }
-        assert payload["manual_overrides"]["col"] is None
-
-        # When
-        request = HarmonizeRequest.model_validate(payload)
-
-        # Then
-        assert request.manual_overrides == {"col": None}
-
-    def test_harmonize_request_accepts_column_renames(self) -> None:
-        """
-        Given: Stage 2 sends selected output column names
-        When: the Stage 3 request model validates the payload
-        Then: the rename map is preserved separately from CDE overrides
-        """
-        from src.api.schemas import HarmonizeRequest
-
-        # Given
-        payload = {
-            "file_id": "abcdef0123456789abcdef0123456789",
-            "data_model_key": "CCDI",
-            "external_version_number": "11.0.4",
-            "manual_overrides": {"col_0000": "primary_diagnosis"},
-            "column_renames": {"col_0000": "Primary Diagnosis"},
-        }
-        assert payload["column_renames"]["col_0000"] == "Primary Diagnosis"
-
-        # When
-        request = HarmonizeRequest.model_validate(payload)
-
-        # Then
-        assert request.manual_overrides == {"col_0000": "primary_diagnosis"}
-        assert request.column_renames == {"col_0000": "Primary Diagnosis"}
-
+class TestMappingExtraction:
     def test_extract_skips_entries_without_target_field(self) -> None:
         """
         Given: a manifest with one valid and one missing cde_key entry
@@ -176,7 +125,10 @@ class TestManualOverridePropagation:
         })
 
         # When
-        result = ColumnMappingManifest.from_payload(manifest).column_cde_map().to_strings()
+        result = {
+            str(column_key): cde_key
+            for column_key, cde_key in ColumnMappingManifest.from_payload(manifest).column_cde_map().mappings.items()
+        }
 
         # Then
         assert "good" in result

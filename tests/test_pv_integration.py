@@ -13,7 +13,10 @@ def _sdk_manifest(column_mappings: dict[str, dict[str, Any]]) -> ManifestPayload
 
 
 def _column_cde_map(manifest: ManifestPayload | None) -> dict[str, str]:
-    return ColumnMappingManifest.from_payload(manifest).column_cde_map().to_strings()
+    return {
+        str(column_key): cde_key
+        for column_key, cde_key in ColumnMappingManifest.from_payload(manifest).column_cde_map().mappings.items()
+    }
 
 
 class TestExtractColumnCDEMappings:

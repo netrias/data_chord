@@ -11,6 +11,11 @@ STAGE_NAME="$(require_stage_name "${2:-}")"
 require_configured_deployment "$TARGET_NAME" "$STAGE_NAME"
 MODE="${3:-ensure}"
 
+case "$MODE" in
+  ensure | check) ;;
+  *) fail "Choose a secret mode: ensure or check." ;;
+esac
+
 require_command aws
 require_deployer_identity "$TARGET_NAME"
 

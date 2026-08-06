@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import httpx
 import pytest
-from netrias_client import DataModel, DataModelStoreError, DataModelVersion
+from netrias_client import DataModel, DataModelStoreError, DataModelVersion, NetriasAPIUnavailable
 
 from src.app.data_model_store import list_data_model_summaries
 from src.domain.cde import CdeType
@@ -108,21 +108,18 @@ def test_list_summaries_returns_preferred_model_first(
 
 
 # ---------------------------------------------------------------------------
-# Test: list_data_model_summaries returns [] when client is None
+# Test: list_data_model_summaries reports an unavailable client
 # ---------------------------------------------------------------------------
 
 
-def test_list_summaries_returns_empty_when_client_unavailable() -> None:
-    """
-    Given: no NetriasClient (API key missing)
-    When: list_data_model_summaries() is called
-    Then: empty list returned (graceful degradation)
-    """
-    # When
-    summaries = list_provider_data_model_summaries(None)
+def test_list_summaries_reports_unavailable_client() -> None:
+    with pytest.raises(NetriasAPIUnavailable, match="client is unavailable"):
+        list_provider_data_model_summaries(None)
 
-    # Then
-    assert summaries == [], f"Expected empty list, got {summaries}"
+
+def test_fetch_cdes_reports_unavailable_client() -> None:
+    with pytest.raises(NetriasAPIUnavailable, match="client is unavailable"):
+        fetch_cdes(None, "gc", "11.0.4")
 
 
 # ---------------------------------------------------------------------------
@@ -145,13 +142,13 @@ def test_all_pvs_response_groups_values_by_cde_key() -> None:
         ]
     }
     parsed = CdePvCatalog.empty()
-    assert parsed.to_mapping() == {}
+    assert parsed.values == {}
 
     # When
     parsed = _pv_map_from_all_pvs_response(response_body)
 
     # Then
-    assert parsed.to_mapping() == {
+    assert parsed.values == {
         "diagnosis": frozenset({"Lung", "Breast"}),
         "sex": frozenset({"Female"}),
     }
