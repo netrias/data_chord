@@ -32,6 +32,8 @@ from .workflow_storage import (
     WorkflowMetadata,
     WorkflowNotFoundError,
     WorkflowStorageError,
+    artifact_suffix,
+    artifact_suffix_from_name,
 )
 
 _CONTENT_TYPE_JSON = "application/json"
@@ -104,8 +106,6 @@ class S3WorkflowStorage:
         self._require_json_kind(kind)
         self._require_access(user, file_id)
         key = self._json_key(file_id, kind)
-        if not kind.is_mutable and expected_version is not None:
-            raise WorkflowConflictError(f"Artifact is create-once: {kind.value}")
         kwargs: dict[str, object] = {
             "Bucket": self.bucket,
             "Key": key,
@@ -143,9 +143,10 @@ class S3WorkflowStorage:
     ) -> StoredArtifact:
         self._require_artifact_kind(kind)
         self._require_access(user, file_id)
-        if not source_path.is_file():
-            raise WorkflowArtifactNotFoundError(f"Source artifact not found: {source_path}")
-        key = self._artifact_key(file_id, kind, source_path.suffix)
+        suffix = artifact_suffix(source_path)
+        if self._existing_artifact_keys(file_id, kind):
+            raise WorkflowConflictError(f"Artifact already exists: {kind.value}")
+        key = self._artifact_key(file_id, kind, suffix)
         try:
             response = self.client.put_object(
                 Bucket=self.bucket,
@@ -157,7 +158,7 @@ class S3WorkflowStorage:
             if _is_precondition_failed(exc):
                 raise WorkflowConflictError(f"Artifact already exists: {kind.value}") from exc
             raise
-        return StoredArtifact(kind=kind, version=_version_from_response(response), suffix=source_path.suffix)
+        return StoredArtifact(kind=kind, version=_version_from_response(response), suffix=suffix)
 
     def write_artifact(
         self,
@@ -168,18 +169,33 @@ class S3WorkflowStorage:
     ) -> StoredArtifact:
         self._require_artifact_kind(kind)
         self._require_access(user, file_id)
-        if not source_path.is_file():
-            raise WorkflowArtifactNotFoundError(f"Source artifact not found: {source_path}")
-        # Mutable file artifacts are stored under one logical kind. Delete stale
-        # suffix variants before uploading the current file.
-        for key in self._existing_artifact_keys(file_id, kind):
-            self.client.delete_object(Bucket=self.bucket, Key=key)
-        response = self.client.put_object(
-            Bucket=self.bucket,
-            Key=self._artifact_key(file_id, kind, source_path.suffix),
-            Body=source_path.read_bytes(),
-        )
-        return StoredArtifact(kind=kind, version=_version_from_response(response), suffix=source_path.suffix)
+        suffix = artifact_suffix(source_path)
+        existing_keys = self._existing_artifact_keys(file_id, kind)
+        if len(existing_keys) > 1:
+            raise WorkflowConflictError(f"Artifact has multiple suffix variants: {kind.value}")
+        if existing_keys:
+            existing_key = existing_keys[0]
+            if kind == WorkflowFile.ORIGINAL_UPLOAD:
+                raise WorkflowConflictError(f"Artifact is create-once: {kind.value}")
+            if Path(existing_key).suffix.lower() != suffix:
+                raise WorkflowConflictError(f"Artifact suffix changed: {kind.value}")
+            key = existing_key
+            write_condition: dict[str, object] = {}
+        else:
+            key = self._artifact_key(file_id, kind, suffix)
+            write_condition = {"IfNoneMatch": "*"}
+        try:
+            response = self.client.put_object(
+                Bucket=self.bucket,
+                Key=key,
+                Body=source_path.read_bytes(),
+                **write_condition,
+            )
+        except ClientError as exc:
+            if _is_precondition_failed(exc):
+                raise WorkflowConflictError(f"Artifact already exists: {kind.value}") from exc
+            raise
+        return StoredArtifact(kind=kind, version=_version_from_response(response), suffix=Path(key).suffix)
 
     @contextmanager
     def materialize_artifact(
@@ -230,14 +246,20 @@ class S3WorkflowStorage:
 
     def _existing_artifact_key(self, file_id: str, kind: WorkflowFile) -> str:
         keys = self._existing_artifact_keys(file_id, kind)
-        if len(keys) != 1:
+        if not keys:
             raise WorkflowArtifactNotFoundError(f"Artifact not found: {kind.value}")
+        if len(keys) > 1:
+            raise WorkflowConflictError(f"Artifact has multiple suffix variants: {kind.value}")
         return keys[0]
 
     def _existing_artifact_keys(self, file_id: str, kind: WorkflowFile) -> list[str]:
         prefix = self._artifact_prefix(file_id, kind)
         response = self.client.list_objects_v2(Bucket=self.bucket, Prefix=prefix)
-        return _listed_keys(response)
+        return [
+            key
+            for key in _listed_keys(response)
+            if artifact_suffix_from_name(kind, Path(key).name) is not None
+        ]
 
     def _metadata_key(self, file_id: str) -> str:
         return self._workflow_key(file_id, _METADATA_KEY)
@@ -249,7 +271,7 @@ class S3WorkflowStorage:
         return self._workflow_key(file_id, _ARTIFACT_PREFIX, f"{kind.value}{suffix.lower()}")
 
     def _artifact_prefix(self, file_id: str, kind: WorkflowFile) -> str:
-        return self._workflow_key(file_id, _ARTIFACT_PREFIX, kind.value)
+        return self._workflow_key(file_id, _ARTIFACT_PREFIX, f"{kind.value}.")
 
     def _workflow_key(self, file_id: str, *parts: str) -> str:
         if "/" in file_id or file_id in {"", ".", ".."}:

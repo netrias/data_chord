@@ -5,6 +5,7 @@
 
 import { createPVCombobox } from './pv_combobox.js';
 import { determineCardState } from './card-state.js';
+import { escapeHtml } from '/assets/shared/html.js';
 
 /** @type {Record<string, string>} */
 export const CONFIDENCE_SYMBOLS = {
@@ -92,6 +93,37 @@ export const getMinConfidence = (cells) => {
  */
 export const toExcelRowNumber = (dataRowNumber) => dataRowNumber + 1;
 
+/** Maximum row numbers shown in a grouped-term tooltip. */
+const ROW_TOOLTIP_PREVIEW_LIMIT = 5;
+
+/**
+ * Build a bounded row label and tooltip without copying the complete row group.
+ * The original row indices stay available for review, overrides, context, and export.
+ * @param {number[]} rowIndices - 1-based data row indices
+ * @returns {{labelText: string, tooltipText: string|null}}
+ */
+export const formatRowReference = (rowIndices) => {
+  const rowCount = rowIndices.length;
+  if (rowCount === 0) {
+    return { labelText: '0 rows', tooltipText: null };
+  }
+  if (rowCount === 1) {
+    return {
+      labelText: `Row ${toExcelRowNumber(rowIndices[0])}`,
+      tooltipText: null,
+    };
+  }
+
+  const previewRows = rowIndices
+    .slice(0, ROW_TOOLTIP_PREVIEW_LIMIT)
+    .map(toExcelRowNumber);
+  const totalSuffix = rowCount > ROW_TOOLTIP_PREVIEW_LIMIT ? `... (${rowCount} total)` : '';
+  return {
+    labelText: `${rowCount} rows`,
+    tooltipText: `Rows: ${previewRows.join(', ')}${totalSuffix}`,
+  };
+};
+
 /**
  * Extract file_id from URL query parameters.
  * @returns {string|null}
@@ -99,17 +131,6 @@ export const toExcelRowNumber = (dataRowNumber) => dataRowNumber + 1;
 export const getFileIdFromUrl = () => {
   const params = new URLSearchParams(window.location.search);
   return params.get('file_id');
-};
-
-/**
- * Escape HTML special characters to prevent XSS.
- * @param {string} str
- * @returns {string}
- */
-export const escapeHtml = (str) => {
-  if (typeof str !== 'string') return String(str);
-  const escapeMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-  return str.replace(/[&<>"']/g, (c) => escapeMap[c]);
 };
 
 /**
@@ -349,7 +370,6 @@ const _applyCardState = (params) => {
 
   // Get derived state from pure function
   const state = determineCardState({
-    originalValue,
     aiSuggestedValue,
     overrideValue,
     hasPVs,
@@ -427,7 +447,6 @@ const _attachInputListener = (card, entry, onOverrideChange) => {
     onOverrideChange(
       entry.rowIndices,
       entry.columnKey,
-      entry.harmonizedValue,
       effectiveOverride,
       entry.originalValue,
     );
@@ -443,7 +462,6 @@ const _attachInputListener = (card, entry, onOverrideChange) => {
     onOverrideChange(
       entry.rowIndices,
       entry.columnKey,
-      entry.harmonizedValue,
       effectiveOverride,
       entry.originalValue,
     );
@@ -613,7 +631,6 @@ const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange
     onOverrideChange(
       entry.rowIndices,
       entry.columnKey,
-      entry.harmonizedValue,
       effectiveOverride,
       entry.originalValue,
     );

@@ -21,12 +21,7 @@ def column_key_from_string(value: str) -> ColumnKey:
 @dataclass(frozen=True)
 class ColumnIdentity:
     key: ColumnKey
-    index: int
     header: str
-
-    @property
-    def label(self) -> str:
-        return self.header or "Unknown"
 
 
 __all__ = [

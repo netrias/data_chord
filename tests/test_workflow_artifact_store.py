@@ -8,14 +8,11 @@ from pathlib import Path
 import pytest
 
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_string
-from src.domain.manifest import normalize_manifest
 from src.persistence.workflow_artifacts import (
     load_harmonization_manifest_path,
     load_harmonized_output_path,
-    load_mapping_manifest,
     load_upload_artifact,
     save_harmonized_artifacts,
-    save_mapping_manifest,
     save_upload_artifacts,
 )
 from src.storage import LocalWorkflowStorage, UploadConstraints, UploadStorage, UserContext, WorkflowFile
@@ -112,29 +109,17 @@ async def test_generated_artifacts_restore_into_new_scratch_space(tmp_path: Path
     workflow_storage.create_workflow(user, meta.dataset_workflow_id)
     save_upload_artifacts(workflow_storage, user, first_scratch, meta)
 
-    manifest = {
-        "column_mappings": {
-            "col_0000": {
-                "cde_key": "primary_diagnosis",
-                "cde_id": 1,
-                "column_name": "diagnosis",
-            }
-        }
-    }
-    save_mapping_manifest(workflow_storage, user, meta.file_id, manifest)
     harmonized_path = first_scratch.harmonized_path_for(meta.file_id, meta.saved_path)
     harmonized_path.write_bytes(b"diagnosis\nbeta\n")
     manifest_path = tmp_path / "manifest.parquet"
     manifest_path.write_bytes(b"fake parquet bytes")
     save_harmonized_artifacts(workflow_storage, user, meta.file_id, harmonized_path, manifest_path)
 
-    assert second_scratch.load_manifest(meta.file_id) is None
     assert second_scratch.load_harmonized_path(meta.file_id) is None
     assert second_scratch.load_harmonization_manifest_path(meta.file_id) is None
 
     # When: the next request restores all durable artifacts into a new scratch space
     restored_meta = load_upload_artifact(second_scratch, workflow_storage, user, meta.file_id)
-    restored_mapping = load_mapping_manifest(second_scratch, workflow_storage, user, meta.file_id)
     assert restored_meta is not None
     restored_output = load_harmonized_output_path(
         second_scratch,
@@ -146,8 +131,35 @@ async def test_generated_artifacts_restore_into_new_scratch_space(tmp_path: Path
     restored_manifest = load_harmonization_manifest_path(second_scratch, workflow_storage, user, meta.file_id)
 
     # Then: local readers can use normal paths again
-    assert restored_mapping == normalize_manifest(manifest)
     assert restored_output is not None
     assert restored_output.read_bytes() == b"diagnosis\nbeta\n"
     assert restored_manifest is not None
     assert restored_manifest.read_bytes() == b"fake parquet bytes"
+
+
+async def test_durable_stage_three_artifacts_override_unpublished_scratch(tmp_path: Path) -> None:
+    """A stale worker's local files cannot replace the last completed run."""
+    user = UserContext(user_id="alice")
+    workflow_storage = LocalWorkflowStorage(tmp_path / "workflow")
+    scratch = UploadStorage(tmp_path / "scratch", UploadConstraints(max_bytes=10_000))
+    meta = await scratch.store(InMemoryUpload(b"diagnosis\nalpha\n"), dataset_workflow_id())
+    workflow_storage.create_workflow(user, meta.dataset_workflow_id)
+    save_upload_artifacts(workflow_storage, user, scratch, meta)
+
+    output_path = scratch.harmonized_path_for(meta.file_id, meta.saved_path)
+    generated_manifest = tmp_path / "generated.parquet"
+    output_path.write_bytes(b"diagnosis\napproved\n")
+    generated_manifest.write_bytes(b"approved manifest")
+    manifest_path = scratch.save_harmonization_manifest(meta.file_id, generated_manifest)
+    save_harmonized_artifacts(workflow_storage, user, meta.file_id, output_path, manifest_path)
+
+    output_path.write_bytes(b"diagnosis\nstale worker\n")
+    manifest_path.write_bytes(b"stale manifest")
+
+    restored_output = load_harmonized_output_path(scratch, workflow_storage, user, meta.file_id, meta)
+    restored_manifest = load_harmonization_manifest_path(scratch, workflow_storage, user, meta.file_id)
+
+    assert restored_output is not None
+    assert restored_output.read_bytes() == b"diagnosis\napproved\n"
+    assert restored_manifest is not None
+    assert restored_manifest.read_bytes() == b"approved manifest"

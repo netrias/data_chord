@@ -11,7 +11,7 @@ import {
   createEmptyState,
   createValueCard,
   renderProgressPills,
-  toExcelRowNumber,
+  formatRowReference,
   cleanupCards,
   sortEntriesByConfidence,
   getFileIdFromUrl,
@@ -201,25 +201,12 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
   const fileId = getFileIdFromUrl();
 
   for (const entry of batchMeta.entries) {
-    // rowCount is the true count; rowIndices may be truncated for large arrays
-    const rowCount = entry.rowCount ?? entry.rowIndices.length;
-    const excelRows = entry.rowIndices.map(toExcelRowNumber);
-    const rowLabel = rowCount === 1 ? `Row ${excelRows[0]}` : `${rowCount} rows`;
-    // Build tooltip: show up to 5 row numbers, then ellipsis if more
-    let tooltipText = null;
-    if (rowCount > 1) {
-      const maxTooltipRows = 5;
-      const displayRows = excelRows.slice(0, maxTooltipRows);
-      if (rowCount > maxTooltipRows) {
-        tooltipText = `Rows: ${displayRows.join(', ')}... (${rowCount} total)`;
-      } else {
-        tooltipText = `Rows: ${displayRows.join(', ')}`;
-      }
-    }
+    const rowCount = entry.rowIndices.length;
+    const { labelText, tooltipText } = formatRowReference(entry.rowIndices);
 
     const card = createValueCard({
       entry,
-      labelText: rowLabel,
+      labelText,
       tooltipText,
       pendingOverrides,
       onOverrideChange,
@@ -232,12 +219,10 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
       if (rowLabelEl) {
         rowLabelEl.classList.add('row-context-link');
         rowLabelEl.addEventListener('click', () => {
-          // Pass entry info; popup will fetch full indices if needed
           showRowContextPopup({
             term: entry.originalValue,
             columnKey: entry.columnKey,
             rowIndices: entry.rowIndices.map((idx) => idx - 1),
-            rowCount,
             fileId,
             totalOriginalRows,
           });

@@ -16,14 +16,6 @@ declare module '/assets/shared/storage-keys.js' {
   export const SessionKey: Record<string, string>;
 }
 
-declare module '/assets/shared/combobox.js' {
-  export function createCombobox(config: unknown): HTMLDivElement;
-}
-
-declare module '/assets/shared/row-state.js' {
-  export function createRowState(): unknown;
-}
-
 type StageConfig = Record<string, any>;
 
 interface ClusterizeOptions {

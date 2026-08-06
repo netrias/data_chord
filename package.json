@@ -7,6 +7,7 @@
     "test": "tests"
   },
   "scripts": {
+    "test": "node --import ./tests/js/register-assets.js --test tests/js/*.test.js",
     "typecheck": "tsc --noEmit",
     "test:e2e": "playwright test",
     "perf:e2e": "RUN_PERF=true playwright test tests/e2e/performance.e2e.spec.mjs --reporter=line",

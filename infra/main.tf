@@ -16,9 +16,8 @@ data "aws_secretsmanager_secret" "netrias_api_key" {
 }
 
 locals {
-  name_prefix              = substr(lower(replace("${var.project_name}-${var.environment}", "_", "-")), 0, 32)
-  hosted_zone_name         = trimsuffix(var.hosted_zone_name, ".")
-  codebuild_connection_arn = var.codebuild_connection_id == "" ? "" : "arn:aws:codeconnections:${var.aws_region}:${var.expected_account_id}:connection/${var.codebuild_connection_id}"
+  name_prefix      = substr(lower(replace("${var.project_name}-${var.environment}", "_", "-")), 0, 32)
+  hosted_zone_name = trimsuffix(var.hosted_zone_name, ".")
   # Prefer a managed subdomain when the caller supplies a hosted zone but not a
   # final domain name; this keeps staging/prod setup small for internal deploys.
   use_managed_dns     = var.domain_name == "" && local.hosted_zone_name != ""
@@ -37,8 +36,7 @@ locals {
     app_url            = local.app_url
     invite_environment = local.invite_environment
   })
-  alert_actions   = [aws_sns_topic.alerts.arn]
-  ecs_service_arn = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/${aws_ecs_cluster.app.name}/${local.name_prefix}"
+  alert_actions = [aws_sns_topic.alerts.arn]
   common_tags = merge(var.tags, {
     Project     = var.project_name
     Environment = var.environment
@@ -950,7 +948,7 @@ resource "aws_cloudwatch_event_rule" "ecs_service_error" {
   event_pattern = jsonencode({
     source        = ["aws.ecs"]
     "detail-type" = ["ECS Service Action"]
-    resources     = [local.ecs_service_arn]
+    resources     = [aws_ecs_service.app.arn]
     detail = {
       clusterArn = [aws_ecs_cluster.app.arn]
       eventType  = ["ERROR"]
@@ -981,7 +979,7 @@ resource "aws_cloudwatch_event_rule" "ecs_deployment_failed" {
   event_pattern = jsonencode({
     source        = ["aws.ecs"]
     "detail-type" = ["ECS Deployment State Change"]
-    resources     = [local.ecs_service_arn]
+    resources     = [aws_ecs_service.app.arn]
     detail = {
       eventName = ["SERVICE_DEPLOYMENT_FAILED"]
       eventType = ["ERROR"]
@@ -1094,7 +1092,7 @@ resource "aws_iam_role_policy" "application_build" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = concat([
+    Statement = [
       {
         Effect = "Allow"
         Action = [
@@ -1115,17 +1113,8 @@ resource "aws_iam_role_policy" "application_build" {
           "ecr:UploadLayerPart"
         ]
         Resource = "*"
-      }
-      ], local.codebuild_connection_arn == "" ? [] : [
-      {
-        Effect = "Allow"
-        Action = [
-          "codeconnections:GetConnection",
-          "codeconnections:GetConnectionToken",
-        ]
-        Resource = local.codebuild_connection_arn
       },
-    ])
+    ]
   })
 }
 
@@ -1184,18 +1173,9 @@ resource "aws_codebuild_project" "app_image" {
   }
 
   source {
-    type      = var.codebuild_source_type
-    location  = var.codebuild_source_location
+    type      = "GITHUB"
+    location  = "https://github.com/netrias/data_chord.git"
     buildspec = "infra/buildspec.yml"
-
-    dynamic "auth" {
-      for_each = local.codebuild_connection_arn == "" ? [] : [local.codebuild_connection_arn]
-
-      content {
-        type     = "CODECONNECTIONS"
-        resource = auth.value
-      }
-    }
   }
 
   tags = local.common_tags

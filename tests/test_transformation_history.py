@@ -355,54 +355,13 @@ class TestTransformationHistoryContract:
         original_step = next(s for s in history if s["source"] == "original")
         assert original_step["timestamp"] is not None, "Original step should have upload timestamp"
 
-    async def test_each_step_has_pv_conformance_field(
+    async def test_conformant_value_is_clear(
         self,
         app_client: AsyncClient,
         temp_storage: UploadStorage,
         sample_csv_path: Path,
     ) -> None:
-        """Every step in history includes is_pv_conformant boolean."""
-
-        # Given: A manifest with original + AI + user steps
-        file_id = await upload_file(app_client, sample_csv_path)
-        meta = temp_storage.load(file_id)
-        assert meta is not None
-        create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"therapeutic_agents": "User Override"}})
-        _create_manifest_with_history(
-            storage=temp_storage,
-            file_id=file_id,
-            original_value="Original Value",
-            ai_value="AI Value",
-            manual_overrides=[{
-                "user_id": "test-user@example.com",
-                "timestamp": "2024-01-15T14:30:00Z",
-                "value": "User Override",
-            }],
-        )
-
-        # When: Summary is requested
-        response = await app_client.post(
-            "/stage-5/summary",
-            json={"file_id": file_id},
-        )
-
-        # Then: Every step has is_pv_conformant field
-        assert response.status_code == 200
-        mappings = response.json()["term_mappings"]
-        assert len(mappings) > 0
-
-        history = mappings[0]["history"]
-        for step in history:
-            assert "is_pv_conformant" in step, f"Step {step['source']} missing is_pv_conformant"
-            assert isinstance(step["is_pv_conformant"], bool)
-
-    async def test_conformant_value_marked_true(
-        self,
-        app_client: AsyncClient,
-        temp_storage: UploadStorage,
-        sample_csv_path: Path,
-    ) -> None:
-        """Value in PV set has is_pv_conformant=True."""
+        """A value in the approved set is clear."""
         # Given: A manifest with a value that will be in the PV set
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
@@ -424,22 +383,22 @@ class TestTransformationHistoryContract:
                 json={"file_id": file_id},
             )
 
-        # Then: AI step (with "Conformant Value") is marked conformant
+        # Then: the AI step is clear
         assert response.status_code == 200
         mappings = response.json()["term_mappings"]
         assert len(mappings) > 0
 
         history = mappings[0]["history"]
         ai_step = next(s for s in history if s["source"] == "ai")
-        assert ai_step["is_pv_conformant"] is True
+        assert ai_step["review_status"] == "clear"
 
-    async def test_non_conformant_value_marked_false(
+    async def test_non_conformant_value_needs_attention(
         self,
         app_client: AsyncClient,
         temp_storage: UploadStorage,
         sample_csv_path: Path,
     ) -> None:
-        """Value NOT in PV set has is_pv_conformant=False."""
+        """A value outside the approved set needs attention."""
         # Given: A manifest with values not in the PV set
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
@@ -461,22 +420,22 @@ class TestTransformationHistoryContract:
                 json={"file_id": file_id},
             )
 
-        # Then: Steps with non-conformant values are marked as such
+        # Then: the AI step needs attention
         assert response.status_code == 200
         mappings = response.json()["term_mappings"]
         assert len(mappings) > 0
 
         history = mappings[0]["history"]
         ai_step = next(s for s in history if s["source"] == "ai")
-        assert ai_step["is_pv_conformant"] is False
+        assert ai_step["review_status"] == "needs_attention"
 
-    async def test_no_pv_set_defaults_conformant(
+    async def test_no_pv_set_is_not_checked(
         self,
         app_client: AsyncClient,
         temp_storage: UploadStorage,
         sample_csv_path: Path,
     ) -> None:
-        """When no PV set exists, all steps default to is_pv_conformant=True."""
+        """Values without an approved set are not checked."""
         # Given: A manifest with transformation history
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
@@ -498,11 +457,11 @@ class TestTransformationHistoryContract:
                 json={"file_id": file_id},
             )
 
-        # Then: All steps default to conformant (graceful degradation)
+        # Then: no history step claims conformance was checked
         assert response.status_code == 200
         mappings = response.json()["term_mappings"]
         assert len(mappings) > 0
 
         history = mappings[0]["history"]
         for step in history:
-            assert step["is_pv_conformant"] is True, f"Step {step['source']} should default to conformant"
+            assert step["review_status"] == "not_checked"

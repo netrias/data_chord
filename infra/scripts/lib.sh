@@ -136,11 +136,20 @@ init_tofu() {
 
 tofu_output() {
   local output_name="$1"
-  local output_json
-  output_json="$(tofu -chdir="$INFRA_DIR" output -json "$output_name" 2>/dev/null)" || return 0
-  python3 -c 'import json, sys
-data = json.load(sys.stdin)
-value = data["value"] if isinstance(data, dict) and "value" in data else data
-print(json.dumps(value) if isinstance(value, (dict, list)) else value)
-' <<<"$output_json" 2>/dev/null || true
+  tofu -chdir="$INFRA_DIR" output -raw "$output_name" 2>/dev/null || true
+}
+
+required_tofu_output() {
+  local output_name="$1"
+  local output
+
+  if ! output="$(tofu -chdir="$INFRA_DIR" output -raw "$output_name" 2>&1)"; then
+    if [[ "$output" == *"Output \"$output_name\" not found"* || "$output" == *"No outputs found"* ]]; then
+      fail "OpenTofu output '$output_name' is unavailable. Apply the application stack first."
+    fi
+    fail "Could not read OpenTofu output '$output_name': $output"
+  fi
+
+  [[ -n "$output" ]] || fail "OpenTofu output '$output_name' is unavailable. Apply the application stack first."
+  printf '%s\n' "$output"
 }

@@ -10,7 +10,6 @@ from uuid import UUID
 
 DATASET_WORKFLOW_ID_LENGTH: Final = 32
 DATASET_WORKFLOW_ID_PATTERN: Final = r"^[a-f0-9]{32}$"
-DATASET_WORKFLOW_ID_MIN_LENGTH: Final = DATASET_WORKFLOW_ID_LENGTH
 
 DatasetWorkflowId = NewType("DatasetWorkflowId", str)
 
@@ -51,7 +50,6 @@ def is_dataset_workflow_id(value: object) -> bool:
 
 __all__ = [
     "DATASET_WORKFLOW_ID_LENGTH",
-    "DATASET_WORKFLOW_ID_MIN_LENGTH",
     "DATASET_WORKFLOW_ID_PATTERN",
     "DatasetWorkflowId",
     "dataset_workflow_id_from_string",

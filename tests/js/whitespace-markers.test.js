@@ -7,14 +7,8 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { pathToFileURL } from 'node:url';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const utilsPath = join(__dirname, '../../src/stage_4_review_results/static/shared_review_utils.js');
-
-const { formatWhitespaceMarkers, escapeHtml } = await import(pathToFileURL(utilsPath).href);
+import { escapeHtml } from '../../src/shared/static/html.js';
+import { formatWhitespaceMarkers } from '../../src/stage_4_review_results/static/shared_review_utils.js';
 
 const MARKER = '<span class="ws-marker">\u00B7</span>';
 

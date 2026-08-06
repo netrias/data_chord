@@ -9,12 +9,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
-from collections import defaultdict
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import urlencode
-from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.concurrency import run_in_threadpool
@@ -24,32 +21,39 @@ from netrias_client import read_tabular, write_tabular
 
 import src.app.dependencies as dependencies
 from src.api.schemas import (
-    ColumnBreakdownSchema,
-    ConfidenceBucketSchema,
     HarmonizeRequest,
     HarmonizeResponse,
-    ManifestSummarySchema,
 )
 from src.app.data_model_store import fetch_all_pvs_async, populate_cde_cache
 from src.app.dependencies import (
     get_harmonize_service,
 )
 from src.app.session_cache import SessionCache, get_session_cache
-from src.domain import (
-    ColumnCdeOverrides,
-    ColumnRenameSet,
-)
+from src.domain.cde_pv_catalog import CdePvCatalog
+from src.domain.cde_type_classification import refine_cde_types_from_pvs
 from src.domain.column_cde_map import ColumnCdeMap
+from src.domain.column_outcomes import (
+    ColumnOutcome,
+    FinalizedValueOutcome,
+    FinalValueSource,
+    summarize_column_outcomes,
+)
+from src.domain.column_renames import ColumnRenameSet
+from src.domain.columns import ColumnKey
 from src.domain.data_model_version_reference import DataModelVersionReference
+from src.domain.harmonization import (
+    ConfidenceBucketCount,
+    HarmonizationColumnBreakdown,
+    HarmonizationManifestSummary,
+    HarmonizeStatus,
+)
 from src.domain.manifest import (
     ColumnMappingManifest,
     ConfidenceBucket,
-    ManifestPayload,
     ManifestPvAdjustment,
     ManifestRow,
     ManifestSummary,
     confidence_bucket,
-    is_value_changed,
 )
 from src.domain.pv_validation import check_value_conformance, compute_pv_adjustment
 from src.domain.tabular_column_renames import (
@@ -57,23 +61,30 @@ from src.domain.tabular_column_renames import (
     apply_column_renames_to_dataset,
     resolve_tabular_columns,
 )
-from src.domain.workflow_state import ConfirmedMappingChoices, WorkflowState
-from src.integrations.netrias_harmonize import HarmonizeResult, HarmonizeStatus
+from src.integrations.netrias_harmonize import HarmonizeResult
 from src.persistence.cde_mapping_document_store import save_cde_mapping_document
+from src.persistence.harmonization_job_store import HarmonizationJobState
 from src.persistence.manifest_reader import read_manifest_parquet
 from src.persistence.manifest_writer import apply_column_renames_batch, apply_pv_adjustments_batch
-from src.persistence.pv_manifest_store import ColumnPvSets, save_pv_manifest_to_disk
+from src.persistence.pv_manifest_store import ColumnPvSets, save_pv_snapshot
 from src.persistence.review_override_store import delete_review_overrides_state
 from src.persistence.workflow_artifacts import (
-    load_mapping_manifest,
     load_upload_artifact,
     save_harmonized_artifacts,
 )
-from src.persistence.workflow_state_store import load_workflow_state
-from src.stage_3_harmonize.job_state import (
-    StageThreeJobState,
-    load_stage_three_job_state,
-    save_stage_three_job_state,
+from src.persistence.workflow_state_store import LoadedWorkflowState
+from src.stage_3_harmonize.use_cases import (
+    HarmonizationStart,
+    HarmonizationStartConflictError,
+    HarmonizationWorkflowNotFoundError,
+    HarmonizationWorkflowUnreadableError,
+    RunAuthority,
+    StaleStageThreeWorkerError,
+    complete_stage_three_job,
+    fail_stage_three_job,
+    heartbeat_stage_three_job,
+    load_authorized_job,
+    start_harmonization,
 )
 from src.storage import UploadStorage, UserContext, WorkflowFile, WorkflowNotFoundError, WorkflowStorage
 
@@ -88,7 +99,6 @@ _router_logger = logging.getLogger(__name__)
 stage_three_router = APIRouter(prefix="/stage-3", tags=["Stage 3 Harmonize"])
 
 
-_stage_three_jobs: dict[str, StageThreeJobState] = {}
 _stage_three_tasks: dict[str, asyncio.Task[None]] = {}
 
 
@@ -118,12 +128,29 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
     storage = dependencies.get_upload_storage()
     workflow_storage = dependencies.get_workflow_storage()
     user = dependencies.get_user_context()
-    meta = load_upload_artifact(storage, workflow_storage, user, payload.file_id)
-    if not meta:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please rerun analysis.")
+    try:
+        start = start_harmonization(
+            upload_storage=storage,
+            workflow_storage=workflow_storage,
+            user=user,
+            payload=payload,
+        )
+    except HarmonizationWorkflowNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workflow not found. Please rerun analysis.",
+        ) from exc
+    except (HarmonizationStartConflictError, HarmonizationWorkflowUnreadableError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Workflow state changed or is unreadable. Please refresh and try again.",
+        ) from exc
 
-    job = _create_stage_three_job(payload.file_id, workflow_storage, user)
-    task = asyncio.create_task(_run_stage_three_job(job.polling_job_id, payload, workflow_storage, user))
+    if not start.should_run:
+        return _response_from_job(start.loaded_job.job)
+
+    job = start.loaded_job.job
+    task = asyncio.create_task(_run_stage_three_job(start, payload, workflow_storage, user))
     _stage_three_tasks[job.polling_job_id] = task
     task.add_done_callback(lambda _task: _stage_three_tasks.pop(job.polling_job_id, None))
     try:
@@ -132,7 +159,13 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
         await asyncio.wait_for(asyncio.shield(task), timeout=JOB_START_GRACE_SECONDS)
     except TimeoutError:
         pass
-    return _response_from_job(_stage_three_jobs[job.polling_job_id])
+    loaded = load_authorized_job(
+        workflow_storage=workflow_storage,
+        user=user,
+        file_id=payload.file_id,
+        requested_job_id=job.polling_job_id,
+    )
+    return _response_from_job(loaded.job if loaded is not None else job)
 
 
 @stage_three_router.get(
@@ -141,116 +174,98 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
     name="stage_three_harmonize_job",
 )
 async def get_harmonize_job(job_id: str, file_id: str | None = Query(default=None)) -> HarmonizeResponse:
+    if file_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Harmonization job not found.")
     workflow_storage = dependencies.get_workflow_storage()
     user = dependencies.get_user_context()
-    job = _load_stage_three_job(job_id, file_id, workflow_storage, user)
-    if job is None:
+    try:
+        loaded = load_authorized_job(
+            workflow_storage=workflow_storage,
+            user=user,
+            file_id=file_id,
+            requested_job_id=job_id,
+        )
+    except (HarmonizationStartConflictError, HarmonizationWorkflowUnreadableError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Harmonization state changed or is unreadable. Please refresh.",
+        ) from exc
+    if loaded is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Harmonization job not found.")
-    return _response_from_job(job)
-
-
-def _create_stage_three_job(
-    file_id: str,
-    workflow_storage: WorkflowStorage,
-    user: UserContext,
-) -> StageThreeJobState:
-    job_id = uuid4().hex
-    next_stage_url = _next_stage_url(file_id=file_id, job_id=job_id, job_status=HarmonizeStatus.QUEUED, detail="")
-    job = StageThreeJobState(
-        polling_job_id=job_id,
-        job_id=job_id,
-        file_id=file_id,
-        status=HarmonizeStatus.QUEUED,
-        detail="Harmonization job accepted.",
-        next_stage_url=next_stage_url,
-        started_at=datetime.now(UTC),
-        job_id_available=False,
-    )
-    _stage_three_jobs[job_id] = job
-    save_stage_three_job_state(workflow_storage, user, job)
-    return job
+    return _response_from_job(loaded.job)
 
 
 async def _run_stage_three_job(
-    polling_job_id: str,
+    start: HarmonizationStart,
     payload: HarmonizeRequest,
     workflow_storage: WorkflowStorage,
     user: UserContext,
 ) -> None:
-    try:
-        response = await _run_harmonization_workflow(payload)
-    except Exception as exc:  # pragma: no cover - defensive job boundary
-        _router_logger.exception("Stage 3 background harmonization failed", extra={"file_id": payload.file_id})
-        failed_job = StageThreeJobState(
-            polling_job_id=polling_job_id,
-            job_id=polling_job_id,
-            file_id=payload.file_id,
-            status=HarmonizeStatus.FAILED,
-            detail=str(exc),
-            next_stage_url=_next_stage_url(
-                file_id=payload.file_id,
-                job_id=polling_job_id,
-                job_status=HarmonizeStatus.FAILED,
-                detail=str(exc),
-            ),
-            started_at=_stage_three_jobs[polling_job_id].started_at,
+    accepted_job = start.loaded_job.job
+    stop_heartbeat = asyncio.Event()
+    heartbeat = asyncio.create_task(
+        heartbeat_stage_three_job(
+            workflow_storage=workflow_storage,
+            user=user,
+            accepted_job=accepted_job,
+            stop=stop_heartbeat,
         )
-        _stage_three_jobs[polling_job_id] = failed_job
-        save_stage_three_job_state(workflow_storage, user, failed_job)
-        return
-
-    started_at = _stage_three_jobs[polling_job_id].started_at
-    completed_job = StageThreeJobState(
-        polling_job_id=polling_job_id,
-        job_id=response.job_id,
-        file_id=payload.file_id,
-        status=response.status,
-        detail=response.detail,
-        next_stage_url=response.next_stage_url,
-        started_at=started_at,
-        job_id_available=response.job_id_available,
-        manifest_summary=response.manifest_summary,
     )
-    _stage_three_jobs[polling_job_id] = completed_job
-    save_stage_three_job_state(workflow_storage, user, completed_job)
-
-
-def _load_stage_three_job(
-    job_id: str,
-    file_id: str | None,
-    workflow_storage: WorkflowStorage,
-    user: UserContext,
-) -> StageThreeJobState | None:
-    job = _stage_three_jobs.get(job_id)
-    if job is not None:
-        return job
-    if file_id is None:
-        return None
     try:
-        stored_job = load_stage_three_job_state(workflow_storage, user, file_id)
-    except WorkflowNotFoundError:
-        return None
-    if stored_job is None or not stored_job.matches_request(job_id):
-        return None
-    # Repopulate the process cache after a restart so later polls avoid durable
-    # storage once the job has been recovered.
-    _stage_three_jobs[stored_job.polling_job_id] = stored_job
-    return stored_job
+        response = await _run_harmonization_workflow(
+            payload,
+            start.loaded_state,
+            RunAuthority(workflow_storage, user, accepted_job),
+        )
+        complete_stage_three_job(
+            workflow_storage=workflow_storage,
+            user=user,
+            accepted_job=accepted_job,
+            response=response,
+        )
+    except StaleStageThreeWorkerError:
+        _router_logger.warning(
+            "Superseded Stage 3 worker stopped before publishing",
+            extra={"file_id": payload.file_id, "job_id": accepted_job.polling_job_id},
+        )
+        fail_stage_three_job(
+            workflow_storage=workflow_storage,
+            user=user,
+            accepted_job=accepted_job,
+        )
+    except Exception:  # pragma: no cover - defensive job boundary
+        _router_logger.exception("Stage 3 background harmonization failed", extra={"file_id": payload.file_id})
+        fail_stage_three_job(
+            workflow_storage=workflow_storage,
+            user=user,
+            accepted_job=accepted_job,
+        )
+    finally:
+        stop_heartbeat.set()
+        await heartbeat
 
 
-def _response_from_job(job: StageThreeJobState) -> HarmonizeResponse:
+def _response_from_job(job: HarmonizationJobState) -> HarmonizeResponse:
     return HarmonizeResponse(
         job_id=job.job_id,
         status=job.status,
         detail=job.detail,
-        next_stage_url=job.next_stage_url,
+        next_stage_url=_next_stage_url(
+            file_id=job.file_id,
+            job_id=job.job_id,
+            job_status=job.status,
+        ),
         job_id_available=job.job_id_available,
         elapsed_seconds=job.elapsed_seconds(),
         manifest_summary=job.manifest_summary,
     )
 
 
-async def _run_harmonization_workflow(payload: HarmonizeRequest) -> HarmonizeResponse:
+async def _run_harmonization_workflow(
+    payload: HarmonizeRequest,
+    loaded_state: LoadedWorkflowState,
+    run_authority: RunAuthority,
+) -> HarmonizeResponse:
     storage = dependencies.get_upload_storage()
     workflow_storage = dependencies.get_workflow_storage()
     user = dependencies.get_user_context()
@@ -273,47 +288,36 @@ async def _run_harmonization_workflow(payload: HarmonizeRequest) -> HarmonizeRes
         )
     except WorkflowNotFoundError:
         pass
-    workflow_state = load_workflow_state(
-        workflow_storage,
-        user,
-        payload.file_id,
-    )
-
-    stored_manifest = load_mapping_manifest(storage, workflow_storage, user, payload.file_id)
-    manifest_payload = stored_manifest or payload.manifest
-    manifest = ColumnMappingManifest.from_payload(manifest_payload)
-    mapping_choices = _mapping_choices_for_harmonize(workflow_state, payload)
+    workflow_state = loaded_state.state
+    manifest = workflow_state.mapping_manifest
+    mapping_choices = workflow_state.mapping_choices
+    if manifest is None or mapping_choices is None:
+        raise ValueError("Workflow mapping choices are incomplete")
     column_overrides = mapping_choices.column_overrides
     column_renames = mapping_choices.column_renames
-    data_model_version = _data_model_version_for_harmonize(workflow_state, payload)
+    data_model_version = workflow_state.data_model_version
     resolved_columns = await _resolved_columns_for_source(
         meta.saved_path,
         column_renames,
         meta.selected_sheet,
     )
 
-    cache = get_session_cache(payload.file_id)
-    column_cde_map = _column_cde_map_for_session(manifest, column_overrides)
-    _store_column_mappings_in_cache(cache, column_cde_map)
-    save_cde_mapping_document(
-        payload.file_id,
-        manifest,
-        column_overrides,
-        column_renames,
-        resolved_columns,
+    cache = get_session_cache(payload.file_id, owner_user_id=user.user_id)
+    await _ensure_reference_catalog(
         cache,
+        payload.file_id,
         data_model_version,
+        user.user_id,
     )
+    prepared_manifest = manifest.apply_choices(column_overrides, column_renames, cache.get_cde_catalog())
+    column_cde_map = prepared_manifest.column_cde_map()
     output_path = storage.harmonized_path_for(payload.file_id, meta.saved_path)
 
     harmonize_task = asyncio.create_task(
         _run_harmonization(
-            cache,
             meta.saved_path,
             data_model_version,
-            column_overrides,
-            column_renames,
-            manifest.to_payload(),
+            prepared_manifest,
             output_path,
             meta.selected_sheet,
         )
@@ -321,6 +325,7 @@ async def _run_harmonization_workflow(payload: HarmonizeRequest) -> HarmonizeRes
     pv_fetch_task = asyncio.create_task(
         _fetch_pvs_for_session(
             payload.file_id,
+            cache,
             column_cde_map,
             data_model_version,
         )
@@ -328,11 +333,15 @@ async def _run_harmonization_workflow(payload: HarmonizeRequest) -> HarmonizeRes
 
     # Fetch PVs beside harmonization so Stage 4 can validate values without
     # adding another user-visible wait after the SDK call finishes.
-    result, _ = await asyncio.gather(harmonize_task, pv_fetch_task)
-    effective_column_renames = column_renames
+    result, pv_catalog = await asyncio.gather(harmonize_task, pv_fetch_task)
+    if result.status == HarmonizeStatus.SUCCEEDED:
+        # Provider output is still scratch at this point. Refuse to transform
+        # or publish it if this worker or its workflow plan was superseded.
+        run_authority.require_current()
+        run_authority.require_plan_current()
     harmonized_output_path = result.output_path or output_path
     if result.status == HarmonizeStatus.SUCCEEDED:
-        effective_column_renames = await _apply_column_renames_to_output(
+        await _apply_column_renames_to_output(
             harmonized_output_path,
             column_renames,
             meta.selected_sheet,
@@ -357,9 +366,29 @@ async def _run_harmonization_workflow(payload: HarmonizeRequest) -> HarmonizeRes
         payload.file_id,
         result.manifest_path,
         storage,
-        effective_column_renames,
+        column_renames,
+        ColumnPvSets({
+            column_key: pv_catalog.get(cde_key)
+            for column_key, cde_key in column_cde_map.mappings.items()
+        }),
     )
-    if harmonized_output_path.exists():
+    if result.status == HarmonizeStatus.SUCCEEDED:
+        if not harmonized_output_path.exists() or manifest_summary is None:
+            raise RuntimeError("Harmonization completed without required output artifacts")
+        run_authority.require_current()
+        run_authority.require_plan_current()
+        save_pv_snapshot(workflow_storage, user, loaded_state, pv_catalog)
+        save_cde_mapping_document(
+            workflow_storage,
+            user,
+            payload.file_id,
+            manifest,
+            column_overrides,
+            column_renames,
+            resolved_columns,
+            cache,
+            data_model_version,
+        )
         save_harmonized_artifacts(
             workflow_storage,
             user,
@@ -380,58 +409,26 @@ async def _run_harmonization_workflow(payload: HarmonizeRequest) -> HarmonizeRes
             file_id=payload.file_id,
             job_id=result.job_id,
             job_status=result.status,
-            detail=result.detail,
         ),
         job_id_available=result.job_id_available,
         manifest_summary=manifest_summary,
     )
 
 
-def _next_stage_url(*, file_id: str, job_id: str, job_status: HarmonizeStatus, detail: str) -> str:
+def _next_stage_url(*, file_id: str, job_id: str, job_status: HarmonizeStatus) -> str:
     query_params = urlencode({
         "file_id": file_id,
         "job_id": job_id,
         "status": job_status.value,
-        "detail": detail or "",
+        "detail": "",
     })
     return f"{NEXT_STAGE_PATH}?{query_params}"
 
 
-def _column_cde_map_for_session(manifest: ColumnMappingManifest, column_overrides: ColumnCdeOverrides) -> ColumnCdeMap:
-    return manifest.column_cde_map().with_overrides(column_overrides)
-
-
-def _data_model_version_for_harmonize(
-    workflow_state: WorkflowState | None,
-    payload: HarmonizeRequest,
-) -> DataModelVersionReference:
-    if workflow_state is not None:
-        return workflow_state.data_model_version
-    return payload.data_model_version()
-
-
-def _mapping_choices_for_harmonize(
-    workflow_state: WorkflowState | None,
-    payload: HarmonizeRequest,
-) -> ConfirmedMappingChoices:
-    if workflow_state is not None and workflow_state.mapping_choices is not None:
-        return workflow_state.mapping_choices
-    return ConfirmedMappingChoices.from_raw(payload.manual_overrides, payload.column_renames)
-
-
-def _store_column_mappings_in_cache(cache: SessionCache, column_cde_map: ColumnCdeMap) -> None:
-    """PV validation needs to know which CDE each column maps to."""
-    cache.set_column_mappings(column_cde_map)
-    _router_logger.info("Stored column→CDE mappings", extra={"mappings": column_cde_map.to_strings()})
-
-
 async def _run_harmonization(
-    cache: SessionCache,
     file_path: Path,
     data_model_version: DataModelVersionReference,
-    column_overrides: ColumnCdeOverrides,
-    column_renames: ColumnRenameSet,
-    manifest: ManifestPayload | None,
+    prepared_manifest: ColumnMappingManifest,
     output_path: Path,
     sheet_name: str | None,
 ) -> HarmonizeResult:
@@ -441,48 +438,55 @@ async def _run_harmonization(
         harmonizer.run,
         file_path=file_path,
         data_model_key=data_model_version.data_model_key,
-        column_overrides=column_overrides,
-        column_renames=column_renames,
-        cache=cache,
         external_version_number=data_model_version.external_version_number,
-        manifest=manifest,
+        prepared_manifest=prepared_manifest,
         output_path=output_path,
         sheet_name=sheet_name,
     )
 
 
-def _validate_pv_fetch_preconditions(
-    cache: SessionCache, cde_keys: list[str], file_id: str
-) -> DataModelVersionReference | None:
-    """Early-exit checks consolidated here to keep the main fetch function simple."""
-    if not cache.has_cdes():
-        _router_logger.warning("No CDEs in cache for PV fetch", extra={"file_id": file_id})
-        return None
-    if not cde_keys:
-        return None
-    data_model_version = cache.get_data_model_version()
-    if data_model_version is None:
-        _router_logger.warning("Missing model info for PV fetch", extra={"file_id": file_id})
-        return None
-    return data_model_version
+async def _ensure_reference_catalog(
+    cache: SessionCache,
+    file_id: str,
+    data_model_version: DataModelVersionReference,
+    owner_user_id: str,
+) -> None:
+    if cache.get_data_model_version() == data_model_version and cache.has_cdes():
+        return
+    await run_in_threadpool(
+        populate_cde_cache,
+        file_id,
+        data_model_version,
+        owner_user_id=owner_user_id,
+    )
 
 
 async def _fetch_and_cache_pvs(
-    cache: SessionCache, data_model_key: str, external_version_number: str, cde_keys: list[str], file_id: str
-) -> None:
+    cache: SessionCache,
+    data_model_version: DataModelVersionReference,
+    cde_keys: list[str],
+    file_id: str,
+) -> CdePvCatalog:
     _router_logger.info(
         "Fetching PVs from Data Model Store",
         extra={
             "file_id": file_id,
-            "data_model_key": data_model_key,
-            "external_version_number": external_version_number,
+            "data_model_key": data_model_version.data_model_key,
+            "external_version_number": data_model_version.external_version_number,
             "cde_keys": cde_keys,
         },
     )
-    pv_catalog = (await fetch_all_pvs_async(data_model_key, external_version_number)).with_defaults(cde_keys)
-    cache.set_pvs_batch(pv_catalog)
-    pv_counts = pv_catalog.counts()
-    total_pvs = pv_catalog.total_count()
+    pv_catalog = (
+        await fetch_all_pvs_async(
+            data_model_version.data_model_key,
+            data_model_version.external_version_number,
+        )
+    ).with_defaults(cde_keys)
+    cache.set_pvs_batch(pv_catalog, expected_version=data_model_version)
+    refined = refine_cde_types_from_pvs(cache.get_cde_catalog(), cache.get_all_pvs())
+    cache.replace_cde_catalog(refined)
+    pv_counts = {cde_key: len(values) for cde_key, values in pv_catalog.values.items()}
+    total_pvs = sum(pv_counts.values())
 
     _router_logger.info(
         "Fetched PVs for session",
@@ -496,47 +500,30 @@ async def _fetch_and_cache_pvs(
             "Check Data Model Store API response and external_version_number.",
             extra={
                 "file_id": file_id,
-                "data_model_key": data_model_key,
-                "external_version_number": external_version_number,
+                "data_model_key": data_model_version.data_model_key,
+                "external_version_number": data_model_version.external_version_number,
                 "cde_keys": cde_keys,
             },
         )
 
-    # Stage 4/5 may run in a fresh process, so PV state must outlive memory.
-    save_pv_manifest_to_disk(file_id, cache, pv_catalog)
+    return pv_catalog
 
 
 async def _fetch_pvs_for_session(
-    file_id: str, column_cde_map: ColumnCdeMap, data_model_version: DataModelVersionReference
-) -> None:
+    file_id: str,
+    cache: SessionCache,
+    column_cde_map: ColumnCdeMap,
+    data_model_version: DataModelVersionReference,
+) -> CdePvCatalog:
     """Runs in parallel with harmonization to hide PV fetch latency."""
-    cache = get_session_cache(file_id)
     cde_keys = column_cde_map.cde_keys()
-
-    # Server restart between Stage 2 and Stage 3 clears in-memory CDEs; re-fetch.
-    if not cache.has_cdes():
-        _router_logger.info("CDEs missing from cache; re-fetching from Data Model Store", extra={"file_id": file_id})
-        await run_in_threadpool(populate_cde_cache, file_id, data_model_version)
-
-    cached_data_model_version = _validate_pv_fetch_preconditions(cache, cde_keys, file_id)
-    if cached_data_model_version is None:
-        return
-
-    try:
-        if cache.has_any_pvs():
-            # Persist even on cache hits; earlier stages may have populated memory
-            # before durable workflow storage existed for this run.
-            save_pv_manifest_to_disk(file_id, cache, cache.get_all_pvs())
-            return
-        await _fetch_and_cache_pvs(
-            cache,
-            cached_data_model_version.data_model_key,
-            cached_data_model_version.external_version_number,
-            cde_keys,
-            file_id,
-        )
-    except Exception:
-        _router_logger.exception("Failed to fetch PVs for session", extra={"file_id": file_id})
+    if cache.get_data_model_version() != data_model_version or not cache.has_cdes():
+        raise RuntimeError("Reference-data cache does not match the workflow model version")
+    existing = cache.get_all_pvs()
+    missing_keys = [cde_key for cde_key in cde_keys if not existing.has(cde_key)]
+    if not missing_keys:
+        return existing
+    return await _fetch_and_cache_pvs(cache, data_model_version, cde_keys, file_id)
 
 
 def _read_manifest_if_exists(manifest_path: Path | None) -> ManifestSummary | None:
@@ -551,6 +538,7 @@ async def _store_and_adjust_manifest(
     manifest_data: ManifestSummary,
     storage: UploadStorage,
     column_renames: ColumnRenameSet,
+    column_pv_map: ColumnPvSets,
 ) -> ManifestSummary:
     """Must store before adjusting so later stages read the adjusted version."""
     stored_path = storage.save_harmonization_manifest(file_id, manifest_path)
@@ -563,7 +551,7 @@ async def _store_and_adjust_manifest(
         _router_logger.info("Applied column renames", extra={"file_id": file_id, "renamed_count": renamed_count})
         manifest_data = read_manifest_parquet(stored_path) or manifest_data
 
-    adjustment_count = await _apply_pv_adjustments(file_id, stored_path)
+    adjustment_count = await _apply_pv_adjustments(stored_path, column_pv_map)
     if adjustment_count > 0:
         _router_logger.info("Applied PV adjustments", extra={"file_id": file_id, "adjustment_count": adjustment_count})
         return read_manifest_parquet(stored_path) or manifest_data
@@ -576,14 +564,20 @@ async def _read_store_and_adjust_manifest(
     manifest_path: Path | None,
     storage: UploadStorage,
     column_renames: ColumnRenameSet,
-) -> ManifestSummarySchema | None:
+    column_pv_map: ColumnPvSets,
+) -> HarmonizationManifestSummary | None:
     manifest_data = _read_manifest_if_exists(manifest_path)
     if manifest_data is None or manifest_path is None:
         return None
 
-    final_data = await _store_and_adjust_manifest(file_id, manifest_path, manifest_data, storage, column_renames)
-    cache = get_session_cache(file_id)
-    column_pv_map = ColumnPvSets({row.column_key: cache.get_pvs_for_column(row.column_key) for row in final_data.rows})
+    final_data = await _store_and_adjust_manifest(
+        file_id,
+        manifest_path,
+        manifest_data,
+        storage,
+        column_renames,
+        column_pv_map,
+    )
     return _convert_to_schema(final_data, column_pv_map)
 
 
@@ -591,14 +585,13 @@ async def _apply_column_renames_to_output(
     output_path: Path,
     column_renames: ColumnRenameSet,
     sheet_name: str | None,
-) -> ColumnRenameSet:
+) -> None:
     if not column_renames.renames or not output_path.exists():
-        return column_renames
+        return
 
     dataset = await run_in_threadpool(read_tabular, output_path, sheet_name)
     renamed = apply_column_renames_to_dataset(dataset, column_renames)
     await run_in_threadpool(write_tabular, output_path, renamed, output_path)
-    return column_renames
 
 
 async def _resolved_columns_for_source(
@@ -627,48 +620,49 @@ async def _apply_column_renames_to_manifest(manifest_path: Path, column_renames:
 def _compute_row_adjustment(
     row: ManifestRow, pv_set: frozenset[str]
 ) -> ManifestPvAdjustment | None:
-    result = compute_pv_adjustment(
+    adjusted_value = compute_pv_adjustment(
         original_value=row.to_harmonize,
         top_harmonization=row.top_harmonization,
         top_suggestions=row.top_harmonizations,
         pv_set=pv_set,
     )
-    if result.adjusted_value is None or result.adjustment_source is None:
-        return None
-    if result.adjusted_value == row.top_harmonization:
+    if adjusted_value is None:
         return None
     return ManifestPvAdjustment.from_raw(
         row.column_key,
         row.to_harmonize,
-        result.adjusted_value,
-        result.adjustment_source.value,
+        adjusted_value,
     )
 
 
 def _process_row_for_adjustment(
-    row: ManifestRow, cache: SessionCache
+    row: ManifestRow,
+    column_pv_map: ColumnPvSets,
 ) -> ManifestPvAdjustment | None:
     """Skips columns without PVs — those don't need conformance adjustment."""
-    pv_set = cache.get_pvs_for_column(row.column_key)
+    pv_set = column_pv_map.get(row.column_key)
     if not pv_set:
         return None
     return _compute_row_adjustment(row, pv_set)
 
 
-def _collect_pv_adjustments(rows: list[ManifestRow], cache: SessionCache) -> list[ManifestPvAdjustment]:
-    adjustments = [adj for row in rows if (adj := _process_row_for_adjustment(row, cache))]
-    _log_non_conformant_samples(rows, cache)
+def _collect_pv_adjustments(
+    rows: list[ManifestRow],
+    column_pv_map: ColumnPvSets,
+) -> list[ManifestPvAdjustment]:
+    adjustments = [adj for row in rows if (adj := _process_row_for_adjustment(row, column_pv_map))]
+    _log_non_conformant_samples(rows, column_pv_map)
     return adjustments
 
 
-def _log_non_conformant_samples(rows: list[ManifestRow], cache: SessionCache) -> None:
+def _log_non_conformant_samples(rows: list[ManifestRow], column_pv_map: ColumnPvSets) -> None:
     """Capped at 5 samples from first 50 rows to avoid log spam while providing debugging signal."""
     samples = [
         {"column": row.column_name, "value": row.top_harmonization}
         # A small prefix sample is enough to diagnose bad PV coverage without
         # making large manifests expensive to log.
         for row in rows[:50]
-        if _is_top_harmonization_non_conformant(row, cache)
+        if _is_top_harmonization_non_conformant(row, column_pv_map)
     ][:5]
     if samples:
         _router_logger.warning(
@@ -677,23 +671,22 @@ def _log_non_conformant_samples(rows: list[ManifestRow], cache: SessionCache) ->
         )
 
 
-def _is_top_harmonization_non_conformant(row: ManifestRow, cache: SessionCache) -> bool:
+def _is_top_harmonization_non_conformant(row: ManifestRow, column_pv_map: ColumnPvSets) -> bool:
     """Logging-only check; the adjustment path in _compute_row_adjustment handles the actual fix."""
-    pv_set = cache.get_pvs_for_column(row.column_key)
+    pv_set = column_pv_map.get(row.column_key)
     return pv_set is not None and row.top_harmonization not in pv_set
 
 
-async def _apply_pv_adjustments(file_id: str, manifest_path: Path) -> int:
+async def _apply_pv_adjustments(manifest_path: Path, column_pv_map: ColumnPvSets) -> int:
     """AI harmonization may produce values outside the permissible value set; fix those."""
-    cache = get_session_cache(file_id)
-    if not cache.has_any_pvs():
+    if not any(pv_set for pv_set in column_pv_map.values.values()):
         return 0
 
     summary = read_manifest_parquet(manifest_path)
     if summary is None:
         return 0
 
-    adjustments = _collect_pv_adjustments(summary.rows, cache)
+    adjustments = _collect_pv_adjustments(summary.rows, column_pv_map)
     if not adjustments:
         return 0
 
@@ -704,47 +697,75 @@ def _compute_column_stats(
     col_rows: list[ManifestRow],
     pv_set: frozenset[str] | None,
 ) -> ColumnStats:
-    total_rows = 0
-    changed_rows = 0
-    unique_terms_changed = 0
-    non_conformant_terms = 0
-    confidence_counts: dict[ConfidenceBucket, int] = {b: 0 for b in ConfidenceBucket}
+    if not col_rows:
+        return ColumnStats(0, 0, 0, 0, {bucket: 0 for bucket in ConfidenceBucket})
 
-    for row in col_rows:
-        # Each ManifestRow is one unique term; row_indices lists source rows with that term.
-        # Empty list means row tracking unavailable (treat as 1 occurrence).
-        row_count = len(row.row_indices) if row.row_indices else 1
-        total_rows += row_count
-        if is_value_changed(row.to_harmonize, row.top_harmonization):
-            changed_rows += row_count
-            unique_terms_changed += 1
+    finalized_outcomes = [_finalized_value_outcome(row, pv_set) for row in col_rows]
+    summary = summarize_column_outcomes(finalized_outcomes)[0]
+    confidence_counts: dict[ConfidenceBucket, int] = {b: 0 for b in ConfidenceBucket}
+    for row, outcome in zip(col_rows, finalized_outcomes, strict=True):
+        if outcome.is_changed:
             confidence_counts[confidence_bucket(row.confidence_score)] += 1
 
-        if not check_value_conformance(row.top_harmonization, pv_set):
-            non_conformant_terms += 1
+    return ColumnStats(
+        summary.total_rows,
+        summary.changed_rows,
+        summary.changed_distinct_values,
+        summary.non_conformant_distinct_values,
+        confidence_counts,
+    )
 
-    return ColumnStats(total_rows, changed_rows, unique_terms_changed, non_conformant_terms, confidence_counts)
+
+def _effective_ai_value(row: ManifestRow) -> str:
+    """Treat a blank provider result as the manifest's pass-through sentinel."""
+    if not row.top_harmonization.strip():
+        return row.to_harmonize
+    return row.top_harmonization
+
+
+def _finalized_value_outcome(
+    row: ManifestRow,
+    pv_set: frozenset[str] | None,
+) -> FinalizedValueOutcome:
+    final_value = _effective_ai_value(row)
+    return FinalizedValueOutcome(
+        column_key=row.column_key,
+        source_column_index=row.column_id,
+        column_label=row.column_name,
+        original_value=row.to_harmonize,
+        final_value=final_value,
+        final_value_source=(
+            FinalValueSource.DATA_CHORD
+            if final_value != row.to_harmonize
+            else FinalValueSource.SOURCE
+        ),
+        occurrence_count=len(row.row_indices) if row.row_indices else 1,
+        pv_set_available=bool(pv_set),
+        is_pv_conformant=check_value_conformance(final_value, pv_set),
+    )
 
 
 def _create_breakdown_schema(
-    column_name: str,
+    outcome: ColumnOutcome,
     col_rows: list[ManifestRow],
     pv_set: frozenset[str] | None,
-) -> ColumnBreakdownSchema:
+) -> HarmonizationColumnBreakdown:
     stats = _compute_column_stats(col_rows, pv_set)
-    unique_terms = len(col_rows)
-    return ColumnBreakdownSchema(
-        column_name=column_name,
-        label=column_name or "Unknown",
-        total_rows=stats.total_rows,
-        changed_rows=stats.changed_rows,
-        unchanged_rows=stats.total_rows - stats.changed_rows,
-        unique_terms=unique_terms,
-        unique_terms_changed=stats.unique_terms_changed,
-        unique_terms_unchanged=unique_terms - stats.unique_terms_changed,
-        non_conformant_terms=stats.non_conformant_terms,
+    return HarmonizationColumnBreakdown(
+        column_name=outcome.column_label,
+        label=outcome.column_label or "Unknown",
+        column_key=str(outcome.column_key),
+        source_column_index=outcome.source_column_index,
+        review_status=outcome.review_status,
+        total_rows=outcome.total_rows,
+        changed_rows=outcome.changed_rows,
+        unchanged_rows=outcome.total_rows - outcome.changed_rows,
+        unique_terms=outcome.total_distinct_values,
+        unique_terms_changed=outcome.changed_distinct_values,
+        unique_terms_unchanged=outcome.total_distinct_values - outcome.changed_distinct_values,
+        non_conformant_terms=outcome.non_conformant_distinct_values,
         confidence_buckets_changed=[
-            ConfidenceBucketSchema(id=b.value, label=b.label, term_count=stats.confidence_counts[b])
+            ConfidenceBucketCount(id=b.value, label=b.label, term_count=stats.confidence_counts[b])
             for b in ConfidenceBucket
         ],
     )
@@ -753,32 +774,32 @@ def _create_breakdown_schema(
 def _build_column_breakdowns(
     rows: list[ManifestRow],
     column_pv_map: ColumnPvSets,
-) -> list[ColumnBreakdownSchema]:
-    column_rows: dict[str, list[ManifestRow]] = defaultdict(list)
+) -> list[HarmonizationColumnBreakdown]:
+    column_rows: dict[ColumnKey, list[ManifestRow]] = {}
     for row in rows:
-        column_rows[str(row.column_key)].append(row)
+        column_rows.setdefault(row.column_key, []).append(row)
 
-    breakdowns = [
+    outcomes = summarize_column_outcomes([
+        _finalized_value_outcome(row, column_pv_map.get(row.column_key))
+        for row in rows
+    ])
+    return [
         _create_breakdown_schema(
-            col_rows[0].column_name,
-            col_rows,
-            column_pv_map.get(col_rows[0].column_key),
+            outcome,
+            column_rows[outcome.column_key],
+            column_pv_map.get(outcome.column_key),
         )
-        for col_rows in column_rows.values()
+        for outcome in outcomes
     ]
-    # Put columns needing attention first so reviewers do not have to hunt for
-    # changed or non-conformant values in wide files.
-    breakdowns.sort(key=lambda b: (b.changed_rows == 0 and b.non_conformant_terms == 0, -b.total_rows))
-    return breakdowns
 
 
 def _convert_to_schema(
     manifest: ManifestSummary,
     column_pv_map: ColumnPvSets,
-) -> ManifestSummarySchema:
+) -> HarmonizationManifestSummary:
     column_breakdowns = _build_column_breakdowns(manifest.rows, column_pv_map)
     total_non_conformant = sum(b.non_conformant_terms for b in column_breakdowns)
-    return ManifestSummarySchema(
+    return HarmonizationManifestSummary(
         total_terms=manifest.total_terms,
         changed_terms=manifest.changed_terms,
         high_confidence_count=manifest.high_confidence_count,

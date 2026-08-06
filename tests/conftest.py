@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import csv
 import os
+import shutil
 import tempfile
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator, Generator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -41,14 +42,10 @@ def review_state_payload() -> dict[str, object]:
         "sort_mode": "original",
         "column_mode": {
             "current_unit": 1,
-            "completed_units": [],
-            "flagged_units": [],
             "batch_size": 5,
         },
         "row_mode": {
             "current_unit": 1,
-            "completed_units": [],
-            "flagged_units": [],
             "batch_size": 5,
         },
     }
@@ -87,6 +84,7 @@ class MockHarmonizeResult:
     job_id: str | None = None
     mapping_id: str | None = None
     manifest_path: Path | None = None
+    file_path: Path | None = None
 
 
 @pytest.fixture
@@ -139,11 +137,22 @@ def mock_netrias_client() -> Generator[MagicMock]:
     mock_client.discover_mapping_from_tabular.return_value = _cde_manifest
     mock_client.configure.return_value = None
 
-    mock_client.harmonize.return_value = MockHarmonizeResult(
-        status="succeeded",
-        description="Harmonization completed.",
-        job_id="mock-job-id-12345",
-    )
+    def _successful_harmonization(**kwargs: object) -> MockHarmonizeResult:
+        source_path = Path(str(kwargs["source_path"]))
+        output_path = Path(str(kwargs["output_path"]))
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_path, output_path)
+        manifest_path = output_path.with_name(f"{output_path.stem}.manifest.parquet")
+        create_test_manifest_parquet(manifest_path, [])
+        return MockHarmonizeResult(
+            status="succeeded",
+            description="Harmonization completed.",
+            job_id="mock-job-id-12345",
+            manifest_path=manifest_path,
+            file_path=output_path,
+        )
+
+    mock_client.harmonize.side_effect = _successful_harmonization
 
     # DMS methods on the shared NetriasClient mock
     from netrias_client import CDE as SdkCDE
@@ -160,24 +169,18 @@ def mock_netrias_client() -> Generator[MagicMock]:
         SdkCDE(cde_key="primary_diagnosis", cde_id=2, cde_version_id=1, description="Primary Diagnosis"),
         SdkCDE(cde_key="therapeutic_agents", cde_id=1, cde_version_id=1, description="Therapeutic Agents"),
     )
-    # Reset dependency singletons so the mock is injected
+    # Replace the shared provider client for this test.
     saved_client = deps._netrias_client
     saved_init = deps._netrias_client_initialized
-    saved_mapping = deps._mapping_discovery
-    saved_harmonizer = deps._harmonizer
     deps._netrias_client = mock_client
     deps._netrias_client_initialized = True
-    deps._mapping_discovery = None
-    deps._harmonizer = None
 
     with patch.dict(os.environ, {"NETRIAS_API_KEY": "test-api-key"}):
         yield mock_client
 
-    # Restore singletons to avoid leaking mock state
+    # Restore provider client state to avoid leaking the mock.
     deps._netrias_client = saved_client
     deps._netrias_client_initialized = saved_init
-    deps._mapping_discovery = saved_mapping
-    deps._harmonizer = saved_harmonizer
 
 
 @pytest.fixture
@@ -221,11 +224,21 @@ async def app_client(
 
     try:
         from backend.app.main import create_app
+        from src.domain.cde_pv_catalog import CdePvCatalog
 
         app = create_app()
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            yield client
+        fake_pvs = CdePvCatalog.from_mapping({
+            "primary_diagnosis": frozenset(),
+            "therapeutic_agents": frozenset(),
+        })
+        with (
+            patch("src.stage_1_upload.router.fetch_all_pvs_async", AsyncMock(return_value=fake_pvs)),
+            patch("src.stage_2_review_columns.use_cases.fetch_all_pvs_async", AsyncMock(return_value=fake_pvs)),
+            patch("src.stage_3_harmonize.router.fetch_all_pvs_async", AsyncMock(return_value=fake_pvs)),
+        ):
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                yield client
     finally:
         deps_module._storage = original_storage
         deps_module.get_upload_storage = original_get_storage
@@ -288,9 +301,9 @@ async def upload_content(
 
 
 async def upload_and_analyze(client: AsyncClient, csv_path: Path) -> str:
-    """why: upload and analyze a file, returning file_id for harmonization tests."""
+    """Upload, analyze, and confirm the current mapping plan."""
     file_id = await upload_file(client, csv_path)
-    await client.post(
+    analysis = await client.post(
         "/stage-1/analyze",
         json={
             "file_id": file_id,
@@ -298,7 +311,30 @@ async def upload_and_analyze(client: AsyncClient, csv_path: Path) -> str:
             "external_version_number": TEST_TARGET_EXTERNAL_VERSION_NUMBER,
         },
     )
+    assert analysis.status_code == 200
+    await confirm_mapping_choices(client, file_id)
     return file_id
+
+
+async def confirm_mapping_choices(
+    client: AsyncClient,
+    file_id: str,
+    *,
+    manual_overrides: Mapping[str, str | None] | None = None,
+    column_renames: Mapping[str, str] | None = None,
+    headers: Mapping[str, str] | None = None,
+) -> None:
+    """Confirm the current Stage 2 plan before a Stage 3 request."""
+    response = await client.post(
+        "/stage-2/choices",
+        headers=headers,
+        json={
+            "file_id": file_id,
+            "manual_overrides": manual_overrides or {},
+            "column_renames": column_renames or {},
+        },
+    )
+    assert response.status_code == 200, response.text
 
 
 def create_harmonized_csv(
@@ -331,7 +367,7 @@ def create_test_manifest_parquet(
     rows: list[dict[str, Any]],
 ) -> Path:
     """why: create a test manifest.parquet file using the canonical schema."""
-    from src.domain.manifest import get_manifest_schema
+    from src.persistence.manifest_schema import get_manifest_schema
 
     schema = get_manifest_schema()
 
@@ -359,11 +395,214 @@ def store_test_harmonization_manifest(
     file_id: str,
     rows: list[dict[str, Any]],
 ) -> Path:
-    """Create a test manifest through the same storage API production uses."""
+    """Create complete Stage 3 evidence through the production storage boundaries."""
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir) / f"{file_id}_test_manifest.parquet"
         create_test_manifest_parquet(temp_path, rows)
-        return storage.save_harmonization_manifest(file_id, temp_path)
+        stored_path = storage.save_harmonization_manifest(file_id, temp_path)
+    _seed_test_workflow_state(file_id, rows)
+    harmonized_path = storage.load_harmonized_path(file_id)
+    if harmonized_path is None:
+        _store_test_harmonization_manifest(file_id, stored_path)
+    elif _store_test_stage_three_artifacts(file_id, harmonized_path, stored_path):
+        _store_test_completed_stage_three_job(file_id)
+    return stored_path
+
+
+def store_test_completed_harmonization(
+    storage: UploadStorage,
+    file_id: str,
+    harmonized_path: Path,
+    *,
+    manifest_path: Path | None = None,
+    manifest_rows: list[dict[str, Any]] | None = None,
+) -> None:
+    """Publish the durable output and terminal job state owned by successful Stage 3."""
+    if not _seed_test_workflow_state(file_id, manifest_rows or []):
+        return
+    if not _store_test_stage_three_artifacts(file_id, harmonized_path, manifest_path):
+        return
+    _store_test_completed_stage_three_job(file_id)
+
+
+def _seed_test_workflow_state(file_id: str, rows: list[dict[str, Any]]) -> bool:
+    """Give hand-built Stage 3 fixtures the canonical plan required by later stages."""
+    from netrias_client import read_tabular
+
+    import src.app.dependencies as dependencies
+    from src.domain.columns import ColumnKey, column_key_for_index
+    from src.domain.data_model_version_reference import DataModelVersionReference
+    from src.domain.manifest import ColumnMappingManifest, ColumnMappingRecord
+    from src.domain.workflow_state import WorkflowState
+    from src.persistence.workflow_state_store import load_workflow_state, save_initial_workflow_state
+    from src.storage import WorkflowStorageError
+
+    workflow_storage = dependencies.get_workflow_storage()
+    user = dependencies.get_user_context()
+    try:
+        loaded = load_workflow_state(workflow_storage, user, file_id)
+        if loaded is not None:
+            return True
+        records: dict[ColumnKey, ColumnMappingRecord] = {}
+        for row in rows:
+            column_id = row.get("column_id")
+            column_name = row.get("column_name")
+            if not isinstance(column_id, int) or not isinstance(column_name, str):
+                continue
+            column_key = column_key_for_index(column_id)
+            cde_key = (
+                column_name
+                if column_name in {"primary_diagnosis", "therapeutic_agents"}
+                else f"cde_{column_id}"
+            )
+            records[column_key] = ColumnMappingRecord(
+                column_key=column_key,
+                cde_key=cde_key,
+                cde_id=column_id + 1,
+                column_name=column_name,
+            )
+        meta = dependencies.get_upload_storage().load(file_id)
+        if meta is not None:
+            dataset = read_tabular(meta.saved_path, sheet_name=meta.selected_sheet)
+            for column in dataset.columns:
+                column_key = column_key_for_index(column.index)
+                if column_key in records:
+                    continue
+                cde_key = (
+                    column.header
+                    if column.header in {"primary_diagnosis", "therapeutic_agents"}
+                    else f"cde_{column.index}"
+                )
+                records[column_key] = ColumnMappingRecord(
+                    column_key=column_key,
+                    cde_key=cde_key,
+                    cde_id=column.index + 1,
+                    column_name=column.header,
+                )
+        save_initial_workflow_state(
+            workflow_storage,
+            user,
+            WorkflowState.from_data_model_version(
+                file_id,
+                DataModelVersionReference(TEST_TARGET_SCHEMA, TEST_TARGET_EXTERNAL_VERSION_NUMBER),
+                ColumnMappingManifest(records),
+            ),
+        )
+        return True
+    except WorkflowStorageError:
+        # Cross-owner tests already seed state through Stage 1/3 under the
+        # request identity; the default test context must not impersonate it.
+        return False
+
+
+def _store_test_harmonization_manifest(file_id: str, manifest_path: Path) -> None:
+    """Persist a manifest-only fixture without claiming Stage 3 completed."""
+    import src.app.dependencies as dependencies
+    from src.storage import WorkflowFile, WorkflowStorageError
+
+    workflow_storage = dependencies.get_workflow_storage()
+    user = dependencies.get_user_context()
+    try:
+        workflow_storage.write_artifact(
+            user,
+            file_id,
+            WorkflowFile.HARMONIZATION_MANIFEST_BASE,
+            manifest_path,
+        )
+    except WorkflowStorageError:
+        return
+
+
+def _store_test_stage_three_artifacts(
+    file_id: str,
+    harmonized_path: Path,
+    manifest_path: Path | None,
+) -> bool:
+    """Persist completed Stage 3 artifacts through the production boundary."""
+    import src.app.dependencies as dependencies
+    from src.persistence.workflow_artifacts import save_harmonized_artifacts
+    from src.storage import WorkflowStorageError
+
+    try:
+        save_harmonized_artifacts(
+            dependencies.get_workflow_storage(),
+            dependencies.get_user_context(),
+            file_id,
+            harmonized_path,
+            manifest_path,
+        )
+        return True
+    except WorkflowStorageError:
+        return False
+
+
+def _store_test_completed_stage_three_job(file_id: str) -> None:
+    """Tie fixture completion to the exact canonical workflow revision."""
+    from dataclasses import replace
+    from datetime import UTC, datetime
+
+    import src.app.dependencies as dependencies
+    from src.domain.harmonization import HarmonizeStatus
+    from src.persistence.harmonization_job_store import (
+        HarmonizationJobState,
+        load_harmonization_job,
+        save_harmonization_job,
+    )
+    from src.persistence.workflow_state_store import load_workflow_state
+    from src.storage import WorkflowStorageError
+
+    workflow_storage = dependencies.get_workflow_storage()
+    user = dependencies.get_user_context()
+    try:
+        loaded_state = load_workflow_state(workflow_storage, user, file_id)
+        if loaded_state is None:
+            return
+        existing_job = load_harmonization_job(workflow_storage, user, file_id)
+        now = datetime.now(UTC)
+        job_id = f"test-job-{file_id}"
+        completed_job = replace(
+            HarmonizationJobState.queued(
+                polling_job_id=job_id,
+                file_id=file_id,
+                plan_version=loaded_state.version.value,
+                worker_id="test-fixture-worker",
+                now=now,
+            ),
+            status=HarmonizeStatus.SUCCEEDED,
+            detail="Harmonization completed.",
+            job_id_available=True,
+            lease_expires_at=now,
+        )
+        save_harmonization_job(
+            workflow_storage,
+            user,
+            completed_job,
+            expected_version=existing_job.version if existing_job is not None else None,
+        )
+    except WorkflowStorageError:
+        return
+
+
+def save_test_pvs_by_column(file_id: str, pvs_by_column_key: dict[str, frozenset[str]]) -> None:
+    """Persist PV evidence against the exact canonical workflow revision."""
+    import src.app.dependencies as dependencies
+    from src.domain.cde_pv_catalog import CdePvCatalog
+    from src.domain.columns import column_key_from_string
+    from src.persistence.pv_manifest_store import effective_column_cde_map, save_pv_snapshot
+    from src.persistence.workflow_state_store import load_workflow_state
+
+    workflow_storage = dependencies.get_workflow_storage()
+    user = dependencies.get_user_context()
+    loaded = load_workflow_state(workflow_storage, user, file_id)
+    assert loaded is not None
+    column_cde_map = effective_column_cde_map(loaded)
+    catalog: dict[str, frozenset[str]] = {}
+    for raw_column_key, pvs in pvs_by_column_key.items():
+        column_key = column_key_from_string(raw_column_key)
+        cde_key = column_cde_map.mappings.get(column_key)
+        assert cde_key is not None, f"Fixture workflow has no CDE mapping for {raw_column_key}"
+        catalog[cde_key] = pvs
+    save_pv_snapshot(workflow_storage, user, loaded, CdePvCatalog.from_mapping(catalog))
 
 
 def _get_columns_with_changes(changes: dict[int, dict[str, str]], headers: list[str]) -> set[str]:

@@ -7,7 +7,9 @@ fetched CDE has no permissible values.
 from __future__ import annotations
 
 from src.domain.cde import CDEInfo, CdeType, is_rename_only
-from src.domain.cde_type_classification import classify_cde
+from src.domain.cde_catalog import CdeCatalog
+from src.domain.cde_pv_catalog import CdePvCatalog
+from src.domain.cde_type_classification import classify_cde, refine_cde_types_from_pvs
 
 # ---------------------------------------------------------------------------
 # Test: CdeType has the two states the takeover branches on
@@ -130,3 +132,45 @@ def test_classify_cde_defaults_to_pv_when_pvs_unknown() -> None:
 
     # Then
     assert result == CdeType.PV
+
+
+def test_refine_cde_types_uses_fetched_pv_state() -> None:
+    """Known empty PVs become passthrough; known populated PVs stay PV."""
+    catalog = CdeCatalog.from_cdes(
+        [
+            CDEInfo(cde_id=1, cde_key="diagnosis", description=None),
+            CDEInfo(cde_id=2, cde_key="free_notes", description=None),
+        ]
+    )
+    pv_sets = CdePvCatalog.from_mapping(
+        {
+            "diagnosis": frozenset({"A", "B"}),
+            "free_notes": frozenset(),
+        }
+    )
+
+    refined = refine_cde_types_from_pvs(catalog, pv_sets)
+
+    diagnosis = refined.get("diagnosis")
+    free_notes = refined.get("free_notes")
+    assert diagnosis is not None
+    assert free_notes is not None
+    assert diagnosis.cde_type == CdeType.PV
+    assert free_notes.cde_type == CdeType.PASSTHROUGH
+
+
+def test_refine_cde_types_preserves_unfetched_cdes() -> None:
+    """An absent PV entry means unknown, so classification stays unchanged."""
+    catalog = CdeCatalog.from_cdes(
+        [
+            CDEInfo(cde_id=1, cde_key="diagnosis", description=None),
+            CDEInfo(cde_id=2, cde_key="other", description=None),
+        ]
+    )
+    pv_sets = CdePvCatalog.from_mapping({"diagnosis": frozenset({"A"})})
+
+    refined = refine_cde_types_from_pvs(catalog, pv_sets)
+
+    other = refined.get("other")
+    assert other is not None
+    assert other.cde_type == CdeType.PV

@@ -5,8 +5,6 @@
  */
 
 const DATA_MODELS_ENDPOINT = '/stage-1/data-models';
-/** Server-provided default; falls back to first available model if missing. */
-const DEFAULT_DATA_MODEL = window.stageOneUploadConfig?.defaultDataModel ?? null;
 
 /* Preload state - enables instant popup after page load. */
 let _cachedDataModels = null;
@@ -406,7 +404,7 @@ function _buildDialogDOM(dataModels) {
   const modelLabel = document.createElement('label');
   modelLabel.htmlFor = 'dataModelDropdownTrigger';
   modelLabel.textContent = 'Data Model';
-  const defaultModel = dataModels.find((m) => m.data_model_key === DEFAULT_DATA_MODEL) || dataModels[0];
+  const defaultModel = dataModels[0];
   const modelDropdown = _createModelDropdown(dataModels, defaultModel?.data_model_key);
   modelField.appendChild(modelLabel);
   modelField.appendChild(modelDropdown);

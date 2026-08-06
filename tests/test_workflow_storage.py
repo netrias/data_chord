@@ -11,6 +11,8 @@ from src.storage import (
     LocalWorkflowStorage,
     UserContext,
     WorkflowAccessDeniedError,
+    WorkflowArtifactNotFoundError,
+    WorkflowArtifactSuffixError,
     WorkflowArtifactTypeError,
     WorkflowConflictError,
     WorkflowFile,
@@ -136,6 +138,62 @@ def test_create_once_artifact_rejects_overwrite(tmp_path: Path) -> None:
         storage.create_artifact(user, workflow.dataset_workflow_id, WorkflowFile.ORIGINAL_UPLOAD, second_source)
 
 
+def test_create_once_artifact_rejects_second_suffix(tmp_path: Path) -> None:
+    storage = LocalWorkflowStorage(tmp_path / "storage")
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    csv_source = tmp_path / "sample.csv"
+    tsv_source = tmp_path / "sample.tsv"
+    csv_source.write_text("a\nold\n", encoding="utf-8")
+    tsv_source.write_text("a\tnew\n", encoding="utf-8")
+    storage.create_artifact(user, workflow.dataset_workflow_id, WorkflowFile.ORIGINAL_UPLOAD, csv_source)
+
+    with pytest.raises(WorkflowConflictError, match="already exists"):
+        storage.create_artifact(user, workflow.dataset_workflow_id, WorkflowFile.ORIGINAL_UPLOAD, tsv_source)
+
+    with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.ORIGINAL_UPLOAD) as path:
+        assert path.suffix == ".csv"
+        assert path.read_text(encoding="utf-8") == "a\nold\n"
+
+
+def test_create_once_artifact_preserves_the_winner_of_a_publish_race(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = LocalWorkflowStorage(tmp_path / "storage")
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    source = tmp_path / "candidate.csv"
+    source.write_text("a\ncandidate\n", encoding="utf-8")
+    artifact_dir = tmp_path / "storage" / "workflows" / workflow.dataset_workflow_id / "artifacts"
+    artifact_dir.mkdir()
+    winner = artifact_dir / "original_upload.csv"
+    winner.write_text("a\nwinner\n", encoding="utf-8")
+    monkeypatch.setattr(storage, "_existing_artifact_paths", lambda _file_id, _kind: [])
+
+    with pytest.raises(WorkflowConflictError, match="already exists"):
+        storage.create_artifact(user, workflow.dataset_workflow_id, WorkflowFile.ORIGINAL_UPLOAD, source)
+
+    assert winner.read_text(encoding="utf-8") == "a\nwinner\n"
+
+
+def test_original_upload_cannot_be_replaced_through_write_artifact(tmp_path: Path) -> None:
+    storage = LocalWorkflowStorage(tmp_path / "storage")
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    original = tmp_path / "original.csv"
+    replacement = tmp_path / "replacement.csv"
+    original.write_text("a\nold\n", encoding="utf-8")
+    replacement.write_text("a\nnew\n", encoding="utf-8")
+    storage.create_artifact(user, workflow.dataset_workflow_id, WorkflowFile.ORIGINAL_UPLOAD, original)
+
+    with pytest.raises(WorkflowConflictError, match="create-once"):
+        storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.ORIGINAL_UPLOAD, replacement)
+
+    with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.ORIGINAL_UPLOAD) as path:
+        assert path.read_text(encoding="utf-8") == "a\nold\n"
+
+
 def test_mutable_json_can_be_deleted(tmp_path: Path) -> None:
     # Given: review overrides have been stored for a workflow
     storage = LocalWorkflowStorage(tmp_path / "storage")
@@ -172,6 +230,121 @@ def test_file_artifact_materializes_as_local_path(tmp_path: Path) -> None:
     with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.ORIGINAL_UPLOAD) as materialized:
         assert materialized.suffix == ".csv"
         assert materialized.read_text(encoding="utf-8") == "a,b\n1,2\n"
+
+
+def test_mutable_artifact_replaces_only_the_same_suffix(tmp_path: Path) -> None:
+    storage = LocalWorkflowStorage(tmp_path / "storage")
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    first = tmp_path / "first.csv"
+    second = tmp_path / "second.csv"
+    different = tmp_path / "different.tsv"
+    first.write_text("a\nold\n", encoding="utf-8")
+    second.write_text("a\nnew\n", encoding="utf-8")
+    different.write_text("a\trejected\n", encoding="utf-8")
+
+    storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, first)
+    storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, second)
+    with pytest.raises(WorkflowConflictError, match="suffix"):
+        storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, different)
+
+    artifact_dir = tmp_path / "storage" / "workflows" / workflow.dataset_workflow_id / "artifacts"
+    assert [path.name for path in artifact_dir.iterdir()] == ["harmonized_output.csv"]
+    with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT) as path:
+        assert path.read_text(encoding="utf-8") == "a\nnew\n"
+
+
+def test_artifact_lookup_matches_the_exact_logical_name(tmp_path: Path) -> None:
+    storage = LocalWorkflowStorage(tmp_path / "storage")
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    source = tmp_path / "output.csv"
+    source.write_text("a\ncurrent\n", encoding="utf-8")
+    storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, source)
+    artifact_dir = tmp_path / "storage" / "workflows" / workflow.dataset_workflow_id / "artifacts"
+    (artifact_dir / "harmonized_output_backup.csv").write_text("a\nstale\n", encoding="utf-8")
+
+    with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT) as path:
+        assert path.name == "harmonized_output.csv"
+        assert path.read_text(encoding="utf-8") == "a\ncurrent\n"
+
+
+def test_artifact_rejects_missing_source_and_missing_suffix(tmp_path: Path) -> None:
+    storage = LocalWorkflowStorage(tmp_path / "storage")
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    no_suffix = tmp_path / "artifact"
+    no_suffix.write_text("content", encoding="utf-8")
+
+    with pytest.raises(WorkflowArtifactSuffixError, match="suffix"):
+        storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, no_suffix)
+    with pytest.raises(WorkflowArtifactNotFoundError, match="Source artifact not found"):
+        storage.write_artifact(
+            user,
+            workflow.dataset_workflow_id,
+            WorkflowFile.HARMONIZED_OUTPUT,
+            tmp_path / "missing.csv",
+        )
+
+
+def test_artifact_lookup_rejects_multiple_exact_variants_and_recovers(tmp_path: Path) -> None:
+    storage = LocalWorkflowStorage(tmp_path / "storage")
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    source = tmp_path / "output.csv"
+    source.write_text("a\ncurrent\n", encoding="utf-8")
+    storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, source)
+    artifact_dir = tmp_path / "storage" / "workflows" / workflow.dataset_workflow_id / "artifacts"
+    stale_variant = artifact_dir / "harmonized_output.tsv"
+    stale_variant.write_text("a\tstale\n", encoding="utf-8")
+
+    with pytest.raises(WorkflowConflictError, match="multiple"):
+        with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT):
+            pass
+
+    stale_variant.unlink()
+    with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT) as path:
+        assert path.read_text(encoding="utf-8") == "a\ncurrent\n"
+
+
+def test_artifact_lookup_reports_zero_variants(tmp_path: Path) -> None:
+    storage = LocalWorkflowStorage(tmp_path / "storage")
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+
+    with pytest.raises(WorkflowArtifactNotFoundError, match="not found"):
+        with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT):
+            pass
+
+
+def test_failed_local_artifact_replacement_preserves_last_complete_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = LocalWorkflowStorage(tmp_path / "storage")
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    previous = tmp_path / "previous.csv"
+    replacement = tmp_path / "replacement.csv"
+    previous.write_text("a\nold\n", encoding="utf-8")
+    replacement.write_text("a\tnew\n", encoding="utf-8")
+    storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, previous)
+
+    def _fail_copy(_source: Path, _destination: Path) -> None:
+        raise OSError("simulated copy failure")
+
+    monkeypatch.setattr(storage, "_copy_artifact_atomic", _fail_copy)
+    with pytest.raises(OSError, match="simulated copy failure"):
+        storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, replacement)
+
+    with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT) as path:
+        assert path.suffix == ".csv"
+        assert path.read_text(encoding="utf-8") == "a\nold\n"
+
+    monkeypatch.undo()
+    storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, replacement)
+    with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT) as path:
+        assert path.read_text(encoding="utf-8") == "a\tnew\n"
 
 
 def test_json_and_file_artifact_operations_are_not_interchangeable(tmp_path: Path) -> None:

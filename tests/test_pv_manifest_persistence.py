@@ -1,293 +1,190 @@
-"""Feature tests for PV manifest persistence and server restart recovery.
-
-Tests the user journey: After harmonization completes, if the server restarts
-(clearing in-memory cache), users can still see PV dropdowns and non-conformant
-warnings when they return to Stage 4 or Stage 5.
-"""
+"""Behavior proof for durable, plan-bound permissible-value snapshots."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, cast
-from unittest.mock import patch
 
 import pytest
 
-from src.app.session_cache import (
-    SessionCache,
-    clear_all_session_caches,
-    get_session_cache,
-)
+from src.app.session_cache import ReferenceDataVersionMismatchError, SessionCache, clear_all_session_caches
+from src.domain.cde import CDEInfo
+from src.domain.cde_catalog import CdeCatalog
 from src.domain.cde_pv_catalog import CdePvCatalog
-from src.domain.columns import column_key_from_string
+from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.dataset_workflow_ids import dataset_workflow_id_from_string
-from src.persistence.pv_manifest_store import column_pv_sets, ensure_pvs_loaded, load_pv_manifest_from_disk
-from src.storage import LocalWorkflowStorage, UserContext, WorkflowFile
+from src.domain.manifest import ColumnMappingManifest
+from src.domain.pv_manifest import PVManifest, PvManifestSchemaError
+from src.domain.workflow_state import ConfirmedMappingChoices, WorkflowState
+from src.persistence.pv_manifest_store import (
+    PvSnapshotMismatchError,
+    column_pv_sets,
+    save_pv_snapshot,
+)
+from src.persistence.workflow_state_store import (
+    load_workflow_state,
+    save_confirmed_mapping_choices_to_state,
+    save_initial_workflow_state,
+)
+from src.storage import LocalWorkflowStorage, UserContext, WorkflowAccessDeniedError
+
+FILE_ID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+MODEL_A = DataModelVersionReference("cptac", "11.0.4")
+MODEL_B = DataModelVersionReference("cptac", "12.0.0")
 
 
-def _pv_catalog(values: dict[str, frozenset[str]]) -> CdePvCatalog:
-    return CdePvCatalog.from_mapping(values)
+def _manifest() -> ColumnMappingManifest:
+    return ColumnMappingManifest.from_payload_strict({
+        "column_mappings": {
+            "col_0000": {"cde_key": "diagnosis", "cde_id": 1},
+            "col_0001": {"cde_key": "notes", "cde_id": 2},
+        }
+    })
 
 
-def _workflow_storage_with_pv_manifest(
-    tmp_path: Path,
-    file_id: str,
-    payload: dict[str, object] | None,
-) -> tuple[LocalWorkflowStorage, UserContext]:
+def _stored_workflow(tmp_path: Path) -> tuple[LocalWorkflowStorage, UserContext]:
     storage = LocalWorkflowStorage(tmp_path / "workflow-storage")
-    user = UserContext(user_id="test-user")
-    storage.create_workflow(user, dataset_workflow_id_from_string(file_id))
-    if payload is not None:
-        storage.write_json(user, file_id, WorkflowFile.PV_MANIFEST, payload)
+    user = UserContext(user_id="alice")
+    storage.create_workflow(user, dataset_workflow_id_from_string(FILE_ID))
     return storage, user
 
 
-class TestPVManifestPersistenceFeature:
-    """PV manifest persistence enables recovery after server restart."""
-
-    def test_pvs_restored_from_disk_after_cache_cleared(self, tmp_path: Path) -> None:
-        """FEATURE: PVs are recovered from disk manifest when cache is empty.
-
-        Simulates: User completes Stage 3 → server restarts → user returns to Stage 4
-        """
-        # Given: A PV manifest was saved to disk during Stage 3
-        file_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        pv_manifest_data = {
-            "data_model_key": "cptac",
-            "external_version_number": "11.0.4",
-            "column_to_cde_key": {
-                "primary_diagnosis": "primary_diagnosis_cde",
-                "tissue_type": "tissue_or_organ_of_origin",
-            },
-            "pvs": {
-                "primary_diagnosis_cde": ["Adenocarcinoma", "Squamous Cell Carcinoma"],
-                "tissue_or_organ_of_origin": ["Lung", "Liver", "Kidney"],
-            },
-        }
-
-        # Simulate server restart: cache is cleared
-        clear_all_session_caches()
-        cache = get_session_cache(file_id)
-
-        # Verify cache is empty (simulating post-restart state)
-        assert not cache.has_any_pvs(), "Cache should be empty after clear"
-
-        # When: Stage 4/5 lazy-loads PVs from disk
-        storage, user = _workflow_storage_with_pv_manifest(tmp_path, file_id, pv_manifest_data)
-        with (
-            patch("src.app.dependencies.get_workflow_storage", return_value=storage),
-            patch("src.app.dependencies.get_user_context", return_value=user),
-        ):
-            load_pv_manifest_from_disk(file_id, cache)
-
-        # Then: PVs are available for validation and dropdowns
-        assert cache.has_any_pvs(), "Cache should have PVs after loading"
-
-        # Column mappings are restored
-        assert cache.get_column_mappings().to_strings() == {
-            "primary_diagnosis": "primary_diagnosis_cde",
-            "tissue_type": "tissue_or_organ_of_origin",
-        }
-
-        # PV sets are restored as frozensets
-        primary_pvs = cache.get_pvs_for_column("primary_diagnosis")
-        assert primary_pvs is not None
-        assert "Adenocarcinoma" in primary_pvs
-        assert "Squamous Cell Carcinoma" in primary_pvs
-
-        tissue_pvs = cache.get_pvs_for_column("tissue_type")
-        assert tissue_pvs is not None
-        assert "Lung" in tissue_pvs
-        assert len(tissue_pvs) == 3
-
-    def test_missing_pv_manifest_degrades_gracefully(self, tmp_path: Path) -> None:
-        """FEATURE: Missing PV manifest doesn't crash; PV features just don't work.
-
-        Simulates: User skips Stage 3 or manifest was never saved
-        """
-        # Given: No PV manifest exists on disk
-        file_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-        clear_all_session_caches()
-        cache = get_session_cache(file_id)
-
-        # When: Attempting to load from non-existent manifest
-        storage, user = _workflow_storage_with_pv_manifest(tmp_path, file_id, None)
-        with (
-            patch("src.app.dependencies.get_workflow_storage", return_value=storage),
-            patch("src.app.dependencies.get_user_context", return_value=user),
-        ):
-            # Then: No exception raised, cache remains empty
-            load_pv_manifest_from_disk(file_id, cache)
-
-        assert not cache.has_any_pvs(), "Cache should remain empty"
-        assert cache.get_pvs_for_column("any_column") is None
-
-    def test_new_upload_clears_stale_pv_cache(self) -> None:
-        """FEATURE: Uploading a new file clears old PV data to prevent cross-contamination.
-
-        Simulates: User completes workflow → uploads new file → should not see old PVs
-        """
-        # Given: A previous session has PVs in cache
-        old_file_id = "old_file_abc"
-        old_cache = get_session_cache(old_file_id)
-        old_cache.set_pvs_batch(_pv_catalog({"some_cde": frozenset(["Old Value 1", "Old Value 2"])}))
-        assert old_cache.has_any_pvs()
-
-        # When: the user starts a new dataset workflow and Stage 1 clears caches
-        clear_all_session_caches()
-
-        # Then: Old cache is cleared
-        new_cache = get_session_cache(old_file_id)
-        assert not new_cache.has_any_pvs(), "Old PV data should be cleared"
-
-        # And the new workflow gets a fresh cache
-        new_dataset_workflow_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-        fresh_cache = get_session_cache(new_dataset_workflow_id)
-        assert not fresh_cache.has_any_pvs(), "New workflow should have empty cache"
-
-    def test_ensure_pvs_loaded_returns_cache_with_pvs(self, tmp_path: Path) -> None:
-        """FEATURE: ensure_pvs_loaded is a single entry point that handles lazy loading."""
-        # Given: A file with PV manifest on disk
-        file_id = "cccccccccccccccccccccccccccccccc"
-        pv_manifest_data = {
-            "column_to_cde_key": {"col1": "cde1"},
-            "pvs": {"cde1": ["Value A", "Value B"]},
-        }
-
-        clear_all_session_caches()
-
-        # When: ensure_pvs_loaded is called
-        storage, user = _workflow_storage_with_pv_manifest(tmp_path, file_id, pv_manifest_data)
-        with (
-            patch("src.app.dependencies.get_workflow_storage", return_value=storage),
-            patch("src.app.dependencies.get_user_context", return_value=user),
-        ):
-            cache = ensure_pvs_loaded(file_id)
-
-        # Then: Cache is returned with PVs loaded
-        assert cache.has_any_pvs()
-        assert cache.get_pvs_for_column("col1") == frozenset(["Value A", "Value B"])
-
-    def test_column_pv_sets_restores_missing_column_mappings(self, tmp_path: Path) -> None:
-        """FEATURE: Stage 4 recovers PVs when cache has values but lost column mappings."""
-        # Given: A file with durable PV data, but the process cache cannot map columns to CDEs
-        file_id = "dddddddddddddddddddddddddddddddd"
-        pv_manifest_data = {
-            "column_to_cde_key": {"col_0000": "primary_diagnosis"},
-            "pvs": {"primary_diagnosis": ["Adenocarcinoma", "Glioma"]},
-        }
-        clear_all_session_caches()
-        cache = get_session_cache(file_id)
-        cache.set_pvs_batch(_pv_catalog({"primary_diagnosis": frozenset(["Adenocarcinoma", "Glioma"])}))
-        assert cache.get_pvs_for_column("col_0000") is None, "Cache should not already resolve the column"
-
-        # When: Stage 4 asks for PV sets by source column key
-        storage, user = _workflow_storage_with_pv_manifest(tmp_path, file_id, pv_manifest_data)
-        with (
-            patch("src.app.dependencies.get_workflow_storage", return_value=storage),
-            patch("src.app.dependencies.get_user_context", return_value=user),
-        ):
-            pvs_by_column = column_pv_sets(file_id, ["col_0000"])
-
-        # Then: the durable manifest is reloaded and the column gets its PV set
-        assert pvs_by_column.get("col_0000") == frozenset(["Adenocarcinoma", "Glioma"])
-        assert pvs_by_column.to_strings() == {
-            "col_0000": frozenset(["Adenocarcinoma", "Glioma"]),
-        }
-        assert cache.get_pvs_for_column("col_0000") == frozenset(["Adenocarcinoma", "Glioma"])
+def _initial_state(storage: LocalWorkflowStorage, user: UserContext):
+    return save_initial_workflow_state(
+        storage,
+        user,
+        WorkflowState.from_data_model_version(FILE_ID, MODEL_A, _manifest()),
+    )
 
 
-class TestSessionCacheThreadSafety:
-    """Cache operations are thread-safe for concurrent async access."""
+def test_pv_manifest_round_trip_uses_current_boundary_schema() -> None:
+    manifest = PVManifest(
+        data_model_version=MODEL_A,
+        workflow_state_version="workflow-state-v1",
+        pvs=CdePvCatalog.from_mapping({"diagnosis": frozenset({"Glioma"})}),
+    )
 
-    def test_get_column_mappings_returns_copy(self) -> None:
-        """Thread-safe accessor returns an immutable snapshot, not the internal dict."""
-        # Given: A cache with column mappings
-        cache = SessionCache()
-        cache.set_column_mappings({"col1": "cde1", "col2": "cde2"})
+    stored = manifest.to_store()
 
-        # When: Getting column mappings
-        mappings = cache.get_column_mappings()
-
-        # Then: Returned map cannot be mutated and the cache is unchanged
-        immutable_mappings = cast(Any, mappings.mappings)
-        with pytest.raises(TypeError):
-            immutable_mappings[column_key_from_string("col3")] = "cde3"
-        assert "col3" not in cache.get_column_mappings().to_strings(), "Cache should not be modified"
-
-    def test_pvs_stored_as_frozenset(self) -> None:
-        """PVs are stored as frozensets for immutability and O(1) lookup."""
-        # Given: A cache
-        cache = SessionCache()
-
-        # When: Setting PVs
-        pv_list = ["Value A", "Value B", "Value C"]
-        cache.set_pvs_batch(_pv_catalog({"test_cde": frozenset(pv_list)}))
-
-        # Then: PVs are retrievable and membership check is O(1)
-        pvs = cache.get_all_pvs().get("test_cde")
-        assert pvs is not None
-        assert isinstance(pvs, frozenset)
-        assert "Value A" in pvs
-        assert "Unknown" not in pvs
-
-    def test_batch_pv_update(self) -> None:
-        """Multiple PV sets can be updated atomically."""
-        # Given: An empty cache
-        cache = SessionCache()
-
-        # When: Batch updating PVs
-        pv_map = {
-            "cde1": frozenset(["A", "B"]),
-            "cde2": frozenset(["X", "Y", "Z"]),
-        }
-        cache.set_pvs_batch(_pv_catalog(pv_map))
-
-        # Then: All PVs are available
-        assert cache.get_all_pvs().to_mapping() == pv_map
-        assert cache.has_any_pvs()
+    assert stored == {
+        "schema_version": 2,
+        "data_model_key": "cptac",
+        "external_version_number": "11.0.4",
+        "workflow_state_version": "workflow-state-v1",
+        "pvs": {"diagnosis": ["Glioma"]},
+    }
+    assert PVManifest.from_store(stored) == manifest
 
 
-class TestPVLookupByColumn:
-    """PV lookup via column name (through column→CDE mapping)."""
+def test_pv_manifest_rejects_old_boundary_schema() -> None:
+    legacy_stored = {
+        "schema_version": 1,
+        "data_model_key": MODEL_A.data_model_key,
+        "external_version_number": MODEL_A.external_version_number,
+        "workflow_state_version": "legacy-workflow-state",
+        "column_to_cde_key": {"col_0000": "diagnosis"},
+        "pvs": {"diagnosis": ["Glioma"]},
+    }
 
-    def test_pvs_accessible_by_column_name(self) -> None:
-        """Stage 4/5 look up PVs by column name, not CDE key."""
-        # Given: A cache with column mappings and PVs
-        cache = SessionCache()
-        cache.set_column_mappings({"diagnosis_col": "primary_diagnosis_cde"})
-        cache.set_pvs_batch(_pv_catalog({"primary_diagnosis_cde": frozenset(["Cancer", "Normal"])}))
+    with pytest.raises(PvManifestSchemaError, match="not supported"):
+        PVManifest.from_store(legacy_stored)
 
-        # When: Looking up PVs by column name
-        pvs = cache.get_pvs_for_column("diagnosis_col")
 
-        # Then: PVs are found via the mapping
-        assert pvs is not None
-        assert "Cancer" in pvs
-        assert "Normal" in pvs
+@pytest.mark.parametrize("schema_version", [2.0, 3, None])
+def test_pv_manifest_rejects_non_current_boundary_schema(schema_version: object) -> None:
+    with pytest.raises(PvManifestSchemaError, match="not supported"):
+        PVManifest.from_store({"schema_version": schema_version})
 
-    def test_unmapped_column_returns_none(self) -> None:
-        """Columns without CDE mapping return None for PVs."""
-        # Given: A cache with some mappings but not for all columns
-        cache = SessionCache()
-        cache.set_column_mappings({"mapped_col": "some_cde"})
-        cache.set_pvs_batch(_pv_catalog({"some_cde": frozenset(["Value"])}))
 
-        # When: Looking up PVs for an unmapped column
-        pvs = cache.get_pvs_for_column("unmapped_col")
+def test_stage_four_recovers_pvs_after_process_cache_loss(tmp_path: Path) -> None:
+    """A process restart does not remove PV dropdown and conformance data."""
+    storage, user = _stored_workflow(tmp_path)
+    loaded = _initial_state(storage, user)
+    save_pv_snapshot(
+        storage,
+        user,
+        loaded,
+        CdePvCatalog.from_mapping({
+            "diagnosis": frozenset({"Adenocarcinoma", "Glioma"}),
+            "notes": frozenset(),
+        }),
+    )
 
-        # Then: Returns None (no PV validation for this column)
-        assert pvs is None
+    clear_all_session_caches()
+    reloaded = load_workflow_state(storage, user, FILE_ID)
+    assert reloaded is not None
 
-    def test_column_mapped_but_no_pvs_returns_none(self) -> None:
-        """Column mapped to CDE but CDE has no PVs (free-text field)."""
-        # Given: A column mapping but no PVs for that CDE
-        cache = SessionCache()
-        cache.set_column_mappings({"notes_col": "clinical_notes_cde"})
-        # No PVs set for clinical_notes_cde (it's free-text)
+    by_column = column_pv_sets(storage, user, reloaded, ["col_0000", "col_0001"])
 
-        # When: Looking up PVs
-        pvs = cache.get_pvs_for_column("notes_col")
+    assert by_column.get("col_0000") == frozenset({"Adenocarcinoma", "Glioma"})
+    assert by_column.get("col_0001") == frozenset()
 
-        # Then: Returns None (no conformance check needed)
-        assert pvs is None
+
+def test_missing_snapshot_is_distinct_from_fetched_empty(tmp_path: Path) -> None:
+    storage, user = _stored_workflow(tmp_path)
+    loaded = _initial_state(storage, user)
+
+    before_fetch = column_pv_sets(storage, user, loaded, ["col_0001"])
+    assert before_fetch.get("col_0001") is None
+
+    save_pv_snapshot(storage, user, loaded, CdePvCatalog.from_mapping({"notes": frozenset()}))
+    after_fetch = column_pv_sets(storage, user, loaded, ["col_0001"])
+    assert after_fetch.get("col_0001") == frozenset()
+
+
+def test_snapshot_from_stale_workflow_revision_is_rejected(tmp_path: Path) -> None:
+    storage, user = _stored_workflow(tmp_path)
+    loaded = _initial_state(storage, user)
+    save_pv_snapshot(
+        storage,
+        user,
+        loaded,
+        CdePvCatalog.from_mapping({"diagnosis": frozenset({"Glioma"})}),
+    )
+
+    newer = save_confirmed_mapping_choices_to_state(
+        storage,
+        user,
+        FILE_ID,
+        ConfirmedMappingChoices.from_raw({"col_0000": "diagnosis"}, {}),
+    )
+
+    with pytest.raises(PvSnapshotMismatchError):
+        column_pv_sets(storage, user, newer, ["col_0000"])
+
+
+def test_cross_owner_cannot_read_pv_snapshot(tmp_path: Path) -> None:
+    storage, alice = _stored_workflow(tmp_path)
+    loaded = _initial_state(storage, alice)
+    save_pv_snapshot(
+        storage,
+        alice,
+        loaded,
+        CdePvCatalog.from_mapping({"diagnosis": frozenset({"Glioma"})}),
+    )
+
+    bob = UserContext(user_id="bob")
+    with pytest.raises(WorkflowAccessDeniedError):
+        load_workflow_state(storage, bob, FILE_ID)
+
+
+def test_model_switch_clears_pvs_and_rejects_late_fetch() -> None:
+    cache = SessionCache()
+    catalog = CdeCatalog.from_cdes([CDEInfo(cde_id=1, cde_key="diagnosis", description=None)])
+    cache.install_reference_data(
+        MODEL_A,
+        catalog,
+        CdePvCatalog.from_mapping({"diagnosis": frozenset({"Glioma"})}),
+    )
+
+    cache.set_cde_catalog(
+        catalog,
+        data_model_key=MODEL_B.data_model_key,
+        external_version_number=MODEL_B.external_version_number,
+    )
+
+    assert cache.get_all_pvs().values == {}
+    with pytest.raises(ReferenceDataVersionMismatchError):
+        cache.set_pvs_batch(
+            CdePvCatalog.from_mapping({"diagnosis": frozenset({"Stale"})}),
+            expected_version=MODEL_A,
+        )

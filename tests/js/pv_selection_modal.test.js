@@ -12,15 +12,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
 import { JSDOM } from 'jsdom';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const pvComboboxPath = join(__dirname, '../../src/stage_4_review_results/static/pv_combobox.js');
-const stageFourCssPath = join(__dirname, '../../src/stage_4_review_results/static/stage_4_review.css');
-const pvComboboxCode = readFileSync(pvComboboxPath, 'utf-8');
-const stageFourCss = readFileSync(stageFourCssPath, 'utf-8');
+import { showPVSelectionModal } from '../../src/stage_4_review_results/static/pv_combobox.js';
 
 const TEST_SUGGESTIONS = [
   { value: 'Lung Cancer', isPVConformant: true },
@@ -29,10 +21,9 @@ const TEST_SUGGESTIONS = [
 
 const TEST_PV_VALUES = ['Breast Cancer', 'Colon Cancer', 'Lung Cancer', 'Prostate Cancer'];
 
-/** Set up JSDOM environment and load the pv_combobox module. */
+/** Set up the browser globals used by the production module. */
 const setupDOM = () => {
   const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>', {
-    runScripts: 'dangerously',
     url: 'http://localhost',
   });
 
@@ -52,19 +43,8 @@ const setupDOM = () => {
     };
   }
 
-  dom.window._escapeHtml = (str) => {
-    if (typeof str !== 'string') return String(str);
-    const escapeMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-    return str.replace(/[&<>"']/g, (c) => escapeMap[c]);
-  };
-
-  // Inject the pv_combobox code as a script (remove exports for eval)
-  const moduleCode = pvComboboxCode
-    .replace("import { escapeHtml as _escapeHtml } from './shared_review_utils.js';", 'const _escapeHtml = window._escapeHtml;')
-    .replace('export const createPVCombobox', 'window.createPVCombobox')
-    .replace('export async function showPVSelectionModal', 'window.showPVSelectionModal = async function');
-
-  dom.window.eval(moduleCode);
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
 
   return dom;
 };
@@ -87,15 +67,15 @@ const keydown = (element, key) => {
 
 describe('PV Selection Modal', () => {
   let dom;
-  let showPVSelectionModal;
 
   before(() => {
     dom = setupDOM();
-    showPVSelectionModal = dom.window.showPVSelectionModal;
   });
 
   after(() => {
     dom.window.close();
+    delete globalThis.document;
+    delete globalThis.window;
   });
 
   describe('Modal Open Behavior', () => {
@@ -298,6 +278,26 @@ describe('PV Selection Modal', () => {
       dialog.close();
       await modalPromise;
     });
+
+    it('renders provider values as text rather than executable markup', async () => {
+      const unsafeValue = '<img src=x onerror="alert(1)">';
+      const modalPromise = showPVSelectionModal({
+        originalValue: unsafeValue,
+        currentValue: unsafeValue,
+        targetCdeLabel: '<script>alert(1)</script>',
+        suggestions: [{ value: unsafeValue, isPVConformant: true }],
+        pvValues: [],
+      });
+
+      const dialog = dom.window.document.querySelector('dialog.pv-selection-dialog');
+      assert.strictEqual(dialog.querySelector('img'), null);
+      assert.strictEqual(dialog.querySelector('script'), null);
+      assert.strictEqual(dialog.querySelector('.pv-selection-option').textContent, unsafeValue);
+      assert.strictEqual(dialog.querySelector('.pv-selection-subtitle span').textContent, '<script>alert(1)</script>');
+
+      dialog.close();
+      await modalPromise;
+    });
   });
 
   describe('Search Filtering', () => {
@@ -380,20 +380,6 @@ describe('PV Selection Modal', () => {
       // Cleanup
       dialog.close();
       await modalPromise;
-    });
-  });
-
-  describe('Fixed Layout', () => {
-    it('keeps modal frame sizing fixed while the values list scrolls', () => {
-      // Given: the Stage 4 stylesheet controls the PV selection popup
-      const dialogRule = stageFourCss.match(/\.pv-selection-dialog\s*\{[^}]+\}/)?.[0] ?? '';
-      const listRule = stageFourCss.match(/\.pv-selection-list\s*\{[^}]+\}/)?.[0] ?? '';
-
-      // Then: the dialog has an explicit height, and the list owns overflow
-      assert.match(dialogRule, /height:\s*min\(/);
-      assert.match(dialogRule, /max-height:\s*80vh/);
-      assert.match(listRule, /overflow-y:\s*auto/);
-      assert.match(listRule, /min-height:\s*0/);
     });
   });
 

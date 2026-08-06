@@ -18,6 +18,7 @@ from src.domain.manifest.mapping_manifest import (
     MAPPING_FIELD_TARGET,
     ColumnMappingManifest,
     ColumnMappingRecord,
+    InvalidMappingManifestError,
     MappingAlternative,
     normalize_manifest,
 )
@@ -35,7 +36,6 @@ from src.domain.manifest.models import (
     completeness_bucket,
     confidence_bucket,
     get_latest_override_value,
-    get_manifest_schema,
     is_value_changed,
 )
 from src.domain.manifest.models import (
@@ -49,6 +49,7 @@ __all__ = [
     "ColumnMappingEntry",
     "ColumnMappingManifest",
     "ColumnMappingRecord",
+    "InvalidMappingManifestError",
     "ConfidenceBucket",
     "DEFAULT_HARMONIZATION",
     "HIGH_CONFIDENCE_THRESHOLD",
@@ -73,7 +74,6 @@ __all__ = [
     "completeness_bucket",
     "confidence_bucket",
     "get_latest_override_value",
-    "get_manifest_schema",
     "is_value_changed",
     "normalize_manifest",
 ]

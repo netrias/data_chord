@@ -94,6 +94,18 @@ variable "certificate_arn" {
   description = "Optional ACM certificate ARN for the HTTPS listener. Leave empty to create and validate one in hosted_zone_name."
   type        = string
   default     = ""
+
+  validation {
+    condition = (
+      (var.certificate_arn == "" && var.domain_name == "" && trimspace(trimsuffix(var.hosted_zone_name, ".")) != "") ||
+      (
+        trimspace(var.certificate_arn) != "" && var.certificate_arn == trimspace(var.certificate_arn) &&
+        trimspace(var.domain_name) != "" && var.domain_name == trimspace(var.domain_name) &&
+        var.hosted_zone_name == ""
+      )
+    )
+    error_message = "Choose one TLS mode: leave certificate_arn and domain_name empty and provide hosted_zone_name, or leave hosted_zone_name empty and provide nonblank certificate_arn and domain_name values without surrounding whitespace."
+  }
 }
 
 variable "domain_name" {
@@ -278,32 +290,6 @@ variable "target_group_unhealthy_threshold" {
   validation {
     condition     = var.target_group_unhealthy_threshold >= 2 && var.target_group_unhealthy_threshold <= 10
     error_message = "target_group_unhealthy_threshold must be between 2 and 10."
-  }
-}
-
-variable "codebuild_source_type" {
-  description = "CodeBuild source type. GITHUB is the simplest default for the public repo."
-  type        = string
-  default     = "GITHUB"
-}
-
-variable "codebuild_source_location" {
-  description = "Repository URL CodeBuild should build."
-  type        = string
-  default     = "https://github.com/netrias/data_chord.git"
-}
-
-variable "codebuild_connection_id" {
-  description = "Optional CodeConnections UUID used by CodeBuild to read GitHub. The ARN is derived from the target account and region."
-  type        = string
-  default     = ""
-
-  validation {
-    condition = (
-      var.codebuild_connection_id == "" ||
-      can(regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", var.codebuild_connection_id))
-    )
-    error_message = "codebuild_connection_id must be empty or a lowercase UUID."
   }
 }
 

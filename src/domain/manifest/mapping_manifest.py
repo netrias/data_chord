@@ -7,7 +7,9 @@ from dataclasses import dataclass, replace
 from typing import Final
 
 from src.domain.cde import ModelSuggestion
-from src.domain.column_cde_map import ColumnCdeMap
+from src.domain.cde_catalog import CdeCatalog
+from src.domain.column_cde_map import ColumnCdeMap, ColumnCdeOverrides
+from src.domain.column_renames import ColumnRenameSet
 from src.domain.columns import ColumnKey, column_key_from_string
 from src.domain.manifest.models import AlternativeEntry, ColumnMappingEntry, ManifestPayload
 
@@ -29,6 +31,10 @@ MAPPING_FIELD_TARGET: Final = "target"
 DEFAULT_HARMONIZATION: Final = "harmonizable"
 
 
+class InvalidMappingManifestError(Exception):
+    """Raised when a current-schema mapping manifest is malformed."""
+
+
 @dataclass(frozen=True)
 class MappingAlternative:
     """One ranked CDE candidate returned by mapping discovery.
@@ -42,20 +48,6 @@ class MappingAlternative:
     confidence: float
     cde_id: int | None = None
     harmonization: str | None = None
-
-    @classmethod
-    def from_payload(cls, payload: object) -> MappingAlternative | None:
-        if not isinstance(payload, Mapping):
-            return None
-        target = payload.get(MAPPING_FIELD_TARGET)
-        if not isinstance(target, str) or not target:
-            return None
-        return cls(
-            target=target,
-            confidence=_score_from_payload(payload),
-            cde_id=_int_or_none(payload.get(MAPPING_FIELD_CDE_ID)),
-            harmonization=_str_or_none(payload.get(MAPPING_FIELD_HARMONIZATION)),
-        )
 
     def to_payload(self) -> AlternativeEntry:
         payload = AlternativeEntry(target=self.target, confidence=self.confidence)
@@ -86,29 +78,6 @@ class ColumnMappingRecord:
     harmonization: str | None = None
     route: str | None = None
     alternatives: tuple[MappingAlternative, ...] = ()
-
-    @classmethod
-    def from_payload(cls, column_key: str, payload: object) -> ColumnMappingRecord | None:
-        if not isinstance(payload, Mapping):
-            return None
-        cde_key = _cde_key_from_payload(payload)
-        cde_id = _int_or_none(payload.get(MAPPING_FIELD_CDE_ID))
-        if cde_key is None or cde_id is None:
-            return None
-        alternatives = tuple(
-            alternative
-            for raw in _list_or_empty(payload.get(MAPPING_FIELD_ALTERNATIVES))
-            if (alternative := MappingAlternative.from_payload(raw)) is not None
-        )
-        return cls(
-            column_key=column_key_from_string(column_key),
-            cde_key=cde_key,
-            cde_id=cde_id,
-            column_name=_str_or_none(payload.get(MAPPING_FIELD_COLUMN_NAME)),
-            harmonization=_str_or_none(payload.get(MAPPING_FIELD_HARMONIZATION)),
-            route=_str_or_none(payload.get(MAPPING_FIELD_ROUTE)),
-            alternatives=alternatives,
-        )
 
     def to_payload(self) -> ColumnMappingEntry:
         payload = ColumnMappingEntry(
@@ -153,9 +122,27 @@ class ColumnMappingManifest:
         for raw_key, raw_record in raw_mappings.items():
             if not isinstance(raw_key, str):
                 continue
-            record = ColumnMappingRecord.from_payload(raw_key, raw_record)
+            record = _record_from_payload(raw_key, raw_record, strict=False)
             if record is not None:
                 records[record.column_key] = record
+        return cls(records=records)
+
+    @classmethod
+    def from_payload_strict(cls, payload: object) -> ColumnMappingManifest:
+        """Decode a current manifest without turning malformed data into an empty result."""
+        if not isinstance(payload, Mapping):
+            raise InvalidMappingManifestError("mapping manifest must be an object")
+        raw_mappings = payload.get(MANIFEST_FIELD_COLUMN_MAPPINGS)
+        if not isinstance(raw_mappings, Mapping):
+            raise InvalidMappingManifestError("mapping manifest column_mappings must be an object")
+
+        records: dict[ColumnKey, ColumnMappingRecord] = {}
+        for raw_key, raw_record in raw_mappings.items():
+            if not isinstance(raw_key, str) or not raw_key:
+                raise InvalidMappingManifestError("mapping manifest column keys must be non-empty strings")
+            record = _record_from_payload(raw_key, raw_record, strict=True)
+            assert record is not None
+            records[record.column_key] = record
         return cls(records=records)
 
     def to_payload(self) -> ManifestPayload:
@@ -189,6 +176,34 @@ class ColumnMappingManifest:
     def suggestions_by_column(self) -> dict[str, list[ModelSuggestion]]:
         return {str(column_key): record.suggestions() for column_key, record in self.records.items()}
 
+    def apply_choices(
+        self,
+        overrides: ColumnCdeOverrides,
+        renames: ColumnRenameSet,
+        cde_catalog: CdeCatalog,
+    ) -> ColumnMappingManifest:
+        """Return the manifest the provider should receive after confirmed Stage 2 choices."""
+        updated = self
+        for column_key, cde_key in overrides.applied_items():
+            cde = cde_catalog.get(cde_key)
+            if cde is None:
+                raise ValueError(f"Unknown CDE key: {cde_key}")
+            existing = updated.records.get(column_key)
+            updated = updated.with_record(
+                ColumnMappingRecord(
+                    column_key=column_key,
+                    cde_key=cde_key,
+                    cde_id=cde.cde_id,
+                    column_name=existing.column_name if existing else str(column_key),
+                    harmonization=existing.harmonization if existing else DEFAULT_HARMONIZATION,
+                    route=existing.route if existing else None,
+                    alternatives=existing.alternatives if existing else (),
+                )
+            )
+        for column_key in overrides.skipped_columns():
+            updated = updated.without_column(column_key)
+        return updated.with_column_names(renames.renames)
+
 
 def normalize_manifest(payload: Mapping[str, object] | object | None) -> ManifestPayload:
     return ColumnMappingManifest.from_payload(payload).to_payload()
@@ -210,21 +225,92 @@ def _cde_key_from_payload(payload: Mapping[object, object]) -> str | None:
 
 def _score_from_payload(payload: Mapping[object, object]) -> float:
     confidence = payload.get(MAPPING_FIELD_CONFIDENCE)
-    if isinstance(confidence, (int, float)):
+    if not isinstance(confidence, bool) and isinstance(confidence, (int, float)):
         return float(confidence)
     return 0.0
 
 
 def _int_or_none(value: object) -> int | None:
-    return value if isinstance(value, int) else None
+    return value if not isinstance(value, bool) and isinstance(value, int) else None
+
+
+def _record_from_payload(
+    column_key: str,
+    value: object,
+    *,
+    strict: bool,
+) -> ColumnMappingRecord | None:
+    if not isinstance(value, Mapping):
+        if strict:
+            raise InvalidMappingManifestError(f"mapping manifest record is invalid: {column_key}")
+        return None
+    cde_key = _cde_key_from_payload(value)
+    cde_id = _int_or_none(value.get(MAPPING_FIELD_CDE_ID))
+    if cde_key is None or cde_id is None:
+        if strict:
+            raise InvalidMappingManifestError(f"mapping manifest record is invalid: {column_key}")
+        return None
+    for field in (MAPPING_FIELD_COLUMN_NAME, MAPPING_FIELD_HARMONIZATION, MAPPING_FIELD_ROUTE):
+        if strict and field in value and _str_or_none(value.get(field)) is None:
+            raise InvalidMappingManifestError(f"mapping manifest {field} is invalid: {column_key}")
+
+    raw_alternatives = value.get(MAPPING_FIELD_ALTERNATIVES)
+    if raw_alternatives is None:
+        raw_alternatives = []
+    elif not isinstance(raw_alternatives, list):
+        if strict:
+            raise InvalidMappingManifestError(f"mapping alternatives must be a list: {column_key}")
+        raw_alternatives = []
+    alternatives = tuple(
+        alternative
+        for raw in raw_alternatives
+        if (alternative := _alternative_from_payload(column_key, raw, strict=strict)) is not None
+    )
+    return ColumnMappingRecord(
+        column_key=column_key_from_string(column_key),
+        cde_key=cde_key,
+        cde_id=cde_id,
+        column_name=_str_or_none(value.get(MAPPING_FIELD_COLUMN_NAME)),
+        harmonization=_str_or_none(value.get(MAPPING_FIELD_HARMONIZATION)),
+        route=_str_or_none(value.get(MAPPING_FIELD_ROUTE)),
+        alternatives=alternatives,
+    )
+
+
+def _alternative_from_payload(
+    column_key: str,
+    value: object,
+    *,
+    strict: bool,
+) -> MappingAlternative | None:
+    if not isinstance(value, Mapping):
+        if strict:
+            raise InvalidMappingManifestError(f"mapping alternative is invalid: {column_key}")
+        return None
+    target = value.get(MAPPING_FIELD_TARGET)
+    confidence = value.get(MAPPING_FIELD_CONFIDENCE)
+    if not isinstance(target, str) or not target:
+        if strict:
+            raise InvalidMappingManifestError(f"mapping alternative is invalid: {column_key}")
+        return None
+    if strict and (isinstance(confidence, bool) or not isinstance(confidence, (int, float))):
+        raise InvalidMappingManifestError(f"mapping alternative confidence is invalid: {column_key}")
+    cde_id = _int_or_none(value.get(MAPPING_FIELD_CDE_ID))
+    if strict and MAPPING_FIELD_CDE_ID in value and cde_id is None:
+        raise InvalidMappingManifestError(f"mapping alternative cde_id is invalid: {column_key}")
+    harmonization = _str_or_none(value.get(MAPPING_FIELD_HARMONIZATION))
+    if strict and MAPPING_FIELD_HARMONIZATION in value and harmonization is None:
+        raise InvalidMappingManifestError(f"mapping alternative harmonization is invalid: {column_key}")
+    return MappingAlternative(
+        target=target,
+        confidence=_score_from_payload(value),
+        cde_id=cde_id,
+        harmonization=harmonization,
+    )
 
 
 def _str_or_none(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
-
-
-def _list_or_empty(value: object) -> list[object]:
-    return value if isinstance(value, list) else []
 
 
 __all__ = [
@@ -240,6 +326,7 @@ __all__ = [
     "MAPPING_FIELD_HARMONIZATION",
     "MAPPING_FIELD_ROUTE",
     "MAPPING_FIELD_TARGET",
+    "InvalidMappingManifestError",
     "MappingAlternative",
     "normalize_manifest",
 ]

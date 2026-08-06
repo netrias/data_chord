@@ -13,8 +13,16 @@ import {
   renderBatchProgress as renderColumnBatchProgress,
   getAllEntries as getColumnAllEntries,
 } from './review_mode_column.js';
-import { escapeHtml, getFileIdFromUrl, createValueCard, toExcelRowNumber, cleanupCards } from './shared_review_utils.js';
+import { escapeHtml } from '/assets/shared/html.js';
+import {
+  getFileIdFromUrl,
+  createValueCard,
+  formatRowReference,
+  toExcelRowNumber,
+  cleanupCards,
+} from './shared_review_utils.js';
 import { showRowContextPopup } from './row_context_popup.js';
+import { fetchConformanceResult } from './conformance-gate.js';
 import {
   getTotalUnits as getRowTotalUnits,
   getCurrentEntries as getRowCurrentEntries,
@@ -120,6 +128,7 @@ const OVERRIDE_SAVE_DELAY_MS = 400;
 let overrideSaveTimeout = null;
 let overrideSaveInFlight = null;
 let overrideSaveNeeded = false;
+let overrideVersion = null;
 
 /**
  * Get the state object for the current review mode.
@@ -199,7 +208,9 @@ const fetchOverrides = async (fileId) => {
   try {
     const response = await fetch(`/stage-4/overrides/${encodeURIComponent(fileId)}`);
     if (response.ok) {
-      return await response.json();
+      const stored = await response.json();
+      overrideVersion = response.headers.get('ETag');
+      return stored;
     }
     if (response.status === 404) {
       return null;
@@ -248,14 +259,24 @@ const _sendOverrideSave = async () => {
   const fileId = getFileIdFromUrl();
   if (!fileId || !isValidFileId(fileId)) return true;
 
+  const headers = { 'Content-Type': 'application/json' };
+  if (overrideVersion) {
+    headers['If-Match'] = overrideVersion;
+  } else {
+    headers['If-None-Match'] = '*';
+  }
   const response = await fetch('/stage-4/overrides', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(_buildSavePayload()),
   });
+  if (response.status === 409) {
+    throw new Error('Review state changed in another tab. Reload this page before saving again.');
+  }
   if (!response.ok) {
     throw new Error('Server returned an error');
   }
+  overrideVersion = response.headers.get('ETag') ?? overrideVersion;
   return true;
 };
 
@@ -325,11 +346,10 @@ const flushPendingSaves = async () => {
  * Record an override for multiple row indices sharing the same original value.
  * @param {number[]} rowIndices - Array of row indices
  * @param {string} columnKey - Column identifier
- * @param {string|null} aiValue - AI-recommended value
  * @param {string} humanValue - User-entered override value
  * @param {string} originalValue - Original input value
  */
-const recordOverrideForRows = (rowIndices, columnKey, aiValue, humanValue, originalValue) => {
+const recordOverrideForRows = (rowIndices, columnKey, humanValue, originalValue) => {
   for (const rowIndex of rowIndices) {
     const rowKey = String(rowIndex);
     if (!state.pendingOverrides[rowKey]) {
@@ -337,7 +357,6 @@ const recordOverrideForRows = (rowIndices, columnKey, aiValue, humanValue, origi
     }
     if (humanValue !== '') {
       state.pendingOverrides[rowKey][columnKey] = {
-        ai_value: aiValue,
         human_value: humanValue,
         original_value: originalValue,
       };
@@ -514,14 +533,11 @@ const renderColumnScrollMode = (entries) => {
   const fileId = getFileIdFromUrl();
 
   for (const entry of entries) {
-    const rowCount = entry.rowIndices.length;
-    const excelRows = entry.rowIndices.map(toExcelRowNumber);
-    const rowLabel = rowCount === 1 ? `Row ${excelRows[0]}` : `${rowCount} rows`;
-    const tooltipText = rowCount > 1 ? `Rows: ${excelRows.join(', ')}` : null;
+    const { labelText, tooltipText } = formatRowReference(entry.rowIndices);
 
     const card = createValueCard({
       entry,
-      labelText: rowLabel,
+      labelText,
       tooltipText,
       pendingOverrides: state.pendingOverrides,
       onOverrideChange: recordOverrideForRows,
@@ -955,6 +971,38 @@ const showPVWarningDialog = (data) => {
   dialog.showModal();
 };
 
+const showConformanceCheckError = () => {
+  if (document.querySelector('.conformance-error-dialog')) return;
+  const dialog = document.createElement('dialog');
+  dialog.className = 'pv-warning-dialog conformance-error-dialog';
+  dialog.innerHTML = `
+    <div class="pv-warning-dialog-content">
+      <div class="pv-warning-dialog-header">
+        <h3 class="pv-warning-dialog-title">Unable to check approved values</h3>
+      </div>
+      <div class="pv-warning-dialog-body">
+        <p>The check did not finish. Try again before you continue.</p>
+      </div>
+      <div class="pv-warning-dialog-footer">
+        <button class="btn-secondary" data-action="return">Stay in review</button>
+        <button class="btn-warning" data-action="retry">Retry check</button>
+      </div>
+    </div>
+  `;
+
+  const close = () => {
+    dialog.close();
+    dialog.remove();
+  };
+  dialog.querySelector('[data-action="return"]').addEventListener('click', close);
+  dialog.querySelector('[data-action="retry"]').addEventListener('click', async () => {
+    close();
+    await handleAdvanceToStage5();
+  });
+  document.body.appendChild(dialog);
+  dialog.showModal();
+};
+
 /**
  * Handle advancement to Stage 5 with PV conformance check.
  * @returns {Promise<void>}
@@ -962,7 +1010,6 @@ const showPVWarningDialog = (data) => {
 const handleAdvanceToStage5 = async () => {
   const fileId = getFileIdFromUrl();
   if (!fileId || !isValidFileId(fileId)) {
-    navigateToStage5();
     return;
   }
 
@@ -972,20 +1019,15 @@ const handleAdvanceToStage5 = async () => {
       return;
     }
 
-    const response = await fetch(`/stage-4/non-conformant/${encodeURIComponent(fileId)}`);
-    if (!response.ok) {
-      console.warn('Failed to check PV conformance, proceeding anyway');
-      navigateToStage5();
-      return;
-    }
-
-    const data = await response.json();
+    const data = await fetchConformanceResult(fileId);
     if (data.count > 0) {
       showPVWarningDialog(data);
       return;
     }
   } catch (err) {
     console.warn('Error checking PV conformance:', err);
+    showConformanceCheckError();
+    return;
   }
 
   navigateToStage5();
@@ -1021,16 +1063,6 @@ const init = async () => {
   updateUIForScrollMode();
 
   attachEventListeners();
-
-  /* Save any pending overrides on page unload */
-  window.addEventListener('beforeunload', () => {
-    if (Object.keys(state.pendingOverrides).length > 0) {
-      navigator.sendBeacon(
-        '/stage-4/overrides',
-        new Blob([JSON.stringify(_buildSavePayload())], { type: 'application/json' }),
-      );
-    }
-  });
 
   await fetchRows();
   _clampCurrentUnitsToValidRange();

@@ -4,7 +4,6 @@
  */
 
 export const STAGE_2_PAYLOAD_KEY = 'stage2Payload';
-export const STAGE_3_PAYLOAD_KEY = 'stage3HarmonizePayload';
 export const STAGE_3_JOB_KEY = 'stage3HarmonizeJob';
 export const CURRENT_FILE_SESSION_KEY = 'currentFileSession';
 export const MAX_REACHED_STAGE_KEY = 'maxReachedStage';
@@ -12,7 +11,6 @@ export const MAX_REACHED_STAGE_KEY = 'maxReachedStage';
 const WORKFLOW_SESSION_KEYS = [
   CURRENT_FILE_SESSION_KEY,
   STAGE_2_PAYLOAD_KEY,
-  STAGE_3_PAYLOAD_KEY,
   STAGE_3_JOB_KEY,
   MAX_REACHED_STAGE_KEY,
 ];

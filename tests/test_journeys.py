@@ -11,9 +11,11 @@ from src.storage import UploadStorage
 from tests.conftest import (
     TEST_CSV_CONTENT_TYPE,
     TEST_TARGET_SCHEMA,
+    confirm_mapping_choices,
     create_harmonized_csv,
     create_manifest_for_file,
     create_manifest_with_manual_override,
+    store_test_completed_harmonization,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -45,13 +47,12 @@ async def test_upload_to_analyze_journey(
         json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
 
-    # Then: Analysis returns column info, CDE suggestions, and manifest
+    # Then: Analysis returns column info and CDE suggestions
     assert analyze_response.status_code == 200
     analyze_data = analyze_response.json()
     assert analyze_data["file_id"] == file_id
     assert len(analyze_data["columns"]) > 0
     assert "cde_targets" in analyze_data
-    assert "manifest" in analyze_data
 
 
 async def test_analyze_to_harmonize_journey(
@@ -60,7 +61,7 @@ async def test_analyze_to_harmonize_journey(
 ) -> None:
     """User analyzes a file then triggers harmonization."""
 
-    # Given: An uploaded and analyzed file with manifest from analysis
+    # Given: An uploaded and analyzed file
     upload_response = await app_client.post(
         "/stage-1/upload",
         files={"file": (sample_csv_path.name, sample_csv_path.read_bytes(), TEST_CSV_CONTENT_TYPE)},
@@ -71,18 +72,13 @@ async def test_analyze_to_harmonize_journey(
         "/stage-1/analyze",
         json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
-    manifest = analyze_response.json()["manifest"]
+    assert analyze_response.status_code == 200
+    await confirm_mapping_choices(app_client, file_id)
 
-    # When: User triggers harmonization with the manifest
+    # When: User triggers harmonization from the confirmed mapping plan
     harmonize_response = await app_client.post(
         "/stage-3/harmonize",
-        json={
-            "file_id": file_id,
-            "data_model_key": TEST_TARGET_SCHEMA,
-            "external_version_number": "11.0.4",
-                "manual_overrides": {},
-            "manifest": manifest,
-        },
+        json={"file_id": file_id},
     )
 
     # Then: Harmonization returns job info with URL to review stage
@@ -116,7 +112,7 @@ async def test_harmonize_to_review_journey(
     # When: User fetches review rows to compare original vs harmonized
     rows_response = await app_client.post(
         "/stage-4/rows",
-        json={"file_id": file_id, "manual_columns": []},
+        json={"file_id": file_id},
     )
 
     # Then: Columns are returned with transformations for review
@@ -191,21 +187,15 @@ async def test_full_pipeline_journey(
         "/stage-1/analyze",
         json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
-    # Then: Analysis succeeds with manifest
+    # Then: Analysis succeeds
     assert analyze_response.status_code == 200
-    manifest = analyze_response.json()["manifest"]
+    await confirm_mapping_choices(app_client, file_id)
 
     # Stage 3: Harmonize
     # When: User triggers harmonization
     harmonize_response = await app_client.post(
         "/stage-3/harmonize",
-        json={
-            "file_id": file_id,
-            "data_model_key": TEST_TARGET_SCHEMA,
-            "external_version_number": "11.0.4",
-                "manual_overrides": {},
-            "manifest": manifest,
-        },
+        json={"file_id": file_id},
     )
     # Then: Harmonization succeeds
     assert harmonize_response.status_code == 200
@@ -224,7 +214,7 @@ async def test_full_pipeline_journey(
     # When: User fetches columns for review
     rows_response = await app_client.post(
         "/stage-4/rows",
-        json={"file_id": file_id, "manual_columns": []},
+        json={"file_id": file_id},
     )
     # Then: Columns with transformations are returned
     assert rows_response.status_code == 200
@@ -249,9 +239,9 @@ async def test_manual_overrides_counted_in_summary(
     temp_storage: UploadStorage,
     sample_csv_path: Path,
 ) -> None:
-    """Manual overrides in manifest are correctly categorized in summary statistics."""
+    """Active reviewer overrides are categorized in current summary statistics."""
 
-    # Given: An uploaded file with a manifest containing manual overrides
+    # Given: An uploaded file with audit history and the corresponding active override
     upload_response = await app_client.post(
         "/stage-1/upload",
         files={"file": (sample_csv_path.name, sample_csv_path.read_bytes(), TEST_CSV_CONTENT_TYPE)},
@@ -262,6 +252,23 @@ async def test_manual_overrides_counted_in_summary(
     assert meta is not None
     create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"primary_diagnosis": "User Manual Override"}})
     create_manifest_with_manual_override(temp_storage, file_id, meta.saved_path)
+    save_response = await app_client.post(
+        "/stage-4/overrides",
+        json={
+            "file_id": file_id,
+            "overrides": {
+                "1": {
+                    "col_0000": {
+                        "human_value": "User Manual Override",
+                        "original_value": "R001",
+                    }
+                }
+            },
+            "review_state": {},
+        },
+        headers={"If-None-Match": "*"},
+    )
+    assert save_response.status_code == 200
 
     # When: Summary is requested
     summary_response = await app_client.post(
@@ -293,9 +300,10 @@ async def test_download_returns_zip_with_csv(
     file_id = upload_response.json()["file_id"]
     meta = temp_storage.load(file_id)
     assert meta is not None
-    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {
+    harmonized_path = create_harmonized_csv(temp_storage, file_id, meta.saved_path, {
         0: {"primary_diagnosis": "Harmonized Value"},
     })
+    store_test_completed_harmonization(temp_storage, file_id, harmonized_path)
 
     # When: User requests download
     download_response = await app_client.post(

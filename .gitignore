@@ -24,7 +24,6 @@ frontend/dist
 .DS_Store
 
 # Stage 1 runtime files
-src/stage_1_upload/uploads/
 uploads/
 workflow_storage/
 

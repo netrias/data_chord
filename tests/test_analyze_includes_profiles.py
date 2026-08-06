@@ -121,12 +121,29 @@ def test_analyze_response_does_not_require_full_profiles() -> None:
             )
         ],
         cde_targets={},
-        next_stage="mapping",
-        next_step_hint="Review mappings.",
     )
 
     # Then
-    assert response.column_profiles == {}
+    assert response.model_dump(mode="json") == {
+        "file_id": "abcdef0123456789abcdef0123456789",
+        "file_name": "data.csv",
+        "external_version_number": "11.0.4",
+        "total_rows": 1,
+        "columns": [
+            {
+                "column_name": "diagnosis",
+                "column_key": "diagnosis",
+                "source_index": 0,
+                "header": "diagnosis",
+                "inferred_type": "text",
+                "has_non_empty_values": True,
+                "confidence_bucket": "high",
+                "confidence_score": 1.0,
+            }
+        ],
+        "column_summaries": {},
+        "cde_targets": {},
+    }
 
 
 def test_analyze_marks_columns_with_late_values_as_non_empty(tmp_path: Path) -> None:

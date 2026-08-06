@@ -24,7 +24,6 @@ from netrias_client import (
 )
 
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_value
-from src.domain.manifest import ManifestPayload, normalize_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +90,7 @@ class UploadedFileMeta:
 
     @property
     def file_id(self) -> DatasetWorkflowId:
-        """Compatibility view for public APIs and persisted ``file_id`` fields."""
+        """Public identifier used by API and persisted ``file_id`` fields."""
         return self.dataset_workflow_id
 
     @property
@@ -254,8 +253,8 @@ class UploadStorage:
         meta = self._metadata_from_payload(cast(StoredMeta, payload))
         meta.saved_path.parent.mkdir(parents=True, exist_ok=True)
         if source_path.resolve() != meta.saved_path.resolve():
-            # Durable storage can materialize files from a temp path; restore to
-            # the managed upload path so legacy stage code sees the usual layout.
+            # Durable storage materializes through a temp path. Restore the file
+            # to the managed upload path used by the current stage services.
             shutil.copy2(source_path, meta.saved_path)
         self._write_metadata(meta)
         return meta
@@ -283,22 +282,6 @@ class UploadStorage:
         updated = _with_selected_sheet(meta, selected_sheet)
         self._write_metadata(updated)
         return updated
-
-    def save_manifest(self, file_id: str, manifest: ManifestPayload | Mapping[str, object]) -> Path:
-        path = self._manifest_dir / f"{file_id}.json"
-        path.write_text(json.dumps(normalize_manifest(manifest), indent=2))
-        logger.info("Stored manifest", extra={"file_id": file_id, "manifest_path": str(path)})
-        return path
-
-    def load_manifest(self, file_id: str) -> ManifestPayload | None:
-        path = self._manifest_dir / f"{file_id}.json"
-        if not path.exists():
-            return None
-        try:
-            return normalize_manifest(cast(object, json.loads(path.read_text())))
-        except json.JSONDecodeError:
-            logger.warning("Manifest file corrupt", extra={"file_id": file_id, "path": str(path)})
-            return None
 
     def save_harmonization_manifest(self, file_id: str, manifest_path: Path) -> Path:
         destination = self._manifest_dir / f"{file_id}_harmonization.parquet"

@@ -6,7 +6,7 @@ import { STEP_INSTRUCTIONS, STAGE_ORDER } from './step-instructions.js';
 import {
   CURRENT_FILE_SESSION_KEY,
   MAX_REACHED_STAGE_KEY,
-  STAGE_3_PAYLOAD_KEY,
+  readFromSession,
 } from './storage-keys.js';
 
 /**
@@ -54,16 +54,7 @@ function _getFileIdForNavigation() {
   const fromUrl = urlParams.get('file_id');
   if (fromUrl) return fromUrl;
 
-  try {
-    const session = sessionStorage.getItem(CURRENT_FILE_SESSION_KEY);
-    if (session) {
-      const parsed = JSON.parse(session);
-      return parsed.file_id || null;
-    }
-  } catch {
-    /* ignore parse errors */
-  }
-  return null;
+  return readFromSession(CURRENT_FILE_SESSION_KEY)?.file_id ?? null;
 }
 
 /* why: append file_id to navigation URLs so stages can access the active session. */
@@ -76,7 +67,7 @@ function _buildNavUrl(baseUrl) {
 }
 
 function _addMappingContext(url) {
-  if (url.pathname !== '/stage-2' && url.pathname !== '/stage-3') return;
+  if (url.pathname !== '/stage-2') return;
 
   const context = _getTargetContextForNavigation();
   if (!context.dataModelKey) return;
@@ -91,21 +82,7 @@ function _getTargetContextForNavigation() {
   const params = new URLSearchParams(window.location.search);
   const dataModelKey = params.get('data_model_key');
   const externalVersionNumber = params.get('external_version_number');
-  if (dataModelKey) {
-    return { dataModelKey, externalVersionNumber };
-  }
-
-  try {
-    const stored = sessionStorage.getItem(STAGE_3_PAYLOAD_KEY);
-    if (!stored) return {};
-    const parsed = JSON.parse(stored);
-    return {
-      dataModelKey: parsed.context?.dataModelKey || parsed.request?.data_model_key || null,
-      externalVersionNumber: parsed.context?.externalVersionNumber || parsed.request?.external_version_number || null,
-    };
-  } catch {
-    return {};
-  }
+  return dataModelKey ? { dataModelKey, externalVersionNumber } : {};
 }
 
 /**

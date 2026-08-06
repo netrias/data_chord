@@ -1,4 +1,4 @@
-"""Bridge legacy local upload files to durable typed workflow storage.
+"""Move workflow artifacts between local scratch and durable storage.
 
 Axis of change: when workflow artifacts need to move between local scratch
 paths and the configured durable workflow storage backend.
@@ -9,7 +9,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from pathlib import Path
 
-from src.domain.manifest import ManifestPayload, normalize_manifest
 from src.storage import (
     UploadedFileMeta,
     UploadStorage,
@@ -58,15 +57,13 @@ def load_upload_artifact(
     user: UserContext,
     file_id: str,
 ) -> UploadedFileMeta | None:
-    local_meta = upload_storage.load(file_id)
     try:
         stored = workflow_storage.read_json(user, file_id, WorkflowFile.UPLOAD_METADATA)
     except WorkflowNotFoundError:
-        # Older local workflows may predate durable metadata; keep them usable
-        # instead of forcing users to re-upload.
-        return local_meta
+        return None
+    local_meta = upload_storage.load(file_id)
     if stored is None or not isinstance(stored.data, Mapping):
-        return local_meta
+        return None
     if local_meta is not None and local_meta.saved_path.exists():
         # Prefer the existing local file when present to avoid copying large
         # artifacts back out of durable storage on every stage transition.
@@ -76,35 +73,6 @@ def load_upload_artifact(
             return upload_storage.restore_upload(stored.data, source_path)
     except WorkflowArtifactNotFoundError:
         return local_meta
-
-
-def save_mapping_manifest(
-    workflow_storage: WorkflowStorage,
-    user: UserContext,
-    file_id: str,
-    manifest: ManifestPayload | Mapping[str, object],
-) -> None:
-    _upsert_json(workflow_storage, user, file_id, WorkflowFile.MAPPING_MANIFEST, normalize_manifest(manifest))
-
-
-def load_mapping_manifest(
-    upload_storage: UploadStorage,
-    workflow_storage: WorkflowStorage,
-    user: UserContext,
-    file_id: str,
-) -> ManifestPayload | None:
-    local_manifest = upload_storage.load_manifest(file_id)
-    if local_manifest is not None:
-        return local_manifest
-    try:
-        stored = workflow_storage.read_json(user, file_id, WorkflowFile.MAPPING_MANIFEST)
-    except WorkflowNotFoundError:
-        return None
-    if stored is None:
-        return None
-    manifest = normalize_manifest(stored.data)
-    upload_storage.save_manifest(file_id, manifest)
-    return manifest
 
 
 def save_harmonized_artifacts(
@@ -126,9 +94,11 @@ def load_harmonized_output_path(
     file_id: str,
     meta: UploadedFileMeta,
 ) -> Path | None:
-    path = upload_storage.load_harmonized_path(file_id)
-    if path is not None:
-        return path
+    # Authorize against durable workflow metadata before consulting scratch.
+    try:
+        workflow_storage.read_json(user, file_id, WorkflowFile.UPLOAD_METADATA)
+    except WorkflowNotFoundError:
+        raise
     try:
         with workflow_storage.materialize_artifact(user, file_id, WorkflowFile.HARMONIZED_OUTPUT) as source_path:
             return upload_storage.restore_harmonized_output(file_id, meta.saved_path, source_path)
@@ -142,9 +112,11 @@ def load_harmonization_manifest_path(
     user: UserContext,
     file_id: str,
 ) -> Path | None:
-    path = upload_storage.load_harmonization_manifest_path(file_id)
-    if path is not None:
-        return path
+    # Authorize against durable workflow metadata before consulting scratch.
+    try:
+        workflow_storage.read_json(user, file_id, WorkflowFile.UPLOAD_METADATA)
+    except WorkflowNotFoundError:
+        raise
     try:
         with workflow_storage.materialize_artifact(
             user,
@@ -173,10 +145,8 @@ def _upsert_json(
 __all__ = [
     "load_harmonization_manifest_path",
     "load_harmonized_output_path",
-    "load_mapping_manifest",
     "load_upload_artifact",
     "save_harmonized_artifacts",
-    "save_mapping_manifest",
     "save_upload_artifacts",
     "save_upload_metadata",
 ]

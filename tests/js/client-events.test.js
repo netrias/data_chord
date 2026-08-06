@@ -48,7 +48,7 @@ describe('Client Event Reporter', () => {
       stage: 'stage_1',
       operation: 'analyze',
       endpoint: '/stage-1/analyze?token=not-for-logs',
-      fileId: 'abcdef1234567890',
+      fileId: 'abcdef1234567890abcdef1234567890',
       error,
     });
 
@@ -61,7 +61,7 @@ describe('Client Event Reporter', () => {
     assert.strictEqual(payload.stage, 'stage_1');
     assert.strictEqual(payload.operation, 'analyze');
     assert.strictEqual(payload.path, '/stage-1/analyze');
-    assert.strictEqual(payload.file_id, 'abcdef1234567890');
+    assert.strictEqual(payload.file_id, 'abcdef1234567890abcdef1234567890');
     assert.strictEqual(payload.error_name, 'TypeError');
     assert.strictEqual(payload.error_message, 'Failed to fetch');
     assert.strictEqual(payload.online, true);
@@ -74,7 +74,7 @@ describe('Client Event Reporter', () => {
       stage: 'stage_1',
       operation: 'analyze',
       endpoint: '/stage-1/analyze?token=not-for-logs',
-      fileId: 'abcdef1234567890',
+      fileId: 'abcdef1234567890abcdef1234567890',
       statusCode: 422,
       serverRequestId: 'server-request-123',
     });
@@ -84,7 +84,7 @@ describe('Client Event Reporter', () => {
     const payload = JSON.parse(await sendBeaconCalls[0].body.text());
     assert.strictEqual(payload.event_name, 'client.api.error');
     assert.strictEqual(payload.path, '/stage-1/analyze');
-    assert.strictEqual(payload.file_id, 'abcdef1234567890');
+    assert.strictEqual(payload.file_id, 'abcdef1234567890abcdef1234567890');
     assert.strictEqual(payload.status_code, 422);
     assert.strictEqual(payload.server_request_id, 'server-request-123');
     assert.strictEqual(payload.error_name, null);

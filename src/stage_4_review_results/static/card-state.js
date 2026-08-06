@@ -8,7 +8,6 @@
 
 /**
  * @typedef {Object} CardStateInput
- * @property {string} originalValue - Original value from source data
  * @property {string} aiSuggestedValue - AI harmonized value
  * @property {string} overrideValue - User's manual override (empty string = no override)
  * @property {boolean} hasPVs - Whether permissible values exist for this column

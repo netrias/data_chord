@@ -7,10 +7,9 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from src.api.schemas import DatasetWorkflowIdField
-from src.domain import ModelSuggestion
-from src.domain.column_profile import ColumnProfilePayload
+from src.domain.cde import ModelSuggestion
 from src.domain.data_model_version_reference import DataModelVersionReference
-from src.domain.manifest import ConfidenceBucket, ManifestPayload
+from src.domain.manifest import ConfidenceBucket
 
 
 class SheetPreview(BaseModel):
@@ -67,22 +66,12 @@ class ColumnOverlapRatio(BaseModel):
 
 
 class AnalyzeResponse(BaseModel):
-    """Stage 1 analyze response.
-
-    ``column_profiles`` stays optional for older browser sessions. New Stage 2
-    detail calls load one selected column profile at a time so analyze responses
-    do not carry every distinct value for every column.
-    """
+    """Small Stage 1 response used by the Stage 2 mapping page."""
 
     file_id: DatasetWorkflowIdField
     file_name: str
     external_version_number: str
     total_rows: int = Field(ge=0)
     columns: list[ColumnSummary]
-    column_profiles: dict[str, ColumnProfilePayload] = Field(default_factory=dict)
     column_summaries: dict[str, ColumnOverlapRatio] = Field(default_factory=dict)
     cde_targets: dict[str, list[ModelSuggestion]]
-    next_stage: str
-    next_step_hint: str
-    manual_overrides: dict[str, str] = Field(default_factory=dict)
-    manifest: ManifestPayload = Field(default_factory=lambda: {"column_mappings": {}})

@@ -11,11 +11,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Final, Self
+from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, ValidationError, field_validator
 
-import src.app.dependencies as dependencies
 from src.app.session_cache import SessionCache
 from src.domain.cde import CdeType, is_rename_only
 from src.domain.column_cde_map import ColumnCdeOverrides
@@ -27,22 +26,13 @@ from src.domain.manifest import ColumnMappingManifest, ColumnMappingRecord
 from src.domain.tabular_column_renames import ResolvedTabularColumn
 from src.storage import UserContext, WorkflowFile, WorkflowNotFoundError, WorkflowStorage
 
-MAPPING_SOURCE_AI: Final = "ai"
-MAPPING_SOURCE_USER_OVERRIDE: Final = "user_override"
-MAPPING_SOURCE_NO_MAPPING: Final = "no_mapping"
-
 
 class MappingSource(StrEnum):
     """How a source column ended up with its target CDE mapping."""
 
-    AI = MAPPING_SOURCE_AI
-    USER_OVERRIDE = MAPPING_SOURCE_USER_OVERRIDE
-    NO_MAPPING = MAPPING_SOURCE_NO_MAPPING
-
-MAPPING_ARTIFACT_FIELD_CDE_DESCRIPTION: Final = "cde_description"
-MAPPING_ARTIFACT_FIELD_CDE_ID: Final = "cde_id"
-MAPPING_ARTIFACT_FIELD_CDE_TYPE: Final = "cde_type"
-MAPPING_ARTIFACT_FIELD_MAPS_VALUES: Final = "maps_values"
+    AI = "ai"
+    USER_OVERRIDE = "user_override"
+    NO_MAPPING = "no_mapping"
 
 
 @dataclass(frozen=True)
@@ -63,9 +53,6 @@ class CdeMappingEntry:
     cde_id: int | None = None
     cde_description: str | None = None
     cde_type: CdeType | None = None
-
-    def to_store(self) -> dict[str, object]:
-        return CdeMappingEntryStore.from_domain(self).to_store()
 
 
 @dataclass(frozen=True)
@@ -124,9 +111,6 @@ class CdeMappingEntryStore(BaseModel):
             maps_values=self.maps_values,
         )
 
-    def to_store(self) -> dict[str, object]:
-        return self.model_dump(mode="json", exclude_none=True)
-
 
 class CdeMappingDocumentStore(BaseModel):
     """Persisted JSON shape for the CDE mapping audit artifact."""
@@ -174,6 +158,8 @@ class CdeMappingDocumentStore(BaseModel):
 
 
 def save_cde_mapping_document(
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
     file_id: DatasetWorkflowId | str,
     manifest: ColumnMappingManifest,
     column_overrides: ColumnCdeOverrides,
@@ -191,14 +177,12 @@ def save_cde_mapping_document(
         external_version_number=data_model_version.external_version_number,
         mappings=_build_entries(manifest, column_overrides, column_renames, columns, cache),
     )
-    storage = dependencies.get_workflow_storage()
-    user = dependencies.get_user_context()
     try:
-        existing = storage.read_json(user, dataset_workflow_id, WorkflowFile.CDE_MAPPING)
+        existing = workflow_storage.read_json(user, dataset_workflow_id, WorkflowFile.CDE_MAPPING)
     except WorkflowNotFoundError:
-        storage.create_workflow(user, dataset_workflow_id)
+        workflow_storage.create_workflow(user, dataset_workflow_id)
         existing = None
-    storage.write_json(
+    workflow_storage.write_json(
         user,
         dataset_workflow_id,
         WorkflowFile.CDE_MAPPING,
@@ -209,14 +193,12 @@ def save_cde_mapping_document(
 
 def load_cde_mapping_json(
     file_id: str,
-    workflow_storage: WorkflowStorage | None = None,
-    user: UserContext | None = None,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
 ) -> str | None:
     """Return a pretty JSON mapping artifact for the download bundle."""
-    storage = workflow_storage if workflow_storage is not None else dependencies.get_workflow_storage()
-    context = user if user is not None else dependencies.get_user_context()
     try:
-        stored = storage.read_json(context, file_id, WorkflowFile.CDE_MAPPING)
+        stored = workflow_storage.read_json(user, file_id, WorkflowFile.CDE_MAPPING)
     except WorkflowNotFoundError:
         return None
     if stored is None:
@@ -345,13 +327,6 @@ def _mapping_source(
 __all__ = [
     "CdeMappingDocument",
     "CdeMappingEntry",
-    "MAPPING_ARTIFACT_FIELD_CDE_DESCRIPTION",
-    "MAPPING_ARTIFACT_FIELD_CDE_ID",
-    "MAPPING_ARTIFACT_FIELD_CDE_TYPE",
-    "MAPPING_ARTIFACT_FIELD_MAPS_VALUES",
-    "MAPPING_SOURCE_AI",
-    "MAPPING_SOURCE_NO_MAPPING",
-    "MAPPING_SOURCE_USER_OVERRIDE",
     "MappingSource",
     "load_cde_mapping_entries_by_column",
     "load_cde_mapping_json",

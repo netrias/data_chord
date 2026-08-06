@@ -12,7 +12,5 @@ certificate_arn  = ""
 domain_name      = ""
 hosted_zone_name = "apps.netrias.com"
 
-codebuild_connection_id = "bb057081-ca91-46eb-b943-d8d2738a577c"
-
 cognito_domain_prefix = ""
 desired_count         = 1

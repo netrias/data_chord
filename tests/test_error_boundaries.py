@@ -10,6 +10,8 @@ from httpx import AsyncClient
 from netrias_client import DataModelStoreError
 
 from src.domain.cde import DataModelSummary, DataModelVersionInfo
+from src.integrations.netrias_mapping import MappingDiscoveryUnavailableError
+from src.storage import WorkflowConflictError
 from tests.conftest import TEST_CSV_CONTENT_TYPE, TEST_TARGET_EXTERNAL_VERSION_NUMBER, TEST_TARGET_SCHEMA, upload_file
 
 pytestmark = pytest.mark.asyncio
@@ -48,55 +50,50 @@ class TestMissingFileErrors:
         # When: Harmonize is called with the non-existent file_id
         response = await app_client.post(
             "/stage-3/harmonize",
-            json={
-                "file_id": INVALID_FILE_ID,
-                "data_model_key": TEST_TARGET_SCHEMA,
-                "external_version_number": TEST_TARGET_EXTERNAL_VERSION_NUMBER,
-                "manual_overrides": {},
-            },
+            json={"file_id": INVALID_FILE_ID},
         )
 
         # Then: 404 response
         assert response.status_code == 404
 
     async def test_rows_missing_file(self, app_client: AsyncClient) -> None:
-        """Rows returns 404 for unknown file_id."""
+        """Rows returns recovery guidance for an unknown workflow."""
 
         # Given: A file_id that does not exist in storage (valid hex format)
 
         # When: Rows are requested with the non-existent file_id
         response = await app_client.post(
             "/stage-4/rows",
-            json={"file_id": INVALID_FILE_ID, "manual_columns": []},
+            json={"file_id": INVALID_FILE_ID},
         )
 
-        # Then: 404 response
-        assert response.status_code == 404
+        assert response.status_code == 409
+        assert "Stage 2" in response.json()["detail"]
 
     async def test_summary_missing_file(self, app_client: AsyncClient) -> None:
-        """Summary returns 404 for unknown file_id."""
+        """Summary returns recovery guidance for an unknown workflow."""
 
         # Given: A file_id that does not exist in storage (valid hex format)
 
         # When: Summary is requested with the non-existent file_id
         response = await app_client.post(
             "/stage-5/summary",
-            json={"file_id": INVALID_FILE_ID, "manual_columns": []},
+            json={"file_id": INVALID_FILE_ID},
         )
 
-        # Then: 404 response
-        assert response.status_code == 404
+        assert response.status_code == 409
+        assert "Stage 2" in response.json()["detail"]
 
 
-class TestMissingHarmonizedFileErrors:
-    """Stage 4 and 5 return 404 when harmonized file doesn't exist."""
+class TestHarmonizationNotReadyErrors:
+    """Stage 4 and 5 return recovery guidance before current harmonization."""
 
     async def test_rows_missing_harmonized(
         self,
         app_client: AsyncClient,
         sample_csv_path: Path,
     ) -> None:
-        """Rows returns 404 when harmonization manifest doesn't exist."""
+        """Rows directs the user back to the missing workflow step."""
 
         # Given: An uploaded file without harmonized output
         file_id = await upload_file(app_client, sample_csv_path)
@@ -104,19 +101,18 @@ class TestMissingHarmonizedFileErrors:
         # When: Rows are requested before harmonization
         response = await app_client.post(
             "/stage-4/rows",
-            json={"file_id": file_id, "manual_columns": []},
+            json={"file_id": file_id},
         )
 
-        # Then: 404 response with generic user-facing detail
-        assert response.status_code == 404
-        assert response.json()["detail"] == GENERIC_API_ERROR_DETAIL
+        assert response.status_code == 409
+        assert "Stage 2" in response.json()["detail"]
 
     async def test_summary_missing_harmonized(
         self,
         app_client: AsyncClient,
         sample_csv_path: Path,
     ) -> None:
-        """Summary returns 404 when harmonized CSV doesn't exist."""
+        """Summary directs the user back to the missing workflow step."""
 
         # Given: An uploaded file without harmonized output
         file_id = await upload_file(app_client, sample_csv_path)
@@ -124,11 +120,11 @@ class TestMissingHarmonizedFileErrors:
         # When: Summary is requested before harmonization
         response = await app_client.post(
             "/stage-5/summary",
-            json={"file_id": file_id, "manual_columns": []},
+            json={"file_id": file_id},
         )
 
-        # Then: 404 response
-        assert response.status_code == 404
+        assert response.status_code == 409
+        assert "Stage 2" in response.json()["detail"]
 
 
 class TestDataModelServiceErrors:
@@ -178,6 +174,59 @@ class TestDataModelServiceErrors:
         # Then: 503 response with generic user-facing detail
         assert response.status_code == 503
         assert response.json()["detail"] == GENERIC_API_ERROR_DETAIL
+
+    async def test_analyze_hides_mapping_provider_failure_details(
+        self,
+        app_client: AsyncClient,
+        sample_csv_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A provider failure becomes a generic 503 response."""
+        file_id = await upload_file(app_client, sample_csv_path)
+        mapping_service = MagicMock()
+        mapping_service.discover.side_effect = MappingDiscoveryUnavailableError(
+            "Mapping discovery is unavailable."
+        )
+        monkeypatch.setattr(
+            "src.stage_1_upload.router.get_mapping_service",
+            MagicMock(return_value=mapping_service),
+        )
+
+        response = await app_client.post(
+            "/stage-1/analyze",
+            json={
+                "file_id": file_id,
+                "data_model_key": TEST_TARGET_SCHEMA,
+                "external_version_number": TEST_TARGET_EXTERNAL_VERSION_NUMBER,
+            },
+        )
+
+        assert response.status_code == 503
+        assert response.json() == {"detail": GENERIC_API_ERROR_DETAIL}
+
+
+async def test_workflow_write_conflicts_are_globally_reported_as_retryable(
+    app_client: AsyncClient,
+    sample_csv_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    file_id = await upload_file(app_client, sample_csv_path)
+    monkeypatch.setattr(
+        "src.stage_1_upload.router.save_initial_workflow_state",
+        MagicMock(side_effect=WorkflowConflictError(file_id)),
+    )
+
+    response = await app_client.post(
+        "/stage-1/analyze",
+        json={
+            "file_id": file_id,
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": TEST_TARGET_EXTERNAL_VERSION_NUMBER,
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == GENERIC_API_ERROR_DETAIL
 
 
 class TestUploadValidationErrors:

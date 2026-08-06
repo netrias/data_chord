@@ -18,7 +18,6 @@ from src.app.data_model_store import (
     fetch_all_pvs_async,
     fetch_cdes,
     list_data_model_summaries,
-    refine_cde_types_from_pvs,
 )
 from src.app.dependencies import (
     get_mapping_service,
@@ -28,6 +27,7 @@ from src.app.session_cache import get_session_cache
 from src.domain.cde import CDEInfo, DataModelSummary
 from src.domain.cde_catalog import CdeCatalog
 from src.domain.cde_pv_catalog import CdePvCatalog
+from src.domain.cde_type_classification import refine_cde_types_from_pvs
 from src.domain.column_profile import ColumnProfile
 from src.domain.columns import column_key_from_string
 from src.domain.data_model_version_reference import DataModelVersionReference
@@ -35,10 +35,9 @@ from src.domain.dataset_workflow_ids import new_dataset_workflow_id
 from src.domain.manifest import ColumnMappingManifest
 from src.domain.match_counts import column_value_overlap_ratio
 from src.domain.workflow_state import WorkflowState
-from src.integrations.netrias_mapping import MappingDiscoveryResult
+from src.integrations.netrias_mapping import MappingDiscoveryUnavailableError
 from src.observability.events import (
     WorkflowEvent,
-    WorkflowEventName,
     WorkflowOperation,
     WorkflowOutcome,
     WorkflowStage,
@@ -46,11 +45,10 @@ from src.observability.events import (
 )
 from src.persistence.workflow_artifacts import (
     load_upload_artifact,
-    save_mapping_manifest,
     save_upload_artifacts,
     save_upload_metadata,
 )
-from src.persistence.workflow_state_store import create_workflow_record, save_initial_workflow_state
+from src.persistence.workflow_state_store import save_initial_workflow_state
 from src.storage import (
     UnsupportedUploadError,
     UploadedFileMeta,
@@ -85,7 +83,6 @@ async def render_stage_one(request: Request) -> HTMLResponse:
     context = {
         "request": request,
         "ui_constraints": describe_constraints(_upload_constraints),
-        "default_data_model_key": None,
     }
     return _templates.TemplateResponse(request, "stage_1_upload.html", context)
 
@@ -119,7 +116,6 @@ async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadRespon
     dataset_workflow_id = new_dataset_workflow_id()
     log_workflow_event(
         WorkflowEvent(
-            event_name=WorkflowEventName.UPLOAD_STARTED,
             stage=WorkflowStage.STAGE_1,
             operation=WorkflowOperation.UPLOAD,
             outcome=WorkflowOutcome.STARTED,
@@ -130,11 +126,7 @@ async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadRespon
     )
     try:
         meta = await storage.store(file, dataset_workflow_id)
-        create_workflow_record(
-            dependencies.get_workflow_storage(),
-            user,
-            meta.dataset_workflow_id,
-        )
+        dependencies.get_workflow_storage().create_workflow(user, meta.dataset_workflow_id)
         save_upload_artifacts(
             dependencies.get_workflow_storage(),
             user,
@@ -152,7 +144,6 @@ async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadRespon
         raise
     log_workflow_event(
         WorkflowEvent(
-            event_name=WorkflowEventName.UPLOAD_COMPLETED,
             stage=WorkflowStage.STAGE_1,
             operation=WorkflowOperation.UPLOAD,
             outcome=WorkflowOutcome.COMPLETED,
@@ -190,7 +181,6 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     user = dependencies.get_user_context()
     log_workflow_event(
         WorkflowEvent(
-            event_name=WorkflowEventName.ANALYZE_STARTED,
             stage=WorkflowStage.STAGE_1,
             operation=WorkflowOperation.ANALYZE,
             outcome=WorkflowOutcome.STARTED,
@@ -240,33 +230,29 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
         _prime_data_model_cache(
             payload.file_id,
             data_model_version,
+            user.user_id,
         )
     )
     try:
         total_rows, columns, profiles = await analysis_task
-        discovery = await discovery_task
-        mapping_manifest = discovery.manifest
-        manifest = discovery.manifest_payload
+        mapping_manifest = await discovery_task
         await reference_task
     except Exception as exc:
         _log_analyze_failed(user, payload.file_id, type(exc).__name__)
         await _cancel_pending_tasks(discovery_task, reference_task)
         raise
-    storage.save_manifest(meta.dataset_workflow_id, manifest)
-    save_mapping_manifest(
-        dependencies.get_workflow_storage(),
-        user,
-        meta.dataset_workflow_id,
-        manifest,
-    )
     save_initial_workflow_state(
         dependencies.get_workflow_storage(),
         user,
-        WorkflowState.from_data_model_version(meta.dataset_workflow_id, data_model_version),
+        WorkflowState.from_data_model_version(
+            meta.dataset_workflow_id,
+            data_model_version,
+            mapping_manifest,
+        ),
     )
     # Stash profiles in the session cache so the Stage 2 column-detail endpoint
     # can serve them without re-reading the file.
-    cache = get_session_cache(meta.dataset_workflow_id)
+    cache = get_session_cache(meta.dataset_workflow_id, owner_user_id=user.user_id)
     cache.set_column_profiles(profiles)
     column_summaries = _build_column_summaries(
         profiles,
@@ -277,7 +263,6 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     _log_analysis_results(payload.file_id, total_rows, columns, mapping_manifest)
     log_workflow_event(
         WorkflowEvent(
-            event_name=WorkflowEventName.ANALYZE_COMPLETED,
             stage=WorkflowStage.STAGE_1,
             operation=WorkflowOperation.ANALYZE,
             outcome=WorkflowOutcome.COMPLETED,
@@ -300,10 +285,6 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
         columns=columns,
         column_summaries=column_summaries,
         cde_targets=cde_targets,
-        next_stage="mapping",
-        next_step_hint="Review AI-suggested column mappings once ready.",
-        manual_overrides={},
-        manifest=manifest,
     )
 
 
@@ -350,12 +331,11 @@ async def _discover_mappings(
     file_id: str,
     data_model_version: DataModelVersionReference,
     sheet_name: str | None,
-) -> MappingDiscoveryResult:
+) -> ColumnMappingManifest:
     mapping_service = get_mapping_service()
     user = dependencies.get_user_context()
     log_workflow_event(
         WorkflowEvent(
-            event_name=WorkflowEventName.MAPPING_STARTED,
             stage=WorkflowStage.STAGE_1,
             operation=WorkflowOperation.MAPPING,
             outcome=WorkflowOutcome.STARTED,
@@ -377,12 +357,11 @@ async def _discover_mappings(
         )
         log_workflow_event(
             WorkflowEvent(
-                event_name=WorkflowEventName.MAPPING_COMPLETED,
                 stage=WorkflowStage.STAGE_1,
                 operation=WorkflowOperation.MAPPING,
                 outcome=WorkflowOutcome.COMPLETED,
                 file_id=file_id,
-                metadata={"mapped_columns": len(discovery.cde_targets)},
+                metadata={"mapped_columns": len(discovery.records)},
             ),
             user,
         )
@@ -391,7 +370,7 @@ async def _discover_mappings(
         _log_mapping_failed(user, file_id, type(exc).__name__)
         _router_logger.warning("Upload failed validation during analysis", extra={"file_id": file_id})
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except RuntimeError as exc:
+    except MappingDiscoveryUnavailableError as exc:
         _log_mapping_failed(user, file_id, type(exc).__name__)
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except Exception as exc:  # pragma: no cover - defensive
@@ -404,7 +383,11 @@ async def _discover_mappings(
         ) from exc
 
 
-async def _prime_data_model_cache(file_id: str, data_model_version: DataModelVersionReference) -> None:
+async def _prime_data_model_cache(
+    file_id: str,
+    data_model_version: DataModelVersionReference,
+    owner_user_id: str,
+) -> None:
     """Warm CDEs and all PVs while mapping discovery is running."""
     try:
         cdes_task = asyncio.create_task(
@@ -418,16 +401,11 @@ async def _prime_data_model_cache(file_id: str, data_model_version: DataModelVer
         _router_logger.warning("Data Model Store API unavailable during cache warmup", extra={"file_id": file_id})
         return
 
-    cache = get_session_cache(file_id)
+    cache = get_session_cache(file_id, owner_user_id=owner_user_id)
     catalog = CdeCatalog.from_cdes(cdes)
     pv_catalog = raw_pv_catalog.with_defaults(catalog.keys())
     refined = refine_cde_types_from_pvs(catalog, pv_catalog)
-    cache.set_cde_catalog(
-        refined,
-        data_model_key=data_model_version.data_model_key,
-        external_version_number=data_model_version.external_version_number,
-    )
-    cache.set_pvs_batch(pv_catalog)
+    cache.install_reference_data(data_model_version, refined, pv_catalog)
 
 
 def _build_column_summaries(
@@ -495,7 +473,6 @@ def _log_analysis_results(
 def _log_upload_failed(user: UserContext, file_id: str, error_type: str) -> None:
     log_workflow_event(
         WorkflowEvent(
-            event_name=WorkflowEventName.UPLOAD_FAILED,
             stage=WorkflowStage.STAGE_1,
             operation=WorkflowOperation.UPLOAD,
             outcome=WorkflowOutcome.FAILED,
@@ -509,7 +486,6 @@ def _log_upload_failed(user: UserContext, file_id: str, error_type: str) -> None
 def _log_analyze_failed(user: UserContext, file_id: str, error_type: str) -> None:
     log_workflow_event(
         WorkflowEvent(
-            event_name=WorkflowEventName.ANALYZE_FAILED,
             stage=WorkflowStage.STAGE_1,
             operation=WorkflowOperation.ANALYZE,
             outcome=WorkflowOutcome.FAILED,
@@ -523,7 +499,6 @@ def _log_analyze_failed(user: UserContext, file_id: str, error_type: str) -> Non
 def _log_mapping_failed(user: UserContext, file_id: str, error_type: str) -> None:
     log_workflow_event(
         WorkflowEvent(
-            event_name=WorkflowEventName.MAPPING_FAILED,
             stage=WorkflowStage.STAGE_1,
             operation=WorkflowOperation.MAPPING,
             outcome=WorkflowOutcome.FAILED,

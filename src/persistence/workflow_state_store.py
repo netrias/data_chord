@@ -1,14 +1,13 @@
-"""Persist WorkflowState through the typed workflow storage boundary.
-
-Axis of change: how the backend stores and updates durable workflow progress.
-"""
+"""Persist the one canonical workflow plan with optimistic version checks."""
 
 from __future__ import annotations
 
-from src.domain.dataset_workflow_ids import DatasetWorkflowId
-from src.domain.workflow_state import ConfirmedMappingChoices, WorkflowState
+from dataclasses import dataclass
+
+from src.domain.workflow_state import ConfirmedMappingChoices, WorkflowState, WorkflowStateSchemaError
 from src.storage import (
     UserContext,
+    VersionToken,
     WorkflowConflictError,
     WorkflowFile,
     WorkflowNotFoundError,
@@ -24,31 +23,43 @@ class WorkflowStateConflictError(Exception):
     """Raised when workflow state changed during a read-modify-write update."""
 
 
-def create_workflow_record(
-    storage: WorkflowStorage,
-    user: UserContext,
-    dataset_workflow_id: DatasetWorkflowId,
-) -> None:
-    """Create owner metadata for a newly uploaded workflow."""
-    storage.create_workflow(user, dataset_workflow_id)
+class WorkflowStateUnreadableError(Exception):
+    """Raised when stored workflow state exists but cannot be decoded safely."""
+
+
+@dataclass(frozen=True)
+class LoadedWorkflowState:
+    """Canonical workflow state plus the storage token read with it."""
+
+    state: WorkflowState
+    version: VersionToken
 
 
 def save_initial_workflow_state(
     storage: WorkflowStorage,
     user: UserContext,
     state: WorkflowState,
-) -> None:
-    """Create or replace the workflow selection while preserving version checks."""
+) -> LoadedWorkflowState:
+    """Create or replace the workflow plan."""
+    existing = storage.read_json(user, state.file_id, WorkflowFile.WORKFLOW_STATE)
+    return save_workflow_state(
+        storage,
+        user,
+        state,
+        expected_version=existing.version if existing is not None else None,
+    )
+
+
+def save_workflow_state(
+    storage: WorkflowStorage,
+    user: UserContext,
+    state: WorkflowState,
+    *,
+    expected_version: VersionToken | None,
+) -> LoadedWorkflowState:
+    """Compare-and-swap the canonical record."""
     try:
-        existing = storage.read_json(user, state.file_id, WorkflowFile.WORKFLOW_STATE)
-    except WorkflowNotFoundError:
-        # Some callers can arrive with artifacts restored from older local-only
-        # flows, so create the owner record here instead of failing late.
-        storage.create_workflow(user, state.file_id)
-        existing = None
-    expected_version = existing.version if existing is not None else None
-    try:
-        storage.write_json(
+        stored = storage.write_json(
             user,
             state.file_id,
             WorkflowFile.WORKFLOW_STATE,
@@ -57,20 +68,26 @@ def save_initial_workflow_state(
         )
     except WorkflowConflictError as exc:
         raise WorkflowStateConflictError(state.file_id) from exc
+    return LoadedWorkflowState(state=state, version=stored.version)
 
 
 def load_workflow_state(
     storage: WorkflowStorage,
     user: UserContext,
     file_id: str,
-) -> WorkflowState | None:
+) -> LoadedWorkflowState | None:
+    """Load the current canonical workflow state."""
     try:
         stored = storage.read_json(user, file_id, WorkflowFile.WORKFLOW_STATE)
     except WorkflowNotFoundError:
         return None
     if stored is None:
         return None
-    return WorkflowState.from_store(stored.data, file_id)
+    try:
+        state = WorkflowState.from_store(stored.data, file_id)
+    except WorkflowStateSchemaError as exc:
+        raise WorkflowStateUnreadableError(file_id) from exc
+    return LoadedWorkflowState(state=state, version=stored.version)
 
 
 def save_confirmed_mapping_choices_to_state(
@@ -78,39 +95,25 @@ def save_confirmed_mapping_choices_to_state(
     user: UserContext,
     file_id: str,
     choices: ConfirmedMappingChoices,
-) -> WorkflowState:
-    try:
-        stored = storage.read_json(user, file_id, WorkflowFile.WORKFLOW_STATE)
-    except WorkflowNotFoundError as exc:
-        raise WorkflowStateNotFoundError(file_id) from exc
-    if stored is None:
+) -> LoadedWorkflowState:
+    loaded = load_workflow_state(storage, user, file_id)
+    if loaded is None:
         raise WorkflowStateNotFoundError(file_id)
-
-    state = WorkflowState.from_store(stored.data, file_id)
-    if state is None:
-        raise WorkflowStateNotFoundError(file_id)
-
-    updated = state.with_mapping_choices(choices)
-    try:
-        # Stage 2 choices are the canonical handoff to Stage 3; reject stale
-        # writes so a second tab cannot replace a newer mapping decision.
-        storage.write_json(
-            user,
-            file_id,
-            WorkflowFile.WORKFLOW_STATE,
-            updated.to_store(),
-            expected_version=stored.version,
-        )
-    except WorkflowConflictError as exc:
-        raise WorkflowStateConflictError(file_id) from exc
-    return updated
+    return save_workflow_state(
+        storage,
+        user,
+        loaded.state.with_mapping_choices(choices),
+        expected_version=loaded.version,
+    )
 
 
 __all__ = [
+    "LoadedWorkflowState",
     "WorkflowStateConflictError",
     "WorkflowStateNotFoundError",
-    "create_workflow_record",
+    "WorkflowStateUnreadableError",
     "load_workflow_state",
     "save_confirmed_mapping_choices_to_state",
     "save_initial_workflow_state",
+    "save_workflow_state",
 ]

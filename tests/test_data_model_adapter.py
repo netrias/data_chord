@@ -9,17 +9,18 @@ from unittest.mock import MagicMock
 
 import httpx
 import pytest
-from netrias_client import DataModel, DataModelStoreError, DataModelVersion
+from netrias_client import DataModel, DataModelStoreError, DataModelVersion, NetriasAPIUnavailable
 
-from src.domain.cde import CDEInfo, CdeType
-from src.domain.cde_catalog import CdeCatalog
+from src.app.data_model_store import list_data_model_summaries
+from src.domain.cde import CdeType
 from src.domain.cde_pv_catalog import CdePvCatalog
 from src.integrations.data_model_store import (
     _pv_map_from_all_pvs_response,
     fetch_all_pvs_async,
     fetch_cdes,
-    list_data_model_summaries,
-    refine_cde_types_from_pvs,
+)
+from src.integrations.data_model_store import (
+    list_data_model_summaries as list_provider_data_model_summaries,
 )
 
 # ---------------------------------------------------------------------------
@@ -90,7 +91,7 @@ def test_list_summaries_returns_preferred_model_first(
     monkeypatch.setattr("src.integrations.data_model_store.httpx.get", direct_get)
 
     # When
-    summaries = list_data_model_summaries(mock_netrias)
+    summaries = list_data_model_summaries()
 
     # Then: "gc" is first despite alphabetical ordering of raw data
     assert len(summaries) == 2, f"Expected 2 summaries, got {len(summaries)}"
@@ -107,21 +108,18 @@ def test_list_summaries_returns_preferred_model_first(
 
 
 # ---------------------------------------------------------------------------
-# Test: list_data_model_summaries returns [] when client is None
+# Test: list_data_model_summaries reports an unavailable client
 # ---------------------------------------------------------------------------
 
 
-def test_list_summaries_returns_empty_when_client_unavailable() -> None:
-    """
-    Given: no NetriasClient (API key missing)
-    When: list_data_model_summaries() is called
-    Then: empty list returned (graceful degradation)
-    """
-    # When
-    summaries = list_data_model_summaries(None)
+def test_list_summaries_reports_unavailable_client() -> None:
+    with pytest.raises(NetriasAPIUnavailable, match="client is unavailable"):
+        list_provider_data_model_summaries(None)
 
-    # Then
-    assert summaries == [], f"Expected empty list, got {summaries}"
+
+def test_fetch_cdes_reports_unavailable_client() -> None:
+    with pytest.raises(NetriasAPIUnavailable, match="client is unavailable"):
+        fetch_cdes(None, "gc", "11.0.4")
 
 
 # ---------------------------------------------------------------------------
@@ -144,13 +142,13 @@ def test_all_pvs_response_groups_values_by_cde_key() -> None:
         ]
     }
     parsed = CdePvCatalog.empty()
-    assert parsed.to_mapping() == {}
+    assert parsed.values == {}
 
     # When
     parsed = _pv_map_from_all_pvs_response(response_body)
 
     # Then
-    assert parsed.to_mapping() == {
+    assert parsed.values == {
         "diagnosis": frozenset({"Lung", "Breast"}),
         "sex": frozenset({"Female"}),
     }
@@ -327,81 +325,3 @@ async def test_fetch_all_pvs_preserves_unknown_external_version_error(
         await fetch_all_pvs_async(mock_netrias, "gc", "99.0.0")
 
     assert requested_urls == ["https://dms.example.test/data-models/gc/versions/99.0.0/pvs"]
-
-
-def test_refine_cde_types_downgrades_to_passthrough_for_empty_pvs() -> None:
-    """
-    Given: two CDEs both initially typed as PV; PV fetch returned an empty
-           frozenset for one of them
-    When: refine_cde_types_from_pvs is called
-    Then: the empty-PV CDE becomes PASSTHROUGH; the populated one stays PV
-    """
-    # Given
-    cdes = [
-        CDEInfo(cde_id=1, cde_key="diagnosis", description=None),
-        CDEInfo(cde_id=2, cde_key="free_notes", description=None),
-    ]
-    pv_sets = CdePvCatalog.from_mapping({
-        "diagnosis": frozenset({"A", "B"}),
-        "free_notes": frozenset(),
-    })
-    # negative assertion: types start as PV
-    assert all(c.cde_type == CdeType.PV for c in cdes)
-
-    # When
-    refined = refine_cde_types_from_pvs(CdeCatalog.from_cdes(cdes), pv_sets)
-
-    # Then
-    diagnosis = refined.get("diagnosis")
-    free_notes = refined.get("free_notes")
-    assert diagnosis is not None
-    assert free_notes is not None
-    assert diagnosis.cde_type == CdeType.PV
-    assert free_notes.cde_type == CdeType.PASSTHROUGH
-
-
-def test_refine_cde_types_skips_unfetched_cdes() -> None:
-    """
-    Given: two CDEs, but PVs were fetched for only one
-    When: refine_cde_types_from_pvs is called
-    Then: the un-fetched CDE keeps its original type unchanged
-    """
-    # Given
-    cdes = [
-        CDEInfo(cde_id=1, cde_key="diagnosis", description=None),
-        CDEInfo(cde_id=2, cde_key="other", description=None),
-    ]
-    pv_sets = CdePvCatalog.from_mapping({"diagnosis": frozenset({"A"})})
-
-    # When
-    refined = refine_cde_types_from_pvs(CdeCatalog.from_cdes(cdes), pv_sets)
-
-    # Then: untouched CDE remains as it was
-    other = refined.get("other")
-    assert other is not None
-    assert other.cde_type == CdeType.PV
-
-
-def test_refine_does_not_downgrade_when_fetch_failure_omits_key() -> None:
-    """
-    Given: a CDE that genuinely has PVs but its PV fetch failed and is therefore
-           absent from the pv_sets dict
-    When: refine_cde_types_from_pvs is called
-    Then: the CDE stays at its initial type (PV) — it is NOT downgraded to
-          PASSTHROUGH, which would happen if absent-key were treated the same
-          as known-empty-set.
-    """
-    # Given
-    cdes = [
-        CDEInfo(cde_id=1, cde_key="primary_diagnosis", description=None),
-    ]
-    # PV sets dict is empty — the fetch failed for primary_diagnosis
-    pv_sets = CdePvCatalog.empty()
-
-    # When
-    refined = refine_cde_types_from_pvs(CdeCatalog.from_cdes(cdes), pv_sets)
-
-    # Then: type is PRESERVED at PV; no PASSTHROUGH downgrade
-    primary_diagnosis = refined.get("primary_diagnosis")
-    assert primary_diagnosis is not None
-    assert primary_diagnosis.cde_type == CdeType.PV

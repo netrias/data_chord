@@ -1,7 +1,6 @@
-import StageThreeMetricsDashboard from './metrics/dashboard.js';
-import buildDashboardDataset from './metrics/manifest_adapter.js';
 import { initStepInstruction, updateStepInstruction, setActiveStage, initNavigationEvents, isSafeRelativeUrl, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
-import { STAGE_3_PAYLOAD_KEY, STAGE_3_JOB_KEY, readFromSession, writeToSession, removeFromSession } from '/assets/shared/storage-keys.js';
+import { STAGE_3_JOB_KEY, readFromSession, writeToSession, removeFromSession } from '/assets/shared/storage-keys.js';
+import { renderColumnOutcomeTable } from '/assets/shared/column-outcome-table.js';
 
 const config = window.stageThreeConfig ?? {};
 const harmonizeEndpoint = config.harmonizeEndpoint ?? '/stage-3/harmonize';
@@ -10,7 +9,6 @@ const stageTwoUrl = config.stageTwoUrl ?? '/stage-2';
 const JOB_POLL_INTERVAL_MS = 3000;
 
 const loadingState = document.getElementById('loadingState');
-const jobIdDisplay = document.getElementById('jobIdDisplay');
 const reviewButton = document.getElementById('reviewButton');
 const retryButton = document.getElementById('retryButton');
 const emptyState = document.getElementById('stageThreeEmptyState');
@@ -19,35 +17,55 @@ const stageThreeTitle = document.getElementById('stageThreeTitle');
 const returnToStageTwo = document.getElementById('returnToStageTwo');
 const harmonizeAnimation = document.querySelector('#loadingState .harmonize-animation');
 const harmonizeProgressMessage = document.getElementById('harmonizeProgressMessage');
-
-const metricsDashboard = StageThreeMetricsDashboard.initFromDom();
+const columnOutcomePanel = document.querySelector('[data-column-outcome-panel]');
+const columnOutcomeContainer = document.querySelector('[data-column-outcome-table]');
 
 const state = {
-  payload: null,
   requestBody: null,
   job: null,
   isProcessing: false,
   pollTimer: null,
 };
 
-/* why: keep dashboard orchestration isolated from the job rendering logic. */
 const _hideMetricsDashboard = () => {
-  if (metricsDashboard) {
-    metricsDashboard.hide();
-  }
+  columnOutcomeContainer?.replaceChildren();
+  columnOutcomePanel?.classList.add('hidden');
 };
 
-/* why: expose a single call site for wiring harmonizer telemetry into the UI. */
+const _safeCount = (value) => {
+  const count = Number(value);
+  return Number.isFinite(count) && count >= 0 ? count : 0;
+};
+
+const _columnOutcome = (column) => ({
+  columnKey: column.column_key ?? '',
+  sourceColumnIndex: Number.isInteger(column.source_column_index)
+    ? column.source_column_index
+    : null,
+  label: column.label ?? column.column_name ?? 'Unnamed column',
+  changedDistinctValues: _safeCount(column.unique_terms_changed),
+  totalDistinctValues: _safeCount(column.unique_terms),
+  changedRows: _safeCount(column.changed_rows),
+  totalRows: _safeCount(column.total_rows),
+  reviewerEditedRows: 0,
+  nonConformantValues: _safeCount(column.non_conformant_terms),
+  reviewStatus: column.review_status ?? null,
+});
+
 const _renderMetricsDashboard = (job) => {
-  if (!metricsDashboard) {
+  if (!columnOutcomePanel || !columnOutcomeContainer) {
     return;
   }
-  const dataset = buildDashboardDataset({ job, payload: state.payload });
-  if (!dataset) {
-    metricsDashboard.hide();
+  const breakdowns = job?.manifest_summary?.column_breakdowns;
+  if (!Array.isArray(breakdowns) || breakdowns.length === 0) {
+    _hideMetricsDashboard();
     return;
   }
-  metricsDashboard.render(dataset);
+  renderColumnOutcomeTable({
+    container: columnOutcomeContainer,
+    columns: breakdowns.map(_columnOutcome),
+  });
+  columnOutcomePanel.classList.remove('hidden');
 };
 
 const COMPLETE_STATUSES = new Set(['completed', 'succeeded', 'success', 'done']);
@@ -98,18 +116,16 @@ const _handleContinue = () => {
 };
 
 const _handleRetry = () => {
-  if (!state.payload && !state.requestBody) {
+  const fileId = state.requestBody?.file_id ?? state.job?.file_id ?? _getFileIdFromUrl();
+  if (!fileId) {
     return;
   }
-  /* Preserve requestBody before clearing job - startHarmonize uses it. */
-  const savedRequestBody = state.requestBody;
   state.job = null;
   _persistJobMeta(null);
   reviewButton.disabled = true;
   retryButton.classList.add('hidden');
   _clearError();
-  _hideJobMeta();
-  _startHarmonize(savedRequestBody);
+  _startHarmonize({ file_id: fileId });
 };
 
 const _persistJobMeta = (job) => {
@@ -137,12 +153,6 @@ const _updateTitleForStatus = (status) => {
     return;
   }
   if (stageThreeTitle) stageThreeTitle.textContent = 'Harmonizing';
-};
-
-const _hideJobMeta = () => {
-  if (jobIdDisplay) {
-    jobIdDisplay.classList.add('hidden');
-  }
 };
 
 const _formatElapsed = (elapsedSeconds) => {
@@ -182,25 +192,15 @@ const _clearPollTimer = () => {
   }
 };
 
-const _showJobId = (jobId) => {
-  if (jobIdDisplay && jobId) {
-    jobIdDisplay.textContent = `Job ID: ${jobId}`;
-    jobIdDisplay.classList.remove('hidden');
-  }
-};
-
 /* why: extract file_id from URL for job and payload validation. */
 const _getFileIdFromUrl = () => {
   const params = new URLSearchParams(window.location.search);
   return params.get('file_id');
 };
 
-const _getPayloadFileId = (payload) => payload?.request?.file_id ?? payload?.file_id ?? null;
-
-const _payloadMatchesCurrentFile = (payload) => {
-  const currentFileId = _getFileIdFromUrl();
-  const payloadFileId = _getPayloadFileId(payload);
-  return !currentFileId || !payloadFileId || currentFileId === payloadFileId;
+const _getJobIdFromUrl = () => {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('job_id');
 };
 
 /* why: update UI based on job status. */
@@ -212,7 +212,6 @@ const _renderJob = (job) => {
   const jobForSession = _jobWithCurrentFile(job);
   state.job = jobForSession;
   _persistJobMeta(jobForSession);
-  _showJobId(jobForSession.job_id);
 
   /* Default to 'running' when status is missing - job is in progress. */
   const status = jobForSession.status ?? 'running';
@@ -282,49 +281,19 @@ const _pollJob = async (jobId) => {
   }
 };
 
-/* why: extract session payload for harmonization request. */
-const _extractRequestPayload = () => {
-  let payload = readFromSession(STAGE_3_PAYLOAD_KEY);
-  if (payload && !_payloadMatchesCurrentFile(payload)) {
-    removeFromSession(STAGE_3_PAYLOAD_KEY);
-    payload = null;
-  }
-  let harmonizePayload = payload?.request ?? payload;
-  if (!harmonizePayload) {
-    const params = new URLSearchParams(window.location.search);
-    const fileId = params.get('file_id');
-    const dataModelKey = params.get('data_model_key') || config.dataModelKey;
-    const externalVersionNumber = params.get('external_version_number');
-    if (!fileId || !dataModelKey || !externalVersionNumber) {
-      return null;
-    }
-    harmonizePayload = {
-      file_id: fileId,
-      data_model_key: dataModelKey,
-      external_version_number: externalVersionNumber,
-      manual_overrides: {},
-      manifest: null,
-    };
-  }
-  state.payload = payload;
-  state.requestBody = harmonizePayload;
-  return harmonizePayload;
-};
-
 const _startHarmonize = async (payloadOverride = null) => {
   if (state.isProcessing) {
     return;
   }
-  const payload = payloadOverride || state.requestBody || _extractRequestPayload();
-  if (!payload) {
+  const fileId = payloadOverride?.file_id ?? state.requestBody?.file_id ?? _getFileIdFromUrl();
+  if (!fileId) {
     _toggleLoadingState(false);
     _toggleEmptyState(true);
-    _hideJobMeta();
     _hideMetricsDashboard();
     return;
   }
+  const payload = { file_id: fileId };
 
-  _hideJobMeta();
   state.requestBody = payload;
 
   _clearError();
@@ -352,7 +321,6 @@ const _startHarmonize = async (payloadOverride = null) => {
     console.error(error);
     _showError(error.message || 'Unexpected error while launching harmonization.');
     _toggleLoadingState(false);
-    _hideJobMeta();
     retryButton.classList.remove('hidden');
   } finally {
     state.isProcessing = false;
@@ -367,18 +335,31 @@ const _hydrateFromStoredJob = () => {
   }
 
   const currentFileId = _getFileIdFromUrl();
-  const storedFileId = job.file_id ?? state.requestBody?.file_id;
+  const requestedJobId = _getJobIdFromUrl();
+  const storedFileId = job.file_id;
 
-  // If URL has file_id and it doesn't match stored job, clear stale job
-  if (currentFileId && storedFileId && currentFileId !== storedFileId) {
+  if (
+    (currentFileId && storedFileId && currentFileId !== storedFileId)
+    || (requestedJobId && job.job_id !== requestedJobId)
+  ) {
     removeFromSession(STAGE_3_JOB_KEY);
     return false;
   }
 
-  if (!state.payload) {
-    _extractRequestPayload();
-  }
-  _renderJob(job);
+  state.requestBody = { file_id: currentFileId ?? storedFileId };
+  _renderJob(_jobWithCurrentFile(job));
+  return true;
+};
+
+const _resumeJobFromUrl = () => {
+  const fileId = _getFileIdFromUrl();
+  const jobId = _getJobIdFromUrl();
+  if (!fileId || !jobId) return false;
+
+  state.requestBody = { file_id: fileId };
+  _toggleEmptyState(false);
+  _toggleLoadingState(true);
+  void _pollJob(jobId);
   return true;
 };
 
@@ -396,7 +377,10 @@ const _init = () => {
   if (returnToStageTwo) {
     returnToStageTwo.addEventListener('click', () => {
       if (isSafeRelativeUrl(stageTwoUrl)) {
-        window.location.assign(stageTwoUrl);
+        const url = new URL(stageTwoUrl, window.location.origin);
+        const fileId = _getFileIdFromUrl();
+        if (fileId) url.searchParams.set('file_id', fileId);
+        window.location.assign(`${url.pathname}${url.search}`);
       }
     });
   }
@@ -406,14 +390,12 @@ const _init = () => {
     return;
   }
 
-  const payload = _extractRequestPayload();
-  if (!payload) {
-    _toggleLoadingState(false);
-    _toggleEmptyState(true);
+  if (_resumeJobFromUrl()) {
     return;
   }
 
-  _startHarmonize(payload);
+  _toggleLoadingState(false);
+  _toggleEmptyState(true);
 };
 
 _init();

@@ -2,8 +2,7 @@
 
 Axis of change: how a column's data is summarized for the takeover. Owns the
 ``ColumnProfile`` dataclass (canonical "what's in this column" representation),
-the API payload mirror, and the builders that tally values from iterables or
-stored tabular files.
+the API payload mirror, and the pure builder that tallies values.
 
 Invariant: ``sum(dv.count for dv in distinct_values) + null_count == total_rows``.
 """
@@ -13,9 +12,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
-from pathlib import Path
 
-from netrias_client import read_tabular
 from pydantic import BaseModel
 
 from src.domain.columns import ColumnKey, column_key_from_string
@@ -107,22 +104,6 @@ def build_column_profile(column_key: ColumnKey | str, values: Iterable[str | Non
         total_rows=total_rows,
         distinct_values=distinct_values,
         null_count=null_count,
-    )
-
-
-def build_column_profile_from_tabular(
-    tabular_path: Path,
-    column_key: ColumnKey | str,
-    sheet_name: str | None = None,
-) -> ColumnProfile | None:
-    """Build one column profile without requiring the analyze response cache."""
-    dataset = read_tabular(tabular_path, sheet_name=sheet_name)
-    column = next((candidate for candidate in dataset.columns if candidate.key == str(column_key)), None)
-    if column is None:
-        return None
-    return build_column_profile(
-        column.key,
-        (row[column.index] if column.index < len(row) else "" for row in dataset.rows),
     )
 
 

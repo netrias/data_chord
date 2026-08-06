@@ -1,42 +1,70 @@
-# Data Chord: Application Overview
+# Data Chord
 
-## What It Is
+Data Chord helps a curator turn a CSV, TSV, or Excel workbook into a reviewed,
+standardized dataset. It combines Netrias recommendations with explicit human
+decisions, then packages both the result and the evidence needed to understand
+how it was produced.
 
-Data Chord is a web-based data harmonization tool that transforms tabular data into standardized formats through a guided, human-in-the-loop workflow. It supports CSV, TSV, and XLSX uploads, and bridges raw research data with the Common Data Elements (CDEs) required by data repositories.
+## What the user does
 
-## The Problem
+1. **Upload and choose a model.** The user uploads a tabular dataset, chooses a
+   worksheet when needed, and selects a Common Data Element (CDE) model and
+   version.
 
-Research datasets use inconsistent terminology — a diagnosis might appear as "melanoma," "malignant melanoma," "MM," or "melanoma, primary" depending on the source. This makes data aggregation and analysis difficult.
+2. **Review column mappings.** Data Chord recommends a target CDE for each
+   source column. The user can accept it, choose another CDE, choose no mapping,
+   or rename the output column. Duplicate source headers remain separate.
 
-Manual curation is accurate but slow. Automated normalization is fast but opaque, with errors that need expert review anyway. Data Chord combines both: ML suggests standardized values with confidence scores, and curators focus their expertise on low-confidence suggestions while automation handles routine mappings.
+3. **Run harmonization.** Netrias standardizes values using the confirmed
+   column plan. The progress page can recover after a browser refresh, worker
+   restart, or application deployment because the accepted job is durable.
 
-## Workflow Stages
+4. **Review values.** The user reviews changes by column or row, sees confidence
+   and permissible-value context, opens source-row context, and applies manual
+   overrides. A stale browser tab cannot silently replace newer review work.
 
-1. **Upload** — User uploads a tabular file. Data Chord profiles columns and calls the CDE Recommendation API to suggest column-to-schema mappings.
-2. **Review Column Mappings** — Users accept, override, or skip the AI's column-to-CDE suggestions, with sample data shown for verification.
-3. **Harmonize** — The Netrias client SDK transforms each cell value to its standardized equivalent, producing harmonized values, confidence scores, and alternatives.
-4. **Review Results** — Batch-oriented review sorted by confidence (lowest first). Users approve high-confidence batches in bulk and manually review uncertain mappings.
-5. **Export** — Download the harmonized dataset and an audit bundle (column mapping plan, manual overrides, confidence distributions, model versions).
+5. **Summarize and download.** Data Chord shows what stayed the same, what
+   Netrias changed, and what the curator changed. The download contains the
+   final tabular data and its mapping and transformation audit artifacts.
 
-## Key Design Decisions
+## Behavior that matters
 
-- **Server-side rendering with HTMX** — FastAPI + Jinja2 templates + HTMX for interactivity, keeping the codebase simple with minimal JavaScript.
-- **Stage-based architecture** — Each stage is its own module with its own router, templates, and assets. Stages share code only through `domain/`, preventing circular dependencies.
-- **Manifest as source of truth** — The harmonization manifest (Parquet) captures every transformation decision and serves as the audit trail.
+- Supported inputs are CSV, TSV, and XLSX, including worksheet selection.
+- Column identity is positional, so duplicate or blank headers do not merge.
+- Character differences such as case, whitespace, and punctuation remain
+  meaningful.
+- An original value that already conforms to the target permissible values is
+  not replaced by an AI suggestion.
+- Confirmed model, mapping, and job state are durable; browser storage and
+  in-memory caches are accelerators only.
+- Every hosted workflow belongs to an authenticated principal, and
+  authorization is checked before cached or local data is used. Cognito users
+  are distinct; the optional trusted-network bypass deliberately shares one
+  fallback principal and is not per-person access control.
+- Repeating the same accepted harmonization request reuses its active job.
+  Competing or stale decisions return a visible conflict.
+- Active review overrides control export. The Parquet audit history remains
+  historical evidence even if the active overrides are deleted.
+- External failures are visible and retryable without exposing provider
+  exception details.
 
-## Technical Stack
+## Output
 
-| Layer | Technology |
-|-------|------------|
-| Backend | FastAPI (Python 3.13+) |
-| Templates | Jinja2 |
-| Interactivity | HTMX |
-| Data Processing | PyArrow (Parquet) |
-| Harmonization | Netrias Client SDK |
-| Deployment | Docker |
+The ZIP download keeps stable artifact names and includes:
 
-## See Also
+- the final CSV, TSV, or XLSX dataset;
+- a JSON representation of the harmonization manifest;
+- the CDE column-mapping audit document.
 
-- [README.md](README.md) — Setup and quick start
-- [ARCHITECTURE.md](ARCHITECTURE.md) — Architectural details
-- [workflow.md](workflow.md) — Complete workflow specification
+## Implementation in one paragraph
+
+Data Chord is a FastAPI application with server-rendered Jinja pages and small
+vanilla JavaScript modules. Domain types own workflow and transformation
+meaning. Application use cases coordinate the five stages. Netrias adapters and
+local/S3 storage implementations sit behind explicit boundaries. Hosted
+deployments run on ECS Fargate behind an authenticated Application Load
+Balancer, with durable workflow artifacts in S3.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for boundaries and state ownership,
+[README.md](README.md) for local setup, and [infra/README.md](infra/README.md)
+for hosted operations.

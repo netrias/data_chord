@@ -1,11 +1,5 @@
-"""Storage helpers for uploaded files and durable JSON sidecar artifacts."""
+"""Storage helpers for uploaded files and durable workflow artifacts."""
 
-from .file_store import FileStore
-from .file_types import (
-    FILE_NAME_TEMPLATE,
-    FileType,
-    build_file_name,
-)
 from .s3_workflow_storage import S3WorkflowClient, S3WorkflowStorage
 from .upload_storage import (
     UnsupportedUploadError,
@@ -25,6 +19,7 @@ from .workflow_storage import (
     VersionToken,
     WorkflowAccessDeniedError,
     WorkflowArtifactNotFoundError,
+    WorkflowArtifactSuffixError,
     WorkflowArtifactTypeError,
     WorkflowConflictError,
     WorkflowFile,
@@ -35,9 +30,6 @@ from .workflow_storage import (
 )
 
 __all__ = [
-    "FILE_NAME_TEMPLATE",
-    "FileStore",
-    "FileType",
     "LocalWorkflowStorage",
     "S3WorkflowClient",
     "S3WorkflowStorage",
@@ -54,6 +46,7 @@ __all__ = [
     "VersionToken",
     "WorkflowAccessDeniedError",
     "WorkflowArtifactNotFoundError",
+    "WorkflowArtifactSuffixError",
     "WorkflowArtifactTypeError",
     "WorkflowConflictError",
     "WorkflowFile",
@@ -61,6 +54,5 @@ __all__ = [
     "WorkflowNotFoundError",
     "WorkflowStorage",
     "WorkflowStorageError",
-    "build_file_name",
     "describe_constraints",
 ]

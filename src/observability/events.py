@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from collections.abc import Mapping, Sequence
 from contextvars import ContextVar, Token
@@ -18,30 +19,20 @@ from types import TracebackType
 from typing import Final
 from uuid import uuid4
 
+from src.domain.dataset_workflow_ids import DATASET_WORKFLOW_ID_PATTERN
 from src.storage import UserContext
 
 REQUEST_ID_HEADER: Final = "X-Request-ID"
 REQUEST_ID_PATTERN: Final = r"^[A-Za-z0-9_-]{8,64}$"
 CLIENT_EVENTS_ENDPOINT: Final = "/client-events"
-FILE_ID_PATTERN: Final = r"^[a-f0-9]{8,64}$"
+FILE_ID_PATTERN: Final = DATASET_WORKFLOW_ID_PATTERN
 
 _MAX_STRING_LENGTH: Final = 512
 _MAX_LIST_ITEMS: Final = 20
 _RESERVED_LOG_FIELDS = frozenset(logging.makeLogRecord({}).__dict__)
 _current_request_id: ContextVar[str | None] = ContextVar("request_id", default=None)
 _logger = logging.getLogger("src.observability.events")
-
-
-class WorkflowEventName(StrEnum):
-    UPLOAD_STARTED = "workflow.upload.started"
-    UPLOAD_COMPLETED = "workflow.upload.completed"
-    UPLOAD_FAILED = "workflow.upload.failed"
-    ANALYZE_STARTED = "workflow.analyze.started"
-    ANALYZE_COMPLETED = "workflow.analyze.completed"
-    ANALYZE_FAILED = "workflow.analyze.failed"
-    MAPPING_STARTED = "workflow.mapping.started"
-    MAPPING_COMPLETED = "workflow.mapping.completed"
-    MAPPING_FAILED = "workflow.mapping.failed"
+_request_id_pattern: Final = re.compile(REQUEST_ID_PATTERN)
 
 
 class ClientEventName(StrEnum):
@@ -81,7 +72,6 @@ class RequestTrace:
 
 @dataclass(frozen=True)
 class WorkflowEvent:
-    event_name: WorkflowEventName
     stage: WorkflowStage
     operation: WorkflowOperation
     outcome: WorkflowOutcome
@@ -164,7 +154,7 @@ def log_request(trace: RequestTrace) -> None:
 
 def log_workflow_event(event: WorkflowEvent, user: UserContext) -> None:
     extra = {
-        "event_name": event.event_name.value,
+        "event_name": f"workflow.{event.operation.value}.{event.outcome.value}",
         "stage": event.stage.value,
         "operation": event.operation.value,
         "outcome": event.outcome.value,
@@ -275,9 +265,7 @@ def _validation_error_text(value: object) -> str:
 
 
 def _is_safe_request_id(value: str) -> bool:
-    if not 8 <= len(value) <= 64:
-        return False
-    return all(char.isalnum() or char in {"-", "_"} for char in value)
+    return _request_id_pattern.fullmatch(value) is not None
 
 
 __all__ = [
@@ -289,7 +277,6 @@ __all__ = [
     "JsonLogFormatter",
     "RequestTrace",
     "WorkflowEvent",
-    "WorkflowEventName",
     "WorkflowOperation",
     "WorkflowOutcome",
     "WorkflowStage",

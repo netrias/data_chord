@@ -10,7 +10,6 @@ TARGET_NAME="$(require_target_name "${1:-}")"
 STAGE_NAME="$(require_stage_name "${2:-}")"
 require_configured_deployment "$TARGET_NAME" "$STAGE_NAME"
 MODE="${3:-deploy}"
-TARGET_CONFIG_FILE="$(target_config_path "$TARGET_NAME")"
 COMMON_TFVARS_FILE="$(common_tfvars_path "$TARGET_NAME")"
 STAGE_TFVARS_FILE="$(stage_tfvars_path "$TARGET_NAME" "$STAGE_NAME")"
 
@@ -21,10 +20,6 @@ export AWS_DEFAULT_REGION="$AWS_REGION_VALUE"
 require_command aws
 require_command git
 require_command tofu
-
-[[ -f "$TARGET_CONFIG_FILE" ]] || fail "Missing target contract: $TARGET_CONFIG_FILE"
-[[ -f "$COMMON_TFVARS_FILE" ]] || fail "Missing common config: $COMMON_TFVARS_FILE"
-[[ -f "$STAGE_TFVARS_FILE" ]] || fail "Missing stage config: $STAGE_TFVARS_FILE"
 
 tofu_args=(
   "-var-file=$COMMON_TFVARS_FILE"
@@ -51,14 +46,6 @@ git_image_tag() {
   git -C "$REPO_DIR" rev-parse --short=12 HEAD
 }
 
-require_immutable_image_tag() {
-  local image_tag="$1"
-
-  if [[ "$image_tag" == "latest" || ! "$image_tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
-    fail "Image tag must be an immutable Docker tag such as a short commit SHA, not '$image_tag'."
-  fi
-}
-
 remote_branch_matches_commit() {
   local branch="$1"
   local commit="$2"
@@ -78,9 +65,7 @@ ensure_deployable_git_state() {
 
   [[ -n "$branch" ]] || fail "Cannot deploy from a detached HEAD."
 
-  if [[ -n "$dirty_status" && "${DATA_CHORD_DEPLOY_ALLOW_DIRTY:-}" != "1" ]]; then
-    fail "Working tree has uncommitted changes. Commit them, or rerun with DATA_CHORD_DEPLOY_ALLOW_DIRTY=1 to deploy the current HEAD anyway."
-  fi
+  [[ -z "$dirty_status" ]] || fail "Working tree has uncommitted changes. Commit them before deploying."
 
   # CodeBuild pulls from GitHub, so local-only commits would build a different
   # image than the one this script is about to deploy.
@@ -93,14 +78,12 @@ ensure_deployable_git_state() {
 
 apply_stack() {
   local image_tag="$1"
-  require_immutable_image_tag "$image_tag"
   log "Applying OpenTofu stack for $TARGET_NAME/$STAGE_NAME with image tag $image_tag"
   tofu -chdir="$INFRA_DIR" apply -input=false -auto-approve "${tofu_args[@]}" "-var=image_tag=$image_tag"
 }
 
 apply_build_prerequisites() {
   local image_tag="$1"
-  require_immutable_image_tag "$image_tag"
   log "Reconciling build prerequisites for $TARGET_NAME/$STAGE_NAME"
   tofu -chdir="$INFRA_DIR" apply \
     -input=false \
@@ -121,7 +104,6 @@ ensure_build_prerequisites() {
 
 plan_stack() {
   local image_tag="$1"
-  require_immutable_image_tag "$image_tag"
   log "Planning OpenTofu stack for $TARGET_NAME/$STAGE_NAME with image tag $image_tag"
   tofu -chdir="$INFRA_DIR" plan -input=false "${tofu_args[@]}" "-var=image_tag=$image_tag"
 }
@@ -212,24 +194,51 @@ start_build() {
     --output text
 }
 
-ensure_image() {
-  local image_tag="$1"
-  local repository_url repository_name output build_id
+ecr_repository_name() {
+  local repository_url
 
   repository_url="$(tofu_output ecr_repository_url)"
-  [[ -n "$repository_url" ]] || fail "ECR repository output is not available after the build-prerequisite apply."
-  repository_name="${repository_url##*/}"
+  [[ -n "$repository_url" ]] || fail "ECR repository output is not available. Apply the build prerequisites first."
+  printf '%s\n' "${repository_url##*/}"
+}
+
+image_exists() {
+  local image_tag="$1"
+  local repository_name="$2"
+  local output
 
   if output="$(aws ecr describe-images --repository-name "$repository_name" --image-ids "imageTag=$image_tag" 2>&1)"; then
-    log "Immutable image already exists; reusing $repository_name:$image_tag"
     return 0
   fi
   if [[ "$output" != *"ImageNotFoundException"* ]]; then
     fail "Could not check ECR image '$repository_name:$image_tag': $output"
   fi
 
+  return 1
+}
+
+ensure_image() {
+  local image_tag="$1"
+  local repository_name build_id
+
+  repository_name="$(ecr_repository_name)"
+  if image_exists "$image_tag" "$repository_name"; then
+    log "Immutable image already exists; reusing $repository_name:$image_tag"
+    return 0
+  fi
+
   build_id="$(start_build)"
   watch_build "$build_id"
+}
+
+require_existing_image() {
+  local image_tag="$1"
+  local repository_name
+
+  repository_name="$(ecr_repository_name)"
+  image_exists "$image_tag" "$repository_name" ||
+    fail "ECR image '$repository_name:$image_tag' does not exist. Build it before an infrastructure-only deploy."
+  log "Verified existing ECR image: $repository_name:$image_tag"
 }
 
 print_build_logs_hint() {
@@ -487,6 +496,7 @@ run_infra_deploy() {
   load_auth_bypass_cidrs
 
   image_tag="$(infra_image_tag)"
+  require_existing_image "$image_tag"
   before_task_definition="$(current_task_definition_arn)"
   apply_stack "$image_tag"
   after_task_definition="$(current_task_definition_arn)"
@@ -555,7 +565,7 @@ case "$MODE" in
   output-url)
     require_deployer_identity "$TARGET_NAME"
     init_tofu "$TARGET_NAME" "$STAGE_NAME" >/dev/null
-    tofu_output app_url
+    required_tofu_output app_url
     ;;
   *)
     fail "Unknown deploy mode: $MODE"

@@ -10,8 +10,6 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import NotRequired, TypedDict
 
-import pyarrow as pa
-
 from src.domain.columns import ColumnKey, column_key_for_index
 
 
@@ -137,28 +135,6 @@ def get_latest_override_value(overrides: list[ManualOverride]) -> str | None:
     return overrides[-1].value
 
 
-def get_manifest_schema() -> pa.Schema:
-    override_struct = pa.struct([
-        ("user_id", pa.string()),
-        ("timestamp", pa.string()),
-        ("value", pa.string()),
-    ])
-
-    return pa.schema([
-        ("job_id", pa.string()),
-        ("column_id", pa.int64()),
-        ("column_name", pa.string()),
-        ("to_harmonize", pa.string()),
-        ("top_harmonization", pa.string()),
-        ("ontology_id", pa.string()),
-        ("top_harmonizations", pa.list_(pa.string())),
-        ("confidence_score", pa.float64()),
-        ("error", pa.string()),
-        ("row_indices", pa.list_(pa.int64())),
-        ("manual_overrides", pa.list_(override_struct)),
-    ])
-
-
 __all__ = [
     "AlternativeEntry",
     "COMPLETENESS_HIGH_THRESHOLD",
@@ -174,6 +150,5 @@ __all__ = [
     "completeness_bucket",
     "confidence_bucket",
     "get_latest_override_value",
-    "get_manifest_schema",
     "is_value_changed",
 ]

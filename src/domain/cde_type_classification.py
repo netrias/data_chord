@@ -7,7 +7,9 @@ trust it.
 
 from __future__ import annotations
 
-from src.domain.cde import CdeType
+from src.domain.cde import CDEInfo, CdeType
+from src.domain.cde_catalog import CdeCatalog
+from src.domain.cde_pv_catalog import CdePvCatalog
 
 
 def classify_cde(
@@ -24,3 +26,28 @@ def classify_cde(
     if has_pvs is False:
         return CdeType.PASSTHROUGH
     return CdeType.PV
+
+
+def refine_cde_types_from_pvs(
+    catalog: CdeCatalog,
+    pv_sets: CdePvCatalog,
+) -> CdeCatalog:
+    """Return CDE types refined by PV sets that were fetched successfully."""
+    refined: list[CDEInfo] = []
+    for cde in catalog:
+        if not pv_sets.has(cde.cde_key):
+            refined.append(cde)
+            continue
+        cde_type = classify_cde(has_pvs=bool(pv_sets.get(cde.cde_key)))
+        if cde_type == cde.cde_type:
+            refined.append(cde)
+            continue
+        refined.append(
+            CDEInfo(
+                cde_id=cde.cde_id,
+                cde_key=cde.cde_key,
+                description=cde.description,
+                cde_type=cde_type,
+            )
+        )
+    return CdeCatalog.from_cdes(refined)

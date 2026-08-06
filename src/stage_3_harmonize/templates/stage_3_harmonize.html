@@ -59,9 +59,9 @@
         </header>
 
         <div id="stageThreeEmptyState" class="stage-empty hidden">
-          <p class="stage-empty-title">We need mapping context</p>
+          <p class="stage-empty-title">We need a harmonization job</p>
           <p class="stage-empty-copy">
-            Head back to Stage 2 to confirm mappings, then launch harmonization again.
+            Head back to Stage 2 to confirm your mappings and start harmonization.
           </p>
           <button id="returnToStageTwo" class="netrias-btn" type="button">Back to mappings</button>
         </div>
@@ -118,7 +118,13 @@
           <p id="harmonizeProgressMessage" class="loading-message loading-message--secondary">This usually takes 1-2 minutes.</p>
         </div>
 
-        <div class="metrics-grid hidden" data-metrics-grid aria-live="polite"></div>
+        <section class="column-outcome-panel hidden" data-column-outcome-panel aria-live="polite">
+          <header class="column-outcome-panel__header">
+            <h3>Changes by source column</h3>
+            <p>Counts include exact character changes, including case and whitespace.</p>
+          </header>
+          <div data-column-outcome-table></div>
+        </section>
 
         <p id="stageThreeError" class="stage-error hidden" role="alert"></p>
 

@@ -81,6 +81,7 @@
             <div id="mappingRows"></div>
           </div>
           <div id="mappingEmptyState" class="mapping-empty hidden"></div>
+          <p id="harmonizeError" class="stage-error hidden" role="alert"></p>
         </div>
       </section>
     </main>
@@ -93,12 +94,12 @@
     <script>
       window.stageTwoConfig = {
         analyzeEndpoint: "{{ request.url_for('stage_one_upload_analyze') }}",
-        mappingChoicesEndpoint: "{{ request.url_for('stage_two_save_mapping_choices') }}",
+        choicesEndpoint: "{{ request.url_for('stage_two_save_mapping_choices') }}",
+        harmonizeEndpoint: "{{ request.url_for('stage_three_harmonize') }}",
         columnDetailBase: "/stage-2/column-detail",
         dataModelKey: "{{ default_data_model_key }}",
         externalVersionNumber: {{ default_external_version_number|tojson }},
         cdeCatalog: {{ cde_catalog | tojson }},
-        noMappingLabel: {{ no_mapping_label | tojson }},
         stageThreeUrl: "{{ request.url_for('stage_three_entry') }}",
       };
     </script>

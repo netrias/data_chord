@@ -39,7 +39,10 @@ const _changesFor = (rowCount, headers) => {
   const changes = {};
   for (let row = 0; row < rowCount; row += 1) {
     changes[row] = Object.fromEntries(
-      headers.map((header) => [header, `${header}_harmonized_${row + 1}`]),
+      headers.map((header, index) => [
+        `col_${String(index).padStart(4, '0')}`,
+        `${header}_harmonized_${row + 1}`,
+      ]),
     );
   }
   return changes;
@@ -184,7 +187,8 @@ test('performance journey: Stage 4 and Stage 5 user-perceived timings', async ({
   let stage5Report = await _readReport(page);
 
   // Then: summary UI is usable and the download operation is timed through the button.
-  await expect(page.locator('#summaryGrid')).toBeVisible();
+  await expect(page.locator('.quality-certificate')).toBeVisible();
+  await expect(page.locator('#summaryGrid .column-outcome-table')).toBeVisible();
   const downloadPromise = page.waitForEvent('download');
   await page.click('#downloadResults');
   await downloadPromise;

@@ -20,6 +20,7 @@ from src.domain.manifest.models import (
     confidence_bucket,
     is_value_changed,
 )
+from src.persistence.manifest_schema import MANUAL_OVERRIDES_FIELD, get_manifest_schema
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +32,21 @@ def read_manifest_parquet(manifest_path: Path) -> ManifestSummary | None:
 
     try:
         table = pq.read_table(manifest_path)
+        _validate_manifest_schema(table.schema)
         rows = _parse_manifest_rows(table)
         return _summarize_manifest(rows)
     except Exception as exc:
         logger.exception("Failed to read manifest parquet", exc_info=exc, extra={"path": str(manifest_path)})
         return None
+
+
+def _validate_manifest_schema(actual: pa.Schema) -> None:
+    """Require the provider fields while allowing Arrow's compatible numeric widths."""
+    required_fields = set(get_manifest_schema().names) - {MANUAL_OVERRIDES_FIELD}
+    missing_fields = required_fields - set(actual.names)
+    if missing_fields:
+        missing = ", ".join(sorted(missing_fields))
+        raise ValueError(f"Manifest is missing required fields: {missing}")
 
 
 def _parse_manifest_rows(table: pa.Table) -> list[ManifestRow]:
@@ -62,7 +73,7 @@ def _extract_row(batch: pa.RecordBatch, index: int) -> ManifestRow:
         confidence_score=_get_float_nullable(batch, "confidence_score", index),
         error=_get_string_nullable(batch, "error", index),
         row_indices=_get_int_list(batch, "row_indices", index),
-        manual_overrides=_get_manual_overrides(batch, "manual_overrides", index),
+        manual_overrides=_get_manual_overrides(batch, MANUAL_OVERRIDES_FIELD, index),
     )
 
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 from collections.abc import Generator, Mapping
 from contextlib import AbstractContextManager, contextmanager
@@ -44,7 +45,6 @@ class WorkflowFile(str, Enum):
 
     ORIGINAL_UPLOAD = "original_upload"
     UPLOAD_METADATA = "upload_metadata"
-    MAPPING_MANIFEST = "mapping_manifest"
     HARMONIZATION_MANIFEST_BASE = "harmonization_manifest_base"
     HARMONIZED_OUTPUT = "harmonized_output"
     PV_MANIFEST = "pv_manifest"
@@ -52,37 +52,17 @@ class WorkflowFile(str, Enum):
     STAGE_THREE_JOB = "stage_three_job"
     WORKFLOW_STATE = "workflow_state"
     REVIEW_OVERRIDES = "review_overrides"
-    REVIEW_AUDIT = "review_audit"
-    FINAL_BUNDLE = "final_bundle"
 
     @property
     def is_json(self) -> bool:
         return self in {
             WorkflowFile.UPLOAD_METADATA,
-            WorkflowFile.MAPPING_MANIFEST,
             WorkflowFile.PV_MANIFEST,
             WorkflowFile.CDE_MAPPING,
             WorkflowFile.STAGE_THREE_JOB,
             WorkflowFile.WORKFLOW_STATE,
             WorkflowFile.REVIEW_OVERRIDES,
-            WorkflowFile.REVIEW_AUDIT,
         }
-
-    @property
-    def is_mutable(self) -> bool:
-        # Upload originals and final bundles are create-once so later stages cannot
-        # silently replace evidence that earlier stages or downloads depend on.
-        return self in {
-            WorkflowFile.UPLOAD_METADATA,
-            WorkflowFile.MAPPING_MANIFEST,
-            WorkflowFile.CDE_MAPPING,
-            WorkflowFile.STAGE_THREE_JOB,
-            WorkflowFile.PV_MANIFEST,
-            WorkflowFile.WORKFLOW_STATE,
-            WorkflowFile.REVIEW_OVERRIDES,
-            WorkflowFile.REVIEW_AUDIT,
-        }
-
 
 @dataclass(frozen=True)
 class UserContext:
@@ -120,7 +100,13 @@ class WorkflowMetadata:
         schema_version = payload.get(_FIELD_STORAGE_SCHEMA_VERSION)
         if not isinstance(file_id, str) or not isinstance(owner_user_id, str):
             return None
-        if created_at is None or not isinstance(schema_version, int):
+        if (
+            created_at is None
+            or isinstance(schema_version, bool)
+            or not isinstance(schema_version, int)
+        ):
+            return None
+        if schema_version != STORAGE_SCHEMA_VERSION:
             return None
         return cls(
             dataset_workflow_id=dataset_workflow_id_from_value(file_id),
@@ -184,6 +170,10 @@ class WorkflowArtifactNotFoundError(WorkflowStorageError):
 
 class WorkflowArtifactTypeError(WorkflowStorageError):
     """Raised when a JSON operation targets a file artifact, or vice versa."""
+
+
+class WorkflowArtifactSuffixError(WorkflowStorageError):
+    """Raised when a file artifact has no usable suffix."""
 
 
 class WorkflowStorage(Protocol):
@@ -298,13 +288,15 @@ class LocalWorkflowStorage:
     ) -> StoredArtifact:
         self._require_artifact_kind(kind)
         self._require_access(user, file_id)
-        if not source_path.is_file():
-            raise WorkflowArtifactNotFoundError(f"Source artifact not found: {source_path}")
-        path = self._artifact_path(file_id, kind, source_path.suffix)
-        if path.exists():
+        suffix = artifact_suffix(source_path)
+        if self._existing_artifact_paths(file_id, kind):
             raise WorkflowConflictError(f"Artifact already exists: {kind.value}")
+        path = self._artifact_path(file_id, kind, suffix)
         path.parent.mkdir(parents=True, exist_ok=True)
-        self._copy_artifact_atomic(source_path, path)
+        try:
+            self._copy_artifact_create_once(source_path, path)
+        except FileExistsError as exc:
+            raise WorkflowConflictError(f"Artifact already exists: {kind.value}") from exc
         return StoredArtifact(kind=kind, version=_version_for_file(path), suffix=path.suffix)
 
     def write_artifact(
@@ -316,15 +308,20 @@ class LocalWorkflowStorage:
     ) -> StoredArtifact:
         self._require_artifact_kind(kind)
         self._require_access(user, file_id)
-        if not source_path.is_file():
-            raise WorkflowArtifactNotFoundError(f"Source artifact not found: {source_path}")
-        path = self._artifact_path(file_id, kind, source_path.suffix)
+        suffix = artifact_suffix(source_path)
+        existing_paths = self._existing_artifact_paths(file_id, kind)
+        if len(existing_paths) > 1:
+            raise WorkflowConflictError(f"Artifact has multiple suffix variants: {kind.value}")
+        if existing_paths:
+            existing_path = existing_paths[0]
+            if kind == WorkflowFile.ORIGINAL_UPLOAD:
+                raise WorkflowConflictError(f"Artifact is create-once: {kind.value}")
+            if existing_path.suffix.lower() != suffix:
+                raise WorkflowConflictError(f"Artifact suffix changed: {kind.value}")
+            path = existing_path
+        else:
+            path = self._artifact_path(file_id, kind, suffix)
         path.parent.mkdir(parents=True, exist_ok=True)
-        # A mutable artifact may change suffix after processing, so remove stale
-        # siblings before writing the replacement named by the new source file.
-        for existing_path in self._existing_artifact_paths(file_id, kind):
-            if existing_path != path:
-                existing_path.unlink(missing_ok=True)
         self._copy_artifact_atomic(source_path, path)
         return StoredArtifact(kind=kind, version=_version_for_file(path), suffix=path.suffix)
 
@@ -356,12 +353,21 @@ class LocalWorkflowStorage:
 
     def _existing_artifact_path(self, file_id: str, kind: WorkflowFile) -> Path:
         paths = self._existing_artifact_paths(file_id, kind)
-        if len(paths) != 1:
+        if not paths:
             raise WorkflowArtifactNotFoundError(f"Artifact not found: {kind.value}")
+        if len(paths) > 1:
+            raise WorkflowConflictError(f"Artifact has multiple suffix variants: {kind.value}")
         return paths[0]
 
     def _existing_artifact_paths(self, file_id: str, kind: WorkflowFile) -> list[Path]:
-        return sorted((self._path_for_workflow(file_id) / _ARTIFACT_DIR).glob(f"{kind.value}*"))
+        artifact_dir = self._path_for_workflow(file_id) / _ARTIFACT_DIR
+        if not artifact_dir.is_dir():
+            return []
+        return sorted(
+            path
+            for path in artifact_dir.iterdir()
+            if path.is_file() and artifact_suffix_from_name(kind, path.name) is not None
+        )
 
     def _require_access(self, user: UserContext, file_id: str) -> WorkflowMetadata:
         metadata_path = self._metadata_path(file_id)
@@ -386,8 +392,6 @@ class LocalWorkflowStorage:
             if expected_version is not None:
                 raise WorkflowConflictError(f"Artifact does not exist: {kind.value}")
             return
-        if not kind.is_mutable:
-            raise WorkflowConflictError(f"Artifact is create-once: {kind.value}")
         current_version = _version_for_file(path)
         if expected_version is None or expected_version != current_version:
             raise WorkflowConflictError(f"Artifact version changed: {kind.value}")
@@ -404,8 +408,20 @@ class LocalWorkflowStorage:
     def _copy_artifact_atomic(self, source_path: Path, path: Path) -> None:
         with NamedTemporaryFile("wb", dir=path.parent, delete=False) as temp_file:
             temp_path = Path(temp_file.name)
-        shutil.copy2(source_path, temp_path)
-        temp_path.replace(path)
+        try:
+            shutil.copy2(source_path, temp_path)
+            temp_path.replace(path)
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+    def _copy_artifact_create_once(self, source_path: Path, path: Path) -> None:
+        with NamedTemporaryFile("wb", dir=path.parent, delete=False) as temp_file:
+            temp_path = Path(temp_file.name)
+        try:
+            shutil.copy2(source_path, temp_path)
+            os.link(temp_path, path)
+        finally:
+            temp_path.unlink(missing_ok=True)
 
     def _require_json_kind(self, kind: WorkflowFile) -> None:
         if not kind.is_json:
@@ -420,6 +436,25 @@ def _version_for_file(path: Path) -> VersionToken:
     # Content hashes give local files the same optimistic-write shape as S3
     # ETags without relying on filesystem timestamps.
     return VersionToken(f"{_SHA256_PREFIX}{_sha256_for_file(path)}")
+
+
+def artifact_suffix(source_path: Path) -> str:
+    if not source_path.is_file():
+        raise WorkflowArtifactNotFoundError(f"Source artifact not found: {source_path}")
+    suffix = source_path.suffix.lower()
+    if not suffix or suffix == "." or "/" in suffix or "\\" in suffix:
+        raise WorkflowArtifactSuffixError(f"Artifact source has an invalid suffix: {source_path}")
+    return suffix
+
+
+def artifact_suffix_from_name(kind: WorkflowFile, name: str) -> str | None:
+    path = Path(name)
+    if path.name != name or path.stem != kind.value:
+        return None
+    suffix = path.suffix.lower()
+    if not suffix or suffix == "." or "/" in suffix or "\\" in suffix:
+        return None
+    return suffix
 
 
 def _sha256_for_file(path: Path) -> str:
@@ -447,6 +482,7 @@ __all__ = [
     "VersionToken",
     "WorkflowAccessDeniedError",
     "WorkflowArtifactNotFoundError",
+    "WorkflowArtifactSuffixError",
     "WorkflowArtifactTypeError",
     "WorkflowConflictError",
     "WorkflowFile",

@@ -67,13 +67,11 @@ jobs:
         # Security: npm 11.10+ enforces min-release-age from .npmrc.
         run: npm install -g npm@11.11.1
 
-      - name: Install JS test dependencies
+      - name: Install npm dependencies
         run: npm ci
-        working-directory: tests/js
 
       - name: Run JS tests
         run: npm test
-        working-directory: tests/js
 
   test:
     runs-on: ubuntu-latest
