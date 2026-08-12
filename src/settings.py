@@ -27,6 +27,7 @@ _DATA_CHORD_S3_BUCKET_VAR = "DATA_CHORD_S3_BUCKET"
 _DATA_CHORD_S3_PREFIX_VAR = "DATA_CHORD_S3_PREFIX"
 _DATA_CHORD_NETRIAS_ENVIRONMENT_VAR = "DATA_CHORD_NETRIAS_ENVIRONMENT"
 _DATA_CHORD_NETRIAS_HARMONIZATION_URL_VAR = "DATA_CHORD_NETRIAS_HARMONIZATION_URL"
+_DATA_CHORD_NETRIAS_DATA_MODEL_STORE_URL_VAR = "DATA_CHORD_NETRIAS_DATA_MODEL_STORE_URL"
 _DATA_CHORD_NETRIAS_TIMEOUT_SECONDS_VAR = "DATA_CHORD_NETRIAS_TIMEOUT_SECONDS"
 _DATA_CHORD_ALB_ARN_VAR = "DATA_CHORD_ALB_ARN"
 _DEFAULT_STORAGE_BACKEND = StorageBackend.LOCAL
@@ -76,6 +77,14 @@ def get_netrias_environment_name() -> str:
 
 def get_netrias_harmonization_url() -> str | None:
     raw_url = os.getenv(_DATA_CHORD_NETRIAS_HARMONIZATION_URL_VAR)
+    if raw_url is None:
+        return None
+    url = raw_url.strip()
+    return url or None
+
+
+def get_netrias_data_model_store_url() -> str | None:
+    raw_url = os.getenv(_DATA_CHORD_NETRIAS_DATA_MODEL_STORE_URL_VAR)
     if raw_url is None:
         return None
     url = raw_url.strip()

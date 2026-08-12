@@ -29,15 +29,6 @@ jobs:
       - name: Test OpenTofu behavior
         run: tofu -chdir=infra test
 
-      - name: Test deployment contract
-        run: |
-          bash infra/tests/deployment_contract_test.sh
-          bash infra/tests/deployment_flow_test.sh
-          bash infra/tests/secret_preparation_test.sh
-
-      - name: Check shell syntax
-        run: bash -n infra/scripts/*.sh infra/tests/*.sh
-
   js-check:
     runs-on: ubuntu-latest
     steps:
@@ -113,7 +104,7 @@ jobs:
         run: uv sync --frozen --all-extras
 
       - name: Run basedpyright
-        run: uv run basedpyright --level error src/
+        run: uv run basedpyright --level error src/ deploy/
 
   lint:
     runs-on: ubuntu-latest
@@ -134,7 +125,7 @@ jobs:
         run: uv sync --frozen --all-extras
 
       - name: Run ruff check
-        run: uv run ruff check src/ tests/
+        run: uv run ruff check src/ deploy/ tests/
 
       - name: Run vulture
         run: uv run vulture
@@ -158,7 +149,7 @@ jobs:
         run: uv sync --frozen --all-extras
 
       - name: Run bandit
-        run: uv run bandit -r src/ -c pyproject.toml
+        run: uv run bandit -r src/ deploy/ -c pyproject.toml
 
       - name: Run dependency audit
         # GHSA-6v7p-g79w-8964 affects msgpack via pip-audit's CacheControl

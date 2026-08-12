@@ -16,7 +16,8 @@ data "aws_secretsmanager_secret" "netrias_api_key" {
 }
 
 locals {
-  name_prefix      = substr(lower(replace("${var.project_name}-${var.environment}", "_", "-")), 0, 32)
+  project_name     = "data-chord"
+  name_prefix      = substr(lower(replace("${local.project_name}-${var.environment}", "_", "-")), 0, 32)
   hosted_zone_name = trimsuffix(var.hosted_zone_name, ".")
   # Prefer a managed subdomain when the caller supplies a hosted zone but not a
   # final domain name; this keeps staging/prod setup small for internal deploys.
@@ -38,7 +39,8 @@ locals {
   })
   alert_actions = [aws_sns_topic.alerts.arn]
   common_tags = merge(var.tags, {
-    Project     = var.project_name
+    Project     = local.project_name
+    Target      = var.target_slug
     Environment = var.environment
     ManagedBy   = "opentofu"
   })
@@ -54,7 +56,7 @@ data "aws_route53_zone" "app" {
 resource "aws_security_group" "alb" {
   name        = "${local.name_prefix}-alb"
   description = "Public access to the Data Chord load balancer"
-  vpc_id      = var.vpc_id
+  vpc_id      = aws_vpc.app.id
 
   ingress {
     description = "HTTP redirect"
@@ -86,7 +88,7 @@ resource "aws_security_group" "alb" {
 resource "aws_security_group" "task" {
   name        = "${local.name_prefix}-task"
   description = "Only the ALB can reach the app task"
-  vpc_id      = var.vpc_id
+  vpc_id      = aws_vpc.app.id
 
   ingress {
     description     = "App traffic from ALB"
@@ -105,61 +107,6 @@ resource "aws_security_group" "task" {
   }
 
   tags = local.common_tags
-}
-
-resource "aws_security_group" "secrets_endpoint" {
-  count = var.secretsmanager_vpc_endpoint_id == "" ? 0 : 1
-
-  name        = "${local.name_prefix}-secrets-endpoint"
-  description = "Secrets Manager VPC endpoint access from Data Chord tasks"
-  vpc_id      = var.vpc_id
-
-  ingress {
-    description     = "Secrets Manager HTTPS from app tasks"
-    from_port       = 443
-    to_port         = 443
-    protocol        = "tcp"
-    security_groups = [aws_security_group.task.id]
-  }
-
-  dynamic "ingress" {
-    for_each = var.additional_secretsmanager_client_security_group_ids
-
-    content {
-      description     = "Secrets Manager HTTPS from additional client"
-      from_port       = 443
-      to_port         = 443
-      protocol        = "tcp"
-      security_groups = [ingress.value]
-    }
-  }
-
-  egress {
-    description = "Outbound"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = local.common_tags
-}
-
-resource "aws_vpc_endpoint_security_group_association" "secretsmanager_tasks" {
-  count = var.secretsmanager_vpc_endpoint_id == "" ? 0 : 1
-
-  vpc_endpoint_id   = var.secretsmanager_vpc_endpoint_id
-  security_group_id = aws_security_group.secrets_endpoint[0].id
-}
-
-moved {
-  from = aws_security_group.secrets_endpoint
-  to   = aws_security_group.secrets_endpoint[0]
-}
-
-moved {
-  from = aws_vpc_endpoint_security_group_association.secretsmanager_tasks
-  to   = aws_vpc_endpoint_security_group_association.secretsmanager_tasks[0]
 }
 
 resource "aws_s3_bucket" "workflow" {
@@ -556,7 +503,7 @@ resource "aws_iam_role" "application_task_execution" {
 
 resource "aws_iam_role_policy_attachment" "application_task_execution" {
   role       = aws_iam_role.application_task_execution.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+  policy_arn = "arn:${var.aws_partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
 resource "aws_iam_role_policy" "application_task_execution_secrets" {
@@ -672,7 +619,7 @@ resource "aws_ecs_task_definition" "application" {
         },
         {
           name  = "DATA_CHORD_NETRIAS_ENVIRONMENT"
-          value = var.environment
+          value = var.netrias_environment
         },
         {
           name  = "DATA_CHORD_NETRIAS_TIMEOUT_SECONDS"
@@ -681,6 +628,10 @@ resource "aws_ecs_task_definition" "application" {
         {
           name  = "DATA_CHORD_ASSET_VERSION"
           value = var.image_tag
+        },
+        {
+          name  = "DATA_CHORD_NETRIAS_DATA_MODEL_STORE_URL"
+          value = var.data_model_store_url
         },
         {
           name  = "DATA_CHORD_ALB_ARN"
@@ -724,7 +675,7 @@ resource "aws_lb" "app" {
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
-  subnets            = var.public_subnet_ids
+  subnets            = aws_subnet.public[*].id
 
   access_logs {
     bucket  = aws_s3_bucket.alb_logs.bucket
@@ -734,7 +685,10 @@ resource "aws_lb" "app" {
 
   tags = local.common_tags
 
-  depends_on = [aws_s3_bucket_policy.alb_logs]
+  depends_on = [
+    aws_route_table_association.public,
+    aws_s3_bucket_policy.alb_logs,
+  ]
 }
 
 resource "aws_lb_target_group" "app" {
@@ -742,7 +696,7 @@ resource "aws_lb_target_group" "app" {
   port                 = var.container_port
   protocol             = "HTTP"
   target_type          = "ip"
-  vpc_id               = var.vpc_id
+  vpc_id               = aws_vpc.app.id
   deregistration_delay = var.target_group_deregistration_delay_seconds
 
   health_check {
@@ -925,7 +879,7 @@ resource "aws_ecs_service" "app" {
   }
 
   network_configuration {
-    subnets          = var.public_subnet_ids
+    subnets          = aws_subnet.public[*].id
     security_groups  = [aws_security_group.task.id]
     assign_public_ip = true
   }

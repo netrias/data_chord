@@ -6,6 +6,12 @@ mock_provider "aws" {
     }
   }
 
+  mock_data "aws_availability_zones" {
+    defaults = {
+      names = ["us-east-2a", "us-east-2b", "us-east-2c"]
+    }
+  }
+
   mock_data "aws_secretsmanager_secret" {
     defaults = {
       arn = "arn:aws:secretsmanager:us-east-2:084828580051:secret:data-chord/test"
@@ -71,14 +77,16 @@ mock_provider "aws" {
 }
 
 variables {
+  target_slug                   = "test"
+  aws_partition                 = "aws"
   expected_account_id           = "084828580051"
   aws_region                    = "us-east-2"
   application_role_boundary_arn = "arn:aws:iam::084828580051:policy/datachord-application-role-boundary"
   application_role_path         = "/application/"
 
   environment                 = "qa"
-  vpc_id                      = "vpc-0123456789abcdef0"
-  public_subnet_ids           = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
+  netrias_environment         = "staging"
+  data_model_store_url        = "https://model.example.com"
   certificate_arn             = "arn:aws:acm:us-east-2:084828580051:certificate/00000000-0000-0000-0000-000000000000"
   domain_name                 = "data-chord.example.com"
   hosted_zone_name            = ""
@@ -230,45 +238,39 @@ run "codebuild_reads_the_public_repository_without_authentication" {
   }
 }
 
-run "endpoint_resources_are_absent_without_shared_endpoint" {
+run "application_owns_its_network" {
   command = plan
 
-  variables {
-    secretsmanager_vpc_endpoint_id = ""
+  assert {
+    condition = (
+      aws_security_group.alb.vpc_id == aws_vpc.app.id &&
+      aws_security_group.task.vpc_id == aws_vpc.app.id &&
+      aws_lb.app.subnets == toset(aws_subnet.public[*].id) &&
+      aws_ecs_service.app.network_configuration[0].subnets == toset(aws_subnet.public[*].id)
+    )
+    error_message = "Data Chord networking must use the VPC and public subnets owned by this stack."
   }
 
   assert {
     condition = (
-      length(aws_security_group.secrets_endpoint) == 0 &&
-      length(aws_vpc_endpoint_security_group_association.secretsmanager_tasks) == 0
+      length(aws_subnet.public) == 2 &&
+      alltrue([for subnet in aws_subnet.public : subnet.map_public_ip_on_launch])
     )
-    error_message = "Endpoint resources must be absent when the target has no shared endpoint."
+    error_message = "Data Chord must create two public application subnets."
   }
 }
 
-run "endpoint_resources_attach_when_shared_endpoint_exists" {
+run "runtime_receives_the_foundation_data_model_store" {
   command = plan
-
-  variables {
-    secretsmanager_vpc_endpoint_id = "vpce-0123456789abcdef0"
-  }
 
   assert {
-    condition = (
-      length(aws_security_group.secrets_endpoint) == 1 &&
-      length(aws_vpc_endpoint_security_group_association.secretsmanager_tasks) == 1
+    condition = contains(
+      jsondecode(aws_ecs_task_definition.application.container_definitions)[0].environment,
+      {
+        name  = "DATA_CHORD_NETRIAS_DATA_MODEL_STORE_URL"
+        value = var.data_model_store_url
+      }
     )
-    error_message = "Endpoint resources must attach when the target provides a shared endpoint."
+    error_message = "The application must receive the foundation data model store URL."
   }
-}
-
-run "additional_endpoint_clients_require_shared_endpoint" {
-  command = plan
-
-  variables {
-    secretsmanager_vpc_endpoint_id                      = ""
-    additional_secretsmanager_client_security_group_ids = ["sg-0123456789abcdef0"]
-  }
-
-  expect_failures = [var.additional_secretsmanager_client_security_group_ids]
 }

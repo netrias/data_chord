@@ -1,7 +1,21 @@
-variable "project_name" {
-  description = "Short project name used in AWS resource names."
+variable "target_slug" {
+  description = "Foundation target that owns this deployment."
   type        = string
-  default     = "data-chord"
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9-]*$", var.target_slug))
+    error_message = "target_slug must be a lowercase slug."
+  }
+}
+
+variable "aws_partition" {
+  description = "AWS partition selected by the foundation contract."
+  type        = string
+
+  validation {
+    condition     = contains(["aws", "aws-us-gov"], var.aws_partition)
+    error_message = "aws_partition must be aws or aws-us-gov."
+  }
 }
 
 variable "expected_account_id" {
@@ -19,7 +33,7 @@ variable "application_role_boundary_arn" {
   type        = string
 
   validation {
-    condition     = can(regex("^arn:aws:iam::${var.expected_account_id}:policy/.+$", var.application_role_boundary_arn))
+    condition     = can(regex("^arn:${var.aws_partition}:iam::${var.expected_account_id}:policy/.+$", var.application_role_boundary_arn))
     error_message = "application_role_boundary_arn must be an IAM policy in expected_account_id."
   }
 }
@@ -47,46 +61,25 @@ variable "environment" {
 variable "aws_region" {
   description = "AWS region for the app."
   type        = string
-  default     = "us-east-2"
 }
 
-variable "vpc_id" {
-  description = "Existing VPC id for the ALB and Fargate service."
+variable "netrias_environment" {
+  description = "Netrias service environment used by the application."
   type        = string
-}
-
-variable "public_subnet_ids" {
-  description = "Existing public subnet ids for the ALB and Fargate service. Use at least two availability zones."
-  type        = list(string)
-}
-
-variable "secretsmanager_vpc_endpoint_id" {
-  description = "Optional existing Secrets Manager VPC endpoint id used by Fargate tasks."
-  type        = string
-  default     = ""
 
   validation {
-    condition     = var.secretsmanager_vpc_endpoint_id == "" || can(regex("^vpce-[0-9a-f]+$", var.secretsmanager_vpc_endpoint_id))
-    error_message = "secretsmanager_vpc_endpoint_id must be empty or a valid VPC endpoint id."
+    condition     = contains(["staging", "prod"], var.netrias_environment)
+    error_message = "netrias_environment must be staging or prod."
   }
 }
 
-variable "additional_secretsmanager_client_security_group_ids" {
-  description = "Additional security groups allowed to reach the shared Secrets Manager VPC endpoint."
-  type        = set(string)
-  default     = []
+variable "data_model_store_url" {
+  description = "Data Model Store URL published by the foundation contract."
+  type        = string
 
   validation {
-    condition = alltrue([
-      for security_group_id in var.additional_secretsmanager_client_security_group_ids :
-      can(regex("^sg-[0-9a-f]+$", security_group_id))
-    ])
-    error_message = "additional_secretsmanager_client_security_group_ids must contain valid security group ids."
-  }
-
-  validation {
-    condition     = var.secretsmanager_vpc_endpoint_id != "" || length(var.additional_secretsmanager_client_security_group_ids) == 0
-    error_message = "additional_secretsmanager_client_security_group_ids requires secretsmanager_vpc_endpoint_id."
+    condition     = can(regex("^https://[^/[:space:]]+", var.data_model_store_url))
+    error_message = "data_model_store_url must be an HTTPS URL."
   }
 }
 

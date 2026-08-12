@@ -1,6 +1,7 @@
-domain_label = "netrias-data-chord"
+domain_label     = "netrias-data-chord"
+hosted_zone_name = "netriasbdf.cloud"
 
-additional_secretsmanager_client_security_group_ids = ["sg-0a9e0f356c22abf67"]
+netrias_environment = "prod"
 
 alert_email_addresses = ["charman@netrias.com"]
 

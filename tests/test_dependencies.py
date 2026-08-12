@@ -40,7 +40,11 @@ def test_netrias_client_uses_configured_timeout(monkeypatch) -> None:
     # Then: the SDK receives the configured timeout
     assert client is client_class.return_value
     client_class.assert_called_once_with(api_key="test-key", environment=Environment.STAGING)
-    client_class.return_value.configure.assert_called_once_with(timeout=3600.0)
+    client_class.return_value.configure.assert_called_once_with(
+        timeout=3600.0,
+        harmonization_url=None,
+        data_model_store_url=None,
+    )
 
 
 def test_netrias_client_uses_configured_environment(monkeypatch) -> None:
@@ -77,5 +81,30 @@ def test_netrias_client_uses_configured_harmonization_url(monkeypatch) -> None:
     assert client is client_class.return_value
     client_class.assert_called_once_with(api_key="test-key", environment=Environment.STAGING)
     client_class.return_value.configure.assert_called_once_with(
-        harmonization_url="https://pdyuq0vi4h.execute-api.us-east-2.amazonaws.com/prod"
+        timeout=None,
+        harmonization_url="https://pdyuq0vi4h.execute-api.us-east-2.amazonaws.com/prod",
+        data_model_store_url=None,
+    )
+
+
+def test_netrias_client_uses_configured_data_model_store(monkeypatch) -> None:
+    # Given: the foundation contract selects a customer-specific Data Model Store
+    monkeypatch.setenv("NETRIAS_API_KEY", "test-key")
+    monkeypatch.setenv(
+        "DATA_CHORD_NETRIAS_DATA_MODEL_STORE_URL",
+        "https://model.customer.example",
+    )
+    monkeypatch.setattr(dependencies, "_netrias_client", None)
+    monkeypatch.setattr(dependencies, "_netrias_client_initialized", False)
+
+    # When: the shared Netrias client is initialized
+    with patch("src.app.dependencies.NetriasClient") as client_class:
+        client = dependencies.get_netrias_client()
+
+    # Then: model requests use the URL published for this target
+    assert client is client_class.return_value
+    client_class.return_value.configure.assert_called_once_with(
+        timeout=None,
+        harmonization_url=None,
+        data_model_store_url="https://model.customer.example",
     )

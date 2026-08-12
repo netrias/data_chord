@@ -25,12 +25,12 @@ test-e2e:
 perf-e2e:
 	npm run perf:e2e
 
-perf-staging target="bdf" base_url="":
+perf-staging base_url="":
 	@set -euo pipefail; \
 	url="{{base_url}}"; \
 	if [ -z "$url" ]; then url="${DATA_CHORD_STAGING_URL:-}"; fi; \
 	if [ -z "$url" ]; then \
-		url="$(infra/scripts/deploy.sh {{target}} staging output-url)"; \
+		echo "Set DATA_CHORD_STAGING_URL or pass base_url." >&2; exit 1; \
 	fi; \
 	echo "Running staging performance journey against $url"; \
 	PLAYWRIGHT_BASE_URL="$url" npm run perf:staging
@@ -63,43 +63,16 @@ infra-validate:
 
 infra-test:
 	tofu -chdir=infra test
-	bash infra/tests/deployment_contract_test.sh
-	bash infra/tests/deployment_flow_test.sh
-	bash infra/tests/secret_preparation_test.sh
-	bash -n infra/scripts/*.sh infra/tests/*.sh
+	uv run pytest tests/test_deployment_commands.py
 
-# Prepare or update the stage API secret. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required; NETRIAS_API_KEY creates or updates.
-prepare-stage-secret target stage:
-	infra/scripts/bootstrap-secrets.sh {{target}} {{stage}} ensure
+# Save and show a read-only plan. The profile selects the AWS account and region.
+plan target stage profile:
+	uv run python deploy/deploy.py plan {{target}} {{stage}} {{profile}}
 
-# Deploy the app. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
-deploy target stage:
-	infra/scripts/deploy.sh {{target}} {{stage}}
+# Build, apply the displayed saved plan, and verify the service.
+deploy target stage profile:
+	uv run python deploy/deploy.py deploy {{target}} {{stage}} {{profile}}
 
-# Apply infrastructure while keeping the deployed image. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
-deploy-infra target stage:
-	infra/scripts/deploy.sh {{target}} {{stage}} deploy-infra
-
-# Plan infrastructure. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
-deploy-plan target stage:
-	infra/scripts/deploy.sh {{target}} {{stage}} plan
-
-# Show deployment status. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
-deploy-status target stage:
-	infra/scripts/deploy.sh {{target}} {{stage}} status
-
-# Show deployment logs. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
-deploy-logs target stage:
-	infra/scripts/deploy.sh {{target}} {{stage}} logs
-
-# Build the current commit without the full application apply. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
-deploy-build target stage:
-	infra/scripts/deploy.sh {{target}} {{stage}} build
-
-# Invite a user. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
-invite-user target stage email:
-	infra/scripts/invite-cognito-user.sh {{target}} {{stage}} {{email}}
-
-# Resend an invite. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
-resend-user-invite target stage email:
-	infra/scripts/invite-cognito-user.sh {{target}} {{stage}} {{email}} resend
+# Query the deployed ECS service without OpenTofu or state access.
+status target stage profile:
+	uv run python deploy/deploy.py status {{target}} {{stage}} {{profile}}

@@ -20,6 +20,7 @@ from src.settings import (
     ConfigurationError,
     StorageBackend,
     get_netrias_api_key,
+    get_netrias_data_model_store_url,
     get_netrias_environment_name,
     get_netrias_harmonization_url,
     get_netrias_timeout_seconds,
@@ -116,12 +117,13 @@ def get_netrias_client() -> NetriasClient | None:
             try:
                 _netrias_client = NetriasClient(api_key=api_key, environment=environment)
                 harmonization_url = get_netrias_harmonization_url()
-                if timeout is not None and harmonization_url is not None:
-                    _netrias_client.configure(timeout=timeout, harmonization_url=harmonization_url)
-                elif timeout is not None:
-                    _netrias_client.configure(timeout=timeout)
-                elif harmonization_url is not None:
-                    _netrias_client.configure(harmonization_url=harmonization_url)
+                data_model_store_url = get_netrias_data_model_store_url()
+                if any(value is not None for value in (timeout, harmonization_url, data_model_store_url)):
+                    _netrias_client.configure(
+                        timeout=timeout,
+                        harmonization_url=harmonization_url,
+                        data_model_store_url=data_model_store_url,
+                    )
             except Exception:
                 logger.exception("Failed to initialize NetriasClient")
         else:

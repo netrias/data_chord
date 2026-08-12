@@ -85,4 +85,19 @@ Set `PERF_REMOTE_ROWS=50` to change the generated CSV size.
 
 ## AWS Hosting
 
-The app has an OpenTofu starter stack in [infra/README.md](infra/README.md). It deploys ECS Fargate behind ALB + Cognito, stores workflow artifacts in S3, and uses CodeBuild to test, build, and push the Docker image before OpenTofu rolls ECS.
+The OpenTofu stack deploys ECS Fargate behind ALB and Cognito. Data Chord owns
+its VPC, storage, and public GitHub CodeBuild project.
+
+For a new customer, first apply its target in `data_chord_infra`. Then configure
+an AWS profile for that account and region, add
+`infra/env/<target>/<stage>.tfvars`, and put the stage Netrias API key in
+Secrets Manager. Push the Data Chord commit, then run:
+
+```bash
+just plan <target> <stage> <profile>
+just deploy <target> <stage> <profile>
+just status <target> <stage> <profile>
+```
+
+See [infra/README.md](infra/README.md) for the exact secret names, state key,
+DNS choices, and existing BDF migration gate.

@@ -1,4 +1,7 @@
-domain_label = "netrias-data-chord-staging"
+domain_label     = "netrias-data-chord-staging"
+hosted_zone_name = "netriasbdf.cloud"
+
+netrias_environment = "staging"
 
 netrias_harmonization_url = "https://pdyuq0vi4h.execute-api.us-east-2.amazonaws.com/prod"
 
