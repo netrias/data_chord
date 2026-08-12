@@ -38,12 +38,12 @@ locals {
     invite_environment = local.invite_environment
   })
   alert_actions = [aws_sns_topic.alerts.arn]
-  common_tags = merge(var.tags, {
+  common_tags = {
     Project     = local.project_name
     Target      = var.target_slug
     Environment = var.environment
     ManagedBy   = "opentofu"
-  })
+  }
 }
 
 data "aws_route53_zone" "app" {
@@ -92,8 +92,8 @@ resource "aws_security_group" "task" {
 
   ingress {
     description     = "App traffic from ALB"
-    from_port       = var.container_port
-    to_port         = var.container_port
+    from_port       = 8000
+    to_port         = 8000
     protocol        = "tcp"
     security_groups = [aws_security_group.alb.id]
   }
@@ -181,7 +181,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "alb_logs" {
     status = "Enabled"
 
     expiration {
-      days = var.alb_access_log_retention_days
+      days = 30
     }
   }
 }
@@ -208,7 +208,7 @@ resource "aws_s3_bucket_policy" "alb_logs" {
 resource "aws_ecr_repository" "app" {
   name                 = local.name_prefix
   image_tag_mutability = "IMMUTABLE"
-  force_delete         = var.force_delete_repositories
+  force_delete         = false
 
   image_scanning_configuration {
     scan_on_push = true
@@ -267,7 +267,7 @@ resource "aws_cloudwatch_metric_alarm" "app_error_logs" {
   namespace           = aws_cloudwatch_log_metric_filter.app_error_logs.metric_transformation[0].namespace
   period              = 300
   statistic           = "Sum"
-  threshold           = var.app_error_log_alarm_threshold
+  threshold           = 1
   treat_missing_data  = "notBreaching"
 
   tags = local.common_tags
@@ -283,7 +283,7 @@ resource "aws_cloudwatch_metric_alarm" "alb_no_healthy_targets" {
   namespace           = "AWS/ApplicationELB"
   period              = 60
   statistic           = "Minimum"
-  threshold           = var.desired_count
+  threshold           = 1
   treat_missing_data  = "breaching"
   alarm_actions       = local.alert_actions
 
@@ -326,7 +326,7 @@ resource "aws_cloudwatch_metric_alarm" "app_5xx" {
   namespace           = "AWS/ApplicationELB"
   period              = 300
   statistic           = "Sum"
-  threshold           = var.app_5xx_alarm_threshold
+  threshold           = 1
   treat_missing_data  = "notBreaching"
   alarm_actions       = local.alert_actions
 
@@ -347,7 +347,7 @@ resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
   namespace           = "AWS/ApplicationELB"
   period              = 300
   statistic           = "Sum"
-  threshold           = var.alb_5xx_alarm_threshold
+  threshold           = 1
   treat_missing_data  = "notBreaching"
   alarm_actions       = local.alert_actions
 
@@ -367,7 +367,7 @@ resource "aws_cloudwatch_metric_alarm" "alb_auth_errors" {
   namespace           = "AWS/ApplicationELB"
   period              = 300
   statistic           = "Sum"
-  threshold           = var.alb_auth_alarm_threshold
+  threshold           = 1
   treat_missing_data  = "notBreaching"
   alarm_actions       = local.alert_actions
 
@@ -387,7 +387,7 @@ resource "aws_cloudwatch_metric_alarm" "alb_auth_failures" {
   namespace           = "AWS/ApplicationELB"
   period              = 300
   statistic           = "Sum"
-  threshold           = var.alb_auth_alarm_threshold
+  threshold           = 1
   treat_missing_data  = "notBreaching"
   alarm_actions       = local.alert_actions
 
@@ -407,7 +407,7 @@ resource "aws_cloudwatch_metric_alarm" "target_connection_errors" {
   namespace           = "AWS/ApplicationELB"
   period              = 300
   statistic           = "Sum"
-  threshold           = var.target_connection_error_alarm_threshold
+  threshold           = 1
   treat_missing_data  = "notBreaching"
   alarm_actions       = local.alert_actions
 
@@ -429,7 +429,7 @@ resource "aws_cloudwatch_metric_alarm" "target_response_time" {
   metric_name         = "TargetResponseTime"
   namespace           = "AWS/ApplicationELB"
   period              = 300
-  threshold           = var.target_response_time_alarm_seconds
+  threshold           = 10
   treat_missing_data  = "notBreaching"
 
   dimensions = {
@@ -450,7 +450,7 @@ resource "aws_cloudwatch_metric_alarm" "ecs_cpu_high" {
   namespace           = "AWS/ECS"
   period              = 300
   statistic           = "Average"
-  threshold           = var.ecs_cpu_alarm_threshold_percent
+  threshold           = 85
   treat_missing_data  = "notBreaching"
 
   dimensions = {
@@ -471,7 +471,7 @@ resource "aws_cloudwatch_metric_alarm" "ecs_memory_high" {
   namespace           = "AWS/ECS"
   period              = 300
   statistic           = "Average"
-  threshold           = var.ecs_memory_alarm_threshold_percent
+  threshold           = 85
   treat_missing_data  = "notBreaching"
 
   dimensions = {
@@ -581,8 +581,8 @@ resource "aws_ecs_task_definition" "application" {
   family                   = local.name_prefix
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = var.container_cpu
-  memory                   = var.container_memory
+  cpu                      = 1024
+  memory                   = 2048
   execution_role_arn       = aws_iam_role.application_task_execution.arn
   task_role_arn            = aws_iam_role.application_task.arn
 
@@ -598,8 +598,8 @@ resource "aws_ecs_task_definition" "application" {
       image     = "${aws_ecr_repository.app.repository_url}:${var.image_tag}"
       essential = true
       portMappings = [{
-        containerPort = var.container_port
-        hostPort      = var.container_port
+        containerPort = 8000
+        hostPort      = 8000
         protocol      = "tcp"
       }]
       environment = concat([
@@ -658,7 +658,7 @@ resource "aws_ecs_task_definition" "application" {
         }
       }
       healthCheck = {
-        command     = ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:${var.container_port}/healthz', timeout=3).read()\""]
+        command     = ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).read()\""]
         interval    = 30
         timeout     = 5
         retries     = 3
@@ -680,7 +680,7 @@ resource "aws_lb" "app" {
   access_logs {
     bucket  = aws_s3_bucket.alb_logs.bucket
     prefix  = "alb/${var.environment}"
-    enabled = var.enable_alb_access_logs
+    enabled = true
   }
 
   tags = local.common_tags
@@ -693,7 +693,7 @@ resource "aws_lb" "app" {
 
 resource "aws_lb_target_group" "app" {
   name                 = substr("${local.name_prefix}-app", 0, 32)
-  port                 = var.container_port
+  port                 = 8000
   protocol             = "HTTP"
   target_type          = "ip"
   vpc_id               = aws_vpc.app.id
@@ -763,7 +763,7 @@ resource "aws_cognito_user_pool" "auth" {
 }
 
 resource "aws_cognito_user_pool_domain" "auth" {
-  domain       = var.cognito_domain_prefix != "" ? var.cognito_domain_prefix : "${local.name_prefix}-${data.aws_caller_identity.current.account_id}"
+  domain       = "${local.name_prefix}-${data.aws_caller_identity.current.account_id}"
   user_pool_id = aws_cognito_user_pool.auth.id
 }
 
@@ -870,7 +870,7 @@ resource "aws_ecs_service" "app" {
   name            = local.name_prefix
   cluster         = aws_ecs_cluster.app.id
   task_definition = aws_ecs_task_definition.application.arn
-  desired_count   = var.desired_count
+  desired_count   = 1
   launch_type     = "FARGATE"
 
   deployment_circuit_breaker {
@@ -887,7 +887,7 @@ resource "aws_ecs_service" "app" {
   load_balancer {
     target_group_arn = aws_lb_target_group.app.arn
     container_name   = "app"
-    container_port   = var.container_port
+    container_port   = 8000
   }
 
   depends_on = [aws_lb_listener.https]

@@ -47,7 +47,7 @@ _BUILD_TARGETS = (
     "aws_codebuild_project.app_image",
 )
 _CANONICAL_REPOSITORY = "https://github.com/netrias/data_chord.git"
-_FOUNDATION_VARIABLES = frozenset(
+_DEPLOYMENT_CONTROLLED_VARIABLES = frozenset(
     {
         "application_role_boundary_arn",
         "application_role_path",
@@ -583,7 +583,7 @@ def _require_stage_configuration(
             f"stage configuration does not exist: "
             f"infra/env/{request.target.value}/{request.stage.value}.tfvars"
         )
-    protected_variables = set(_FOUNDATION_VARIABLES)
+    protected_variables = set(_DEPLOYMENT_CONTROLLED_VARIABLES)
     if contract.application_dns_zone_name is not None:
         protected_variables.add("hosted_zone_name")
     assignment = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=", re.MULTILINE)
@@ -591,7 +591,7 @@ def _require_stage_configuration(
     forbidden_variables = sorted(protected_variables & configured_variables)
     if forbidden_variables:
         raise RuntimeError(
-            "stage configuration sets foundation-owned variables: "
+            "stage configuration sets deployment-controlled variables: "
             f"{', '.join(forbidden_variables)}"
         )
 

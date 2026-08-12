@@ -137,99 +137,10 @@ variable "auth_bypass_cidrs" {
   sensitive   = true
 }
 
-variable "desired_count" {
-  description = "Number of Fargate tasks to run."
-  type        = number
-  default     = 1
-}
-
 variable "alert_email_addresses" {
   description = "Email addresses subscribed to environment-specific health alerts. Leave empty to create alarms without email subscribers."
   type        = list(string)
   default     = []
-}
-
-variable "app_5xx_alarm_threshold" {
-  description = "Number of target-generated 5xx responses in five minutes before alerting."
-  type        = number
-  default     = 1
-}
-
-variable "alb_5xx_alarm_threshold" {
-  description = "Number of load-balancer-generated 5xx responses in five minutes before alerting."
-  type        = number
-  default     = 1
-}
-
-variable "alb_auth_alarm_threshold" {
-  description = "Number of ALB authentication errors or failures in five minutes before alerting."
-  type        = number
-  default     = 1
-}
-
-variable "target_connection_error_alarm_threshold" {
-  description = "Number of ALB target connection errors in five minutes before alerting."
-  type        = number
-  default     = 1
-}
-
-variable "target_response_time_alarm_seconds" {
-  description = "p95 ALB target response time in seconds before alerting."
-  type        = number
-  default     = 10
-}
-
-variable "ecs_cpu_alarm_threshold_percent" {
-  description = "Average ECS service CPU utilization percentage before alerting."
-  type        = number
-  default     = 85
-}
-
-variable "ecs_memory_alarm_threshold_percent" {
-  description = "Average ECS service memory utilization percentage before alerting."
-  type        = number
-  default     = 85
-}
-
-variable "app_error_log_alarm_threshold" {
-  description = "Number of app ERROR log entries in five minutes before alerting."
-  type        = number
-  default     = 1
-}
-
-variable "enable_alb_access_logs" {
-  description = "Whether the ALB should write access logs to the environment log bucket."
-  type        = bool
-  default     = true
-}
-
-variable "alb_access_log_retention_days" {
-  description = "Days to retain ALB access logs."
-  type        = number
-  default     = 30
-
-  validation {
-    condition     = var.alb_access_log_retention_days >= 1 && var.alb_access_log_retention_days <= 365
-    error_message = "alb_access_log_retention_days must be between 1 and 365."
-  }
-}
-
-variable "container_cpu" {
-  description = "Fargate task CPU units."
-  type        = number
-  default     = 1024
-}
-
-variable "container_memory" {
-  description = "Fargate task memory in MiB."
-  type        = number
-  default     = 2048
-}
-
-variable "container_port" {
-  description = "Port served by uvicorn in the container."
-  type        = number
-  default     = 8000
 }
 
 variable "image_tag" {
@@ -284,22 +195,4 @@ variable "target_group_unhealthy_threshold" {
     condition     = var.target_group_unhealthy_threshold >= 2 && var.target_group_unhealthy_threshold <= 10
     error_message = "target_group_unhealthy_threshold must be between 2 and 10."
   }
-}
-
-variable "cognito_domain_prefix" {
-  description = "Optional globally unique Cognito hosted UI domain prefix. Leave empty to use a generated prefix."
-  type        = string
-  default     = ""
-}
-
-variable "force_delete_repositories" {
-  description = "Allow OpenTofu destroy to delete non-empty ECR repositories. Keep false for normal use."
-  type        = bool
-  default     = false
-}
-
-variable "tags" {
-  description = "Extra tags applied to AWS resources."
-  type        = map(string)
-  default     = {}
 }

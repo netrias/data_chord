@@ -136,7 +136,7 @@ run "external_certificate_tls_uses_supplied_hostname" {
     condition = (
       length(aws_acm_certificate.app) == 0 &&
       length(aws_acm_certificate_validation.app) == 0 &&
-      output.app_hostname == var.domain_name &&
+      local.app_host == var.domain_name &&
       output.app_url == "https://${var.domain_name}"
     )
     error_message = "External-certificate TLS must use the supplied certificate and hostname."
@@ -157,7 +157,7 @@ run "managed_tls_creates_certificate_for_hosted_zone" {
     condition = (
       length(aws_acm_certificate.app) == 1 &&
       length(aws_acm_certificate_validation.app) == 1 &&
-      output.app_hostname == "data-chord-qa.example.com" &&
+      local.app_host == "data-chord-qa.example.com" &&
       output.app_url == "https://data-chord-qa.example.com"
     )
     error_message = "Managed TLS must create a certificate and hostname under the hosted zone."
@@ -219,9 +219,8 @@ run "ecs_event_rules_use_the_managed_service_identity" {
     condition = alltrue([
       jsondecode(aws_cloudwatch_event_rule.ecs_service_error.event_pattern).resources == [aws_ecs_service.app.arn],
       jsondecode(aws_cloudwatch_event_rule.ecs_deployment_failed.event_pattern).resources == [aws_ecs_service.app.arn],
-      output.ecs_service_name == aws_ecs_service.app.name,
     ])
-    error_message = "ECS event rules and outputs must use the managed service identity."
+    error_message = "ECS event rules must use the managed service identity."
   }
 }
 

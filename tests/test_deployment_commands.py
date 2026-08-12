@@ -17,7 +17,7 @@ _PROFILE = "customer-admin"
 _TARGET = "netrias"
 
 
-class FakeTools:
+class MockCommandRunner:
     """Return realistic tool responses while recording externally visible effects."""
 
     def __init__(self, contract_overrides: Mapping[str, object] | None = None) -> None:
@@ -99,9 +99,6 @@ class FakeTools:
         if command[:3] == ("tofu", "output", "-raw"):
             output_name = command[3]
             return {
-                "codebuild_project_name": "data-chord-staging-image\n",
-                "ecs_cluster_name": "data-chord-staging\n",
-                "ecs_service_name": "data-chord-staging\n",
                 "app_url": "https://data-chord.apps.example.com\n",
             }[output_name]
         if command[:3] == ("aws", "codebuild", "start-build"):
@@ -127,64 +124,64 @@ class FakeTools:
 
 def _run(
     monkeypatch: pytest.MonkeyPatch,
-    fake_tools: FakeTools,
+    runner: MockCommandRunner,
     action: str,
     target: str = _TARGET,
 ) -> int:
-    monkeypatch.setattr(deployment, "_run", fake_tools)
+    monkeypatch.setattr(deployment, "_run", runner)
     return deployment.main([action, target, "staging", _PROFILE])
 
 
-def _has_command(fake_tools: FakeTools, *prefix: str) -> bool:
-    return any(command[: len(prefix)] == prefix for command in fake_tools.commands)
+def _has_command(runner: MockCommandRunner, *prefix: str) -> bool:
+    return any(command[: len(prefix)] == prefix for command in runner.commands)
 
 
 def test_plan_saves_and_shows_a_read_only_plan(monkeypatch, capsys) -> None:
-    fake_tools = FakeTools()
+    runner = MockCommandRunner()
 
-    result = _run(monkeypatch, fake_tools, "plan")
+    result = _run(monkeypatch, runner, "plan")
 
     assert result == 0
     assert "no infrastructure was applied" in capsys.readouterr().out
-    assert _has_command(fake_tools, "tofu", "init")
-    plan = next(command for command in fake_tools.commands if command[:2] == ("tofu", "plan"))
+    assert _has_command(runner, "tofu", "init")
+    plan = next(command for command in runner.commands if command[:2] == ("tofu", "plan"))
     assert "-lock=false" in plan
     assert any(argument.startswith("-out=") for argument in plan)
-    assert _has_command(fake_tools, "tofu", "show")
-    assert not _has_command(fake_tools, "tofu", "apply")
-    assert not _has_command(fake_tools, "aws", "codebuild", "start-build")
+    assert _has_command(runner, "tofu", "show")
+    assert not _has_command(runner, "tofu", "apply")
+    assert not _has_command(runner, "aws", "codebuild", "start-build")
 
 
 def test_deploy_builds_then_applies_the_displayed_final_plan(monkeypatch, capsys) -> None:
-    fake_tools = FakeTools()
+    runner = MockCommandRunner()
 
-    result = _run(monkeypatch, fake_tools, "deploy")
+    result = _run(monkeypatch, runner, "deploy")
 
     assert result == 0
     output = capsys.readouterr().out
     assert "Verified data-chord-staging" in output
-    assert _has_command(fake_tools, "aws", "codebuild", "start-build")
-    plans = [command for command in fake_tools.commands if command[:2] == ("tofu", "plan")]
-    shown = [command[-1] for command in fake_tools.commands if command[:2] == ("tofu", "show")]
-    applied = [command[-1] for command in fake_tools.commands if command[:2] == ("tofu", "apply")]
+    assert _has_command(runner, "aws", "codebuild", "start-build")
+    plans = [command for command in runner.commands if command[:2] == ("tofu", "plan")]
+    shown = [command[-1] for command in runner.commands if command[:2] == ("tofu", "show")]
+    applied = [command[-1] for command in runner.commands if command[:2] == ("tofu", "apply")]
     assert len(plans) == 2
     assert len(set(shown)) == 2
     assert len(shown) == 2
     assert applied == shown
-    assert all("-auto-approve" not in command for command in fake_tools.commands)
+    assert all("-auto-approve" not in command for command in runner.commands)
 
 
 def test_status_only_queries_the_service(monkeypatch, capsys) -> None:
-    fake_tools = FakeTools()
+    runner = MockCommandRunner()
 
-    result = _run(monkeypatch, fake_tools, "status")
+    result = _run(monkeypatch, runner, "status")
 
     assert result == 0
     assert '"status": "ACTIVE"' in capsys.readouterr().out
-    assert _has_command(fake_tools, "aws", "ecs", "describe-services")
-    assert not any(command[0] == "tofu" for command in fake_tools.commands)
-    assert not _has_command(fake_tools, "aws", "secretsmanager")
-    assert not _has_command(fake_tools, "aws", "codebuild")
+    assert _has_command(runner, "aws", "ecs", "describe-services")
+    assert not any(command[0] == "tofu" for command in runner.commands)
+    assert not _has_command(runner, "aws", "secretsmanager")
+    assert not _has_command(runner, "aws", "codebuild")
 
 
 @pytest.mark.parametrize(
@@ -203,23 +200,23 @@ def test_contract_mismatch_stops_before_state_or_secret_access(
     value: str,
     message: str,
 ) -> None:
-    fake_tools = FakeTools({field: value})
+    runner = MockCommandRunner({field: value})
 
-    result = _run(monkeypatch, fake_tools, "plan")
+    result = _run(monkeypatch, runner, "plan")
 
     assert result == 1
     assert message in capsys.readouterr().err
-    assert not any(command[0] == "tofu" for command in fake_tools.commands)
-    assert not _has_command(fake_tools, "aws", "s3api")
-    assert not _has_command(fake_tools, "aws", "secretsmanager")
-    assert not _has_command(fake_tools, "aws", "codebuild")
+    assert not any(command[0] == "tofu" for command in runner.commands)
+    assert not _has_command(runner, "aws", "s3api")
+    assert not _has_command(runner, "aws", "secretsmanager")
+    assert not _has_command(runner, "aws", "codebuild")
 
 
 def test_profile_region_and_partition_select_the_foundation_role(monkeypatch) -> None:
     account_id = "210987654321"
     region = "us-gov-west-1"
     expected_role = f"arn:aws-us-gov:iam::{account_id}:role/foundation/datachord-deployer"
-    fake_tools = FakeTools(
+    runner = MockCommandRunner(
         {
             "aws_partition": "aws-us-gov",
             "aws_account_id": account_id,
@@ -241,17 +238,17 @@ def test_profile_region_and_partition_select_the_foundation_role(monkeypatch) ->
     ) -> subprocess.CompletedProcess[str]:
         command_tuple = tuple(command)
         if command_tuple[:4] == ("aws", "configure", "get", "region"):
-            fake_tools.commands.append(command_tuple)
-            fake_tools.environments.append(dict(environment or {}))
+            runner.commands.append(command_tuple)
+            runner.environments.append(dict(environment or {}))
             return subprocess.CompletedProcess(command_tuple, 0, stdout=f"{region}\n", stderr="")
         if command_tuple[:3] == ("aws", "sts", "get-caller-identity"):
-            fake_tools.commands.append(command_tuple)
-            fake_tools.environments.append(dict(environment or {}))
+            runner.commands.append(command_tuple)
+            runner.environments.append(dict(environment or {}))
             identity = {"Account": account_id, "Arn": f"arn:aws-us-gov:iam::{account_id}:role/admin"}
             return subprocess.CompletedProcess(command_tuple, 0, stdout=json.dumps(identity), stderr="")
         if command_tuple[:3] == ("aws", "sts", "assume-role"):
-            fake_tools.commands.append(command_tuple)
-            fake_tools.environments.append(dict(environment or {}))
+            runner.commands.append(command_tuple)
+            runner.environments.append(dict(environment or {}))
             response = {
                 "AssumedRoleUser": {
                     "Arn": f"arn:aws-us-gov:sts::{account_id}:assumed-role/datachord-deployer/session"
@@ -263,7 +260,7 @@ def test_profile_region_and_partition_select_the_foundation_role(monkeypatch) ->
                 },
             }
             return subprocess.CompletedProcess(command_tuple, 0, stdout=json.dumps(response), stderr="")
-        return fake_tools(
+        return runner(
             command,
             cwd=cwd,
             environment=environment,
@@ -274,14 +271,14 @@ def test_profile_region_and_partition_select_the_foundation_role(monkeypatch) ->
     monkeypatch.setattr(deployment, "_run", govcloud_tools)
 
     assert deployment.main(["status", _TARGET, "staging", _PROFILE]) == 0
-    assume_role = next(command for command in fake_tools.commands if command[:3] == ("aws", "sts", "assume-role"))
+    assume_role = next(command for command in runner.commands if command[:3] == ("aws", "sts", "assume-role"))
     assert expected_role in assume_role
-    contract_read = next(command for command in fake_tools.commands if command[:3] == ("aws", "ssm", "get-parameter"))
+    contract_read = next(command for command in runner.commands if command[:3] == ("aws", "ssm", "get-parameter"))
     assert region in contract_read
 
 
 def test_existing_bdf_stage_requires_migrated_service_state(monkeypatch, capsys) -> None:
-    fake_tools = FakeTools(
+    runner = MockCommandRunner(
         {"target_slug": "bdf", "application_dns_zone_name": None}
     )
 
@@ -293,7 +290,7 @@ def test_existing_bdf_stage_requires_migrated_service_state(monkeypatch, capsys)
         check: bool = True,
         capture_output: bool = True,
     ) -> subprocess.CompletedProcess[str]:
-        result = fake_tools(
+        result = runner(
             command,
             cwd=cwd,
             environment=environment,
@@ -308,7 +305,7 @@ def test_existing_bdf_stage_requires_migrated_service_state(monkeypatch, capsys)
 
     assert deployment.main(["plan", "bdf", "staging", _PROFILE]) == 1
     assert "cannot confirm migrated state" in capsys.readouterr().err
-    assert not any(command[0] == "tofu" for command in fake_tools.commands)
+    assert not any(command[0] == "tofu" for command in runner.commands)
 
 
 @pytest.mark.parametrize(
@@ -324,7 +321,7 @@ def test_deploy_stops_before_changes_when_the_bdf_handoff_is_incomplete(
     capsys,
     legacy_address: str,
 ) -> None:
-    fake_tools = FakeTools(
+    runner = MockCommandRunner(
         {"target_slug": "bdf", "application_dns_zone_name": None}
     )
 
@@ -336,7 +333,7 @@ def test_deploy_stops_before_changes_when_the_bdf_handoff_is_incomplete(
         check: bool = True,
         capture_output: bool = True,
     ) -> subprocess.CompletedProcess[str]:
-        result = fake_tools(
+        result = runner(
             command,
             cwd=cwd,
             environment=environment,
@@ -355,14 +352,14 @@ def test_deploy_stops_before_changes_when_the_bdf_handoff_is_incomplete(
     error = capsys.readouterr().err
     assert "legacy BDF handoff resources remain in state" in error
     assert legacy_address in error
-    assert not _has_command(fake_tools, "tofu", "apply")
-    assert not _has_command(fake_tools, "aws", "codebuild", "start-build")
+    assert not _has_command(runner, "tofu", "apply")
+    assert not _has_command(runner, "aws", "codebuild", "start-build")
 
 
 def test_new_customer_deploy_does_not_require_existing_state(
     monkeypatch,
 ) -> None:
-    fake_tools = FakeTools()
+    runner = MockCommandRunner()
 
     def no_existing_state(
         command: Sequence[str],
@@ -374,7 +371,7 @@ def test_new_customer_deploy_does_not_require_existing_state(
     ) -> subprocess.CompletedProcess[str]:
         if tuple(command)[:3] == ("tofu", "state", "list"):
             raise AssertionError("a new customer must not inspect legacy BDF state")
-        return fake_tools(
+        return runner(
             command,
             cwd=cwd,
             environment=environment,
@@ -385,7 +382,7 @@ def test_new_customer_deploy_does_not_require_existing_state(
     monkeypatch.setattr(deployment, "_run", no_existing_state)
 
     assert deployment.main(["deploy", _TARGET, "staging", _PROFILE]) == 0
-    assert not _has_command(fake_tools, "tofu", "state", "list")
+    assert not _has_command(runner, "tofu", "state", "list")
 
 
 @pytest.mark.parametrize(
@@ -406,26 +403,26 @@ def test_invalid_data_model_store_url_stops_before_state_access(
     capsys,
     url: str,
 ) -> None:
-    fake_tools = FakeTools({"data_model_store_url": url})
+    runner = MockCommandRunner({"data_model_store_url": url})
 
-    assert _run(monkeypatch, fake_tools, "plan") == 1
+    assert _run(monkeypatch, runner, "plan") == 1
     assert "data_model_store_url" in capsys.readouterr().err
-    assert not any(command[0] == "tofu" for command in fake_tools.commands)
-    assert not _has_command(fake_tools, "aws", "s3api")
-    assert not _has_command(fake_tools, "aws", "secretsmanager")
+    assert not any(command[0] == "tofu" for command in runner.commands)
+    assert not _has_command(runner, "aws", "s3api")
+    assert not _has_command(runner, "aws", "secretsmanager")
 
 
 def test_plan_ignores_ambient_opentofu_overrides(monkeypatch) -> None:
-    fake_tools = FakeTools()
+    runner = MockCommandRunner()
     monkeypatch.setenv("TF_VAR_expected_account_id", "999999999999")
     monkeypatch.setenv("TF_CLI_ARGS_plan", "-destroy")
 
-    assert _run(monkeypatch, fake_tools, "plan") == 0
+    assert _run(monkeypatch, runner, "plan") == 0
 
     tofu_environments = [
         environment
         for command, environment in zip(
-            fake_tools.commands, fake_tools.environments, strict=True
+            runner.commands, runner.environments, strict=True
         )
         if command[0] == "tofu"
     ]
@@ -444,7 +441,7 @@ def test_deploy_does_not_apply_a_plan_after_the_foundation_contract_changes(
     change_on_read: int,
     expected_applies: int,
 ) -> None:
-    fake_tools = FakeTools()
+    runner = MockCommandRunner()
     ssm_reads = 0
 
     def changing_contract(
@@ -459,10 +456,10 @@ def test_deploy_does_not_apply_a_plan_after_the_foundation_contract_changes(
         if tuple(command)[:3] == ("aws", "ssm", "get-parameter"):
             ssm_reads += 1
             if ssm_reads == change_on_read:
-                fake_tools.contract["data_model_store_url"] = (
+                runner.contract["data_model_store_url"] = (
                     "https://replacement-model.example.com"
                 )
-        return fake_tools(
+        return runner(
             command,
             cwd=cwd,
             environment=environment,
@@ -475,7 +472,7 @@ def test_deploy_does_not_apply_a_plan_after_the_foundation_contract_changes(
     assert deployment.main(["deploy", _TARGET, "staging", _PROFILE]) == 1
     assert "contract changed after plan creation" in capsys.readouterr().err
     applies = [
-        command for command in fake_tools.commands if command[:2] == ("tofu", "apply")
+        command for command in runner.commands if command[:2] == ("tofu", "apply")
     ]
     assert len(applies) == expected_applies
 
@@ -484,7 +481,7 @@ def test_deploy_does_not_apply_a_plan_replaced_after_display(
     monkeypatch,
     capsys,
 ) -> None:
-    fake_tools = FakeTools()
+    runner = MockCommandRunner()
     ssm_reads = 0
 
     def replace_displayed_plan(
@@ -501,11 +498,11 @@ def test_deploy_does_not_apply_a_plan_replaced_after_display(
             if ssm_reads == 2:
                 shown_plan = next(
                     Path(recorded[-1])
-                    for recorded in reversed(fake_tools.commands)
+                    for recorded in reversed(runner.commands)
                     if recorded[:2] == ("tofu", "show")
                 )
                 shown_plan.write_bytes(b"replacement plan")
-        return fake_tools(
+        return runner(
             command,
             cwd=cwd,
             environment=environment,
@@ -517,15 +514,15 @@ def test_deploy_does_not_apply_a_plan_replaced_after_display(
 
     assert deployment.main(["deploy", _TARGET, "staging", _PROFILE]) == 1
     assert "saved plan changed after display" in capsys.readouterr().err
-    assert not _has_command(fake_tools, "tofu", "apply")
+    assert not _has_command(runner, "tofu", "apply")
 
 
-def test_stage_cannot_override_foundation_values(
+def test_stage_cannot_override_deployment_controlled_values(
     monkeypatch,
     tmp_path: Path,
     capsys,
 ) -> None:
-    fake_tools = FakeTools()
+    runner = MockCommandRunner()
     module_path = tmp_path / "repo" / "deploy" / "deploy.py"
     module_path.parent.mkdir(parents=True)
     module_path.touch()
@@ -533,19 +530,19 @@ def test_stage_cannot_override_foundation_values(
     stage_file.parent.mkdir(parents=True)
     stage_file.write_text('expected_account_id = "999999999999"\n')
     monkeypatch.setattr(deployment, "__file__", str(module_path))
-    monkeypatch.setattr(deployment, "_run", fake_tools)
+    monkeypatch.setattr(deployment, "_run", runner)
 
     assert deployment.main(["plan", _TARGET, "staging", _PROFILE]) == 1
-    assert "stage configuration sets foundation-owned variables" in capsys.readouterr().err
-    assert not any(command[0] == "tofu" for command in fake_tools.commands)
-    assert not _has_command(fake_tools, "aws", "secretsmanager")
+    assert "stage configuration sets deployment-controlled variables" in capsys.readouterr().err
+    assert not any(command[0] == "tofu" for command in runner.commands)
+    assert not _has_command(runner, "aws", "secretsmanager")
 
 
 def test_source_must_match_a_live_branch_in_the_canonical_repository(
     monkeypatch,
     capsys,
 ) -> None:
-    fake_tools = FakeTools()
+    runner = MockCommandRunner()
 
     def stale_canonical_branch(
         command: Sequence[str],
@@ -557,15 +554,15 @@ def test_source_must_match_a_live_branch_in_the_canonical_repository(
     ) -> subprocess.CompletedProcess[str]:
         if tuple(command)[:2] == ("git", "ls-remote"):
             command_tuple = tuple(command)
-            fake_tools.commands.append(command_tuple)
-            fake_tools.environments.append(dict(environment or {}))
+            runner.commands.append(command_tuple)
+            runner.environments.append(dict(environment or {}))
             return subprocess.CompletedProcess(
                 command_tuple,
                 0,
                 stdout="ffffffffffffffffffffffffffffffffffffffff\trefs/heads/deployment-contract\n",
                 stderr="",
             )
-        return fake_tools(
+        return runner(
             command,
             cwd=cwd,
             environment=environment,
@@ -577,5 +574,5 @@ def test_source_must_match_a_live_branch_in_the_canonical_repository(
 
     assert deployment.main(["plan", _TARGET, "staging", _PROFILE]) == 1
     assert "canonical branch" in capsys.readouterr().err
-    assert not any(command[0] == "tofu" for command in fake_tools.commands)
-    assert not _has_command(fake_tools, "aws", "secretsmanager")
+    assert not any(command[0] == "tofu" for command in runner.commands)
+    assert not _has_command(runner, "aws", "secretsmanager")
