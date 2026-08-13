@@ -89,7 +89,7 @@ state_key_for() {
   local target_name="$1"
   local stage_name="$2"
 
-  if [[ "$target_name" == "bdf" && ( "$stage_name" == "staging" || "$stage_name" == "prod" ) ]]; then
+  if [[ "$target_name" == "bdf" && "$stage_name" == "prod" ]]; then
     printf 'data-chord/%s/tofu.tfstate\n' "$stage_name"
   else
     printf 'datachord/%s/%s/tofu.tfstate\n' "$target_name" "$stage_name"
@@ -100,17 +100,15 @@ require_deployer_identity() {
   local target_name="$1"
   local expected_account deployer_role_arn deployer_role_name identity account_id caller_arn
 
-  [[ -n "${AWS_PROFILE:-}" ]] || fail "Set AWS_PROFILE to a profile that assumes the target deployer role."
-
   expected_account="$(target_value "$target_name" expected_account_id)"
   deployer_role_arn="$(target_value "$target_name" deployer_role_arn)"
   deployer_role_name="${deployer_role_arn##*/}"
-  identity="$(aws sts get-caller-identity --query '[Account,Arn]' --output text)" || fail "Could not resolve AWS identity for profile '$AWS_PROFILE'."
+  identity="$(aws sts get-caller-identity --query '[Account,Arn]' --output text)" || fail "Could not resolve the AWS deployment identity."
   read -r account_id caller_arn <<<"$identity"
 
-  [[ "$account_id" == "$expected_account" ]] || fail "AWS profile '$AWS_PROFILE' resolves to account '$account_id', not target account '$expected_account'."
+  [[ "$account_id" == "$expected_account" ]] || fail "AWS credentials resolve to account '$account_id', not target account '$expected_account'."
   [[ "$caller_arn" == "arn:aws:sts::$expected_account:assumed-role/$deployer_role_name/"* ]] ||
-    fail "AWS profile '$AWS_PROFILE' must assume '$deployer_role_arn'. Current caller is '$caller_arn'."
+    fail "AWS credentials must assume '$deployer_role_arn'. Current caller is '$caller_arn'."
 }
 
 init_tofu() {

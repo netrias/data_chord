@@ -3,24 +3,9 @@ output "app_url" {
   value       = local.app_url
 }
 
-output "alb_dns_name" {
-  description = "DNS name of the application load balancer."
-  value       = aws_lb.app.dns_name
-}
-
-output "app_hostname" {
-  description = "Hostname users should visit."
-  value       = local.app_host
-}
-
 output "workflow_bucket" {
   description = "S3 bucket used for durable workflow storage."
   value       = aws_s3_bucket.workflow.bucket
-}
-
-output "alb_access_log_bucket" {
-  description = "S3 bucket used for ALB access logs."
-  value       = aws_s3_bucket.alb_logs.bucket
 }
 
 output "ecr_repository_url" {
@@ -33,11 +18,6 @@ output "codebuild_project_name" {
   value       = aws_codebuild_project.app_image.name
 }
 
-output "codebuild_log_group" {
-  description = "CloudWatch log group for CodeBuild deploy logs."
-  value       = aws_cloudwatch_log_group.codebuild.name
-}
-
 output "ecs_cluster_name" {
   description = "ECS cluster name."
   value       = aws_ecs_cluster.app.name
@@ -46,16 +26,6 @@ output "ecs_cluster_name" {
 output "ecs_service_name" {
   description = "ECS service name."
   value       = aws_ecs_service.app.name
-}
-
-output "ecs_log_group" {
-  description = "CloudWatch log group for ECS app logs."
-  value       = aws_cloudwatch_log_group.app.name
-}
-
-output "alert_topic_arn" {
-  description = "SNS topic ARN for environment-specific Data Chord health alerts."
-  value       = aws_sns_topic.alerts.arn
 }
 
 output "target_group_arn" {

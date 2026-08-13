@@ -1,385 +1,153 @@
-# Data Chord AWS Deploy
+# Data Chord AWS deployment
 
-This repository owns the Data Chord application infrastructure and all final
-application resource names. The stack creates the load balancer, Cognito login,
-ECS service, application IAM roles, workflow bucket, image repository,
-CodeBuild project, logs, and alerts.
+This directory owns one complete Data Chord application deployment. OpenTofu
+creates these application resources:
 
-The `netrias/datachord-infrastructure` repository owns the one-per-account
-foundation. That foundation contains the OpenTofu state bucket, deployer role,
-deployer permissions, application-role permission boundary, application IAM
-path, and state access. A Data Chord deployment does not clone, call, or read
-files from the foundation repository.
+- A small public VPC with two public subnets.
+- An Application Load Balancer with Cognito authentication and managed TLS.
+- One ECS Fargate service.
+- One versioned and encrypted S3 workflow bucket.
+- One ECR repository and one CodeBuild project.
+- The application IAM roles and CloudWatch log groups.
 
-## Target onboarding contract
+The stack does not create NAT gateways, private subnets, VPC endpoints,
+databases, alarms, email subscriptions, EventBridge alert rules, or ALB access
+logs.
 
-Each AWS target has one checked-in contract under `infra/targets`. It contains
-only these foundation outputs and deployment selectors:
+The separate `netrias/datachord-infrastructure` repository owns account-level
+resources. These include the state bucket, deployer role, application-role
+permission boundary, IAM path, and state-access policy.
 
-1. Target name and expected AWS account.
+## Target contract
 
-2. AWS region and exact state bucket name.
+Each target file under `infra/targets` contains the account-level outputs that
+this stack consumes:
 
-3. Deployer-role ARN.
+- AWS account and region.
+- State bucket.
+- Deployer-role ARN.
+- Application permission-boundary ARN and IAM path.
 
-4. Application permission-boundary ARN and IAM path.
+Environment files under `infra/env/<target>` contain application settings such
+as the DNS label and health-check timing.
 
-The current targets are `bdf` and `netrias`. The supported stage names are
-`dev`, `qa`, `staging`, and `prod`. Application settings are separate from the
-onboarding contract under `infra/env/<target>`.
-
-Supported stage names and configured deployments are different contracts. This
-repository currently has application configuration for:
+The configured deployments are:
 
 - `bdf/staging`
 - `bdf/prod`
 - `netrias/staging`
 
-The Netrias staging configuration selects the first intended Netrias
-deployment. It is not evidence of a live deployment.
+The Netrias staging files define a possible deployment. They do not prove that
+a live deployment exists.
 
-The checked-in contracts are copies of foundation outputs. They do not create
-foundation resources. Update a target contract only after the foundation
-outputs for that AWS account change.
+## State
 
-## State keys
-
-New state uses this key:
+Canonical state uses one visible key convention:
 
 ```text
 datachord/<target>/<stage>/tofu.tfstate
 ```
 
-BDF staging and production keep their existing live keys:
+The S3 backend uses OpenTofu native lock files. It does not use a DynamoDB lock
+table.
+
+BDF staging has moved to the canonical key:
 
 ```text
-data-chord/staging/tofu.tfstate
-data-chord/prod/tofu.tfstate
+datachord/bdf/staging/tofu.tfstate
 ```
 
-This compatibility rule is limited to those two known states. The backend uses
-the native S3 lock file. It does not use a DynamoDB lock table.
+BDF production keeps `data-chord/prod/tofu.tfstate` until its own reviewed
+migration. No other legacy key is supported.
 
-## One-time foundation onboarding
+## Account prerequisites
 
-For each AWS account:
+Before the first deployment:
 
-1. Apply the target in `netrias/datachord-infrastructure` by its documented
-   process.
+1. Apply the target foundation in `netrias/datachord-infrastructure`.
+2. Copy its outputs into the matching file under `infra/targets`.
+3. Configure an AWS profile that assumes the target `deployer_role_arn`.
+4. Create `data-chord/<stage>/netrias-api-key` in Secrets Manager.
+5. Confirm that the public Route 53 hosted zone exists.
+6. Authorize CodeBuild to read `netrias/data_chord` through the approved AWS
+   account setup.
 
-2. Copy the target outputs into the matching file in `infra/targets`.
+The deploy script rejects a direct IAM user, the wrong account, and the wrong
+role.
 
-3. Configure a local AWS profile that assumes the output
-   `deployer_role_arn`. The deploy scripts reject a direct IAM user, a different
-   role, or a different account.
+Each target and stage owns its own VPC. The ALB and Fargate task use two public
+subnets in separate Availability Zones. The task receives a public IP, but its
+security group accepts application traffic only from the ALB.
 
-4. Add the target application values under `infra/env/<target>`.
+## Operator commands
 
-5. Complete service prerequisites that are outside this stack. CodeBuild needs
-   GitHub source access. Managed DNS needs the configured public Route 53 hosted
-   zone.
-
-The foundation deployment policy must also let the deployer read the exact
-application permission-boundary policy with `iam:GetPolicy` and
-`iam:GetPolicyVersion`. Data Chord reads that policy during planning. This
-stops role creation when the boundary does not exist. The permission must name
-only the foundation output `application_role_boundary_arn`; it does not permit
-changes to the policy.
-
-Before a Data Chord plan or BDF handoff, verify these durable prerequisites:
-
-- The account-access foundation exists, including the deployer role,
-  application-role boundary, application IAM path, and state bucket with
-  versioning and the required bucket policy.
-- The deployer can use `secretsmanager:DescribeSecret`,
-  `secretsmanager:GetSecretValue`, `secretsmanager:CreateSecret`, and
-  `secretsmanager:PutSecretValue` for the stage API secret, and
-  `secretsmanager:GetSecretValue` for the optional auth-bypass secret.
-- The configured VPC and subnets exist in the target account and region. Public
-  application subnets must have the required address mapping and active route.
-- CodeBuild has approved access to the configured source repository.
-- If `hosted_zone_name` is set, the matching public Route 53 hosted zone exists.
-  Otherwise, the configured ACM certificate exists and covers `domain_name`.
-- Public DNS is delegated to the configured zone or records. External DNS
-  delegation remains an operator responsibility.
-
-Any change to VPC, subnet, DNS, certificate, domain, or other deployment input
-must be committed and pushed before deploy. Deploy commands reject dirty
-worktrees and commits that do not match the selected branch on `origin`.
-
-## Plan and deploy
-
-Set `AWS_PROFILE` to the profile that assumes the target deployer role. Before
-the first plan for a stage, prepare its application API secret:
+The normal interface has three commands. Pass the AWS profile explicitly:
 
 ```bash
-AWS_PROFILE=datachord-netrias NETRIAS_API_KEY='replace-with-key' just prepare-stage-secret netrias staging
-AWS_PROFILE=datachord-netrias just deploy-plan netrias staging
-AWS_PROFILE=datachord-netrias just deploy netrias staging
+just plan bdf staging datachord-bdf
+just deploy bdf staging datachord-bdf
+just status bdf staging datachord-bdf
 ```
 
-`prepare-stage-secret` is the only command that writes the stage API secret. It
-is idempotent. With `NETRIAS_API_KEY`, it creates the
-secret or updates its value. If Secrets Manager already has the desired value,
-the command does not write another version. A changed value uses a deterministic
-request token based on the current version, so a lost-response retry is safe
-and a later intentional revert gets a new token. Without `NETRIAS_API_KEY`, the
-command verifies that the secret already exists. Plan and deploy commands only
-check the secret, even when `NETRIAS_API_KEY` is present in the shell.
-`deploy-plan` does not apply OpenTofu or start a build.
+`plan` initializes the correct state key, creates a saved plan under
+`build/plans`, displays it, and checks durable-storage safety. It does not apply
+infrastructure or start a build.
 
-The normal application flow is:
+`deploy` accepts only a named branch with a clean worktree and a commit that
+matches the branch on `origin`. It then:
 
-```text
-foundation onboarding
-  -> assume the shared deployer role
-  -> prepare the stage application API secret
-  -> Data Chord selects its target and stage files
-  -> Data Chord initializes its S3 state key
-  -> review the Data Chord plan
-  -> app deploy reconciles build prerequisites in the same state
-  -> CodeBuild builds the immutable image
-  -> Data Chord applies its complete application stack
-```
+1. Creates missing ECR and CodeBuild prerequisites.
+2. Builds or reuses the immutable image for that commit.
+3. Creates and displays a saved final plan.
+4. Applies that exact saved plan.
+5. Waits for a stable ECS rollout and healthy load-balancer target.
 
-An app deploy requires a named branch, a clean worktree, and a matching commit
-on `origin`. CodeBuild builds that commit. OpenTofu records its short commit SHA
-as the immutable ECS image tag and then watches the ECS rollout.
+`status` reads the current OpenTofu outputs, ECS status, and target health. It
+does not change AWS.
 
-A plan uses the currently deployed image tag when one exists. For an empty
-state, it uses the current short commit SHA as the proposed first image tag.
-`DATA_CHORD_IMAGE_TAG` overrides both choices so plan and infrastructure-only
-deploy can select the same existing immutable image explicitly.
-That first plan requires the same named, clean, and pushed Git source as an app
-deploy, so the later build can produce the image shown in the plan.
-
-On every app deploy, the `deploy` command first applies one target,
-`aws_codebuild_project.app_image`. This idempotent apply creates missing build
-resources and reconciles drift before any image lookup or build. Its dependency
-graph contains the Data Chord-owned ECR repository, CodeBuild log group,
-bounded build role and policy, and CodeBuild project. The targeted apply uses
-the same root, backend, and state as the full stack. It does not create a second
-stack.
-
-If a previous attempt already pushed the same immutable commit image, a retry
-reuses that image and continues with the full apply. It does not try to overwrite
-or rebuild an immutable tag.
-
-You can also prepare or replace the stage secret separately at any later time:
+Prepare or replace the stage API secret only when needed:
 
 ```bash
-AWS_PROFILE=datachord-bdf NETRIAS_API_KEY='replace-with-key' just prepare-stage-secret bdf staging
+AWS_PROFILE=datachord-bdf NETRIAS_API_KEY='replace-with-key' \
+  infra/scripts/bootstrap-secrets.sh bdf staging ensure
 ```
 
-An infrastructure-only deploy reuses the current ECS image. It is not the
-first-deploy command. Run `just deploy <target> <stage>` first when no image has
-been deployed.
+The secret helper is idempotent. Normal plan and deploy commands only verify
+that the secret exists.
 
-Other operational commands use the same target-stage order:
+## Safety rules
+
+The workflow bucket contains durable application data. Every normal plan stops
+if OpenTofu would delete or replace it.
+
+Retiring an old ALB access-log bucket takes two saved plans. First disable ALB
+logging and set the old bucket to allow removal. Apply that plan. Remove the
+bucket resource in a later plan. The deployment script rejects a one-step
+retirement.
+
+The application IAM roles use the foundation-owned path and permission
+boundary. `migration-handoff.tf` forgets the old unbounded role addresses
+without deleting those roles. A deployment stops if a legacy handoff address
+still exists in state.
+
+BDF production still needs its own reviewed state and IAM handoff before the
+new shared contract can be applied there. Do not copy or restore the BDF
+staging state for production.
+
+## CodeBuild source access
+
+CodeBuild reads `https://github.com/netrias/data_chord.git`. Source
+authorization is an account prerequisite. Do not put a GitHub token in
+OpenTofu variables, state, source files, or Docker build arguments.
+
+## Diagnostics
+
+The stack keeps application and CodeBuild logs in CloudWatch for 14 days.
+Start with:
 
 ```bash
-AWS_PROFILE=datachord-bdf just deploy-status bdf staging
-AWS_PROFILE=datachord-bdf just deploy-logs bdf staging
-AWS_PROFILE=datachord-bdf just deploy-build bdf staging
-AWS_PROFILE=datachord-bdf just invite-user bdf staging user@example.com
+just status <target> <stage> <profile>
 ```
 
-`deploy-build` uses the same current-commit image path as an app deploy. It
-checks the legacy BDF handoff state, reconciles the build prerequisites, and
-reuses the immutable image when it already exists. It does not run the full
-application apply.
-
-## State and IAM handoff safety
-
-The BDF staging and production state files contain application resources only,
-and this repository keeps their existing keys.
-
-The existing BDF application roles use the IAM root path and no permission
-boundary. The foundation deployer cannot delete those root-path roles. OpenTofu
-therefore uses `removed` blocks with `destroy = false` to forget the legacy IAM
-and task-definition addresses without deleting AWS resources. It creates new
-roles under the foundation path, applies the foundation boundary, registers a
-new task definition, and then updates ECS and CodeBuild.
-
-The normal foundation deployer cannot refresh the legacy IAM objects. Do not
-use the normal deploy command for the first BDF handoff. Do not use
-`-refresh=false` for the planned handoff. An approved BDF foundation
-administrator must create and apply a saved plan with normal refresh.
-Deploy and build write modes inspect state without refresh and stop before
-apply if any legacy handoff address remains. Plan mode stays available for
-review.
-
-Use this sequence once for `staging` and once for `prod`:
-
-1. Confirm that the BDF foundation and application boundary exist.
-
-2. Record the current ECS task-definition ARN and CodeBuild service-role ARN.
-
-3. Initialize the existing BDF state key with the privileged profile. Pull a
-   local state backup. Record the current S3 state-object version.
-
-4. Read the current `deployed_image_tag` output. If the optional auth-bypass
-   secret exists, export its JSON array as `TF_VAR_auth_bypass_cidrs`. Otherwise,
-   confirm that it is absent and use `[]`.
-
-5. Create a saved plan with normal refresh, review it, and apply that exact
-   saved plan only after explicit confirmation:
-
-```bash
-bash <<'BDF_HANDOFF'
-set -Eeuo pipefail
-stage=staging
-operator_profile='<approved-privileged-profile>'
-umask 077
-migration_dir='<absolute-path-in-approved-protected-storage>'
-if [[ "$migration_dir" != /* ]]; then
-  printf 'migration_dir must be an operator-supplied absolute protected path.\n' >&2
-  exit 1
-fi
-if [[ -e "$migration_dir" ]]; then
-  printf 'migration_dir already exists: %s\n' "$migration_dir" >&2
-  exit 1
-fi
-mkdir -m 700 "$migration_dir"
-source infra/scripts/lib.sh
-require_configured_deployment bdf "$stage"
-
-state_key="$(state_key_for bdf "$stage")"
-TF_DATA_DIR="$migration_dir/tofu-data"
-export TF_DATA_DIR
-
-AWS_PROFILE="$operator_profile" tofu -chdir=infra init \
-  -backend-config="bucket=$(target_value bdf state_bucket_name)" \
-  -backend-config="key=$state_key" \
-  -backend-config="region=$(target_value bdf aws_region)" \
-  -backend-config="encrypt=true" \
-  -backend-config="use_lockfile=true" \
-  -input=false \
-  -reconfigure
-
-AWS_PROFILE="$operator_profile" tofu -chdir=infra state pull \
-  >"$migration_dir/bdf-$stage-before.tfstate"
-AWS_PROFILE="$operator_profile" aws s3api list-object-versions \
-  --bucket "$(target_value bdf state_bucket_name)" \
-  --prefix "$state_key" \
-  --query "Versions[?Key=='$state_key' && IsLatest].VersionId | [0]" \
-  --output text >"$migration_dir/bdf-$stage-state-version.txt"
-image_tag="$(AWS_PROFILE="$operator_profile" tofu -chdir=infra output -raw deployed_image_tag)"
-
-AWS_PROFILE="$operator_profile" tofu -chdir=infra plan \
-  -input=false \
-  -out="$migration_dir/bdf-$stage.tfplan" \
-  -var-file="$INFRA_DIR/env/bdf/common.tfvars" \
-  -var-file="$INFRA_DIR/env/bdf/$stage.tfvars" \
-  -var="expected_account_id=$(target_value bdf expected_account_id)" \
-  -var="aws_region=$(target_value bdf aws_region)" \
-  -var="application_role_boundary_arn=$(target_value bdf application_role_boundary_arn)" \
-  -var="application_role_path=$(target_value bdf application_role_path)" \
-  -var="environment=$stage" \
-  -var="netrias_api_key_secret_name=$(netrias_api_key_secret_name_for "$stage")" \
-  -var="image_tag=$image_tag"
-
-tofu -chdir=infra show "$migration_dir/bdf-$stage.tfplan"
-
-printf '\nSTOP unless the plan forgets all eight legacy addresses without destroy, creates the three bounded application roles, and has no unexplained destroy or replacement.\n\n'
-read -r -p "Type apply to apply this exact saved plan: " confirmation </dev/tty
-if [[ "$confirmation" != "apply" ]]; then
-  printf 'Saved plan was not applied.\n' >&2
-  exit 1
-fi
-
-AWS_PROFILE="$operator_profile" tofu -chdir=infra apply \
-  -input=false "$migration_dir/bdf-$stage.tfplan"
-
-printf '\nHandoff evidence: %s\nRetain this directory in approved protected storage through the rollback period.\n' "$migration_dir"
-BDF_HANDOFF
-```
-
-6. Use the normal foundation-role `deploy` command for a new commit. Confirm
-   the CodeBuild build succeeds and ECS is stable.
-
-Keep the old root-path roles through a rollback period. Before cleanup, a
-privileged operator can restore the recorded ECS task definition and CodeBuild
-service role. Do not restore an old state version after the new bounded roles
-exist. Do not return to source that manages the root-path roles.
-
-After the new deployment is healthy and its CodeBuild project has completed a
-build, an approved privileged operator must remove the old roles. The shared
-deployer cannot do this cleanup. For each migrated BDF stage, delete these
-resources in this order, where `<stage>` is `staging` or `prod`:
-
-1. Deregister the recorded old ECS task-definition revision.
-
-2. Inline policy `data-chord-<stage>-codebuild` and role
-   `data-chord-<stage>-codebuild`.
-
-3. Inline policy `data-chord-<stage>-workflow-storage` and role
-   `data-chord-<stage>-task`.
-
-4. Inline policy `data-chord-<stage>-task-secrets`, the
-   `AmazonECSTaskExecutionRolePolicy` attachment, and role
-   `data-chord-<stage>-task-exec`.
-
-After the rollback period, set the profile to an approved identity that can
-manage the old root-path roles:
-
-```bash
-stage=staging
-old_task_definition='<recorded-task-definition-arn>'
-operator_profile='<approved-privileged-profile>'
-role_prefix="data-chord-$stage"
-
-AWS_PROFILE="$operator_profile" aws ecs deregister-task-definition \
-  --region us-east-2 \
-  --task-definition "$old_task_definition"
-
-AWS_PROFILE="$operator_profile" aws iam delete-role-policy \
-  --role-name "$role_prefix-codebuild" \
-  --policy-name "$role_prefix-codebuild"
-AWS_PROFILE="$operator_profile" aws iam delete-role \
-  --role-name "$role_prefix-codebuild"
-
-AWS_PROFILE="$operator_profile" aws iam delete-role-policy \
-  --role-name "$role_prefix-task" \
-  --policy-name "$role_prefix-workflow-storage"
-AWS_PROFILE="$operator_profile" aws iam delete-role \
-  --role-name "$role_prefix-task"
-
-AWS_PROFILE="$operator_profile" aws iam delete-role-policy \
-  --role-name "$role_prefix-task-exec" \
-  --policy-name "$role_prefix-task-secrets"
-AWS_PROFILE="$operator_profile" aws iam detach-role-policy \
-  --role-name "$role_prefix-task-exec" \
-  --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-AWS_PROFILE="$operator_profile" aws iam delete-role \
-  --role-name "$role_prefix-task-exec"
-```
-
-After this cleanup, rollback application code or images through the current
-Data Chord configuration so the bounded application roles stay in use.
-After both BDF stages complete the handoff, rollback period, and old-role
-cleanup, remove `migration-handoff.tf` in a separate reviewed change.
-
-## Optional VPN auth bypass
-
-Store trusted source CIDRs as a JSON array in this stage secret:
-
-```text
-data-chord/<stage>/auth-bypass-cidrs
-```
-
-The deploy script passes the list to OpenTofu without storing it in a tfvars
-file. Requests from those CIDRs bypass Cognito. All other requests use Cognito.
-
-## CodeBuild GitHub access
-
-CodeBuild source credentials are an account and region prerequisite. Import
-them through the approved account onboarding process. Do not store a GitHub
-token in OpenTofu, Secrets Manager values committed to this repository, or the
-target contract.
-
-## Alerts
-
-Each stage owns its CloudWatch alarms, EventBridge failure rules, and SNS topic.
-Production has an email subscriber by default. Other stages keep alarms without
-email unless their stage file adds subscribers.
+Then inspect the named ECS service or CodeBuild log group. The stack does not
+create alerts or notification infrastructure.
