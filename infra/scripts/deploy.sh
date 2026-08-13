@@ -28,11 +28,10 @@ tofu_args=(
   "-var=aws_region=$(target_value "$TARGET_NAME" aws_region)"
   "-var=application_role_boundary_arn=$(target_value "$TARGET_NAME" application_role_boundary_arn)"
   "-var=application_role_path=$(target_value "$TARGET_NAME" application_role_path)"
+  "-var=deployment_target=$TARGET_NAME"
   "-var=environment=$STAGE_NAME"
-  "-var=netrias_api_key_secret_name=$(netrias_api_key_secret_name_for "$STAGE_NAME")"
 )
-
-AUTH_BYPASS_CIDRS_SECRET_NAME="data-chord/$STAGE_NAME/auth-bypass-cidrs"
+PLAN_DIR=""
 
 git_branch() {
   git -C "$REPO_DIR" branch --show-current
@@ -76,36 +75,138 @@ ensure_deployable_git_state() {
   log "Deploy source: $branch @ ${commit:0:12}"
 }
 
+create_plan_directory() {
+  local plans_root="$REPO_DIR/build/plans"
+
+  mkdir -p "$plans_root"
+  PLAN_DIR="$(mktemp -d "$plans_root/$TARGET_NAME-$STAGE_NAME.XXXXXX")"
+}
+
+show_and_check_plan() {
+  local plan_file="$1"
+
+  tofu -chdir="$INFRA_DIR" show "$plan_file"
+  tofu -chdir="$INFRA_DIR" show -json "$plan_file" | python3 -c '
+import json
+import sys
+
+plan = json.load(sys.stdin)
+resources = plan.get("resource_changes") or []
+for resource in resources:
+    address = resource.get("address")
+    actions = resource.get("change", {}).get("actions", [])
+    if address == "aws_s3_bucket.workflow" and "delete" in actions:
+        print(
+            "The plan would delete or replace the durable workflow bucket.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+log_bucket_deletion = next(
+    (
+        resource
+        for resource in resources
+        if resource.get("address") == "aws_s3_bucket.alb_logs"
+        and "delete" in resource.get("change", {}).get("actions", [])
+    ),
+    None,
+)
+if log_bucket_deletion is not None:
+    load_balancer = next(
+        (resource for resource in resources if resource.get("address") == "aws_lb.app"),
+        None,
+    )
+    load_balancer_before = (
+        load_balancer.get("change", {}).get("before") or {}
+        if load_balancer is not None
+        else {}
+    )
+    access_logs = load_balancer_before.get("access_logs") or []
+    if any(logs.get("enabled", False) for logs in access_logs):
+        print(
+            "ALB access logging must already be disabled before the log bucket "
+            "can be removed in a later saved plan.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    bucket_before = log_bucket_deletion.get("change", {}).get("before") or {}
+    if not bucket_before.get("force_destroy", False):
+        print(
+            "Remove the ALB log bucket in two stages. First retain the bucket "
+            "with force_destroy = true while access logs are disabled. Apply "
+            "that saved plan. Then remove the bucket in a later saved plan.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+'
+}
+
+create_saved_plan() {
+  local plan_file="$1"
+  local image_tag="$2"
+  shift 2
+
+  tofu -chdir="$INFRA_DIR" plan \
+    -input=false \
+    "${tofu_args[@]}" \
+    "-var=image_tag=$image_tag" \
+    "-out=$plan_file" \
+    "$@" >/dev/null
+  show_and_check_plan "$plan_file" || fail "OpenTofu plan failed a storage safety check."
+  log "Saved plan: $plan_file"
+}
+
+apply_saved_plan() {
+  local plan_file="$1"
+
+  tofu -chdir="$INFRA_DIR" apply -input=false "$plan_file"
+}
+
 apply_stack() {
   local image_tag="$1"
-  log "Applying OpenTofu stack for $TARGET_NAME/$STAGE_NAME with image tag $image_tag"
-  tofu -chdir="$INFRA_DIR" apply -input=false -auto-approve "${tofu_args[@]}" "-var=image_tag=$image_tag"
+  local plan_file="$PLAN_DIR/final.tfplan"
+
+  log "Planning OpenTofu stack for $TARGET_NAME/$STAGE_NAME with image tag $image_tag"
+  create_saved_plan "$plan_file" "$image_tag"
+  log "Applying the displayed OpenTofu plan"
+  apply_saved_plan "$plan_file"
 }
 
 apply_build_prerequisites() {
   local image_tag="$1"
-  log "Reconciling build prerequisites for $TARGET_NAME/$STAGE_NAME"
-  tofu -chdir="$INFRA_DIR" apply \
-    -input=false \
-    -auto-approve \
-    "${tofu_args[@]}" \
-    "-var=image_tag=$image_tag" \
+  local plan_file="$PLAN_DIR/build-prerequisites.tfplan"
+
+  log "Creating missing build prerequisites for $TARGET_NAME/$STAGE_NAME"
+  create_saved_plan \
+    "$plan_file" \
+    "$image_tag" \
     -target=aws_codebuild_project.app_image
+  apply_saved_plan "$plan_file"
+}
+
+build_prerequisites_exist() {
+  [[ -n "$(tofu_output codebuild_project_name)" && -n "$(tofu_output ecr_repository_url)" ]]
 }
 
 ensure_build_prerequisites() {
   local image_tag="$1"
-  local project_name
+
+  if build_prerequisites_exist; then
+    log "Build prerequisites already exist; skipping targeted bootstrap"
+    return 0
+  fi
 
   apply_build_prerequisites "$image_tag"
-  project_name="$(tofu_output codebuild_project_name)"
-  [[ -n "$project_name" ]] || fail "Build prerequisites were applied, but the CodeBuild project output is still unavailable."
+  build_prerequisites_exist || fail "Build prerequisites were applied, but their outputs are unavailable."
 }
 
 plan_stack() {
   local image_tag="$1"
+  local plan_file="$PLAN_DIR/final.tfplan"
+
   log "Planning OpenTofu stack for $TARGET_NAME/$STAGE_NAME with image tag $image_tag"
-  tofu -chdir="$INFRA_DIR" plan -input=false "${tofu_args[@]}" "-var=image_tag=$image_tag"
+  create_saved_plan "$plan_file" "$image_tag" -lock=false
 }
 
 require_application_state_handoff_complete() {
@@ -137,47 +238,6 @@ require_application_state_handoff_complete() {
 
 check_secret() {
   "$SCRIPT_DIR/bootstrap-secrets.sh" "$TARGET_NAME" "$STAGE_NAME" check
-}
-
-load_auth_bypass_cidrs() {
-  local output secret_value normalized
-
-  if ! output="$(
-    aws secretsmanager get-secret-value \
-      --secret-id "$AUTH_BYPASS_CIDRS_SECRET_NAME" \
-      --query SecretString \
-      --output text 2>&1
-  )"; then
-    if [[ "$output" == *"ResourceNotFoundException"* ]]; then
-      log "No auth bypass CIDR secret found: $AUTH_BYPASS_CIDRS_SECRET_NAME"
-      return 0
-    fi
-    fail "Could not read auth bypass CIDR secret '$AUTH_BYPASS_CIDRS_SECRET_NAME': $output"
-  fi
-
-  secret_value="$output"
-  if [[ -z "$secret_value" || "$secret_value" == "None" ]]; then
-    log "Auth bypass CIDR secret is empty: $AUTH_BYPASS_CIDRS_SECRET_NAME"
-    return 0
-  fi
-
-  # Keep bypass ranges out of tfvars so emergency/VPN access can change without
-  # leaving sensitive network details in the repo.
-  normalized="$(
-    python3 -c 'import json, sys
-raw = sys.stdin.read().strip()
-try:
-    value = json.loads(raw)
-except json.JSONDecodeError as exc:
-    raise SystemExit(f"Secret must be a JSON array of CIDR strings: {exc}") from exc
-if not isinstance(value, list) or not all(isinstance(item, str) and item.strip() for item in value):
-    raise SystemExit("Secret must be a JSON array of non-empty CIDR strings")
-print(json.dumps(value))
-' <<<"$secret_value"
-  )" || fail "Invalid auth bypass CIDR secret: $AUTH_BYPASS_CIDRS_SECRET_NAME"
-
-  export TF_VAR_auth_bypass_cidrs="$normalized"
-  log "Loaded auth bypass CIDRs from Secrets Manager: $AUTH_BYPASS_CIDRS_SECRET_NAME"
 }
 
 start_build() {
@@ -229,16 +289,6 @@ ensure_image() {
 
   build_id="$(start_build)"
   watch_build "$build_id"
-}
-
-require_existing_image() {
-  local image_tag="$1"
-  local repository_name
-
-  repository_name="$(ecr_repository_name)"
-  image_exists "$image_tag" "$repository_name" ||
-    fail "ECR image '$repository_name:$image_tag' does not exist. Build it before an infrastructure-only deploy."
-  log "Verified existing ECR image: $repository_name:$image_tag"
 }
 
 print_build_logs_hint() {
@@ -331,7 +381,7 @@ current_image_tag() {
   printf '%s\n' "${image##*:}"
 }
 
-selected_existing_image_tag() {
+plan_image_tag() {
   local image_tag
 
   if [[ -n "${DATA_CHORD_IMAGE_TAG:-}" ]]; then
@@ -340,26 +390,6 @@ selected_existing_image_tag() {
   fi
 
   image_tag="$(current_image_tag)"
-  if [[ -n "$image_tag" ]]; then
-    printf '%s\n' "$image_tag"
-  fi
-}
-
-infra_image_tag() {
-  local image_tag
-
-  image_tag="$(selected_existing_image_tag)"
-  if [[ -n "$image_tag" ]]; then
-    printf '%s\n' "$image_tag"
-    return 0
-  fi
-  fail "No deployed image tag is available. Run an app deploy after the base infrastructure exists, or set DATA_CHORD_IMAGE_TAG to an existing immutable image tag."
-}
-
-plan_image_tag() {
-  local image_tag
-
-  image_tag="$(selected_existing_image_tag)"
   if [[ -n "$image_tag" ]]; then
     printf '%s\n' "$image_tag"
     return 0
@@ -371,14 +401,32 @@ plan_image_tag() {
 
 print_target_health() {
   local target_group_arn
-  target_group_arn="$(tofu_output target_group_arn)"
-  [[ -n "$target_group_arn" ]] || return 0
+  target_group_arn="$(required_tofu_output target_group_arn)"
 
   log "Current target health:"
   aws elbv2 describe-target-health \
     --target-group-arn "$target_group_arn" \
     --query "TargetHealthDescriptions[].{Target:Target.Id,State:TargetHealth.State,Reason:TargetHealth.Reason,Description:TargetHealth.Description}" \
-    --output table || true
+    --output table || fail "Could not read application target health."
+}
+
+require_healthy_targets() {
+  local target_group_arn states state
+
+  target_group_arn="$(tofu_output target_group_arn)"
+  [[ -n "$target_group_arn" ]] || fail "The application target group is unavailable."
+  states="$(
+    aws elbv2 describe-target-health \
+      --target-group-arn "$target_group_arn" \
+      --query "TargetHealthDescriptions[].TargetHealth.State" \
+      --output text
+  )" || fail "Could not read application target health."
+  [[ -n "$states" && "$states" != "None" ]] || fail "The application target group has no registered targets."
+
+  for state in $states; do
+    [[ "$state" == "healthy" ]] || fail "The application target is not healthy: $state"
+  done
+  log "Application targets are healthy"
 }
 
 watch_ecs_rollout() {
@@ -427,114 +475,52 @@ watch_ecs_rollout() {
 }
 
 print_status() {
-  local app_url cluster service build_project
-  app_url="$(tofu_output app_url)"
-  cluster="$(tofu_output ecs_cluster_name)"
-  service="$(tofu_output ecs_service_name)"
-  build_project="$(tofu_output codebuild_project_name)"
+  local app_url cluster service
+  app_url="$(required_tofu_output app_url)"
+  cluster="$(required_tofu_output ecs_cluster_name)"
+  service="$(required_tofu_output ecs_service_name)"
 
-  [[ -z "$app_url" ]] || log "App URL: $app_url"
-  [[ -z "$build_project" ]] || log "CodeBuild project: $build_project"
+  log "App URL: $app_url"
 
-  if [[ -n "$cluster" && -n "$service" ]]; then
-    aws ecs describe-services \
-      --cluster "$cluster" \
-      --services "$service" \
-      --query "services[0].{Desired:desiredCount,Running:runningCount,Pending:pendingCount,Status:status,LatestEvent:events[0].message}" \
-      --output table || true
-  fi
+  aws ecs describe-services \
+    --cluster "$cluster" \
+    --services "$service" \
+    --query "services[0].{Desired:desiredCount,Running:runningCount,Pending:pendingCount,Status:status,LatestEvent:events[0].message}" \
+    --output table || fail "Could not read ECS service status."
 
   print_target_health
-}
-
-tail_logs() {
-  local ecs_group codebuild_group
-  ecs_group="$(tofu_output ecs_log_group)"
-  codebuild_group="$(tofu_output codebuild_log_group)"
-
-  [[ -z "$ecs_group" ]] || {
-    log "Recent ECS app logs: $ecs_group"
-    aws logs tail "$ecs_group" --since 30m || true
-  }
-
-  [[ -z "$codebuild_group" ]] || {
-    log "Recent CodeBuild logs: $codebuild_group"
-    aws logs tail "$codebuild_group" --since 30m || true
-  }
 }
 
 run_app_deploy() {
   local image_tag app_url
 
   require_deployer_identity "$TARGET_NAME"
-  log "Using AWS profile: $AWS_PROFILE"
+  log "Using verified AWS deployment-role credentials"
   ensure_deployable_git_state
   image_tag="$(git_image_tag)"
   init_tofu "$TARGET_NAME" "$STAGE_NAME"
   require_application_state_handoff_complete
   check_secret
-  load_auth_bypass_cidrs
+  create_plan_directory
 
   ensure_build_prerequisites "$image_tag"
   ensure_image "$image_tag"
   apply_stack "$image_tag"
   watch_ecs_rollout
+  require_healthy_targets
 
-  app_url="$(tofu_output app_url)"
+  app_url="$(required_tofu_output app_url)"
   log "Deploy complete: $app_url"
-}
-
-run_infra_deploy() {
-  local before_task_definition after_task_definition image_tag app_url
-
-  require_deployer_identity "$TARGET_NAME"
-  log "Using AWS profile: $AWS_PROFILE"
-  ensure_deployable_git_state
-  init_tofu "$TARGET_NAME" "$STAGE_NAME"
-  require_application_state_handoff_complete
-  check_secret
-  load_auth_bypass_cidrs
-
-  image_tag="$(infra_image_tag)"
-  require_existing_image "$image_tag"
-  before_task_definition="$(current_task_definition_arn)"
-  apply_stack "$image_tag"
-  after_task_definition="$(current_task_definition_arn)"
-
-  # Pure infrastructure edits do not always create a new task definition, so
-  # only wait for an ECS rollout when there is actually a new task to watch.
-  if [[ -n "$after_task_definition" && "$after_task_definition" != "$before_task_definition" ]]; then
-    watch_ecs_rollout
-  else
-    log "No ECS task definition change detected; skipping rollout watch"
-  fi
-
-  app_url="$(tofu_output app_url)"
-  log "Infra deploy complete: $app_url"
-}
-
-run_build() {
-  local image_tag
-
-  require_deployer_identity "$TARGET_NAME"
-  log "Using AWS profile: $AWS_PROFILE"
-  ensure_deployable_git_state
-  image_tag="$(git_image_tag)"
-  init_tofu "$TARGET_NAME" "$STAGE_NAME"
-  require_application_state_handoff_complete
-  ensure_build_prerequisites "$image_tag"
-  ensure_image "$image_tag"
-  log "Immutable image is ready. The full application stack has not been applied."
 }
 
 run_plan() {
   local image_tag
 
   require_deployer_identity "$TARGET_NAME"
-  log "Using AWS profile: $AWS_PROFILE"
+  log "Using verified AWS deployment-role credentials"
   check_secret
-  load_auth_bypass_cidrs
   init_tofu "$TARGET_NAME" "$STAGE_NAME"
+  create_plan_directory
   image_tag="$(plan_image_tag)"
   plan_stack "$image_tag"
 }
@@ -543,9 +529,6 @@ case "$MODE" in
   deploy)
     run_app_deploy
     ;;
-  deploy-infra)
-    run_infra_deploy
-    ;;
   plan)
     run_plan
     ;;
@@ -553,14 +536,6 @@ case "$MODE" in
     require_deployer_identity "$TARGET_NAME"
     init_tofu "$TARGET_NAME" "$STAGE_NAME"
     print_status
-    ;;
-  logs)
-    require_deployer_identity "$TARGET_NAME"
-    init_tofu "$TARGET_NAME" "$STAGE_NAME"
-    tail_logs
-    ;;
-  build)
-    run_build
     ;;
   output-url)
     require_deployer_identity "$TARGET_NAME"

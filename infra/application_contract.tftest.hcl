@@ -8,34 +8,41 @@ mock_provider "aws" {
 
   mock_data "aws_secretsmanager_secret" {
     defaults = {
-      arn = "arn:aws:secretsmanager:us-east-2:084828580051:secret:data-chord/test"
+      arn = "arn:aws:secretsmanager:us-east-2:084828580051:secret:data-chord/qa/netrias-api-key"
     }
   }
 
-  mock_data "aws_iam_policy" {
+  mock_data "aws_availability_zones" {
     defaults = {
-      policy = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+      names = ["us-east-2a", "us-east-2b", "us-east-2c"]
+    }
+  }
+
+  mock_data "aws_route_table" {
+    defaults = {
+      id     = "rtb-0123456789abcdef0"
+      vpc_id = "ryyXLP0q"
     }
   }
 
   mock_resource "aws_iam_role" {
     defaults = {
-      arn = "arn:aws:iam::084828580051:role/application/data-chord-test"
+      arn = "arn:aws:iam::084828580051:role/application/data-chord-qa"
     }
   }
 
   mock_resource "aws_lb" {
     defaults = {
-      arn        = "arn:aws:elasticloadbalancing:us-east-2:084828580051:loadbalancer/app/data-chord-test/0123456789abcdef"
-      arn_suffix = "app/data-chord-test/0123456789abcdef"
-      dns_name   = "data-chord-test.us-east-2.elb.amazonaws.com"
+      arn        = "arn:aws:elasticloadbalancing:us-east-2:084828580051:loadbalancer/app/data-chord-qa/0123456789abcdef"
+      arn_suffix = "app/data-chord-qa/0123456789abcdef"
+      dns_name   = "data-chord-qa.us-east-2.elb.amazonaws.com"
     }
   }
 
   mock_resource "aws_lb_target_group" {
     defaults = {
-      arn        = "arn:aws:elasticloadbalancing:us-east-2:084828580051:targetgroup/data-chord-test/0123456789abcdef"
-      arn_suffix = "targetgroup/data-chord-test/0123456789abcdef"
+      arn        = "arn:aws:elasticloadbalancing:us-east-2:084828580051:targetgroup/data-chord-qa/0123456789abcdef"
+      arn_suffix = "targetgroup/data-chord-qa/0123456789abcdef"
     }
   }
 
@@ -57,12 +64,6 @@ mock_provider "aws" {
     }
   }
 
-  mock_resource "aws_sns_topic" {
-    defaults = {
-      arn = "arn:aws:sns:us-east-2:084828580051:data-chord-test"
-    }
-  }
-
   mock_resource "aws_ecs_service" {
     defaults = {
       arn = "arn:aws:ecs:us-east-2:084828580051:service/data-chord-qa/data-chord-qa"
@@ -76,14 +77,11 @@ variables {
   application_role_boundary_arn = "arn:aws:iam::084828580051:policy/datachord-application-role-boundary"
   application_role_path         = "/application/"
 
-  environment                 = "qa"
-  vpc_id                      = "vpc-0123456789abcdef0"
-  public_subnet_ids           = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
-  certificate_arn             = "arn:aws:acm:us-east-2:084828580051:certificate/00000000-0000-0000-0000-000000000000"
-  domain_name                 = "data-chord.example.com"
-  hosted_zone_name            = ""
-  netrias_api_key_secret_name = "data-chord/qa/netrias-api-key"
-  image_tag                   = "0123456789ab"
+  environment       = "qa"
+  deployment_target = "bdf"
+  hosted_zone_name  = "example.com"
+  domain_label      = "data-chord-qa"
+  image_tag         = "0123456789ab"
 }
 
 run "application_roles_follow_foundation_guardrails" {
@@ -121,103 +119,53 @@ run "application_role_names_are_owned_by_data_chord" {
   }
 }
 
-run "external_certificate_tls_uses_supplied_hostname" {
+run "managed_https_entrypoint_uses_the_hosted_zone" {
   command = plan
 
   assert {
     condition = (
-      length(aws_acm_certificate.app) == 0 &&
-      length(aws_acm_certificate_validation.app) == 0 &&
-      output.app_hostname == var.domain_name &&
-      output.app_url == "https://${var.domain_name}"
-    )
-    error_message = "External-certificate TLS must use the supplied certificate and hostname."
-  }
-}
-
-run "managed_tls_creates_certificate_for_hosted_zone" {
-  command = plan
-
-  variables {
-    certificate_arn  = ""
-    domain_name      = ""
-    hosted_zone_name = "example.com"
-    domain_label     = "data-chord-qa"
-  }
-
-  assert {
-    condition = (
-      length(aws_acm_certificate.app) == 1 &&
-      length(aws_acm_certificate_validation.app) == 1 &&
-      output.app_hostname == "data-chord-qa.example.com" &&
+      aws_acm_certificate.app.domain_name == "data-chord-qa.example.com" &&
+      aws_acm_certificate_validation.app.certificate_arn == aws_acm_certificate.app.arn &&
       output.app_url == "https://data-chord-qa.example.com"
     )
-    error_message = "Managed TLS must create a certificate and hostname under the hosted zone."
+    error_message = "The app must create and validate its HTTPS hostname in the configured hosted zone."
   }
 }
 
-run "tls_rejects_missing_configuration" {
-  command = plan
-
-  variables {
-    certificate_arn  = ""
-    domain_name      = ""
-    hosted_zone_name = ""
-  }
-
-  expect_failures = [var.certificate_arn]
-}
-
-run "tls_rejects_certificate_without_domain" {
-  command = plan
-
-  variables {
-    certificate_arn  = "arn:aws:acm:us-east-2:084828580051:certificate/00000000-0000-0000-0000-000000000000"
-    domain_name      = ""
-    hosted_zone_name = ""
-  }
-
-  expect_failures = [var.certificate_arn]
-}
-
-run "tls_rejects_domain_without_certificate" {
-  command = plan
-
-  variables {
-    certificate_arn  = ""
-    domain_name      = "data-chord.example.com"
-    hosted_zone_name = ""
-  }
-
-  expect_failures = [var.certificate_arn]
-}
-
-run "tls_rejects_mixed_external_and_managed_inputs" {
-  command = plan
-
-  variables {
-    certificate_arn  = "arn:aws:acm:us-east-2:084828580051:certificate/00000000-0000-0000-0000-000000000000"
-    domain_name      = "data-chord.example.com"
-    hosted_zone_name = "example.com"
-  }
-
-  expect_failures = [var.certificate_arn]
-}
-
-run "ecs_event_rules_use_the_managed_service_identity" {
+run "public_entrypoint_requires_cognito_authentication" {
   command = plan
 
   assert {
-    condition = alltrue([
-      jsondecode(aws_cloudwatch_event_rule.ecs_service_error.event_pattern).resources == [aws_ecs_service.app.arn],
-      jsondecode(aws_cloudwatch_event_rule.ecs_deployment_failed.event_pattern).resources == [aws_ecs_service.app.arn],
-      output.ecs_service_name == aws_ecs_service.app.name,
-    ])
-    error_message = "ECS event rules and outputs must use the managed service identity."
+    condition = (
+      alltrue([
+        for rule in aws_security_group.alb.ingress :
+        rule.from_port == 443 && rule.to_port == 443
+      ]) &&
+      [for action in aws_lb_listener.https.default_action : action.type] == ["authenticate-cognito", "forward"]
+    )
+    error_message = "The public entrypoint must accept only HTTPS and authenticate with Cognito before forwarding."
   }
 }
 
-run "codebuild_reads_the_public_repository_without_authentication" {
+run "api_secret_name_is_derived_from_the_environment" {
+  command = plan
+
+  assert {
+    condition     = data.aws_secretsmanager_secret.netrias_api_key.name == "data-chord/qa/netrias-api-key"
+    error_message = "The API secret name must be derived from the deployment environment."
+  }
+}
+
+run "ecs_service_output_uses_the_managed_service_identity" {
+  command = plan
+
+  assert {
+    condition     = output.ecs_service_name == aws_ecs_service.app.name
+    error_message = "The ECS service output must use the managed service identity."
+  }
+}
+
+run "codebuild_uses_public_source" {
   command = plan
 
   assert {
@@ -226,49 +174,70 @@ run "codebuild_reads_the_public_repository_without_authentication" {
       aws_codebuild_project.app_image.source[0].location == "https://github.com/netrias/data_chord.git" &&
       length(aws_codebuild_project.app_image.source[0].auth) == 0
     )
-    error_message = "CodeBuild must read the public Data Chord repository without account-specific source authentication."
+    error_message = "CodeBuild must read the public Data Chord repository without source authentication."
   }
 }
 
-run "endpoint_resources_are_absent_without_shared_endpoint" {
+run "application_owns_a_minimal_public_network" {
   command = plan
 
-  variables {
-    secretsmanager_vpc_endpoint_id = ""
+  assert {
+    condition = (
+      aws_vpc.app.cidr_block == "10.0.0.0/16" &&
+      aws_vpc.app.enable_dns_support &&
+      aws_vpc.app.enable_dns_hostnames &&
+      length(aws_subnet.public) == 2 &&
+      alltrue([
+        for subnet in aws_subnet.public :
+        subnet.vpc_id == aws_vpc.app.id && subnet.map_public_ip_on_launch
+      ]) &&
+      length(distinct([for subnet in aws_subnet.public : subnet.availability_zone])) == 2
+    )
+    error_message = "The application must own two public subnets in separate availability zones."
   }
 
   assert {
     condition = (
-      length(aws_security_group.secrets_endpoint) == 0 &&
-      length(aws_vpc_endpoint_security_group_association.secretsmanager_tasks) == 0
+      aws_internet_gateway.app.vpc_id == aws_vpc.app.id &&
+      data.aws_route_table.main.vpc_id == aws_vpc.app.id &&
+      aws_route.public_internet.destination_cidr_block == "0.0.0.0/0" &&
+      aws_route.public_internet.gateway_id == aws_internet_gateway.app.id
     )
-    error_message = "Endpoint resources must be absent when the target has no shared endpoint."
+    error_message = "The VPC main route table must use the application internet gateway."
   }
 }
 
-run "endpoint_resources_attach_when_shared_endpoint_exists" {
+run "workflow_storage_uses_the_canonical_deployment_prefix" {
   command = plan
-
-  variables {
-    secretsmanager_vpc_endpoint_id = "vpce-0123456789abcdef0"
-  }
 
   assert {
     condition = (
-      length(aws_security_group.secrets_endpoint) == 1 &&
-      length(aws_vpc_endpoint_security_group_association.secretsmanager_tasks) == 1
+      local.deployment_prefix == "datachord/bdf/qa" &&
+      anytrue([
+        for environment_variable in jsondecode(aws_ecs_task_definition.application.container_definitions)[0].environment :
+        environment_variable.name == "DATA_CHORD_S3_PREFIX" && environment_variable.value == local.deployment_prefix
+      ]) &&
+      anytrue([
+        for statement in jsondecode(aws_iam_role_policy.application_task_workflow_storage.policy).Statement :
+        try(statement.Resource, "") == "${aws_s3_bucket.workflow.arn}/${local.deployment_prefix}/*"
+      ])
     )
-    error_message = "Endpoint resources must attach when the target provides a shared endpoint."
+    error_message = "Workflow storage must use datachord/<target>/<stage>."
   }
 }
 
-run "additional_endpoint_clients_require_shared_endpoint" {
+run "runtime_and_entrypoint_use_the_application_network" {
   command = plan
 
-  variables {
-    secretsmanager_vpc_endpoint_id                      = ""
-    additional_secretsmanager_client_security_group_ids = ["sg-0123456789abcdef0"]
+  assert {
+    condition = (
+      aws_security_group.alb.vpc_id == aws_vpc.app.id &&
+      aws_security_group.task.vpc_id == aws_vpc.app.id &&
+      aws_lb_target_group.app.vpc_id == aws_vpc.app.id &&
+      toset(aws_lb.app.subnets) == toset(local.public_subnet_ids) &&
+      toset(aws_ecs_service.app.network_configuration[0].subnets) == toset(local.public_subnet_ids) &&
+      aws_ecs_service.app.network_configuration[0].assign_public_ip
+    )
+    error_message = "The ALB and Fargate task must use the application-owned public network."
   }
-
-  expect_failures = [var.additional_secretsmanager_client_security_group_ids]
 }

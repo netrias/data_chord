@@ -40,7 +40,7 @@ if [[ -n "$MESSAGE_ACTION" && "$MESSAGE_ACTION" != "resend" ]]; then
 fi
 
 require_deployer_identity "$TARGET_NAME"
-log "Using AWS profile: $AWS_PROFILE"
+log "Using verified AWS deployment-role credentials"
 init_tofu "$TARGET_NAME" "$STAGE_NAME" >/dev/null
 
 USER_POOL_ID="$(tofu_output cognito_user_pool_id)"

@@ -68,38 +68,14 @@ infra-test:
 	bash infra/tests/secret_preparation_test.sh
 	bash -n infra/scripts/*.sh infra/tests/*.sh
 
-# Prepare or update the stage API secret. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required; NETRIAS_API_KEY creates or updates.
-prepare-stage-secret target stage:
-	infra/scripts/bootstrap-secrets.sh {{target}} {{stage}} ensure
+# Save and show a read-only OpenTofu plan.
+plan target stage profile:
+	AWS_PROFILE={{profile}} infra/scripts/deploy.sh {{target}} {{stage}} plan
 
-# Deploy the app. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
-deploy target stage:
-	infra/scripts/deploy.sh {{target}} {{stage}}
+# Build the pushed commit, apply the displayed saved plan, and verify ECS health.
+deploy target stage profile:
+	AWS_PROFILE={{profile}} infra/scripts/deploy.sh {{target}} {{stage}} deploy
 
-# Apply infrastructure while keeping the deployed image. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
-deploy-infra target stage:
-	infra/scripts/deploy.sh {{target}} {{stage}} deploy-infra
-
-# Plan infrastructure. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
-deploy-plan target stage:
-	infra/scripts/deploy.sh {{target}} {{stage}} plan
-
-# Show deployment status. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
-deploy-status target stage:
-	infra/scripts/deploy.sh {{target}} {{stage}} status
-
-# Show deployment logs. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
-deploy-logs target stage:
-	infra/scripts/deploy.sh {{target}} {{stage}} logs
-
-# Build the current commit without the full application apply. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
-deploy-build target stage:
-	infra/scripts/deploy.sh {{target}} {{stage}} build
-
-# Invite a user. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
-invite-user target stage email:
-	infra/scripts/invite-cognito-user.sh {{target}} {{stage}} {{email}}
-
-# Resend an invite. target=bdf|netrias; stage=dev|qa|staging|prod; AWS_PROFILE is required.
-resend-user-invite target stage email:
-	infra/scripts/invite-cognito-user.sh {{target}} {{stage}} {{email}} resend
+# Show the deployed application and ECS service status.
+status target stage profile:
+	AWS_PROFILE={{profile}} infra/scripts/deploy.sh {{target}} {{stage}} status

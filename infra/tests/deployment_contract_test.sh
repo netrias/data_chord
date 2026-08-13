@@ -55,8 +55,8 @@ test_configured_deployments_are_separate_from_stage_names() {
   assert_fails_with "not configured for netrias/prod" require_configured_deployment netrias prod
 }
 
-test_state_keys_preserve_only_live_legacy_states() {
-  assert_equal "data-chord/staging/tofu.tfstate" "$(state_key_for bdf staging)" "BDF staging state key"
+test_state_keys_use_the_canonical_deployment_prefix() {
+  assert_equal "datachord/bdf/staging/tofu.tfstate" "$(state_key_for bdf staging)" "BDF staging state key"
   assert_equal "data-chord/prod/tofu.tfstate" "$(state_key_for bdf prod)" "BDF production state key"
   assert_equal "datachord/bdf/dev/tofu.tfstate" "$(state_key_for bdf dev)" "new BDF state key"
   assert_equal "datachord/netrias/prod/tofu.tfstate" "$(state_key_for netrias prod)" "new Netrias state key"
@@ -102,7 +102,7 @@ test_backend_uses_contract_and_native_lock_file() {
 test_supported_targets
 test_supported_stages
 test_configured_deployments_are_separate_from_stage_names
-test_state_keys_preserve_only_live_legacy_states
+test_state_keys_use_the_canonical_deployment_prefix
 test_deployer_identity_is_required
 test_backend_uses_contract_and_native_lock_file
 

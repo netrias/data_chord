@@ -1,9 +1,3 @@
-variable "project_name" {
-  description = "Short project name used in AWS resource names."
-  type        = string
-  default     = "data-chord"
-}
-
 variable "expected_account_id" {
   description = "AWS account that owns this application deployment."
   type        = string
@@ -35,7 +29,7 @@ variable "application_role_path" {
 }
 
 variable "environment" {
-  description = "Deployment environment name, such as staging or prod."
+  description = "Deployment environment name."
   type        = string
 
   validation {
@@ -44,181 +38,45 @@ variable "environment" {
   }
 }
 
+variable "deployment_target" {
+  description = "Stable target name used in deployment-owned storage paths."
+  type        = string
+
+  validation {
+    condition     = contains(["bdf", "netrias"], var.deployment_target)
+    error_message = "deployment_target must be bdf or netrias."
+  }
+}
+
 variable "aws_region" {
   description = "AWS region for the app."
   type        = string
-  default     = "us-east-2"
-}
-
-variable "vpc_id" {
-  description = "Existing VPC id for the ALB and Fargate service."
-  type        = string
-}
-
-variable "public_subnet_ids" {
-  description = "Existing public subnet ids for the ALB and Fargate service. Use at least two availability zones."
-  type        = list(string)
-}
-
-variable "secretsmanager_vpc_endpoint_id" {
-  description = "Optional existing Secrets Manager VPC endpoint id used by Fargate tasks."
-  type        = string
-  default     = ""
-
-  validation {
-    condition     = var.secretsmanager_vpc_endpoint_id == "" || can(regex("^vpce-[0-9a-f]+$", var.secretsmanager_vpc_endpoint_id))
-    error_message = "secretsmanager_vpc_endpoint_id must be empty or a valid VPC endpoint id."
-  }
-}
-
-variable "additional_secretsmanager_client_security_group_ids" {
-  description = "Additional security groups allowed to reach the shared Secrets Manager VPC endpoint."
-  type        = set(string)
-  default     = []
-
-  validation {
-    condition = alltrue([
-      for security_group_id in var.additional_secretsmanager_client_security_group_ids :
-      can(regex("^sg-[0-9a-f]+$", security_group_id))
-    ])
-    error_message = "additional_secretsmanager_client_security_group_ids must contain valid security group ids."
-  }
-
-  validation {
-    condition     = var.secretsmanager_vpc_endpoint_id != "" || length(var.additional_secretsmanager_client_security_group_ids) == 0
-    error_message = "additional_secretsmanager_client_security_group_ids requires secretsmanager_vpc_endpoint_id."
-  }
-}
-
-variable "certificate_arn" {
-  description = "Optional ACM certificate ARN for the HTTPS listener. Leave empty to create and validate one in hosted_zone_name."
-  type        = string
-  default     = ""
-
-  validation {
-    condition = (
-      (var.certificate_arn == "" && var.domain_name == "" && trimspace(trimsuffix(var.hosted_zone_name, ".")) != "") ||
-      (
-        trimspace(var.certificate_arn) != "" && var.certificate_arn == trimspace(var.certificate_arn) &&
-        trimspace(var.domain_name) != "" && var.domain_name == trimspace(var.domain_name) &&
-        var.hosted_zone_name == ""
-      )
-    )
-    error_message = "Choose one TLS mode: leave certificate_arn and domain_name empty and provide hosted_zone_name, or leave hosted_zone_name empty and provide nonblank certificate_arn and domain_name values without surrounding whitespace."
-  }
-}
-
-variable "domain_name" {
-  description = "Optional DNS name users will visit. Leave empty to generate one under hosted_zone_name."
-  type        = string
-  default     = ""
 }
 
 variable "hosted_zone_name" {
-  description = "Route 53 hosted zone used to generate an obscure app hostname and validate ACM. Leave empty only if certificate_arn and domain_name are both supplied."
+  description = "Public Route 53 hosted zone used for the app hostname and certificate validation."
   type        = string
-  default     = ""
+
+  validation {
+    condition     = trimspace(trimsuffix(var.hosted_zone_name, ".")) != ""
+    error_message = "hosted_zone_name must not be empty."
+  }
 }
 
 variable "domain_label" {
-  description = "Optional left-hand DNS label under hosted_zone_name. Leave empty to generate data-chord-<environment>-<random>."
+  description = "App DNS label under hosted_zone_name."
   type        = string
-  default     = ""
-}
 
-variable "netrias_api_key_secret_name" {
-  description = "Secrets Manager secret name containing NETRIAS_API_KEY."
-  type        = string
+  validation {
+    condition     = trimspace(var.domain_label) != ""
+    error_message = "domain_label must not be empty."
+  }
 }
 
 variable "netrias_harmonization_url" {
   description = "Optional Netrias harmonization endpoint override."
   type        = string
   default     = ""
-}
-
-variable "auth_bypass_cidrs" {
-  description = "Trusted source CIDRs that can reach the app without Cognito auth. Loaded by deploy scripts from Secrets Manager."
-  type        = list(string)
-  default     = []
-  sensitive   = true
-}
-
-variable "desired_count" {
-  description = "Number of Fargate tasks to run."
-  type        = number
-  default     = 1
-}
-
-variable "alert_email_addresses" {
-  description = "Email addresses subscribed to environment-specific health alerts. Leave empty to create alarms without email subscribers."
-  type        = list(string)
-  default     = []
-}
-
-variable "app_5xx_alarm_threshold" {
-  description = "Number of target-generated 5xx responses in five minutes before alerting."
-  type        = number
-  default     = 1
-}
-
-variable "alb_5xx_alarm_threshold" {
-  description = "Number of load-balancer-generated 5xx responses in five minutes before alerting."
-  type        = number
-  default     = 1
-}
-
-variable "alb_auth_alarm_threshold" {
-  description = "Number of ALB authentication errors or failures in five minutes before alerting."
-  type        = number
-  default     = 1
-}
-
-variable "target_connection_error_alarm_threshold" {
-  description = "Number of ALB target connection errors in five minutes before alerting."
-  type        = number
-  default     = 1
-}
-
-variable "target_response_time_alarm_seconds" {
-  description = "p95 ALB target response time in seconds before alerting."
-  type        = number
-  default     = 10
-}
-
-variable "ecs_cpu_alarm_threshold_percent" {
-  description = "Average ECS service CPU utilization percentage before alerting."
-  type        = number
-  default     = 85
-}
-
-variable "ecs_memory_alarm_threshold_percent" {
-  description = "Average ECS service memory utilization percentage before alerting."
-  type        = number
-  default     = 85
-}
-
-variable "app_error_log_alarm_threshold" {
-  description = "Number of app ERROR log entries in five minutes before alerting."
-  type        = number
-  default     = 1
-}
-
-variable "enable_alb_access_logs" {
-  description = "Whether the ALB should write access logs to the environment log bucket."
-  type        = bool
-  default     = true
-}
-
-variable "alb_access_log_retention_days" {
-  description = "Days to retain ALB access logs."
-  type        = number
-  default     = 30
-
-  validation {
-    condition     = var.alb_access_log_retention_days >= 1 && var.alb_access_log_retention_days <= 365
-    error_message = "alb_access_log_retention_days must be between 1 and 365."
-  }
 }
 
 variable "container_cpu" {
@@ -233,19 +91,13 @@ variable "container_memory" {
   default     = 2048
 }
 
-variable "container_port" {
-  description = "Port served by uvicorn in the container."
-  type        = number
-  default     = 8000
-}
-
 variable "image_tag" {
-  description = "Immutable image tag the ECS task definition should run. Deploy scripts pass the short source commit SHA."
+  description = "Immutable image tag the ECS task definition should run."
   type        = string
 
   validation {
     condition     = can(regex("^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$", var.image_tag)) && var.image_tag != "latest"
-    error_message = "image_tag must be an immutable Docker tag, such as a short commit SHA, and must not be latest."
+    error_message = "image_tag must be an immutable Docker tag and must not be latest."
   }
 }
 
@@ -291,22 +143,4 @@ variable "target_group_unhealthy_threshold" {
     condition     = var.target_group_unhealthy_threshold >= 2 && var.target_group_unhealthy_threshold <= 10
     error_message = "target_group_unhealthy_threshold must be between 2 and 10."
   }
-}
-
-variable "cognito_domain_prefix" {
-  description = "Optional globally unique Cognito hosted UI domain prefix. Leave empty to use a generated prefix."
-  type        = string
-  default     = ""
-}
-
-variable "force_delete_repositories" {
-  description = "Allow OpenTofu destroy to delete non-empty ECR repositories. Keep false for normal use."
-  type        = bool
-  default     = false
-}
-
-variable "tags" {
-  description = "Extra tags applied to AWS resources."
-  type        = map(string)
-  default     = {}
 }
