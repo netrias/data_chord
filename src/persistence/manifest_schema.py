@@ -22,7 +22,7 @@ def get_manifest_schema() -> pa.Schema:
         ("top_harmonization", pa.string()),
         ("ontology_id", pa.string()),
         ("top_harmonizations", pa.list_(pa.string())),
-        ("confidence_score", pa.float64()),
+        ("match_fidelity", pa.string()),
         ("error", pa.string()),
         ("row_indices", pa.list_(pa.int64())),
         (MANUAL_OVERRIDES_FIELD, pa.list_(override_struct)),

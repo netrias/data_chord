@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from src.domain.harmonization import MatchFidelity
 from src.domain.manifest.models import ManifestRow
 from src.persistence.manifest_reader import read_manifest_parquet
 from src.persistence.manifest_writer import _write_manifest_parquet
@@ -27,7 +28,7 @@ def _make_row(
         top_harmonization=top_harmonization,
         ontology_id=None,
         top_harmonizations=top_harmonizations or ["Lung Cancer"],
-        confidence_score=0.9,
+        match_fidelity=MatchFidelity.STRONG,
         error=None,
         row_indices=[0],
         manual_overrides=[],

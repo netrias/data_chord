@@ -13,7 +13,7 @@ import {
   renderProgressPills,
   formatRowReference,
   cleanupCards,
-  sortEntriesByConfidence,
+  sortEntriesByFidelity,
   getFileIdFromUrl,
   SORT_MODE,
 } from './shared_review_utils.js';
@@ -34,7 +34,7 @@ const _filterTransformations = (transformations, filterOptions = {}) => {
 
 /**
  * Get all entries across all columns for scroll mode.
- * Returns a flat array of all entries, sorted by column then by confidence within column.
+ * Returns a flat array of all entries, sorted by column then by match fidelity within column.
  * @param {Array} columns - Array of ColumnReviewData objects from backend
  * @param {string} [sortMode] - Sort mode for entries within each column
  * @param {Object} [filterOptions] - Filter options
@@ -45,7 +45,7 @@ export const getAllEntries = (columns, sortMode = SORT_MODE.ORIGINAL, filterOpti
 
   for (const col of columns) {
     const filtered = _filterTransformations(col.transformations, filterOptions);
-    const sortedEntries = sortEntriesByConfidence(filtered, sortMode);
+    const sortedEntries = sortEntriesByFidelity(filtered, sortMode);
     for (const entry of sortedEntries) {
       allEntries.push({
         ...entry,
@@ -84,7 +84,7 @@ export const getTotalUnits = (columns, entriesPerBatch = DEFAULT_ENTRIES_PER_BAT
  * Sorting is applied before calculating batch boundaries so slicing is consistent.
  * @param {Array} columns - Array of ColumnReviewData objects from backend
  * @param {number} entriesPerBatch - Number of entries per batch
- * @param {string} [sortMode] - Sort mode: 'original', 'confidence-asc', 'confidence-desc'
+ * @param {string} [sortMode] - Sort mode: 'original', 'fidelity-asc', 'fidelity-desc'
  * @param {Object} [filterOptions] - Filter options
  * @returns {Array} Array of summary objects for each unit (empty array if no data)
  */
@@ -98,7 +98,7 @@ const getColumnSummaries = (columns, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH
     if (filtered.length === 0) continue;
 
     // Sort entries before calculating batch boundaries
-    const sortedEntries = sortEntriesByConfidence(filtered, sortMode);
+    const sortedEntries = sortEntriesByFidelity(filtered, sortMode);
     const batchCount = Math.ceil(sortedEntries.length / safeBatchSize);
 
     for (let batch = 0; batch < batchCount; batch++) {
@@ -128,7 +128,7 @@ const getColumnSummaries = (columns, entriesPerBatch = DEFAULT_ENTRIES_PER_BATCH
  * @param {Array} columns - Array of ColumnReviewData objects from backend
  * @param {number} currentUnit - Current unit index (1-based)
  * @param {number} entriesPerBatch - Number of entries per batch
- * @param {string} [sortMode] - Sort mode: 'original', 'confidence-asc', 'confidence-desc'
+ * @param {string} [sortMode] - Sort mode: 'original', 'fidelity-asc', 'fidelity-desc'
  * @param {Object} [filterOptions] - Filter options
  * @returns {Object} Batch metadata with entries array
  */

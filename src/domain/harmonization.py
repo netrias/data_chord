@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import Enum, StrEnum
 
 from pydantic import BaseModel, Field
 
@@ -15,8 +15,19 @@ class HarmonizeStatus(str, Enum):
     FAILED = "failed"
 
 
-class ConfidenceBucketCount(BaseModel):
-    id: str
+class MatchFidelity(StrEnum):
+    STRONG = "strong"
+    PARTIAL = "partial"
+    APPROXIMATE = "approximate"
+    NONE = "none"
+
+    @property
+    def label(self) -> str:
+        return self.value.title()
+
+
+class MatchFidelityCount(BaseModel):
+    id: MatchFidelity
     label: str
     term_count: int
 
@@ -34,21 +45,20 @@ class HarmonizationColumnBreakdown(BaseModel):
     unique_terms_changed: int
     unique_terms_unchanged: int
     non_conformant_terms: int = 0
-    confidence_buckets_changed: list[ConfidenceBucketCount]
+    match_fidelity_counts_changed: list[MatchFidelityCount]
 
 
 class HarmonizationManifestSummary(BaseModel):
     total_terms: int
     changed_terms: int
-    high_confidence_count: int
-    medium_confidence_count: int
-    low_confidence_count: int
+    match_fidelity_counts: list[MatchFidelityCount]
     non_conformant_terms: int = 0
     column_breakdowns: list[HarmonizationColumnBreakdown] = Field(default_factory=list)
 
 
 __all__ = [
-    "ConfidenceBucketCount",
+    "MatchFidelity",
+    "MatchFidelityCount",
     "HarmonizationColumnBreakdown",
     "HarmonizationManifestSummary",
     "HarmonizeStatus",

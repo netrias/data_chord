@@ -165,7 +165,7 @@ run "ecs_service_output_uses_the_managed_service_identity" {
   }
 }
 
-run "codebuild_uses_public_source" {
+run "codebuild_uses_public_source_and_read_only_dependency_credential" {
   command = plan
 
   assert {
@@ -175,6 +175,38 @@ run "codebuild_uses_public_source" {
       length(aws_codebuild_project.app_image.source[0].auth) == 0
     )
     error_message = "CodeBuild must read the public Data Chord repository without source authentication."
+  }
+
+  assert {
+    condition = (
+      data.aws_secretsmanager_secret.github_app.name == "data-chord/build/github-app" &&
+      anytrue([
+        for statement in jsondecode(aws_iam_role_policy.application_build.policy).Statement :
+        statement.Resource == data.aws_secretsmanager_secret.github_app.arn
+      ])
+    )
+    error_message = "CodeBuild must read only the configured GitHub App credential."
+  }
+}
+
+run "agentic_harmonization_is_the_scaled_default" {
+  command = plan
+
+  assert {
+    condition = (
+      var.harmonizer == "agentic" &&
+      aws_ecs_task_definition.application.cpu == tostring(4096) &&
+      aws_ecs_task_definition.application.memory == tostring(8192)
+    )
+    error_message = "Agentic harmonization must default to the larger task shape."
+  }
+
+  assert {
+    condition = anytrue([
+      for statement in jsondecode(aws_iam_role_policy.application_task_bedrock_mantle[0].policy).Statement :
+      contains(statement.Action, "bedrock-mantle:CallWithBearerToken")
+    ])
+    error_message = "The task role must be able to call Bedrock Mantle."
   }
 }
 

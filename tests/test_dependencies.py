@@ -8,6 +8,8 @@ from unittest.mock import patch
 from netrias_client import Environment
 
 import src.app.dependencies as dependencies
+from src.integrations.agentic_harmonize import AgenticHarmonizeService
+from src.integrations.netrias_harmonize import HarmonizeService as NetriasHarmonizeService
 
 
 def test_upload_storage_uses_configured_scratch_dir(monkeypatch, tmp_path: Path) -> None:
@@ -79,3 +81,23 @@ def test_netrias_client_uses_configured_harmonization_url(monkeypatch) -> None:
     client_class.return_value.configure.assert_called_once_with(
         harmonization_url="https://pdyuq0vi4h.execute-api.us-east-2.amazonaws.com/prod"
     )
+
+
+def test_harmonizer_defaults_to_agentic(monkeypatch) -> None:
+    monkeypatch.delenv("DATA_CHORD_HARMONIZER", raising=False)
+    monkeypatch.setenv("AWS_REGION", "us-east-2")
+
+    service = dependencies.get_harmonize_service()
+
+    assert isinstance(service, AgenticHarmonizeService)
+
+
+def test_client_can_keep_netrias_harmonization(monkeypatch) -> None:
+    monkeypatch.setenv("DATA_CHORD_HARMONIZER", "netrias")
+    monkeypatch.setenv("NETRIAS_API_KEY", "test-key")
+    monkeypatch.setattr(dependencies, "_netrias_client", None)
+    monkeypatch.setattr(dependencies, "_netrias_client_initialized", False)
+
+    service = dependencies.get_harmonize_service()
+
+    assert isinstance(service, NetriasHarmonizeService)

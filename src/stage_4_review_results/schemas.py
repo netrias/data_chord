@@ -8,6 +8,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.schemas import DatasetWorkflowIdField
+from src.domain.harmonization import MatchFidelity
 
 
 class CellOverrideSchema(BaseModel):
@@ -34,7 +35,7 @@ class ReviewStateSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     review_mode: Literal["column", "row"] = "column"
-    sort_mode: Literal["original", "confidence-asc", "confidence-desc"] = "original"
+    sort_mode: Literal["original", "fidelity-asc", "fidelity-desc"] = "original"
     scroll_mode: bool = False
     show_case_only_changes: bool = False
     show_unchanged_values: bool = False
@@ -47,7 +48,7 @@ class ReviewOverridesSchema(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[1]
+    schema_version: Literal[2]
     file_id: DatasetWorkflowIdField
     created_at: datetime
     updated_at: datetime
@@ -119,8 +120,7 @@ class Transformation(BaseModel):
 
     originalValue: str
     harmonizedValue: str | None
-    confidence: float
-    bucket: str  # ConfidenceBucket.value for JSON serialization
+    matchFidelity: MatchFidelity
     isChanged: bool
     recommendationType: str  # RecommendationType.value for JSON serialization
     isPVConformant: bool

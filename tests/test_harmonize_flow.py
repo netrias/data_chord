@@ -12,6 +12,8 @@ from httpx import AsyncClient
 from src.domain.harmonization import HarmonizeStatus
 from src.domain.manifest import ColumnMappingManifest
 from src.integrations.netrias_harmonize import HarmonizeService
+from src.persistence.manifest_writer import write_manifest_parquet
+from src.persistence.pv_manifest_store import ColumnPvSets
 from tests.conftest import TEST_TARGET_SCHEMA, MockHarmonizeResult, confirm_mapping_choices, upload_and_analyze
 
 
@@ -212,7 +214,7 @@ def test_harmonize_sends_the_prepared_manifest_to_the_provider(tmp_path: Path) -
     csv_path.write_text("name,name\nAlice,Smith\n", encoding="utf-8")
     requested_output_path = tmp_path / "requested-output.csv"
     provider_manifest_path = tmp_path / "provider-manifest.parquet"
-    provider_manifest_path.touch()
+    assert write_manifest_parquet(provider_manifest_path, [])
     requested_output_path.touch()
     mock_client = MagicMock()
     mock_client.harmonize.return_value = MagicMock(
@@ -241,6 +243,7 @@ def test_harmonize_sends_the_prepared_manifest_to_the_provider(tmp_path: Path) -
         data_model_key=TEST_TARGET_SCHEMA,
         external_version_number="11.0.4",
         prepared_manifest=prepared_manifest,
+        column_pv_sets=ColumnPvSets({}),
         output_path=requested_output_path,
         sheet_name="Patients",
     )
@@ -286,6 +289,7 @@ def test_harmonize_hides_provider_exception_details(tmp_path: Path) -> None:
         data_model_key=TEST_TARGET_SCHEMA,
         external_version_number="11.0.4",
         prepared_manifest=prepared_manifest,
+        column_pv_sets=ColumnPvSets({}),
     )
 
     assert result.status == HarmonizeStatus.FAILED
@@ -312,6 +316,7 @@ def test_harmonize_rejects_invalid_provider_status(
         data_model_key=TEST_TARGET_SCHEMA,
         external_version_number="11.0.4",
         prepared_manifest=ColumnMappingManifest.empty(),
+        column_pv_sets=ColumnPvSets({}),
     )
 
     assert result.status == HarmonizeStatus.FAILED

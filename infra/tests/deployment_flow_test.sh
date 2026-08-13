@@ -45,7 +45,7 @@ assert_call_absent() {
 assert_no_deploy_writes() {
   local calls_file="$1"
 
-  assert_call_absent "tofu bootstrap-apply " "$calls_file"
+  assert_call_absent "tofu reconcile-apply " "$calls_file"
   assert_call_absent "tofu full-apply " "$calls_file"
   assert_call_absent "aws start-build " "$calls_file"
   assert_call_absent "aws secret-write " "$calls_file"
@@ -231,8 +231,8 @@ case " $args " in
     fi
     ;;
   *" apply "*)
-    if [[ "$args" == *"build-prerequisites.tfplan"* ]]; then
-      printf 'tofu bootstrap-apply %s\n' "$args" >>"$MOCK_CALLS"
+    if [[ "$args" == *"build-resources.tfplan"* ]]; then
+      printf 'tofu reconcile-apply %s\n' "$args" >>"$MOCK_CALLS"
       [[ "${MOCK_BOOTSTRAP_FAIL:-0}" != "1" ]] || exit 23
       touch "$MOCK_BUILD_READY"
       [[ -z "${MOCK_RECONCILED_FILE:-}" ]] || touch "$MOCK_RECONCILED_FILE"
@@ -263,7 +263,7 @@ chmod +x "$MOCK_BIN/aws" "$MOCK_BIN/git" "$MOCK_BIN/tofu"
 run_first_deploy() {
   local scenario_root="$TEST_ROOT/first-deploy"
   local calls_file="$scenario_root/calls"
-  local bootstrap_line build_line full_apply_line output
+  local reconcile_line build_line full_apply_line output
   mkdir -p "$scenario_root"
   : >"$calls_file"
 
@@ -284,17 +284,17 @@ run_first_deploy() {
     fail_test "First deployment failed"
   fi
 
-  bootstrap_line="$(grep -n '^tofu bootstrap-apply ' "$calls_file" | cut -d: -f1)"
+  reconcile_line="$(grep -n '^tofu reconcile-apply ' "$calls_file" | cut -d: -f1)"
   build_line="$(grep -n '^aws start-build ' "$calls_file" | cut -d: -f1)"
   full_apply_line="$(grep -n '^tofu full-apply ' "$calls_file" | cut -d: -f1)"
-  (( bootstrap_line < build_line && build_line < full_apply_line )) ||
-    fail_test "First deployment did not bootstrap, build, and fully apply in order"
+  (( reconcile_line < build_line && build_line < full_apply_line )) ||
+    fail_test "First deployment did not reconcile, build, and fully apply in order"
 
   assert_call_contains "tofu plan " "-target=aws_codebuild_project.app_image" "$calls_file"
   assert_call_contains "tofu plan " "-var=environment=staging" "$calls_file"
-  assert_saved_plan_apply "tofu bootstrap-apply " "build-prerequisites.tfplan" "$calls_file"
+  assert_saved_plan_apply "tofu reconcile-apply " "build-resources.tfplan" "$calls_file"
   assert_saved_plan_apply "tofu full-apply " "final.tfplan" "$calls_file"
-  assert_any_call_contains "tofu show " "build-prerequisites.tfplan" "$calls_file"
+  assert_any_call_contains "tofu show " "build-resources.tfplan" "$calls_file"
   assert_any_call_contains "tofu show " "final.tfplan" "$calls_file"
   assert_call_absent "aws bypass-secret-read " "$calls_file"
   assert_call_contains "tofu init " "-backend-config=key=datachord/netrias/staging/tofu.tfstate" "$calls_file"
@@ -303,11 +303,12 @@ run_first_deploy() {
   [[ -f "$scenario_root/full-applied" ]] || fail_test "Full application apply did not complete"
 }
 
-run_failed_bootstrap() {
-  local scenario_root="$TEST_ROOT/failed-bootstrap"
+run_failed_build_reconciliation() {
+  local scenario_root="$TEST_ROOT/failed-build-reconciliation"
   local calls_file="$scenario_root/calls"
   mkdir -p "$scenario_root"
   : >"$calls_file"
+  touch "$scenario_root/build-ready"
 
   if PATH="$MOCK_BIN:$PATH" \
     AWS_PROFILE=mock \
@@ -319,11 +320,11 @@ run_failed_bootstrap() {
     MOCK_FULL_APPLIED="$scenario_root/full-applied" \
     DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
     "$DEPLOY_SCRIPT" netrias staging deploy >/dev/null 2>&1; then
-    fail_test "Deployment succeeded after the build-prerequisite apply failed"
+    fail_test "Deployment succeeded after build-resource reconciliation failed"
   fi
 
   assert_call_contains "tofu plan " "-target=aws_codebuild_project.app_image" "$calls_file"
-  assert_saved_plan_apply "tofu bootstrap-apply " "build-prerequisites.tfplan" "$calls_file"
+  assert_saved_plan_apply "tofu reconcile-apply " "build-resources.tfplan" "$calls_file"
   assert_call_absent "aws start-build " "$calls_file"
   assert_call_absent "tofu full-apply " "$calls_file"
 }
@@ -331,6 +332,7 @@ run_failed_bootstrap() {
 run_retry_after_image_build() {
   local scenario_root="$TEST_ROOT/image-retry"
   local calls_file="$scenario_root/calls"
+  local reconcile_line image_check_line full_apply_line
   mkdir -p "$scenario_root"
   : >"$calls_file"
   touch "$scenario_root/build-ready"
@@ -343,14 +345,19 @@ run_retry_after_image_build() {
     MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
     MOCK_FULL_APPLIED="$scenario_root/full-applied" \
     MOCK_IMAGE_EXISTS=1 \
+    MOCK_RECONCILED_FILE="$scenario_root/reconciled" \
     MOCK_STATE_ADDRESSES=aws_s3_bucket.workflow \
     DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
     "$DEPLOY_SCRIPT" netrias staging deploy >/dev/null 2>&1
 
-  assert_call_absent "tofu bootstrap-apply " "$calls_file"
-  if grep '^tofu plan ' "$calls_file" | grep -q -- '-target=aws_codebuild_project.app_image'; then
-    fail_test "Existing build prerequisites used a targeted plan"
-  fi
+  reconcile_line="$(grep -n '^tofu reconcile-apply ' "$calls_file" | cut -d: -f1)"
+  image_check_line="$(grep -n '^aws image-check ' "$calls_file" | cut -d: -f1)"
+  full_apply_line="$(grep -n '^tofu full-apply ' "$calls_file" | cut -d: -f1)"
+  (( reconcile_line < image_check_line && image_check_line < full_apply_line )) ||
+    fail_test "Retry did not reconcile build resources before image work and the full apply"
+
+  assert_call_contains "tofu plan " "-target=aws_codebuild_project.app_image" "$calls_file"
+  assert_saved_plan_apply "tofu reconcile-apply " "build-resources.tfplan" "$calls_file"
   assert_call_contains "tofu state-list " "state list" "$calls_file"
   assert_call_absent "aws start-build " "$calls_file"
   assert_saved_plan_apply "tofu full-apply " "final.tfplan" "$calls_file"
@@ -381,7 +388,7 @@ run_empty_state_plan() {
   assert_call_contains "tofu plan " "-lock=false" "$calls_file"
   assert_call_contains "tofu plan " "-out=" "$calls_file"
   assert_call_contains "tofu show " "final.tfplan" "$calls_file"
-  assert_call_absent "tofu bootstrap-apply " "$calls_file"
+  assert_call_absent "tofu reconcile-apply " "$calls_file"
   assert_call_absent "tofu full-apply " "$calls_file"
   assert_call_absent "aws start-build " "$calls_file"
   assert_call_absent "aws secret-write " "$calls_file"
@@ -571,7 +578,7 @@ run_workflow_bucket_replacement_guard() {
   fi
 
   [[ "$output" == *"durable workflow bucket"* ]] || fail_test "Workflow bucket guard did not explain the failure"
-  assert_call_absent "tofu bootstrap-apply " "$calls_file"
+  assert_call_absent "tofu reconcile-apply " "$calls_file"
   assert_call_absent "tofu full-apply " "$calls_file"
 }
 
@@ -598,7 +605,7 @@ run_alb_log_bucket_retirement_guard() {
   fi
 
   [[ "$output" == *"two stages"* ]] || fail_test "ALB log bucket guard did not explain the two-stage retirement"
-  assert_call_absent "tofu bootstrap-apply " "$calls_file"
+  assert_call_absent "tofu reconcile-apply " "$calls_file"
   assert_call_absent "tofu full-apply " "$calls_file"
 }
 
@@ -625,7 +632,7 @@ run_alb_logging_must_already_be_disabled() {
   fi
 
   [[ "$output" == *"already be disabled"* ]] || fail_test "ALB logging guard did not explain the required prior state"
-  assert_call_absent "tofu bootstrap-apply " "$calls_file"
+  assert_call_absent "tofu reconcile-apply " "$calls_file"
   assert_call_absent "tofu full-apply " "$calls_file"
 }
 
@@ -788,7 +795,7 @@ run_legacy_state_guard() {
 }
 
 run_first_deploy
-run_failed_bootstrap
+run_failed_build_reconciliation
 run_retry_after_image_build
 run_empty_state_plan
 run_existing_state_plan

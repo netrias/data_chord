@@ -550,7 +550,7 @@ const renderColumnScrollMode = (entries) => {
       const titleEl = document.createElement('span');
       titleEl.className = 'scroll-mode-column-title';
       titleEl.textContent = entry.columnLabel;
-      // Insert after row label so layout is: [confidence] [row] [column title] [pv icons]
+      // Insert after row label so layout is: [fidelity] [row] [column title] [pv icons]
       const rowLabelEl = headerRow.querySelector('.entry-row-label');
       if (rowLabelEl) {
         rowLabelEl.after(titleEl);

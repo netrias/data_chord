@@ -12,14 +12,8 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from src.domain.manifest.models import (
-    ConfidenceBucket,
-    ManifestRow,
-    ManifestSummary,
-    ManualOverride,
-    confidence_bucket,
-    is_value_changed,
-)
+from src.domain.harmonization import MatchFidelity
+from src.domain.manifest.models import ManifestRow, ManifestSummary, ManualOverride, is_value_changed
 from src.persistence.manifest_schema import MANUAL_OVERRIDES_FIELD, get_manifest_schema
 
 logger = logging.getLogger(__name__)
@@ -42,7 +36,7 @@ def read_manifest_parquet(manifest_path: Path) -> ManifestSummary | None:
 
 def _validate_manifest_schema(actual: pa.Schema) -> None:
     """Require the provider fields while allowing Arrow's compatible numeric widths."""
-    required_fields = set(get_manifest_schema().names) - {MANUAL_OVERRIDES_FIELD}
+    required_fields = set(get_manifest_schema().names) - {MANUAL_OVERRIDES_FIELD, "match_fidelity"}
     missing_fields = required_fields - set(actual.names)
     if missing_fields:
         missing = ", ".join(sorted(missing_fields))
@@ -70,7 +64,7 @@ def _extract_row(batch: pa.RecordBatch, index: int) -> ManifestRow:
         top_harmonization=raw_harmonization.strip(),
         ontology_id=_get_string_nullable(batch, "ontology_id", index),
         top_harmonizations=[s.strip() for s in raw_suggestions],
-        confidence_score=_get_float_nullable(batch, "confidence_score", index),
+        match_fidelity=_get_match_fidelity(batch, index),
         error=_get_string_nullable(batch, "error", index),
         row_indices=_get_int_list(batch, "row_indices", index),
         manual_overrides=_get_manual_overrides(batch, MANUAL_OVERRIDES_FIELD, index),
@@ -79,28 +73,13 @@ def _extract_row(batch: pa.RecordBatch, index: int) -> ManifestRow:
 
 def _summarize_manifest(rows: list[ManifestRow]) -> ManifestSummary:
     changed_count = 0
-    high_count = 0
-    medium_count = 0
-    low_count = 0
-
     for row in rows:
         if is_value_changed(row.to_harmonize, row.top_harmonization):
             changed_count += 1
 
-        bucket = confidence_bucket(row.confidence_score)
-        if bucket == ConfidenceBucket.HIGH:
-            high_count += 1
-        elif bucket == ConfidenceBucket.MEDIUM:
-            medium_count += 1
-        else:
-            low_count += 1
-
     return ManifestSummary(
         total_terms=len(rows),
         changed_terms=changed_count,
-        high_confidence_count=high_count,
-        medium_confidence_count=medium_count,
-        low_confidence_count=low_count,
         rows=rows,
     )
 
@@ -126,11 +105,14 @@ def _get_int(batch: pa.RecordBatch, column: str, index: int, default: int) -> in
     return int(value) if value is not None else default
 
 
-def _get_float_nullable(batch: pa.RecordBatch, column: str, index: int) -> float | None:
-    if column not in batch.schema.names:
-        return None
-    value = batch.column(column)[index].as_py()
-    return float(value) if value is not None else None
+def _get_match_fidelity(batch: pa.RecordBatch, index: int) -> MatchFidelity:
+    value = _get_string_nullable(batch, "match_fidelity", index)
+    if value is None:
+        return MatchFidelity.NONE
+    try:
+        return MatchFidelity(value)
+    except ValueError as exc:
+        raise ValueError(f"Unknown match fidelity: {value}") from exc
 
 
 def _get_string_list(batch: pa.RecordBatch, column: str, index: int) -> list[str]:

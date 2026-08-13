@@ -11,6 +11,10 @@ data "aws_secretsmanager_secret" "netrias_api_key" {
   name = "data-chord/${var.environment}/netrias-api-key"
 }
 
+data "aws_secretsmanager_secret" "github_app" {
+  name = var.github_app_secret_name
+}
+
 locals {
   name_prefix          = "data-chord-${var.environment}"
   deployment_prefix    = "datachord/${var.deployment_target}/${var.environment}"

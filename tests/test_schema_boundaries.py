@@ -11,7 +11,7 @@ import pytest
 from src.app.harmonization_readiness import HarmonizationNotReadyError, require_ready_harmonization_workflow
 from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.dataset_workflow_ids import dataset_workflow_id_from_string
-from src.domain.harmonization import HarmonizationManifestSummary, HarmonizeStatus
+from src.domain.harmonization import HarmonizationManifestSummary, HarmonizeStatus, MatchFidelity, MatchFidelityCount
 from src.domain.manifest import ColumnMappingManifest, InvalidMappingManifestError
 from src.domain.pv_manifest import PVManifest, PvManifestSchemaError
 from src.domain.workflow_state import WorkflowState, WorkflowStateSchemaError
@@ -102,7 +102,7 @@ def test_stage_three_job_rejects_boolean_schema_version() -> None:
 
 
 def test_stage_three_job_rejects_older_and_newer_schema_versions() -> None:
-    for schema_version in (1, 3):
+    for schema_version in (1, 2, 4):
         with pytest.raises(HarmonizationJobUnreadableError, match="not supported"):
             HarmonizationJobState.from_store({"schema_version": schema_version}, _FILE_ID)
 
@@ -119,9 +119,11 @@ def test_current_harmonization_job_round_trips_without_derived_url() -> None:
         manifest_summary=HarmonizationManifestSummary(
             total_terms=3,
             changed_terms=2,
-            high_confidence_count=1,
-            medium_confidence_count=1,
-            low_confidence_count=1,
+            match_fidelity_counts=[
+                MatchFidelityCount(id=MatchFidelity.STRONG, label="Strong", term_count=1),
+                MatchFidelityCount(id=MatchFidelity.PARTIAL, label="Partial", term_count=1),
+                MatchFidelityCount(id=MatchFidelity.APPROXIMATE, label="Approximate", term_count=1),
+            ],
         ),
     )
 
@@ -130,7 +132,7 @@ def test_current_harmonization_job_round_trips_without_derived_url() -> None:
 
     assert loaded == job
     assert stored == {
-        "schema_version": 2,
+        "schema_version": 3,
         "polling_job_id": "job-1",
         "job_id": "job-1",
         "file_id": _FILE_ID,
@@ -144,9 +146,11 @@ def test_current_harmonization_job_round_trips_without_derived_url() -> None:
         "manifest_summary": {
             "total_terms": 3,
             "changed_terms": 2,
-            "high_confidence_count": 1,
-            "medium_confidence_count": 1,
-            "low_confidence_count": 1,
+            "match_fidelity_counts": [
+                {"id": "strong", "label": "Strong", "term_count": 1},
+                {"id": "partial", "label": "Partial", "term_count": 1},
+                {"id": "approximate", "label": "Approximate", "term_count": 1},
+            ],
             "non_conformant_terms": 0,
             "column_breakdowns": [],
         },

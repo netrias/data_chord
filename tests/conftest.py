@@ -175,7 +175,10 @@ def mock_netrias_client() -> Generator[MagicMock]:
     deps._netrias_client = mock_client
     deps._netrias_client_initialized = True
 
-    with patch.dict(os.environ, {"NETRIAS_API_KEY": "test-api-key"}):
+    with patch.dict(
+        os.environ,
+        {"NETRIAS_API_KEY": "test-api-key", "DATA_CHORD_HARMONIZER": "netrias"},
+    ):
         yield mock_client
 
     # Restore provider client state to avoid leaking the mock.
@@ -379,7 +382,7 @@ def create_test_manifest_parquet(
         "top_harmonization": [row.get("top_harmonization", "") for row in rows],
         "ontology_id": [row.get("ontology_id") for row in rows],
         "top_harmonizations": [row.get("top_harmonizations", []) for row in rows],
-        "confidence_score": [row.get("confidence_score") for row in rows],
+        "match_fidelity": [row.get("match_fidelity", "strong") for row in rows],
         "error": [row.get("error") for row in rows],
         "row_indices": [row.get("row_indices", []) for row in rows],
         "manual_overrides": [row.get("manual_overrides", []) for row in rows],
@@ -630,7 +633,7 @@ def _build_manifest_row(
         "top_harmonization": harmonized_value,
         "ontology_id": None,
         "top_harmonizations": [harmonized_value] if harmonized_value else [],
-        "confidence_score": 0.95 if original_value != harmonized_value else 0.99,
+        "match_fidelity": "strong",
         "error": None,
         "row_indices": [row_idx],
         "manual_overrides": [],
@@ -668,7 +671,7 @@ def create_manifest_for_file(
                     "top_harmonization": harmonized_value,
                     "ontology_id": None,
                     "top_harmonizations": [harmonized_value] if harmonized_value else [],
-                    "confidence_score": 0.95 if original_value != harmonized_value else 0.99,
+                    "match_fidelity": "strong",
                     "error": None,
                     "row_indices": [row_idx],
                     "manual_overrides": [],
@@ -708,7 +711,7 @@ def create_manifest_with_manual_override(
         "top_harmonization": ai_harmonized_value,
         "ontology_id": None,
         "top_harmonizations": [ai_harmonized_value],
-        "confidence_score": 0.85,
+        "match_fidelity": "partial",
         "error": None,
         "row_indices": [0],
         "manual_overrides": [

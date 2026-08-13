@@ -158,6 +158,11 @@ def _write_manifest_parquet(manifest_path: Path, rows: list[ManifestRow]) -> boo
         return False
 
 
+def write_manifest_parquet(manifest_path: Path, rows: list[ManifestRow]) -> bool:
+    """Write the canonical manifest shape at a provider boundary."""
+    return _write_manifest_parquet(manifest_path, rows)
+
+
 _MANIFEST_FIELDS = tuple(
     field_name
     for field_name in get_manifest_schema().names
@@ -181,4 +186,5 @@ __all__ = [
     "add_manual_overrides_batch",
     "apply_column_renames_batch",
     "apply_pv_adjustments_batch",
+    "write_manifest_parquet",
 ]

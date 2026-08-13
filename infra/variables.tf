@@ -79,16 +79,44 @@ variable "netrias_harmonization_url" {
   default     = ""
 }
 
+variable "harmonizer" {
+  description = "Harmonization implementation used by this client deployment."
+  type        = string
+  default     = "agentic"
+
+  validation {
+    condition     = contains(["agentic", "netrias"], var.harmonizer)
+    error_message = "harmonizer must be agentic or netrias."
+  }
+}
+
+variable "agentic_workers" {
+  description = "Maximum concurrent agentic term harmonizations in one task."
+  type        = number
+  default     = 50
+
+  validation {
+    condition     = var.agentic_workers >= 1
+    error_message = "agentic_workers must be positive."
+  }
+}
+
 variable "container_cpu" {
   description = "Fargate task CPU units."
   type        = number
-  default     = 1024
+  default     = 4096
 }
 
 variable "container_memory" {
   description = "Fargate task memory in MiB."
   type        = number
-  default     = 2048
+  default     = 8192
+}
+
+variable "github_app_secret_name" {
+  description = "Secrets Manager name for the read-only GitHub App build credential."
+  type        = string
+  default     = "data-chord/build/github-app"
 }
 
 variable "image_tag" {

@@ -3,7 +3,7 @@ version: 0.2
 env:
   shell: bash
   variables:
-    UV_VERSION: "0.10.0"
+    UV_VERSION: "0.12.3"
 
 phases:
   install:
@@ -13,6 +13,12 @@ phases:
   pre_build:
     commands:
       - export PATH="$HOME/.local/bin:$PATH"
+      - export GITHUB_TOKEN_FILE="/tmp/data-chord-github-token"
+      - infra/scripts/github-app-installation-token.sh "$GITHUB_APP_SECRET_ARN" "$GITHUB_TOKEN_FILE"
+      - export GITHUB_INSTALLATION_TOKEN="$(<"$GITHUB_TOKEN_FILE")"
+      - export GIT_CONFIG_COUNT=1
+      - export GIT_CONFIG_KEY_0="url.https://x-access-token:${GITHUB_INSTALLATION_TOKEN}@github.com/.insteadOf"
+      - export GIT_CONFIG_VALUE_0="https://github.com/"
       - uv sync --frozen --extra dev
       - uv run ruff check .
       - uv run basedpyright
@@ -26,7 +32,9 @@ phases:
       - 'if aws ecr describe-images --repository-name "$IMAGE_REPO_NAME" --image-ids imageTag="$IMAGE_TAG" >/dev/null 2>&1; then echo "Image tag already exists and ECR tags are immutable: $IMAGE_TAG"; exit 1; fi'
   build:
     commands:
-      - docker build -t "$IMAGE_REPO_URI:$IMAGE_TAG" .
+      - docker build --secret "id=github_token,src=$GITHUB_TOKEN_FILE" -t "$IMAGE_REPO_URI:$IMAGE_TAG" .
+      - ': > "$GITHUB_TOKEN_FILE"'
+      - unset GITHUB_INSTALLATION_TOKEN GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
   post_build:
     commands:
       - if [ "$CODEBUILD_BUILD_SUCCEEDING" != "1" ]; then echo "Build failed; skipping image push"; exit 1; fi

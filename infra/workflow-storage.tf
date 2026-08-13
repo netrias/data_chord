@@ -5,6 +5,7 @@ resource "aws_s3_bucket" "workflow" {
     Name = "${local.name_prefix}-workflow"
   })
 }
+
 resource "aws_s3_bucket_public_access_block" "workflow" {
   bucket = aws_s3_bucket.workflow.id
 
@@ -12,16 +13,6 @@ resource "aws_s3_bucket_public_access_block" "workflow" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "workflow" {
-  bucket = aws_s3_bucket.workflow.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
 }
 
 resource "aws_s3_bucket_versioning" "workflow" {
@@ -80,5 +71,21 @@ resource "aws_iam_role_policy" "application_task_workflow_storage" {
         }
       }
     ]
+  })
+}
+
+resource "aws_iam_role_policy" "application_task_bedrock_mantle" {
+  count = var.harmonizer == "agentic" ? 1 : 0
+
+  name = "${local.name_prefix}-bedrock-mantle"
+  role = aws_iam_role.application_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["bedrock-mantle:CallWithBearerToken"]
+      Resource = "*"
+    }]
   })
 }

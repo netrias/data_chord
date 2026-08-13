@@ -325,7 +325,7 @@
   font-weight: 600;
 }
 
-/* Review toolbar - confidence legend + batch actions */
+/* Review toolbar - match fidelity legend + batch actions */
 .review-toolbar {
   display: flex;
   justify-content: space-between;
@@ -395,8 +395,8 @@
   position: relative;
 }
 
-/* Confidence states - neutral cards, color only on indicator badges */
-/* All confidence levels use the same neutral card styling */
+/* Match fidelity states - neutral cards, color only on indicator badges */
+/* All match fidelity levels use the same neutral card styling */
 
 /* Card header row - compact height, border-radius to match card corners since overflow is visible */
 .card-header-row {
@@ -415,7 +415,7 @@
   border-bottom-color: var(--netrias-300);
 }
 
-.confidence-indicator {
+.fidelity-indicator {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -428,7 +428,7 @@
   margin-right: var(--space-3);
 }
 
-.confidence-indicator::after {
+.fidelity-indicator::after {
   content: attr(data-tooltip);
   position: absolute;
   top: 50%;
@@ -451,7 +451,7 @@
   transition: opacity var(--transition-fast), visibility var(--transition-fast);
 }
 
-.confidence-indicator:hover::after {
+.fidelity-indicator:hover::after {
   opacity: 1;
   visibility: visible;
 }

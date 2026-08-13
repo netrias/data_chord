@@ -74,15 +74,28 @@ jobs:
         run: npm test
 
   test:
+    # Fork pull requests cannot receive the private agentic source credential.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Create agentic dependency token
+        id: agentic-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ vars.DATA_CHORD_BUILD_APP_ID }}
+          private-key: ${{ secrets.DATA_CHORD_BUILD_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: agentic_harmonization
 
       - name: Install uv
         uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
         with:
           # Security: pin uv so dependency age enforcement stays stable in CI.
-          version: "0.10.0"
+          version: "0.12.3"
 
       - name: Set up Python
         run: uv python install
@@ -90,20 +103,36 @@ jobs:
       - name: Install dependencies
         # Security: CI must use the committed lockfile, not silently resolve fresh packages.
         run: uv sync --frozen --all-extras
+        env:
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: "url.https://x-access-token:${{ steps.agentic-token.outputs.token }}@github.com/.insteadOf"
+          GIT_CONFIG_VALUE_0: "https://github.com/"
 
       - name: Run tests
         run: uv run pytest --tb=short
 
   type-check:
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Create agentic dependency token
+        id: agentic-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ vars.DATA_CHORD_BUILD_APP_ID }}
+          private-key: ${{ secrets.DATA_CHORD_BUILD_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: agentic_harmonization
 
       - name: Install uv
         uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
         with:
           # Security: pin uv so dependency age enforcement stays stable in CI.
-          version: "0.10.0"
+          version: "0.12.3"
 
       - name: Set up Python
         run: uv python install
@@ -111,20 +140,36 @@ jobs:
       - name: Install dependencies
         # Security: CI must use the committed lockfile, not silently resolve fresh packages.
         run: uv sync --frozen --all-extras
+        env:
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: "url.https://x-access-token:${{ steps.agentic-token.outputs.token }}@github.com/.insteadOf"
+          GIT_CONFIG_VALUE_0: "https://github.com/"
 
       - name: Run basedpyright
         run: uv run basedpyright --level error src/
 
   lint:
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Create agentic dependency token
+        id: agentic-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ vars.DATA_CHORD_BUILD_APP_ID }}
+          private-key: ${{ secrets.DATA_CHORD_BUILD_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: agentic_harmonization
 
       - name: Install uv
         uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
         with:
           # Security: pin uv so dependency age enforcement stays stable in CI.
-          version: "0.10.0"
+          version: "0.12.3"
 
       - name: Set up Python
         run: uv python install
@@ -132,6 +177,10 @@ jobs:
       - name: Install dependencies
         # Security: CI must use the committed lockfile, not silently resolve fresh packages.
         run: uv sync --frozen --all-extras
+        env:
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: "url.https://x-access-token:${{ steps.agentic-token.outputs.token }}@github.com/.insteadOf"
+          GIT_CONFIG_VALUE_0: "https://github.com/"
 
       - name: Run ruff check
         run: uv run ruff check src/ tests/
@@ -140,15 +189,27 @@ jobs:
         run: uv run vulture
 
   security:
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Create agentic dependency token
+        id: agentic-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ vars.DATA_CHORD_BUILD_APP_ID }}
+          private-key: ${{ secrets.DATA_CHORD_BUILD_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: agentic_harmonization
 
       - name: Install uv
         uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
         with:
           # Security: pin uv so dependency age enforcement stays stable in CI.
-          version: "0.10.0"
+          version: "0.12.3"
 
       - name: Set up Python
         run: uv python install
@@ -156,6 +217,10 @@ jobs:
       - name: Install dependencies
         # Security: CI must use the committed lockfile, not silently resolve fresh packages.
         run: uv sync --frozen --all-extras
+        env:
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: "url.https://x-access-token:${{ steps.agentic-token.outputs.token }}@github.com/.insteadOf"
+          GIT_CONFIG_VALUE_0: "https://github.com/"
 
       - name: Run bandit
         run: uv run bandit -r src/ -c pyproject.toml
@@ -168,17 +233,29 @@ jobs:
 
   # E2E tests using Playwright with Chromium for browser automation.
   e2e:
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     env:
       NETRIAS_API_KEY: ${{ secrets.NETRIAS_API_KEY }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
+      - name: Create agentic dependency token
+        id: agentic-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ vars.DATA_CHORD_BUILD_APP_ID }}
+          private-key: ${{ secrets.DATA_CHORD_BUILD_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: agentic_harmonization
+
       - name: Install uv
         uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
         with:
           # Security: pin uv so dependency age enforcement stays stable in CI.
-          version: "0.10.0"
+          version: "0.12.3"
 
       - name: Set up Python
         run: uv python install
@@ -186,6 +263,10 @@ jobs:
       - name: Install dependencies
         # Security: CI must use the committed lockfile, not silently resolve fresh packages.
         run: uv sync --frozen --all-extras
+        env:
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: "url.https://x-access-token:${{ steps.agentic-token.outputs.token }}@github.com/.insteadOf"
+          GIT_CONFIG_VALUE_0: "https://github.com/"
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
