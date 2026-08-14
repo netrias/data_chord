@@ -83,8 +83,11 @@ resource "aws_iam_role_policy" "application_task_bedrock_mantle" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Effect   = "Allow"
-      Action   = ["bedrock-mantle:CallWithBearerToken"]
+      Effect = "Allow"
+      Action = [
+        "bedrock:CallWithBearerToken",
+        "bedrock-mantle:CallWithBearerToken",
+      ]
       Resource = "*"
     }]
   })

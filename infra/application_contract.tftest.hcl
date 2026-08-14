@@ -201,12 +201,18 @@ run "agentic_harmonization_is_the_scaled_default" {
     error_message = "Agentic harmonization must default to the larger task shape."
   }
 
+  # Given agentic harmonization uses AWS short-term bearer tokens,
+  # when the ECS task policy is planned,
+  # then it permits exactly token generation and Mantle inference.
   assert {
     condition = anytrue([
       for statement in jsondecode(aws_iam_role_policy.application_task_bedrock_mantle[0].policy).Statement :
-      contains(statement.Action, "bedrock-mantle:CallWithBearerToken")
+      toset(statement.Action) == toset([
+        "bedrock:CallWithBearerToken",
+        "bedrock-mantle:CallWithBearerToken",
+      ])
     ])
-    error_message = "The task role must be able to call Bedrock Mantle."
+    error_message = "The task role must allow only Bedrock token generation and Bedrock Mantle inference."
   }
 }
 
