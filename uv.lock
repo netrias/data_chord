@@ -17,7 +17,7 @@ exclude-newer-span = "P7D"
 [[package]]
 name = "agent-experiment"
 version = "0.1.0"
-source = { git = "https://github.com/netrias/agentic_harmonization.git?rev=0cc05ceac578ea4e181f9203ea25c738f666060f#0cc05ceac578ea4e181f9203ea25c738f666060f" }
+source = { git = "https://github.com/netrias/agentic_harmonization.git?rev=7b095c228df9497c5dd0572d31ce94e13914ce1f#7b095c228df9497c5dd0572d31ce94e13914ce1f" }
 dependencies = [
     { name = "aws-bedrock-token-generator" },
     { name = "boto3" },
@@ -393,7 +393,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agent-experiment", git = "https://github.com/netrias/agentic_harmonization.git?rev=0cc05ceac578ea4e181f9203ea25c738f666060f" },
+    { name = "agent-experiment", git = "https://github.com/netrias/agentic_harmonization.git?rev=7b095c228df9497c5dd0572d31ce94e13914ce1f" },
     { name = "bandit", marker = "extra == 'dev'", specifier = ">=1.7" },
     { name = "basedpyright", marker = "extra == 'dev'", specifier = ">=1.17.0" },
     { name = "boto3", specifier = ">=1.40.69" },
