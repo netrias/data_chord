@@ -688,24 +688,6 @@
   position: relative;
 }
 
-.row-cell.no-recommendation::after {
-  content: "?";
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--white);
-  background: var(--gray-500);
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1;
-}
-
 /* PV status icons (in card header row, right-aligned) */
 .pv-warning-icon,
 .pv-conformant-icon {

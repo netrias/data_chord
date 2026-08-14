@@ -8,11 +8,11 @@
 
 /**
  * @typedef {Object} CardStateInput
- * @property {string} aiSuggestedValue - AI harmonized value
+ * @property {string} baselineValue - Model result, or source value when no result exists
  * @property {string} overrideValue - User's manual override (empty string = no override)
  * @property {boolean} hasPVs - Whether permissible values exist for this column
  * @property {Set<string>|null} pvSet - Set of valid PVs (null if hasPVs is false)
- * @property {boolean} aiIsConformant - Whether AI suggestion is PV-conformant
+ * @property {boolean} baselineIsConformant - Whether the baseline value is PV-conformant
  * @property {boolean} [overrideIsKnownConformant] - If true, skip pvSet check for override (value came from verified dropdown selection)
  */
 
@@ -26,13 +26,13 @@
  */
 
 /**
- * Check whether an override value represents a real change from the AI suggestion.
+ * Check whether an override value represents a real change from the baseline.
  * @param {string} overrideValue - User's override (empty string = no override)
- * @param {string} aiSuggestedValue - AI harmonized value
+ * @param {string} baselineValue - Model result, or source value when no result exists
  * @returns {boolean}
  */
-export const isEffectiveOverride = (overrideValue, aiSuggestedValue) =>
-  overrideValue !== '' && overrideValue !== aiSuggestedValue;
+export const isEffectiveOverride = (overrideValue, baselineValue) =>
+  overrideValue !== '' && overrideValue !== baselineValue;
 
 /**
  * Determine the complete display state for a value card.
@@ -42,18 +42,18 @@ export const isEffectiveOverride = (overrideValue, aiSuggestedValue) =>
  */
 export const determineCardState = (input) => {
   const {
-    aiSuggestedValue,
+    baselineValue,
     overrideValue,
     hasPVs,
     pvSet,
-    aiIsConformant,
+    baselineIsConformant,
     overrideIsKnownConformant,
   } = input;
 
-  const hasOverride = isEffectiveOverride(overrideValue, aiSuggestedValue);
+  const hasOverride = isEffectiveOverride(overrideValue, baselineValue);
 
   // Derive: what value is currently "active"?
-  const activeValue = hasOverride ? overrideValue : aiSuggestedValue;
+  const activeValue = hasOverride ? overrideValue : baselineValue;
 
   // Derive: is the active value conformant?
   // If no PVs exist for this column, treat as neutral (not conformant, not non-conformant)
@@ -67,8 +67,8 @@ export const determineCardState = (input) => {
       ? true
       : pvSet !== null && pvSet.has(overrideValue);
   } else {
-    // Using AI suggestion - use pre-computed conformance flag
-    isConformant = aiIsConformant;
+    // The server has already checked the baseline value.
+    isConformant = baselineIsConformant;
   }
 
   return {

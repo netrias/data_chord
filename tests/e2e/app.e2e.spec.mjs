@@ -123,6 +123,106 @@ const _stage2HarnessHtml = (cdeCatalog) => `
 </html>
 `;
 
+test('no-recommendation card warns when its displayed source value is not permissible', async ({ page }) => {
+  const fileId = '0123456789abcdef0123456789abcdef';
+  let savedOverrides = null;
+  await page.route('**/stage-4/rows', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        columns: [{
+          columnKey: 'col_0000',
+          columnLabel: 'diagnosis',
+          targetCdeKey: 'primary_diagnosis',
+          targetCdeLabel: 'primary_diagnosis',
+          sourceColumnIndex: 0,
+          termCount: 2,
+          termsWithChanges: 0,
+          transformations: [
+            {
+              originalValue: 'adamantinoma',
+              harmonizedValue: null,
+              matchFidelity: 'none',
+              isChanged: false,
+              recommendationType: 'no_recommendation',
+              isPVConformant: false,
+              pvSetAvailable: true,
+              topSuggestions: [],
+              rowIndices: [8692],
+              manualOverride: null,
+            },
+            {
+              originalValue: 'Lung Cancer',
+              harmonizedValue: null,
+              matchFidelity: 'none',
+              isChanged: false,
+              recommendationType: 'no_recommendation',
+              isPVConformant: true,
+              pvSetAvailable: true,
+              topSuggestions: [],
+              rowIndices: [8693],
+              manualOverride: null,
+            },
+          ],
+        }],
+        columnPVs: { col_0000: ['Carcinoma NOS', 'Lung Cancer'] },
+        totalOriginalRows: 10000,
+      }),
+    });
+  });
+  await page.route('**/stage-4/overrides/*', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: 'null' });
+  });
+  await page.route('**/stage-4/overrides', async (route) => {
+    savedOverrides = route.request().postDataJSON();
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { ETag: '"test-version"' },
+      body: JSON.stringify({ file_id: fileId, updated_at: '2026-08-14T00:00:00Z' }),
+    });
+  });
+
+  // Given: Stage 4 receives no recommendation and the source is outside the target PV set
+  await page.goto(`/stage-4?file_id=${fileId}`);
+
+  // When: the browser renders the review card
+  await waitForReviewRows(page);
+  const cards = page.locator('.row-cell.no-recommendation');
+  const rejectedCard = cards.filter({ has: page.locator('.original-context-value', { hasText: 'adamantinoma' }) });
+  const permittedCard = cards.filter({ has: page.locator('.original-context-value', { hasText: 'Lung Cancer' }) });
+
+  // Then: each displayed source has one clear conformance state and no question marker
+  await expect(cards).toHaveCount(2);
+  await expect(rejectedCard.locator('.pv-combobox-link')).toHaveText('adamantinoma');
+  await expect(rejectedCard.locator('.pv-warning-icon')).toBeVisible();
+  await expect(rejectedCard.locator('.pv-conformant-icon')).toBeHidden();
+  await expect(rejectedCard.locator('.card-header-row')).not.toHaveClass(/pv-conformant/);
+  await expect(permittedCard.locator('.pv-warning-icon')).toBeHidden();
+  await expect(permittedCard.locator('.pv-conformant-icon')).toBeVisible();
+  await expect(permittedCard.locator('.card-header-row')).toHaveClass(/pv-conformant/);
+  for (const card of await cards.all()) {
+    const markerContent = await card.evaluate((element) => getComputedStyle(element, '::after').content);
+    expect(markerContent).toBe('none');
+  }
+
+  // When: the reviewer replaces the rejected source with a permitted value
+  const saveResponse = page.waitForResponse(
+    (response) => response.request().method() === 'POST' && response.url().endsWith('/stage-4/overrides'),
+  );
+  await rejectedCard.locator('.pv-combobox-link').click();
+  await page.locator('.pv-selection-option[data-value="Carcinoma NOS"]').click();
+  await saveResponse;
+
+  // Then: the card becomes conformant, stays a no-recommendation card, and saves the override
+  await expect(rejectedCard.locator('.pv-warning-icon')).toBeHidden();
+  await expect(rejectedCard.locator('.pv-conformant-icon')).toBeVisible();
+  await expect(rejectedCard.locator('.card-header-row')).toHaveClass(/pv-conformant/);
+  await expect(rejectedCard).toHaveClass(/no-recommendation/);
+  expect(savedOverrides.overrides['8692'].col_0000.human_value).toBe('Carcinoma NOS');
+});
+
 test('happy path flow: upload → analyze → harmonize → review → summary → download', async ({ page }) => {
   await mockHarmonizeSuccess(page);
 

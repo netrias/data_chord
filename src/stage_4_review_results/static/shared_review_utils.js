@@ -301,7 +301,7 @@ const _buildCardHTML = (params) => {
   const warningHidden = isPVConformant ? ' style="display: none;"' : '';
   const checkHidden = isPVConformant ? '' : ' style="display: none;"';
   const pvStatusIcons = hasPVs
-    ? `<span class="pv-warning-icon" data-tooltip="This current suggestion isn't an approved value, but it might point you in the right direction." aria-label="Warning: value not in permissible values"${warningHidden}>⚠</span><span class="pv-conformant-icon" aria-label="Value is in permissible values"${checkHidden}>✓</span>`
+    ? `<span class="pv-warning-icon" data-tooltip="This current value isn't an approved value, but it might point you in the right direction." aria-label="Warning: value not in permissible values"${warningHidden}>⚠</span><span class="pv-conformant-icon" aria-label="Value is in permissible values"${checkHidden}>✓</span>`
     : '';
 
   // Add conformant class to header when value is in PV list
@@ -351,11 +351,11 @@ const _buildCardHTML = (params) => {
  * @param {HTMLElement} params.card - The card element
  * @param {HTMLElement|null} params.inputEl - The target value input element
  * @param {string} params.originalValue - Original value from source data
- * @param {string} params.aiSuggestedValue - AI harmonized value
+ * @param {string} params.baselineValue - Model result, or source value when no result exists
  * @param {string} params.overrideValue - User's override (empty string = no override)
  * @param {boolean} params.hasPVs - Whether PVs exist for this column
  * @param {Set<string>|null} params.pvSet - Set of valid PVs
- * @param {boolean} params.aiIsConformant - Whether AI suggestion is PV-conformant
+ * @param {boolean} params.baselineIsConformant - Whether the baseline value is PV-conformant
  * @param {boolean} [params.overrideIsKnownConformant] - If true, skip pvSet check (value from verified dropdown)
  */
 const _applyCardState = (params) => {
@@ -363,25 +363,25 @@ const _applyCardState = (params) => {
     card,
     inputEl,
     originalValue,
-    aiSuggestedValue,
+    baselineValue,
     overrideValue,
     hasPVs,
     pvSet,
-    aiIsConformant,
+    baselineIsConformant,
     overrideIsKnownConformant,
   } = params;
 
   // Get derived state from pure function
   const state = determineCardState({
-    aiSuggestedValue,
+    baselineValue,
     overrideValue,
     hasPVs,
     pvSet,
-    aiIsConformant,
+    baselineIsConformant,
     overrideIsKnownConformant,
   });
 
-  // Input shows the current effective value (AI suggestion or override)
+  // Input shows the current effective value (baseline or override)
   if (inputEl) {
     inputEl.value = state.activeValue;
   }
@@ -423,15 +423,13 @@ const _applyCardState = (params) => {
  * @param {Function} onOverrideChange
  * @returns {Function} Cleanup function to remove event listeners
  */
-const _attachInputListener = (card, entry, onOverrideChange) => {
+const _attachInputListener = (card, entry, baselineValue, onOverrideChange) => {
   const input = card.querySelector('.target-value-input');
   const revertBtn = card.querySelector('.revert-btn');
   const originalContext = card.querySelector('.original-context');
   if (!input) return () => {};
 
   const originalValue = entry.originalValue ?? '';
-  const aiSuggestedValue = entry.harmonizedValue ?? entry.originalValue ?? '—';
-
   // Helper to update revert button visibility based on current effective value
   const updateRevertState = (currentValue) => {
     if (originalContext) {
@@ -443,7 +441,7 @@ const _attachInputListener = (card, entry, onOverrideChange) => {
   // Handle input changes - determine override from current input value
   const handleInput = () => {
     const currentValue = input.value;
-    const effectiveOverride = currentValue === aiSuggestedValue ? '' : currentValue;
+    const effectiveOverride = currentValue === baselineValue ? '' : currentValue;
 
     updateRevertState(currentValue);
 
@@ -460,7 +458,7 @@ const _attachInputListener = (card, entry, onOverrideChange) => {
   // Click on revert button -> revert to original
   const handleRevertClick = () => {
     input.value = originalValue;
-    const effectiveOverride = originalValue === aiSuggestedValue ? '' : originalValue;
+    const effectiveOverride = originalValue === baselineValue ? '' : originalValue;
     updateRevertState(originalValue);
     onOverrideChange(
       entry.rowIndices,
@@ -586,47 +584,39 @@ const _attachRevertClickHandlers = (card, entry, triggerChange) => {
  * @param {Function} onOverrideChange - Callback for override changes
  * @returns {Function|null} Cleanup function, or null if no input wrapper
  */
-const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange) => {
+const _attachPVCombobox = (card, entry, pvValues, baselineValue, initialValue, onOverrideChange) => {
   const inputWrapper = card.querySelector('.target-value-input-wrapper');
   if (!inputWrapper) return null;
 
   const originalValue = entry.originalValue ?? '';
-  const aiSuggestedValue = entry.harmonizedValue ?? entry.originalValue ?? '—';
   const hasPVs = entry.pvSetAvailable;
   // Build Set for O(1) conformance checks
   const pvSet = new Set(pvValues);
-  // Backend computes conformance against the PV-adjusted harmonized value
-  const aiIsConformant = entry.isPVConformant;
+  // The backend computes conformance for the baseline value.
+  const baselineIsConformant = entry.isPVConformant;
 
   // Clear the wrapper and add PV combobox
   inputWrapper.innerHTML = '';
 
-  // Display value is override if present, otherwise AI suggestion
+  // Display the override when present. Otherwise, display the baseline.
   // (In compact design, input IS the display so we must show something)
-  const displayValue = initialValue || aiSuggestedValue;
+  const displayValue = initialValue || baselineValue;
 
   // Shared function to apply a value change (from combobox or revert click)
   // isKnownConformant: true when value comes from dropdown (already verified), undefined when reverting
-  const originalContext = card.querySelector('.original-context');
   const applyValueChange = (value, isKnownConformant) => {
-    const effectiveOverride = value === aiSuggestedValue ? '' : value;
-
-    // Update revert button visibility
-    if (originalContext) {
-      const canRevertToOriginal = originalValue !== value;
-      originalContext.classList.toggle('can-revert', canRevertToOriginal);
-    }
+    const effectiveOverride = value === baselineValue ? '' : value;
 
     // Apply PV conformance styling
     _applyCardState({
       card,
       inputEl: null,  // Combobox manages its own input
       originalValue,
-      aiSuggestedValue,
+      baselineValue,
       overrideValue: effectiveOverride,
       hasPVs,
       pvSet,
-      aiIsConformant,
+      baselineIsConformant,
       overrideIsKnownConformant: isKnownConformant,
     });
 
@@ -650,19 +640,6 @@ const _attachPVCombobox = (card, entry, pvValues, initialValue, onOverrideChange
   });
 
   inputWrapper.appendChild(combobox);
-
-  // Apply initial state (including revert button visibility)
-  const initialOverride = initialValue === aiSuggestedValue ? '' : initialValue;
-  _applyCardState({
-    card,
-    inputEl: null,
-    originalValue,
-    aiSuggestedValue,
-    overrideValue: initialOverride,
-    hasPVs,
-    pvSet,
-    aiIsConformant,
-  });
 
   // Attach revert click handler for original context
   const revertCleanup = _attachRevertClickHandlers(card, entry, (value) => {
@@ -697,23 +674,24 @@ export const createValueCard = (config) => {
   const columnLabel = entry.columnLabel ?? entry.columnKey ?? '';
   const overrideValue = _getInputValue(entry, pendingOverrides);
 
-  // Determine the AI suggestion
+  // The baseline is the model result, or the source when no recommendation exists.
   const isNoRecommendation = entry.recommendationType === RECOMMENDATION_TYPE.NO_RECOMMENDATION;
-  const aiSuggestedValue = isNoRecommendation
-    ? ''
+  const baselineValue = isNoRecommendation
+    ? (entry.originalValue ?? '—')
     : (entry.harmonizedValue ?? entry.originalValue ?? '');
-
-  // Effective value is override if present, otherwise AI suggestion
-  const effectiveValue = overrideValue || aiSuggestedValue || entry.originalValue || '—';
 
   const fidelitySymbol = FIDELITY_SYMBOLS[entry.matchFidelity] ?? '?';
   const fidelityTooltip = FIDELITY_TOOLTIPS[entry.matchFidelity] ?? '';
 
-  // Check if effective value is conformant (PVs available AND value matches)
-  // Need to check the actual effective value, not just the AI suggestion
   const pvValues = columnPVs?.[entry.columnKey];
   const pvSet = pvValues ? new Set(pvValues) : null;
-  const isPVConformant = entry.pvSetAvailable && pvSet && pvSet.has(effectiveValue);
+  const initialState = determineCardState({
+    baselineValue,
+    overrideValue,
+    hasPVs: entry.pvSetAvailable,
+    pvSet,
+    baselineIsConformant: entry.isPVConformant,
+  });
 
   card.innerHTML = _buildCardHTML({
     columnLabel,
@@ -721,21 +699,31 @@ export const createValueCard = (config) => {
     fidelitySymbol,
     fidelityTooltip,
     matchFidelity: entry.matchFidelity,
-    effectiveValue,
+    effectiveValue: initialState.activeValue,
     originalValue: entry.originalValue ?? '—',
-    isPVConformant,
+    isPVConformant: initialState.isConformant,
     hasPVs: entry.pvSetAvailable,
   });
+
+  const originalContext = card.querySelector('.original-context');
+  originalContext?.classList.toggle('can-revert', (entry.originalValue ?? '') !== initialState.activeValue);
 
   // Collect cleanup functions for proper resource management
   const cleanupFns = [];
 
   // Use PV combobox if PVs are available for this column, otherwise use text input
   if (entry.pvSetAvailable && pvValues?.length > 0) {
-    const comboboxCleanup = _attachPVCombobox(card, entry, pvValues, overrideValue, onOverrideChange);
+    const comboboxCleanup = _attachPVCombobox(
+      card,
+      entry,
+      pvValues,
+      baselineValue,
+      overrideValue,
+      onOverrideChange,
+    );
     if (comboboxCleanup) cleanupFns.push(comboboxCleanup);
   } else {
-    const inputCleanup = _attachInputListener(card, entry, onOverrideChange);
+    const inputCleanup = _attachInputListener(card, entry, baselineValue, onOverrideChange);
     if (inputCleanup) cleanupFns.push(inputCleanup);
   }
 
