@@ -82,13 +82,20 @@ resource "aws_iam_role_policy" "application_task_bedrock_mantle" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "bedrock:CallWithBearerToken",
-        "bedrock-mantle:CallWithBearerToken",
-      ]
-      Resource = "*"
-    }]
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "bedrock:CallWithBearerToken",
+          "bedrock-mantle:CallWithBearerToken",
+        ]
+        Resource = "*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["bedrock-mantle:CreateInference"]
+        Resource = "arn:${data.aws_partition.current.partition}:bedrock-mantle:${var.aws_region}:${data.aws_caller_identity.current.account_id}:project/default"
+      },
+    ]
   })
 }

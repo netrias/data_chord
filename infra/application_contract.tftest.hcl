@@ -1,4 +1,10 @@
 mock_provider "aws" {
+  mock_data "aws_partition" {
+    defaults = {
+      partition = "aws"
+    }
+  }
+
   mock_data "aws_caller_identity" {
     defaults = {
       account_id = "084828580051"
@@ -201,18 +207,25 @@ run "agentic_harmonization_is_the_scaled_default" {
     error_message = "Agentic harmonization must default to the larger task shape."
   }
 
-  # Given agentic harmonization uses AWS short-term bearer tokens,
+  # Given agentic harmonization uses AWS short-term bearer tokens and the default project,
   # when the ECS task policy is planned,
-  # then it permits exactly token generation and Mantle inference.
+  # then it permits only token use and inference on that project.
   assert {
-    condition = anytrue([
-      for statement in jsondecode(aws_iam_role_policy.application_task_bedrock_mantle[0].policy).Statement :
-      toset(statement.Action) == toset([
-        "bedrock:CallWithBearerToken",
-        "bedrock-mantle:CallWithBearerToken",
-      ])
+    condition = alltrue([
+      anytrue([
+        for statement in jsondecode(aws_iam_role_policy.application_task_bedrock_mantle[0].policy).Statement :
+        toset(statement.Action) == toset([
+          "bedrock:CallWithBearerToken",
+          "bedrock-mantle:CallWithBearerToken",
+        ]) && statement.Resource == "*"
+      ]),
+      anytrue([
+        for statement in jsondecode(aws_iam_role_policy.application_task_bedrock_mantle[0].policy).Statement :
+        toset(statement.Action) == toset(["bedrock-mantle:CreateInference"]) &&
+        statement.Resource == "arn:aws:bedrock-mantle:us-east-2:084828580051:project/default"
+      ]),
     ])
-    error_message = "The task role must allow only Bedrock token generation and Bedrock Mantle inference."
+    error_message = "The task role must allow bearer-token use and inference only on the account's default Bedrock project."
   }
 }
 
