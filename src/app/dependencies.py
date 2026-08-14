@@ -13,12 +13,18 @@ from typing import cast
 from netrias_client import Environment, NetriasClient
 
 from src.auth.user_context import current_user_context
-from src.integrations.netrias_harmonize import HarmonizeService
+from src.integrations.agentic_harmonize import AgenticHarmonizeConfig, AgenticHarmonizeService
+from src.integrations.harmonize import HarmonizeService
+from src.integrations.netrias_harmonize import HarmonizeService as NetriasHarmonizeService
 from src.integrations.netrias_mapping import MappingDiscoveryService
 from src.paths import PROJECT_ROOT
 from src.settings import (
     ConfigurationError,
+    Harmonizer,
     StorageBackend,
+    get_agentic_workers,
+    get_aws_region,
+    get_harmonizer,
     get_netrias_api_key,
     get_netrias_environment_name,
     get_netrias_harmonization_url,
@@ -139,7 +145,14 @@ def get_mapping_service() -> MappingDiscoveryService:
 
 
 def get_harmonize_service() -> HarmonizeService:
-    return HarmonizeService(get_netrias_client())
+    if get_harmonizer() is Harmonizer.NETRIAS:
+        return NetriasHarmonizeService(get_netrias_client())
+    return AgenticHarmonizeService(
+        AgenticHarmonizeConfig(
+            region=get_aws_region(),
+            max_workers=get_agentic_workers(),
+        )
+    )
 
 
 def cleanup_services() -> None:

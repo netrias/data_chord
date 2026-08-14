@@ -1,7 +1,7 @@
 """
 HTTP routes for triggering harmonization and building result summaries.
 
-Orchestrates parallel harmonization and PV fetch tasks.
+Fetches permissible values, then runs the configured harmonizer.
 """
 
 from __future__ import annotations
@@ -42,18 +42,17 @@ from src.domain.column_renames import ColumnRenameSet
 from src.domain.columns import ColumnKey
 from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.harmonization import (
-    ConfidenceBucketCount,
     HarmonizationColumnBreakdown,
     HarmonizationManifestSummary,
     HarmonizeStatus,
+    MatchFidelity,
+    MatchFidelityCount,
 )
 from src.domain.manifest import (
     ColumnMappingManifest,
-    ConfidenceBucket,
     ManifestPvAdjustment,
     ManifestRow,
     ManifestSummary,
-    confidence_bucket,
 )
 from src.domain.pv_validation import check_value_conformance, compute_pv_adjustment
 from src.domain.tabular_column_renames import (
@@ -61,7 +60,7 @@ from src.domain.tabular_column_renames import (
     apply_column_renames_to_dataset,
     resolve_tabular_columns,
 )
-from src.integrations.netrias_harmonize import HarmonizeResult
+from src.integrations.harmonize import HarmonizeResult
 from src.persistence.cde_mapping_document_store import save_cde_mapping_document
 from src.persistence.harmonization_job_store import HarmonizationJobState
 from src.persistence.manifest_reader import read_manifest_parquet
@@ -107,7 +106,7 @@ class ColumnStats(NamedTuple):
     changed_rows: int
     unique_terms_changed: int
     non_conformant_terms: int
-    confidence_counts: dict[ConfidenceBucket, int]
+    match_fidelity_counts: dict[MatchFidelity, int]
 
 
 @stage_three_router.get("", response_class=HTMLResponse, name="stage_three_entry")
@@ -313,27 +312,24 @@ async def _run_harmonization_workflow(
     column_cde_map = prepared_manifest.column_cde_map()
     output_path = storage.harmonized_path_for(payload.file_id, meta.saved_path)
 
-    harmonize_task = asyncio.create_task(
-        _run_harmonization(
-            meta.saved_path,
-            data_model_version,
-            prepared_manifest,
-            output_path,
-            meta.selected_sheet,
-        )
+    pv_catalog = await _fetch_pvs_for_session(
+        payload.file_id,
+        cache,
+        column_cde_map,
+        data_model_version,
     )
-    pv_fetch_task = asyncio.create_task(
-        _fetch_pvs_for_session(
-            payload.file_id,
-            cache,
-            column_cde_map,
-            data_model_version,
-        )
+    column_pv_sets = ColumnPvSets({
+        column_key: pv_catalog.get(cde_key)
+        for column_key, cde_key in column_cde_map.mappings.items()
+    })
+    result = await _run_harmonization(
+        meta.saved_path,
+        data_model_version,
+        prepared_manifest,
+        column_pv_sets,
+        output_path,
+        meta.selected_sheet,
     )
-
-    # Fetch PVs beside harmonization so Stage 4 can validate values without
-    # adding another user-visible wait after the SDK call finishes.
-    result, pv_catalog = await asyncio.gather(harmonize_task, pv_fetch_task)
     if result.status == HarmonizeStatus.SUCCEEDED:
         # Provider output is still scratch at this point. Refuse to transform
         # or publish it if this worker or its workflow plan was superseded.
@@ -367,10 +363,7 @@ async def _run_harmonization_workflow(
         result.manifest_path,
         storage,
         column_renames,
-        ColumnPvSets({
-            column_key: pv_catalog.get(cde_key)
-            for column_key, cde_key in column_cde_map.mappings.items()
-        }),
+        column_pv_sets,
     )
     if result.status == HarmonizeStatus.SUCCEEDED:
         if not harmonized_output_path.exists() or manifest_summary is None:
@@ -429,10 +422,11 @@ async def _run_harmonization(
     file_path: Path,
     data_model_version: DataModelVersionReference,
     prepared_manifest: ColumnMappingManifest,
+    column_pv_sets: ColumnPvSets,
     output_path: Path,
     sheet_name: str | None,
 ) -> HarmonizeResult:
-    """Netrias client is sync; run in threadpool to avoid blocking the event loop."""
+    """The provider is synchronous; keep its work off the event loop."""
     harmonizer = get_harmonize_service()
     return await run_in_threadpool(
         harmonizer.run,
@@ -440,6 +434,7 @@ async def _run_harmonization(
         data_model_key=data_model_version.data_model_key,
         external_version_number=data_model_version.external_version_number,
         prepared_manifest=prepared_manifest,
+        column_pv_sets=column_pv_sets,
         output_path=output_path,
         sheet_name=sheet_name,
     )
@@ -515,7 +510,7 @@ async def _fetch_pvs_for_session(
     column_cde_map: ColumnCdeMap,
     data_model_version: DataModelVersionReference,
 ) -> CdePvCatalog:
-    """Runs in parallel with harmonization to hide PV fetch latency."""
+    """Fetch the value sets required by the configured harmonizer."""
     cde_keys = column_cde_map.cde_keys()
     if cache.get_data_model_version() != data_model_version or not cache.has_cdes():
         raise RuntimeError("Reference-data cache does not match the workflow model version")
@@ -698,21 +693,21 @@ def _compute_column_stats(
     pv_set: frozenset[str] | None,
 ) -> ColumnStats:
     if not col_rows:
-        return ColumnStats(0, 0, 0, 0, {bucket: 0 for bucket in ConfidenceBucket})
+        return ColumnStats(0, 0, 0, 0, {fidelity: 0 for fidelity in MatchFidelity})
 
     finalized_outcomes = [_finalized_value_outcome(row, pv_set) for row in col_rows]
     summary = summarize_column_outcomes(finalized_outcomes)[0]
-    confidence_counts: dict[ConfidenceBucket, int] = {b: 0 for b in ConfidenceBucket}
+    fidelity_counts: dict[MatchFidelity, int] = {fidelity: 0 for fidelity in MatchFidelity}
     for row, outcome in zip(col_rows, finalized_outcomes, strict=True):
         if outcome.is_changed:
-            confidence_counts[confidence_bucket(row.confidence_score)] += 1
+            fidelity_counts[row.match_fidelity] += 1
 
     return ColumnStats(
         summary.total_rows,
         summary.changed_rows,
         summary.changed_distinct_values,
         summary.non_conformant_distinct_values,
-        confidence_counts,
+        fidelity_counts,
     )
 
 
@@ -764,9 +759,9 @@ def _create_breakdown_schema(
         unique_terms_changed=outcome.changed_distinct_values,
         unique_terms_unchanged=outcome.total_distinct_values - outcome.changed_distinct_values,
         non_conformant_terms=outcome.non_conformant_distinct_values,
-        confidence_buckets_changed=[
-            ConfidenceBucketCount(id=b.value, label=b.label, term_count=stats.confidence_counts[b])
-            for b in ConfidenceBucket
+        match_fidelity_counts_changed=[
+            MatchFidelityCount(id=fidelity, label=fidelity.label, term_count=stats.match_fidelity_counts[fidelity])
+            for fidelity in MatchFidelity
         ],
     )
 
@@ -799,12 +794,16 @@ def _convert_to_schema(
 ) -> HarmonizationManifestSummary:
     column_breakdowns = _build_column_breakdowns(manifest.rows, column_pv_map)
     total_non_conformant = sum(b.non_conformant_terms for b in column_breakdowns)
+    fidelity_counts = {fidelity: 0 for fidelity in MatchFidelity}
+    for row in manifest.rows:
+        fidelity_counts[row.match_fidelity] += 1
     return HarmonizationManifestSummary(
         total_terms=manifest.total_terms,
         changed_terms=manifest.changed_terms,
-        high_confidence_count=manifest.high_confidence_count,
-        medium_confidence_count=manifest.medium_confidence_count,
-        low_confidence_count=manifest.low_confidence_count,
+        match_fidelity_counts=[
+            MatchFidelityCount(id=fidelity, label=fidelity.label, term_count=fidelity_counts[fidelity])
+            for fidelity in MatchFidelity
+        ],
         non_conformant_terms=total_non_conformant,
         column_breakdowns=column_breakdowns,
     )

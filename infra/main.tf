@@ -1,3 +1,5 @@
+data "aws_partition" "current" {}
+
 data "aws_caller_identity" "current" {
   lifecycle {
     postcondition {
@@ -9,6 +11,10 @@ data "aws_caller_identity" "current" {
 
 data "aws_secretsmanager_secret" "netrias_api_key" {
   name = "data-chord/${var.environment}/netrias-api-key"
+}
+
+data "aws_secretsmanager_secret" "github_app" {
+  name = var.github_app_secret_name
 }
 
 locals {

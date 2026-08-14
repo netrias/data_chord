@@ -1,5 +1,6 @@
+# syntax=docker/dockerfile:1.7
 # Security: keep uv pinned so dependency age enforcement stays stable in container builds.
-FROM ghcr.io/astral-sh/uv:0.10.0 AS uv
+FROM ghcr.io/astral-sh/uv:0.12.3 AS uv
 
 FROM public.ecr.aws/docker/library/python:3.13-slim-bookworm AS builder
 
@@ -16,7 +17,11 @@ COPY --from=uv /uv /usr/local/bin/uv
 WORKDIR /app
 
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev
+RUN --mount=type=secret,id=github_token \
+    github_token="$(cat /run/secrets/github_token)" \
+    && git config --global url."https://x-access-token:${github_token}@github.com/".insteadOf "https://github.com/" \
+    && uv sync --frozen --no-dev \
+    && git config --global --unset-all url."https://x-access-token:${github_token}@github.com/".insteadOf
 
 FROM public.ecr.aws/docker/library/python:3.13-slim-bookworm AS runtime
 

@@ -8,17 +8,19 @@ import { determineCardState } from './card-state.js';
 import { escapeHtml } from '/assets/shared/html.js';
 
 /** @type {Record<string, string>} */
-export const CONFIDENCE_SYMBOLS = {
-  high: '▲',
-  medium: '–',
-  low: '▼',
+export const FIDELITY_SYMBOLS = {
+  strong: '▲',
+  partial: '●',
+  approximate: '~',
+  none: '–',
 };
 
 /** @type {Record<string, string>} */
-export const CONFIDENCE_TOOLTIPS = {
-  high: 'High confidence – The AI estimates this transformation is likely correct, but verification is still recommended.',
-  medium: 'Medium confidence – The AI found a reasonable match. Review suggested.',
-  low: 'Low confidence – The AI is uncertain. Manual review recommended.',
+export const FIDELITY_TOOLTIPS = {
+  strong: 'Strong match – The selected value closely preserves the source meaning.',
+  partial: 'Partial match – The selected value preserves the main meaning but loses some detail.',
+  approximate: 'Approximate match – This is the closest permitted value, but its meaning differs.',
+  none: 'No match – No suitable permitted value was selected.',
 };
 
 /** @type {Record<string, string>} */
@@ -31,38 +33,39 @@ export const RECOMMENDATION_TYPE = {
 /** @type {Record<string, string>} */
 export const SORT_MODE = {
   ORIGINAL: 'original',
-  CONFIDENCE_ASC: 'confidence-asc',
-  CONFIDENCE_DESC: 'confidence-desc',
+  FIDELITY_ASC: 'fidelity-asc',
+  FIDELITY_DESC: 'fidelity-desc',
 };
 
 /**
- * Numeric sort key for confidence buckets.
- * Lower values = lower confidence (sorted first in ascending order).
+ * Numeric sort key for match fidelity.
+ * Lower values = lower fidelity (sorted first in ascending order).
  * @type {Record<string, number>}
  */
-const CONFIDENCE_SORT_KEY = {
-  low: 1,
-  medium: 2,
-  high: 3,
+const FIDELITY_SORT_KEY = {
+  none: 0,
+  approximate: 1,
+  partial: 2,
+  strong: 3,
 };
 
 /**
- * Sort entries by confidence level.
- * @param {Array} entries - Array of entry objects with `confidence` (number) or `bucket` (string)
- * @param {string} sortMode - One of 'original', 'confidence-asc', 'confidence-desc'
+ * Sort entries by match fidelity.
+ * @param {Array} entries - Array of entry objects with `matchFidelity`
+ * @param {string} sortMode - One of 'original', 'fidelity-asc', 'fidelity-desc'
  * @returns {Array} Sorted array (new array, original not mutated)
  */
-export const sortEntriesByConfidence = (entries, sortMode) => {
+export const sortEntriesByFidelity = (entries, sortMode) => {
   if (sortMode === SORT_MODE.ORIGINAL || !sortMode) {
     return entries;
   }
 
   const sorted = [...entries];
-  const ascending = sortMode === SORT_MODE.CONFIDENCE_ASC;
+  const ascending = sortMode === SORT_MODE.FIDELITY_ASC;
 
   sorted.sort((a, b) => {
-    const aKey = CONFIDENCE_SORT_KEY[a.bucket] ?? a.confidence ?? 0;
-    const bKey = CONFIDENCE_SORT_KEY[b.bucket] ?? b.confidence ?? 0;
+    const aKey = FIDELITY_SORT_KEY[a.matchFidelity] ?? 0;
+    const bKey = FIDELITY_SORT_KEY[b.matchFidelity] ?? 0;
     return ascending ? aKey - bKey : bKey - aKey;
   });
 
@@ -70,16 +73,16 @@ export const sortEntriesByConfidence = (entries, sortMode) => {
 };
 
 /**
- * Get the minimum confidence value from an array of cells.
- * Used for sorting rows by their lowest-confidence cell.
+ * Get the minimum match fidelity from an array of cells.
+ * Used for sorting rows by their lowest-fidelity cell.
  * @param {Array} cells - Array of cell objects
- * @returns {number} Minimum confidence sort key
+ * @returns {number} Minimum match fidelity sort key
  */
-export const getMinConfidence = (cells) => {
+export const getMinFidelity = (cells) => {
   if (!cells?.length) return Infinity;
   let min = Infinity;
   for (const cell of cells) {
-    const key = CONFIDENCE_SORT_KEY[cell.bucket] ?? cell.confidence ?? 0;
+    const key = FIDELITY_SORT_KEY[cell.matchFidelity] ?? 0;
     if (key < min) min = key;
   }
   return min;
@@ -256,7 +259,7 @@ export const createEmptyState = () => {
  * @returns {string}
  */
 const _buildCardClasses = (entry) => {
-  const classes = ['row-cell', `confidence-${entry.bucket}`];
+  const classes = ['row-cell', `fidelity-${entry.matchFidelity}`];
 
   // Add recommendation type class for special states
   if (entry.recommendationType === RECOMMENDATION_TYPE.NO_RECOMMENDATION) {
@@ -288,7 +291,7 @@ const _getInputValue = (entry, pendingOverrides) => {
  * @returns {string}
  */
 const _buildCardHTML = (params) => {
-  const { columnLabel, labelText, confidenceSymbol, confidenceTooltip, bucket, effectiveValue, originalValue, isPVConformant, hasPVs } = params;
+  const { columnLabel, labelText, fidelitySymbol, fidelityTooltip, matchFidelity, effectiveValue, originalValue, isPVConformant, hasPVs } = params;
   const safeColumnLabel = escapeHtml(columnLabel);
   const safeLabelText = escapeHtml(labelText);
   const safeEffectiveValue = escapeHtml(effectiveValue);
@@ -309,7 +312,7 @@ const _buildCardHTML = (params) => {
 
   return `
     <div class="${headerClasses.join(' ')}">
-      <span class="confidence-indicator confidence-${bucket}" data-tooltip="${confidenceTooltip}" aria-label="${bucket} confidence">${confidenceSymbol}</span>
+      <span class="fidelity-indicator fidelity-${matchFidelity}" data-tooltip="${fidelityTooltip}" aria-label="${matchFidelity} match fidelity">${fidelitySymbol}</span>
       <div class="entry-row-label">${safeLabelText}</div>
       ${pvStatusIcons}
     </div>
@@ -703,8 +706,8 @@ export const createValueCard = (config) => {
   // Effective value is override if present, otherwise AI suggestion
   const effectiveValue = overrideValue || aiSuggestedValue || entry.originalValue || '—';
 
-  const confidenceSymbol = CONFIDENCE_SYMBOLS[entry.bucket] ?? '?';
-  const confidenceTooltip = CONFIDENCE_TOOLTIPS[entry.bucket] ?? '';
+  const fidelitySymbol = FIDELITY_SYMBOLS[entry.matchFidelity] ?? '?';
+  const fidelityTooltip = FIDELITY_TOOLTIPS[entry.matchFidelity] ?? '';
 
   // Check if effective value is conformant (PVs available AND value matches)
   // Need to check the actual effective value, not just the AI suggestion
@@ -715,9 +718,9 @@ export const createValueCard = (config) => {
   card.innerHTML = _buildCardHTML({
     columnLabel,
     labelText,
-    confidenceSymbol,
-    confidenceTooltip,
-    bucket: entry.bucket,
+    fidelitySymbol,
+    fidelityTooltip,
+    matchFidelity: entry.matchFidelity,
     effectiveValue,
     originalValue: entry.originalValue ?? '—',
     isPVConformant,

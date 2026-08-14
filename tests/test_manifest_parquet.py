@@ -9,6 +9,7 @@ from tempfile import TemporaryDirectory
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from src.domain.harmonization import MatchFidelity
 from src.domain.manifest import (
     ManifestRow,
     ManualOverride,
@@ -58,7 +59,7 @@ class TestManifestParquetSchema:
             ("top_harmonization", pa.string()),
             ("ontology_id", pa.string()),
             ("top_harmonizations", pa.list_(pa.string())),
-            ("confidence_score", pa.float64()),
+            ("match_fidelity", pa.string()),
             ("error", pa.string()),
             ("row_indices", pa.list_(pa.int64())),
             ("manual_overrides", pa.list_(override_struct)),
@@ -94,7 +95,7 @@ class TestManifestParquetSchema:
         assert len(summary.rows) == 1
         assert summary.rows[0].column_id == 3
         assert summary.rows[0].ontology_id == "123"
-        assert summary.rows[0].confidence_score == 0.75
+        assert summary.rows[0].match_fidelity is MatchFidelity.NONE
         assert summary.rows[0].manual_overrides == []
 
 
@@ -116,7 +117,7 @@ class TestManifestToJson:
             top_harmonization="Lung Carcinoma",
             ontology_id="NCIT:C3200",
             top_harmonizations=["Lung Carcinoma", "Lung Cancer"],
-            confidence_score=0.85,
+            match_fidelity=MatchFidelity.PARTIAL,
             error=None,
             row_indices=[0, 5, 12],
             manual_overrides=manual_overrides,
@@ -135,7 +136,7 @@ class TestManifestToJson:
             parsed = data[0]
             assert parsed["job_id"] == "test-job-123"
             assert parsed["column_name"] == "diagnosis"
-            assert parsed["confidence_score"] == 0.85
+            assert parsed["match_fidelity"] == "partial"
             assert parsed["row_indices"] == [0, 5, 12]
 
             assert len(parsed["manual_overrides"]) == 2
@@ -152,7 +153,7 @@ class TestManifestToJson:
             top_harmonization="Value",
             ontology_id=None,
             top_harmonizations=["Value"],
-            confidence_score=0.95,
+            match_fidelity=MatchFidelity.STRONG,
             error=None,
             row_indices=[0],
             manual_overrides=[],

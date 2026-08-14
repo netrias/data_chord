@@ -11,7 +11,7 @@ from netrias_client import TabularDataset
 from src.domain.columns import ColumnKey, column_key_from_string
 from src.domain.manifest import ManifestManualOverride
 
-REVIEW_OVERRIDES_SCHEMA_VERSION = 1
+REVIEW_OVERRIDES_SCHEMA_VERSION = 2
 
 
 class InvalidReviewOverridesError(ValueError):
@@ -73,8 +73,8 @@ class ReviewProgressState:
         sort_mode = payload.get("sort_mode")
         if not isinstance(sort_mode, str) or sort_mode not in {
             "original",
-            "confidence-asc",
-            "confidence-desc",
+            "fidelity-asc",
+            "fidelity-desc",
         }:
             raise InvalidReviewOverridesError("Review sort mode is invalid.")
         return cls(

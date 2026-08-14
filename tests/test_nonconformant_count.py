@@ -38,7 +38,7 @@ def _manifest_row(
         "top_harmonization": harmonized,
         "ontology_id": None,
         "top_harmonizations": [harmonized] if harmonized else [],
-        "confidence_score": 0.95,
+        "match_fidelity": "strong",
         "error": None,
         "row_indices": [row_index],
         "manual_overrides": [],

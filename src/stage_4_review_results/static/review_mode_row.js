@@ -13,7 +13,7 @@ import {
   renderProgressPills,
   toExcelRowNumber,
   cleanupCards,
-  getMinConfidence,
+  getMinFidelity,
   SORT_MODE,
 } from './shared_review_utils.js';
 
@@ -64,7 +64,7 @@ const _reconstructRowsFromColumns = (columns, filterOptions = {}) => {
 /**
  * Build row summaries with only rows that have changes.
  * @param {Array} columns - Array of ColumnReviewData objects from backend
- * @param {string} [sortMode] - Sort mode: 'original', 'confidence-asc', 'confidence-desc'
+ * @param {string} [sortMode] - Sort mode: 'original', 'fidelity-asc', 'fidelity-desc'
  * @param {Object} [filterOptions] - Filter options passed to _reconstructRowsFromColumns
  * @returns {Array} Array of row objects with changedCells and rowIndex added
  */
@@ -75,10 +75,10 @@ const _buildRowsWithChanges = (columns, sortMode = SORT_MODE.ORIGINAL, filterOpt
     return changedRows;
   }
 
-  const ascending = sortMode === SORT_MODE.CONFIDENCE_ASC;
+  const ascending = sortMode === SORT_MODE.FIDELITY_ASC;
   return changedRows.sort((a, b) => {
-    const aMin = getMinConfidence(a.changedCells);
-    const bMin = getMinConfidence(b.changedCells);
+    const aMin = getMinFidelity(a.changedCells);
+    const bMin = getMinFidelity(b.changedCells);
     return ascending ? aMin - bMin : bMin - aMin;
   });
 };
@@ -113,7 +113,7 @@ export const getTotalUnits = (columns, batchSize, filterOptions = {}) => {
  * Get batch summaries for progress display.
  * @param {Array} columns - Array of ColumnReviewData objects from backend
  * @param {number} batchSize - Number of rows per batch
- * @param {string} [sortMode] - Sort mode: 'original', 'confidence-asc', 'confidence-desc'
+ * @param {string} [sortMode] - Sort mode: 'original', 'fidelity-asc', 'fidelity-desc'
  * @param {Object} [filterOptions] - Filter options
  * @returns {Array} Array of summary objects for each batch
  */
@@ -151,7 +151,7 @@ const getBatchSummaries = (columns, batchSize, sortMode = SORT_MODE.ORIGINAL, fi
  * @param {Array} columns - Array of ColumnReviewData objects from backend
  * @param {number} currentUnit - Current batch index (1-based)
  * @param {number} batchSize - Number of rows per batch
- * @param {string} [sortMode] - Sort mode: 'original', 'confidence-asc', 'confidence-desc'
+ * @param {string} [sortMode] - Sort mode: 'original', 'fidelity-asc', 'fidelity-desc'
  * @param {Object} [filterOptions] - Filter options
  * @returns {Object} Batch metadata with entries array
  */

@@ -26,7 +26,7 @@ export const STEP_INSTRUCTIONS = {
   },
   verify: {
     short: "Inspect harmonized values and override any AI suggestions as needed.",
-    long: "Each card shows the original value at top, an arrow, then the AI-suggested harmonization below. Cards are color-coded by confidence level. Use the input field at the bottom of each card to enter a manual override if needed."
+    long: "Each card shows the original value at top, then the AI-suggested harmonization below. The match fidelity marker describes how closely the suggestion preserves the original meaning. Use the input field to enter a manual override if needed."
   },
   review: {
     short: "Review the current output and download your harmonized dataset.",

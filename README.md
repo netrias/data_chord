@@ -2,6 +2,11 @@
 
 Data harmonization workflow application. Upload CSV, TSV, or XLSX tabular data, review AI-suggested column mappings, run harmonization, and approve results before export.
 
+Value harmonization runs the agentic library through Amazon Bedrock Mantle by
+default. A client deployment can set `DATA_CHORD_HARMONIZER=netrias` to keep the
+legacy remote harmonizer. Review data uses match fidelity, not harmonization
+confidence.
+
 XLSX uploads are treated as workbooks at the upload boundary. Stage 1 defaults
 to the first worksheet and lets the user select another sheet before mapping.
 Only the selected worksheet is harmonized, and downloads preserve the input
@@ -26,8 +31,13 @@ For a detailed overview, see [app.md](app.md).
    git clone https://github.com/netrias/data_chord.git
    cd data_chord
    git checkout $(git describe --tags --abbrev=0)
+   gh auth setup-git
    uv sync --frozen
    ```
+   Data Chord is public, but its default agentic harmonization dependency is
+   private. A licensed developer needs read access to
+   `netrias/agentic_harmonization` and an authenticated Git client before the
+   frozen install can succeed.
    The frozen install is an important supply-chain security control: normal setup uses the committed lockfile instead of resolving newly published packages.
 
 3. Configure your API key:
@@ -85,7 +95,14 @@ Set `PERF_REMOTE_ROWS=50` to change the generated CSV size.
 
 ## AWS Hosting
 
-The OpenTofu stack in [infra/README.md](infra/README.md) creates one small
-public VPC, runs the app on ECS Fargate behind ALB and Cognito, stores workflow
-artifacts in S3, and uses CodeBuild to build the Docker image. Operators use
-three commands: `just plan`, `just deploy`, and `just status`.
+OpenTofu deploys the app to ECS Fargate behind an ALB and Cognito. It stores
+workflow data in S3. Operators use three commands:
+
+```bash
+just plan <target> <stage> <profile>
+just deploy <target> <stage> <profile>
+just status <target> <stage> <profile>
+```
+
+See [infra/README.md](infra/README.md) for target setup and BDF migration
+instructions.

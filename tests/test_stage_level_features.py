@@ -27,7 +27,7 @@ from src.domain.cde import CDEInfo
 from src.domain.harmonization import HarmonizeStatus
 from src.domain.manifest import ManifestPayload
 from src.domain.workflow_state import WorkflowState
-from src.integrations.netrias_harmonize import HarmonizeResult
+from src.integrations.harmonize import HarmonizeResult
 from src.persistence.harmonization_job_store import HarmonizationJobState
 from src.persistence.workflow_state_store import load_workflow_state
 from src.storage import UploadStorage, WorkflowFile
@@ -620,6 +620,7 @@ async def test_stage3_harmonize_uses_stored_selection(
             data_model_key,
             external_version_number,
             prepared_manifest,
+            column_pv_sets,
             output_path,
             sheet_name,
         ):
@@ -669,6 +670,7 @@ async def test_stage3_harmonize_returns_queued_while_long_job_finishes(
             data_model_key,
             external_version_number,
             prepared_manifest,
+            column_pv_sets,
             output_path,
             sheet_name,
         ):
@@ -726,6 +728,7 @@ async def test_stage3_job_status_recovers_from_durable_state_after_cache_loss(
             data_model_key,
             external_version_number,
             prepared_manifest,
+            column_pv_sets,
             output_path,
             sheet_name,
         ):
@@ -848,6 +851,7 @@ async def test_stage3_harmonize_prefers_stored_mapping_choices_over_stale_reques
             data_model_key,
             external_version_number,
             prepared_manifest,
+            column_pv_sets,
             output_path,
             sheet_name,
         ):
@@ -908,6 +912,7 @@ async def test_stage3_applies_confirmed_column_renames_to_download(
             data_model_key,
             external_version_number,
             prepared_manifest,
+            column_pv_sets,
             output_path,
             sheet_name,
         ):
@@ -927,7 +932,7 @@ async def test_stage3_applies_confirmed_column_renames_to_download(
                         "top_harmonization": "Lung Cancer",
                         "ontology_id": None,
                         "top_harmonizations": ["Lung Cancer"],
-                        "confidence_score": 0.95,
+                        "match_fidelity": "strong",
                         "error": None,
                         "row_indices": [0],
                         "manual_overrides": [],
@@ -997,6 +1002,7 @@ async def test_stage3_column_renames_propagate_when_output_name_matches_existing
             data_model_key,
             external_version_number,
             prepared_manifest,
+            column_pv_sets,
             output_path,
             sheet_name,
         ):
@@ -1024,7 +1030,7 @@ async def test_stage3_column_renames_propagate_when_output_name_matches_existing
                         "top_harmonization": "Lung Cancer",
                         "ontology_id": None,
                         "top_harmonizations": ["Lung Cancer"],
-                        "confidence_score": 0.95,
+                        "match_fidelity": "strong",
                         "error": None,
                         "row_indices": [0],
                         "manual_overrides": [],

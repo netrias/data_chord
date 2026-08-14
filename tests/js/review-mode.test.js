@@ -15,23 +15,16 @@ import {
   getTotalUnits as getRowTotalUnits,
 } from '../../src/stage_4_review_results/static/review_mode_row.js';
 
-const BUCKET_CONFIDENCE = {
-  high: 0.9,
-  medium: 0.6,
-  low: 0.3,
-};
-
 const createTransformation = ({
   originalValue = 'source',
   harmonizedValue = 'target',
   rowIndices = [1],
-  bucket = 'high',
+  matchFidelity = 'strong',
   recommendationType,
 } = {}) => ({
   originalValue,
   harmonizedValue,
-  confidence: BUCKET_CONFIDENCE[bucket],
-  bucket,
+  matchFidelity,
   isChanged: originalValue !== harmonizedValue,
   recommendationType: recommendationType
     ?? (originalValue === harmonizedValue ? 'ai_unchanged' : 'ai_changed'),
@@ -109,21 +102,21 @@ describe('column review navigation', () => {
     assert.deepEqual(finalBatch.entries.map((entry) => entry.originalValue), ['lung']);
   });
 
-  it('sorts before slicing so confidence batches remain stable', () => {
+  it('sorts before slicing so match fidelity batches remain stable', () => {
     const columns = [createColumn('diagnosis', [
-      createTransformation({ originalValue: 'high', bucket: 'high' }),
-      createTransformation({ originalValue: 'low-a', bucket: 'low' }),
-      createTransformation({ originalValue: 'medium', bucket: 'medium' }),
-      createTransformation({ originalValue: 'low-b', bucket: 'low' }),
+      createTransformation({ originalValue: 'strong', matchFidelity: 'strong' }),
+      createTransformation({ originalValue: 'none-a', matchFidelity: 'none' }),
+      createTransformation({ originalValue: 'partial', matchFidelity: 'partial' }),
+      createTransformation({ originalValue: 'none-b', matchFidelity: 'none' }),
     ])];
 
-    const firstBatch = getColumnCurrentEntries(columns, 1, 2, SORT_MODE.CONFIDENCE_ASC);
-    const secondBatch = getColumnCurrentEntries(columns, 2, 2, SORT_MODE.CONFIDENCE_ASC);
-    const descendingBatch = getColumnCurrentEntries(columns, 1, 2, SORT_MODE.CONFIDENCE_DESC);
+    const firstBatch = getColumnCurrentEntries(columns, 1, 2, SORT_MODE.FIDELITY_ASC);
+    const secondBatch = getColumnCurrentEntries(columns, 2, 2, SORT_MODE.FIDELITY_ASC);
+    const descendingBatch = getColumnCurrentEntries(columns, 1, 2, SORT_MODE.FIDELITY_DESC);
 
-    assert.deepEqual(firstBatch.entries.map((entry) => entry.originalValue), ['low-a', 'low-b']);
-    assert.deepEqual(secondBatch.entries.map((entry) => entry.originalValue), ['medium', 'high']);
-    assert.deepEqual(descendingBatch.entries.map((entry) => entry.originalValue), ['high', 'medium']);
+    assert.deepEqual(firstBatch.entries.map((entry) => entry.originalValue), ['none-a', 'none-b']);
+    assert.deepEqual(secondBatch.entries.map((entry) => entry.originalValue), ['partial', 'strong']);
+    assert.deepEqual(descendingBatch.entries.map((entry) => entry.originalValue), ['strong', 'partial']);
   });
 });
 
@@ -162,22 +155,22 @@ describe('row review navigation', () => {
     );
   });
 
-  it('sorts rows by their least-confident changed cell', () => {
+  it('sorts rows by their lowest-fidelity changed cell', () => {
     const columns = [
       createColumn('diagnosis', [
-        createTransformation({ originalValue: 'row-1-a', rowIndices: [1], bucket: 'high' }),
-        createTransformation({ originalValue: 'row-2-a', rowIndices: [2], bucket: 'high' }),
-        createTransformation({ originalValue: 'row-3-a', rowIndices: [3], bucket: 'medium' }),
+        createTransformation({ originalValue: 'row-1-a', rowIndices: [1], matchFidelity: 'strong' }),
+        createTransformation({ originalValue: 'row-2-a', rowIndices: [2], matchFidelity: 'strong' }),
+        createTransformation({ originalValue: 'row-3-a', rowIndices: [3], matchFidelity: 'partial' }),
       ]),
       createColumn('sample_site', [
-        createTransformation({ originalValue: 'row-1-b', rowIndices: [1], bucket: 'high' }),
-        createTransformation({ originalValue: 'row-2-b', rowIndices: [2], bucket: 'low' }),
-        createTransformation({ originalValue: 'row-3-b', rowIndices: [3], bucket: 'high' }),
+        createTransformation({ originalValue: 'row-1-b', rowIndices: [1], matchFidelity: 'strong' }),
+        createTransformation({ originalValue: 'row-2-b', rowIndices: [2], matchFidelity: 'none' }),
+        createTransformation({ originalValue: 'row-3-b', rowIndices: [3], matchFidelity: 'strong' }),
       ], 1),
     ];
 
-    const result = getRowCurrentEntries(columns, 1, 10, SORT_MODE.CONFIDENCE_ASC);
-    const descending = getRowCurrentEntries(columns, 1, 10, SORT_MODE.CONFIDENCE_DESC);
+    const result = getRowCurrentEntries(columns, 1, 10, SORT_MODE.FIDELITY_ASC);
+    const descending = getRowCurrentEntries(columns, 1, 10, SORT_MODE.FIDELITY_DESC);
 
     assert.deepEqual(result.entries.map((row) => row.rowIndex), [2, 3, 1]);
     assert.deepEqual(descending.entries.map((row) => row.rowIndex), [1, 3, 2]);

@@ -13,7 +13,7 @@ from httpx import AsyncClient
 import src.app.dependencies as dependencies
 import src.stage_3_harmonize.router as stage_three_router
 from src.domain.harmonization import HarmonizeStatus
-from src.integrations.netrias_harmonize import HarmonizeResult
+from src.integrations.harmonize import HarmonizeResult
 from src.persistence.harmonization_job_store import load_harmonization_job
 from src.persistence.workflow_state_store import load_workflow_state
 from src.storage import WorkflowArtifactNotFoundError, WorkflowFile
@@ -119,6 +119,7 @@ async def test_worker_with_superseded_plan_cannot_publish_scratch_results(
             data_model_key,
             external_version_number,
             prepared_manifest,
+            column_pv_sets,
             output_path,
             sheet_name,
         ):

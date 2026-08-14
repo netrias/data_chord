@@ -85,6 +85,7 @@ resource "aws_ecs_task_definition" "application" {
   depends_on = [
     aws_iam_role_policy.application_task_execution_secrets,
     aws_iam_role_policy.application_task_workflow_storage,
+    aws_iam_role_policy.application_task_bedrock_mantle,
     aws_iam_role_policy_attachment.application_task_execution,
   ]
 
@@ -118,6 +119,18 @@ resource "aws_ecs_task_definition" "application" {
         {
           name  = "DATA_CHORD_NETRIAS_TIMEOUT_SECONDS"
           value = "3600"
+        },
+        {
+          name  = "DATA_CHORD_HARMONIZER"
+          value = var.harmonizer
+        },
+        {
+          name  = "DATA_CHORD_AGENTIC_WORKERS"
+          value = tostring(var.agentic_workers)
+        },
+        {
+          name  = "AWS_REGION"
+          value = var.aws_region
         },
         {
           name  = "DATA_CHORD_ASSET_VERSION"

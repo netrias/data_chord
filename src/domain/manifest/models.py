@@ -1,7 +1,7 @@
 """
-Data structures for harmonization results and confidence classification.
+Data structures for harmonization results and data-completeness classification.
 
-Centralizes manifest row/summary structure and confidence threshold logic.
+Centralizes manifest row and summary structures.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from enum import Enum
 from typing import NotRequired, TypedDict
 
 from src.domain.columns import ColumnKey, column_key_for_index
+from src.domain.harmonization import MatchFidelity
 
 
 class ConfidenceBucket(str, Enum):
@@ -21,10 +22,6 @@ class ConfidenceBucket(str, Enum):
     @property
     def label(self) -> str:
         return self.value.title()
-
-
-HIGH_CONFIDENCE_THRESHOLD: float = 0.8
-MEDIUM_CONFIDENCE_THRESHOLD: float = 0.45
 
 
 class AlternativeEntry(TypedDict):
@@ -73,7 +70,7 @@ class ManifestRow:
     top_harmonization: str
     ontology_id: str | None
     top_harmonizations: list[str]
-    confidence_score: float | None
+    match_fidelity: MatchFidelity
     error: str | None
     row_indices: list[int]
     manual_overrides: list[ManualOverride]
@@ -89,20 +86,7 @@ class ManifestSummary:
 
     total_terms: int
     changed_terms: int
-    high_confidence_count: int
-    medium_confidence_count: int
-    low_confidence_count: int
     rows: list[ManifestRow]
-
-
-def confidence_bucket(score: float | None) -> ConfidenceBucket:
-    if score is None:
-        return ConfidenceBucket.LOW
-    if score >= HIGH_CONFIDENCE_THRESHOLD:
-        return ConfidenceBucket.HIGH
-    if score >= MEDIUM_CONFIDENCE_THRESHOLD:
-        return ConfidenceBucket.MEDIUM
-    return ConfidenceBucket.LOW
 
 
 COMPLETENESS_HIGH_THRESHOLD: float = 0.8
@@ -141,14 +125,11 @@ __all__ = [
     "COMPLETENESS_MEDIUM_THRESHOLD",
     "ColumnMappingEntry",
     "ConfidenceBucket",
-    "HIGH_CONFIDENCE_THRESHOLD",
-    "MEDIUM_CONFIDENCE_THRESHOLD",
     "ManifestPayload",
     "ManifestRow",
     "ManifestSummary",
     "ManualOverride",
     "completeness_bucket",
-    "confidence_bucket",
     "get_latest_override_value",
     "is_value_changed",
 ]

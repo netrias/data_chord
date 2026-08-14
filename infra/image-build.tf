@@ -64,6 +64,11 @@ resource "aws_iam_role_policy" "application_build" {
         ]
         Resource = "*"
       },
+      {
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = data.aws_secretsmanager_secret.github_app.arn
+      },
     ]
   })
 }
@@ -112,6 +117,11 @@ resource "aws_codebuild_project" "app_image" {
     environment_variable {
       name  = "IMAGE_REPO_NAME"
       value = aws_ecr_repository.app.name
+    }
+
+    environment_variable {
+      name  = "GITHUB_APP_SECRET_ARN"
+      value = data.aws_secretsmanager_secret.github_app.arn
     }
   }
 

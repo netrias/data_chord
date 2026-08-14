@@ -535,8 +535,8 @@ class TestRowsContract:
         for t in transformations:
             assert "originalValue" in t
             assert "harmonizedValue" in t
-            assert "bucket" in t
-            assert "confidence" in t
+            assert "matchFidelity" in t
+            assert t["matchFidelity"] in ("strong", "partial", "approximate", "none")
             assert "isChanged" in t
             assert "recommendationType" in t
             assert "rowIndices" in t

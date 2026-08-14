@@ -34,7 +34,7 @@ def _create_manifest_with_history(
         "top_harmonization": ai_value,
         "ontology_id": None,
         "top_harmonizations": [ai_value] if ai_value else [],
-        "confidence_score": 0.85,
+        "match_fidelity": "partial",
         "error": None,
         "row_indices": [0],
         "manual_overrides": manual_overrides,

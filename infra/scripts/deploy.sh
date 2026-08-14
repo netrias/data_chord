@@ -173,32 +173,16 @@ apply_stack() {
   apply_saved_plan "$plan_file"
 }
 
-apply_build_prerequisites() {
+reconcile_build_resources() {
   local image_tag="$1"
-  local plan_file="$PLAN_DIR/build-prerequisites.tfplan"
+  local plan_file="$PLAN_DIR/build-resources.tfplan"
 
-  log "Creating missing build prerequisites for $TARGET_NAME/$STAGE_NAME"
+  log "Reconciling build resources for $TARGET_NAME/$STAGE_NAME"
   create_saved_plan \
     "$plan_file" \
     "$image_tag" \
     -target=aws_codebuild_project.app_image
   apply_saved_plan "$plan_file"
-}
-
-build_prerequisites_exist() {
-  [[ -n "$(tofu_output codebuild_project_name)" && -n "$(tofu_output ecr_repository_url)" ]]
-}
-
-ensure_build_prerequisites() {
-  local image_tag="$1"
-
-  if build_prerequisites_exist; then
-    log "Build prerequisites already exist; skipping targeted bootstrap"
-    return 0
-  fi
-
-  apply_build_prerequisites "$image_tag"
-  build_prerequisites_exist || fail "Build prerequisites were applied, but their outputs are unavailable."
 }
 
 plan_stack() {
@@ -503,7 +487,7 @@ run_app_deploy() {
   check_secret
   create_plan_directory
 
-  ensure_build_prerequisites "$image_tag"
+  reconcile_build_resources "$image_tag"
   ensure_image "$image_tag"
   apply_stack "$image_tag"
   watch_ecs_rollout

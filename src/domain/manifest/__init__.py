@@ -1,5 +1,5 @@
 """
-Harmonization results including AI suggestions, confidence scores, and manual overrides.
+Harmonization results including AI suggestions, match fidelity, and manual overrides.
 
 Encapsulates manifest structure, reading, and writing; tracks override audit trail.
 """
@@ -25,8 +25,6 @@ from src.domain.manifest.mapping_manifest import (
 from src.domain.manifest.models import (
     COMPLETENESS_HIGH_THRESHOLD,
     COMPLETENESS_MEDIUM_THRESHOLD,
-    HIGH_CONFIDENCE_THRESHOLD,
-    MEDIUM_CONFIDENCE_THRESHOLD,
     ColumnMappingEntry,
     ConfidenceBucket,
     ManifestPayload,
@@ -34,7 +32,6 @@ from src.domain.manifest.models import (
     ManifestSummary,
     ManualOverride,
     completeness_bucket,
-    confidence_bucket,
     get_latest_override_value,
     is_value_changed,
 )
@@ -52,9 +49,7 @@ __all__ = [
     "InvalidMappingManifestError",
     "ConfidenceBucket",
     "DEFAULT_HARMONIZATION",
-    "HIGH_CONFIDENCE_THRESHOLD",
     "MANIFEST_FIELD_COLUMN_MAPPINGS",
-    "MEDIUM_CONFIDENCE_THRESHOLD",
     "MAPPING_FIELD_ALTERNATIVES",
     "MAPPING_FIELD_CDE_ID",
     "MAPPING_FIELD_CDE_KEY",
@@ -72,7 +67,6 @@ __all__ = [
     "ManualOverride",
     "MappingAlternative",
     "completeness_bucket",
-    "confidence_bucket",
     "get_latest_override_value",
     "is_value_changed",
     "normalize_manifest",

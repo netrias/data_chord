@@ -7,7 +7,6 @@ Accepts a prepared mapping manifest and isolates SDK response handling.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
@@ -15,18 +14,12 @@ from netrias_client import NetriasClient
 
 from src.domain.harmonization import HarmonizeStatus
 from src.domain.manifest import ColumnMappingManifest
+from src.integrations.harmonize import HarmonizeResult
+from src.persistence.manifest_reader import read_manifest_parquet
+from src.persistence.manifest_writer import write_manifest_parquet
+from src.persistence.pv_manifest_store import ColumnPvSets
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class HarmonizeResult:
-    job_id: str
-    status: HarmonizeStatus
-    detail: str
-    job_id_available: bool = False
-    manifest_path: Path | None = None
-    output_path: Path | None = None
 
 
 class HarmonizeService:
@@ -42,6 +35,7 @@ class HarmonizeService:
         data_model_key: str,
         external_version_number: str,
         prepared_manifest: ColumnMappingManifest,
+        column_pv_sets: ColumnPvSets,
         output_path: Path | None = None,
         sheet_name: str | None = None,
     ) -> HarmonizeResult:
@@ -103,6 +97,8 @@ class HarmonizeService:
             else str(raw_mapping_id) if raw_mapping_id else fallback_job_id
         )
         manifest_path = _extract_manifest_path(netrias_result)
+        if manifest_path is not None:
+            _normalize_manifest(manifest_path)
         output_path = _extract_output_path(netrias_result)
         logger.info(
             "Harmonization finished",
@@ -138,7 +134,13 @@ def _existing_path_from_value(raw_path: object) -> Path | None:
     return None
 
 
+def _normalize_manifest(manifest_path: Path) -> None:
+    """Drop the legacy provider confidence field at the adapter boundary."""
+    manifest = read_manifest_parquet(manifest_path)
+    if manifest is None or not write_manifest_parquet(manifest_path, manifest.rows):
+        raise ValueError("Harmonization provider returned an unreadable manifest")
+
+
 __all__ = [
-    "HarmonizeResult",
     "HarmonizeService",
 ]

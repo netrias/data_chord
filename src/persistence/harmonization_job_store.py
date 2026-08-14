@@ -11,7 +11,7 @@ from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_
 from src.domain.harmonization import HarmonizationManifestSummary, HarmonizeStatus
 from src.storage import UserContext, VersionToken, WorkflowConflictError, WorkflowFile, WorkflowStorage
 
-_CURRENT_SCHEMA_VERSION: Final = 2
+_CURRENT_SCHEMA_VERSION: Final = 3
 _DEFAULT_LEASE_SECONDS: Final = 45
 _SAFE_FAILED_DETAIL: Final = "Harmonization failed. Please retry."
 

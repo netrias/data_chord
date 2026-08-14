@@ -10,7 +10,7 @@ dependencies = [
     "python-multipart>=0.0.31",  # CVE remediation
     "uvicorn[standard]>=0.30.0",
     "boto3>=1.40.69",
-    "cryptography>=48.0.1",
+    "cryptography>=50.0.0",
     "netrias_client @ git+https://github.com/netrias/netrias_client.git@2c763bd9fb972ee7035dc44b537a584a477a7c38",
     "openpyxl>=3.1.5",
     "pyarrow>=23.0.1,<24",  # PYSEC-2026-113
@@ -21,6 +21,7 @@ dependencies = [
     "urllib3>=2.6.0",     # CVE-2025-66418, CVE-2025-66471 (via requests/boto3)
     "idna>=3.15",         # CVE-2026-45409 (via requests/httpx)
     "msgpack>=1.2.1",     # GHSA-6v7p-g79w-8964
+    "agent-experiment",
 ]
 
 [project.optional-dependencies]
@@ -81,3 +82,6 @@ min_confidence = 100
 # Security: require Python packages to be at least 7 days old before resolution.
 # This is an important supply-chain protection against newly published compromised packages.
 exclude-newer = "7 days"
+
+[tool.uv.sources]
+agent-experiment = { git = "https://github.com/netrias/agentic_harmonization.git", rev = "7b095c228df9497c5dd0572d31ce94e13914ce1f" }

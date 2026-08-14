@@ -190,7 +190,7 @@ class TestStage4RecommendationTypeContract:
                 "top_harmonization": "   ",
                 "ontology_id": None,
                 "top_harmonizations": [],
-                "confidence_score": 0.4,
+                "match_fidelity": "approximate",
                 "error": None,
                 "row_indices": [0],
                 "manual_overrides": [],

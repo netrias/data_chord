@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import cast
 
+from src.domain.harmonization import MatchFidelity
 from src.domain.manifest import ColumnMappingManifest, ManifestPayload, ManifestRow, ManifestSummary
 from src.persistence.pv_manifest_store import ColumnPvSets
 from src.stage_3_harmonize.router import _convert_to_schema
@@ -24,7 +25,7 @@ def _make_row(
         top_harmonization=harmonized,
         ontology_id=None,
         top_harmonizations=[harmonized] if harmonized else [],
-        confidence_score=0.9,
+        match_fidelity=MatchFidelity.STRONG,
         error=None,
         row_indices=row_indices if row_indices is not None else [0],
         manual_overrides=[],
@@ -45,9 +46,6 @@ class TestSummaryAggregation:
         manifest = ManifestSummary(
             total_terms=5,
             changed_terms=0,
-            high_confidence_count=5,
-            medium_confidence_count=0,
-            low_confidence_count=0,
             rows=rows,
         )
         column_pv_map = ColumnPvSets({
@@ -67,9 +65,6 @@ class TestSummaryAggregation:
         manifest = ManifestSummary(
             total_terms=2,
             changed_terms=0,
-            high_confidence_count=2,
-            medium_confidence_count=0,
-            low_confidence_count=0,
             rows=rows,
         )
         column_pv_map = ColumnPvSets({
@@ -89,9 +84,6 @@ class TestSummaryAggregation:
         manifest = ManifestSummary(
             total_terms=2,
             changed_terms=1,
-            high_confidence_count=2,
-            medium_confidence_count=0,
-            low_confidence_count=0,
             rows=rows,
         )
         column_pv_map = ColumnPvSets({

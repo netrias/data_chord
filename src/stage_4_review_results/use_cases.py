@@ -15,16 +15,14 @@ from src.app.harmonization_readiness import (
     load_readable_review_overrides_record,
     require_ready_harmonization_workflow,
 )
-from src.domain.change import CONFIDENCE, RecommendationType
+from src.domain.change import RecommendationType
 from src.domain.columns import ColumnIdentity, ColumnKey
 from src.domain.dataset_workflow_ids import DatasetWorkflowId
 from src.domain.manifest import (
-    ConfidenceBucket,
     ManifestManualOverride,
     ManifestRow,
     ManifestSummary,
     ManifestTermKey,
-    confidence_bucket,
     get_latest_override_value,
     is_value_changed,
 )
@@ -365,15 +363,8 @@ def _is_unchanged_passthrough(
 def _build_transformation(row: ManifestRow, pv_set: frozenset[str] | None) -> Transformation:
     original_value = row.to_harmonize or ""
     harmonized_value = row.top_harmonization or None
-    confidence = row.confidence_score
     is_changed = is_value_changed(original_value, harmonized_value)
     recommendation_type = _compute_recommendation_type(original_value, harmonized_value)
-
-    if confidence is not None:
-        bucket = confidence_bucket(confidence)
-    else:
-        bucket = ConfidenceBucket.LOW if is_changed else ConfidenceBucket.HIGH
-        confidence = CONFIDENCE.HIGH if bucket == ConfidenceBucket.HIGH else CONFIDENCE.LOW
 
     manual_override = get_latest_override_value(row.manual_overrides)
     current_value = manual_override if manual_override is not None else harmonized_value
@@ -381,8 +372,7 @@ def _build_transformation(row: ManifestRow, pv_set: frozenset[str] | None) -> Tr
     return Transformation(
         originalValue=original_value,
         harmonizedValue=harmonized_value,
-        bucket=bucket.value,
-        confidence=confidence,
+        matchFidelity=row.match_fidelity,
         isChanged=is_changed,
         recommendationType=recommendation_type.value,
         manualOverride=manual_override,
