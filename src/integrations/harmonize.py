@@ -26,8 +26,6 @@ class HarmonizeService(Protocol):
         self,
         *,
         file_path: Path,
-        data_model_key: str,
-        external_version_number: str,
         prepared_manifest: ColumnMappingManifest,
         column_pv_sets: ColumnPvSets,
         output_path: Path | None = None,

@@ -77,8 +77,6 @@ def test_agentic_harmonization_collapses_duplicates_only_within_each_column(
 
     result = service.run(
         file_path=source,
-        data_model_key="CCDI",
-        external_version_number="1",
         prepared_manifest=_manifest(),
         column_pv_sets=ColumnPvSets({
             column_key_for_index(0): frozenset({"Diagnosis Match"}),
@@ -127,8 +125,6 @@ def test_agentic_harmonization_passes_through_columns_without_pvs(
 
     result = service.run(
         file_path=source,
-        data_model_key="CCDI",
-        external_version_number="1",
         prepared_manifest=_manifest(),
         column_pv_sets=ColumnPvSets({
             column_key_for_index(0): frozenset(),
@@ -157,8 +153,6 @@ def test_agentic_no_match_keeps_the_source_value(monkeypatch, tmp_path: Path) ->
 
     result = service.run(
         file_path=source,
-        data_model_key="CCDI",
-        external_version_number="1",
         prepared_manifest=_manifest(),
         column_pv_sets=ColumnPvSets({
             column_key_for_index(0): frozenset({"Known"}),
@@ -193,8 +187,6 @@ def test_agentic_harmonization_fails_without_output_when_one_term_fails(
 
     result = service.run(
         file_path=source,
-        data_model_key="CCDI",
-        external_version_number="1",
         prepared_manifest=_manifest(),
         column_pv_sets=ColumnPvSets({
             column_key_for_index(0): frozenset({"Diagnosis Match"}),

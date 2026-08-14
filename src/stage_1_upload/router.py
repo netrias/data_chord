@@ -11,31 +11,26 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from netrias_client import DataModelStoreError, NetriasAPIUnavailable
 
 import src.app.dependencies as dependencies
-from src.app.data_model_store import (
-    fetch_all_pvs_async,
-    fetch_cdes,
-    list_data_model_summaries,
-)
-from src.app.dependencies import (
-    get_mapping_service,
-    get_upload_constraints,
-)
+from src.app.dependencies import get_upload_constraints
 from src.app.session_cache import get_session_cache
 from src.domain.cde import CDEInfo, DataModelSummary
 from src.domain.cde_catalog import CdeCatalog
 from src.domain.cde_pv_catalog import CdePvCatalog
-from src.domain.cde_type_classification import refine_cde_types_from_pvs
 from src.domain.column_profile import ColumnProfile
-from src.domain.columns import column_key_from_string
-from src.domain.data_model_version_reference import DataModelVersionReference
+from src.domain.columns import ColumnKey, column_key_from_string
 from src.domain.dataset_workflow_ids import new_dataset_workflow_id
-from src.domain.manifest import ColumnMappingManifest
+from src.domain.manifest import (
+    ColumnMappingManifest,
+    ColumnMappingRecord,
+    MappingAlternative,
+    RecommendationSource,
+)
 from src.domain.match_counts import column_value_overlap_ratio
+from src.domain.reference_data import ReferenceDataError, ReferenceModel
+from src.domain.value_overlap_mapping import ValueOverlapSuggestions, suggest_value_overlap_mappings
 from src.domain.workflow_state import WorkflowState
-from src.integrations.netrias_mapping import MappingDiscoveryUnavailableError
 from src.observability.events import (
     WorkflowEvent,
     WorkflowOperation,
@@ -48,7 +43,7 @@ from src.persistence.workflow_artifacts import (
     save_upload_artifacts,
     save_upload_metadata,
 )
-from src.persistence.workflow_state_store import save_initial_workflow_state
+from src.persistence.workflow_state_store import load_workflow_state, save_initial_workflow_state
 from src.storage import (
     UnsupportedUploadError,
     UploadedFileMeta,
@@ -95,9 +90,9 @@ async def render_stage_one(request: Request) -> HTMLResponse:
 async def list_data_models() -> list[DataModelSummary]:
     """Decouples frontend from model list changes; labels may vary by deployment."""
     try:
-        return await run_in_threadpool(list_data_model_summaries)
-    except (DataModelStoreError, NetriasAPIUnavailable):
-        _router_logger.warning("Data Model Store API unavailable")
+        return list(await run_in_threadpool(dependencies.get_reference_data_repository().list_models))
+    except ReferenceDataError:
+        _router_logger.warning("Reference data unavailable")
         raise HTTPException(
             status_code=503,
             detail="Data models are currently unavailable. Please try again later.",
@@ -218,28 +213,25 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
             meta.selected_sheet,
         )
     )
-    discovery_task = asyncio.create_task(
-        _discover_mappings(
-            meta.saved_path,
-            payload.file_id,
-            data_model_version,
-            meta.selected_sheet,
-        )
-    )
-    reference_task = asyncio.create_task(
-        _prime_data_model_cache(
-            payload.file_id,
-            data_model_version,
-            user.user_id,
-        )
+    reference_task = run_in_threadpool(
+        dependencies.get_reference_data_repository().load_model,
+        data_model_version,
     )
     try:
-        total_rows, columns, profiles = await analysis_task
-        mapping_manifest = await discovery_task
-        await reference_task
+        (total_rows, columns, profiles), reference_model = await asyncio.gather(
+            analysis_task,
+            reference_task,
+        )
+        overlap = suggest_value_overlap_mappings(profiles, reference_model.pvs)
+        mapping_manifest = _mapping_manifest(overlap, reference_model)
+    except ReferenceDataError as exc:
+        _log_analyze_failed(user, payload.file_id, type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Reference data is currently unavailable. Please try again later.",
+        ) from exc
     except Exception as exc:
         _log_analyze_failed(user, payload.file_id, type(exc).__name__)
-        await _cancel_pending_tasks(discovery_task, reference_task)
         raise
     save_initial_workflow_state(
         dependencies.get_workflow_storage(),
@@ -257,8 +249,8 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     column_summaries = _build_column_summaries(
         profiles,
         mapping_manifest,
-        cache.get_cde_catalog(),
-        cache.get_all_pvs(),
+        reference_model.catalog,
+        reference_model.pvs,
     )
     _log_analysis_results(payload.file_id, total_rows, columns, mapping_manifest)
     log_workflow_event(
@@ -285,6 +277,66 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
         columns=columns,
         column_summaries=column_summaries,
         cde_targets=cde_targets,
+    )
+
+
+@stage_one_router.get(
+    "/analysis/{file_id}",
+    response_model=AnalyzeResponse,
+    name="stage_one_analysis_state",
+)
+async def load_analysis_state(file_id: str) -> AnalyzeResponse:
+    """Rebuild browser analysis state without changing the durable workflow."""
+    storage = dependencies.get_upload_storage()
+    workflow_storage = dependencies.get_workflow_storage()
+    user = dependencies.get_user_context()
+    loaded_state = load_workflow_state(workflow_storage, user, file_id)
+    if loaded_state is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found. Please rerun analysis.")
+    state = loaded_state.state
+    if state.mapping_manifest is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Workflow analysis is incomplete.")
+    meta = load_upload_artifact(storage, workflow_storage, user, file_id)
+    if meta is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please upload again.")
+    try:
+        (total_rows, columns, profiles), reference_model = await asyncio.gather(
+            run_in_threadpool(_analyze_columns_safe, meta.saved_path, file_id, meta.selected_sheet),
+            run_in_threadpool(
+                dependencies.get_reference_data_repository().load_model,
+                state.data_model_version,
+            ),
+        )
+    except ReferenceDataError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Reference data is currently unavailable. Please try again later.",
+        ) from exc
+    get_session_cache(file_id, owner_user_id=user.user_id).set_column_profiles(profiles)
+    choices = state.mapping_choices
+    return AnalyzeResponse(
+        file_id=meta.file_id,
+        file_name=meta.original_name,
+        external_version_number=state.data_model_version.external_version_number,
+        total_rows=total_rows,
+        columns=columns,
+        column_summaries=_build_column_summaries(
+            profiles,
+            state.mapping_manifest,
+            reference_model.catalog,
+            reference_model.pvs,
+        ),
+        cde_targets=state.mapping_manifest.suggestions_by_column(),
+        manual_overrides=(
+            {str(key): value for key, value in choices.column_overrides.overrides.items()}
+            if choices is not None
+            else {}
+        ),
+        column_renames=(
+            {str(key): value for key, value in choices.column_renames.renames.items()}
+            if choices is not None
+            else {}
+        ),
     )
 
 
@@ -326,86 +378,25 @@ def _load_sheet_previews_safe(meta: UploadedFileMeta) -> dict[str, SheetPreview]
         return {}
 
 
-async def _discover_mappings(
-    csv_path: Path,
-    file_id: str,
-    data_model_version: DataModelVersionReference,
-    sheet_name: str | None,
+def _mapping_manifest(
+    suggestions: ValueOverlapSuggestions,
+    reference_model: ReferenceModel,
 ) -> ColumnMappingManifest:
-    mapping_service = get_mapping_service()
-    user = dependencies.get_user_context()
-    log_workflow_event(
-        WorkflowEvent(
-            stage=WorkflowStage.STAGE_1,
-            operation=WorkflowOperation.MAPPING,
-            outcome=WorkflowOutcome.STARTED,
-            file_id=file_id,
-            metadata={
-                "data_model_key": data_model_version.data_model_key,
-                "external_version_number": data_model_version.external_version_number,
-            },
-        ),
-        user,
-    )
-    try:
-        discovery = await run_in_threadpool(
-            mapping_service.discover,
-            csv_path=csv_path,
-            data_model_key=data_model_version.data_model_key,
-            external_version_number=data_model_version.external_version_number,
-            sheet_name=sheet_name,
-        )
-        log_workflow_event(
-            WorkflowEvent(
-                stage=WorkflowStage.STAGE_1,
-                operation=WorkflowOperation.MAPPING,
-                outcome=WorkflowOutcome.COMPLETED,
-                file_id=file_id,
-                metadata={"mapped_columns": len(discovery.records)},
+    records: dict[ColumnKey, ColumnMappingRecord] = {}
+    for column_key, candidates in suggestions.by_column.items():
+        top = candidates[0]
+        cde = reference_model.catalog.get(top.cde_key)
+        records[column_key] = ColumnMappingRecord(
+            column_key=column_key,
+            cde_key=top.cde_key,
+            cde_id=cde.cde_id if cde else None,
+            alternatives=tuple(
+                MappingAlternative(target=candidate.cde_key, confidence=candidate.overlap_ratio)
+                for candidate in candidates
             ),
-            user,
+            recommendation_source=RecommendationSource.VALUE_OVERLAP,
         )
-        return discovery
-    except (UnicodeDecodeError, ValueError) as exc:
-        _log_mapping_failed(user, file_id, type(exc).__name__)
-        _router_logger.warning("Upload failed validation during analysis", extra={"file_id": file_id})
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except MappingDiscoveryUnavailableError as exc:
-        _log_mapping_failed(user, file_id, type(exc).__name__)
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
-    except Exception as exc:  # pragma: no cover - defensive
-        _log_mapping_failed(user, file_id, type(exc).__name__)
-        _router_logger.exception(
-            "Failed discovering mappings: %s", type(exc).__name__, exc_info=exc
-        )
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to fetch mapping suggestions."
-        ) from exc
-
-
-async def _prime_data_model_cache(
-    file_id: str,
-    data_model_version: DataModelVersionReference,
-    owner_user_id: str,
-) -> None:
-    """Warm CDEs and all PVs while mapping discovery is running."""
-    try:
-        cdes_task = asyncio.create_task(
-            run_in_threadpool(fetch_cdes, data_model_version.data_model_key, data_model_version.external_version_number)
-        )
-        pvs_task = asyncio.create_task(
-            fetch_all_pvs_async(data_model_version.data_model_key, data_model_version.external_version_number)
-        )
-        cdes, raw_pv_catalog = await asyncio.gather(cdes_task, pvs_task)
-    except (DataModelStoreError, NetriasAPIUnavailable):
-        _router_logger.warning("Data Model Store API unavailable during cache warmup", extra={"file_id": file_id})
-        return
-
-    cache = get_session_cache(file_id, owner_user_id=owner_user_id)
-    catalog = CdeCatalog.from_cdes(cdes)
-    pv_catalog = raw_pv_catalog.with_defaults(catalog.keys())
-    refined = refine_cde_types_from_pvs(catalog, pv_catalog)
-    cache.install_reference_data(data_model_version, refined, pv_catalog)
+    return ColumnMappingManifest(records)
 
 
 def _build_column_summaries(
@@ -440,14 +431,6 @@ def _top_catalog_cde(
         if cde := cde_catalog.get(suggestion.target):
             return cde
     return None
-
-
-async def _cancel_pending_tasks(*tasks: asyncio.Task[object]) -> None:
-    pending = [task for task in tasks if not task.done()]
-    for task in pending:
-        task.cancel()
-    if pending:
-        await asyncio.gather(*pending, return_exceptions=True)
 
 
 def _log_analysis_results(
@@ -488,19 +471,6 @@ def _log_analyze_failed(user: UserContext, file_id: str, error_type: str) -> Non
         WorkflowEvent(
             stage=WorkflowStage.STAGE_1,
             operation=WorkflowOperation.ANALYZE,
-            outcome=WorkflowOutcome.FAILED,
-            file_id=file_id,
-            metadata={"error_type": error_type},
-        ),
-        user,
-    )
-
-
-def _log_mapping_failed(user: UserContext, file_id: str, error_type: str) -> None:
-    log_workflow_event(
-        WorkflowEvent(
-            stage=WorkflowStage.STAGE_1,
-            operation=WorkflowOperation.MAPPING,
             outcome=WorkflowOutcome.FAILED,
             file_id=file_id,
             metadata={"error_type": error_type},

@@ -24,14 +24,10 @@ from src.api.schemas import (
     HarmonizeRequest,
     HarmonizeResponse,
 )
-from src.app.data_model_store import fetch_all_pvs_async, populate_cde_cache
 from src.app.dependencies import (
     get_harmonize_service,
 )
-from src.app.session_cache import SessionCache, get_session_cache
 from src.domain.cde_pv_catalog import CdePvCatalog
-from src.domain.cde_type_classification import refine_cde_types_from_pvs
-from src.domain.column_cde_map import ColumnCdeMap
 from src.domain.column_outcomes import (
     ColumnOutcome,
     FinalizedValueOutcome,
@@ -40,7 +36,6 @@ from src.domain.column_outcomes import (
 )
 from src.domain.column_renames import ColumnRenameSet
 from src.domain.columns import ColumnKey
-from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.harmonization import (
     HarmonizationColumnBreakdown,
     HarmonizationManifestSummary,
@@ -55,6 +50,7 @@ from src.domain.manifest import (
     ManifestSummary,
 )
 from src.domain.pv_validation import check_value_conformance, compute_pv_adjustment
+from src.domain.reference_data import ReferenceDataError
 from src.domain.tabular_column_renames import (
     ResolvedTabularColumn,
     apply_column_renames_to_dataset,
@@ -301,30 +297,31 @@ async def _run_harmonization_workflow(
         meta.selected_sheet,
     )
 
-    cache = get_session_cache(payload.file_id, owner_user_id=user.user_id)
-    await _ensure_reference_catalog(
-        cache,
-        payload.file_id,
-        data_model_version,
-        user.user_id,
-    )
-    prepared_manifest = manifest.apply_choices(column_overrides, column_renames, cache.get_cde_catalog())
+    try:
+        reference_model = await run_in_threadpool(
+            dependencies.get_reference_data_repository().load_model,
+            data_model_version,
+        )
+    except ReferenceDataError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Reference data is currently unavailable. Please try again later.",
+        ) from exc
+    prepared_manifest = manifest.apply_choices(column_overrides, column_renames, reference_model.catalog)
     column_cde_map = prepared_manifest.column_cde_map()
     output_path = storage.harmonized_path_for(payload.file_id, meta.saved_path)
 
-    pv_catalog = await _fetch_pvs_for_session(
-        payload.file_id,
-        cache,
-        column_cde_map,
-        data_model_version,
-    )
+    selected_cde_keys = column_cde_map.cde_keys()
+    pv_catalog = CdePvCatalog.from_mapping({
+        cde_key: reference_model.pvs.values[cde_key]
+        for cde_key in selected_cde_keys
+    })
     column_pv_sets = ColumnPvSets({
         column_key: pv_catalog.get(cde_key)
         for column_key, cde_key in column_cde_map.mappings.items()
     })
     result = await _run_harmonization(
         meta.saved_path,
-        data_model_version,
         prepared_manifest,
         column_pv_sets,
         output_path,
@@ -379,7 +376,7 @@ async def _run_harmonization_workflow(
             column_overrides,
             column_renames,
             resolved_columns,
-            cache,
+            reference_model.catalog,
             data_model_version,
         )
         save_harmonized_artifacts(
@@ -420,7 +417,6 @@ def _next_stage_url(*, file_id: str, job_id: str, job_status: HarmonizeStatus) -
 
 async def _run_harmonization(
     file_path: Path,
-    data_model_version: DataModelVersionReference,
     prepared_manifest: ColumnMappingManifest,
     column_pv_sets: ColumnPvSets,
     output_path: Path,
@@ -431,94 +427,11 @@ async def _run_harmonization(
     return await run_in_threadpool(
         harmonizer.run,
         file_path=file_path,
-        data_model_key=data_model_version.data_model_key,
-        external_version_number=data_model_version.external_version_number,
         prepared_manifest=prepared_manifest,
         column_pv_sets=column_pv_sets,
         output_path=output_path,
         sheet_name=sheet_name,
     )
-
-
-async def _ensure_reference_catalog(
-    cache: SessionCache,
-    file_id: str,
-    data_model_version: DataModelVersionReference,
-    owner_user_id: str,
-) -> None:
-    if cache.get_data_model_version() == data_model_version and cache.has_cdes():
-        return
-    await run_in_threadpool(
-        populate_cde_cache,
-        file_id,
-        data_model_version,
-        owner_user_id=owner_user_id,
-    )
-
-
-async def _fetch_and_cache_pvs(
-    cache: SessionCache,
-    data_model_version: DataModelVersionReference,
-    cde_keys: list[str],
-    file_id: str,
-) -> CdePvCatalog:
-    _router_logger.info(
-        "Fetching PVs from Data Model Store",
-        extra={
-            "file_id": file_id,
-            "data_model_key": data_model_version.data_model_key,
-            "external_version_number": data_model_version.external_version_number,
-            "cde_keys": cde_keys,
-        },
-    )
-    pv_catalog = (
-        await fetch_all_pvs_async(
-            data_model_version.data_model_key,
-            data_model_version.external_version_number,
-        )
-    ).with_defaults(cde_keys)
-    cache.set_pvs_batch(pv_catalog, expected_version=data_model_version)
-    refined = refine_cde_types_from_pvs(cache.get_cde_catalog(), cache.get_all_pvs())
-    cache.replace_cde_catalog(refined)
-    pv_counts = {cde_key: len(values) for cde_key, values in pv_catalog.values.items()}
-    total_pvs = sum(pv_counts.values())
-
-    _router_logger.info(
-        "Fetched PVs for session",
-        extra={"file_id": file_id, "cde_count": len(pv_catalog), "pv_counts": pv_counts, "total_pvs": total_pvs},
-    )
-
-    # Warn if no PVs were found - likely indicates API issue or version mismatch
-    if total_pvs == 0 and cde_keys:
-        _router_logger.warning(
-            "No PVs found for any CDE. PV combobox will not be available. "
-            "Check Data Model Store API response and external_version_number.",
-            extra={
-                "file_id": file_id,
-                "data_model_key": data_model_version.data_model_key,
-                "external_version_number": data_model_version.external_version_number,
-                "cde_keys": cde_keys,
-            },
-        )
-
-    return pv_catalog
-
-
-async def _fetch_pvs_for_session(
-    file_id: str,
-    cache: SessionCache,
-    column_cde_map: ColumnCdeMap,
-    data_model_version: DataModelVersionReference,
-) -> CdePvCatalog:
-    """Fetch the value sets required by the configured harmonizer."""
-    cde_keys = column_cde_map.cde_keys()
-    if cache.get_data_model_version() != data_model_version or not cache.has_cdes():
-        raise RuntimeError("Reference-data cache does not match the workflow model version")
-    existing = cache.get_all_pvs()
-    missing_keys = [cde_key for cde_key in cde_keys if not existing.has(cde_key)]
-    if not missing_keys:
-        return existing
-    return await _fetch_and_cache_pvs(cache, data_model_version, cde_keys, file_id)
 
 
 def _read_manifest_if_exists(manifest_path: Path | None) -> ManifestSummary | None:

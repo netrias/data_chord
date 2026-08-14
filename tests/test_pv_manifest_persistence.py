@@ -6,9 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from src.app.session_cache import ReferenceDataVersionMismatchError, SessionCache, clear_all_session_caches
-from src.domain.cde import CDEInfo
-from src.domain.cde_catalog import CdeCatalog
+from src.app.session_cache import clear_all_session_caches
 from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.dataset_workflow_ids import dataset_workflow_id_from_string
@@ -29,7 +27,6 @@ from src.storage import LocalWorkflowStorage, UserContext, WorkflowAccessDeniedE
 
 FILE_ID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 MODEL_A = DataModelVersionReference("cptac", "11.0.4")
-MODEL_B = DataModelVersionReference("cptac", "12.0.0")
 
 
 def _manifest() -> ColumnMappingManifest:
@@ -165,26 +162,3 @@ def test_cross_owner_cannot_read_pv_snapshot(tmp_path: Path) -> None:
     bob = UserContext(user_id="bob")
     with pytest.raises(WorkflowAccessDeniedError):
         load_workflow_state(storage, bob, FILE_ID)
-
-
-def test_model_switch_clears_pvs_and_rejects_late_fetch() -> None:
-    cache = SessionCache()
-    catalog = CdeCatalog.from_cdes([CDEInfo(cde_id=1, cde_key="diagnosis", description=None)])
-    cache.install_reference_data(
-        MODEL_A,
-        catalog,
-        CdePvCatalog.from_mapping({"diagnosis": frozenset({"Glioma"})}),
-    )
-
-    cache.set_cde_catalog(
-        catalog,
-        data_model_key=MODEL_B.data_model_key,
-        external_version_number=MODEL_B.external_version_number,
-    )
-
-    assert cache.get_all_pvs().values == {}
-    with pytest.raises(ReferenceDataVersionMismatchError):
-        cache.set_pvs_batch(
-            CdePvCatalog.from_mapping({"diagnosis": frozenset({"Stale"})}),
-            expected_version=MODEL_A,
-        )

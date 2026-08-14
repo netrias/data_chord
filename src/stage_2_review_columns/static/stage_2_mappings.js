@@ -31,8 +31,7 @@ const stageThreeUrl = config.stageThreeUrl ?? '/stage-3';
 const choicesEndpoint = config.choicesEndpoint ?? '/stage-2/choices';
 const harmonizeEndpoint = config.harmonizeEndpoint ?? '/stage-3/harmonize';
 const columnDetailBase = config.columnDetailBase ?? '/stage-2/column-detail';
-const dataModelKey = config.dataModelKey ?? '';
-const externalVersionNumber = config.externalVersionNumber ?? null;
+const analysisStateBase = config.analysisStateBase ?? '/stage-1/analysis';
 
 const cdeCatalog = (config.cdeCatalog ?? []).map((c) => ({
   key: c.cde_key,
@@ -67,7 +66,7 @@ const MATCH_TIP = "Distinct values in your column that exactly match a permissib
 const PASSTHROUGH_TOOLTIP = "This target common data element has no permissible values to harmonize against. Your data will be left unchanged.";
 const PASSTHROUGH_GLYPH = '→';
 const NO_MAP_DESC = "Skip this column. Values will not be harmonized to any standard.";
-const AI_RECOMMENDED_SECTION_LABEL = 'AI recommended common data elements';
+const AI_RECOMMENDED_SECTION_LABEL = 'Value-overlap suggestions';
 const PV_CDE_SECTION_LABEL = 'Common data elements with permissible values';
 const RENAME_ONLY_SECTION_LABEL = 'Common data elements with no permissible values';
 
@@ -978,7 +977,7 @@ const _targetPaneHtml = (col, cde, detail, profile) => {
     pickerInner = `
       <span class="cde-picker-name" title="${_escAttr(cde)}">${_escHtml(cde)}</span>
       ${typeBadge}
-      ${isAi ? `<span class="ai-badge">✦ AI rec</span>` : ''}
+      ${isAi ? `<span class="ai-badge">Value overlap</span>` : ''}
       <span class="cde-picker-caret cde-picker-caret--end">▾</span>
     `;
   }
@@ -1327,17 +1326,9 @@ const _submitHarmonize = async () => {
 /* ─── Bootstrap ──────────────────────────────────────────── */
 const _payloadIsCurrent = (payload) => payload != null && 'column_summaries' in payload;
 
-const _fetchPayload = async (fileId, requestDataModelKey) => {
+const _fetchPayload = async (fileId) => {
   if (!fileId) return null;
-  const response = await fetch(config.analyzeEndpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      file_id: fileId,
-      data_model_key: requestDataModelKey || dataModelKey,
-      external_version_number: externalVersionNumber,
-    }),
-  });
+  const response = await fetch(`${analysisStateBase}/${encodeURIComponent(fileId)}`);
   const payload = await response.json().catch((err) => {
     console.error('Failed to parse response JSON:', err);
     return {};
@@ -1374,10 +1365,9 @@ const _init = async () => {
   let payload = _readPayloadFromStorage();
   const params = new URLSearchParams(window.location.search);
   const fileId = params.get('file_id') || payload?.file_id;
-  const requestDataModelKey = params.get('data_model_key') || dataModelKey;
   if (!_payloadIsCurrent(payload)) {
     try {
-      payload = await _fetchPayload(fileId, requestDataModelKey);
+      payload = await _fetchPayload(fileId);
     } catch (err) {
       console.error(err);
     }

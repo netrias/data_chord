@@ -53,20 +53,6 @@ resource "aws_iam_role_policy_attachment" "application_task_execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
-resource "aws_iam_role_policy" "application_task_execution_secrets" {
-  name = "${local.name_prefix}-task-secrets"
-  role = aws_iam_role.application_task_execution.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["secretsmanager:GetSecretValue"]
-      Resource = data.aws_secretsmanager_secret.netrias_api_key.arn
-    }]
-  })
-}
-
 resource "aws_ecs_cluster" "app" {
   name = local.name_prefix
 
@@ -83,7 +69,7 @@ resource "aws_ecs_task_definition" "application" {
   task_role_arn            = aws_iam_role.application_task.arn
 
   depends_on = [
-    aws_iam_role_policy.application_task_execution_secrets,
+    aws_iam_role_policy.application_task_reference_data,
     aws_iam_role_policy.application_task_workflow_storage,
     aws_iam_role_policy.application_task_bedrock_mantle,
     aws_iam_role_policy_attachment.application_task_execution,
@@ -113,16 +99,8 @@ resource "aws_ecs_task_definition" "application" {
           value = local.deployment_prefix
         },
         {
-          name  = "DATA_CHORD_NETRIAS_ENVIRONMENT"
-          value = var.environment
-        },
-        {
-          name  = "DATA_CHORD_NETRIAS_TIMEOUT_SECONDS"
-          value = "3600"
-        },
-        {
-          name  = "DATA_CHORD_HARMONIZER"
-          value = var.harmonizer
+          name  = "DATA_CHORD_REFERENCE_TABLE"
+          value = aws_dynamodb_table.reference_data.name
         },
         {
           name  = "DATA_CHORD_AGENTIC_WORKERS"
@@ -144,14 +122,8 @@ resource "aws_ecs_task_definition" "application" {
           name  = "CORS_ALLOW_ORIGINS"
           value = local.app_url
         }
-        ], var.netrias_harmonization_url == "" ? [] : [{
-          name  = "DATA_CHORD_NETRIAS_HARMONIZATION_URL"
-          value = var.netrias_harmonization_url
-      }])
-      secrets = [{
-        name      = "NETRIAS_API_KEY"
-        valueFrom = data.aws_secretsmanager_secret.netrias_api_key.arn
-      }]
+      ])
+      secrets = []
       logConfiguration = {
         logDriver = "awslogs"
         options = {

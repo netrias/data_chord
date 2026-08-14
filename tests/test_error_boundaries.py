@@ -7,10 +7,9 @@ from unittest.mock import MagicMock
 
 import pytest
 from httpx import AsyncClient
-from netrias_client import DataModelStoreError
 
 from src.domain.cde import DataModelSummary, DataModelVersionInfo
-from src.integrations.netrias_mapping import MappingDiscoveryUnavailableError
+from src.domain.reference_data import ReferenceDataUnavailableError
 from src.storage import WorkflowConflictError
 from tests.conftest import TEST_CSV_CONTENT_TYPE, TEST_TARGET_EXTERNAL_VERSION_NUMBER, TEST_TARGET_SCHEMA, upload_file
 
@@ -134,17 +133,17 @@ class TestDataModelServiceErrors:
         self, app_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Stage 1 does not leak Data Model Store internal version fields."""
-        monkeypatch.setattr(
-            "src.stage_1_upload.router.list_data_model_summaries",
-            MagicMock(
-                return_value=[
+        repository = MagicMock()
+        repository.list_models.return_value = (
                     DataModelSummary(
                         data_model_key="gc",
                         label="Genomic Commons",
                         versions=[DataModelVersionInfo(external_version_number="11.0.4")],
-                    )
-                ]
-            ),
+                    ),
+                )
+        monkeypatch.setattr(
+            "src.app.dependencies.get_reference_data_repository",
+            MagicMock(return_value=repository),
         )
 
         response = await app_client.get("/stage-1/data-models")
@@ -161,11 +160,13 @@ class TestDataModelServiceErrors:
     async def test_list_data_models_returns_503_when_api_unavailable(
         self, app_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """503 returned when Data Model Store API is unreachable."""
-        # Given: Data Model Store API is unreachable
+        """503 returned when the reference database is unreachable."""
+        # Given the reference database is unreachable.
+        repository = MagicMock()
+        repository.list_models.side_effect = ReferenceDataUnavailableError("Connection failed")
         monkeypatch.setattr(
-            "src.stage_1_upload.router.list_data_model_summaries",
-            MagicMock(side_effect=DataModelStoreError("Connection failed")),
+            "src.app.dependencies.get_reference_data_repository",
+            MagicMock(return_value=repository),
         )
 
         # When: GET /stage-1/data-models is called
@@ -181,15 +182,13 @@ class TestDataModelServiceErrors:
         sample_csv_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """A provider failure becomes a generic 503 response."""
+        """A reference-data failure becomes a generic 503 response."""
         file_id = await upload_file(app_client, sample_csv_path)
-        mapping_service = MagicMock()
-        mapping_service.discover.side_effect = MappingDiscoveryUnavailableError(
-            "Mapping discovery is unavailable."
-        )
+        repository = MagicMock()
+        repository.load_model.side_effect = ReferenceDataUnavailableError("database detail")
         monkeypatch.setattr(
-            "src.stage_1_upload.router.get_mapping_service",
-            MagicMock(return_value=mapping_service),
+            "src.app.dependencies.get_reference_data_repository",
+            MagicMock(return_value=repository),
         )
 
         response = await app_client.post(

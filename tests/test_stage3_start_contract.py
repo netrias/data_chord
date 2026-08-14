@@ -116,8 +116,6 @@ async def test_worker_with_superseded_plan_cannot_publish_scratch_results(
             self,
             *,
             file_path,
-            data_model_key,
-            external_version_number,
             prepared_manifest,
             column_pv_sets,
             output_path,

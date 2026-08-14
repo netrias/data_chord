@@ -153,12 +153,23 @@ run "public_entrypoint_requires_cognito_authentication" {
   }
 }
 
-run "api_secret_name_is_derived_from_the_environment" {
+run "reference_data_has_a_dedicated_durable_table" {
   command = plan
 
   assert {
-    condition     = data.aws_secretsmanager_secret.netrias_api_key.name == "data-chord/qa/netrias-api-key"
-    error_message = "The API secret name must be derived from the deployment environment."
+    condition = (
+      aws_dynamodb_table.reference_data.billing_mode == "PAY_PER_REQUEST" &&
+      aws_dynamodb_table.reference_data.hash_key == "pk" &&
+      aws_dynamodb_table.reference_data.range_key == "sk" &&
+      length(aws_dynamodb_table.reference_data.global_secondary_index) == 0 &&
+      toset(jsondecode(aws_iam_role_policy.application_task_reference_data.policy).Statement[0].Action) == toset([
+        "dynamodb:DescribeTable",
+        "dynamodb:Query",
+      ]) &&
+      length(aws_iam_role.reference_data_importer) == 0 &&
+      output.reference_data_table == aws_dynamodb_table.reference_data.name
+    )
+    error_message = "Reference data must use the dedicated table, read-only runtime access, and no permanent importer."
   }
 }
 
@@ -195,12 +206,11 @@ run "codebuild_uses_public_source_and_read_only_dependency_credential" {
   }
 }
 
-run "agentic_harmonization_is_the_scaled_default" {
+run "agentic_harmonization_is_the_only_scaled_runtime" {
   command = plan
 
   assert {
     condition = (
-      var.harmonizer == "agentic" &&
       aws_ecs_task_definition.application.cpu == tostring(4096) &&
       aws_ecs_task_definition.application.memory == tostring(8192)
     )
@@ -213,14 +223,14 @@ run "agentic_harmonization_is_the_scaled_default" {
   assert {
     condition = alltrue([
       anytrue([
-        for statement in jsondecode(aws_iam_role_policy.application_task_bedrock_mantle[0].policy).Statement :
+        for statement in jsondecode(aws_iam_role_policy.application_task_bedrock_mantle.policy).Statement :
         toset(statement.Action) == toset([
           "bedrock:CallWithBearerToken",
           "bedrock-mantle:CallWithBearerToken",
         ]) && statement.Resource == "*"
       ]),
       anytrue([
-        for statement in jsondecode(aws_iam_role_policy.application_task_bedrock_mantle[0].policy).Statement :
+        for statement in jsondecode(aws_iam_role_policy.application_task_bedrock_mantle.policy).Statement :
         toset(statement.Action) == toset(["bedrock-mantle:CreateInference"]) &&
         statement.Resource == "arn:aws:bedrock-mantle:us-east-2:084828580051:project/default"
       ]),

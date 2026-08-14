@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import csv
-import os
 import shutil
 import tempfile
 from collections.abc import AsyncGenerator, Generator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -101,89 +100,65 @@ def temp_storage(tmp_path: Path, test_constraints: UploadConstraints) -> UploadS
 
 @pytest.fixture
 def mock_netrias_client() -> Generator[MagicMock]:
-    """why: avoid real network calls to Netrias Lambda and Data Model Store APIs."""
+    """Temporary fixture name retained while feature tests move to local services."""
     import src.app.dependencies as deps
+    from src.domain.cde import CDEInfo, CdeType, DataModelSummary, DataModelVersionInfo
+    from src.domain.cde_catalog import CdeCatalog
+    from src.domain.cde_pv_catalog import CdePvCatalog
+    from src.domain.data_model_version_reference import DataModelVersionReference
+    from src.domain.harmonization import HarmonizeStatus
+    from src.domain.reference_data import ReferenceModel
+    from src.integrations.harmonize import HarmonizeResult
 
-    mock_client = MagicMock()
-
-    _cde_manifest = {
-        "column_mappings": {
-            "col_0000": {
-                "cde_key": "primary_diagnosis",
-                "cde_id": 2,
-            },
-            "col_0001": {
-                "cde_key": "therapeutic_agents",
-                "cde_id": 1,
-            },
-        },
+    model_key = "test-data-model"
+    version = "11.0.4"
+    values = {
+        "record_id": frozenset(f"R{index:03d}" for index in range(1, 20)),
+        "therapeutic_agents": frozenset({"Aspirin", "Ibuprofen", "Metformin", "Lisinopril"}),
+        "primary_diagnosis": frozenset({"Lung Cancer", "Breast Cancer", "Diabetes", "Hypertension"}),
+        "morphology": frozenset({"Adenocarcinoma", "Ductal Carcinoma", "N/A"}),
+        "tissue_or_organ_of_origin": frozenset({"Lung", "Breast", "Pancreas", "Heart"}),
+        "sample_anatomic_site": frozenset({"Right Lung", "Left Breast", "Pancreas", "Heart"}),
     }
-
-    mock_client.discover_cde_mapping.return_value = MockCDEMappingResult(
-        suggestions=[
-            MockMappingSuggestion(
-                source_column="primary_diagnosis",
-                options=[MockMappingOption(target="primary_diagnosis", confidence=0.95)],
-            ),
-            MockMappingSuggestion(
-                source_column="therapeutic_agents",
-                options=[MockMappingOption(target="therapeutic_agents", confidence=0.90)],
-            ),
-        ],
-        raw={"recognized_mappings": {"primary_diagnosis": 2, "therapeutic_agents": 1}, **_cde_manifest},
+    reference_model = ReferenceModel(
+        version=DataModelVersionReference(model_key, version),
+        label="Test Data Model",
+        catalog=CdeCatalog.from_cdes([
+            CDEInfo(None, cde_key, cde_key.replace("_", " ").title(), CdeType.PV)
+            for cde_key in values
+        ]),
+        pvs=CdePvCatalog.from_mapping(values),
     )
+    repository = MagicMock()
+    repository.list_models.return_value = (
+        DataModelSummary(model_key, "Test Data Model", [DataModelVersionInfo(version)]),
+    )
+    repository.load_model.return_value = reference_model
 
-    # MappingDiscoveryService.discover() calls this after demo_bypass removal
-    mock_client.discover_mapping_from_tabular.return_value = _cde_manifest
-    mock_client.configure.return_value = None
-
-    def _successful_harmonization(**kwargs: object) -> MockHarmonizeResult:
-        source_path = Path(str(kwargs["source_path"]))
+    def _successful_harmonization(**kwargs: object) -> HarmonizeResult:
+        source_path = Path(str(kwargs["file_path"]))
         output_path = Path(str(kwargs["output_path"]))
         output_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_path, output_path)
         manifest_path = output_path.with_name(f"{output_path.stem}.manifest.parquet")
         create_test_manifest_parquet(manifest_path, [])
-        return MockHarmonizeResult(
-            status="succeeded",
-            description="Harmonization completed.",
+        return HarmonizeResult(
             job_id="mock-job-id-12345",
+            status=HarmonizeStatus.SUCCEEDED,
+            detail="Harmonization completed.",
             manifest_path=manifest_path,
-            file_path=output_path,
+            output_path=output_path,
         )
-
-    mock_client.harmonize.side_effect = _successful_harmonization
-
-    # DMS methods on the shared NetriasClient mock
-    from netrias_client import CDE as SdkCDE
-    from netrias_client import DataModel, DataModelVersion
-
-    mock_client.list_data_models.return_value = (
-        DataModel(
-            data_commons_id=1, key="test-data-model", name="Test Data Model",
-            description=None, is_active=True,
-            versions=(DataModelVersion(external_version_number="11.0.4"),),
-        ),
-    )
-    mock_client.list_cdes.return_value = (
-        SdkCDE(cde_key="primary_diagnosis", cde_id=2, cde_version_id=1, description="Primary Diagnosis"),
-        SdkCDE(cde_key="therapeutic_agents", cde_id=1, cde_version_id=1, description="Therapeutic Agents"),
-    )
-    # Replace the shared provider client for this test.
-    saved_client = deps._netrias_client
-    saved_init = deps._netrias_client_initialized
-    deps._netrias_client = mock_client
-    deps._netrias_client_initialized = True
-
-    with patch.dict(
-        os.environ,
-        {"NETRIAS_API_KEY": "test-api-key", "DATA_CHORD_HARMONIZER": "netrias"},
-    ):
-        yield mock_client
-
-    # Restore provider client state to avoid leaking the mock.
-    deps._netrias_client = saved_client
-    deps._netrias_client_initialized = saved_init
+    harmonizer = MagicMock()
+    harmonizer.run.side_effect = _successful_harmonization
+    harmonizer.reference_repository = repository
+    original_repository = deps._reference_data_repository
+    original_harmonizer = deps._harmonize_service
+    deps._reference_data_repository = repository
+    deps._harmonize_service = harmonizer
+    yield harmonizer
+    deps._reference_data_repository = original_repository
+    deps._harmonize_service = original_harmonizer
 
 
 @pytest.fixture
@@ -208,8 +183,10 @@ def with_nulls_csv_path() -> Path:
 async def app_client(
     temp_storage: UploadStorage,
     mock_netrias_client: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> AsyncGenerator[AsyncClient]:
     """why: provide an async HTTP client for testing the full API."""
+    monkeypatch.setenv("DATA_CHORD_REFERENCE_TABLE", "test-reference-table")
     import src.app.dependencies as deps_module
     from src.storage import LocalWorkflowStorage
 
@@ -227,21 +204,10 @@ async def app_client(
 
     try:
         from backend.app.main import create_app
-        from src.domain.cde_pv_catalog import CdePvCatalog
-
         app = create_app()
         transport = ASGITransport(app=app)
-        fake_pvs = CdePvCatalog.from_mapping({
-            "primary_diagnosis": frozenset(),
-            "therapeutic_agents": frozenset(),
-        })
-        with (
-            patch("src.stage_1_upload.router.fetch_all_pvs_async", AsyncMock(return_value=fake_pvs)),
-            patch("src.stage_2_review_columns.use_cases.fetch_all_pvs_async", AsyncMock(return_value=fake_pvs)),
-            patch("src.stage_3_harmonize.router.fetch_all_pvs_async", AsyncMock(return_value=fake_pvs)),
-        ):
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
-                yield client
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            yield client
     finally:
         deps_module._storage = original_storage
         deps_module.get_upload_storage = original_get_storage

@@ -1,11 +1,9 @@
 # Data Chord
 
-Data harmonization workflow application. Upload CSV, TSV, or XLSX tabular data, review AI-suggested column mappings, run harmonization, and approve results before export.
+Data harmonization workflow application. Upload CSV, TSV, or XLSX tabular data, review value-overlap column suggestions, run harmonization, and approve results before export.
 
-Value harmonization runs the agentic library through Amazon Bedrock Mantle by
-default. A client deployment can set `DATA_CHORD_HARMONIZER=netrias` to keep the
-legacy remote harmonizer. Review data uses match fidelity, not harmonization
-confidence.
+Value harmonization runs the agentic library through Amazon Bedrock Mantle.
+Standard metadata and permissible values come from a dedicated DynamoDB table.
 
 XLSX uploads are treated as workbooks at the upload boundary. Stage 1 defaults
 to the first worksheet and lets the user select another sheet before mapping.
@@ -40,10 +38,10 @@ For a detailed overview, see [app.md](app.md).
    frozen install can succeed.
    The frozen install is an important supply-chain security control: normal setup uses the committed lockfile instead of resolving newly published packages.
 
-3. Configure your API key:
+3. Configure the populated reference-data table and AWS region:
    ```bash
    cp .env.example .env
-   # Edit .env and add your Netrias API key (contact Netrias for access)
+   # Edit .env and set DATA_CHORD_REFERENCE_TABLE and AWS_REGION.
    ```
 
 4. Run:

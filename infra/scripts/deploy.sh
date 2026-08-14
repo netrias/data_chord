@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 require_command python3
+require_command uv
 TARGET_NAME="$(require_target_name "${1:-}")"
 STAGE_NAME="$(require_stage_name "${2:-}")"
 require_configured_deployment "$TARGET_NAME" "$STAGE_NAME"
@@ -163,6 +164,16 @@ apply_saved_plan() {
   tofu -chdir="$INFRA_DIR" apply -input=false "$plan_file"
 }
 
+confirm_saved_plan() {
+  local label="$1"
+  local answer
+
+  [[ "${DATA_CHORD_REQUIRE_CONFIRMATION:-0}" == "1" ]] || return 0
+  printf 'Apply the displayed %s plan? Type yes to continue: ' "$label" >&2
+  IFS= read -r answer
+  [[ "$answer" == "yes" ]] || fail "Plan was not approved. No plan changes were applied."
+}
+
 apply_stack() {
   local image_tag="$1"
   local plan_file="$PLAN_DIR/final.tfplan"
@@ -171,6 +182,33 @@ apply_stack() {
   create_saved_plan "$plan_file" "$image_tag"
   log "Applying the displayed OpenTofu plan"
   apply_saved_plan "$plan_file"
+}
+
+prepare_reference_data_resources() {
+  local image_tag="$1"
+  local plan_file="$PLAN_DIR/reference-data.tfplan"
+
+  log "Planning reference-data resources without changing the application"
+  create_saved_plan \
+    "$plan_file" \
+    "$image_tag" \
+    -var=enable_reference_data_importer=true \
+    -target=aws_dynamodb_table.reference_data \
+    '-target=aws_iam_role.reference_data_importer[0]' \
+    '-target=aws_iam_role_policy.reference_data_importer[0]'
+  confirm_saved_plan "reference-data"
+  apply_saved_plan "$plan_file"
+  log "Reference table: $(required_tofu_output reference_data_table)"
+  log "Importer role: $(required_tofu_output reference_data_importer_role_arn)"
+}
+
+require_reference_data_ready() {
+  local table_name
+  table_name="$(required_tofu_output reference_data_table)"
+  uv run --frozen python "$REPO_DIR/scripts/reference_data.py" verify \
+    --table "$table_name" \
+    --region "$AWS_REGION_VALUE" ||
+    fail "Reference data is incomplete. Export, import, and verify it before deploying the application."
 }
 
 reconcile_build_resources() {
@@ -218,10 +256,6 @@ require_application_state_handoff_complete() {
       fail "Legacy BDF application state is present. Complete the privileged saved-plan handoff in infra/README.md before deploy."
     fi
   done <<<"$legacy_addresses"
-}
-
-check_secret() {
-  "$SCRIPT_DIR/bootstrap-secrets.sh" "$TARGET_NAME" "$STAGE_NAME" check
 }
 
 start_build() {
@@ -484,8 +518,8 @@ run_app_deploy() {
   image_tag="$(git_image_tag)"
   init_tofu "$TARGET_NAME" "$STAGE_NAME"
   require_application_state_handoff_complete
-  check_secret
   create_plan_directory
+  require_reference_data_ready
 
   reconcile_build_resources "$image_tag"
   ensure_image "$image_tag"
@@ -497,12 +531,22 @@ run_app_deploy() {
   log "Deploy complete: $app_url"
 }
 
+run_reference_data_prepare() {
+  local image_tag
+
+  require_deployer_identity "$TARGET_NAME"
+  ensure_deployable_git_state
+  init_tofu "$TARGET_NAME" "$STAGE_NAME"
+  create_plan_directory
+  image_tag="$(plan_image_tag)"
+  prepare_reference_data_resources "$image_tag"
+}
+
 run_plan() {
   local image_tag
 
   require_deployer_identity "$TARGET_NAME"
   log "Using verified AWS deployment-role credentials"
-  check_secret
   init_tofu "$TARGET_NAME" "$STAGE_NAME"
   create_plan_directory
   image_tag="$(plan_image_tag)"
@@ -520,6 +564,9 @@ case "$MODE" in
     require_deployer_identity "$TARGET_NAME"
     init_tofu "$TARGET_NAME" "$STAGE_NAME"
     print_status
+    ;;
+  prepare-reference-data)
+    run_reference_data_prepare
     ;;
   output-url)
     require_deployer_identity "$TARGET_NAME"

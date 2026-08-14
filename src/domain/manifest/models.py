@@ -37,11 +37,12 @@ class ColumnMappingEntry(TypedDict):
     """SDK column-mapping shape stored in JSON before harmonization."""
 
     cde_key: str
-    cde_id: int
+    cde_id: NotRequired[int]
     column_name: NotRequired[str]
     harmonization: NotRequired[str]
     route: NotRequired[str]
     alternatives: NotRequired[list[AlternativeEntry]]
+    recommendation_source: NotRequired[str]
 
 
 class ManifestPayload(TypedDict):

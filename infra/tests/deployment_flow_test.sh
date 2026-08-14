@@ -163,6 +163,14 @@ case "${1:-} ${2:-}" in
 esac
 MOCK_AWS
 
+cat >"$MOCK_BIN/uv" <<'MOCK_UV'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+printf 'uv reference-verify %s\n' "$*" >>"$MOCK_CALLS"
+[[ "${MOCK_REFERENCE_READY:-1}" == "1" ]]
+MOCK_UV
+
 cat >"$MOCK_BIN/tofu" <<'MOCK_TOFU'
 #!/usr/bin/env bash
 set -Eeuo pipefail
@@ -194,6 +202,12 @@ case " $args " in
       ecr_repository_url)
         [[ -f "$MOCK_BUILD_READY" ]] || exit 1
         printf '"945365518758.dkr.ecr.us-east-2.amazonaws.com/data-chord-staging"\n'
+        ;;
+      reference_data_table)
+        printf '"data-chord-staging-reference-data"\n'
+        ;;
+      reference_data_importer_role_arn)
+        printf '"arn:aws:iam::945365518758:role/application/data-chord-staging-reference-data-importer"\n'
         ;;
       ecs_cluster_name)
         [[ -f "$MOCK_FULL_APPLIED" ]] || exit 1
@@ -258,7 +272,7 @@ case " $args " in
 esac
 MOCK_TOFU
 
-chmod +x "$MOCK_BIN/aws" "$MOCK_BIN/git" "$MOCK_BIN/tofu"
+chmod +x "$MOCK_BIN/aws" "$MOCK_BIN/git" "$MOCK_BIN/tofu" "$MOCK_BIN/uv"
 
 run_first_deploy() {
   local scenario_root="$TEST_ROOT/first-deploy"
@@ -459,6 +473,53 @@ run_dirty_deploy_fails() {
 
   assert_call_absent "tofu init " "$calls_file"
   assert_no_deploy_writes "$calls_file"
+}
+
+run_incomplete_reference_data_fails_before_build() {
+  local scenario_root="$TEST_ROOT/incomplete-reference-data"
+  local calls_file="$scenario_root/calls"
+  mkdir -p "$scenario_root"
+  : >"$calls_file"
+
+  if PATH="$MOCK_BIN:$PATH" \
+    AWS_PROFILE=mock \
+    MOCK_ACCOUNT_ID=945365518758 \
+    MOCK_BUILD_READY="$scenario_root/build-ready" \
+    MOCK_CALLS="$calls_file" \
+    MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+    MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+    MOCK_REFERENCE_READY=0 \
+    DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+    "$DEPLOY_SCRIPT" netrias staging deploy >/dev/null 2>&1; then
+    fail_test "Deploy accepted incomplete reference data"
+  fi
+
+  assert_call_contains "uv reference-verify " "scripts/reference_data.py verify" "$calls_file"
+  assert_call_absent "aws start-build " "$calls_file"
+  assert_call_absent "tofu full-apply " "$calls_file"
+}
+
+run_reference_prepare_requires_confirmation() {
+  local scenario_root="$TEST_ROOT/reference-prepare-confirmation"
+  local calls_file="$scenario_root/calls"
+  mkdir -p "$scenario_root"
+  : >"$calls_file"
+
+  if printf 'no\n' | PATH="$MOCK_BIN:$PATH" \
+    AWS_PROFILE=mock \
+    DATA_CHORD_REQUIRE_CONFIRMATION=1 \
+    MOCK_ACCOUNT_ID=945365518758 \
+    MOCK_BUILD_READY="$scenario_root/build-ready" \
+    MOCK_CALLS="$calls_file" \
+    MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+    MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+    DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+    "$DEPLOY_SCRIPT" netrias staging prepare-reference-data >/dev/null 2>&1; then
+    fail_test "Reference-data preparation ignored a rejected plan"
+  fi
+
+  assert_call_contains "tofu plan " "-var=enable_reference_data_importer=true" "$calls_file"
+  assert_call_absent "tofu full-apply " "$calls_file"
 }
 
 run_output_url_contract() {
@@ -801,6 +862,8 @@ run_empty_state_plan
 run_existing_state_plan
 run_plan_image_override
 run_dirty_deploy_fails
+run_incomplete_reference_data_fails_before_build
+run_reference_prepare_requires_confirmation
 run_output_url_contract
 run_status_is_read_only_and_reports_failures
 run_workflow_bucket_replacement_guard

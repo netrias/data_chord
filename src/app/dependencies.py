@@ -10,25 +10,18 @@ import logging
 from pathlib import Path
 from typing import cast
 
-from netrias_client import Environment, NetriasClient
-
 from src.auth.user_context import current_user_context
+from src.domain.reference_data import ReferenceDataRepository
 from src.integrations.agentic_harmonize import AgenticHarmonizeConfig, AgenticHarmonizeService
+from src.integrations.dynamodb_reference_data import DynamoDbReferenceDataRepository, DynamoResource
 from src.integrations.harmonize import HarmonizeService
-from src.integrations.netrias_harmonize import HarmonizeService as NetriasHarmonizeService
-from src.integrations.netrias_mapping import MappingDiscoveryService
 from src.paths import PROJECT_ROOT
 from src.settings import (
     ConfigurationError,
-    Harmonizer,
     StorageBackend,
     get_agentic_workers,
     get_aws_region,
-    get_harmonizer,
-    get_netrias_api_key,
-    get_netrias_environment_name,
-    get_netrias_harmonization_url,
-    get_netrias_timeout_seconds,
+    get_reference_table_name,
     get_storage_backend,
     get_upload_dir,
     get_workflow_s3_bucket,
@@ -54,8 +47,8 @@ MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024
 _upload_constraints: UploadConstraints | None = None
 _storage: UploadStorage | None = None
 _workflow_storage: WorkflowStorage | None = None
-_netrias_client: NetriasClient | None = None
-_netrias_client_initialized: bool = False
+_reference_data_repository: ReferenceDataRepository | None = None
+_harmonize_service: HarmonizeService | None = None
 
 
 def get_upload_constraints() -> UploadConstraints:
@@ -111,55 +104,33 @@ def get_user_context() -> UserContext:
     return current_user_context()
 
 
-def get_netrias_client() -> NetriasClient | None:
-    """Why: None when NETRIAS_API_KEY missing — callers already guard with 'if not client'."""
-    global _netrias_client, _netrias_client_initialized  # noqa: PLW0603
-    if not _netrias_client_initialized:
-        api_key = get_netrias_api_key()
-        if api_key:
-            timeout = get_netrias_timeout_seconds()
-            environment = _netrias_environment()
-            try:
-                _netrias_client = NetriasClient(api_key=api_key, environment=environment)
-                harmonization_url = get_netrias_harmonization_url()
-                if timeout is not None and harmonization_url is not None:
-                    _netrias_client.configure(timeout=timeout, harmonization_url=harmonization_url)
-                elif timeout is not None:
-                    _netrias_client.configure(timeout=timeout)
-                elif harmonization_url is not None:
-                    _netrias_client.configure(harmonization_url=harmonization_url)
-            except Exception:
-                logger.exception("Failed to initialize NetriasClient")
-        else:
-            logger.warning("NETRIAS_API_KEY missing; SDK calls will be unavailable.")
-        _netrias_client_initialized = True
-    return _netrias_client
+def get_reference_data_repository() -> ReferenceDataRepository:
+    global _reference_data_repository  # noqa: PLW0603 - intentional singleton
+    if _reference_data_repository is None:
+        import boto3
 
-
-def _netrias_environment() -> Environment:
-    return Environment(get_netrias_environment_name())
-
-
-def get_mapping_service() -> MappingDiscoveryService:
-    return MappingDiscoveryService(get_netrias_client())
+        resource = cast(DynamoResource, boto3.resource("dynamodb", region_name=get_aws_region()))
+        _reference_data_repository = DynamoDbReferenceDataRepository(resource.Table(get_reference_table_name()))
+    return _reference_data_repository
 
 
 def get_harmonize_service() -> HarmonizeService:
-    if get_harmonizer() is Harmonizer.NETRIAS:
-        return NetriasHarmonizeService(get_netrias_client())
-    return AgenticHarmonizeService(
-        AgenticHarmonizeConfig(
-            region=get_aws_region(),
-            max_workers=get_agentic_workers(),
+    global _harmonize_service  # noqa: PLW0603 - intentional singleton
+    if _harmonize_service is None:
+        _harmonize_service = AgenticHarmonizeService(
+            AgenticHarmonizeConfig(
+                region=get_aws_region(),
+                max_workers=get_agentic_workers(),
+            )
         )
-    )
+    return _harmonize_service
 
 
 def cleanup_services() -> None:
     """Clean up resources held by singleton services (call on app shutdown)."""
-    global _netrias_client, _netrias_client_initialized, _workflow_storage  # noqa: PLW0603
-    _netrias_client = None
-    _netrias_client_initialized = False
+    global _harmonize_service, _reference_data_repository, _workflow_storage  # noqa: PLW0603
+    _harmonize_service = None
+    _reference_data_repository = None
     _workflow_storage = None
 
 
@@ -169,8 +140,7 @@ __all__ = [
     "DEFAULT_WORKFLOW_STORAGE_DIR",
     "cleanup_services",
     "get_harmonize_service",
-    "get_mapping_service",
-    "get_netrias_client",
+    "get_reference_data_repository",
     "get_upload_constraints",
     "get_upload_storage",
     "get_user_context",

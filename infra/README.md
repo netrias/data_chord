@@ -111,6 +111,42 @@ database route.
 
 ## Plan and deploy
 
+### First reference-data release
+
+The first release that removes the old service has one required gate. Keep the
+old application running while you complete these steps:
+
+1. Create only the DynamoDB table and importer role:
+
+   ```bash
+   infra/scripts/deploy.sh bdf staging prepare-reference-data
+   ```
+
+2. Export canonical JSON from the old service. Store this recovery file in an
+   approved durable location:
+
+   ```bash
+   uv run python scripts/reference_data.py export \
+     --environment staging \
+     --output /approved/location/reference-data.json
+   ```
+
+3. Assume the `reference_data_importer_role_arn` output. Import the same file
+   into each target table:
+
+   ```bash
+   uv run python scripts/reference_data.py import \
+     --input /approved/location/reference-data.json \
+     --table "$(tofu -chdir=infra output -raw reference_data_table)" \
+     --expected-model-count 9
+   ```
+
+4. Run the normal deployment. It loads every published model and checks the
+   complete catalog marker before the build. The final apply removes the
+   temporary importer role.
+
+The new application has no fallback to the old service.
+
 The normal operator interface has three commands. Pass the AWS profile
 explicitly:
 
@@ -170,16 +206,9 @@ If a previous attempt already pushed the same immutable commit image, a retry
 reuses that image and continues with the full apply. It does not try to overwrite
 or rebuild an immutable tag.
 
-Before the first plan, prepare the stage API secret. This is a separate,
-infrequent operation:
-
-```bash
-AWS_PROFILE=datachord-bdf NETRIAS_API_KEY='replace-with-key' \
-  infra/scripts/bootstrap-secrets.sh bdf staging ensure
-```
-
-The secret helper is idempotent. Plan and deploy only verify the secret. They
-never write it.
+The application no longer reads the old stage API secret. Existing secret
+resources are not deleted by this change because another deployment may own
+them.
 
 ## State and IAM handoff safety
 

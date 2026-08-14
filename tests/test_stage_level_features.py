@@ -23,7 +23,8 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 import src.app.dependencies as dependencies
 from src.app.session_cache import clear_session_cache, get_session_cache
-from src.domain.cde import CDEInfo
+from src.domain.column_profile import build_column_profile
+from src.domain.columns import column_key_from_string
 from src.domain.harmonization import HarmonizeStatus
 from src.domain.manifest import ManifestPayload
 from src.domain.workflow_state import WorkflowState
@@ -158,37 +159,24 @@ async def test_stage1_upload_persists_exact_bytes(
     assert meta.saved_path.read_bytes() == content, "Stored bytes do not match uploaded bytes"
 
 
-async def test_stage1_upload_preserves_other_session_cde_cache(app_client: AsyncClient) -> None:
-    """Uploading a new file must not discard another active session's CDE cache."""
+async def test_stage1_upload_preserves_other_session_profile_cache(app_client: AsyncClient) -> None:
+    """Uploading a new file must not discard another active session's source profiles."""
 
     first_file_id: str | None = None
     second_file_id: str | None = None
 
     try:
-        # Given: one uploaded file has session-scoped CDE metadata
+        # Given one uploaded file has a session-scoped source profile.
         first_file_id = await upload_content(app_client, create_csv_content([["col_a"], ["alpha"]]), "first.csv")
         first_cache = get_session_cache(first_file_id)
-        assert not first_cache.has_cdes()
-
-        first_cache.set_cdes(
-            [
-                CDEInfo(
-                    cde_id=1,
-                    cde_key="primary_diagnosis",
-                    description="Primary Diagnosis",
-                )
-            ],
-            data_model_key=TEST_TARGET_SCHEMA,
-            external_version_number="11.0.4",
-        )
-        assert first_cache.has_cdes()
+        first_cache.set_column_profile(build_column_profile("col_0000", ["alpha"]))
 
         # When: another file is uploaded
         second_file_id = await upload_content(app_client, create_csv_content([["col_b"], ["beta"]]), "second.csv")
 
-        # Then: the first file's cache remains available for Stage 2 and later
+        # Then the first file's profile remains available for Stage 2.
         assert second_file_id != first_file_id
-        assert get_session_cache(first_file_id).get_cde_by_key("primary_diagnosis") is not None
+        assert get_session_cache(first_file_id).get_column_profile("col_0000") is not None
     finally:
         if first_file_id is not None:
             clear_session_cache(first_file_id)
@@ -495,19 +483,18 @@ async def test_stage1_analyze_is_idempotent(
     assert response_one.json() == response_two.json()
 
 
-async def test_stage1_analyze_uses_selected_version_and_primes_reference_cache(
+async def test_stage1_analyze_loads_the_selected_reference_model(
     app_client: AsyncClient,
     temp_storage: UploadStorage,
     mock_netrias_client: MagicMock,
 ) -> None:
-    """Analyze passes the selected model version and warms CDE/PV cache."""
+    """Analyze loads the selected model version through the repository."""
 
-    # Given: an uploaded CSV and an empty session cache
+    # Given an uploaded CSV.
     content = create_csv_content([["diagnosis"], ["Lung"], ["Breast"]])
     file_id = await upload_content(app_client, content, "versioned.csv")
-    cache = get_session_cache(file_id)
-    assert not cache.has_cdes()
-    assert not cache.has_any_pvs()
+    repository = mock_netrias_client.reference_repository
+    repository.load_model.reset_mock()
 
     # When: analysis is requested for GC external version 11.0.4
     response = await app_client.post(
@@ -519,16 +506,12 @@ async def test_stage1_analyze_uses_selected_version_and_primes_reference_cache(
         },
     )
 
-    # Then: discovery and the session cache use the selected external version
+    # Then the repository receives the selected external version.
     assert response.status_code == 200
     assert response.json()["external_version_number"] == "11.0.4"
-    assert mock_netrias_client.discover_mapping_from_tabular.call_args.kwargs["external_version_number"] == "11.0.4"
-    data_model_version = cache.get_data_model_version()
-    assert data_model_version is not None
-    assert data_model_version.data_model_key == "gc"
-    assert data_model_version.external_version_number == "11.0.4"
-    assert cache.has_cdes()
-    assert cache.has_any_pvs()
+    loaded_version = repository.load_model.call_args.args[0]
+    assert loaded_version.data_model_key == "gc"
+    assert loaded_version.external_version_number == "11.0.4"
 
 
 async def test_stage1_analyze_persists_selected_data_model_version(
@@ -577,7 +560,8 @@ async def test_stage2_mapping_page_recovers_selected_model_from_workflow_state(
     )
     assert analyze_response.status_code == 200
     clear_session_cache(file_id)
-    mock_netrias_client.list_cdes.reset_mock()
+    repository = mock_netrias_client.reference_repository
+    repository.load_model.reset_mock()
 
     # When: Stage 2 is loaded with only the file id in the URL
     response = await app_client.get(f"/stage-2?file_id={file_id}")
@@ -587,11 +571,42 @@ async def test_stage2_mapping_page_recovers_selected_model_from_workflow_state(
     assert 'dataModelKey: "gc"' in response.text
     assert 'externalVersionNumber: "11.0.4"' in response.text
     assert "stage_2_mappings.js?v=" in response.text
-    mock_netrias_client.list_cdes.assert_called_with(
-        model_key="gc",
-        version="11.0.4",
-        include_description=True,
+    loaded_version = repository.load_model.call_args.args[0]
+    assert loaded_version.data_model_key == "gc"
+    assert loaded_version.external_version_number == "11.0.4"
+
+
+async def test_stage2_analysis_state_recovers_without_replacing_confirmed_choices(
+    app_client: AsyncClient,
+) -> None:
+    # Given Stage 1 analysis and confirmed Stage 2 choices survived a browser restart.
+    file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "recover.csv")
+    analyzed = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "data_model_key": "gc", "external_version_number": "11.0.4"},
     )
+    assert analyzed.status_code == 200
+    saved = await app_client.post(
+        "/stage-2/choices",
+        json={
+            "file_id": file_id,
+            "manual_overrides": {"col_0000": "primary_diagnosis"},
+            "column_renames": {"col_0000": "Diagnosis"},
+        },
+    )
+    assert saved.status_code == 200
+
+    # When the browser rebuilds its analysis payload from durable state.
+    recovered = await app_client.get(f"/stage-1/analysis/{file_id}")
+
+    # Then the payload includes the confirmed choices and durable state is unchanged.
+    assert recovered.status_code == 200
+    assert recovered.json()["manual_overrides"] == {"col_0000": "primary_diagnosis"}
+    assert recovered.json()["column_renames"] == {"col_0000": "Diagnosis"}
+    state = _load_workflow_state(file_id)
+    assert state is not None
+    assert state.mapping_choices is not None
+    assert state.mapping_choices.column_overrides.overrides[column_key_from_string("col_0000")] == "primary_diagnosis"
 
 
 async def test_static_assets_require_browser_revalidation(app_client: AsyncClient) -> None:
@@ -605,27 +620,24 @@ async def test_static_assets_require_browser_revalidation(app_client: AsyncClien
 
 async def test_stage3_harmonize_uses_stored_selection(
     app_client: AsyncClient,
+    mock_netrias_client: MagicMock,
 ) -> None:
     """The durable selected model/version is backend truth during harmonization."""
 
     class StubHarmonizer:
         def __init__(self) -> None:
-            self.received_data_model_key = None
-            self.received_target_version = None
+            self.called = False
 
         def run(  # type: ignore[no-untyped-def]
             self,
             *,
             file_path,
-            data_model_key,
-            external_version_number,
             prepared_manifest,
             column_pv_sets,
             output_path,
             sheet_name,
         ):
-            self.received_data_model_key = data_model_key
-            self.received_target_version = external_version_number
+            self.called = True
             return _successful_stage_three_result(file_path, output_path, "job-selection")
 
     # Given: analysis saved GC external version 11.0.4
@@ -641,6 +653,8 @@ async def test_stage3_harmonize_uses_stored_selection(
     assert analyze_response.status_code == 200
     await confirm_mapping_choices(app_client, file_id)
     stub = StubHarmonizer()
+    repository = mock_netrias_client.reference_repository
+    repository.load_model.reset_mock()
 
     # When: harmonization is triggered from the confirmed workflow
     import unittest.mock
@@ -651,10 +665,12 @@ async def test_stage3_harmonize_uses_stored_selection(
             json={"file_id": file_id},
         )
 
-    # Then: the harmonization service receives the stored selection instead
+    # Then the stored selection loads the reference model before the harmonizer runs.
     assert response.status_code == 200
-    assert stub.received_data_model_key == "gc"
-    assert stub.received_target_version == "11.0.4"
+    loaded_version = repository.load_model.call_args.args[0]
+    assert loaded_version.data_model_key == "gc"
+    assert loaded_version.external_version_number == "11.0.4"
+    assert stub.called
 
 
 async def test_stage3_harmonize_returns_queued_while_long_job_finishes(
@@ -667,8 +683,6 @@ async def test_stage3_harmonize_returns_queued_while_long_job_finishes(
             self,
             *,
             file_path,
-            data_model_key,
-            external_version_number,
             prepared_manifest,
             column_pv_sets,
             output_path,
@@ -725,8 +739,6 @@ async def test_stage3_job_status_recovers_from_durable_state_after_cache_loss(
             self,
             *,
             file_path,
-            data_model_key,
-            external_version_number,
             prepared_manifest,
             column_pv_sets,
             output_path,
@@ -848,8 +860,6 @@ async def test_stage3_harmonize_prefers_stored_mapping_choices_over_stale_reques
             self,
             *,
             file_path,
-            data_model_key,
-            external_version_number,
             prepared_manifest,
             column_pv_sets,
             output_path,
@@ -909,8 +919,6 @@ async def test_stage3_applies_confirmed_column_renames_to_download(
             self,
             *,
             file_path,
-            data_model_key,
-            external_version_number,
             prepared_manifest,
             column_pv_sets,
             output_path,
@@ -999,8 +1007,6 @@ async def test_stage3_column_renames_propagate_when_output_name_matches_existing
             self,
             *,
             file_path,
-            data_model_key,
-            external_version_number,
             prepared_manifest,
             column_pv_sets,
             output_path,
@@ -1137,13 +1143,13 @@ async def test_stage3_persists_cde_mapping_download_artifact(
         json={"file_id": file_id},
     )
 
-    # Then: a mapping artifact records AI mappings, user overrides, and output names by column key
+    # Then a mapping artifact records overlap suggestions, user overrides, and output names by column key.
     assert response.status_code == 200
     document = _load_json_artifact(file_id, WorkflowFile.CDE_MAPPING)
     assert isinstance(document, dict)
     mappings = {entry["column_key"]: entry for entry in document["mappings"]}
-    assert mappings["col_0000"]["mapping_source"] == "ai"
-    assert mappings["col_0000"]["cde_key"] == "primary_diagnosis"
+    assert mappings["col_0000"]["mapping_source"] == "value_overlap"
+    assert mappings["col_0000"]["cde_key"] == "tissue_or_organ_of_origin"
     assert mappings["col_0001"]["mapping_source"] == "user_override"
     assert mappings["col_0001"]["source_column_name"] == "drug"
     assert mappings["col_0001"]["output_column_name"] == "Treatment Diagnosis"
@@ -1155,14 +1161,8 @@ async def test_stage2_mapping_page_renders_manual_options(
 ) -> None:
     """Stage 2 mapping page exposes CDE labels for manual mapping."""
 
-    # Given: CDE cache is pre-populated for the file
+    # Given the repository contains the requested model.
     file_id = "deadbeefdeadbeefdeadbeefdeadbeef"
-    cache = get_session_cache(file_id)
-    cache.set_cdes(
-        [CDEInfo(cde_id=2, cde_key="primary_diagnosis", description=None)],
-        data_model_key="test-data-model",
-        external_version_number="11.0.4",
-    )
 
     # When: the mapping page is requested with data model version query params
     response = await app_client.get(

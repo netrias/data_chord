@@ -73,23 +73,6 @@ variable "domain_label" {
   }
 }
 
-variable "netrias_harmonization_url" {
-  description = "Optional Netrias harmonization endpoint override."
-  type        = string
-  default     = ""
-}
-
-variable "harmonizer" {
-  description = "Harmonization implementation used by this client deployment."
-  type        = string
-  default     = "agentic"
-
-  validation {
-    condition     = contains(["agentic", "netrias"], var.harmonizer)
-    error_message = "harmonizer must be agentic or netrias."
-  }
-}
-
 variable "agentic_workers" {
   description = "Maximum concurrent agentic term harmonizations in one task."
   type        = number
@@ -99,6 +82,12 @@ variable "agentic_workers" {
     condition     = var.agentic_workers >= 1
     error_message = "agentic_workers must be positive."
   }
+}
+
+variable "enable_reference_data_importer" {
+  description = "Create the temporary reference-data migration role. Normal deploys remove it."
+  type        = bool
+  default     = false
 }
 
 variable "container_cpu" {
