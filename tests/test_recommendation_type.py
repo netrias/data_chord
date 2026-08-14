@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from httpx import AsyncClient
 
 from src.domain.change import RecommendationType
@@ -11,6 +12,7 @@ from src.storage import UploadStorage
 from tests.conftest import (
     create_harmonized_csv,
     create_manifest_for_file,
+    save_test_pvs_by_column,
     store_test_harmonization_manifest,
     upload_file,
 )
@@ -168,15 +170,26 @@ class TestStage4RecommendationTypeContract:
 
         assert found_unchanged, "No ai_unchanged transformations found"
 
-    async def test_recommendation_type_reflects_no_recommendation(
+    @pytest.mark.parametrize(
+        ("source_value", "model_value", "permissible_values", "expected_conformance"),
+        [
+            pytest.param("Adamantinoma", "", frozenset({"Carcinoma NOS"}), False, id="source-outside-pvs"),
+            pytest.param("Lung Cancer", "   ", frozenset({"Lung Cancer"}), True, id="source-inside-pvs"),
+        ],
+    )
+    async def test_no_recommendation_conformance_uses_source_value(
         self,
         app_client: AsyncClient,
         temp_storage: UploadStorage,
         sample_csv_path: Path,
+        source_value: str,
+        model_value: str,
+        permissible_values: frozenset[str],
+        expected_conformance: bool,
     ) -> None:
-        """recommendationType is no_recommendation when AI returns only whitespace."""
+        """A blank model result checks the displayed source value against PVs."""
 
-        # Given: uploaded file with a manifest row whose AI value has no useful text
+        # Given: a source value, a blank model result, and a known permissible-value set
         file_id = await upload_file(app_client, sample_csv_path)
         create_harmonized_csv(temp_storage, file_id, sample_csv_path, {})
         store_test_harmonization_manifest(
@@ -186,8 +199,8 @@ class TestStage4RecommendationTypeContract:
                 "job_id": f"test-job-{file_id}",
                 "column_id": 0,
                 "column_name": "primary_diagnosis",
-                "to_harmonize": "Lung Cancer",
-                "top_harmonization": "   ",
+                "to_harmonize": source_value,
+                "top_harmonization": model_value,
                 "ontology_id": None,
                 "top_harmonizations": [],
                 "match_fidelity": "approximate",
@@ -196,15 +209,17 @@ class TestStage4RecommendationTypeContract:
                 "manual_overrides": [],
             }],
         )
+        save_test_pvs_by_column(file_id, {"col_0000": permissible_values})
 
-        # When: requesting rows from Stage 4
+        # When: the client requests Stage 4 review rows
         response = await app_client.post(
             "/stage-4/rows",
             json={"file_id": file_id},
         )
 
-        # Then: the public response marks the row as no recommendation
+        # Then: conformance describes the source value that Stage 4 displays
         assert response.status_code == 200
-        transformation = _find_transformation(response.json()["columns"], "primary_diagnosis", "Lung Cancer")
+        transformation = _find_transformation(response.json()["columns"], "primary_diagnosis", source_value)
         assert transformation is not None, "No transformation found for primary_diagnosis"
         assert transformation["recommendationType"] == "no_recommendation"
+        assert transformation["isPVConformant"] is expected_conformance

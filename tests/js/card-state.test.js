@@ -9,11 +9,11 @@ const AI_SUGGESTION = 'Lung Cancer';
 const PV_SET = new Set(['Lung Cancer', 'Breast Cancer', 'Colon Cancer']);
 
 const createInput = (overrides = {}) => ({
-  aiSuggestedValue: AI_SUGGESTION,
+  baselineValue: AI_SUGGESTION,
   overrideValue: '',
   hasPVs: true,
   pvSet: PV_SET,
-  aiIsConformant: true,
+  baselineIsConformant: true,
   ...overrides,
 });
 
@@ -32,7 +32,7 @@ describe('value card display state', () => {
     },
     {
       name: 'warns when the AI suggestion is not permissible',
-      input: { aiIsConformant: false },
+      input: { baselineIsConformant: false },
       expected: {
         activeValue: AI_SUGGESTION,
         isConformant: false,
@@ -136,7 +136,14 @@ describe('value card display state', () => {
 
   for (const scenario of scenarios) {
     it(scenario.name, () => {
-      assert.deepEqual(determineCardState(createInput(scenario.input)), scenario.expected);
+      // Given: a baseline value, optional override, and permissible-value state
+      const input = createInput(scenario.input);
+
+      // When: the card derives its presentation state
+      const actual = determineCardState(input);
+
+      // Then: the active value and presentation match the behavior contract
+      assert.deepEqual(actual, scenario.expected);
     });
   }
 });

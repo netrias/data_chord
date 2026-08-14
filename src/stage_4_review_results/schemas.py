@@ -123,7 +123,9 @@ class Transformation(BaseModel):
     matchFidelity: MatchFidelity
     isChanged: bool
     recommendationType: str  # RecommendationType.value for JSON serialization
-    isPVConformant: bool
+    isPVConformant: bool = Field(
+        description="Whether the initial server review value is permissible."
+    )
     pvSetAvailable: bool
     topSuggestions: list[SuggestionInfo]
     rowIndices: list[int]  # 1-based source row indices

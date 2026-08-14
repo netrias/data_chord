@@ -287,21 +287,26 @@ def _active_values_for_row(
     row: ManifestRow,
     review_overrides: ReviewOverrides | None,
 ) -> list[str]:
-    ai_value = row.top_harmonization if row.top_harmonization.strip() else row.to_harmonize
+    baseline_value = _baseline_value_for_row(row)
     if review_overrides is None or not row.row_indices:
-        return [ai_value]
+        return [baseline_value]
 
     values: list[str] = []
     for row_index in row.row_indices:
         row_overrides = review_overrides.overrides.get(str(row_index + 1))
         active_override = row_overrides.get(row.column_key) if row_overrides is not None else None
-        values.append(active_override.human_value if active_override is not None else ai_value)
+        values.append(active_override.human_value if active_override is not None else baseline_value)
     return values
+
+
+def _baseline_value_for_row(row: ManifestRow) -> str:
+    """Use the source value when the provider made no recommendation."""
+    return row.top_harmonization if row.top_harmonization.strip() else row.to_harmonize
 
 
 def _current_value_for_row(row: ManifestRow) -> str:
     latest_override = get_latest_override_value(row.manual_overrides)
-    return latest_override if latest_override is not None else row.top_harmonization
+    return latest_override if latest_override is not None else _baseline_value_for_row(row)
 
 
 def _build_columns_from_manifest(
@@ -367,7 +372,7 @@ def _build_transformation(row: ManifestRow, pv_set: frozenset[str] | None) -> Tr
     recommendation_type = _compute_recommendation_type(original_value, harmonized_value)
 
     manual_override = get_latest_override_value(row.manual_overrides)
-    current_value = manual_override if manual_override is not None else harmonized_value
+    current_value = manual_override if manual_override is not None else _baseline_value_for_row(row)
     manifest_indices_full = [idx + 1 for idx in row.row_indices]
     return Transformation(
         originalValue=original_value,
