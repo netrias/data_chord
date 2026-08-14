@@ -13,8 +13,11 @@ variable "application_role_boundary_arn" {
   type        = string
 
   validation {
-    condition     = can(regex("^arn:aws:iam::${var.expected_account_id}:policy/.+$", var.application_role_boundary_arn))
-    error_message = "application_role_boundary_arn must be an IAM policy in expected_account_id."
+    condition = (
+      can(regex("^arn:[^:]+:iam::${var.expected_account_id}:policy/.+$", var.application_role_boundary_arn)) &&
+      try(split(":", var.application_role_boundary_arn)[1] == data.aws_partition.current.partition, false)
+    )
+    error_message = "application_role_boundary_arn must be an IAM policy in the target account and AWS partition."
   }
 }
 
@@ -43,8 +46,8 @@ variable "deployment_target" {
   type        = string
 
   validation {
-    condition     = contains(["bdf", "netrias"], var.deployment_target)
-    error_message = "deployment_target must be bdf or netrias."
+    condition     = can(regex("^[a-z0-9][a-z0-9-]*$", var.deployment_target))
+    error_message = "deployment_target must contain lowercase letters, numbers, and hyphens."
   }
 }
 

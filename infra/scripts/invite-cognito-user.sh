@@ -8,7 +8,7 @@ source "$SCRIPT_DIR/lib.sh"
 require_command python3
 usage() {
   cat >&2 <<'EOF'
-Usage: infra/scripts/invite-cognito-user.sh <bdf|netrias> <dev|qa|staging|prod> <email> [resend]
+Usage: infra/scripts/invite-cognito-user.sh <target> <dev|qa|staging|prod> <email> [resend]
 
 Creates a Cognito user for Data Chord. Cognito emails the user a temporary
 password. Pass "resend" as the fourth argument to resend the invitation for an

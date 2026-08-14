@@ -34,7 +34,56 @@ assert_fails_with() {
 test_supported_targets() {
   assert_equal "bdf" "$(require_target_name bdf)" "BDF target"
   assert_equal "netrias" "$(require_target_name netrias)" "Netrias target"
-  assert_fails_with "Choose a target" require_target_name other
+  assert_fails_with "No target contract exists" require_target_name other
+  assert_fails_with "Target names may contain" require_target_name '../other'
+}
+
+test_deployment_profile_names_follow_the_target() {
+  assert_equal "datachord-bdf" "$(deployment_profile_name bdf)" "BDF deployment profile"
+  assert_equal "datachord-netrias" "$(deployment_profile_name netrias)" "Netrias deployment profile"
+}
+
+test_deployment_credentials_use_existing_profile_without_target_profile() {
+  aws() {
+    [[ "$*" == "configure list-profiles" ]] || return 2
+    printf 'default\noperator\n'
+  }
+
+  AWS_PROFILE=operator
+  AWS_ACCESS_KEY_ID=ambient-access-key
+  AWS_SECRET_ACCESS_KEY=ambient-secret-key
+  select_deployment_credentials netrias
+  assert_equal "operator" "$AWS_PROFILE" "existing deployment profile"
+  assert_equal "ambient-access-key" "$AWS_ACCESS_KEY_ID" "existing profile access key"
+  assert_equal "ambient-secret-key" "$AWS_SECRET_ACCESS_KEY" "existing profile secret key"
+}
+
+test_deployment_credentials_use_target_profile() {
+  aws() {
+    [[ "$*" == "configure list-profiles" ]] || return 2
+    printf 'default\ndatachord-netrias\n'
+  }
+
+  AWS_PROFILE=strides
+  AWS_ACCESS_KEY_ID=ambient-access-key
+  AWS_SECRET_ACCESS_KEY=ambient-secret-key
+  AWS_SESSION_TOKEN=ambient-session-token
+  select_deployment_credentials netrias
+  assert_equal "datachord-netrias" "$AWS_PROFILE" "derived deployment profile"
+  assert_equal "" "${AWS_ACCESS_KEY_ID:-}" "ambient access key after profile selection"
+  assert_equal "" "${AWS_SECRET_ACCESS_KEY:-}" "ambient secret key after profile selection"
+  assert_equal "" "${AWS_SESSION_TOKEN:-}" "ambient session token after profile selection"
+}
+
+test_deployment_credentials_preserve_ambient_credentials() {
+  aws() {
+    [[ "$*" == "configure list-profiles" ]] || return 2
+    printf 'default\n'
+  }
+
+  unset AWS_PROFILE
+  select_deployment_credentials netrias
+  assert_equal "" "${AWS_PROFILE:-}" "ambient deployment credentials"
 }
 
 test_supported_stages() {
@@ -100,6 +149,10 @@ test_backend_uses_contract_and_native_lock_file() {
 }
 
 test_supported_targets
+test_deployment_profile_names_follow_the_target
+test_deployment_credentials_use_existing_profile_without_target_profile
+test_deployment_credentials_use_target_profile
+test_deployment_credentials_preserve_ambient_credentials
 test_supported_stages
 test_configured_deployments_are_separate_from_stage_names
 test_state_keys_use_the_canonical_deployment_prefix

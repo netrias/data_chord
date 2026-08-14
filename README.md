@@ -96,12 +96,14 @@ Set `PERF_REMOTE_ROWS=50` to change the generated CSV size.
 ## AWS Hosting
 
 OpenTofu deploys the app to ECS Fargate behind an ALB and Cognito. It stores
-workflow data in S3. Operators use three commands:
+workflow data in S3. Configure local target access once, then use three normal
+commands:
 
 ```bash
-just plan <target> <stage> <profile>
-just deploy <target> <stage> <profile>
-just status <target> <stage> <profile>
+just setup <target> [source-profile]
+just plan <target> <stage>
+just deploy <target> <stage>
+just status <target> <stage>
 ```
 
 See [infra/README.md](infra/README.md) for target setup and BDF migration

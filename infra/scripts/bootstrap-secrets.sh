@@ -17,6 +17,7 @@ case "$MODE" in
 esac
 
 require_command aws
+select_deployment_credentials "$TARGET_NAME"
 require_deployer_identity "$TARGET_NAME"
 
 SECRET_NAME="$(netrias_api_key_secret_name_for "$STAGE_NAME")"
@@ -79,10 +80,11 @@ print(version_id)
 fi
 
 if [[ "$MODE" != "ensure" ]]; then
-  fail "Missing Secrets Manager secret: $SECRET_NAME"
+  fail "Missing Secrets Manager secret: $SECRET_NAME. Cause: the stage API key has not been prepared in this AWS account. Set NETRIAS_API_KEY and run '$0 $TARGET_NAME $STAGE_NAME ensure', then rerun the plan."
 fi
 
-[[ -n "${NETRIAS_API_KEY:-}" ]] || fail "Missing $SECRET_NAME. Set NETRIAS_API_KEY to create it."
+[[ -n "${NETRIAS_API_KEY:-}" ]] ||
+  fail "Missing $SECRET_NAME. Cause: ensure mode needs the desired API key value. Set NETRIAS_API_KEY, then rerun '$0 $TARGET_NAME $STAGE_NAME ensure'."
 
 CLIENT_REQUEST_TOKEN="$(secret_version_token create)"
 log "Creating Secrets Manager secret: $SECRET_NAME"

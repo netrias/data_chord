@@ -277,6 +277,63 @@ run "workflow_storage_uses_the_canonical_deployment_prefix" {
   }
 }
 
+run "customer_target_uses_its_contract_slug" {
+  command = plan
+
+  variables {
+    deployment_target = "government-customer"
+  }
+
+  assert {
+    condition     = local.deployment_prefix == "datachord/government-customer/qa"
+    error_message = "Any valid target contract slug must work without a hard-coded target allowlist."
+  }
+}
+
+run "govcloud_uses_the_current_aws_partition" {
+  command = plan
+
+  override_data {
+    target = data.aws_partition.current
+    values = {
+      partition = "aws-us-gov"
+    }
+  }
+
+  variables {
+    application_role_boundary_arn = "arn:aws-us-gov:iam::084828580051:policy/datachord-application-role-boundary"
+    aws_region                    = "us-gov-west-1"
+    deployment_target             = "government-customer"
+  }
+
+  assert {
+    condition = (
+      aws_iam_role.application_task.permissions_boundary == var.application_role_boundary_arn &&
+      aws_iam_role_policy_attachment.application_task_execution.policy_arn == "arn:aws-us-gov:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+    )
+    error_message = "IAM ARNs must use the active AWS partition."
+  }
+}
+
+run "permission_boundary_rejects_the_wrong_partition" {
+  command = plan
+
+  override_data {
+    target = data.aws_partition.current
+    values = {
+      partition = "aws-us-gov"
+    }
+  }
+
+  variables {
+    application_role_boundary_arn = "arn:aws:iam::084828580051:policy/datachord-application-role-boundary"
+  }
+
+  expect_failures = [
+    var.application_role_boundary_arn,
+  ]
+}
+
 run "runtime_and_entrypoint_use_the_application_network" {
   command = plan
 

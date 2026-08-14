@@ -68,9 +68,9 @@ For each AWS account:
 
 2. Copy the target outputs into the matching file in `infra/targets`.
 
-3. Configure AWS credentials that assume the output `deployer_role_arn`. The
-   deploy scripts reject a direct IAM user, a different role, or a different
-   account.
+3. Run `just setup <target> [source-profile]`. It creates the local
+   `datachord-<target>` profile and confirms that it assumes the output
+   `deployer_role_arn`. The source profile defaults to `default`.
 
 4. Add the target application values under `infra/env/<target>`.
 
@@ -109,15 +109,38 @@ public IP, but its security group accepts application traffic only from the ALB.
 The application network has no NAT gateway, private subnet, VPC endpoint, or
 database route.
 
-## Plan and deploy
+## Local AWS setup
 
-The normal operator interface has three commands. Pass the AWS profile
-explicitly:
+Run setup once on each operator machine:
 
 ```bash
-just plan bdf staging datachord-bdf
-just deploy bdf staging datachord-bdf
-just status bdf staging datachord-bdf
+just setup netrias
+# Or select another existing login or SSO profile:
+just setup netrias company-sso
+```
+
+Setup writes only `role_arn`, `source_profile`, and `region` to the local
+`datachord-<target>` AWS profile. It never writes credentials or tokens. It
+stops rather than overwrite a profile that has conflicting settings.
+
+Deployment commands use `datachord-<target>` when it exists. Otherwise, they
+keep an existing `AWS_PROFILE` or use ambient role credentials for CI, EC2, or
+OIDC environments. This prevents an unrelated local profile from overriding a
+target that has completed setup. Every path must still pass the exact account
+and deployer-role check.
+
+Setup verifies local role access. The plan remains the authoritative check for
+the state backend, stage secret, hosted zone, GitHub App secret, and other AWS
+dependencies.
+
+## Plan and deploy
+
+The normal operator interface has three commands:
+
+```bash
+just plan netrias staging
+just deploy netrias staging
+just status netrias staging
 ```
 
 `plan` creates and displays a saved plan under `build/plans`. It disables state
@@ -179,7 +202,8 @@ AWS_PROFILE=datachord-bdf NETRIAS_API_KEY='replace-with-key' \
 ```
 
 The secret helper is idempotent. Plan and deploy only verify the secret. They
-never write it.
+never write it. After local setup, the target profile name follows the
+`datachord-<target>` convention.
 
 ## State and IAM handoff safety
 
@@ -233,12 +257,19 @@ fi
 mkdir -m 700 "$migration_dir"
 source infra/scripts/lib.sh
 require_configured_deployment bdf "$stage"
+activate_aws_profile "$operator_profile"
+expected_account="$(target_value bdf expected_account_id)"
+identity="$(aws sts get-caller-identity --query '[Account,Arn]' --output text)"
+read -r account_id caller_arn <<<"$identity"
+if [[ "$account_id" != "$expected_account" ]]; then
+  fail "Privileged profile resolved to account '$account_id', not BDF account '$expected_account'. Current caller: $caller_arn"
+fi
 
 state_key="$(state_key_for bdf "$stage")"
 TF_DATA_DIR="$migration_dir/tofu-data"
 export TF_DATA_DIR
 
-AWS_PROFILE="$operator_profile" tofu -chdir=infra init \
+tofu -chdir=infra init \
   -backend-config="bucket=$(target_value bdf state_bucket_name)" \
   -backend-config="key=$state_key" \
   -backend-config="region=$(target_value bdf aws_region)" \
@@ -247,16 +278,16 @@ AWS_PROFILE="$operator_profile" tofu -chdir=infra init \
   -input=false \
   -reconfigure
 
-AWS_PROFILE="$operator_profile" tofu -chdir=infra state pull \
+tofu -chdir=infra state pull \
   >"$migration_dir/bdf-$stage-before.tfstate"
-AWS_PROFILE="$operator_profile" aws s3api list-object-versions \
+aws s3api list-object-versions \
   --bucket "$(target_value bdf state_bucket_name)" \
   --prefix "$state_key" \
   --query "Versions[?Key=='$state_key' && IsLatest].VersionId | [0]" \
   --output text >"$migration_dir/bdf-$stage-state-version.txt"
-image_tag="$(AWS_PROFILE="$operator_profile" tofu -chdir=infra output -raw deployed_image_tag)"
+image_tag="$(tofu -chdir=infra output -raw deployed_image_tag)"
 
-AWS_PROFILE="$operator_profile" tofu -chdir=infra plan \
+tofu -chdir=infra plan \
   -input=false \
   -out="$migration_dir/bdf-$stage.tfplan" \
   -var-file="$INFRA_DIR/env/bdf/common.tfvars" \
@@ -265,6 +296,7 @@ AWS_PROFILE="$operator_profile" tofu -chdir=infra plan \
   -var="aws_region=$(target_value bdf aws_region)" \
   -var="application_role_boundary_arn=$(target_value bdf application_role_boundary_arn)" \
   -var="application_role_path=$(target_value bdf application_role_path)" \
+  -var="deployment_target=bdf" \
   -var="environment=$stage" \
   -var="image_tag=$image_tag"
 
@@ -277,7 +309,7 @@ if [[ "$confirmation" != "apply" ]]; then
   exit 1
 fi
 
-AWS_PROFILE="$operator_profile" tofu -chdir=infra apply \
+tofu -chdir=infra apply \
   -input=false "$migration_dir/bdf-$stage.tfplan"
 
 printf '\nHandoff evidence: %s\nRetain this directory in approved protected storage through the rollback period.\n' "$migration_dir"
@@ -313,34 +345,43 @@ After the rollback period, set the profile to an approved identity that can
 manage the old root-path roles:
 
 ```bash
+set -Eeuo pipefail
 stage=staging
 old_task_definition='<recorded-task-definition-arn>'
 operator_profile='<approved-privileged-profile>'
 role_prefix="data-chord-$stage"
+source infra/scripts/lib.sh
+activate_aws_profile "$operator_profile"
+expected_account="$(target_value bdf expected_account_id)"
+identity="$(aws sts get-caller-identity --query '[Account,Arn]' --output text)"
+read -r account_id caller_arn <<<"$identity"
+if [[ "$account_id" != "$expected_account" ]]; then
+  fail "Privileged profile resolved to account '$account_id', not BDF account '$expected_account'. Current caller: $caller_arn"
+fi
 
-AWS_PROFILE="$operator_profile" aws ecs deregister-task-definition \
-  --region us-east-2 \
+aws ecs deregister-task-definition \
+  --region "$(target_value bdf aws_region)" \
   --task-definition "$old_task_definition"
 
-AWS_PROFILE="$operator_profile" aws iam delete-role-policy \
+aws iam delete-role-policy \
   --role-name "$role_prefix-codebuild" \
   --policy-name "$role_prefix-codebuild"
-AWS_PROFILE="$operator_profile" aws iam delete-role \
+aws iam delete-role \
   --role-name "$role_prefix-codebuild"
 
-AWS_PROFILE="$operator_profile" aws iam delete-role-policy \
+aws iam delete-role-policy \
   --role-name "$role_prefix-task" \
   --policy-name "$role_prefix-workflow-storage"
-AWS_PROFILE="$operator_profile" aws iam delete-role \
+aws iam delete-role \
   --role-name "$role_prefix-task"
 
-AWS_PROFILE="$operator_profile" aws iam delete-role-policy \
+aws iam delete-role-policy \
   --role-name "$role_prefix-task-exec" \
   --policy-name "$role_prefix-task-secrets"
-AWS_PROFILE="$operator_profile" aws iam detach-role-policy \
+aws iam detach-role-policy \
   --role-name "$role_prefix-task-exec" \
   --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-AWS_PROFILE="$operator_profile" aws iam delete-role \
+aws iam delete-role \
   --role-name "$role_prefix-task-exec"
 ```
 
@@ -375,6 +416,7 @@ jobs. The public infrastructure and JavaScript checks still run.
 ## Diagnostics
 
 The stack retains CloudWatch logs for the application and CodeBuild. Start with
-`just status <target> <stage> <profile>` when a deployment fails. The stack does
+`just status <target> <stage>` when a deployment fails. Deployment errors state
+the failed check, its likely cause, and the next operator action. The stack does
 not create alarms, email subscriptions, EventBridge alert rules, or ALB access
 logs.

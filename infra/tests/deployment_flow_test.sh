@@ -89,6 +89,10 @@ case "${1:-}" in
     fi
     ;;
   ls-remote)
+    if [[ "${MOCK_REMOTE_FAIL:-0}" == "1" ]]; then
+      printf 'Could not resolve host: github.com\n' >&2
+      exit 1
+    fi
     printf '%s\trefs/heads/test-branch\n' "$MOCK_COMMIT"
     ;;
   *)
@@ -103,8 +107,11 @@ cat >"$MOCK_BIN/aws" <<'MOCK_AWS'
 set -Eeuo pipefail
 
 case "${1:-} ${2:-}" in
+  "configure list-profiles")
+    printf 'default\nmock\n'
+    ;;
   "sts get-caller-identity")
-    printf '%s\tarn:aws:sts::%s:assumed-role/datachord-deployer/test\n' "$MOCK_ACCOUNT_ID" "$MOCK_ACCOUNT_ID"
+    printf '%s\tarn:%s:sts::%s:assumed-role/datachord-deployer/test\n' "$MOCK_ACCOUNT_ID" "${MOCK_PARTITION:-aws}" "$MOCK_ACCOUNT_ID"
     ;;
   "secretsmanager describe-secret")
     printf 'aws secret-check %s\n' "$*" >>"$MOCK_CALLS"
@@ -171,6 +178,10 @@ args="$*"
 case " $args " in
   *" init "*)
     printf 'tofu init %s\n' "$args" >>"$MOCK_CALLS"
+    if [[ "${MOCK_INIT_FAIL:-0}" == "1" ]]; then
+      printf 'AccessDenied: state bucket is not accessible\n' >&2
+      exit 1
+    fi
     ;;
   *" state list "*)
     printf 'tofu state-list %s\n' "$args" >>"$MOCK_CALLS"
@@ -238,11 +249,19 @@ case " $args " in
       [[ -z "${MOCK_RECONCILED_FILE:-}" ]] || touch "$MOCK_RECONCILED_FILE"
     else
       printf 'tofu full-apply %s\n' "$args" >>"$MOCK_CALLS"
+      if [[ "${MOCK_FULL_APPLY_FAIL:-0}" == "1" ]]; then
+        printf 'Error: state lock is already held\n' >&2
+        exit 1
+      fi
       touch "$MOCK_FULL_APPLIED"
     fi
     ;;
   *" plan "*)
     printf 'tofu plan %s\n' "$args" >>"$MOCK_CALLS"
+    if [[ "${MOCK_PLAN_FAIL:-0}" == "1" ]]; then
+      printf 'Error: a required hosted zone was not found\n' >&2
+      exit 1
+    fi
     for argument in "$@"; do
       if [[ "$argument" == -out=* ]]; then
         plan_path="${argument#-out=}"
@@ -457,6 +476,32 @@ run_dirty_deploy_fails() {
     fail_test "Deploy accepted a dirty worktree"
   fi
 
+  assert_call_absent "tofu init " "$calls_file"
+  assert_no_deploy_writes "$calls_file"
+}
+
+run_remote_failure_is_explained() {
+  local scenario_root="$TEST_ROOT/remote-failure"
+  local calls_file="$scenario_root/calls"
+  local output
+  mkdir -p "$scenario_root"
+  : >"$calls_file"
+
+  if output="$(
+    PATH="$MOCK_BIN:$PATH" \
+      AWS_PROFILE=mock \
+      MOCK_ACCOUNT_ID=945365518758 \
+      MOCK_CALLS="$calls_file" \
+      MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+      MOCK_REMOTE_FAIL=1 \
+      "$DEPLOY_SCRIPT" netrias staging deploy 2>&1
+  )"; then
+    fail_test "Deploy accepted an unreadable remote branch"
+  fi
+
+  [[ "$output" == *"Could not read origin/test-branch"* ]] || fail_test "Remote failure did not identify the failed operation"
+  [[ "$output" == *"Could not resolve host"* ]] || fail_test "Remote failure did not preserve the Git cause"
+  [[ "$output" == *"Check GitHub access and network connectivity"* ]] || fail_test "Remote failure did not provide a recovery action"
   assert_call_absent "tofu init " "$calls_file"
   assert_no_deploy_writes "$calls_file"
 }
@@ -715,7 +760,7 @@ run_public_command_contract() {
   local public_commands
 
   public_commands="$(awk -F: '/^[a-z][a-z-]*([^:]*)?:/ { sub(/ .*/, "", $1); print $1 }' "$JUSTFILE")"
-  for command in plan deploy status; do
+  for command in setup plan deploy status; do
     grep -Fxq "$command" <<<"$public_commands" || fail_test "Justfile is missing public command: $command"
   done
   for removed_command in prepare-stage-secret deploy-infra deploy-plan deploy-status deploy-logs deploy-build invite-user resend-user-invite; do
@@ -723,7 +768,134 @@ run_public_command_contract() {
       fail_test "Justfile still exposes extra deployment command: $removed_command"
     fi
   done
-  grep -Fq 'AWS_PROFILE={{profile}}' "$JUSTFILE" || fail_test "Public deployment commands do not take an explicit AWS profile"
+  grep -Fq 'setup target source_profile="default":' "$JUSTFILE" || fail_test "Setup does not accept a target and optional source profile"
+  grep -Fq 'plan target stage:' "$JUSTFILE" || fail_test "Plan still requires extra deployment arguments"
+  grep -Fq 'deploy target stage:' "$JUSTFILE" || fail_test "Deploy still requires extra deployment arguments"
+  grep -Fq 'status target stage:' "$JUSTFILE" || fail_test "Status still requires extra deployment arguments"
+  if grep -Fq 'AWS_PROFILE={{profile}}' "$JUSTFILE"; then
+    fail_test "Public deployment commands still require an explicit AWS profile"
+  fi
+
+  setup_command="$(just --dry-run --justfile "$JUSTFILE" setup netrias 'company sso; echo unsafe' 2>&1)"
+  JUST_COMMAND="$setup_command" python3 -c '
+import os
+import shlex
+
+actual = shlex.split(os.environ["JUST_COMMAND"])
+expected = ["infra/scripts/setup.sh", "netrias", "company sso; echo unsafe"]
+if actual != expected:
+    raise SystemExit(f"Setup arguments do not cross the shell safely: {actual!r}")
+'
+}
+
+run_backend_failure_is_explained() {
+  local calls_file="$TEST_ROOT/backend-failure-calls"
+  local output
+  : >"$calls_file"
+
+  if output="$(
+    PATH="$MOCK_BIN:$PATH" \
+      AWS_PROFILE=mock \
+      MOCK_ACCOUNT_ID=945365518758 \
+      MOCK_CALLS="$calls_file" \
+      MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+      MOCK_INIT_FAIL=1 \
+      DATA_CHORD_TF_DATA_DIR="$TEST_ROOT/backend-failure-tofu" \
+      "$DEPLOY_SCRIPT" netrias staging plan 2>&1
+  )"; then
+    fail_test "Plan accepted an inaccessible state backend"
+  fi
+
+  [[ "$output" == *"Could not initialize OpenTofu state"* ]] || fail_test "Backend failure did not identify the failed operation"
+  [[ "$output" == *"Cause:"* ]] || fail_test "Backend failure did not explain likely causes"
+  [[ "$output" == *"just setup netrias"* ]] || fail_test "Backend failure did not provide a recovery action"
+}
+
+run_plan_failure_is_explained() {
+  local calls_file="$TEST_ROOT/plan-failure-calls"
+  local output
+  : >"$calls_file"
+
+  if output="$(
+    PATH="$MOCK_BIN:$PATH" \
+      AWS_PROFILE=mock \
+      MOCK_ACCOUNT_ID=945365518758 \
+      MOCK_CALLS="$calls_file" \
+      MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+      MOCK_PLAN_FAIL=1 \
+      DATA_CHORD_TF_DATA_DIR="$TEST_ROOT/plan-failure-tofu" \
+      "$DEPLOY_SCRIPT" netrias staging plan 2>&1
+  )"; then
+    fail_test "Plan accepted an OpenTofu planning failure"
+  fi
+
+  [[ "$output" == *"Could not create the OpenTofu plan"* ]] || fail_test "Plan failure did not identify the failed operation"
+  [[ "$output" == *"Cause:"* ]] || fail_test "Plan failure did not explain likely causes"
+  [[ "$output" == *"Review the OpenTofu error above"* ]] || fail_test "Plan failure did not provide a recovery action"
+}
+
+run_apply_failure_is_explained() {
+  local scenario_root="$TEST_ROOT/apply-failure"
+  local calls_file="$scenario_root/calls"
+  local output
+  mkdir -p "$scenario_root"
+  : >"$calls_file"
+  touch "$scenario_root/build-ready"
+
+  if output="$(
+    PATH="$MOCK_BIN:$PATH" \
+      AWS_PROFILE=mock \
+      MOCK_ACCOUNT_ID=945365518758 \
+      MOCK_BUILD_READY="$scenario_root/build-ready" \
+      MOCK_CALLS="$calls_file" \
+      MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+      MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+      MOCK_FULL_APPLY_FAIL=1 \
+      MOCK_IMAGE_EXISTS=1 \
+      MOCK_STATE_ADDRESSES=aws_s3_bucket.workflow \
+      DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+      "$DEPLOY_SCRIPT" netrias staging deploy 2>&1
+  )"; then
+    fail_test "Deploy accepted an OpenTofu apply failure"
+  fi
+
+  [[ "$output" == *"Could not apply the saved OpenTofu plan"* ]] || fail_test "Apply failure did not identify the failed operation"
+  [[ "$output" == *"Cause: OpenTofu did not complete the saved plan"* ]] || fail_test "Apply failure overclaimed an AWS cause"
+  [[ "$output" == *"Run 'just status netrias staging'"* ]] || fail_test "Apply failure did not provide a safe recovery action"
+}
+
+run_customer_target_plan() {
+  local fixture_repo="$TEST_ROOT/customer-plan-repo"
+  local fixture_infra="$fixture_repo/infra"
+  local calls_file="$TEST_ROOT/customer-plan-calls"
+  mkdir -p "$fixture_infra/targets" "$fixture_infra/env/government-customer"
+  cp -R "$TEST_DIR/../scripts" "$fixture_infra/scripts"
+  sed \
+    -e 's/"target_slug": "netrias"/"target_slug": "government-customer"/' \
+    -e 's/arn:aws:/arn:aws-us-gov:/g' \
+    -e 's/us-east-2/us-gov-west-1/g' \
+    "$TEST_DIR/../targets/netrias.json" >"$fixture_infra/targets/government-customer.json"
+  cp "$TEST_DIR/../env/netrias/common.tfvars" "$fixture_infra/env/government-customer/common.tfvars"
+  cp "$TEST_DIR/../env/netrias/staging.tfvars" "$fixture_infra/env/government-customer/staging.tfvars"
+  : >"$calls_file"
+
+  # Given a new GovCloud customer contract and stage configuration,
+  # when the public plan script runs, then it uses the derived target, partition, and state key.
+  PATH="$MOCK_BIN:$PATH" \
+    AWS_PROFILE=mock \
+    DATA_CHORD_IMAGE_TAG=customer123456 \
+    MOCK_ACCOUNT_ID=945365518758 \
+    MOCK_CALLS="$calls_file" \
+    MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+    MOCK_PARTITION=aws-us-gov \
+    DATA_CHORD_TF_DATA_DIR="$TEST_ROOT/customer-plan-tofu" \
+    "$fixture_infra/scripts/deploy.sh" government-customer staging plan >/dev/null 2>&1
+
+  assert_call_contains "tofu init " "-backend-config=key=datachord/government-customer/staging/tofu.tfstate" "$calls_file"
+  assert_call_contains "tofu init " "-backend-config=region=us-gov-west-1" "$calls_file"
+  assert_call_contains "tofu plan " "-var=deployment_target=government-customer" "$calls_file"
+  assert_call_contains "tofu plan " "-var=aws_region=us-gov-west-1" "$calls_file"
+  assert_call_contains "tofu plan " "-var=image_tag=customer123456" "$calls_file"
 }
 
 run_removed_write_modes_are_rejected() {
@@ -801,6 +973,7 @@ run_empty_state_plan
 run_existing_state_plan
 run_plan_image_override
 run_dirty_deploy_fails
+run_remote_failure_is_explained
 run_output_url_contract
 run_status_is_read_only_and_reports_failures
 run_workflow_bucket_replacement_guard
@@ -810,6 +983,10 @@ run_retired_alb_log_bucket_can_be_removed
 run_unhealthy_target_fails_verification
 run_deploy_requires_application_url
 run_public_command_contract
+run_backend_failure_is_explained
+run_plan_failure_is_explained
+run_apply_failure_is_explained
+run_customer_target_plan
 run_removed_write_modes_are_rejected
 run_legacy_state_guard
 

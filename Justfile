@@ -65,17 +65,22 @@ infra-test:
 	tofu -chdir=infra test
 	bash infra/tests/deployment_contract_test.sh
 	bash infra/tests/deployment_flow_test.sh
+	bash infra/tests/deployment_setup_test.sh
 	bash infra/tests/secret_preparation_test.sh
 	bash -n infra/scripts/*.sh infra/tests/*.sh
 
+# Configure and verify the target-specific local AWS profile.
+setup target source_profile="default":
+	infra/scripts/setup.sh {{quote(target)}} {{quote(source_profile)}}
+
 # Save and show a read-only OpenTofu plan.
-plan target stage profile:
-	AWS_PROFILE={{profile}} infra/scripts/deploy.sh {{target}} {{stage}} plan
+plan target stage:
+	infra/scripts/deploy.sh {{quote(target)}} {{quote(stage)}} plan
 
 # Build the pushed commit, apply the displayed saved plan, and verify ECS health.
-deploy target stage profile:
-	AWS_PROFILE={{profile}} infra/scripts/deploy.sh {{target}} {{stage}} deploy
+deploy target stage:
+	infra/scripts/deploy.sh {{quote(target)}} {{quote(stage)}} deploy
 
 # Show the deployed application and ECS service status.
-status target stage profile:
-	AWS_PROFILE={{profile}} infra/scripts/deploy.sh {{target}} {{stage}} status
+status target stage:
+	infra/scripts/deploy.sh {{quote(target)}} {{quote(stage)}} status

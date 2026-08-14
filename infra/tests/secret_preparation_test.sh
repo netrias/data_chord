@@ -21,7 +21,14 @@ set -Eeuo pipefail
 [[ -z "${MOCK_AWS_STARTED_FILE:-}" ]] || touch "$MOCK_AWS_STARTED_FILE"
 
 case "${1:-} ${2:-}" in
+  "configure list-profiles")
+    printf '%s\n' "${MOCK_PROFILES:-default}"
+    ;;
   "sts get-caller-identity")
+    if [[ "${MOCK_REQUIRE_TARGET_PROFILE:-0}" == "1" ]]; then
+      [[ "${AWS_PROFILE:-}" == "datachord-netrias" ]] || exit 26
+      [[ -z "${AWS_ACCESS_KEY_ID:-}" ]] || exit 27
+    fi
     printf '945365518758\tarn:aws:sts::945365518758:assumed-role/datachord-deployer/test\n'
     ;;
   "secretsmanager describe-secret")
@@ -61,6 +68,8 @@ prepare_secret() {
 
   PATH="$MOCK_BIN:$PATH" \
     AWS_PROFILE=mock \
+    MOCK_PROFILES=$'default\ndatachord-netrias' \
+    MOCK_REQUIRE_TARGET_PROFILE=1 \
     MOCK_CALLS="$MOCK_CALLS" \
     MOCK_CURRENT_SECRET_VALUE="$current_value" \
     MOCK_CURRENT_VERSION_ID="$current_version_id" \
@@ -104,6 +113,9 @@ check_secret_value="must-not-appear-in-output"
 check_output="$(
   PATH="$MOCK_BIN:$PATH" \
     AWS_PROFILE=mock \
+    MOCK_PROFILES=$'default\ndatachord-netrias' \
+    MOCK_REQUIRE_TARGET_PROFILE=1 \
+    AWS_ACCESS_KEY_ID=stale-access-key \
     MOCK_CALLS="$MOCK_CALLS" \
     MOCK_SECRET_EXISTS=1 \
     NETRIAS_API_KEY="$check_secret_value" \
@@ -114,6 +126,8 @@ check_output="$(
 
 if PATH="$MOCK_BIN:$PATH" \
   AWS_PROFILE=mock \
+  MOCK_PROFILES=$'default\ndatachord-netrias' \
+  MOCK_REQUIRE_TARGET_PROFILE=1 \
   MOCK_CALLS="$MOCK_CALLS" \
   MOCK_SECRET_EXISTS=0 \
   NETRIAS_API_KEY=must-not-create-during-check \

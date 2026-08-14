@@ -20,6 +20,7 @@ export AWS_DEFAULT_REGION="$AWS_REGION_VALUE"
 require_command aws
 require_command git
 require_command tofu
+select_deployment_credentials "$TARGET_NAME"
 
 tofu_args=(
   "-var-file=$COMMON_TFVARS_FILE"
@@ -32,6 +33,7 @@ tofu_args=(
   "-var=environment=$STAGE_NAME"
 )
 PLAN_DIR=""
+REMOTE_BRANCH_ERROR=""
 
 git_branch() {
   git -C "$REPO_DIR" branch --show-current
@@ -48,28 +50,38 @@ git_image_tag() {
 remote_branch_matches_commit() {
   local branch="$1"
   local commit="$2"
-  local remote_commit
-  remote_commit="$(
-    git -C "$REPO_DIR" ls-remote origin "refs/heads/$branch" |
-      awk '{print $1}'
-  )"
+  local remote_commit remote_output
+
+  if ! remote_output="$(git -C "$REPO_DIR" ls-remote origin "refs/heads/$branch" 2>&1)"; then
+    REMOTE_BRANCH_ERROR="$remote_output"
+    return 2
+  fi
+  remote_commit="$(awk '{print $1}' <<<"$remote_output")"
   [[ "$remote_commit" == "$commit" ]]
 }
 
 ensure_deployable_git_state() {
-  local branch commit dirty_status
+  local branch commit dirty_status remote_status
   branch="$(git_branch)"
   commit="$(git_commit)"
   dirty_status="$(git -C "$REPO_DIR" status --porcelain)"
 
-  [[ -n "$branch" ]] || fail "Cannot deploy from a detached HEAD."
+  [[ -n "$branch" ]] ||
+    fail "Cannot deploy from a detached HEAD. Cause: CodeBuild needs a named remote branch for the exact source commit. Check out a named branch, push it, and rerun the command."
 
-  [[ -z "$dirty_status" ]] || fail "Working tree has uncommitted changes. Commit them before deploying."
+  [[ -z "$dirty_status" ]] ||
+    fail "Working tree has uncommitted changes. Cause: CodeBuild can build only a pushed commit, so local files would not match the proposed image. Review 'git status'. Commit and push the intended changes before deploy. For a read-only plan, DATA_CHORD_IMAGE_TAG may select an existing immutable image."
 
   # CodeBuild pulls from GitHub, so local-only commits would build a different
   # image than the one this script is about to deploy.
-  if ! remote_branch_matches_commit "$branch" "$commit"; then
-    fail "origin/$branch does not match local HEAD. Push branch '$branch' before deploying."
+  if remote_branch_matches_commit "$branch" "$commit"; then
+    :
+  else
+    remote_status=$?
+    if [[ "$remote_status" == "2" ]]; then
+      fail "Could not read origin/$branch. Git reported: $REMOTE_BRANCH_ERROR. Cause: GitHub authentication, repository access, or network connectivity failed. Check GitHub access and network connectivity, then rerun the command."
+    fi
+    fail "origin/$branch does not match local HEAD. Cause: the local commit is not the commit available to CodeBuild. Push branch '$branch', or update the local branch to match origin, then rerun the command."
   fi
 
   log "Deploy source: $branch @ ${commit:0:12}"
@@ -147,12 +159,14 @@ create_saved_plan() {
   local image_tag="$2"
   shift 2
 
-  tofu -chdir="$INFRA_DIR" plan \
+  if ! tofu -chdir="$INFRA_DIR" plan \
     -input=false \
     "${tofu_args[@]}" \
     "-var=image_tag=$image_tag" \
     "-out=$plan_file" \
-    "$@" >/dev/null
+    "$@" >/dev/null; then
+    fail "Could not create the OpenTofu plan for $TARGET_NAME/$STAGE_NAME. Cause: an AWS prerequisite, deployment input, provider call, or configuration check failed. Review the OpenTofu error above, correct that cause, and rerun the same command."
+  fi
   show_and_check_plan "$plan_file" || fail "OpenTofu plan failed a storage safety check."
   log "Saved plan: $plan_file"
 }
@@ -160,7 +174,9 @@ create_saved_plan() {
 apply_saved_plan() {
   local plan_file="$1"
 
-  tofu -chdir="$INFRA_DIR" apply -input=false "$plan_file"
+  if ! tofu -chdir="$INFRA_DIR" apply -input=false "$plan_file"; then
+    fail "Could not apply the saved OpenTofu plan for $TARGET_NAME/$STAGE_NAME. Cause: OpenTofu did not complete the saved plan. Some planned changes may already exist. Review the OpenTofu error above. Run 'just status $TARGET_NAME $STAGE_NAME', then run 'just plan $TARGET_NAME $STAGE_NAME' before retrying."
+  fi
 }
 
 apply_stack() {

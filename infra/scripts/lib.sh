@@ -16,16 +16,14 @@ fail() {
 
 require_target_name() {
   local target_name="${1:-}"
-  case "$target_name" in
-    bdf | netrias)
-      [[ -f "$(target_config_path "$target_name")" ]] || fail "Missing target contract: $(target_config_path "$target_name")"
-      [[ "$(target_value "$target_name" target_slug)" == "$target_name" ]] || fail "Target contract does not identify itself as '$target_name'."
-      printf '%s\n' "$target_name"
-      ;;
-    *)
-      fail "Choose a target: bdf or netrias."
-      ;;
-  esac
+
+  [[ "$target_name" =~ ^[a-z0-9][a-z0-9-]*$ ]] ||
+    fail "Target names may contain lowercase letters, numbers, and hyphens. Received: '${target_name:-<empty>}'."
+  [[ -f "$(target_config_path "$target_name")" ]] ||
+    fail "No target contract exists for '$target_name'. Cause: $(target_config_path "$target_name") is missing. Add that contract or choose an existing target."
+  [[ "$(target_value "$target_name" target_slug)" == "$target_name" ]] ||
+    fail "Target contract does not identify itself as '$target_name'. Cause: target_slug must match the contract file name."
+  printf '%s\n' "$target_name"
 }
 
 require_stage_name() {
@@ -47,12 +45,15 @@ require_configured_deployment() {
 
   common_file="$(common_tfvars_path "$target_name")"
   stage_file="$(stage_tfvars_path "$target_name" "$stage_name")"
-  [[ -f "$common_file" ]] || fail "Missing target application config: $common_file"
-  [[ -f "$stage_file" ]] || fail "Data Chord is not configured for $target_name/$stage_name."
+  [[ -f "$common_file" ]] ||
+    fail "Missing target application config: $common_file. Cause: the target has no shared application settings. Add the committed target config before planning."
+  [[ -f "$stage_file" ]] ||
+    fail "Data Chord is not configured for $target_name/$stage_name. Cause: $stage_file is missing. Add and commit the stage config before planning."
 }
 
 require_command() {
-  command -v "$1" >/dev/null 2>&1 || fail "Missing required command: $1"
+  command -v "$1" >/dev/null 2>&1 ||
+    fail "Missing required command: $1. Cause: it is not installed or is not on PATH. Install the project prerequisite, then rerun the command."
 }
 
 target_config_path() {
@@ -69,6 +70,46 @@ stage_tfvars_path() {
 
 netrias_api_key_secret_name_for() {
   printf 'data-chord/%s/netrias-api-key\n' "$1"
+}
+
+deployment_profile_name() {
+  printf 'datachord-%s\n' "$1"
+}
+
+activate_aws_profile() {
+  export AWS_PROFILE="$1"
+  unset AWS_ACCESS_KEY_ID
+  unset AWS_SECRET_ACCESS_KEY
+  unset AWS_SESSION_TOKEN
+  unset AWS_SECURITY_TOKEN
+  unset AWS_WEB_IDENTITY_TOKEN_FILE
+  unset AWS_ROLE_ARN
+  unset AWS_ROLE_SESSION_NAME
+  unset AWS_CONTAINER_CREDENTIALS_FULL_URI
+  unset AWS_CONTAINER_CREDENTIALS_RELATIVE_URI
+}
+
+select_deployment_credentials() {
+  local target_name="$1"
+  local target_profile profiles
+
+  target_profile="$(deployment_profile_name "$target_name")"
+  if ! profiles="$(aws configure list-profiles 2>&1)"; then
+    fail "Could not read local AWS profiles. AWS reported: $profiles. Cause: the AWS configuration is unreadable. Check AWS_CONFIG_FILE and file permissions."
+  fi
+
+  if grep -Fxq -- "$target_profile" <<<"$profiles"; then
+    activate_aws_profile "$target_profile"
+    log "Using target AWS profile: $AWS_PROFILE"
+    return 0
+  fi
+
+  if [[ -n "${AWS_PROFILE:-}" ]]; then
+    log "Target profile '$target_profile' is not configured. Using existing AWS profile: $AWS_PROFILE"
+    return 0
+  fi
+
+  log "No AWS profile is selected. Using ambient AWS credentials. For local setup, run: just setup $target_name"
 }
 
 target_value() {
@@ -98,17 +139,25 @@ state_key_for() {
 
 require_deployer_identity() {
   local target_name="$1"
-  local expected_account deployer_role_arn deployer_role_name identity account_id caller_arn
+  local profile_name="${2:-}"
+  local expected_account deployer_role_arn deployer_role_name deployer_partition identity account_id caller_arn
+  local identity_args=(sts get-caller-identity --query '[Account,Arn]' --output text)
 
   expected_account="$(target_value "$target_name" expected_account_id)"
   deployer_role_arn="$(target_value "$target_name" deployer_role_arn)"
   deployer_role_name="${deployer_role_arn##*/}"
-  identity="$(aws sts get-caller-identity --query '[Account,Arn]' --output text)" || fail "Could not resolve the AWS deployment identity."
+  deployer_partition="${deployer_role_arn#arn:}"
+  deployer_partition="${deployer_partition%%:*}"
+  [[ -z "$profile_name" ]] || identity_args+=(--profile "$profile_name")
+  if ! identity="$(aws "${identity_args[@]}" 2>&1)"; then
+    fail "Could not resolve the AWS deployment identity. AWS reported: $identity. Cause: the selected credentials are missing, expired, or cannot reach STS. For local setup, run 'just setup $target_name'. If AWS_PROFILE is set, unset it or select the intended profile."
+  fi
   read -r account_id caller_arn <<<"$identity"
 
-  [[ "$account_id" == "$expected_account" ]] || fail "AWS credentials resolve to account '$account_id', not target account '$expected_account'."
-  [[ "$caller_arn" == "arn:aws:sts::$expected_account:assumed-role/$deployer_role_name/"* ]] ||
-    fail "AWS credentials must assume '$deployer_role_arn'. Current caller is '$caller_arn'."
+  [[ "$account_id" == "$expected_account" ]] ||
+    fail "AWS credentials resolve to account '$account_id', not target account '$expected_account'. Cause: the wrong AWS credentials were selected. Run 'just setup $target_name' or set AWS_PROFILE to the intended deployment profile."
+  [[ "$caller_arn" == "arn:$deployer_partition:sts::$expected_account:assumed-role/$deployer_role_name/"* ]] ||
+    fail "AWS credentials must assume '$deployer_role_arn'. Current caller is '$caller_arn'. Cause: the credentials use a direct user or another role. Run 'just setup $target_name' or set AWS_PROFILE to a profile that assumes the deployer role."
 }
 
 init_tofu() {
@@ -122,14 +171,16 @@ init_tofu() {
   export TF_DATA_DIR="${DATA_CHORD_TF_DATA_DIR:-$INFRA_DIR/.terraform-data/$target_name/$stage_name}"
 
   log "Initializing OpenTofu backend for $target_name/$stage_name at s3://$bucket/$state_key"
-  tofu -chdir="$INFRA_DIR" init \
+  if ! tofu -chdir="$INFRA_DIR" init \
     -backend-config="bucket=$bucket" \
     -backend-config="key=$state_key" \
     -backend-config="region=$region" \
     -backend-config="encrypt=true" \
     -backend-config="use_lockfile=true" \
     -input=false \
-    -reconfigure
+    -reconfigure; then
+    fail "Could not initialize OpenTofu state for $target_name/$stage_name. Cause: the state bucket may be missing, inaccessible, or configured in another account or region. Review the OpenTofu error above, confirm the foundation deployment, and run 'just setup $target_name' to verify local access."
+  fi
 }
 
 tofu_output() {
