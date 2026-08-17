@@ -24,6 +24,16 @@ assert_call_contains() {
   [[ "$call" == *"$expected"* ]] || fail_test "Call '$call_prefix' does not contain '$expected': $call"
 }
 
+assert_call_not_contains() {
+  local call_prefix="$1"
+  local unexpected="$2"
+  local calls_file="$3"
+  local call
+
+  call="$(grep -m 1 "^${call_prefix}" "$calls_file")" || fail_test "Missing call: $call_prefix"
+  [[ "$call" != *"$unexpected"* ]] || fail_test "Call '$call_prefix' contains '$unexpected': $call"
+}
+
 assert_any_call_contains() {
   local call_prefix="$1"
   local expected="$2"
@@ -205,9 +215,6 @@ case " $args " in
         ;;
       reference_data_table)
         printf '"data-chord-staging-reference-data"\n'
-        ;;
-      reference_data_importer_role_arn)
-        printf '"arn:aws:iam::945365518758:role/application/data-chord-staging-reference-data-importer"\n'
         ;;
       ecs_cluster_name)
         [[ -f "$MOCK_FULL_APPLIED" ]] || exit 1
@@ -518,7 +525,7 @@ run_reference_prepare_requires_confirmation() {
     fail_test "Reference-data preparation ignored a rejected plan"
   fi
 
-  assert_call_contains "tofu plan " "-var=enable_reference_data_importer=true" "$calls_file"
+  assert_call_contains "tofu plan " "-target=aws_dynamodb_table.reference_data" "$calls_file"
   assert_call_absent "tofu full-apply " "$calls_file"
 }
 
@@ -639,6 +646,36 @@ run_workflow_bucket_replacement_guard() {
   fi
 
   [[ "$output" == *"durable workflow bucket"* ]] || fail_test "Workflow bucket guard did not explain the failure"
+  assert_call_absent "tofu reconcile-apply " "$calls_file"
+  assert_call_absent "tofu full-apply " "$calls_file"
+}
+
+run_reference_data_table_replacement_guard() {
+  local scenario_root="$TEST_ROOT/reference-data-table-guard"
+  local calls_file="$scenario_root/calls"
+  local output
+  mkdir -p "$scenario_root"
+  : >"$calls_file"
+
+  # Given: a plan would replace the table that owns the standards.
+  # When: the read-only plan command checks the saved plan.
+  if output="$(
+    PATH="$MOCK_BIN:$PATH" \
+      AWS_PROFILE=mock \
+      MOCK_ACCOUNT_ID=945365518758 \
+      MOCK_BUILD_READY="$scenario_root/build-ready" \
+      MOCK_CALLS="$calls_file" \
+      MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+      MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+      MOCK_PLAN_JSON='{"resource_changes":[{"address":"aws_dynamodb_table.reference_data","change":{"actions":["delete","create"]}}]}' \
+      DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+      "$DEPLOY_SCRIPT" netrias staging plan 2>&1
+  )"; then
+    fail_test "Plan accepted reference-data table replacement"
+  fi
+
+  # Then: the plan stops before any apply and explains the durable-data risk.
+  [[ "$output" == *"durable reference-data table"* ]] || fail_test "Reference-data table guard did not explain the failure"
   assert_call_absent "tofu reconcile-apply " "$calls_file"
   assert_call_absent "tofu full-apply " "$calls_file"
 }
@@ -855,6 +892,209 @@ run_legacy_state_guard() {
   assert_call_contains "tofu plan " "-var=environment=staging" "$calls_file"
 }
 
+write_external_contract() {
+  local contract_file="$1"
+  local application_commit="$2"
+  local repository_url="${3:-https://github.com/netrias/data_chord-deploy.git}"
+
+  cat >"$contract_file" <<JSON
+{
+  "application_commit": "$application_commit",
+  "application_repository_url": "$repository_url",
+  "application_role_boundary_arn": "arn:aws:iam::945365518758:policy/datachord-application-role-boundary",
+  "application_role_path": "/application/",
+  "aws_partition": "aws",
+  "aws_region": "us-east-2",
+  "deployer_role_arn": "arn:aws:iam::945365518758:role/foundation/datachord-deployer",
+  "domain_label": "data-chord-staging",
+  "expected_account_id": "945365518758",
+  "github_app_secret_name": "data-chord/build/github-app",
+  "hosted_zone_name": "apps.netrias.com",
+  "netrias_api_key_secret_name": "data-chord/staging/netrias-api-key",
+  "stage": "staging",
+  "state_bucket_name": "explicit-shared-state-bucket",
+  "state_key": "datachord/netrias/staging/tofu.tfstate",
+  "target_slug": "netrias"
+}
+JSON
+}
+
+run_external_contract_plan() {
+  local scenario_root="$TEST_ROOT/external-contract-plan"
+  local calls_file="$scenario_root/calls"
+  local contract_file="$scenario_root/contract.json"
+  mkdir -p "$scenario_root"
+  : >"$calls_file"
+  write_external_contract "$contract_file" 0123456789abcdef0123456789abcdef01234567
+
+  # Given: foundation pins this clean checkout and a non-default GitHub repository.
+  # When: the application creates a read-only plan from the contract.
+  PATH="$MOCK_BIN:$PATH" \
+    AWS_PROFILE=mock \
+    DATA_CHORD_DEPLOYMENT_CONTRACT="$contract_file" \
+    DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+    MOCK_ACCOUNT_ID=945365518758 \
+    MOCK_BUILD_READY="$scenario_root/build-ready" \
+    MOCK_CALLS="$calls_file" \
+    MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+    MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+    "$DEPLOY_SCRIPT" netrias staging plan >/dev/null 2>&1
+
+  # Then: only contract values reach the backend and OpenTofu plan.
+  assert_call_contains "tofu init " "-backend-config=bucket=explicit-shared-state-bucket" "$calls_file"
+  assert_call_contains "tofu init " "-backend-config=key=datachord/netrias/staging/tofu.tfstate" "$calls_file"
+  assert_call_contains "tofu plan " "-var=hosted_zone_name=apps.netrias.com" "$calls_file"
+  assert_call_contains "tofu plan " "-var=domain_label=data-chord-staging" "$calls_file"
+  assert_call_contains "tofu plan " "-var=application_repository_url=https://github.com/netrias/data_chord-deploy.git" "$calls_file"
+  assert_call_contains "tofu plan " "-var=image_tag=0123456789ab" "$calls_file"
+  assert_call_not_contains "tofu plan " "-var-file=" "$calls_file"
+  assert_call_not_contains "tofu plan " "netrias_api_key_secret_name" "$calls_file"
+}
+
+run_external_contract_commit_mismatch_fails() {
+  local scenario_root="$TEST_ROOT/external-contract-commit-mismatch"
+  local calls_file="$scenario_root/calls"
+  local contract_file="$scenario_root/contract.json"
+  mkdir -p "$scenario_root"
+  : >"$calls_file"
+  write_external_contract "$contract_file" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
+  # Given: foundation pins a different application commit.
+  # When: the application tries to create a plan.
+  if PATH="$MOCK_BIN:$PATH" \
+    AWS_PROFILE=mock \
+    DATA_CHORD_DEPLOYMENT_CONTRACT="$contract_file" \
+    DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+    MOCK_ACCOUNT_ID=945365518758 \
+    MOCK_BUILD_READY="$scenario_root/build-ready" \
+    MOCK_CALLS="$calls_file" \
+    MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+    MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+    "$DEPLOY_SCRIPT" netrias staging plan >/dev/null 2>&1; then
+    fail_test "External plan accepted a commit other than the pinned commit"
+  fi
+
+  # Then: the command stops before selecting OpenTofu state.
+  assert_call_absent "tofu init " "$calls_file"
+}
+
+run_external_contract_dirty_checkout_fails() {
+  local scenario_root="$TEST_ROOT/external-contract-dirty-checkout"
+  local calls_file="$scenario_root/calls"
+  local contract_file="$scenario_root/contract.json"
+  mkdir -p "$scenario_root"
+  : >"$calls_file"
+  write_external_contract "$contract_file" 0123456789abcdef0123456789abcdef01234567
+
+  # Given: foundation pins the commit but the checkout contains local edits.
+  # When: the application tries to create a plan.
+  if PATH="$MOCK_BIN:$PATH" \
+    AWS_PROFILE=mock \
+    DATA_CHORD_DEPLOYMENT_CONTRACT="$contract_file" \
+    DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+    MOCK_ACCOUNT_ID=945365518758 \
+    MOCK_BUILD_READY="$scenario_root/build-ready" \
+    MOCK_CALLS="$calls_file" \
+    MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+    MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+    MOCK_GIT_DIRTY=1 \
+    "$DEPLOY_SCRIPT" netrias staging plan >/dev/null 2>&1; then
+    fail_test "External plan accepted a dirty checkout"
+  fi
+
+  # Then: the command stops before selecting OpenTofu state.
+  assert_call_absent "tofu init " "$calls_file"
+}
+
+run_external_reference_prepare_requires_confirmation() {
+  local scenario_root="$TEST_ROOT/external-reference-confirmation"
+  local calls_file="$scenario_root/calls"
+  local contract_file="$scenario_root/contract.json"
+  mkdir -p "$scenario_root"
+  : >"$calls_file"
+  write_external_contract "$contract_file" 0123456789abcdef0123456789abcdef01234567
+
+  # Given: an external contract requests the first reference-data write.
+  # When: the operator rejects the displayed plan.
+  if printf 'no\n' | PATH="$MOCK_BIN:$PATH" \
+    AWS_PROFILE=mock \
+    DATA_CHORD_DEPLOYMENT_CONTRACT="$contract_file" \
+    DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+    MOCK_ACCOUNT_ID=945365518758 \
+    MOCK_BUILD_READY="$scenario_root/build-ready" \
+    MOCK_CALLS="$calls_file" \
+    MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+    MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+    "$DEPLOY_SCRIPT" netrias staging prepare-reference-data >/dev/null 2>&1; then
+    fail_test "External reference-data preparation ignored a rejected plan"
+  fi
+
+  # Then: the table plan exists but no plan is applied.
+  assert_call_contains "tofu plan " "-target=aws_dynamodb_table.reference_data" "$calls_file"
+  assert_call_absent "tofu full-apply " "$calls_file"
+}
+
+run_external_build_reconciliation_requires_confirmation() {
+  local scenario_root="$TEST_ROOT/external-build-confirmation"
+  local calls_file="$scenario_root/calls"
+  local contract_file="$scenario_root/contract.json"
+  mkdir -p "$scenario_root"
+  : >"$calls_file"
+  write_external_contract "$contract_file" 0123456789abcdef0123456789abcdef01234567
+
+  # Given: reference data is ready for an external application deployment.
+  # When: the operator rejects the displayed build prerequisite plan.
+  if printf 'no\n' | PATH="$MOCK_BIN:$PATH" \
+    AWS_PROFILE=mock \
+    DATA_CHORD_DEPLOYMENT_CONTRACT="$contract_file" \
+    DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+    MOCK_ACCOUNT_ID=945365518758 \
+    MOCK_BUILD_READY="$scenario_root/build-ready" \
+    MOCK_CALLS="$calls_file" \
+    MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+    MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+    MOCK_REFERENCE_READY=1 \
+    "$DEPLOY_SCRIPT" netrias staging deploy >/dev/null 2>&1; then
+    fail_test "External deployment ignored a rejected build prerequisite plan"
+  fi
+
+  # Then: the build prerequisite plan exists but no plan is applied.
+  assert_call_contains "tofu plan " "-target=aws_codebuild_project.app_image" "$calls_file"
+  assert_call_absent "tofu reconcile-apply " "$calls_file"
+  assert_call_absent "tofu full-apply " "$calls_file"
+}
+
+run_external_application_requires_confirmation() {
+  local scenario_root="$TEST_ROOT/external-application-confirmation"
+  local calls_file="$scenario_root/calls"
+  local contract_file="$scenario_root/contract.json"
+  mkdir -p "$scenario_root"
+  : >"$calls_file"
+  write_external_contract "$contract_file" 0123456789abcdef0123456789abcdef01234567
+
+  # Given: reference data and the immutable image are ready for deployment.
+  # When: the operator accepts the build plan but rejects the application plan.
+  if printf 'yes\nno\n' | PATH="$MOCK_BIN:$PATH" \
+    AWS_PROFILE=mock \
+    DATA_CHORD_DEPLOYMENT_CONTRACT="$contract_file" \
+    DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+    MOCK_ACCOUNT_ID=945365518758 \
+    MOCK_BUILD_READY="$scenario_root/build-ready" \
+    MOCK_CALLS="$calls_file" \
+    MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+    MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+    MOCK_IMAGE_EXISTS=1 \
+    MOCK_REFERENCE_READY=1 \
+    "$DEPLOY_SCRIPT" netrias staging deploy >/dev/null 2>&1; then
+    fail_test "External deployment ignored a rejected application plan"
+  fi
+
+  # Then: the prerequisite is applied, but the application plan is not.
+  assert_call_contains "tofu reconcile-apply " "build-resources.tfplan" "$calls_file"
+  assert_any_call_contains "tofu show " "final.tfplan" "$calls_file"
+  assert_call_absent "tofu full-apply " "$calls_file"
+}
+
 run_first_deploy
 run_failed_build_reconciliation
 run_retry_after_image_build
@@ -867,6 +1107,7 @@ run_reference_prepare_requires_confirmation
 run_output_url_contract
 run_status_is_read_only_and_reports_failures
 run_workflow_bucket_replacement_guard
+run_reference_data_table_replacement_guard
 run_alb_log_bucket_retirement_guard
 run_alb_logging_must_already_be_disabled
 run_retired_alb_log_bucket_can_be_removed
@@ -875,5 +1116,11 @@ run_deploy_requires_application_url
 run_public_command_contract
 run_removed_write_modes_are_rejected
 run_legacy_state_guard
+run_external_contract_plan
+run_external_contract_commit_mismatch_fails
+run_external_contract_dirty_checkout_fails
+run_external_reference_prepare_requires_confirmation
+run_external_build_reconciliation_requires_confirmation
+run_external_application_requires_confirmation
 
 printf 'Deployment flow tests passed.\n'

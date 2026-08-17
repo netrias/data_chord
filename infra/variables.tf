@@ -84,12 +84,6 @@ variable "agentic_workers" {
   }
 }
 
-variable "enable_reference_data_importer" {
-  description = "Create the temporary reference-data migration role. Normal deploys remove it."
-  type        = bool
-  default     = false
-}
-
 variable "container_cpu" {
   description = "Fargate task CPU units."
   type        = number
@@ -106,6 +100,17 @@ variable "github_app_secret_name" {
   description = "Secrets Manager name for the read-only GitHub App build credential."
   type        = string
   default     = "data-chord/build/github-app"
+}
+
+variable "application_repository_url" {
+  description = "HTTPS Git repository that CodeBuild checks out."
+  type        = string
+  default     = "https://github.com/netrias/data_chord.git"
+
+  validation {
+    condition     = can(regex("^https://github\\.com/[^/]+/[^/]+\\.git$", var.application_repository_url))
+    error_message = "application_repository_url must be an HTTPS GitHub repository URL ending in .git."
+  }
 }
 
 variable "image_tag" {

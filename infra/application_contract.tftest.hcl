@@ -166,10 +166,9 @@ run "reference_data_has_a_dedicated_durable_table" {
         "dynamodb:DescribeTable",
         "dynamodb:Query",
       ]) &&
-      length(aws_iam_role.reference_data_importer) == 0 &&
       output.reference_data_table == aws_dynamodb_table.reference_data.name
     )
-    error_message = "Reference data must use the dedicated table, read-only runtime access, and no permanent importer."
+    error_message = "Reference data must use the dedicated table and read-only runtime access."
   }
 }
 
@@ -203,6 +202,19 @@ run "codebuild_uses_public_source_and_read_only_dependency_credential" {
       ])
     )
     error_message = "CodeBuild must read only the configured GitHub App credential."
+  }
+}
+
+run "codebuild_uses_the_configured_github_repository" {
+  command = plan
+
+  variables {
+    application_repository_url = "https://github.com/netrias/data_chord-deploy.git"
+  }
+
+  assert {
+    condition     = aws_codebuild_project.app_image.source[0].location == var.application_repository_url
+    error_message = "CodeBuild must use the GitHub repository selected by the deployment contract."
   }
 }
 

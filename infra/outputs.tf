@@ -13,11 +13,6 @@ output "reference_data_table" {
   value       = aws_dynamodb_table.reference_data.name
 }
 
-output "reference_data_importer_role_arn" {
-  description = "Role used only by the one-time reference-data importer."
-  value       = try(aws_iam_role.reference_data_importer[0].arn, null)
-}
-
 output "ecr_repository_url" {
   description = "ECR repository URI for the app image."
   value       = aws_ecr_repository.app.repository_url

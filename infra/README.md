@@ -116,7 +116,7 @@ database route.
 The first release that removes the old service has one required gate. Keep the
 old application running while you complete these steps:
 
-1. Create only the DynamoDB table and importer role:
+1. Create only the DynamoDB table:
 
    ```bash
    infra/scripts/deploy.sh bdf staging prepare-reference-data
@@ -131,8 +131,8 @@ old application running while you complete these steps:
      --output /approved/location/reference-data.json
    ```
 
-3. Assume the `reference_data_importer_role_arn` output. Import the same file
-   into each target table:
+3. Use the verified deployment-role credentials. Import the same file into each
+   target table:
 
    ```bash
    uv run python scripts/reference_data.py import \
@@ -142,8 +142,12 @@ old application running while you complete these steps:
    ```
 
 4. Run the normal deployment. It loads every published model and checks the
-   complete catalog marker before the build. The final apply removes the
-   temporary importer role.
+   complete catalog marker before the build.
+
+When the foundation repository supplies `DATA_CHORD_DEPLOYMENT_CONTRACT`, run
+the same prepare, import, verify, and deploy sequence with the commit and AWS
+credentials selected by that contract. The normal deploy does not create an
+empty table or skip the data gate.
 
 The new application has no fallback to the old service.
 

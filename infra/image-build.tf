@@ -134,7 +134,7 @@ resource "aws_codebuild_project" "app_image" {
 
   source {
     type      = "GITHUB"
-    location  = "https://github.com/netrias/data_chord.git"
+    location  = var.application_repository_url
     buildspec = "infra/buildspec.yml"
   }
 

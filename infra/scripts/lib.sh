@@ -16,6 +16,13 @@ fail() {
 
 require_target_name() {
   local target_name="${1:-}"
+  if using_external_contract; then
+    [[ -n "$target_name" ]] || fail "A target name is required."
+    [[ "$(contract_value target_slug)" == "$target_name" ]] ||
+      fail "Deployment contract does not select target '$target_name'."
+    printf '%s\n' "$target_name"
+    return 0
+  fi
   case "$target_name" in
     bdf | netrias)
       [[ -f "$(target_config_path "$target_name")" ]] || fail "Missing target contract: $(target_config_path "$target_name")"
@@ -45,6 +52,13 @@ require_configured_deployment() {
   local stage_name="$2"
   local common_file stage_file
 
+  if using_external_contract; then
+    python3 "$SCRIPT_DIR/deployment_contract.py" validate \
+      "$DATA_CHORD_DEPLOYMENT_CONTRACT" "$target_name" "$stage_name" ||
+      fail "Invalid external deployment contract."
+    return 0
+  fi
+
   common_file="$(common_tfvars_path "$target_name")"
   stage_file="$(stage_tfvars_path "$target_name" "$stage_name")"
   [[ -f "$common_file" ]] || fail "Missing target application config: $common_file"
@@ -56,7 +70,20 @@ require_command() {
 }
 
 target_config_path() {
+  if using_external_contract; then
+    printf '%s\n' "$DATA_CHORD_DEPLOYMENT_CONTRACT"
+    return 0
+  fi
   printf '%s/targets/%s.json\n' "$INFRA_DIR" "$1"
+}
+
+using_external_contract() {
+  [[ -n "${DATA_CHORD_DEPLOYMENT_CONTRACT:-}" ]]
+}
+
+contract_value() {
+  python3 "$SCRIPT_DIR/deployment_contract.py" get \
+    "$DATA_CHORD_DEPLOYMENT_CONTRACT" "$1"
 }
 
 common_tfvars_path() {
@@ -68,12 +95,21 @@ stage_tfvars_path() {
 }
 
 netrias_api_key_secret_name_for() {
-  printf 'data-chord/%s/netrias-api-key\n' "$1"
+  if using_external_contract; then
+    contract_value netrias_api_key_secret_name
+  else
+    printf 'data-chord/%s/netrias-api-key\n' "$1"
+  fi
 }
 
 target_value() {
   local target_name="$1"
   local key="$2"
+
+  if using_external_contract; then
+    contract_value "$key"
+    return 0
+  fi
 
   python3 - "$(target_config_path "$target_name")" "$key" <<'PY'
 import json
@@ -89,7 +125,9 @@ state_key_for() {
   local target_name="$1"
   local stage_name="$2"
 
-  if [[ "$target_name" == "bdf" && "$stage_name" == "prod" ]]; then
+  if using_external_contract; then
+    contract_value state_key
+  elif [[ "$target_name" == "bdf" && "$stage_name" == "prod" ]]; then
     printf 'data-chord/%s/tofu.tfstate\n' "$stage_name"
   else
     printf 'datachord/%s/%s/tofu.tfstate\n' "$target_name" "$stage_name"
