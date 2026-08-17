@@ -73,12 +73,17 @@ Before the first plan, the environment owner must:
    JSON value must contain `app_id`, `installation_id`, and `private_key` for a
    read-only GitHub App that can read `netrias/data_chord`.
 
-4. Give the selected AWS profile permission to assume the exact
+4. In the AWS account and Region named by the environment file, create and
+   authorize an AWS CodeConnections connection to GitHub. Register it as that
+   Region's default GitHub source credential for CodeBuild. The environment
+   owner controls this connection. The environment JSON does not store its ARN.
+
+5. Give the selected AWS profile permission to assume the exact
    `deployer_role_arn`.
 
-5. Add the environment JSON to the deployment branch.
+6. Add the environment JSON to the deployment branch.
 
-6. Push the exact deployment commit. The commands reject local-only commits
+7. Push the exact deployment commit. The commands reject local-only commits
    and a dirty working tree.
 
 ## Two commands
@@ -140,6 +145,9 @@ progress. Inspect the failure and run `plan` again before a retry.
   GovCloud does not provide this action. A GovCloud deployment branch must
   replace that application authentication design before it can plan. The
   foundation repository already supports the `aws-us-gov` ARN partition.
+- The image build uses AWS CodeConnections. AWS provides CodeConnections in
+  GovCloud East, but not GovCloud West. A `us-gov-west-1` deployment branch
+  must replace this source connection design.
 - The environment owner controls the AWS profile, DNS delegation, GitHub App,
   and any controlled CI runner. The two commands work the same on a workstation
   or in CI.
