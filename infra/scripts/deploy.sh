@@ -10,8 +10,6 @@ TARGET_NAME="$(require_target_name "${1:-}")"
 STAGE_NAME="$(require_stage_name "${2:-}")"
 require_configured_deployment "$TARGET_NAME" "$STAGE_NAME"
 MODE="${3:-deploy}"
-COMMON_TFVARS_FILE="$(common_tfvars_path "$TARGET_NAME")"
-STAGE_TFVARS_FILE="$(stage_tfvars_path "$TARGET_NAME" "$STAGE_NAME")"
 
 AWS_REGION_VALUE="$(target_value "$TARGET_NAME" aws_region)"
 export AWS_REGION="$AWS_REGION_VALUE"
@@ -22,8 +20,6 @@ require_command git
 require_command tofu
 
 tofu_args=(
-  "-var-file=$COMMON_TFVARS_FILE"
-  "-var-file=$STAGE_TFVARS_FILE"
   "-var=expected_account_id=$(target_value "$TARGET_NAME" expected_account_id)"
   "-var=aws_region=$(target_value "$TARGET_NAME" aws_region)"
   "-var=application_role_boundary_arn=$(target_value "$TARGET_NAME" application_role_boundary_arn)"
@@ -31,6 +27,21 @@ tofu_args=(
   "-var=deployment_target=$TARGET_NAME"
   "-var=environment=$STAGE_NAME"
 )
+if using_external_contract; then
+  tofu_args+=(
+    "-var=application_repository_url=$(contract_value application_repository_url)"
+    "-var=domain_label=$(contract_value domain_label)"
+    "-var=github_app_secret_name=$(contract_value github_app_secret_name)"
+    "-var=hosted_zone_name=$(contract_value hosted_zone_name)"
+    "-var=netrias_api_key_secret_name=$(contract_value netrias_api_key_secret_name)"
+  )
+else
+  tofu_args=(
+    "-var-file=$(common_tfvars_path "$TARGET_NAME")"
+    "-var-file=$(stage_tfvars_path "$TARGET_NAME" "$STAGE_NAME")"
+    "${tofu_args[@]}"
+  )
+fi
 PLAN_DIR=""
 
 git_branch() {
@@ -62,9 +73,18 @@ ensure_deployable_git_state() {
   commit="$(git_commit)"
   dirty_status="$(git -C "$REPO_DIR" status --porcelain)"
 
-  [[ -n "$branch" ]] || fail "Cannot deploy from a detached HEAD."
-
   [[ -z "$dirty_status" ]] || fail "Working tree has uncommitted changes. Commit them before deploying."
+
+  if using_external_contract; then
+    local expected_commit
+    expected_commit="$(contract_value application_commit)"
+    [[ "$commit" == "$expected_commit" ]] ||
+      fail "DataChord checkout is '$commit', not pinned commit '$expected_commit'."
+    log "Deploy source: pinned commit @ ${commit:0:12}"
+    return 0
+  fi
+
+  [[ -n "$branch" ]] || fail "Cannot deploy from a detached HEAD."
 
   # CodeBuild pulls from GitHub, so local-only commits would build a different
   # image than the one this script is about to deploy.
@@ -163,12 +183,23 @@ apply_saved_plan() {
   tofu -chdir="$INFRA_DIR" apply -input=false "$plan_file"
 }
 
+confirm_saved_plan() {
+  local label="$1"
+  local answer
+
+  [[ "${DATA_CHORD_REQUIRE_CONFIRMATION:-0}" == "1" ]] || return 0
+  printf 'Apply the displayed %s plan? Type yes to continue: ' "$label" >&2
+  IFS= read -r answer
+  [[ "$answer" == "yes" ]] || fail "Plan was not approved. No plan changes were applied."
+}
+
 apply_stack() {
   local image_tag="$1"
   local plan_file="$PLAN_DIR/final.tfplan"
 
   log "Planning OpenTofu stack for $TARGET_NAME/$STAGE_NAME with image tag $image_tag"
   create_saved_plan "$plan_file" "$image_tag"
+  confirm_saved_plan "application"
   log "Applying the displayed OpenTofu plan"
   apply_saved_plan "$plan_file"
 }
@@ -182,6 +213,7 @@ reconcile_build_resources() {
     "$plan_file" \
     "$image_tag" \
     -target=aws_codebuild_project.app_image
+  confirm_saved_plan "build prerequisite"
   apply_saved_plan "$plan_file"
 }
 
@@ -367,6 +399,12 @@ current_image_tag() {
 
 plan_image_tag() {
   local image_tag
+
+  if using_external_contract; then
+    ensure_deployable_git_state
+    git_image_tag
+    return 0
+  fi
 
   if [[ -n "${DATA_CHORD_IMAGE_TAG:-}" ]]; then
     printf '%s\n' "$DATA_CHORD_IMAGE_TAG"
