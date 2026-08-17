@@ -82,6 +82,34 @@ def test_receipt_rejects_changed_state_before_deploy(tmp_path: Path) -> None:
     assert "no longer matches state" in result.stderr
 
 
+def test_receipt_treats_the_new_backend_state_as_absent(tmp_path: Path) -> None:
+    # Given OpenTofu returns its empty state document for a new backend.
+    environment = _environment(tmp_path)
+    state = tmp_path / "empty-state.json"
+    state.write_text(
+        json.dumps(
+            {
+                "version": 4,
+                "terraform_version": "1.10.3",
+                "serial": 0,
+                "lineage": "",
+                "outputs": {},
+                "resources": [],
+                "check_results": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+    receipt = tmp_path / "receipt.json"
+
+    # When plan records the current state identity.
+    _create(receipt, environment, state, _plan(tmp_path, {}))
+
+    # Then the valid fresh backend is recorded as absent state.
+    document = json.loads(receipt.read_text(encoding="utf-8"))
+    assert document["state"] == {"kind": "absent"}
+
+
 def test_in_progress_receipt_rechecks_state_before_first_apply(tmp_path: Path) -> None:
     # Given deploy validated its receipt and then marked it in progress.
     environment = _environment(tmp_path)

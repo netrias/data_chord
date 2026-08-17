@@ -244,6 +244,13 @@ def _state_identity(path: Path | None) -> StateIdentity:
     if not isinstance(raw, dict):
         raise ReceiptError("OpenTofu state must contain one JSON object")
     lineage, serial = raw.get("lineage"), raw.get("serial")
+    if (
+        lineage == ""
+        and serial == 0
+        and raw.get("outputs") == {}
+        and raw.get("resources") == []
+    ):
+        return StateIdentity(None, None)
     if not isinstance(lineage, str) or not lineage or not isinstance(serial, int):
         raise ReceiptError("OpenTofu state has no valid lineage and serial")
     return StateIdentity(lineage, serial)
