@@ -54,17 +54,17 @@ printf 'aws %s\n' "$*" >>"$MOCK_CALLS"
 case "${1:-} ${2:-}" in
   "sts get-caller-identity")
     if [[ "${MOCK_ALREADY_DEPLOYER:-0}" == "1" || "${AWS_ACCESS_KEY_ID:-}" == "ASIATEST" ]]; then
-      printf '945365518758\tarn:aws:sts::945365518758:assumed-role/datachord-deployer/test\n'
+      printf '%s\tarn:aws:sts::%s:assumed-role/%s/test\n' "$MOCK_ACCOUNT" "$MOCK_ACCOUNT" "$MOCK_ROLE_NAME"
     else
       printf '111111111111\tarn:aws:iam::111111111111:user/operator\n'
     fi
     ;;
   "sts assume-role") printf 'ASIATEST\tsecret\ttoken\t2099-01-01T00:00:00Z\n' ;;
   "iam get-role")
-    printf '/foundation/\tarn:aws:iam::945365518758:policy/datachord-deployer-boundary\n'
+    printf '/foundation/\t%s\n' "$MOCK_DEPLOYER_BOUNDARY_ARN"
     ;;
   "iam get-policy")
-    printf 'arn:aws:iam::945365518758:policy/datachord-application-role-boundary\n'
+    printf '%s\n' "$MOCK_APPLICATION_BOUNDARY_ARN"
     ;;
   "ecr describe-images")
     if [[ -f "$MOCK_IMAGE_FILE" ]]; then
@@ -222,6 +222,10 @@ run_command() {
   : >"$calls.convergence"
   PATH="$MOCK_BIN:/usr/bin:/bin" \
     MOCK_CALLS="$calls" \
+    MOCK_ACCOUNT="${MOCK_ACCOUNT:-945365518758}" \
+    MOCK_ROLE_NAME="${MOCK_ROLE_NAME:-datachord-deployer}" \
+    MOCK_DEPLOYER_BOUNDARY_ARN="${MOCK_DEPLOYER_BOUNDARY_ARN:-arn:aws:iam::945365518758:policy/datachord-deployer-boundary}" \
+    MOCK_APPLICATION_BOUNDARY_ARN="${MOCK_APPLICATION_BOUNDARY_ARN:-arn:aws:iam::945365518758:policy/datachord-application-role-boundary}" \
     MOCK_COMMIT="$MOCK_COMMIT" \
     MOCK_IMAGE_FILE="$TEST_ROOT/image" \
     MOCK_EMPTY_STATE="${MOCK_EMPTY_STATE:-0}" \
@@ -250,14 +254,29 @@ run_command() {
     "$DEPLOY_SCRIPT" "$@" </dev/null
 }
 
-# Given BDF has a legacy state layout.
+# Given BDF production has no new-system environment file.
 bdf_calls="$TEST_ROOT/bdf-calls"
 : >"$bdf_calls"
-# When the new plan command selects BDF, then it stops before AWS and OpenTofu.
-if PATH="$MOCK_BIN:/usr/bin:/bin" MOCK_CALLS="$bdf_calls" "$DEPLOY_SCRIPT" bdf staging plan >/dev/null 2>&1; then
-  fail_test "BDF plan succeeded"
+# When the new plan command selects BDF production, then it stops before AWS and OpenTofu.
+if PATH="$MOCK_BIN:/usr/bin:/bin" MOCK_CALLS="$bdf_calls" "$DEPLOY_SCRIPT" bdf prod plan >/dev/null 2>&1; then
+  fail_test "BDF production plan succeeded"
 fi
-[[ ! -s "$bdf_calls" ]] || fail_test "BDF reached an external command"
+[[ ! -s "$bdf_calls" ]] || fail_test "BDF production reached an external command"
+
+# Given BDF staging has a new isolated foundation configuration.
+bdf_staging_calls="$TEST_ROOT/bdf-staging-calls"
+# When the new plan command selects BDF staging.
+MOCK_ACCOUNT=084828580051 \
+  MOCK_ROLE_NAME=bdf-datachord-deployer \
+  MOCK_DEPLOYER_BOUNDARY_ARN=arn:aws:iam::084828580051:policy/bdf-datachord-deployer-boundary \
+  MOCK_APPLICATION_BOUNDARY_ARN=arn:aws:iam::084828580051:policy/bdf-datachord-application-role-boundary \
+  MOCK_EMPTY_STATE=1 \
+  run_command "$bdf_staging_calls" bdf staging plan >/dev/null
+# Then it assumes and verifies the new role and initializes only the new state location.
+assert_contains "$bdf_staging_calls" "--role-arn arn:aws:iam::084828580051:role/foundation/bdf-datachord-deployer"
+assert_contains "$bdf_staging_calls" "iam get-role --role-name bdf-datachord-deployer"
+assert_contains "$bdf_staging_calls" "-backend-config=bucket=bdf-datachord-state-084828580051-us-east-2"
+assert_contains "$bdf_staging_calls" "-backend-config=key=datachord/bdf/staging/tofu.tfstate"
 
 # Given a new backend returns success with an empty state body.
 empty_calls="$TEST_ROOT/empty-state-calls"
