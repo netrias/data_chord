@@ -65,6 +65,15 @@ resource "aws_iam_role_policy" "application_build" {
         Resource = "*"
       },
       {
+        Effect = "Allow"
+        Action = [
+          "codeconnections:GetConnection",
+          "codeconnections:GetConnectionToken",
+          "codeconnections:UseConnection"
+        ]
+        Resource = "arn:${data.aws_partition.current.partition}:codeconnections:${var.aws_region}:${data.aws_caller_identity.current.account_id}:connection/*"
+      },
+      {
         Effect   = "Allow"
         Action   = ["secretsmanager:GetSecretValue"]
         Resource = data.aws_secretsmanager_secret.github_app.arn

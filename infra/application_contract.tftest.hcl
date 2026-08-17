@@ -198,18 +198,41 @@ run "ecs_service_output_uses_the_managed_service_identity" {
   }
 }
 
-run "codebuild_uses_public_source_and_read_only_dependency_credential" {
+run "codebuild_uses_account_source_credential_and_read_only_dependency_credential" {
   command = plan
 
+  # Given the target account owns its GitHub source credential,
+  # when the CodeBuild project is planned,
+  # then the project does not pin one account-specific connection ARN.
   assert {
     condition = (
       aws_codebuild_project.app_image.source[0].type == "GITHUB" &&
       aws_codebuild_project.app_image.source[0].location == "https://github.com/netrias/data_chord.git" &&
       length(aws_codebuild_project.app_image.source[0].auth) == 0
     )
-    error_message = "CodeBuild must read the public Data Chord repository without source authentication."
+    error_message = "CodeBuild must use the target account's configured GitHub source credential."
   }
 
+  # Given CodeBuild must use that account-owned connection,
+  # when the build-role policy is planned,
+  # then it can inspect, get a token for, and use only this account's connections.
+  assert {
+    condition = anytrue([
+      for statement in jsondecode(aws_iam_role_policy.application_build.policy).Statement :
+      toset(statement.Action) == toset([
+        "codeconnections:GetConnection",
+        "codeconnections:GetConnectionToken",
+        "codeconnections:UseConnection",
+      ]) &&
+      statement.Effect == "Allow" &&
+      statement.Resource == "arn:${data.aws_partition.current.partition}:codeconnections:${var.aws_region}:${data.aws_caller_identity.current.account_id}:connection/*"
+    ])
+    error_message = "The CodeBuild role must be able to use target-account GitHub connections."
+  }
+
+  # Given the image build reads one GitHub App secret after source download,
+  # when the build-role policy is planned,
+  # then secret access stays limited to that configured credential.
   assert {
     condition = (
       data.aws_secretsmanager_secret.github_app.name == "data-chord/build/github-app" &&
