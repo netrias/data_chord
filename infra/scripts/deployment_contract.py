@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 _FIELDS = {
+    "contract_version",
     "application_commit",
     "application_repository_url",
     "application_role_boundary_arn",
@@ -32,6 +33,7 @@ _ACCOUNT = re.compile(r"^[0-9]{12}$")
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _REGION = re.compile(r"^[a-z]{2}(?:-[a-z]+)+-[0-9]$")
 _STAGES = {"dev", "qa", "staging", "prod"}
+CONTRACT_VERSION = 1
 
 
 class ContractError(ValueError):
@@ -79,6 +81,8 @@ def _load(path: Path) -> dict[str, object]:
 
 
 def _validate(document: dict[str, object]) -> None:
+    if document.get("contract_version") != CONTRACT_VERSION:
+        raise ContractError(f"contract_version must be {CONTRACT_VERSION}")
     target, stage = _string(document, "target_slug"), _string(document, "stage")
     account = _string(document, "expected_account_id")
     partition, region = _string(document, "aws_partition"), _string(document, "aws_region")

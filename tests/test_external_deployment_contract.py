@@ -39,6 +39,10 @@ def test_external_contract_rejects_unsafe_deployment_values(tmp_path: Path) -> N
     # Given: each contract value would select an unsafe deployment boundary.
     cases = (
         (
+            {"contract_version": 2},
+            "contract_version must be 1",
+        ),
+        (
             {
                 "aws_partition": "aws-us-gov",
                 "aws_region": "us-gov-west-1",
@@ -105,6 +109,7 @@ def _run(action: str, contract: Path, *arguments: str) -> subprocess.CompletedPr
 
 def _document() -> dict[str, object]:
     return {
+        "contract_version": 1,
         "application_commit": "83b201050d502a0a391545e3880dba09c354d499",
         "application_repository_url": "https://github.com/netrias/data_chord.git",
         "application_role_boundary_arn": "arn:aws:iam::945365518758:policy/datachord-application-role-boundary",
