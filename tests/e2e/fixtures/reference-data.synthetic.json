@@ -1,0 +1,27 @@
+{
+  "digest": "5ea76371e0fde23ee2fb902453607e80d889d9f1a3c6271d2ef737dca58a0bdc",
+  "model_count": 1,
+  "models": [
+    {
+      "cdes": [
+        {
+          "cde_id": 376,
+          "cde_key": "primary_diagnosis",
+          "cde_type": "pv",
+          "description": "Synthetic diagnosis field for browser tests",
+          "values": [
+            "Breast Cancer",
+            "Carcinoma NOS",
+            "Diabetes",
+            "Hypertension",
+            "Lung Cancer"
+          ]
+        }
+      ],
+      "data_model_key": "gc",
+      "external_version_number": "11.0.4",
+      "label": "Synthetic E2E Data Model"
+    }
+  ],
+  "schema_version": 1
+}

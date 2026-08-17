@@ -6,319 +6,70 @@ import asyncio
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
 from httpx import AsyncClient
 
 from src.domain.harmonization import HarmonizeStatus
-from src.domain.manifest import ColumnMappingManifest
-from src.integrations.netrias_harmonize import HarmonizeService
-from src.persistence.manifest_writer import write_manifest_parquet
-from src.persistence.pv_manifest_store import ColumnPvSets
-from tests.conftest import TEST_TARGET_SCHEMA, MockHarmonizeResult, confirm_mapping_choices, upload_and_analyze
+from tests.conftest import confirm_mapping_choices, upload_and_analyze
 
 
 def test_harmonize_status_values_remain_stable() -> None:
-    """Durable job state and API responses use these exact values."""
-    assert {status.value for status in HarmonizeStatus} == {
-        "queued",
-        "succeeded",
-        "failed",
-    }
+    # Given durable status values, when listed, then their stored strings stay stable.
+    assert {status.value for status in HarmonizeStatus} == {"queued", "succeeded", "failed"}
 
 
-async def test_harmonize_returns_job_id(
+async def test_harmonize_uses_confirmed_mapping_and_exact_reference_values(
     app_client: AsyncClient,
     sample_csv_path: Path,
+    mock_netrias_client: MagicMock,
 ) -> None:
-    """Harmonize endpoint returns a job_id for tracking."""
-
-    # Given: An uploaded and analyzed CSV file
+    # Given an analyzed file with one confirmed mapping override.
     file_id = await upload_and_analyze(app_client, sample_csv_path)
-
-    # When: Harmonization is triggered
-    response = await app_client.post(
-        "/stage-3/harmonize",
-        json={"file_id": file_id},
+    await confirm_mapping_choices(
+        app_client,
+        file_id,
+        manual_overrides={"col_0000": "primary_diagnosis"},
     )
 
-    # Then: Response contains a job_id for tracking progress
-    assert response.status_code == 200
+    # When Stage 3 runs.
+    response = await app_client.post("/stage-3/harmonize", json={"file_id": file_id})
     data = response.json()
-    assert "job_id" in data
-    assert len(data["job_id"]) > 0
-
-
-async def test_harmonize_returns_status(
-    app_client: AsyncClient,
-    sample_csv_path: Path,
-) -> None:
-    """Harmonize endpoint returns execution status."""
-
-    # Given: An uploaded and analyzed CSV file
-    file_id = await upload_and_analyze(app_client, sample_csv_path)
-
-    # When: Harmonization is triggered
-    response = await app_client.post(
-        "/stage-3/harmonize",
-        json={"file_id": file_id},
-    )
-
-    # Then: Response contains status indicating success
-    data = response.json()
-    assert "status" in data
     for _ in range(100):
         if data["status"] in {"succeeded", "failed"}:
             break
         await asyncio.sleep(0.01)
-        poll_response = await app_client.get(
-            f"/stage-3/jobs/{data['job_id']}",
-            params={"file_id": file_id},
-        )
-        assert poll_response.status_code == 200
-        data = poll_response.json()
-    assert data["status"] == "succeeded"
-
-
-async def test_harmonize_with_manual_overrides(
-    app_client: AsyncClient,
-    sample_csv_path: Path,
-    mock_netrias_client: MagicMock,
-) -> None:
-    """Manual overrides are passed to the harmonize service."""
-
-    # Given: An uploaded and analyzed CSV file with manual column overrides
-    file_id = await upload_and_analyze(app_client, sample_csv_path)
-    overrides = {"col_0000": "primary_diagnosis"}
-    await confirm_mapping_choices(app_client, file_id, manual_overrides=overrides)
-
-    # When: Harmonization is triggered with manual overrides
-    response = await app_client.post(
-        "/stage-3/harmonize",
-        json={"file_id": file_id},
-    )
-
-    # Then: Harmonization succeeds with the manual overrides applied
-    assert response.status_code == 200
-
-
-async def test_harmonize_uses_stored_mapping_manifest_when_request_omits_manifest(
-    app_client: AsyncClient,
-    sample_csv_path: Path,
-    mock_netrias_client: MagicMock,
-) -> None:
-    """Stage 3 can harmonize from the manifest saved by Stage 1 analysis."""
-
-    # Given: Stage 1 has analyzed a file and saved its mapping manifest server-side
-    file_id = await upload_and_analyze(app_client, sample_csv_path)
-    assert not mock_netrias_client.harmonize.called
-
-    # When: the browser triggers harmonization without carrying the manifest body
-    response = await app_client.post(
-        "/stage-3/harmonize",
-        json={"file_id": file_id},
-    )
-
-    # Then: harmonization uses the stored column-keyed manifest
-    assert response.status_code == 200
-    sdk_manifest = mock_netrias_client.harmonize.call_args.kwargs["manifest"]
-    assert sdk_manifest["column_mappings"]["col_0000"]["cde_key"] == "primary_diagnosis"
-    assert sdk_manifest["column_mappings"]["col_0001"]["cde_key"] == "therapeutic_agents"
-
-
-async def test_harmonize_file_not_found(app_client: AsyncClient) -> None:
-    """Harmonize with non-existent file_id returns 404."""
-
-    # Given: A file_id that does not exist in storage
-    invalid_file_id = "deadbeef12345678deadbeef12345678"
-
-    # When: Harmonization is triggered with invalid file_id
-    response = await app_client.post(
-        "/stage-3/harmonize",
-        json={"file_id": invalid_file_id},
-    )
-
-    # Then: 404 Not Found response
-    assert response.status_code == 404
-
-
-async def test_harmonize_returns_next_stage_url(
-    app_client: AsyncClient,
-    sample_csv_path: Path,
-) -> None:
-    """Harmonize response includes URL for next stage."""
-
-    # Given: An uploaded and analyzed CSV file
-    file_id = await upload_and_analyze(app_client, sample_csv_path)
-
-    # When: Harmonization is triggered
-    response = await app_client.post(
-        "/stage-3/harmonize",
-        json={"file_id": file_id},
-    )
-
-    # Then: Response contains URL to stage 4 (review)
-    data = response.json()
-    assert "next_stage_url" in data
-    assert "/stage-4" in data["next_stage_url"]
-
-
-async def test_failed_retry_does_not_reopen_previous_successful_artifacts(
-    app_client: AsyncClient,
-    sample_csv_path: Path,
-    mock_netrias_client: MagicMock,
-) -> None:
-    """Later stages stay closed when the newest run fails but old files remain."""
-    file_id = await upload_and_analyze(app_client, sample_csv_path)
-    first = await app_client.post("/stage-3/harmonize", json={"file_id": file_id})
-    assert first.status_code == 200
-    first_job = first.json()
-    for _ in range(100):
-        if first_job["status"] in {"succeeded", "failed"}:
-            break
-        await asyncio.sleep(0.01)
-        first_job = (
+        data = (
             await app_client.get(
-                f"/stage-3/jobs/{first_job['job_id']}",
+                f"/stage-3/jobs/{data['job_id']}",
                 params={"file_id": file_id},
             )
         ).json()
-    assert first_job["status"] == "succeeded"
-    assert (await app_client.post("/stage-4/rows", json={"file_id": file_id})).status_code == 200
 
-    mock_netrias_client.harmonize.side_effect = None
-    mock_netrias_client.harmonize.return_value = MockHarmonizeResult(
-        status="failed",
-        description="provider secret",
-        job_id="failed-job",
-    )
-    failed = await app_client.post("/stage-3/harmonize", json={"file_id": file_id})
-
-    assert failed.status_code == 200
-    assert failed.json()["status"] == "failed"
-    assert (await app_client.post("/stage-4/rows", json={"file_id": file_id})).status_code == 409
-    assert (await app_client.post("/stage-5/download", json={"file_id": file_id})).status_code == 409
-
-
-def test_harmonize_requires_a_provider_client() -> None:
-    """A caller learns during setup when the provider is unavailable."""
-
-    with pytest.raises(RuntimeError, match="NetriasClient unavailable"):
-        HarmonizeService(client=None)
-
-
-def test_harmonize_sends_the_prepared_manifest_to_the_provider(tmp_path: Path) -> None:
-    """The provider receives the caller's complete, typed harmonization plan."""
-
-    # Given: a duplicate-header file and a manifest already prepared by the workflow
-    csv_path = tmp_path / "dupes.csv"
-    csv_path.write_text("name,name\nAlice,Smith\n", encoding="utf-8")
-    requested_output_path = tmp_path / "requested-output.csv"
-    provider_manifest_path = tmp_path / "provider-manifest.parquet"
-    assert write_manifest_parquet(provider_manifest_path, [])
-    requested_output_path.touch()
-    mock_client = MagicMock()
-    mock_client.harmonize.return_value = MagicMock(
-        status="succeeded",
-        description="ok",
-        job_id="job-1",
-        manifest_path=provider_manifest_path,
-        file_path=requested_output_path,
-    )
-    service = HarmonizeService(mock_client)
-    prepared_manifest = ColumnMappingManifest.from_payload_strict(
-        {
-            "column_mappings": {
-                "col_0001": {
-                    "column_name": "Family Name",
-                    "cde_key": "last_name",
-                    "cde_id": 11,
-                }
-            }
-        }
+    # Then the agentic service gets the confirmed CDE and its exact value set.
+    assert response.status_code == 200
+    assert data["status"] == "succeeded"
+    arguments = mock_netrias_client.run.call_args.kwargs
+    record = arguments["prepared_manifest"].records["col_0000"]
+    assert record.cde_key == "primary_diagnosis"
+    assert arguments["column_pv_sets"].get("col_0000") == frozenset(
+        {"Lung Cancer", "Breast Cancer", "Diabetes", "Hypertension"}
     )
 
-    # When: harmonization is run
-    result = service.run(
-        file_path=csv_path,
-        data_model_key=TEST_TARGET_SCHEMA,
-        external_version_number="11.0.4",
-        prepared_manifest=prepared_manifest,
-        column_pv_sets=ColumnPvSets({}),
-        output_path=requested_output_path,
-        sheet_name="Patients",
+
+async def test_harmonize_missing_workflow_returns_404(app_client: AsyncClient) -> None:
+    # Given an unknown workflow, when Stage 3 starts, then it returns 404.
+    response = await app_client.post(
+        "/stage-3/harmonize",
+        json={"file_id": "deadbeef12345678deadbeef12345678"},
     )
-
-    # Then: the SDK receives one complete provider request and its artifacts are surfaced
-    assert result.job_id == "job-1"
-    assert result.status == HarmonizeStatus.SUCCEEDED
-    assert result.job_id_available is True
-    assert result.manifest_path == provider_manifest_path
-    assert result.output_path == requested_output_path
-    assert mock_client.harmonize.call_args.kwargs == {
-        "source_path": csv_path,
-        "manifest": {
-            "column_mappings": {
-                "col_0001": {
-                    "column_name": "Family Name",
-                    "cde_key": "last_name",
-                    "cde_id": 11,
-                    "harmonization": "harmonizable",
-                    "alternatives": [],
-                }
-            }
-        },
-        "target_schema": TEST_TARGET_SCHEMA,
-        "external_version_number": "11.0.4",
-        "output_path": requested_output_path,
-        "sheet_name": "Patients",
-    }
+    assert response.status_code == 404
 
 
-def test_harmonize_hides_provider_exception_details(tmp_path: Path) -> None:
-    """Provider failures give callers a safe failure instead of leaking internals."""
-
-    csv_path = tmp_path / "source.csv"
-    csv_path.write_text("diagnosis\nLung\n", encoding="utf-8")
-    mock_client = MagicMock()
-    mock_client.harmonize.side_effect = RuntimeError("secret provider URL and token")
-    service = HarmonizeService(mock_client)
-    prepared_manifest = ColumnMappingManifest.empty()
-
-    result = service.run(
-        file_path=csv_path,
-        data_model_key=TEST_TARGET_SCHEMA,
-        external_version_number="11.0.4",
-        prepared_manifest=prepared_manifest,
-        column_pv_sets=ColumnPvSets({}),
-    )
-
-    assert result.status == HarmonizeStatus.FAILED
-    assert result.detail == "Harmonization provider failed."
-    assert "secret" not in result.detail
-    assert result.job_id_available is False
-
-
-@pytest.mark.parametrize("provider_status", [None, "unexpected"])
-def test_harmonize_rejects_invalid_provider_status(
-    provider_status: str | None,
-    tmp_path: Path,
+async def test_harmonize_returns_the_next_stage_url(
+    app_client: AsyncClient,
+    sample_csv_path: Path,
 ) -> None:
-    """Missing and unknown provider statuses cannot be reported as success."""
-
-    csv_path = tmp_path / "source.csv"
-    csv_path.write_text("diagnosis\nLung\n", encoding="utf-8")
-    mock_client = MagicMock()
-    mock_client.harmonize.return_value = MagicMock(status=provider_status)
-    service = HarmonizeService(mock_client)
-
-    result = service.run(
-        file_path=csv_path,
-        data_model_key=TEST_TARGET_SCHEMA,
-        external_version_number="11.0.4",
-        prepared_manifest=ColumnMappingManifest.empty(),
-        column_pv_sets=ColumnPvSets({}),
-    )
-
-    assert result.status == HarmonizeStatus.FAILED
-    assert result.detail == "Harmonization provider failed."
-    assert result.job_id_available is False
+    # Given an analyzed file, when Stage 3 starts, then the response points to Stage 4.
+    file_id = await upload_and_analyze(app_client, sample_csv_path)
+    response = await app_client.post("/stage-3/harmonize", json={"file_id": file_id})
+    assert response.status_code == 200
+    assert "/stage-4" in response.json()["next_stage_url"]

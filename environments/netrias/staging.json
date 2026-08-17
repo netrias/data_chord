@@ -1,0 +1,12 @@
+{
+  "account_id": "945365518758",
+  "region": "us-east-2",
+  "state_bucket_name": "netrias-datachord-state-945365518758-us-east-2",
+  "deployer_role_arn": "arn:aws:iam::945365518758:role/foundation/datachord-deployer",
+  "application_role_boundary_arn": "arn:aws:iam::945365518758:policy/datachord-application-role-boundary",
+  "application_role_path": "/application/",
+  "domain_name": "data-chord-staging.apps.netrias.com",
+  "hosted_zone_name": "apps.netrias.com",
+  "application_repository_url": "https://github.com/netrias/data_chord.git",
+  "github_app_secret_name": "data-chord/build/github-app"
+}

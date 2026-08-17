@@ -25,12 +25,12 @@ test-e2e:
 perf-e2e:
 	npm run perf:e2e
 
-perf-staging target="bdf" base_url="":
+perf-staging base_url="" target="netrias":
 	@set -euo pipefail; \
 	url="{{base_url}}"; \
 	if [ -z "$url" ]; then url="${DATA_CHORD_STAGING_URL:-}"; fi; \
 	if [ -z "$url" ]; then \
-		url="$(infra/scripts/deploy.sh {{target}} staging output-url)"; \
+		url="https://$(python3 infra/scripts/environment.py get environments/{{target}}/staging.json {{target}} staging domain_name)"; \
 	fi; \
 	echo "Running staging performance journey against $url"; \
 	PLAYWRIGHT_BASE_URL="$url" npm run perf:staging
@@ -63,19 +63,13 @@ infra-validate:
 
 infra-test:
 	tofu -chdir=infra test
-	bash infra/tests/deployment_contract_test.sh
 	bash infra/tests/deployment_flow_test.sh
-	bash infra/tests/secret_preparation_test.sh
 	bash -n infra/scripts/*.sh infra/tests/*.sh
 
-# Save and show a read-only OpenTofu plan.
-plan target stage profile:
-	AWS_PROFILE={{profile}} infra/scripts/deploy.sh {{target}} {{stage}} plan
+# Save and show a read-only deployment forecast.
+plan target stage:
+	infra/scripts/deploy.sh {{target}} {{stage}} plan
 
-# Build the pushed commit, apply the displayed saved plan, and verify ECS health.
-deploy target stage profile:
-	AWS_PROFILE={{profile}} infra/scripts/deploy.sh {{target}} {{stage}} deploy
-
-# Show the deployed application and ECS service status.
-status target stage profile:
-	AWS_PROFILE={{profile}} infra/scripts/deploy.sh {{target}} {{stage}} status
+# Apply checked saved plans, build the image, and verify health.
+deploy target stage:
+	infra/scripts/deploy.sh {{target}} {{stage}} deploy

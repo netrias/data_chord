@@ -39,9 +39,9 @@ class DataModelSummary:
 
 @dataclass(frozen=True)
 class CDEInfo:
-    """Dynamic CDE metadata fetched from the Data Model Store API."""
+    """Provider-independent CDE metadata."""
 
-    cde_id: int
+    cde_id: int | None
     cde_key: str
     description: str | None
     cde_type: CdeType = field(default=CdeType.PV)

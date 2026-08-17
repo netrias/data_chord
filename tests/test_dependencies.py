@@ -3,101 +3,54 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
-
-from netrias_client import Environment
+from unittest.mock import MagicMock
 
 import src.app.dependencies as dependencies
 from src.integrations.agentic_harmonize import AgenticHarmonizeService
-from src.integrations.netrias_harmonize import HarmonizeService as NetriasHarmonizeService
+from src.integrations.dynamodb_reference_data import DynamoDbReferenceDataRepository
 
 
 def test_upload_storage_uses_configured_scratch_dir(monkeypatch, tmp_path: Path) -> None:
-    # Given: the hosted runtime points upload scratch at a writable directory
+    # Given the hosted runtime points upload scratch at a writable directory.
     scratch_dir = tmp_path / "scratch"
     monkeypatch.setenv("DATA_CHORD_UPLOAD_DIR", str(scratch_dir))
     monkeypatch.setattr(dependencies, "_storage", None)
-    assert not (scratch_dir / "files").exists()
 
-    # When: upload storage is initialized through normal app wiring
+    # When upload storage is initialized through normal app wiring.
     storage = dependencies.get_upload_storage()
 
-    # Then: scratch directories are created under the configured location
+    # Then scratch directories are created under the configured location.
     assert storage is not None
     assert (scratch_dir / "files").is_dir()
     assert (scratch_dir / "meta").is_dir()
 
 
-def test_netrias_client_uses_configured_timeout(monkeypatch) -> None:
-    # Given: hosted runtime configures a longer wait for large harmonization jobs
-    monkeypatch.setenv("NETRIAS_API_KEY", "test-key")
-    monkeypatch.setenv("DATA_CHORD_NETRIAS_TIMEOUT_SECONDS", "3600")
-    monkeypatch.setattr(dependencies, "_netrias_client", None)
-    monkeypatch.setattr(dependencies, "_netrias_client_initialized", False)
+def test_reference_repository_uses_the_configured_table(monkeypatch) -> None:
+    # Given a configured reference table and a fresh dependency container.
+    monkeypatch.setenv("DATA_CHORD_REFERENCE_TABLE", "reference-table")
+    monkeypatch.setattr(dependencies, "_reference_data_repository", None)
+    table = MagicMock()
+    resource = MagicMock()
+    resource.Table.return_value = table
+    boto3 = MagicMock()
+    boto3.resource.return_value = resource
+    monkeypatch.setitem(__import__("sys").modules, "boto3", boto3)
 
-    # When: the shared Netrias client is initialized
-    with patch("src.app.dependencies.NetriasClient") as client_class:
-        client = dependencies.get_netrias_client()
+    # When the repository is initialized.
+    repository = dependencies.get_reference_data_repository()
 
-    # Then: the SDK receives the configured timeout
-    assert client is client_class.return_value
-    client_class.assert_called_once_with(api_key="test-key", environment=Environment.STAGING)
-    client_class.return_value.configure.assert_called_once_with(timeout=3600.0)
-
-
-def test_netrias_client_uses_configured_environment(monkeypatch) -> None:
-    # Given: prod runtime tells the app to use prod Netrias services
-    monkeypatch.setenv("NETRIAS_API_KEY", "test-key")
-    monkeypatch.setenv("DATA_CHORD_NETRIAS_ENVIRONMENT", "prod")
-    monkeypatch.setattr(dependencies, "_netrias_client", None)
-    monkeypatch.setattr(dependencies, "_netrias_client_initialized", False)
-
-    # When: the shared Netrias client is initialized
-    with patch("src.app.dependencies.NetriasClient") as client_class:
-        client = dependencies.get_netrias_client()
-
-    # Then: the SDK is wired to prod endpoints
-    assert client is client_class.return_value
-    client_class.assert_called_once_with(api_key="test-key", environment=Environment.PROD)
+    # Then it uses the configured DynamoDB table.
+    assert isinstance(repository, DynamoDbReferenceDataRepository)
+    resource.Table.assert_called_once_with("reference-table")
 
 
-def test_netrias_client_uses_configured_harmonization_url(monkeypatch) -> None:
-    # Given: staging runtime overrides only the harmonization backend
-    monkeypatch.setenv("NETRIAS_API_KEY", "test-key")
-    monkeypatch.setenv(
-        "DATA_CHORD_NETRIAS_HARMONIZATION_URL",
-        "https://pdyuq0vi4h.execute-api.us-east-2.amazonaws.com/prod",
-    )
-    monkeypatch.setattr(dependencies, "_netrias_client", None)
-    monkeypatch.setattr(dependencies, "_netrias_client_initialized", False)
-
-    # When: the shared Netrias client is initialized
-    with patch("src.app.dependencies.NetriasClient") as client_class:
-        client = dependencies.get_netrias_client()
-
-    # Then: Data Chord keeps the staging environment and overrides the harmonization endpoint only
-    assert client is client_class.return_value
-    client_class.assert_called_once_with(api_key="test-key", environment=Environment.STAGING)
-    client_class.return_value.configure.assert_called_once_with(
-        harmonization_url="https://pdyuq0vi4h.execute-api.us-east-2.amazonaws.com/prod"
-    )
-
-
-def test_harmonizer_defaults_to_agentic(monkeypatch) -> None:
-    monkeypatch.delenv("DATA_CHORD_HARMONIZER", raising=False)
+def test_harmonizer_is_agentic_only(monkeypatch) -> None:
+    # Given a fresh service container.
     monkeypatch.setenv("AWS_REGION", "us-east-2")
+    monkeypatch.setattr(dependencies, "_harmonize_service", None)
 
+    # When the harmonizer is loaded.
     service = dependencies.get_harmonize_service()
 
+    # Then the in-task agentic harmonizer is the only implementation.
     assert isinstance(service, AgenticHarmonizeService)
-
-
-def test_client_can_keep_netrias_harmonization(monkeypatch) -> None:
-    monkeypatch.setenv("DATA_CHORD_HARMONIZER", "netrias")
-    monkeypatch.setenv("NETRIAS_API_KEY", "test-key")
-    monkeypatch.setattr(dependencies, "_netrias_client", None)
-    monkeypatch.setattr(dependencies, "_netrias_client_initialized", False)
-
-    service = dependencies.get_harmonize_service()
-
-    assert isinstance(service, NetriasHarmonizeService)

@@ -9,10 +9,15 @@ from pathlib import Path
 import pytest
 
 from src.app.harmonization_readiness import HarmonizationNotReadyError, require_ready_harmonization_workflow
+from src.domain.cde import CDEInfo, CdeType
+from src.domain.cde_catalog import CdeCatalog
+from src.domain.column_cde_map import ColumnCdeOverrides
+from src.domain.column_renames import ColumnRenameSet
+from src.domain.columns import column_key_from_string
 from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.dataset_workflow_ids import dataset_workflow_id_from_string
 from src.domain.harmonization import HarmonizationManifestSummary, HarmonizeStatus, MatchFidelity, MatchFidelityCount
-from src.domain.manifest import ColumnMappingManifest, InvalidMappingManifestError
+from src.domain.manifest import ColumnMappingManifest, InvalidMappingManifestError, RecommendationSource
 from src.domain.pv_manifest import PVManifest, PvManifestSchemaError
 from src.domain.workflow_state import WorkflowState, WorkflowStateSchemaError
 from src.persistence.harmonization_job_store import (
@@ -336,3 +341,25 @@ def test_harmonization_readiness_accepts_exact_success(tmp_path: Path) -> None:
 def test_current_mapping_manifest_rejects_boolean_numeric_fields(record: dict[str, object]) -> None:
     with pytest.raises(InvalidMappingManifestError):
         ColumnMappingManifest.from_payload_strict({"column_mappings": {"column_0": record}})
+
+
+def test_historical_mapping_without_a_source_remains_ai() -> None:
+    # Given a historical manifest from before recommendation source was stored.
+    manifest = ColumnMappingManifest.from_payload_strict({
+        "column_mappings": {"col_0000": {"cde_key": "known"}}
+    })
+
+    # When it is decoded, then it keeps the truthful historical default.
+    assert manifest.records[column_key_from_string("col_0000")].recommendation_source == RecommendationSource.AI
+
+
+def test_mapping_choices_reject_an_unknown_unchanged_recommendation() -> None:
+    # Given a historical recommendation absent from the selected reference model.
+    manifest = ColumnMappingManifest.from_payload_strict({
+        "column_mappings": {"col_0000": {"cde_key": "removed"}}
+    })
+    catalog = CdeCatalog.from_cdes([CDEInfo(None, "known", None, CdeType.PASSTHROUGH)])
+
+    # When Stage 3 applies unchanged choices, then it fails instead of using empty values.
+    with pytest.raises(ValueError, match="Unknown CDE key: removed"):
+        manifest.apply_choices(ColumnCdeOverrides({}), ColumnRenameSet({}), catalog)

@@ -73,23 +73,6 @@ variable "domain_label" {
   }
 }
 
-variable "netrias_harmonization_url" {
-  description = "Optional Netrias harmonization endpoint override."
-  type        = string
-  default     = ""
-}
-
-variable "harmonizer" {
-  description = "Harmonization implementation used by this client deployment."
-  type        = string
-  default     = "agentic"
-
-  validation {
-    condition     = contains(["agentic", "netrias"], var.harmonizer)
-    error_message = "harmonizer must be agentic or netrias."
-  }
-}
-
 variable "agentic_workers" {
   description = "Maximum concurrent agentic term harmonizations in one task."
   type        = number
@@ -134,19 +117,13 @@ variable "application_repository_url" {
   }
 }
 
-variable "netrias_api_key_secret_name" {
-  description = "Secrets Manager name for the selected stage's Netrias API key."
-  type        = string
-  default     = null
-}
-
 variable "image_tag" {
-  description = "Immutable image tag the ECS task definition should run."
+  description = "Full Git commit used as the immutable application image tag."
   type        = string
 
   validation {
-    condition     = can(regex("^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$", var.image_tag)) && var.image_tag != "latest"
-    error_message = "image_tag must be an immutable Docker tag and must not be latest."
+    condition     = can(regex("^[0-9a-f]{40}$", var.image_tag))
+    error_message = "image_tag must be a full 40-character lowercase Git commit."
   }
 }
 

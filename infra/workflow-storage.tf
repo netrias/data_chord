@@ -75,8 +75,6 @@ resource "aws_iam_role_policy" "application_task_workflow_storage" {
 }
 
 resource "aws_iam_role_policy" "application_task_bedrock_mantle" {
-  count = var.harmonizer == "agentic" ? 1 : 0
-
   name = "${local.name_prefix}-bedrock-mantle"
   role = aws_iam_role.application_task.id
 

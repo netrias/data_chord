@@ -93,7 +93,7 @@
 
     <script>
       window.stageTwoConfig = {
-        analyzeEndpoint: "{{ request.url_for('stage_one_upload_analyze') }}",
+        analysisStateBase: "/stage-1/analysis",
         choicesEndpoint: "{{ request.url_for('stage_two_save_mapping_choices') }}",
         harmonizeEndpoint: "{{ request.url_for('stage_three_harmonize') }}",
         columnDetailBase: "/stage-2/column-detail",

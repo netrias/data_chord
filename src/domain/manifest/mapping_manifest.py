@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from enum import StrEnum
 from typing import Final
 
 from src.domain.cde import ModelSuggestion
@@ -23,6 +24,7 @@ MAPPING_FIELD_COLUMN_NAME: Final = "column_name"
 MAPPING_FIELD_CONFIDENCE: Final = "confidence"
 MAPPING_FIELD_HARMONIZATION: Final = "harmonization"
 MAPPING_FIELD_ROUTE: Final = "route"
+MAPPING_FIELD_RECOMMENDATION_SOURCE: Final = "recommendation_source"
 MAPPING_FIELD_TARGET: Final = "target"
 
 # The SDK requires this field on each column mapping. It means the column is
@@ -35,12 +37,19 @@ class InvalidMappingManifestError(Exception):
     """Raised when a current-schema mapping manifest is malformed."""
 
 
+class RecommendationSource(StrEnum):
+    """The process that created an unconfirmed mapping recommendation."""
+
+    AI = "ai"
+    VALUE_OVERLAP = "value_overlap"
+
+
 @dataclass(frozen=True)
 class MappingAlternative:
     """One ranked CDE candidate returned by mapping discovery.
 
     The top-level mapping record is the applied/default CDE. Alternatives keep
-    the full candidate list so Stage 2 can show every AI recommendation without
+    the full candidate list so Stage 2 can show every overlap suggestion without
     having to understand the raw SDK response shape.
     """
 
@@ -73,22 +82,25 @@ class ColumnMappingRecord:
 
     column_key: ColumnKey
     cde_key: str
-    cde_id: int
+    cde_id: int | None = None
     column_name: str | None = None
     harmonization: str | None = None
     route: str | None = None
     alternatives: tuple[MappingAlternative, ...] = ()
+    recommendation_source: RecommendationSource = RecommendationSource.AI
 
     def to_payload(self) -> ColumnMappingEntry:
         payload = ColumnMappingEntry(
             column_name=self.column_name or str(self.column_key),
             cde_key=self.cde_key,
-            cde_id=self.cde_id,
             harmonization=self.harmonization or DEFAULT_HARMONIZATION,
             alternatives=[alternative.to_payload() for alternative in self.alternatives],
         )
+        if self.cde_id is not None:
+            payload[MAPPING_FIELD_CDE_ID] = self.cde_id
         if self.route is not None:
             payload[MAPPING_FIELD_ROUTE] = self.route
+        payload[MAPPING_FIELD_RECOMMENDATION_SOURCE] = self.recommendation_source.value
         return payload
 
     def suggestions(self) -> list[ModelSuggestion]:
@@ -101,7 +113,7 @@ class ColumnMappingRecord:
 class ColumnMappingManifest:
     """Column-keyed view of the SDK mapping manifest.
 
-    This is the canonical in-app representation for AI-selected CDE mappings.
+    This is the canonical in-app representation for suggested CDE mappings.
     It accepts raw SDK/browser payloads at the boundary, drops incomplete
     records, and gives the rest of the app typed records keyed by ``ColumnKey``.
     """
@@ -198,11 +210,16 @@ class ColumnMappingManifest:
                     harmonization=existing.harmonization if existing else DEFAULT_HARMONIZATION,
                     route=existing.route if existing else None,
                     alternatives=existing.alternatives if existing else (),
+                    recommendation_source=existing.recommendation_source if existing else RecommendationSource.AI,
                 )
             )
         for column_key in overrides.skipped_columns():
             updated = updated.without_column(column_key)
-        return updated.with_column_names(renames.renames)
+        updated = updated.with_column_names(renames.renames)
+        for record in updated.records.values():
+            if cde_catalog.get(record.cde_key) is None:
+                raise ValueError(f"Unknown CDE key: {record.cde_key}")
+        return updated
 
 
 def normalize_manifest(payload: Mapping[str, object] | object | None) -> ManifestPayload:
@@ -245,8 +262,8 @@ def _record_from_payload(
             raise InvalidMappingManifestError(f"mapping manifest record is invalid: {column_key}")
         return None
     cde_key = _cde_key_from_payload(value)
-    cde_id = _int_or_none(value.get(MAPPING_FIELD_CDE_ID))
-    if cde_key is None or cde_id is None:
+    cde_id = _optional_cde_id(value, column_key, strict=strict)
+    if cde_key is None:
         if strict:
             raise InvalidMappingManifestError(f"mapping manifest record is invalid: {column_key}")
         return None
@@ -274,7 +291,37 @@ def _record_from_payload(
         harmonization=_str_or_none(value.get(MAPPING_FIELD_HARMONIZATION)),
         route=_str_or_none(value.get(MAPPING_FIELD_ROUTE)),
         alternatives=alternatives,
+        recommendation_source=_recommendation_source(value, column_key, strict=strict),
     )
+
+
+def _recommendation_source(
+    value: Mapping[object, object],
+    column_key: str,
+    *,
+    strict: bool,
+) -> RecommendationSource:
+    raw_source = value.get(MAPPING_FIELD_RECOMMENDATION_SOURCE, RecommendationSource.AI.value)
+    try:
+        return RecommendationSource(raw_source)
+    except (TypeError, ValueError) as exc:
+        if strict:
+            raise InvalidMappingManifestError(
+                f"mapping manifest recommendation_source is invalid: {column_key}"
+            ) from exc
+        return RecommendationSource.AI
+
+
+def _optional_cde_id(
+    value: Mapping[object, object],
+    column_key: str,
+    *,
+    strict: bool,
+) -> int | None:
+    cde_id = _int_or_none(value.get(MAPPING_FIELD_CDE_ID))
+    if strict and MAPPING_FIELD_CDE_ID in value and cde_id is None:
+        raise InvalidMappingManifestError(f"mapping manifest cde_id is invalid: {column_key}")
+    return cde_id
 
 
 def _alternative_from_payload(

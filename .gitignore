@@ -33,6 +33,8 @@ infra/.terraform-data/
 *.tfstate
 *.tfstate.*
 infra/terraform.tfvars
+.plans/
+/deployment-data/
 
 # Harmonization outputs
 outputs/

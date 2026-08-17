@@ -9,10 +9,6 @@ data "aws_caller_identity" "current" {
   }
 }
 
-data "aws_secretsmanager_secret" "netrias_api_key" {
-  name = coalesce(var.netrias_api_key_secret_name, "data-chord/${var.environment}/netrias-api-key")
-}
-
 data "aws_secretsmanager_secret" "github_app" {
   name = var.github_app_secret_name
 }

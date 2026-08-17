@@ -20,6 +20,7 @@ from src.domain.manifest.mapping_manifest import (
     ColumnMappingRecord,
     InvalidMappingManifestError,
     MappingAlternative,
+    RecommendationSource,
     normalize_manifest,
 )
 from src.domain.manifest.models import (
@@ -66,6 +67,7 @@ __all__ = [
     "ManifestTermKey",
     "ManualOverride",
     "MappingAlternative",
+    "RecommendationSource",
     "completeness_bucket",
     "get_latest_override_value",
     "is_value_changed",

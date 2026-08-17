@@ -8,6 +8,11 @@ output "workflow_bucket" {
   value       = aws_s3_bucket.workflow.bucket
 }
 
+output "reference_data_table" {
+  description = "DynamoDB table used for standard metadata and permissible values."
+  value       = aws_dynamodb_table.reference_data.name
+}
+
 output "ecr_repository_url" {
   description = "ECR repository URI for the app image."
   value       = aws_ecr_repository.app.repository_url

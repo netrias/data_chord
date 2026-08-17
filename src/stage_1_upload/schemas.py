@@ -60,7 +60,7 @@ class ColumnSummary(BaseModel):
 
 
 class ColumnOverlapRatio(BaseModel):
-    """Precomputed AI-rec PV overlap; None means the ratio is undefined."""
+    """Precomputed selected-candidate PV overlap; None means the ratio is undefined."""
 
     value_overlap_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
 
@@ -75,3 +75,5 @@ class AnalyzeResponse(BaseModel):
     columns: list[ColumnSummary]
     column_summaries: dict[str, ColumnOverlapRatio] = Field(default_factory=dict)
     cde_targets: dict[str, list[ModelSuggestion]]
+    manual_overrides: dict[str, str | None] = Field(default_factory=dict)
+    column_renames: dict[str, str] = Field(default_factory=dict)

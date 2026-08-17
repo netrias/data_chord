@@ -29,11 +29,8 @@ jobs:
       - name: Test OpenTofu behavior
         run: tofu -chdir=infra test
 
-      - name: Test deployment contract
-        run: |
-          bash infra/tests/deployment_contract_test.sh
-          bash infra/tests/deployment_flow_test.sh
-          bash infra/tests/secret_preparation_test.sh
+      - name: Test deployment flow
+        run: bash infra/tests/deployment_flow_test.sh
 
       - name: Check shell syntax
         run: bash -n infra/scripts/*.sh infra/tests/*.sh
@@ -237,8 +234,6 @@ jobs:
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    env:
-      NETRIAS_API_KEY: ${{ secrets.NETRIAS_API_KEY }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
