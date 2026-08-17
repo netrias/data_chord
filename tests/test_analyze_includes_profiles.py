@@ -141,9 +141,11 @@ def test_analyze_response_does_not_require_full_profiles() -> None:
                 "confidence_score": 1.0,
             }
         ],
-        "column_summaries": {},
-        "cde_targets": {},
-    }
+            "column_summaries": {},
+            "cde_targets": {},
+            "manual_overrides": {},
+            "column_renames": {},
+        }
 
 
 def test_analyze_marks_columns_with_late_values_as_non_empty(tmp_path: Path) -> None:

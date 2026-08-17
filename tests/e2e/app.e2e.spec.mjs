@@ -799,12 +799,12 @@ test('Stage 2 submits selected column renames for harmonization', async ({ page 
   expect(new URL(page.url()).searchParams.get('job_id')).toBe('rename-job');
 });
 
-test('Stage 2 picker surfaces all AI candidates as separate rows', async ({ page }) => {
+test('Stage 2 picker surfaces all value-overlap candidates as separate rows', async ({ page }) => {
   /*
-   * Given: cde_targets["diagnosis"] returns two ranked AI candidates.
+   * Given: cde_targets["diagnosis"] contains two ranked value-overlap candidates.
    * When:  the user opens the picker for that column.
-   * Then:  both candidates render as .dd-opt.ai rows in similarity order
-   *        (top first) under the "AI recommended common data elements"
+   * Then:  both candidates render as suggestion rows in similarity order
+   *        (top first) under the "Value-overlap suggestions"
    *        section header, and neither key appears in the lower sections
    *        for CDEs with/without permissible values. Picking a candidate
    *        updates the row's target CDE while preserving the rewrite
@@ -882,23 +882,22 @@ test('Stage 2 picker surfaces all AI candidates as separate rows', async ({ page
   await page.locator('.mapping-row', { hasText: 'diagnosis' }).click();
   await page.locator('#cdePicker').click();
 
-  // AI section: both candidates render as .dd-opt.ai rows under the AI
-  // section header, top-first (similarity order). The per-row ✦ AI rec
-  // badge is intentionally absent — the section header conveys it.
+  // The suggestion section shows both candidates in overlap order. The
+  // per-row badge is absent because the section header conveys the source.
   await expect(
-    page.locator('.dd-section-label', { hasText: 'AI recommended common data elements' })
+    page.locator('.dd-section-label', { hasText: 'Value-overlap suggestions' })
   ).toBeVisible();
-  const aiRows = page.locator('#pickerDropdown .dd-opt.ai');
-  await expect(aiRows).toHaveCount(2);
-  await expect(aiRows.nth(0)).toContainText('dx');
-  await expect(aiRows.nth(1)).toContainText('dx_alt');
-  await expect(aiRows.nth(0).locator('.ai-badge')).toHaveCount(0);
+  const suggestionRows = page.locator('#pickerDropdown .dd-opt.ai');
+  await expect(suggestionRows).toHaveCount(2);
+  await expect(suggestionRows.nth(0)).toContainText('dx');
+  await expect(suggestionRows.nth(1)).toContainText('dx_alt');
+  await expect(suggestionRows.nth(0).locator('.ai-badge')).toHaveCount(0);
 
-  // Dedup: each AI candidate appears exactly once across the whole dropdown.
+  // Each overlap candidate appears exactly once across the whole dropdown.
   await expect(page.locator('#pickerDropdown .dd-opt[data-value="dx"]')).toHaveCount(1);
   await expect(page.locator('#pickerDropdown .dd-opt[data-value="dx_alt"]')).toHaveCount(1);
 
-  // Default state: row reflects the top AI candidate.
+  // The default state reflects the top overlap candidate.
   await expect(
     page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-target')
   ).toContainText('dx');
@@ -906,21 +905,18 @@ test('Stage 2 picker surfaces all AI candidates as separate rows', async ({ page
     page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-status.mapping-ico--rewrite')
   ).toBeVisible();
 
-  // Picking the 2nd-ranked AI candidate updates the displayed target while the
-  // row remains a rewrite outcome.
-  await aiRows.nth(1).click();
+  // Picking the second overlap candidate keeps the row as a rewrite outcome.
+  await suggestionRows.nth(1).click();
   await expect(
     page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-target')
   ).toContainText('dx_alt');
   await expect(
     page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-status.mapping-ico--rewrite')
   ).toBeVisible();
-  // The ✦ AI rec badge on the picker button marks "the selected CDE is an AI
-  // recommendation", not "the user accepted the top default" — so picking the
-  // 2nd-ranked AI candidate must keep the badge visible on the button.
+  // The picker badge still marks that the selected CDE came from value overlap.
   await expect(page.locator('#cdePicker .ai-badge')).toBeVisible();
 
-  // Picking a non-AI catalog CDE updates the target and still remains a rewrite
+  // Picking another catalog CDE updates the target and still remains a rewrite
   // outcome because the selected CDE is PV-backed.
   await page.locator('#cdePicker').click();
   await page.locator('#pickerDropdown .dd-opt[data-value="other_dx"]').click();

@@ -90,14 +90,11 @@ class AgenticHarmonizeService:
         self,
         *,
         file_path: Path,
-        data_model_key: str,
-        external_version_number: str,
         prepared_manifest: ColumnMappingManifest,
         column_pv_sets: ColumnPvSets,
         output_path: Path | None = None,
         sheet_name: str | None = None,
     ) -> HarmonizeResult:
-        del data_model_key, external_version_number
         job_id = uuid4().hex
         requested_output = output_path or file_path.with_name(f"{file_path.stem}.harmonized{file_path.suffix}")
         manifest_path = requested_output.with_name(f"{requested_output.stem}.manifest.parquet")

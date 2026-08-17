@@ -15,14 +15,14 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, ValidationError, field_validator
 
-from src.app.session_cache import SessionCache
 from src.domain.cde import CdeType, is_rename_only
+from src.domain.cde_catalog import CdeCatalog
 from src.domain.column_cde_map import ColumnCdeOverrides
 from src.domain.column_renames import ColumnRenameSet
 from src.domain.columns import ColumnKey, column_key_from_string
 from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_value
-from src.domain.manifest import ColumnMappingManifest, ColumnMappingRecord
+from src.domain.manifest import ColumnMappingManifest, ColumnMappingRecord, RecommendationSource
 from src.domain.tabular_column_renames import ResolvedTabularColumn
 from src.storage import UserContext, WorkflowFile, WorkflowNotFoundError, WorkflowStorage
 
@@ -31,6 +31,7 @@ class MappingSource(StrEnum):
     """How a source column ended up with its target CDE mapping."""
 
     AI = "ai"
+    VALUE_OVERLAP = "value_overlap"
     USER_OVERRIDE = "user_override"
     NO_MAPPING = "no_mapping"
 
@@ -165,7 +166,7 @@ def save_cde_mapping_document(
     column_overrides: ColumnCdeOverrides,
     column_renames: ColumnRenameSet,
     columns: Sequence[ResolvedTabularColumn],
-    cache: SessionCache,
+    catalog: CdeCatalog,
     data_model_version: DataModelVersionReference,
 ) -> None:
     """Save an audit-friendly mapping plan using the current column-key model."""
@@ -175,7 +176,7 @@ def save_cde_mapping_document(
         generated_at=datetime.now(UTC),
         data_model_key=data_model_version.data_model_key,
         external_version_number=data_model_version.external_version_number,
-        mappings=_build_entries(manifest, column_overrides, column_renames, columns, cache),
+        mappings=_build_entries(manifest, column_overrides, column_renames, columns, catalog),
     )
     try:
         existing = workflow_storage.read_json(user, dataset_workflow_id, WorkflowFile.CDE_MAPPING)
@@ -241,7 +242,7 @@ def _build_entries(
     column_overrides: ColumnCdeOverrides,
     column_renames: ColumnRenameSet,
     columns: Sequence[ResolvedTabularColumn],
-    cache: SessionCache,
+    catalog: CdeCatalog,
 ) -> list[CdeMappingEntry]:
     override_by_key = column_overrides.overrides
     column_by_key = {column.key: column for column in columns}
@@ -258,7 +259,7 @@ def _build_entries(
             override_by_key,
             column_renames,
             column_by_key.get(column_key),
-            cache,
+            catalog,
         )
         for column_key in keys
     ]
@@ -270,10 +271,10 @@ def _build_entry(
     overrides: Mapping[ColumnKey, str | None],
     renames: ColumnRenameSet,
     column: ResolvedTabularColumn | None,
-    cache: SessionCache,
+    catalog: CdeCatalog,
 ) -> CdeMappingEntry:
     cde_key = overrides.get(column_key, record.cde_key if record else None)
-    source = _mapping_source(column_key, overrides, cde_key)
+    source = _mapping_source(column_key, overrides, cde_key, record)
     source_name = (
         column.original_name
         if column
@@ -292,7 +293,7 @@ def _build_entry(
             maps_values=False,
         )
 
-    cde = cache.get_cde_by_key(cde_key)
+    cde = catalog.get(cde_key)
     cde_type = cde.cde_type if cde else CdeType.PV
     cde_id = None
     cde_description = None
@@ -318,10 +319,15 @@ def _mapping_source(
     column_key: ColumnKey,
     overrides: Mapping[ColumnKey, str | None],
     cde_key: str | None,
+    record: ColumnMappingRecord | None,
 ) -> MappingSource:
     if cde_key is None:
         return MappingSource.NO_MAPPING
-    return MappingSource.USER_OVERRIDE if column_key in overrides else MappingSource.AI
+    if column_key in overrides:
+        return MappingSource.USER_OVERRIDE
+    if record is not None and record.recommendation_source == RecommendationSource.VALUE_OVERLAP:
+        return MappingSource.VALUE_OVERLAP
+    return MappingSource.AI
 
 
 __all__ = [

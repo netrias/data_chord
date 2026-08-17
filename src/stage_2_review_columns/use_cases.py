@@ -8,14 +8,10 @@ from pathlib import Path
 from fastapi.concurrency import run_in_threadpool
 from netrias_client import read_tabular
 
-from src.app.data_model_store import (
-    fetch_all_pvs_async,
-)
 from src.app.session_cache import SessionCache, get_session_cache
 from src.domain.cde import CdeType
 from src.domain.cde_catalog import CdeCatalog
 from src.domain.cde_pv_catalog import CdePvCatalog
-from src.domain.cde_type_classification import refine_cde_types_from_pvs
 from src.domain.column_profile import (
     ColumnProfile,
     build_column_profile,
@@ -23,6 +19,7 @@ from src.domain.column_profile import (
 )
 from src.domain.columns import ColumnKey, column_key_from_string
 from src.domain.match_counts import compute_column_overlap_by_cde, compute_match_counts
+from src.domain.reference_data import ReferenceDataRepository
 from src.domain.workflow_state import ConfirmedMappingChoices
 from src.persistence.workflow_artifacts import load_upload_artifact
 from src.persistence.workflow_state_store import (
@@ -69,6 +66,7 @@ async def compute_column_detail(
     file_id: str,
     column_key: str,
     selected_cde_key: str | None,
+    reference_repository: ReferenceDataRepository,
 ) -> ColumnDetailResponse:
     """Build the takeover's column-detail payload."""
     # Durable state establishes both workflow existence and ownership before a
@@ -90,14 +88,8 @@ async def compute_column_detail(
         file_id,
         source_column_key,
     )
-    catalog = await _get_cde_catalog_snapshot(cache)
-    if catalog.catalog.is_empty():
-        # CDEs not yet populated by the Stage 2 page. Return an empty match
-        # map; the frontend can retry once the page-load completes.
-        return ColumnDetailResponse(
-            column_key=str(source_column_key),
-            profile=column_profile_to_payload(profile),
-        )
+    model = await run_in_threadpool(reference_repository.load_model, loaded_state.state.data_model_version)
+    catalog = CdeCatalogSnapshot(model.catalog, model.pvs)
 
     distinct = frozenset(dv.value for dv in profile.distinct_values)
     return ColumnDetailResponse(
@@ -177,30 +169,6 @@ def _build_column_profile_from_tabular(
         column.key,
         (row[column.index] if column.index < len(row) else "" for row in dataset.rows),
     )
-
-
-async def _get_cde_catalog_snapshot(cache: SessionCache) -> CdeCatalogSnapshot:
-    catalog = cache.get_cde_catalog()
-    if catalog.is_empty():
-        return CdeCatalogSnapshot(catalog=CdeCatalog.empty(), pv_sets=CdePvCatalog.empty())
-
-    await _ensure_pv_sets_fetched(cache)
-    pv_sets = cache.get_all_pvs()
-    refined = refine_cde_types_from_pvs(catalog, pv_sets)
-    cache.replace_cde_catalog(refined)
-    return CdeCatalogSnapshot(catalog=refined, pv_sets=pv_sets)
-
-
-async def _ensure_pv_sets_fetched(cache: SessionCache) -> None:
-    """Side-effect: populate the cache with any PV sets not yet fetched."""
-    missing_keys = cache.cde_keys_missing_pvs()
-    if not missing_keys:
-        return
-    data_model_version = cache.get_data_model_version()
-    if data_model_version is None:
-        return
-    all_pvs = await fetch_all_pvs_async(data_model_version.data_model_key, data_model_version.external_version_number)
-    cache.set_pvs_batch(all_pvs.with_defaults(missing_keys), expected_version=data_model_version)
 
 
 def _selected_pvs(

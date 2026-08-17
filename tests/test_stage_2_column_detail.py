@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -13,12 +13,14 @@ from src.app.session_cache import (
     clear_all_session_caches,
     get_session_cache,
 )
-from src.domain.cde import CDEInfo
+from src.domain.cde import CDEInfo, CdeType
+from src.domain.cde_catalog import CdeCatalog
 from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.column_profile import ColumnProfile, DistinctValue
 from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.dataset_workflow_ids import dataset_workflow_id_from_string
 from src.domain.manifest import ColumnMappingManifest
+from src.domain.reference_data import ReferenceModel
 from src.domain.workflow_state import WorkflowState
 from src.persistence.workflow_artifacts import save_upload_artifacts
 from src.persistence.workflow_state_store import save_initial_workflow_state
@@ -72,6 +74,19 @@ async def _compute_detail(
     column_key: str,
     selected_cde_key: str | None,
 ):
+    reference_repository = MagicMock()
+    reference_repository.load_model.return_value = ReferenceModel(
+        version=DataModelVersionReference("gc", "11.0.4"),
+        label="GC",
+        catalog=CdeCatalog.from_cdes([
+            CDEInfo(None, "dx", None, CdeType.PV),
+            CDEInfo(None, "notes", None, CdeType.PASSTHROUGH),
+        ]),
+        pvs=CdePvCatalog.from_mapping({
+            "dx": frozenset({"Lung", "Breast", "Glioma"}),
+            "notes": frozenset(),
+        }),
+    )
     return await compute_column_detail(
         upload_storage=context.upload_storage,
         workflow_storage=context.workflow_storage,
@@ -79,6 +94,7 @@ async def _compute_detail(
         file_id=FILE_ID,
         column_key=column_key,
         selected_cde_key=selected_cde_key,
+        reference_repository=reference_repository,
     )
 
 
@@ -87,19 +103,6 @@ def _isolate_session_cache() -> Generator[None]:
     clear_all_session_caches()
     yield
     clear_all_session_caches()
-
-
-@pytest.fixture
-def mock_netrias() -> Generator[MagicMock]:
-    """Inject a MagicMock NetriasClient that returns deterministic PVs."""
-    import src.app.dependencies as deps
-
-    saved = deps._netrias_client, deps._netrias_client_initialized
-    mock = MagicMock()
-    deps._netrias_client = mock
-    deps._netrias_client_initialized = True
-    yield mock
-    deps._netrias_client, deps._netrias_client_initialized = saved
 
 
 # ---------------------------------------------------------------------------
@@ -131,8 +134,6 @@ async def test_compute_column_detail_raises_when_profile_missing(stage_two_conte
 @pytest.mark.asyncio
 async def test_compute_column_detail_returns_pv_match_and_sorted_pvs(
     stage_two_context: StageTwoContext,
-    mock_netrias: MagicMock,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
     Given: a column with values overlapping a PV-typed CDE's PV set
@@ -153,24 +154,13 @@ async def test_compute_column_detail_returns_pv_match_and_sorted_pvs(
             null_count=0,
         )
     })
-    cache.set_cdes(
-        [CDEInfo(cde_id=1, cde_key="dx", description=None)],
-        data_model_key="gc",
-        external_version_number="11.0.4",
-    )
-
-    monkeypatch.setattr(
-        "src.stage_2_review_columns.use_cases.fetch_all_pvs_async",
-        AsyncMock(return_value=CdePvCatalog.from_mapping({"dx": frozenset({"Lung", "Breast", "Glioma"})})),
-    )
-
     # When
     detail = await _compute_detail(stage_two_context, "col", selected_cde_key="dx")
 
     # Then
     assert detail.column_key == "col"
-    assert detail.match_counts == {"dx": 2}
-    assert detail.cde_types == {"dx": "pv"}
+    assert detail.match_counts == {"dx": 2, "notes": 2}
+    assert detail.cde_types == {"dx": "pv", "notes": "passthrough"}
     assert detail.overlap_by_cde == {"dx": 1.0}
     assert detail.selected_pvs == ["Breast", "Glioma", "Lung"]
 
@@ -183,8 +173,6 @@ async def test_compute_column_detail_returns_pv_match_and_sorted_pvs(
 @pytest.mark.asyncio
 async def test_compute_column_detail_downgrades_to_passthrough_on_empty_pvs(
     stage_two_context: StageTwoContext,
-    mock_netrias: MagicMock,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
     Given: a CDE that returns an empty PV set (no PVs registered)
@@ -202,23 +190,13 @@ async def test_compute_column_detail_downgrades_to_passthrough_on_empty_pvs(
             null_count=0,
         )
     })
-    cache.set_cdes(
-        [CDEInfo(cde_id=2, cde_key="notes", description=None)],
-        data_model_key="gc",
-        external_version_number="11.0.4",
-    )
-    monkeypatch.setattr(
-        "src.stage_2_review_columns.use_cases.fetch_all_pvs_async",
-        AsyncMock(return_value=CdePvCatalog.from_mapping({"notes": frozenset()})),
-    )
-
     # When
     detail = await _compute_detail(stage_two_context, "col", selected_cde_key="notes")
 
     # Then: PASSTHROUGH counts everything
-    assert detail.cde_types == {"notes": "passthrough"}
+    assert detail.cde_types == {"dx": "pv", "notes": "passthrough"}
     assert detail.match_counts == {"notes": 2}
-    assert detail.overlap_by_cde == {}
+    assert detail.overlap_by_cde == {"dx": 0.0}
     assert detail.selected_pvs is None
 
 
@@ -228,13 +206,13 @@ async def test_compute_column_detail_downgrades_to_passthrough_on_empty_pvs(
 
 
 @pytest.mark.asyncio
-async def test_compute_column_detail_returns_empty_when_cdes_not_yet_loaded(
+async def test_compute_column_detail_reloads_reference_data_without_page_cache(
     stage_two_context: StageTwoContext,
 ) -> None:
     """
     Given: a profile is cached but CDEs haven't been populated by the Stage 2 page
     When: compute_column_detail is called
-    Then: response is empty rather than raising — frontend can retry
+    Then: complete reference data is returned from the repository
     """
     # Given
     file_id = FILE_ID
@@ -247,16 +225,14 @@ async def test_compute_column_detail_returns_empty_when_cdes_not_yet_loaded(
             null_count=0,
         )
     })
-    assert not cache.has_cdes()
-
     # When
     detail = await _compute_detail(stage_two_context, "col", selected_cde_key=None)
 
     # Then
     assert detail.column_key == "col"
-    assert detail.match_counts == {}
-    assert detail.cde_types == {}
-    assert detail.overlap_by_cde == {}
+    assert detail.match_counts == {"notes": 1}
+    assert detail.cde_types == {"dx": "pv", "notes": "passthrough"}
+    assert detail.overlap_by_cde == {"dx": 0.0}
     assert detail.selected_pvs is None
 
 
@@ -268,8 +244,6 @@ async def test_compute_column_detail_returns_empty_when_cdes_not_yet_loaded(
 @pytest.mark.asyncio
 async def test_compute_column_detail_rebuilds_profile_when_cache_lost(
     stage_two_context: StageTwoContext,
-    mock_netrias: MagicMock,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
     Given: browser/session state survived but the server's in-memory column
@@ -310,16 +284,7 @@ async def test_compute_column_detail_rebuilds_profile_when_cache_lost(
 
     file_id = FILE_ID
     cache = get_session_cache(file_id)
-    cache.set_cdes(
-        [CDEInfo(cde_id=1, cde_key="dx", description=None)],
-        data_model_key="gc",
-        external_version_number="11.0.4",
-    )
     assert cache.get_column_profile("col_0000") is None
-    monkeypatch.setattr(
-        "src.stage_2_review_columns.use_cases.fetch_all_pvs_async",
-        AsyncMock(return_value=CdePvCatalog.from_mapping({"dx": frozenset({"Lung", "Breast"})})),
-    )
 
     # When
     detail = await _compute_detail(stage_two_context, "col_0000", selected_cde_key="dx")

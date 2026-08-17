@@ -22,7 +22,7 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   webServer: useWebServer ? {
-    command: 'uv run python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8001',
+    command: 'uv run python -m uvicorn tests.e2e.server:app --host 127.0.0.1 --port 8001',
     env: e2eEnv,
     url: 'http://127.0.0.1:8001',
     reuseExistingServer,

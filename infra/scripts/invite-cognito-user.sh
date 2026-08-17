@@ -8,7 +8,7 @@ source "$SCRIPT_DIR/lib.sh"
 require_command python3
 usage() {
   cat >&2 <<'EOF'
-Usage: infra/scripts/invite-cognito-user.sh <bdf|netrias> <dev|qa|staging|prod> <email> [resend]
+Usage: infra/scripts/invite-cognito-user.sh <target> <stage> <email> [resend]
 
 Creates a Cognito user for Data Chord. Cognito emails the user a temporary
 password. Pass "resend" as the fourth argument to resend the invitation for an
@@ -16,13 +16,14 @@ existing user.
 EOF
 }
 
-TARGET_NAME="$(require_target_name "${1:-}")"
-STAGE_NAME="$(require_stage_name "${2:-}")"
-require_configured_deployment "$TARGET_NAME" "$STAGE_NAME"
+TARGET_NAME="${1:-}"
+STAGE_NAME="${2:-}"
+ENVIRONMENT_FILE="$(environment_path "$TARGET_NAME" "$STAGE_NAME")"
+validate_environment
 EMAIL="${3:-}"
 MESSAGE_ACTION="${4:-}"
 
-AWS_REGION_VALUE="$(target_value "$TARGET_NAME" aws_region)"
+AWS_REGION_VALUE="$(environment_value region)"
 export AWS_REGION="$AWS_REGION_VALUE"
 export AWS_DEFAULT_REGION="$AWS_REGION_VALUE"
 
@@ -39,9 +40,10 @@ if [[ -n "$MESSAGE_ACTION" && "$MESSAGE_ACTION" != "resend" ]]; then
   fail "Unknown action: $MESSAGE_ACTION"
 fi
 
-require_deployer_identity "$TARGET_NAME"
-log "Using verified AWS deployment-role credentials"
-init_tofu "$TARGET_NAME" "$STAGE_NAME" >/dev/null
+assume_deployer_role
+verify_foundation_contract
+log "Using the verified AWS deployment role"
+init_tofu >/dev/null
 
 USER_POOL_ID="$(tofu_output cognito_user_pool_id)"
 APP_URL="$(tofu_output app_url)"
