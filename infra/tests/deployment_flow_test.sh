@@ -25,6 +25,14 @@ assert_absent() {
   fi
 }
 
+assert_before() {
+  local first second
+  first="$(grep -nF -- "$2" "$1" | head -n 1 | cut -d: -f1 || true)"
+  second="$(grep -nF -- "$3" "$1" | head -n 1 | cut -d: -f1 || true)"
+  [[ -n "$first" && -n "$second" && "$first" -lt "$second" ]] ||
+    fail_test "Expected '$2' before '$3' in $1"
+}
+
 cat >"$MOCK_BIN/git" <<'MOCK_GIT'
 #!/usr/bin/env bash
 set -Eeuo pipefail
@@ -66,8 +74,45 @@ case "${1:-} ${2:-}" in
       exit 254
     fi
     ;;
-  "codebuild start-build") touch "$MOCK_IMAGE_FILE"; printf 'build-1\n' ;;
-  "codebuild batch-get-builds") printf 'SUCCEEDED\tCOMPLETED\n' ;;
+  "codebuild start-build")
+    if [[ "${MOCK_CODEBUILD_START_FAILURE:-0}" == "1" ]]; then
+      printf 'AccessDenied: cannot start build\n' >&2
+      exit 254
+    fi
+    [[ "${MOCK_CODEBUILD_FAILURE:-0}" == "1" ]] || touch "$MOCK_IMAGE_FILE"
+    printf 'build-1\n'
+    ;;
+  "codebuild batch-get-builds")
+    if [[ "${MOCK_CODEBUILD_STATUS_FAILURE:-0}" == "1" ]]; then
+      printf 'ServiceUnavailable: cannot inspect build\n' >&2
+      exit 254
+    fi
+    if [[ "$*" == *"builds[0].[buildStatus,currentPhase]"* ]]; then
+      if [[ "${MOCK_CODEBUILD_FAILURE:-0}" == "1" ]]; then
+        printf 'FAILED\tCOMPLETED\n'
+      else
+        printf 'SUCCEEDED\tCOMPLETED\n'
+      fi
+      exit 0
+    fi
+    if [[ "${MOCK_CODEBUILD_NOT_FOUND:-0}" == "1" ]]; then
+      printf '{"builds":[],"buildsNotFound":["build-1"]}\n'
+    elif [[ "${MOCK_CODEBUILD_WRONG_ID:-0}" == "1" ]]; then
+      printf '%s\n' '{"builds":[{"id":"another-build","buildStatus":"SUCCEEDED","currentPhase":"COMPLETED","phases":[]}],"buildsNotFound":[]}'
+    elif [[ "${MOCK_CODEBUILD_MISSING_STATUS:-0}" == "1" ]]; then
+      printf '%s\n' '{"builds":[{"id":"build-1","currentPhase":"DOWNLOAD_SOURCE","phases":[]}],"buildsNotFound":[]}'
+    elif [[ "${MOCK_CODEBUILD_FAILURE:-0}" == "1" ]]; then
+      if [[ "${MOCK_CODEBUILD_MALFORMED_PHASE:-0}" == "1" ]]; then
+        printf '%s\n' '{"builds":[{"id":"build-1","buildStatus":"FAILED","currentPhase":"COMPLETED","phases":["invalid-phase"]}],"buildsNotFound":[]}'
+      elif [[ "${MOCK_CODEBUILD_NO_CONTEXT:-0}" == "1" ]]; then
+        printf '%s\n' '{"builds":[{"id":"build-1","buildStatus":"FAILED","currentPhase":"COMPLETED","phases":[{"phaseType":"DOWNLOAD_SOURCE","phaseStatus":"FAILED","contexts":[]}]}],"buildsNotFound":[]}'
+      else
+        printf '%s\n' '{"builds":[{"id":"build-1","buildStatus":"FAILED","currentPhase":"COMPLETED","phases":[{"phaseType":"DOWNLOAD_SOURCE","phaseStatus":"FAILED","contexts":[{"message":"Access denied to connection test-connection"}]}]}],"buildsNotFound":[]}'
+      fi
+    else
+      printf '%s\n' '{"builds":[{"id":"build-1","buildStatus":"SUCCEEDED","currentPhase":"COMPLETED","phases":[]}],"buildsNotFound":[]}'
+    fi
+    ;;
   "ecs describe-services") printf 'COMPLETED\t1\t1\t0\n' ;;
   "elbv2 describe-target-health") printf 'healthy\n' ;;
   *) printf 'Unexpected AWS call: %s\n' "$*" >&2; exit 2 ;;
@@ -102,6 +147,21 @@ case "$arguments" in
         : >"${argument#-out=}"
       fi
     done
+    if [[ "$arguments" == *" -detailed-exitcode "* ]]; then
+      if [[ "${MOCK_CONVERGENCE_AWS_FAILURE:-0}" == "1" ]]; then
+        exit 1
+      fi
+      if [[ "${MOCK_CONVERGENCE_FAILURE:-0}" == "1" ]]; then
+        exit 2
+      fi
+      attempts=0
+      [[ -s "$MOCK_CONVERGENCE_COUNTER_FILE" ]] && attempts="$(<"$MOCK_CONVERGENCE_COUNTER_FILE")"
+      attempts=$((attempts + 1))
+      printf '%s\n' "$attempts" >"$MOCK_CONVERGENCE_COUNTER_FILE"
+      if ((attempts <= MOCK_CONVERGENCE_REMAINING)); then
+        exit 2
+      fi
+    fi
     ;;
   *" show "*)
     plan_file="${!#}"
@@ -159,6 +219,7 @@ run_command() {
   shift
   : >"$calls"
   : >"$calls.state-pulls"
+  : >"$calls.convergence"
   PATH="$MOCK_BIN:/usr/bin:/bin" \
     MOCK_CALLS="$calls" \
     MOCK_COMMIT="$MOCK_COMMIT" \
@@ -166,6 +227,18 @@ run_command() {
     MOCK_EMPTY_STATE="${MOCK_EMPTY_STATE:-0}" \
     MOCK_ALREADY_DEPLOYER="${MOCK_ALREADY_DEPLOYER:-0}" \
     MOCK_STATE_CHANGE_AFTER_PULL="${MOCK_STATE_CHANGE_AFTER_PULL:-0}" \
+    MOCK_CODEBUILD_FAILURE="${MOCK_CODEBUILD_FAILURE:-0}" \
+    MOCK_CODEBUILD_NOT_FOUND="${MOCK_CODEBUILD_NOT_FOUND:-0}" \
+    MOCK_CODEBUILD_NO_CONTEXT="${MOCK_CODEBUILD_NO_CONTEXT:-0}" \
+    MOCK_CODEBUILD_MALFORMED_PHASE="${MOCK_CODEBUILD_MALFORMED_PHASE:-0}" \
+    MOCK_CODEBUILD_MISSING_STATUS="${MOCK_CODEBUILD_MISSING_STATUS:-0}" \
+    MOCK_CODEBUILD_START_FAILURE="${MOCK_CODEBUILD_START_FAILURE:-0}" \
+    MOCK_CODEBUILD_STATUS_FAILURE="${MOCK_CODEBUILD_STATUS_FAILURE:-0}" \
+    MOCK_CODEBUILD_WRONG_ID="${MOCK_CODEBUILD_WRONG_ID:-0}" \
+    MOCK_CONVERGENCE_AWS_FAILURE="${MOCK_CONVERGENCE_AWS_FAILURE:-0}" \
+    MOCK_CONVERGENCE_FAILURE="${MOCK_CONVERGENCE_FAILURE:-0}" \
+    MOCK_CONVERGENCE_REMAINING="${MOCK_CONVERGENCE_REMAINING:-0}" \
+    MOCK_CONVERGENCE_COUNTER_FILE="$calls.convergence" \
     MOCK_STATE_COUNTER_FILE="$calls.state-pulls" \
     AWS_CREDENTIAL_EXPIRATION="${MOCK_CREDENTIAL_EXPIRATION:-}" \
     MOCK_FORECAST_JSON="${MOCK_FORECAST_JSON_OVERRIDE:-$safe_plan}" \
@@ -173,6 +246,7 @@ run_command() {
     MOCK_APPLICATION_JSON="$application_plan" \
     DATA_CHORD_PLAN_ROOT="$TEST_ROOT/receipts" \
     DATA_CHORD_BUILD_ROOT="$TEST_ROOT/build" \
+    DATA_CHORD_BUILD_WAIT_SECONDS="${DATA_CHORD_BUILD_WAIT_SECONDS:-3900}" \
     "$DEPLOY_SCRIPT" "$@" </dev/null
 }
 
@@ -215,9 +289,16 @@ assert_absent "$plan_calls" "uv run"
 # Given the exact plan receipt still matches code, config, account, and state.
 deploy_calls="$TEST_ROOT/deploy-calls"
 # When deploy runs without stdin.
-run_command "$deploy_calls" netrias staging deploy >/dev/null
-# Then only saved plans apply, no data import runs, and health is checked.
+MOCK_CONVERGENCE_REMAINING=4 run_command "$deploy_calls" netrias staging deploy >/dev/null
+# Then the policy is applied and converges before CodeBuild, saved plans apply,
+# no data import runs, and health is checked.
 assert_contains "$deploy_calls" "prerequisites.tfplan"
+assert_contains "$deploy_calls" "-target=aws_iam_role_policy.application_build"
+assert_contains "$deploy_calls" "-detailed-exitcode"
+assert_before "$deploy_calls" " apply -input=false" " -detailed-exitcode"
+assert_before "$deploy_calls" " -detailed-exitcode" "aws codebuild start-build"
+[[ "$(<"$deploy_calls.convergence")" == "5" ]] ||
+  fail_test "Deploy did not wait for the prerequisite policy to converge"
 assert_contains "$deploy_calls" "--duration-seconds 14400"
 assert_contains "$deploy_calls" "application.tfplan"
 assert_contains "$deploy_calls" "aws codebuild start-build"
@@ -225,6 +306,142 @@ assert_contains "$deploy_calls" "sleep "
 assert_contains "$deploy_calls" "aws elbv2 describe-target-health"
 assert_absent "$deploy_calls" "-auto-approve"
 assert_absent "$deploy_calls" "uv run"
+
+# Given the saved prerequisite apply returns but the live policy stays stale.
+run_command "$plan_calls" netrias staging plan >/dev/null
+convergence_calls="$TEST_ROOT/convergence-calls"
+convergence_output="$TEST_ROOT/convergence-output"
+# When deploy checks convergence, then it stops before CodeBuild and gives one safe next action.
+if MOCK_CONVERGENCE_FAILURE=1 run_command "$convergence_calls" netrias staging deploy >"$convergence_output" 2>&1; then
+  fail_test "Deploy accepted a stale prerequisite policy"
+fi
+assert_absent "$convergence_calls" "aws codebuild start-build"
+assert_contains "$convergence_output" "The prerequisite IAM policy was not applied."
+assert_contains "$convergence_output" "The current plan cannot be reused. Next: just plan netrias staging"
+
+# Given AWS prevents OpenTofu from inspecting the prerequisite policy.
+run_command "$plan_calls" netrias staging plan >/dev/null
+convergence_aws_calls="$TEST_ROOT/convergence-aws-calls"
+convergence_aws_output="$TEST_ROOT/convergence-aws-output"
+# When convergence cannot be checked, then deploy stops before CodeBuild and reports the failed check.
+if MOCK_CONVERGENCE_AWS_FAILURE=1 run_command "$convergence_aws_calls" netrias staging deploy >"$convergence_aws_output" 2>&1; then
+  fail_test "Deploy ignored a prerequisite inspection failure"
+fi
+assert_absent "$convergence_aws_calls" "aws codebuild start-build"
+assert_contains "$convergence_aws_output" "Could not verify the prerequisite IAM policy."
+assert_contains "$convergence_aws_output" "OpenTofu returned no error message"
+assert_contains "$convergence_aws_output" "The current plan cannot be reused. Next: just plan netrias staging"
+
+# Given AWS accepts the prerequisite policy but CodeBuild fails to download source.
+run_command "$plan_calls" netrias staging plan >/dev/null
+mv "$TEST_ROOT/image" "$TEST_ROOT/image-from-success"
+codebuild_failure_calls="$TEST_ROOT/codebuild-failure-calls"
+codebuild_failure_output="$TEST_ROOT/codebuild-failure-output"
+# When deploy observes the terminal build, then it shows the build, phase, AWS message, and next action.
+if MOCK_CODEBUILD_FAILURE=1 run_command "$codebuild_failure_calls" netrias staging deploy >"$codebuild_failure_output" 2>&1; then
+  fail_test "Deploy accepted a failed CodeBuild run"
+fi
+assert_contains "$codebuild_failure_output" "CodeBuild build-1 failed in DOWNLOAD_SOURCE."
+assert_contains "$codebuild_failure_output" "AWS: Access denied to connection test-connection"
+assert_contains "$codebuild_failure_output" "The current plan cannot be reused. Next: just plan netrias staging"
+
+# Given AWS rejects the request to start CodeBuild.
+run_command "$plan_calls" netrias staging plan >/dev/null
+start_failure_calls="$TEST_ROOT/start-failure-calls"
+start_failure_output="$TEST_ROOT/start-failure-output"
+# When deploy requests a build, then it reports that no build ID exists and gives the safe next action.
+if MOCK_CODEBUILD_START_FAILURE=1 run_command "$start_failure_calls" netrias staging deploy >"$start_failure_output" 2>&1; then
+  fail_test "Deploy ignored a CodeBuild start failure"
+fi
+assert_contains "$start_failure_output" "CodeBuild did not start. Build ID: not created."
+assert_contains "$start_failure_output" "AWS: AccessDenied: cannot start build"
+assert_contains "$start_failure_output" "The current plan cannot be reused. Next: just plan netrias staging"
+
+# Given CodeBuild starts but AWS rejects the status request.
+run_command "$plan_calls" netrias staging plan >/dev/null
+status_failure_calls="$TEST_ROOT/status-failure-calls"
+status_failure_output="$TEST_ROOT/status-failure-output"
+# When deploy inspects the build, then it reports the build ID and AWS error.
+if MOCK_CODEBUILD_STATUS_FAILURE=1 run_command "$status_failure_calls" netrias staging deploy >"$status_failure_output" 2>&1; then
+  fail_test "Deploy ignored a CodeBuild status failure"
+fi
+assert_contains "$status_failure_output" "Could not inspect CodeBuild build-1. Status: UNKNOWN. Phase: UNKNOWN."
+assert_contains "$status_failure_output" "AWS: ServiceUnavailable: cannot inspect build"
+assert_contains "$status_failure_output" "The current plan cannot be reused. Next: just plan netrias staging"
+mv "$TEST_ROOT/image" "$TEST_ROOT/image-from-status-failure"
+
+# Given AWS cannot find the build ID it just returned.
+run_command "$plan_calls" netrias staging plan >/dev/null
+not_found_calls="$TEST_ROOT/not-found-calls"
+not_found_output="$TEST_ROOT/not-found-output"
+# When deploy reads the response, then it reports the missing build and safe next action.
+if MOCK_CODEBUILD_NOT_FOUND=1 run_command "$not_found_calls" netrias staging deploy >"$not_found_output" 2>&1; then
+  fail_test "Deploy ignored a missing CodeBuild record"
+fi
+assert_contains "$not_found_output" "Could not inspect CodeBuild build-1. Status: UNKNOWN. Phase: UNKNOWN."
+assert_contains "$not_found_output" "AWS: the requested build build-1 was not returned"
+assert_contains "$not_found_output" "The current plan cannot be reused. Next: just plan netrias staging"
+mv "$TEST_ROOT/image" "$TEST_ROOT/image-from-not-found"
+
+# Given a failed build has no AWS context message.
+run_command "$plan_calls" netrias staging plan >/dev/null
+no_context_calls="$TEST_ROOT/no-context-calls"
+no_context_output="$TEST_ROOT/no-context-output"
+# When deploy reports the failure, then it keeps the phase and states that the message is absent.
+if MOCK_CODEBUILD_FAILURE=1 MOCK_CODEBUILD_NO_CONTEXT=1 run_command "$no_context_calls" netrias staging deploy >"$no_context_output" 2>&1; then
+  fail_test "Deploy ignored a failed build without context"
+fi
+assert_contains "$no_context_output" "CodeBuild build-1 failed in DOWNLOAD_SOURCE. Status: FAILED."
+assert_contains "$no_context_output" "AWS: no failure message was returned"
+assert_contains "$no_context_output" "The current plan cannot be reused. Next: just plan netrias staging"
+
+# Given AWS returns a build record without its status.
+run_command "$plan_calls" netrias staging plan >/dev/null
+missing_status_calls="$TEST_ROOT/missing-status-calls"
+missing_status_output="$TEST_ROOT/missing-status-output"
+# When deploy reads the record, then it stops with the build ID, phase, and next action.
+if MOCK_CODEBUILD_MISSING_STATUS=1 run_command "$missing_status_calls" netrias staging deploy >"$missing_status_output" 2>&1; then
+  fail_test "Deploy accepted a CodeBuild record without status"
+fi
+assert_contains "$missing_status_output" "CodeBuild build-1 returned no status. Phase: DOWNLOAD_SOURCE."
+assert_contains "$missing_status_output" "The current plan cannot be reused. Next: just plan netrias staging"
+mv "$TEST_ROOT/image" "$TEST_ROOT/image-from-missing-status"
+
+# Given AWS returns a different build than the one that deploy started.
+run_command "$plan_calls" netrias staging plan >/dev/null
+wrong_id_calls="$TEST_ROOT/wrong-id-calls"
+wrong_id_output="$TEST_ROOT/wrong-id-output"
+# When deploy reads the record, then it rejects it as an unusable status response.
+if MOCK_CODEBUILD_WRONG_ID=1 run_command "$wrong_id_calls" netrias staging deploy >"$wrong_id_output" 2>&1; then
+  fail_test "Deploy accepted a different CodeBuild record"
+fi
+assert_contains "$wrong_id_output" "AWS: the requested build build-1 was not returned"
+assert_contains "$wrong_id_output" "The current plan cannot be reused. Next: just plan netrias staging"
+mv "$TEST_ROOT/image" "$TEST_ROOT/image-from-wrong-id"
+
+# Given a failed build contains an invalid phase record.
+run_command "$plan_calls" netrias staging plan >/dev/null
+malformed_phase_calls="$TEST_ROOT/malformed-phase-calls"
+malformed_phase_output="$TEST_ROOT/malformed-phase-output"
+# When deploy reads the failure, then it gives a structured error and no traceback.
+if MOCK_CODEBUILD_FAILURE=1 MOCK_CODEBUILD_MALFORMED_PHASE=1 run_command "$malformed_phase_calls" netrias staging deploy >"$malformed_phase_output" 2>&1; then
+  fail_test "Deploy accepted an invalid CodeBuild phase"
+fi
+assert_contains "$malformed_phase_output" "CodeBuild build-1 failed. Status: FAILED. Phase: COMPLETED."
+assert_contains "$malformed_phase_output" "AWS returned no valid CodeBuild phase"
+assert_absent "$malformed_phase_output" "Traceback"
+
+# Given CodeBuild does not finish before the local wait limit.
+run_command "$plan_calls" netrias staging plan >/dev/null
+timeout_calls="$TEST_ROOT/timeout-calls"
+timeout_output="$TEST_ROOT/timeout-output"
+# When the wait expires, then deploy reports the build, unknown state, and next action.
+if DATA_CHORD_BUILD_WAIT_SECONDS=0 run_command "$timeout_calls" netrias staging deploy >"$timeout_output" 2>&1; then
+  fail_test "Deploy accepted a timed-out CodeBuild wait"
+fi
+assert_contains "$timeout_output" "CodeBuild build-1 did not finish within 65 minutes. Status: UNKNOWN. Phase: UNKNOWN."
+assert_contains "$timeout_output" "The current plan cannot be reused. Next: just plan netrias staging"
+mv "$TEST_ROOT/image" "$TEST_ROOT/image-from-timeout"
 
 # Given a new plan receipt was created for state serial one.
 run_command "$plan_calls" netrias staging plan >/dev/null

@@ -131,6 +131,7 @@ apply_prerequisites() {
   log "Planning the application prerequisites"
   create_saved_plan "$plan_file" \
     -target=aws_codebuild_project.app_image \
+    -target=aws_iam_role_policy.application_build \
     -target=aws_s3_bucket_versioning.workflow
   check_internal_plan "$plan_file.json" prerequisite
   if python3 "$SCRIPT_DIR/deployment_receipt.py" has-change \
@@ -142,10 +143,44 @@ apply_prerequisites() {
   receipt_validate "$state_path" in_progress
   log "Applying the displayed prerequisite saved plan"
   tofu -chdir="$INFRA_DIR" apply -input=false "$plan_file"
+  verify_prerequisite_policy
   if [[ "$versioning_changed" == "1" ]]; then
     VERSIONING_READY_AT=$((SECONDS + 900))
     log "AWS can need 15 minutes to propagate new S3 versioning. Image work will run during this wait."
   fi
+}
+
+retry_instruction() {
+  printf 'The current plan cannot be reused. Next: just plan %s %s' "$TARGET_NAME" "$STAGE_NAME"
+}
+
+verify_prerequisite_policy() {
+  local attempt error_detail exit_code error_file plan_file
+  log "Verifying the prerequisite IAM policy"
+  for attempt in {1..5}; do
+    plan_file="$PLAN_DIR/prerequisite-policy-verification-$attempt.tfplan"
+    error_file="$plan_file.err"
+    if tofu -chdir="$INFRA_DIR" plan \
+      -input=false \
+      -detailed-exitcode \
+      -var-file="$TFVARS_FILE" \
+      -var="image_tag=$COMMIT" \
+      -target=aws_iam_role_policy.application_build \
+      -out="$plan_file" > /dev/null 2>"$error_file"; then
+      log "Prerequisite IAM policy verified"
+      return 0
+    else
+      exit_code=$?
+    fi
+    if [[ "$exit_code" == "2" ]]; then
+      ((attempt < 5)) && sleep 2
+      continue
+    fi
+    error_detail="$(<"$error_file")"
+    [[ -n "$error_detail" ]] || error_detail="OpenTofu returned no error message"
+    fail "Could not verify the prerequisite IAM policy. OpenTofu: $error_detail. $(retry_instruction)"
+  done
+  fail "The prerequisite IAM policy was not applied. No image build started. $(retry_instruction)"
 }
 
 ecr_repository_name() {
@@ -168,13 +203,21 @@ image_exists() {
 
 watch_build() {
   local build_id="$1"
-  local deadline status phase fields previous=""
-  deadline=$((SECONDS + 3900))
+  local deadline status phase fields previous="" response_file error_file error_detail
+  response_file="$PLAN_DIR/codebuild-status.json"
+  error_file="$PLAN_DIR/codebuild-status.err"
+  deadline=$((SECONDS + ${DATA_CHORD_BUILD_WAIT_SECONDS:-3900}))
   while ((SECONDS < deadline)); do
-    fields="$(aws codebuild batch-get-builds \
+    if ! aws codebuild batch-get-builds \
       --ids "$build_id" \
-      --query 'builds[0].[buildStatus,currentPhase]' \
-      --output text)"
+      --output json >"$response_file" 2>"$error_file"; then
+      error_detail="$(<"$error_file")"
+      [[ -n "$error_detail" ]] || error_detail="AWS returned no error message"
+      fail "Could not inspect CodeBuild $build_id. Status: UNKNOWN. Phase: UNKNOWN. AWS: $error_detail. $(retry_instruction)"
+    fi
+    if ! fields="$(python3 "$SCRIPT_DIR/codebuild_status.py" "$response_file" "$build_id" "$TARGET_NAME" "$STAGE_NAME" 2>&1)"; then
+      fail "$fields"
+    fi
     read -r status phase <<<"$fields"
     if [[ "$status:$phase" != "$previous" ]]; then
       log "CodeBuild: $status ($phase)"
@@ -182,15 +225,14 @@ watch_build() {
     fi
     case "$status" in
       SUCCEEDED) return 0 ;;
-      FAILED | FAULT | STOPPED | TIMED_OUT) fail "CodeBuild finished with status $status." ;;
     esac
     sleep 10
   done
-  fail "CodeBuild did not finish within 65 minutes."
+  fail "CodeBuild $build_id did not finish within 65 minutes. Status: ${status:-UNKNOWN}. Phase: ${phase:-UNKNOWN}. AWS returned no failure message. $(retry_instruction)"
 }
 
 ensure_image() {
-  local repository build_id project
+  local repository build_id project start_error error_detail
   repository="$(ecr_repository_name)"
   if image_exists "$repository"; then
     log "Reusing immutable image $repository:$COMMIT"
@@ -198,11 +240,18 @@ ensure_image() {
   fi
   project="$(required_tofu_output codebuild_project_name)"
   log "Building immutable image for commit $COMMIT"
-  build_id="$(aws codebuild start-build \
+  start_error="$PLAN_DIR/codebuild-start.err"
+  if ! build_id="$(aws codebuild start-build \
     --project-name "$project" \
     --source-version "$COMMIT" \
     --query 'build.id' \
-    --output text)"
+    --output text 2>"$start_error")"; then
+    error_detail="$(<"$start_error")"
+    [[ -n "$error_detail" ]] || error_detail="AWS returned no error message"
+    fail "CodeBuild did not start. Build ID: not created. Status: NOT_STARTED. Phase: NOT_STARTED. AWS: $error_detail. $(retry_instruction)"
+  fi
+  [[ -n "$build_id" && "$build_id" != "None" ]] ||
+    fail "CodeBuild did not start. Build ID: not created. Status: NOT_STARTED. Phase: NOT_STARTED. AWS returned no build ID. $(retry_instruction)"
   watch_build "$build_id"
   image_exists "$repository" || fail "CodeBuild finished but image $repository:$COMMIT does not exist."
 }
