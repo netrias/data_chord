@@ -13,7 +13,7 @@ variable "application_role_boundary_arn" {
   type        = string
 
   validation {
-    condition     = can(regex("^arn:aws:iam::${var.expected_account_id}:policy/.+$", var.application_role_boundary_arn))
+    condition     = can(regex("^arn:(aws|aws-us-gov):iam::${var.expected_account_id}:policy/.+$", var.application_role_boundary_arn))
     error_message = "application_role_boundary_arn must be an IAM policy in expected_account_id."
   }
 }
@@ -43,8 +43,8 @@ variable "deployment_target" {
   type        = string
 
   validation {
-    condition     = contains(["bdf", "netrias"], var.deployment_target)
-    error_message = "deployment_target must be bdf or netrias."
+    condition     = can(regex("^[a-z][a-z0-9-]*$", var.deployment_target))
+    error_message = "deployment_target must be a lowercase target name."
   }
 }
 
@@ -117,6 +117,27 @@ variable "github_app_secret_name" {
   description = "Secrets Manager name for the read-only GitHub App build credential."
   type        = string
   default     = "data-chord/build/github-app"
+}
+
+variable "application_repository_url" {
+  description = "HTTPS Git repository that CodeBuild checks out."
+  type        = string
+  default     = "https://github.com/netrias/data_chord.git"
+
+  validation {
+    condition = (
+      can(regex("^https://[^/@?#]+/.+\\.git$", var.application_repository_url)) &&
+      !strcontains(var.application_repository_url, "?") &&
+      !strcontains(var.application_repository_url, "#")
+    )
+    error_message = "application_repository_url must be a credential-free HTTPS Git URL ending in .git."
+  }
+}
+
+variable "netrias_api_key_secret_name" {
+  description = "Secrets Manager name for the selected stage's Netrias API key."
+  type        = string
+  default     = null
 }
 
 variable "image_tag" {

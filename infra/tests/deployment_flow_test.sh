@@ -104,7 +104,7 @@ set -Eeuo pipefail
 
 case "${1:-} ${2:-}" in
   "sts get-caller-identity")
-    printf '%s\tarn:aws:sts::%s:assumed-role/datachord-deployer/test\n' "$MOCK_ACCOUNT_ID" "$MOCK_ACCOUNT_ID"
+    printf '%s\tarn:%s:sts::%s:assumed-role/datachord-deployer/test\n' "$MOCK_ACCOUNT_ID" "${MOCK_PARTITION:-aws}" "$MOCK_ACCOUNT_ID"
     ;;
   "secretsmanager describe-secret")
     printf 'aws secret-check %s\n' "$*" >>"$MOCK_CALLS"
@@ -794,6 +794,31 @@ run_legacy_state_guard() {
   assert_call_contains "tofu plan " "-var=environment=staging" "$calls_file"
 }
 
+run_external_contract_plan() {
+  local scenario_root="$TEST_ROOT/external-contract-plan"
+  local calls_file="$scenario_root/calls"
+  local contract_file="$scenario_root/contract.json"
+  mkdir -p "$scenario_root"
+  : >"$calls_file"
+  touch "$scenario_root/full-applied"
+  cat >"$contract_file" <<'JSON'
+{"application_commit":"0123456789abcdef0123456789abcdef01234567","application_repository_url":"https://github.com/netrias/data_chord.git","application_role_boundary_arn":"arn:aws:iam::945365518758:policy/datachord-application-role-boundary","application_role_path":"/application/","aws_partition":"aws","aws_region":"us-east-2","deployer_role_arn":"arn:aws:iam::945365518758:role/foundation/datachord-deployer","domain_label":"data-chord-staging","expected_account_id":"945365518758","github_app_secret_name":"data-chord/build/github-app","hosted_zone_name":"apps.netrias.com","netrias_api_key_secret_name":"data-chord/staging/netrias-api-key","stage":"staging","state_bucket_name":"explicit-shared-state-bucket","state_key":"datachord/netrias/staging/tofu.tfstate","target_slug":"netrias"}
+JSON
+  PATH="$MOCK_BIN:$PATH" AWS_PROFILE=mock \
+    DATA_CHORD_DEPLOYMENT_CONTRACT="$contract_file" \
+    DATA_CHORD_TF_DATA_DIR="$scenario_root/tofu-data" \
+    MOCK_ACCOUNT_ID=945365518758 MOCK_PARTITION=aws MOCK_BUILD_READY="$scenario_root/build-ready" \
+    MOCK_CALLS="$calls_file" MOCK_COMMIT=0123456789abcdef0123456789abcdef01234567 \
+    MOCK_DEPLOYED_IMAGE_TAG=deployed123456 \
+    MOCK_FULL_APPLIED="$scenario_root/full-applied" \
+    "$DEPLOY_SCRIPT" netrias staging plan >/dev/null 2>&1
+
+  assert_call_contains "tofu init " "-backend-config=bucket=explicit-shared-state-bucket" "$calls_file"
+  assert_call_contains "tofu plan " "-var=hosted_zone_name=apps.netrias.com" "$calls_file"
+  assert_call_contains "tofu plan " "-var=application_repository_url=https://github.com/netrias/data_chord.git" "$calls_file"
+  assert_call_contains "tofu plan " "-var=image_tag=0123456789ab" "$calls_file"
+}
+
 run_first_deploy
 run_failed_build_reconciliation
 run_retry_after_image_build
@@ -812,5 +837,6 @@ run_deploy_requires_application_url
 run_public_command_contract
 run_removed_write_modes_are_rejected
 run_legacy_state_guard
+run_external_contract_plan
 
 printf 'Deployment flow tests passed.\n'

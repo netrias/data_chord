@@ -112,6 +112,22 @@ run "application_roles_follow_foundation_guardrails" {
   }
 }
 
+run "new_target_names_and_partition_derived_arns_are_supported" {
+  command = plan
+
+  variables {
+    deployment_target = "core"
+  }
+
+  assert {
+    condition = (
+      aws_iam_role_policy_attachment.application_task_execution.policy_arn ==
+      "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+    )
+    error_message = "Application IAM policy ARNs must use the active AWS partition."
+  }
+}
+
 run "application_role_names_are_owned_by_data_chord" {
   command = plan
 
