@@ -42,7 +42,7 @@ _PREREQUISITE_ADDRESSES = {
     "aws_s3_bucket.workflow",
 }
 _SAFE_REPLACEMENTS = {
-    "aws_ecs_task_definition.application": ["create", "delete"],
+    "aws_ecs_task_definition.application": ["delete", "create"],
 }
 
 

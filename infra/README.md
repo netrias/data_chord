@@ -123,8 +123,8 @@ the image.
 
 Each internal plan must remain inside the approved forecast. Prerequisite work
 has a smaller allow-list. A delete, replacement, or extra resource stops the
-deployment before apply. The only allowed replacement is the normal
-create-before-destroy ECS task-definition revision for a new application image.
+deployment before apply. The only allowed replacement is the normal ECS
+task-definition revision for a new application image.
 
 Deployment creates the empty DynamoDB reference-data table. Loading or changing
 the table data is a separate operation. `plan` and `deploy` do not accept a data

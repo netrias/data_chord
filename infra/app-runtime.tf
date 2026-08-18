@@ -75,11 +75,6 @@ resource "aws_ecs_task_definition" "application" {
     aws_iam_role_policy_attachment.application_task_execution,
   ]
 
-  lifecycle {
-    # Each image deploy creates a new immutable ECS task-definition revision.
-    create_before_destroy = true
-  }
-
   container_definitions = jsonencode([
     {
       name      = "app"
