@@ -114,7 +114,7 @@ case "${1:-} ${2:-}" in
     fi
     ;;
   "ecs describe-services") printf 'COMPLETED\t1\t1\t0\n' ;;
-  "elbv2 describe-target-health") printf 'healthy\n' ;;
+  "elbv2 describe-target-health") printf '%s\n' "$MOCK_TARGET_STATES" ;;
   *) printf 'Unexpected AWS call: %s\n' "$*" >&2; exit 2 ;;
 esac
 MOCK_AWS
@@ -210,8 +210,8 @@ MOCK_SLEEP
 
 chmod +x "$MOCK_BIN/git" "$MOCK_BIN/aws" "$MOCK_BIN/tofu" "$MOCK_BIN/uv" "$MOCK_BIN/sleep"
 
-safe_plan='{"resource_changes":[{"address":"aws_ecr_repository.app","change":{"actions":["create"]}},{"address":"aws_dynamodb_table.reference_data","change":{"actions":["create"]}},{"address":"aws_s3_bucket.workflow","change":{"actions":["create"]}},{"address":"aws_s3_bucket_versioning.workflow","change":{"actions":["create"]}}]}'
-prerequisite_plan='{"resource_changes":[{"address":"aws_ecr_repository.app","change":{"actions":["create"]}},{"address":"aws_s3_bucket.workflow","change":{"actions":["create"]}},{"address":"aws_s3_bucket_versioning.workflow","change":{"actions":["create"]}}]}'
+safe_plan='{"resource_changes":[{"address":"aws_ecr_repository.app","change":{"actions":["create"]}},{"address":"aws_dynamodb_table.reference_data","change":{"actions":["create"]}},{"address":"aws_s3_bucket.workflow","change":{"actions":["create"]}}]}'
+prerequisite_plan='{"resource_changes":[{"address":"aws_ecr_repository.app","change":{"actions":["create"]}},{"address":"aws_s3_bucket.workflow","change":{"actions":["create"]}}]}'
 application_plan='{"resource_changes":[{"address":"aws_dynamodb_table.reference_data","change":{"actions":["create"]}}]}'
 
 run_command() {
@@ -242,12 +242,13 @@ run_command() {
     MOCK_CONVERGENCE_AWS_FAILURE="${MOCK_CONVERGENCE_AWS_FAILURE:-0}" \
     MOCK_CONVERGENCE_FAILURE="${MOCK_CONVERGENCE_FAILURE:-0}" \
     MOCK_CONVERGENCE_REMAINING="${MOCK_CONVERGENCE_REMAINING:-0}" \
+    MOCK_TARGET_STATES="${MOCK_TARGET_STATES:-healthy}" \
     MOCK_CONVERGENCE_COUNTER_FILE="$calls.convergence" \
     MOCK_STATE_COUNTER_FILE="$calls.state-pulls" \
     AWS_CREDENTIAL_EXPIRATION="${MOCK_CREDENTIAL_EXPIRATION:-}" \
     MOCK_FORECAST_JSON="${MOCK_FORECAST_JSON_OVERRIDE:-$safe_plan}" \
     MOCK_PREREQUISITE_JSON="${MOCK_PREREQUISITE_JSON_OVERRIDE:-$prerequisite_plan}" \
-    MOCK_APPLICATION_JSON="$application_plan" \
+    MOCK_APPLICATION_JSON="${MOCK_APPLICATION_JSON_OVERRIDE:-$application_plan}" \
     DATA_CHORD_PLAN_ROOT="$TEST_ROOT/receipts" \
     DATA_CHORD_BUILD_ROOT="$TEST_ROOT/build" \
     DATA_CHORD_BUILD_WAIT_SECONDS="${DATA_CHORD_BUILD_WAIT_SECONDS:-3900}" \
@@ -308,9 +309,12 @@ assert_absent "$plan_calls" "uv run"
 # Given the exact plan receipt still matches code, config, account, and state.
 deploy_calls="$TEST_ROOT/deploy-calls"
 # When deploy runs without stdin.
-MOCK_CONVERGENCE_REMAINING=4 run_command "$deploy_calls" netrias staging deploy >/dev/null
+MOCK_CONVERGENCE_REMAINING=4 \
+  MOCK_TARGET_STATES=$'healthy\tdraining' \
+  run_command "$deploy_calls" netrias staging deploy >/dev/null
 # Then the policy is applied and converges before CodeBuild, saved plans apply,
-# no data import runs, and health is checked.
+# the workflow bucket needs no versioning wait, no data import runs, and the
+# healthy new target is accepted while the old target drains.
 assert_contains "$deploy_calls" "prerequisites.tfplan"
 assert_contains "$deploy_calls" "-target=aws_iam_role_policy.application_build"
 assert_contains "$deploy_calls" "-detailed-exitcode"
@@ -323,8 +327,37 @@ assert_contains "$deploy_calls" "application.tfplan"
 assert_contains "$deploy_calls" "aws codebuild start-build"
 assert_contains "$deploy_calls" "sleep "
 assert_contains "$deploy_calls" "aws elbv2 describe-target-health"
+assert_absent "$deploy_calls" "aws_s3_bucket_versioning.workflow"
+assert_absent "$deploy_calls" "sleep 900"
 assert_absent "$deploy_calls" "-auto-approve"
 assert_absent "$deploy_calls" "uv run"
+
+# Given a stable ECS service has no healthy load-balancer target.
+run_command "$plan_calls" netrias staging plan >/dev/null
+draining_calls="$TEST_ROOT/draining-calls"
+draining_output="$TEST_ROOT/draining-output"
+# When deploy finds only a draining target, then it reports that no healthy target exists.
+if MOCK_TARGET_STATES=draining \
+  run_command "$draining_calls" netrias staging deploy >"$draining_output" 2>&1; then
+  fail_test "Deploy accepted a target group with no healthy target"
+fi
+assert_contains "$draining_output" "The load balancer has no healthy targets."
+
+# Given an existing deployment manages workflow bucket versioning and runs an older app revision.
+versioning_handoff='{"resource_changes":[{"address":"aws_ecs_service.app","change":{"actions":["update"]}},{"address":"aws_ecs_task_definition.application","change":{"actions":["delete","create"]}},{"address":"aws_s3_bucket_versioning.workflow","change":{"actions":["forget"]}}]}'
+migration_plan_calls="$TEST_ROOT/migration-plan-calls"
+MOCK_FORECAST_JSON_OVERRIDE="$versioning_handoff" \
+  run_command "$migration_plan_calls" netrias staging plan >/dev/null
+migration_deploy_calls="$TEST_ROOT/migration-deploy-calls"
+# When the normal deploy command applies the approved ownership handoff.
+MOCK_FORECAST_JSON_OVERRIDE="$versioning_handoff" \
+  MOCK_PREREQUISITE_JSON_OVERRIDE='{"resource_changes":[]}' \
+  MOCK_APPLICATION_JSON_OVERRIDE="$versioning_handoff" \
+  run_command "$migration_deploy_calls" netrias staging deploy >/dev/null
+# Then OpenTofu applies the handoff without targeting versioning or waiting 15 minutes.
+assert_contains "$migration_deploy_calls" "application.tfplan"
+assert_absent "$migration_deploy_calls" "-target=aws_s3_bucket_versioning.workflow"
+assert_absent "$migration_deploy_calls" "sleep 900"
 
 # Given the saved prerequisite apply returns but the live policy stays stale.
 run_command "$plan_calls" netrias staging plan >/dev/null

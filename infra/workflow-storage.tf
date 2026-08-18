@@ -15,13 +15,12 @@ resource "aws_s3_bucket_public_access_block" "workflow" {
   restrict_public_buckets = true
 }
 
-resource "aws_s3_bucket_versioning" "workflow" {
-  bucket = aws_s3_bucket.workflow.id
+removed {
+  from = aws_s3_bucket_versioning.workflow
 
-  versioning_configuration {
-    # Workflow writes use optimistic version checks, so keeping object versions
-    # gives operators a recovery trail when a bad deploy corrupts artifacts.
-    status = "Enabled"
+  lifecycle {
+    # Existing deployments can keep versioning. New deployments do not enable it.
+    destroy = false
   }
 }
 

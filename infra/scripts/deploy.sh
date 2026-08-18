@@ -36,7 +36,6 @@ COMMIT="$(git_commit)"
 RECEIPT="${DATA_CHORD_PLAN_ROOT:-$REPO_DIR/.plans}/$TARGET_NAME-$STAGE_NAME.json"
 PLAN_DIR=""
 TFVARS_FILE=""
-VERSIONING_READY_AT=0
 
 create_plan_directory() {
   local plan_root="${DATA_CHORD_BUILD_ROOT:-$REPO_DIR/build/plans}"
@@ -127,27 +126,16 @@ run_plan() {
 
 apply_prerequisites() {
   local plan_file="$PLAN_DIR/prerequisites.tfplan" state_path
-  local versioning_changed=0
   log "Planning the application prerequisites"
   create_saved_plan "$plan_file" \
     -target=aws_codebuild_project.app_image \
-    -target=aws_iam_role_policy.application_build \
-    -target=aws_s3_bucket_versioning.workflow
+    -target=aws_iam_role_policy.application_build
   check_internal_plan "$plan_file.json" prerequisite
-  if python3 "$SCRIPT_DIR/deployment_receipt.py" has-change \
-    --plan-json "$plan_file.json" \
-    --address aws_s3_bucket_versioning.workflow; then
-    versioning_changed=1
-  fi
   state_path="$(state_identity)"
   receipt_validate "$state_path" in_progress
   log "Applying the displayed prerequisite saved plan"
   tofu -chdir="$INFRA_DIR" apply -input=false "$plan_file"
   verify_prerequisite_policy
-  if [[ "$versioning_changed" == "1" ]]; then
-    VERSIONING_READY_AT=$((SECONDS + 900))
-    log "AWS can need 15 minutes to propagate new S3 versioning. Image work will run during this wait."
-  fi
 }
 
 retry_instruction() {
@@ -256,15 +244,6 @@ ensure_image() {
   image_exists "$repository" || fail "CodeBuild finished but image $repository:$COMMIT does not exist."
 }
 
-wait_for_workflow_versioning() {
-  local remaining
-  remaining=$((VERSIONING_READY_AT - SECONDS))
-  if ((remaining > 0)); then
-    log "Waiting $remaining more seconds for S3 versioning before the application starts."
-    sleep "$remaining"
-  fi
-}
-
 apply_application() {
   local plan_file="$PLAN_DIR/application.tfplan"
   log "Planning the complete application"
@@ -296,7 +275,7 @@ watch_ecs() {
 }
 
 require_healthy_targets() {
-  local target_group states state
+  local target_group states state healthy=0
   target_group="$(required_tofu_output target_group_arn)"
   states="$(aws elbv2 describe-target-health \
     --target-group-arn "$target_group" \
@@ -304,8 +283,13 @@ require_healthy_targets() {
     --output text)"
   [[ -n "$states" && "$states" != "None" ]] || fail "The load balancer has no targets."
   for state in $states; do
-    [[ "$state" == "healthy" ]] || fail "A load balancer target is $state."
+    case "$state" in
+      healthy) healthy=1 ;;
+      draining) ;;
+      *) fail "A load balancer target is $state." ;;
+    esac
   done
+  ((healthy == 1)) || fail "The load balancer has no healthy targets."
 }
 
 run_deploy() {
@@ -316,7 +300,6 @@ run_deploy() {
   receipt_status planned in_progress
   apply_prerequisites
   ensure_image
-  wait_for_workflow_versioning
   apply_application
   watch_ecs
   require_healthy_targets

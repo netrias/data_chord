@@ -123,16 +123,17 @@ the image.
 
 Each internal plan must remain inside the approved forecast. Prerequisite work
 has a smaller allow-list. A delete, replacement, or extra resource stops the
-deployment before apply.
+deployment before apply. The only allowed replacement is the normal ECS
+task-definition revision for a new application image.
 
 Deployment creates the empty DynamoDB reference-data table. Loading or changing
 the table data is a separate operation. `plan` and `deploy` do not accept a data
 export and do not write table data.
 
-If the prerequisite plan first enables versioning on the workflow bucket, AWS
-can need 15 minutes before the bucket is safe for application writes. Image
-work runs during this period. If time remains, `deploy` prints the exact wait
-and finishes it before the application starts.
+New workflow buckets do not use S3 versioning. DataChord uses S3 ETags for
+concurrent-write checks, so deploy does not need a versioning propagation wait.
+Existing buckets keep their current versioning setting when OpenTofu stops
+managing it.
 
 If a deployment stops after its first resource change, its receipt stays in
 progress. Inspect the failure and run `plan` again before a retry.
