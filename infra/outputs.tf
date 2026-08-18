@@ -18,6 +18,11 @@ output "harmonization_cache_table" {
   value       = aws_dynamodb_table.harmonization_cache.name
 }
 
+output "cde_recommendation_cache_table" {
+  description = "DynamoDB table used to reuse versioned CDE recommendations."
+  value       = aws_dynamodb_table.cde_recommendation_cache.name
+}
+
 output "ecr_repository_url" {
   description = "ECR repository URI for the app image."
   value       = aws_ecr_repository.app.repository_url

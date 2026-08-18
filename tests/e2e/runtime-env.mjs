@@ -12,6 +12,7 @@ export const e2eEnv = {
   DATA_CHORD_UPLOAD_DIR: path.join(e2eRuntimeDir, 'uploads'),
   DATA_CHORD_WORKFLOW_STORAGE_DIR: path.join(e2eRuntimeDir, 'workflow_storage'),
   DATA_CHORD_REFERENCE_TABLE: 'data-chord-e2e-reference',
+  DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE: 'data-chord-e2e-cde-cache',
   DATA_CHORD_HARMONIZATION_CACHE_TABLE: 'data-chord-e2e-cache',
 };
 

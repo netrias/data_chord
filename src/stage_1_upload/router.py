@@ -18,18 +18,13 @@ from src.app.session_cache import get_session_cache
 from src.domain.cde import CDEInfo, DataModelSummary
 from src.domain.cde_catalog import CdeCatalog
 from src.domain.cde_pv_catalog import CdePvCatalog
+from src.domain.cde_recommendation import ProfiledColumn, RecommendationUnavailableError
 from src.domain.column_profile import ColumnProfile
-from src.domain.columns import ColumnKey, column_key_from_string
+from src.domain.columns import ColumnIdentity, column_key_from_string
 from src.domain.dataset_workflow_ids import new_dataset_workflow_id
-from src.domain.manifest import (
-    ColumnMappingManifest,
-    ColumnMappingRecord,
-    MappingAlternative,
-    RecommendationSource,
-)
+from src.domain.manifest import ColumnMappingManifest
 from src.domain.match_counts import column_value_overlap_ratio
-from src.domain.reference_data import ReferenceDataError, ReferenceModel
-from src.domain.value_overlap_mapping import ValueOverlapSuggestions, suggest_value_overlap_mappings
+from src.domain.reference_data import ReferenceDataError
 from src.domain.workflow_state import WorkflowState
 from src.observability.events import (
     WorkflowEvent,
@@ -222,13 +217,30 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
             analysis_task,
             reference_task,
         )
-        overlap = suggest_value_overlap_mappings(profiles, reference_model.pvs)
-        mapping_manifest = _mapping_manifest(overlap, reference_model)
+        mapping_manifest = await dependencies.get_cde_recommender().recommend(
+            [
+                ProfiledColumn(
+                    identity=ColumnIdentity(
+                        column_key_from_string(column.column_key),
+                        column.header,
+                    ),
+                    profile=profiles[column.column_key],
+                )
+                for column in columns
+            ],
+            reference_model,
+        )
     except ReferenceDataError as exc:
         _log_analyze_failed(user, payload.file_id, type(exc).__name__)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Reference data is currently unavailable. Please try again later.",
+        ) from exc
+    except RecommendationUnavailableError as exc:
+        _log_analyze_failed(user, payload.file_id, type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="CDE recommendations are currently unavailable. Please try again later.",
         ) from exc
     except Exception as exc:
         _log_analyze_failed(user, payload.file_id, type(exc).__name__)
@@ -376,27 +388,6 @@ def _load_sheet_previews_safe(meta: UploadedFileMeta) -> dict[str, SheetPreview]
             extra={"file_id": meta.dataset_workflow_id, "error": type(exc).__name__},
         )
         return {}
-
-
-def _mapping_manifest(
-    suggestions: ValueOverlapSuggestions,
-    reference_model: ReferenceModel,
-) -> ColumnMappingManifest:
-    records: dict[ColumnKey, ColumnMappingRecord] = {}
-    for column_key, candidates in suggestions.by_column.items():
-        top = candidates[0]
-        cde = reference_model.catalog.get(top.cde_key)
-        records[column_key] = ColumnMappingRecord(
-            column_key=column_key,
-            cde_key=top.cde_key,
-            cde_id=cde.cde_id if cde else None,
-            alternatives=tuple(
-                MappingAlternative(target=candidate.cde_key, confidence=candidate.overlap_ratio)
-                for candidate in candidates
-            ),
-            recommendation_source=RecommendationSource.VALUE_OVERLAP,
-        )
-    return ColumnMappingManifest(records)
 
 
 def _build_column_summaries(

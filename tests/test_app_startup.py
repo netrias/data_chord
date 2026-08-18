@@ -13,6 +13,7 @@ from src.paths import PROJECT_ROOT
 
 _RUNTIME_CONFIG_NAMES = (
     "DATA_CHORD_AGENTIC_WORKERS",
+    "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE",
     "DATA_CHORD_HARMONIZATION_CACHE_TABLE",
     "DATA_CHORD_REFERENCE_TABLE",
     "DATA_CHORD_S3_BUCKET",
@@ -47,6 +48,14 @@ def _run_import(module: str, settings: dict[str, str]) -> subprocess.CompletedPr
             {
                 "DATA_CHORD_REFERENCE_TABLE": "reference",
                 "DATA_CHORD_HARMONIZATION_CACHE_TABLE": "cache",
+            },
+            "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE environment variable is required",
+        ),
+        (
+            {
+                "DATA_CHORD_REFERENCE_TABLE": "reference",
+                "DATA_CHORD_HARMONIZATION_CACHE_TABLE": "cache",
+                "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE": "cde-cache",
                 "DATA_CHORD_STORAGE": "unknown",
             },
             "DATA_CHORD_STORAGE must be one of",
@@ -55,6 +64,7 @@ def _run_import(module: str, settings: dict[str, str]) -> subprocess.CompletedPr
             {
                 "DATA_CHORD_REFERENCE_TABLE": "reference",
                 "DATA_CHORD_HARMONIZATION_CACHE_TABLE": "cache",
+                "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE": "cde-cache",
                 "DATA_CHORD_STORAGE": "s3",
             },
             "DATA_CHORD_S3_BUCKET is required",
@@ -63,6 +73,7 @@ def _run_import(module: str, settings: dict[str, str]) -> subprocess.CompletedPr
             {
                 "DATA_CHORD_REFERENCE_TABLE": "reference",
                 "DATA_CHORD_HARMONIZATION_CACHE_TABLE": "cache",
+                "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE": "cde-cache",
                 "DATA_CHORD_AGENTIC_WORKERS": "0",
             },
             "DATA_CHORD_AGENTIC_WORKERS must be positive",
@@ -71,6 +82,7 @@ def _run_import(module: str, settings: dict[str, str]) -> subprocess.CompletedPr
             {
                 "DATA_CHORD_REFERENCE_TABLE": "reference",
                 "DATA_CHORD_HARMONIZATION_CACHE_TABLE": "cache",
+                "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE": "cde-cache",
                 "DATA_CHORD_AGENTIC_WORKERS": "101",
             },
             "DATA_CHORD_AGENTIC_WORKERS must not exceed 100",
@@ -94,11 +106,13 @@ def test_invalid_runtime_configuration_stops_application_startup(
         {
             "DATA_CHORD_REFERENCE_TABLE": "reference",
             "DATA_CHORD_HARMONIZATION_CACHE_TABLE": "cache",
+            "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE": "cde-cache",
             "DATA_CHORD_STORAGE": "local",
         },
         {
             "DATA_CHORD_REFERENCE_TABLE": "reference",
             "DATA_CHORD_HARMONIZATION_CACHE_TABLE": "cache",
+            "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE": "cde-cache",
             "DATA_CHORD_STORAGE": "s3",
             "DATA_CHORD_S3_BUCKET": "data-chord-test",
         },

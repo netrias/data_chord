@@ -1,8 +1,9 @@
 # Data Chord
 
-Data harmonization workflow application. Upload CSV, TSV, or XLSX tabular data, review value-overlap column suggestions, run harmonization, and approve results before export.
+Data harmonization workflow application. Upload CSV, TSV, or XLSX tabular data, review Bedrock CDE suggestions, run harmonization, and approve results before export.
 
-Value harmonization runs the agentic library through Amazon Bedrock Mantle.
+CDE recommendation uses GPT-5.6 Luna through Amazon Bedrock Mantle. Value
+harmonization uses the same AWS provider boundary.
 Standard metadata and permissible values come from a dedicated DynamoDB table.
 
 XLSX uploads are treated as workbooks at the upload boundary. Stage 1 defaults
@@ -32,16 +33,17 @@ For a detailed overview, see [app.md](app.md).
    gh auth setup-git
    uv sync --frozen
    ```
-   Data Chord is public, but its default agentic harmonization dependency is
-   private. A licensed developer needs read access to
-   `netrias/agentic_harmonization` and an authenticated Git client before the
-   frozen install can succeed.
+   Data Chord is public, but its agentic harmonization and CDE recommendation
+   dependencies are private. A licensed developer needs read access to
+   `netrias/agentic_harmonization` and `netrias/cde-recommendation-lambda`, plus
+   an authenticated Git client, before the frozen install can succeed.
    The frozen install is an important supply-chain security control: normal setup uses the committed lockfile instead of resolving newly published packages.
 
-3. Configure the populated reference-data table and AWS region:
+3. Configure the populated reference-data table, both application cache tables,
+   and the AWS region:
    ```bash
    cp .env.example .env
-   # Edit .env and set DATA_CHORD_REFERENCE_TABLE and AWS_REGION.
+   # Edit .env with the DynamoDB table names and AWS_REGION.
    ```
 
 4. Run:

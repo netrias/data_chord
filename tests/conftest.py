@@ -109,6 +109,7 @@ def mock_netrias_client() -> Generator[MagicMock]:
     from src.domain.harmonization import HarmonizeStatus
     from src.domain.reference_data import ReferenceModel
     from src.integrations.harmonize import HarmonizeResult
+    from src.integrations.value_overlap_cde_recommendation import ValueOverlapCdeRecommender
 
     model_key = "test-data-model"
     version = "11.0.4"
@@ -154,11 +155,14 @@ def mock_netrias_client() -> Generator[MagicMock]:
     harmonizer.reference_repository = repository
     original_repository = deps._reference_data_repository
     original_harmonizer = deps._harmonize_service
+    original_cde_recommender = deps._cde_recommender
     deps._reference_data_repository = repository
     deps._harmonize_service = harmonizer
+    deps._cde_recommender = ValueOverlapCdeRecommender()
     yield harmonizer
     deps._reference_data_repository = original_repository
     deps._harmonize_service = original_harmonizer
+    deps._cde_recommender = original_cde_recommender
 
 
 @pytest.fixture
@@ -188,6 +192,7 @@ async def app_client(
     """why: provide an async HTTP client for testing the full API."""
     monkeypatch.setenv("DATA_CHORD_REFERENCE_TABLE", "test-reference-table")
     monkeypatch.setenv("DATA_CHORD_HARMONIZATION_CACHE_TABLE", "test-cache-table")
+    monkeypatch.setenv("DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE", "test-cde-cache-table")
     import src.app.dependencies as deps_module
     from src.storage import LocalWorkflowStorage
 

@@ -66,7 +66,7 @@ const MATCH_TIP = "Distinct values in your column that exactly match a permissib
 const PASSTHROUGH_TOOLTIP = "This target common data element has no permissible values to harmonize against. Your data will be left unchanged.";
 const PASSTHROUGH_GLYPH = '→';
 const NO_MAP_DESC = "Skip this column. Values will not be harmonized to any standard.";
-const AI_RECOMMENDED_SECTION_LABEL = 'Value-overlap suggestions';
+const AI_RECOMMENDED_SECTION_LABEL = 'AI suggestions';
 const PV_CDE_SECTION_LABEL = 'Common data elements with permissible values';
 const RENAME_ONLY_SECTION_LABEL = 'Common data elements with no permissible values';
 
@@ -977,7 +977,7 @@ const _targetPaneHtml = (col, cde, detail, profile) => {
     pickerInner = `
       <span class="cde-picker-name" title="${_escAttr(cde)}">${_escHtml(cde)}</span>
       ${typeBadge}
-      ${isAi ? `<span class="ai-badge">Value overlap</span>` : ''}
+      ${isAi ? `<span class="ai-badge">AI suggestion</span>` : ''}
       <span class="cde-picker-caret cde-picker-caret--end">▾</span>
     `;
   }

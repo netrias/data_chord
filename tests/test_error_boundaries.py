@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import AsyncClient
 
 from src.domain.cde import DataModelSummary, DataModelVersionInfo
+from src.domain.cde_recommendation import RecommendationUnavailableError
 from src.domain.reference_data import ReferenceDataUnavailableError
 from src.storage import WorkflowConflictError
 from tests.conftest import TEST_CSV_CONTENT_TYPE, TEST_TARGET_EXTERNAL_VERSION_NUMBER, TEST_TARGET_SCHEMA, upload_file
@@ -200,6 +201,37 @@ class TestDataModelServiceErrors:
             },
         )
 
+        assert response.status_code == 503
+        assert response.json() == {"detail": GENERIC_API_ERROR_DETAIL}
+
+    async def test_analyze_reports_total_recommendation_failure_as_unavailable(
+        self,
+        app_client: AsyncClient,
+        sample_csv_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Given the upload and reference model are valid, but all CDE model calls failed.
+        file_id = await upload_file(app_client, sample_csv_path)
+        recommender = MagicMock()
+        recommender.recommend = AsyncMock(
+            side_effect=RecommendationUnavailableError("private provider detail")
+        )
+        monkeypatch.setattr(
+            "src.app.dependencies.get_cde_recommender",
+            MagicMock(return_value=recommender),
+        )
+
+        # When Stage 1 analyzes the upload.
+        response = await app_client.post(
+            "/stage-1/analyze",
+            json={
+                "file_id": file_id,
+                "data_model_key": TEST_TARGET_SCHEMA,
+                "external_version_number": TEST_TARGET_EXTERNAL_VERSION_NUMBER,
+            },
+        )
+
+        # Then it returns a retryable 503 without provider details.
         assert response.status_code == 503
         assert response.json() == {"detail": GENERIC_API_ERROR_DETAIL}
 

@@ -5,8 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from agent_experiment import GPT_5_6_LUNA, ReasoningEffort
+from cde_recommend.result_cache import DynamoRecommendationCache
+
 import src.app.dependencies as dependencies
 from src.integrations.agentic_harmonize import AgenticHarmonizeService
+from src.integrations.bedrock_cde_ranker import BedrockCandidateRanker
+from src.integrations.cde_recommendation import CdeRecommendationAdapter
 from src.integrations.dynamodb_harmonization_cache import DynamoDbHarmonizationCache
 from src.integrations.dynamodb_reference_data import DynamoDbReferenceDataRepository
 
@@ -78,3 +83,22 @@ def test_harmonization_cache_uses_the_configured_table(monkeypatch) -> None:
     # Then it uses the application-owned DynamoDB table.
     assert isinstance(cache, DynamoDbHarmonizationCache)
     resource.Table.assert_called_once_with("cache-table")
+
+
+def test_cde_recommender_uses_bedrock_luna_and_the_owned_cache(monkeypatch) -> None:
+    # Given the runtime has a region and an application-owned cache table.
+    monkeypatch.setenv("AWS_REGION", "us-gov-west-1")
+    monkeypatch.setenv("DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE", "cde-cache-table")
+    monkeypatch.setattr(dependencies, "_cde_recommender", None)
+
+    # When the application builds its CDE recommender.
+    service = dependencies.get_cde_recommender()
+
+    # Then the one runtime path uses Bedrock Luna with medium reasoning and the named cache.
+    assert isinstance(service, CdeRecommendationAdapter)
+    assert isinstance(service._ranker, BedrockCandidateRanker)  # noqa: SLF001
+    assert service._ranker._config.model == GPT_5_6_LUNA  # noqa: SLF001
+    assert service._ranker._config.reasoning_effort == ReasoningEffort.MEDIUM  # noqa: SLF001
+    assert isinstance(service._cache, DynamoRecommendationCache)  # noqa: SLF001
+    assert service._cache._table_name == "cde-cache-table"  # noqa: SLF001
+    assert service._cache._region == "us-gov-west-1"  # noqa: SLF001

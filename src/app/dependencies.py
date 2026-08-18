@@ -10,10 +10,18 @@ import logging
 from pathlib import Path
 from typing import cast
 
+from cde_recommend.result_cache import DynamoRecommendationCache
+
 from src.auth.user_context import current_user_context
+from src.domain.cde_recommendation import CdeRecommender
 from src.domain.harmonization_cache import HarmonizationCache
 from src.domain.reference_data import ReferenceDataRepository
 from src.integrations.agentic_harmonize import AgenticHarmonizeConfig, AgenticHarmonizeService
+from src.integrations.bedrock_cde_ranker import (
+    BedrockCandidateRanker,
+    BedrockCandidateRankerConfig,
+)
+from src.integrations.cde_recommendation import CdeRecommendationAdapter
 from src.integrations.dynamodb_harmonization_cache import DynamoDbHarmonizationCache
 from src.integrations.dynamodb_reference_data import DynamoDbReferenceDataRepository, DynamoResource
 from src.integrations.harmonize import HarmonizeService
@@ -23,6 +31,7 @@ from src.settings import (
     StorageBackend,
     get_agentic_workers,
     get_aws_region,
+    get_cde_recommendation_cache_table_name,
     get_harmonization_cache_table_name,
     get_reference_table_name,
     get_storage_backend,
@@ -53,6 +62,7 @@ _workflow_storage: WorkflowStorage | None = None
 _reference_data_repository: ReferenceDataRepository | None = None
 _harmonization_cache: HarmonizationCache | None = None
 _harmonize_service: HarmonizeService | None = None
+_cde_recommender: CdeRecommender | None = None
 
 
 def get_upload_constraints() -> UploadConstraints:
@@ -143,9 +153,25 @@ def get_harmonize_service() -> HarmonizeService:
     return _harmonize_service
 
 
+def get_cde_recommender() -> CdeRecommender:
+    global _cde_recommender  # noqa: PLW0603 - intentional singleton
+    if _cde_recommender is None:
+        region = get_aws_region()
+        _cde_recommender = CdeRecommendationAdapter(
+            BedrockCandidateRanker(BedrockCandidateRankerConfig(region)),
+            DynamoRecommendationCache(
+                get_cde_recommendation_cache_table_name(),
+                region,
+            ),
+        )
+    return _cde_recommender
+
+
 def cleanup_services() -> None:
     """Clean up resources held by singleton services (call on app shutdown)."""
-    global _harmonization_cache, _harmonize_service, _reference_data_repository, _workflow_storage  # noqa: PLW0603
+    global _cde_recommender, _harmonization_cache, _harmonize_service  # noqa: PLW0603
+    global _reference_data_repository, _workflow_storage  # noqa: PLW0603
+    _cde_recommender = None
     _harmonization_cache = None
     _harmonize_service = None
     _reference_data_repository = None
@@ -159,6 +185,7 @@ __all__ = [
     "cleanup_services",
     "get_harmonization_cache",
     "get_harmonize_service",
+    "get_cde_recommender",
     "get_reference_data_repository",
     "get_upload_constraints",
     "get_upload_storage",
