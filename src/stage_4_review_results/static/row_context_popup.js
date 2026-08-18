@@ -1,10 +1,11 @@
 /**
  * Row context popup module.
  * Shows original spreadsheet context when users click row indicators in Column Mode.
- * Uses Clusterize.js for virtualized rendering of large datasets.
+ * Uses a small local fixed-row virtual table for large datasets.
  */
 
 import { escapeHtml } from '/assets/shared/html.js';
+import { mountFixedRowVirtualTable } from './fixed_row_virtual_table.js';
 import { toExcelRowNumber } from './shared_review_utils.js';
 
 /** Max rows per API request (backend limit). */
@@ -14,13 +15,15 @@ const MAX_ROWS_PER_REQUEST = 10000;
  * Fetch row context from the backend.
  * @param {string} fileId
  * @param {number[]} rowIndices - 0-based row indices
+ * @param {AbortSignal} signal
  * @returns {Promise<{headers: string[], rows: string[][]}>}
  */
-async function _fetchRowContext(fileId, rowIndices) {
+async function _fetchRowContext(fileId, rowIndices, signal) {
   const response = await fetch('/stage-4/row-context', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ file_id: fileId, row_indices: rowIndices }),
+    signal,
   });
 
   if (!response.ok) {
@@ -35,13 +38,14 @@ async function _fetchRowContext(fileId, rowIndices) {
  * @param {string} fileId
  * @param {number[]} rowIndices
  * @param {Function} onProgress - Called with (loadedCount, totalCount) during loading
+ * @param {AbortSignal} signal
  * @returns {Promise<{headers: string[], rows: string[][]}>}
  */
-async function _fetchAllRowsChunked(fileId, rowIndices, onProgress) {
+async function _fetchAllRowsChunked(fileId, rowIndices, onProgress, signal) {
   const totalRows = rowIndices.length;
 
   if (totalRows <= MAX_ROWS_PER_REQUEST) {
-    return _fetchRowContext(fileId, rowIndices);
+    return _fetchRowContext(fileId, rowIndices, signal);
   }
 
   // Fetch in chunks
@@ -50,7 +54,7 @@ async function _fetchAllRowsChunked(fileId, rowIndices, onProgress) {
 
   for (let i = 0; i < totalRows; i += MAX_ROWS_PER_REQUEST) {
     const chunkIndices = rowIndices.slice(i, i + MAX_ROWS_PER_REQUEST);
-    const data = await _fetchRowContext(fileId, chunkIndices);
+    const data = await _fetchRowContext(fileId, chunkIndices, signal);
 
     if (i === 0) {
       headers = data.headers;
@@ -99,24 +103,25 @@ function _buildTableHeader(headers, columnKey) {
 }
 
 /**
- * Build table body rows as an array of HTML strings for Clusterize.
- * @returns {string[]} Array of <tr>...</tr> strings
+ * Build one table row on demand for the virtual table.
+ * @returns {(index: number) => string}
  */
-function _buildTableRowsArray(rows, rowIndices, headers, columnKey) {
+function _createTableRowRenderer(rows, rowIndices, headers, columnKey) {
   const normalizedColumnKey = _normalizeForComparison(columnKey);
   const targetIndex = _columnIndexFromKey(columnKey);
   const highlightColIdx = targetIndex === null
     ? headers.findIndex((h) => _normalizeForComparison(h) === normalizedColumnKey)
     : targetIndex;
 
-  return rows.map((row, i) => {
-    const excelRowNum = toExcelRowNumber(rowIndices[i] + 1);
+  return (index) => {
+    const row = rows[index];
+    const excelRowNum = toExcelRowNumber(rowIndices[index] + 1);
     const cells = row.map((value, colIdx) => {
       const highlightClass = colIdx === highlightColIdx ? ' class="row-context-highlight"' : '';
       return `<td${highlightClass}>${escapeHtml(value)}</td>`;
     });
     return `<tr><td>${excelRowNum}</td>${cells.join('')}</tr>`;
-  });
+  };
 }
 
 /**
@@ -157,7 +162,7 @@ function _buildTitleHTML(params) {
 }
 
 /**
- * Build the dialog HTML with Clusterize-compatible structure.
+ * Build the dialog HTML.
  */
 function _buildDialogHTML(params) {
   const {
@@ -174,8 +179,7 @@ function _buildDialogHTML(params) {
   const toggleHTML = showToggle ? _buildToggleHTML(filteredCount, totalOriginalRows, mode) : '';
   const titleHTML = _buildTitleHTML({ term, columnKey, displayedRowCount, mode });
 
-  // Single scrollable table with sticky header
-  // Clusterize manages tbody content for virtualization
+  // Single scrollable table with a sticky header.
   return `
     <div class="row-context-dialog-content">
       <div class="row-context-dialog-header">
@@ -183,12 +187,12 @@ function _buildDialogHTML(params) {
         ${toggleHTML}
         <button class="row-context-close-btn" type="button" aria-label="Close">×</button>
       </div>
-      <div id="rowContextScrollArea" class="row-context-table-wrapper clusterize-scroll">
-        <table class="row-context-table">
+      <div id="rowContextScrollArea" class="row-context-table-wrapper" tabindex="0" aria-label="Scrollable row context">
+        <table class="row-context-table" aria-rowcount="${displayedRowCount + 1}">
           <thead class="row-context-thead">${_buildTableHeader(headers, columnKey)}</thead>
-          <tbody id="rowContextContentArea" class="clusterize-content">
-            <tr class="clusterize-no-data">
-              <td>Loading...</td>
+          <tbody id="rowContextContentArea" class="virtual-table-content">
+            <tr class="virtual-table-no-data">
+              <td colspan="${headers.length + 1}">Loading...</td>
             </tr>
           </tbody>
         </table>
@@ -252,7 +256,7 @@ function _attachCloseHandlers(dialog, onClose) {
 
   /**
    * Close dialog first for instant visual feedback, then defer cleanup.
-   * Clusterize.destroy() can be slow so deferring keeps the UI responsive.
+   * Deferring cleanup keeps the close interaction responsive.
    */
   const runCleanup = () => {
     if (cleanupCalled) return;
@@ -311,7 +315,7 @@ function _attachToggleHandler(dialog, onModeChange) {
       // Show loading state in table area
       const tbody = dialog.querySelector('#rowContextContentArea');
       if (tbody) {
-        tbody.innerHTML = '<tr class="clusterize-no-data"><td>Loading...</td></tr>';
+        tbody.innerHTML = '<tr class="virtual-table-no-data"><td>Loading...</td></tr>';
       }
 
       // Reset loading flag after mode change completes (re-renders the toggle handler)
@@ -347,13 +351,17 @@ export async function showRowContextPopup({ term, columnKey, rowIndices, fileId,
   document.body.appendChild(dialog);
   dialog.showModal();
 
-  // Track Clusterize instance for cleanup
-  let clusterizeInstance = null;
+  let virtualTable = null;
+  let activeFetch = null;
+  let closed = false;
 
   const cleanup = () => {
-    if (clusterizeInstance) {
-      clusterizeInstance.destroy();
-      clusterizeInstance = null;
+    closed = true;
+    activeFetch?.abort();
+    activeFetch = null;
+    if (virtualTable) {
+      virtualTable.destroy();
+      virtualTable = null;
     }
   };
 
@@ -365,6 +373,9 @@ export async function showRowContextPopup({ term, columnKey, rowIndices, fileId,
    * Render content for the given mode.
    */
   async function renderContent(mode) {
+    activeFetch?.abort();
+    const fetchController = new AbortController();
+    activeFetch = fetchController;
     const currentIndices = mode === 'all'
       ? Array.from({ length: totalOriginalRows }, (_, i) => i)
       : rowIndices;
@@ -376,10 +387,9 @@ export async function showRowContextPopup({ term, columnKey, rowIndices, fileId,
       existingWrapper.innerHTML = '<div class="row-context-loading">Loading row data...</div>';
     }
 
-    // Destroy previous Clusterize instance
-    if (clusterizeInstance) {
-      clusterizeInstance.destroy();
-      clusterizeInstance = null;
+    if (virtualTable) {
+      virtualTable.destroy();
+      virtualTable = null;
     }
 
     try {
@@ -391,7 +401,13 @@ export async function showRowContextPopup({ term, columnKey, rowIndices, fileId,
         }
       };
 
-      const data = await _fetchAllRowsChunked(fileId, currentIndices, updateLoadingMessage);
+      const data = await _fetchAllRowsChunked(
+        fileId,
+        currentIndices,
+        updateLoadingMessage,
+        fetchController.signal,
+      );
+      if (closed || activeFetch !== fetchController) return;
 
       // Build dialog structure
       dialog.innerHTML = _buildDialogHTML({
@@ -410,35 +426,31 @@ export async function showRowContextPopup({ term, columnKey, rowIndices, fileId,
       _attachColumnLinkHandler(dialog);
       _attachToggleHandler(dialog, renderContent);
 
-      // Build row data for Clusterize
-      const rowsHTML = _buildTableRowsArray(data.rows, currentIndices, data.headers, columnKey);
-
-      // Initialize Clusterize for virtualized rendering
-      // Clusterize is loaded globally via CDN
-      if (typeof Clusterize !== 'undefined') {
-        // rows_in_block × blocks_in_cluster = 200 rows rendered in DOM at once.
-        // Tuned for smooth scrolling on 10k+ row datasets without excessive DOM nodes.
-        clusterizeInstance = new Clusterize({
-          rows: rowsHTML,
-          scrollId: 'rowContextScrollArea',
-          contentId: 'rowContextContentArea',
-          rows_in_block: 50,
-          blocks_in_cluster: 4,
-          tag: 'tr',
-        });
-      } else {
-        // Fallback: render all rows directly (no virtualization)
-        const tbody = dialog.querySelector('#rowContextContentArea');
-        if (tbody) {
-          tbody.innerHTML = rowsHTML.join('');
-        }
+      const scrollElement = dialog.querySelector('#rowContextScrollArea');
+      const contentElement = dialog.querySelector('#rowContextContentArea');
+      if (
+        !(scrollElement instanceof HTMLElement)
+        || !(contentElement instanceof HTMLTableSectionElement)
+      ) {
+        throw new Error('Row context table did not render.');
       }
+      virtualTable = mountFixedRowVirtualTable({
+        scrollElement,
+        contentElement,
+        rowCount: data.rows.length,
+        renderRow: _createTableRowRenderer(data.rows, currentIndices, data.headers, columnKey),
+        columnCount: data.headers.length + 1,
+      });
+      activeFetch = null;
 
       // Auto-scroll to target column
       requestAnimationFrame(() => {
         _scrollToTargetColumn(dialog);
       });
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      if (closed || activeFetch !== fetchController) return;
+      activeFetch = null;
       dialog.innerHTML = `
         <div class="row-context-dialog-content">
           <div class="row-context-dialog-header">
