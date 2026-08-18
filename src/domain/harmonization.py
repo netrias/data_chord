@@ -43,6 +43,7 @@ class HarmonizationColumnBreakdown(BaseModel):
     unchanged_rows: int
     unique_terms: int
     unique_terms_changed: int
+    successfully_harmonized_terms: int | None = None
     unique_terms_unchanged: int
     non_conformant_terms: int = 0
     match_fidelity_counts_changed: list[MatchFidelityCount]
@@ -53,6 +54,9 @@ class HarmonizationManifestSummary(BaseModel):
     changed_terms: int
     match_fidelity_counts: list[MatchFidelityCount]
     non_conformant_terms: int = 0
+    source_file_name: str | None = None
+    reference_model_label: str | None = None
+    reference_model_version: str | None = None
     column_breakdowns: list[HarmonizationColumnBreakdown] = Field(default_factory=list)
 
 

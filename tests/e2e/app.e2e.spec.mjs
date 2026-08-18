@@ -246,14 +246,20 @@ test('happy path flow: upload → analyze → harmonize → review → summary �
   const stageThreeTable = page.locator('[data-column-outcome-table] .column-outcome-table');
   await expect(stageThreeTable).toBeVisible();
   await expect(stageThreeTable.getByRole('columnheader')).toHaveText([
-    'Source column',
-    'Distinct values changed',
+    'Column',
+    'Unique values harmonized',
     'Rows affected',
-    'Final-value status',
+    'Status',
   ]);
   const stageThreeOutcome = stageThreeTable.locator('tbody tr').filter({ hasText: 'col_a' });
-  await expect(stageThreeOutcome).toContainText('1 / 2 · 50%');
-  await expect(stageThreeOutcome).toContainText('2 / 3 · 66.7%');
+  await expect(stageThreeOutcome).toContainText('0 of 2');
+  await expect(stageThreeOutcome).toContainText('2 of 3');
+  await expect(page.locator('#stageThreeDial')).toHaveAttribute(
+    'aria-label',
+    'No values were checked against an approved list.',
+  );
+  await expect(page.locator('#stageThreeHeadline')).toHaveText('Harmonization complete');
+  await expect(page.getByText('No values were checked against an approved list.')).toBeVisible();
   await expect(page.getByText('Confidence', { exact: true })).toHaveCount(0);
 
   await page.click('#reviewButton');
@@ -278,6 +284,211 @@ test('happy path flow: upload → analyze → harmonize → review → summary �
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(/\.zip$/);
   await expect(page.locator('#uploadNavAction')).not.toHaveClass(/hidden/);
+});
+
+test('completed Stage 3 shows the durable dial, action table, and remaining columns', async ({ page }) => {
+  const fileId = '0123456789abcdef0123456789abcdef';
+  const jobId = 'durable-stage-three-design';
+  const summary = {
+    total_terms: 7,
+    changed_terms: 3,
+    non_conformant_terms: 2,
+    source_file_name: 'partner_submission.csv',
+    reference_model_label: 'GDC',
+    reference_model_version: '3.0',
+    match_fidelity_counts: [],
+    column_breakdowns: [
+      {
+        column_name: 'rewritten',
+        label: 'rewritten',
+        column_key: 'col_0000',
+        source_column_index: 0,
+        review_status: 'clear',
+        total_rows: 20,
+        changed_rows: 10,
+        unchanged_rows: 10,
+        unique_terms: 2,
+        unique_terms_changed: 1,
+        successfully_harmonized_terms: 1,
+        unique_terms_unchanged: 1,
+        non_conformant_terms: 0,
+        match_fidelity_counts_changed: [],
+      },
+      {
+        column_name: 'unchanged_unresolved',
+        label: 'unchanged_unresolved',
+        column_key: 'col_0001',
+        source_column_index: 1,
+        review_status: 'needs_attention',
+        total_rows: 20,
+        changed_rows: 0,
+        unchanged_rows: 20,
+        unique_terms: 2,
+        unique_terms_changed: 0,
+        successfully_harmonized_terms: 0,
+        unique_terms_unchanged: 2,
+        non_conformant_terms: 1,
+        match_fidelity_counts_changed: [],
+      },
+      {
+        column_name: 'failed_rewrite',
+        label: 'failed_rewrite',
+        column_key: 'col_0002',
+        source_column_index: 2,
+        review_status: 'needs_attention',
+        total_rows: 20,
+        changed_rows: 4,
+        unchanged_rows: 16,
+        unique_terms: 1,
+        unique_terms_changed: 1,
+        successfully_harmonized_terms: 0,
+        unique_terms_unchanged: 0,
+        non_conformant_terms: 1,
+        match_fidelity_counts_changed: [],
+      },
+      {
+        column_name: 'already_matched',
+        label: 'already_matched',
+        column_key: 'col_0003',
+        source_column_index: 3,
+        review_status: 'clear',
+        total_rows: 20,
+        changed_rows: 0,
+        unchanged_rows: 20,
+        unique_terms: 1,
+        unique_terms_changed: 0,
+        successfully_harmonized_terms: 0,
+        unique_terms_unchanged: 1,
+        non_conformant_terms: 0,
+        match_fidelity_counts_changed: [],
+      },
+      {
+        column_name: 'not_checked',
+        label: 'not_checked',
+        column_key: 'col_0004',
+        source_column_index: 4,
+        review_status: 'not_checked',
+        total_rows: 20,
+        changed_rows: 0,
+        unchanged_rows: 20,
+        unique_terms: 2,
+        unique_terms_changed: 0,
+        successfully_harmonized_terms: 0,
+        unique_terms_unchanged: 2,
+        non_conformant_terms: 0,
+        match_fidelity_counts_changed: [],
+      },
+    ],
+  };
+  await page.route('**/stage-3/jobs/*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        job_id: jobId,
+        status: 'succeeded',
+        detail: 'Harmonization completed.',
+        next_stage_url: `/stage-4?file_id=${fileId}&job_id=${jobId}&status=succeeded`,
+        job_id_available: true,
+        manifest_summary: summary,
+      }),
+    });
+  });
+
+  // Given: only a durable completed-job URL is available in a fresh browser session.
+  await page.goto('/stage-1');
+  await page.evaluate(() => sessionStorage.clear());
+
+  // When: Stage 3 reloads the completed result from the job API.
+  await page.goto(`/stage-3?file_id=${fileId}&job_id=${jobId}`);
+
+  // Then: the result uses the durable display context and exact value partition.
+  await expect(page.locator('#stageThreeHeadline')).toContainText('successfully harmonized 1 value');
+  await expect(page.getByText('partner_submission.csv', { exact: true })).toBeVisible();
+  await expect(page.getByText('Checked against GDC 3.0', { exact: true })).toBeVisible();
+  await expect(page.locator('#stageThreeDial')).toHaveAttribute(
+    'aria-label',
+    'Of 6 checked values: 1 was successfully harmonized; 3 already matched; 2 could not be harmonized.',
+  );
+
+  const table = page.locator('[data-column-outcome-table] .column-outcome-table');
+  await expect(table).toBeVisible();
+  await expect(table.locator('tbody tr')).toHaveCount(3);
+  await expect(table.locator('tbody tr').nth(0)).toContainText('unchanged_unresolved');
+  await expect(table.locator('tbody tr')).toContainText([
+    'unchanged_unresolved',
+    'failed_rewrite',
+    'rewritten',
+  ]);
+  await expect(table).not.toContainText('already_matched');
+  await expect(table).not.toContainText('not_checked');
+
+  const remaining = page.locator('[data-remaining-columns]');
+  await expect(remaining).toContainText('2 columns passed through unchanged');
+  await remaining.locator('summary').click();
+  await expect(remaining).toContainText('already_matched');
+  await expect(remaining).toContainText('not_checked');
+  await expect(remaining).not.toContainText('unchanged_unresolved');
+  await expect(page.locator('#reviewButton')).toBeEnabled();
+
+  // When: the user continues to verification.
+  await page.locator('#reviewButton').click();
+
+  // Then: the existing Stage 4 navigation contract remains unchanged.
+  await page.waitForURL(/\/stage-4/);
+});
+
+test('an earlier completed Stage 3 job does not invent detailed value groups', async ({ page }) => {
+  const fileId = '0123456789abcdef0123456789abcdef';
+  const jobId = 'legacy-stage-three-job';
+  await page.route('**/stage-3/jobs/*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        job_id: jobId,
+        status: 'succeeded',
+        detail: 'Harmonization completed.',
+        next_stage_url: `/stage-4?file_id=${fileId}&job_id=${jobId}&status=succeeded`,
+        job_id_available: true,
+        manifest_summary: {
+          total_terms: 2,
+          changed_terms: 1,
+          non_conformant_terms: 0,
+          match_fidelity_counts: [],
+          column_breakdowns: [{
+            column_name: 'legacy_column',
+            label: 'legacy_column',
+            column_key: 'col_0000',
+            source_column_index: 0,
+            review_status: 'clear',
+            total_rows: 2,
+            changed_rows: 1,
+            unchanged_rows: 1,
+            unique_terms: 2,
+            unique_terms_changed: 1,
+            unique_terms_unchanged: 1,
+            non_conformant_terms: 0,
+            match_fidelity_counts_changed: [],
+          }],
+        },
+      }),
+    });
+  });
+
+  // Given: a completed job was stored before exact Stage 3 value groups existed.
+  await page.goto('/stage-1');
+  await page.evaluate(() => sessionStorage.clear());
+
+  // When: Stage 3 reloads that earlier result from its durable job URL.
+  await page.goto(`/stage-3?file_id=${fileId}&job_id=${jobId}`);
+
+  // Then: the page preserves useful results without inventing a dial partition.
+  await expect(page.locator('#stageThreeHeadline')).toHaveText('Harmonization complete');
+  await expect(page.locator('#stageThreeDial')).not.toBeVisible();
+  await expect(page.getByText('Detailed value groups are not available for this earlier result.')).toBeVisible();
+  await expect(page.locator('[data-column-outcome-table]')).toContainText('Not recorded');
+  await expect(page.locator('#reviewButton')).toBeEnabled();
 });
 
 test('Stage 5 confirms start-over after successful download and clears browser workflow state', async ({ page }) => {

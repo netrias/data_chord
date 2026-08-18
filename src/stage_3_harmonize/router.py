@@ -363,6 +363,9 @@ async def _run_harmonization_workflow(
         storage,
         column_renames,
         column_pv_sets,
+        source_file_name=meta.original_name,
+        reference_model_label=reference_model.label,
+        reference_model_version=data_model_version.external_version_number,
     )
     if result.status == HarmonizeStatus.SUCCEEDED:
         if not harmonized_output_path.exists() or manifest_summary is None:
@@ -477,6 +480,10 @@ async def _read_store_and_adjust_manifest(
     storage: UploadStorage,
     column_renames: ColumnRenameSet,
     column_pv_map: ColumnPvSets,
+    *,
+    source_file_name: str,
+    reference_model_label: str,
+    reference_model_version: str,
 ) -> HarmonizationManifestSummary | None:
     manifest_data = _read_manifest_if_exists(manifest_path)
     if manifest_data is None or manifest_path is None:
@@ -490,7 +497,13 @@ async def _read_store_and_adjust_manifest(
         column_renames,
         column_pv_map,
     )
-    return _convert_to_schema(final_data, column_pv_map)
+    return _convert_to_schema(
+        final_data,
+        column_pv_map,
+        source_file_name=source_file_name,
+        reference_model_label=reference_model_label,
+        reference_model_version=reference_model_version,
+    )
 
 
 async def _apply_column_renames_to_output(
@@ -674,6 +687,7 @@ def _create_breakdown_schema(
         unchanged_rows=outcome.total_rows - outcome.changed_rows,
         unique_terms=outcome.total_distinct_values,
         unique_terms_changed=outcome.changed_distinct_values,
+        successfully_harmonized_terms=outcome.successfully_harmonized_distinct_values,
         unique_terms_unchanged=outcome.total_distinct_values - outcome.changed_distinct_values,
         non_conformant_terms=outcome.non_conformant_distinct_values,
         match_fidelity_counts_changed=[
@@ -708,6 +722,10 @@ def _build_column_breakdowns(
 def _convert_to_schema(
     manifest: ManifestSummary,
     column_pv_map: ColumnPvSets,
+    *,
+    source_file_name: str | None = None,
+    reference_model_label: str | None = None,
+    reference_model_version: str | None = None,
 ) -> HarmonizationManifestSummary:
     column_breakdowns = _build_column_breakdowns(manifest.rows, column_pv_map)
     total_non_conformant = sum(b.non_conformant_terms for b in column_breakdowns)
@@ -722,6 +740,9 @@ def _convert_to_schema(
             for fidelity in MatchFidelity
         ],
         non_conformant_terms=total_non_conformant,
+        source_file_name=source_file_name,
+        reference_model_label=reference_model_label,
+        reference_model_version=reference_model_version,
         column_breakdowns=column_breakdowns,
     )
 

@@ -14,11 +14,25 @@ const retryButton = document.getElementById('retryButton');
 const emptyState = document.getElementById('stageThreeEmptyState');
 const errorBanner = document.getElementById('stageThreeError');
 const stageThreeTitle = document.getElementById('stageThreeTitle');
+const stageThreeHeader = document.getElementById('stageThreeHeader');
 const returnToStageTwo = document.getElementById('returnToStageTwo');
 const harmonizeAnimation = document.querySelector('#loadingState .harmonize-animation');
 const harmonizeProgressMessage = document.getElementById('harmonizeProgressMessage');
 const columnOutcomePanel = document.querySelector('[data-column-outcome-panel]');
 const columnOutcomeContainer = document.querySelector('[data-column-outcome-table]');
+const stageThreeDial = document.getElementById('stageThreeDial');
+const stageThreeCheckedCount = document.getElementById('stageThreeCheckedCount');
+const stageThreeLegend = document.getElementById('stageThreeLegend');
+const stageThreeHeadline = document.getElementById('stageThreeHeadline');
+const stageThreeResultMessage = document.getElementById('stageThreeResultMessage');
+const stageThreeDatasetContext = document.getElementById('stageThreeDatasetContext');
+const stageThreeSourceFile = document.getElementById('stageThreeSourceFile');
+const stageThreeRowCount = document.getElementById('stageThreeRowCount');
+const stageThreeModelContext = document.getElementById('stageThreeModelContext');
+const remainingColumns = document.querySelector('[data-remaining-columns]');
+const remainingTitle = document.querySelector('[data-remaining-title]');
+const remainingSummary = document.querySelector('[data-remaining-summary]');
+const remainingBody = document.querySelector('[data-remaining-body]');
 
 const state = {
   requestBody: null,
@@ -30,6 +44,7 @@ const state = {
 const _hideMetricsDashboard = () => {
   columnOutcomeContainer?.replaceChildren();
   columnOutcomePanel?.classList.add('hidden');
+  stageThreeHeader?.classList.remove('hidden');
 };
 
 const _safeCount = (value) => {
@@ -44,6 +59,10 @@ const _columnOutcome = (column) => ({
     : null,
   label: column.label ?? column.column_name ?? 'Unnamed column',
   changedDistinctValues: _safeCount(column.unique_terms_changed),
+  successfullyHarmonizedValues: Number.isFinite(Number(column.successfully_harmonized_terms))
+    && column.successfully_harmonized_terms !== null
+    ? _safeCount(column.successfully_harmonized_terms)
+    : null,
   totalDistinctValues: _safeCount(column.unique_terms),
   changedRows: _safeCount(column.changed_rows),
   totalRows: _safeCount(column.total_rows),
@@ -51,6 +70,138 @@ const _columnOutcome = (column) => ({
   nonConformantValues: _safeCount(column.non_conformant_terms),
   reviewStatus: column.review_status ?? null,
 });
+
+const _plural = (count, singular, plural = `${singular}s`) => (
+  count === 1 ? singular : plural
+);
+
+const _formatCount = (count) => count.toLocaleString();
+
+const _appendLegendItem = (colorClass, count, text) => {
+  if (!stageThreeLegend || count === 0) return;
+  const item = document.createElement('li');
+  const marker = document.createElement('span');
+  marker.className = `stage-three-legend__marker ${colorClass}`;
+  marker.setAttribute('aria-hidden', 'true');
+  const copy = document.createElement('span');
+  const strong = document.createElement('strong');
+  strong.textContent = _formatCount(count);
+  copy.append(strong, ` ${text}`);
+  item.append(marker, copy);
+  stageThreeLegend.appendChild(item);
+};
+
+const _renderDial = ({ checked, harmonized, matched, unresolved }) => {
+  if (!stageThreeDial || !stageThreeCheckedCount || !stageThreeLegend) return;
+  stageThreeCheckedCount.textContent = _formatCount(checked);
+  stageThreeLegend.replaceChildren();
+
+  if (checked === 0) {
+    stageThreeDial.classList.add('stage-three-dial--empty');
+    stageThreeDial.style.removeProperty('--harmonized-end');
+    stageThreeDial.style.removeProperty('--matched-end');
+    stageThreeDial.setAttribute('aria-label', 'No values were checked against an approved list.');
+    return;
+  }
+
+  stageThreeDial.classList.remove('stage-three-dial--empty');
+  const harmonizedEnd = (harmonized / checked) * 100;
+  const matchedEnd = ((harmonized + matched) / checked) * 100;
+  stageThreeDial.style.setProperty('--harmonized-end', `${harmonizedEnd}%`);
+  stageThreeDial.style.setProperty('--matched-end', `${matchedEnd}%`);
+  stageThreeDial.setAttribute(
+    'aria-label',
+    `Of ${_formatCount(checked)} checked ${_plural(checked, 'value')}: `
+      + `${_formatCount(harmonized)} ${harmonized === 1 ? 'was' : 'were'} successfully harmonized; `
+      + `${_formatCount(matched)} already matched; `
+      + `${_formatCount(unresolved)} could not be harmonized.`,
+  );
+
+  _appendLegendItem(
+    'stage-three-legend__marker--harmonized',
+    harmonized,
+    `Data Chord successfully harmonized ${harmonized === 1 ? 'value' : 'values'}`,
+  );
+  _appendLegendItem(
+    'stage-three-legend__marker--matched',
+    matched,
+    `${matched === 1 ? 'value already matched' : 'values already matched'} the approved list`,
+  );
+  _appendLegendItem(
+    'stage-three-legend__marker--unresolved',
+    unresolved,
+    `${unresolved === 1 ? 'value could' : 'values could'} not be harmonized`,
+  );
+};
+
+const _setDisplayContext = (summary, columns) => {
+  const sourceFileName = summary.source_file_name?.trim();
+  const totalRows = columns.reduce((largest, column) => Math.max(largest, column.totalRows), 0);
+  if (sourceFileName && stageThreeDatasetContext && stageThreeSourceFile && stageThreeRowCount) {
+    stageThreeSourceFile.textContent = sourceFileName;
+    stageThreeRowCount.textContent = totalRows > 0 ? ` · ${_formatCount(totalRows)} rows` : '';
+    stageThreeDatasetContext.classList.remove('hidden');
+  } else {
+    stageThreeDatasetContext?.classList.add('hidden');
+  }
+
+  const modelLabel = summary.reference_model_label?.trim();
+  const modelVersion = summary.reference_model_version?.trim();
+  if (modelLabel && stageThreeModelContext) {
+    stageThreeModelContext.textContent = `Checked against ${modelLabel}${modelVersion ? ` ${modelVersion}` : ''}`;
+    stageThreeModelContext.classList.remove('hidden');
+  } else {
+    stageThreeModelContext?.classList.add('hidden');
+  }
+};
+
+const _remainingGroup = (heading, columns, className) => {
+  if (!remainingBody || columns.length === 0) return;
+  const group = document.createElement('section');
+  group.className = 'remaining-columns__group';
+  const title = document.createElement('h3');
+  title.textContent = heading;
+  const list = document.createElement('ul');
+  list.className = 'remaining-columns__list';
+  for (const column of columns) {
+    const item = document.createElement('li');
+    item.className = className;
+    const label = document.createElement('strong');
+    label.textContent = column.label;
+    const count = document.createElement('span');
+    count.textContent = `${_formatCount(column.totalDistinctValues)} different ${_plural(column.totalDistinctValues, 'value')}`;
+    item.append(label, count);
+    list.appendChild(item);
+  }
+  group.append(title, list);
+  remainingBody.appendChild(group);
+};
+
+const _renderRemainingColumns = (columns) => {
+  if (!remainingColumns || !remainingTitle || !remainingSummary || !remainingBody) return;
+  remainingColumns.removeAttribute('open');
+  remainingBody.replaceChildren();
+  if (columns.length === 0) {
+    remainingColumns.classList.add('hidden');
+    return;
+  }
+
+  const matched = columns.filter((column) => column.reviewStatus === 'clear');
+  const unchecked = columns.filter((column) => column.reviewStatus === 'not_checked');
+  remainingTitle.textContent = `${_formatCount(columns.length)} ${_plural(columns.length, 'column')} passed through unchanged`;
+  remainingSummary.textContent = 'Nothing in them needed rewriting.';
+  _remainingGroup(
+    `${_formatCount(matched.length)} already matched the approved list`,
+    matched,
+    'remaining-columns__item--matched',
+  );
+  _remainingGroup(
+    `${_formatCount(unchecked.length)} ${unchecked.length === 1 ? 'has' : 'have'} no approved list to check against`,
+    unchecked,
+    'remaining-columns__item--unchecked',
+  );
+  remainingColumns.classList.remove('hidden');
+};
 
 const _renderMetricsDashboard = (job) => {
   if (!columnOutcomePanel || !columnOutcomeContainer) {
@@ -61,10 +212,61 @@ const _renderMetricsDashboard = (job) => {
     _hideMetricsDashboard();
     return;
   }
+  const columns = breakdowns.map(_columnOutcome);
+  const checkedColumns = columns.filter((column) => column.reviewStatus !== 'not_checked');
+  const exactGroupsAvailable = checkedColumns.every(
+    (column) => column.successfullyHarmonizedValues !== null,
+  );
+  const checked = checkedColumns.reduce((total, column) => total + column.totalDistinctValues, 0);
+  const harmonized = checkedColumns.reduce(
+    (total, column) => total + (column.successfullyHarmonizedValues ?? 0),
+    0,
+  );
+  const unresolved = checkedColumns.reduce(
+    (total, column) => total + column.nonConformantValues,
+    0,
+  );
+  const matched = Math.max(checked - harmonized - unresolved, 0);
+  const actionColumns = columns
+    .filter((column) => column.changedDistinctValues > 0 || column.nonConformantValues > 0)
+    .sort((left, right) => (
+      Number(right.nonConformantValues > 0) - Number(left.nonConformantValues > 0)
+      || (left.sourceColumnIndex ?? Number.MAX_SAFE_INTEGER)
+        - (right.sourceColumnIndex ?? Number.MAX_SAFE_INTEGER)
+    ));
+  const remaining = columns.filter(
+    (column) => column.changedDistinctValues === 0 && column.nonConformantValues === 0,
+  );
+
+  stageThreeDial?.parentElement?.classList.toggle('hidden', !exactGroupsAvailable);
+  document.querySelector('.stage-three-summary')?.classList.toggle(
+    'stage-three-summary--legacy',
+    !exactGroupsAvailable,
+  );
+  if (exactGroupsAvailable) {
+    _renderDial({ checked, harmonized, matched, unresolved });
+  }
+  if (stageThreeHeadline) {
+    stageThreeHeadline.textContent = !exactGroupsAvailable || checked === 0
+      ? 'Harmonization complete'
+      : `Data Chord successfully harmonized ${_formatCount(harmonized)} ${_plural(harmonized, 'value')}!`;
+  }
+  if (stageThreeResultMessage) {
+    stageThreeResultMessage.textContent = !exactGroupsAvailable
+      ? 'Detailed value groups are not available for this earlier result. Continue to Verify to review the changes.'
+      : checked === 0
+      ? 'No values were checked against an approved list.'
+      : unresolved === 0
+        ? 'Every checked value now matches the approved list.'
+        : `${_formatCount(unresolved)} ${_plural(unresolved, 'value')} could not be harmonized. Continue to Verify to review ${unresolved === 1 ? 'it' : 'them'}.`;
+  }
+  _setDisplayContext(job.manifest_summary, columns);
   renderColumnOutcomeTable({
     container: columnOutcomeContainer,
-    columns: breakdowns.map(_columnOutcome),
+    columns: actionColumns,
   });
+  _renderRemainingColumns(remaining);
+  stageThreeHeader?.classList.add('hidden');
   columnOutcomePanel.classList.remove('hidden');
 };
 

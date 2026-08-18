@@ -80,6 +80,7 @@ class ColumnOutcome:
     reviewer_edited_rows: int
     data_chord_changed_distinct_values: int
     reviewer_changed_distinct_values: int
+    successfully_harmonized_distinct_values: int
     non_conformant_distinct_values: int
     review_status: FinalValueReviewStatus
 
@@ -98,6 +99,7 @@ def _summarize_column(outcomes: list[FinalizedValueOutcome]) -> ColumnOutcome:
     first = outcomes[0]
     original_values: set[str] = set()
     changed_originals: set[str] = set()
+    conformant_changed_originals: set[str] = set()
     reviewer_changed_originals: set[str] = set()
     non_conformant_originals: set[str] = set()
     total_rows = 0
@@ -125,6 +127,8 @@ def _summarize_column(outcomes: list[FinalizedValueOutcome]) -> ColumnOutcome:
 
         changed_originals.add(outcome.original_value)
         changed_rows += outcome.occurrence_count
+        if outcome.pv_set_available and outcome.is_pv_conformant:
+            conformant_changed_originals.add(outcome.original_value)
         if outcome.final_value_source is FinalValueSource.REVIEWER:
             reviewer_changed_originals.add(outcome.original_value)
 
@@ -146,6 +150,9 @@ def _summarize_column(outcomes: list[FinalizedValueOutcome]) -> ColumnOutcome:
         reviewer_edited_rows=reviewer_edited_rows,
         data_chord_changed_distinct_values=len(changed_originals - reviewer_changed_originals),
         reviewer_changed_distinct_values=len(reviewer_changed_originals),
+        successfully_harmonized_distinct_values=len(
+            conformant_changed_originals - non_conformant_originals
+        ),
         non_conformant_distinct_values=len(non_conformant_originals),
         review_status=review_status,
     )
