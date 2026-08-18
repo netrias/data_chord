@@ -117,7 +117,10 @@ class HarmonizationJobState:
             "job_id_available": self.job_id_available,
         }
         if self.manifest_summary is not None:
-            payload["manifest_summary"] = self.manifest_summary.model_dump(mode="json")
+            payload["manifest_summary"] = self.manifest_summary.model_dump(
+                mode="json",
+                exclude_none=True,
+            )
         return payload
 
     @classmethod

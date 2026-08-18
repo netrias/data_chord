@@ -3,35 +3,35 @@ const _safeCount = (value) => {
   return Number.isFinite(count) && count >= 0 ? Math.trunc(count) : 0;
 };
 
-const _formatCount = (changedValue, totalValue) => {
+const _metric = (changedValue, totalValue) => {
   const changed = _safeCount(changedValue);
   const total = _safeCount(totalValue);
   const percent = total > 0 ? (changed / total) * 100 : 0;
-  const percentLabel = new Intl.NumberFormat(undefined, {
-    maximumFractionDigits: 1,
-  }).format(percent);
-  return `${changed.toLocaleString()} / ${total.toLocaleString()} · ${percentLabel}%`;
+  return {
+    label: `${changed.toLocaleString()} of ${total.toLocaleString()}`,
+    percent: Math.min(Math.max(percent, 0), 100),
+  };
 };
 
 const _statusContent = (column) => {
   const nonConformantValues = _safeCount(column.nonConformantValues);
   switch (column.reviewStatus) {
     case 'clear':
-      return { className: 'column-outcome-status--approved', text: 'Clear' };
+      return { className: 'column-outcome-status--approved', text: 'All values are harmonized' };
     case 'needs_attention':
       return {
         className: 'column-outcome-status--attention',
-        text: `${nonConformantValues.toLocaleString()} ${nonConformantValues === 1 ? 'value needs' : 'values need'} review`,
+        text: `${nonConformantValues.toLocaleString()} ${nonConformantValues === 1 ? 'value could' : 'values could'} not be harmonized`,
       };
     case 'not_checked':
-      return { className: 'column-outcome-status--unchecked', text: 'Not checked' };
+      return { className: 'column-outcome-status--unchecked', text: 'No approved list' };
     default:
       return nonConformantValues > 0
         ? {
             className: 'column-outcome-status--attention',
-            text: `${nonConformantValues.toLocaleString()} ${nonConformantValues === 1 ? 'value needs' : 'values need'} review`,
+            text: `${nonConformantValues.toLocaleString()} ${nonConformantValues === 1 ? 'value could' : 'values could'} not be harmonized`,
           }
-        : { className: 'column-outcome-status--unchecked', text: 'No issues found' };
+        : { className: 'column-outcome-status--unchecked', text: 'No approved list' };
   }
 };
 
@@ -43,14 +43,35 @@ const _appendCell = (row, text, className = '') => {
   return cell;
 };
 
+const _appendMetricCell = (row, changed, total, className) => {
+  if (changed === null) {
+    _appendCell(row, 'Not recorded', className);
+    return;
+  }
+  const metric = _metric(changed, total);
+  const cell = document.createElement('td');
+  cell.className = className;
+  const content = document.createElement('span');
+  content.className = 'column-outcome-metric-content';
+  const ring = document.createElement('span');
+  ring.className = 'column-outcome-mini-ring';
+  ring.style.setProperty('--metric-percent', `${metric.percent}%`);
+  ring.setAttribute('aria-hidden', 'true');
+  const label = document.createElement('span');
+  label.textContent = metric.label;
+  content.append(ring, label);
+  cell.appendChild(content);
+  row.appendChild(cell);
+};
+
 const _createHeader = () => {
   const head = document.createElement('thead');
   const row = document.createElement('tr');
   const labels = [
-    'Source column',
-    'Distinct values changed',
+    'Column',
+    'Unique values harmonized',
     'Rows affected',
-    'Final-value status',
+    'Status',
   ];
 
   for (const label of labels) {
@@ -70,14 +91,16 @@ const _createBody = (columns) => {
     if (column.columnKey) row.dataset.columnKey = column.columnKey;
 
     _appendCell(row, column.label || 'Unnamed column', 'column-outcome-name');
-    _appendCell(
+    _appendMetricCell(
       row,
-      _formatCount(column.changedDistinctValues, column.totalDistinctValues),
+      column.successfullyHarmonizedValues,
+      column.totalDistinctValues,
       'column-outcome-metric',
     );
-    _appendCell(
+    _appendMetricCell(
       row,
-      _formatCount(column.changedRows, column.totalRows),
+      column.changedRows,
+      column.totalRows,
       'column-outcome-metric',
     );
     const status = _statusContent(column);
@@ -121,7 +144,7 @@ export const renderColumnOutcomeTable = ({
 
   const caption = document.createElement('caption');
   caption.className = 'sr-only';
-  caption.textContent = 'Exact changes and final review status for each source column';
+  caption.textContent = 'Harmonization changes and final status for each source column';
   table.appendChild(caption);
   table.appendChild(_createHeader());
   table.appendChild(_createBody(columns));

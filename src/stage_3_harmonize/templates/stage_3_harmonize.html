@@ -54,7 +54,7 @@
 
     <main class="stage-shell">
       <section id="stageThreeMetrics" class="stage-card progress-card">
-        <header class="stage-section-header">
+        <header id="stageThreeHeader" class="stage-section-header">
           <h2 id="stageThreeTitle" class="stage-title">Harmonizing</h2>
         </header>
 
@@ -118,12 +118,43 @@
           <p id="harmonizeProgressMessage" class="loading-message loading-message--secondary">This usually takes 1-2 minutes.</p>
         </div>
 
-        <section class="column-outcome-panel hidden" data-column-outcome-panel aria-live="polite">
-          <header class="column-outcome-panel__header">
-            <h3>Changes by source column</h3>
-            <p>Counts include exact character changes, including case and whitespace.</p>
+        <section id="stageThreeComplete" class="stage-three-complete hidden" data-column-outcome-panel aria-live="polite">
+          <header class="stage-three-summary">
+            <div class="stage-three-dial-column">
+              <div id="stageThreeDial" class="stage-three-dial" role="img">
+                <div class="stage-three-dial__content">
+                  <strong id="stageThreeCheckedCount">0</strong>
+                  <span>unique values checked</span>
+                </div>
+              </div>
+              <ul id="stageThreeLegend" class="stage-three-legend" aria-label="Harmonization result groups"></ul>
+            </div>
+
+            <div class="stage-three-verdict">
+              <h1 id="stageThreeHeadline">Harmonization complete</h1>
+              <p id="stageThreeResultMessage" class="stage-three-result-message"></p>
+              <p id="stageThreeDatasetContext" class="stage-three-context hidden">
+                <strong id="stageThreeSourceFile"></strong><span id="stageThreeRowCount"></span>
+              </p>
+              <p id="stageThreeModelContext" class="stage-three-context hidden"></p>
+            </div>
           </header>
-          <div data-column-outcome-table></div>
+
+          <section class="column-outcome-panel" aria-labelledby="stageThreeTableTitle">
+            <h2 id="stageThreeTableTitle" class="sr-only">Column harmonization results</h2>
+            <div data-column-outcome-table></div>
+          </section>
+
+          <details class="remaining-columns hidden" data-remaining-columns>
+            <summary>
+              <span>
+                <strong data-remaining-title></strong>
+                <span data-remaining-summary></span>
+              </span>
+              <span class="remaining-columns__chevron" aria-hidden="true">⌄</span>
+            </summary>
+            <div class="remaining-columns__body" data-remaining-body></div>
+          </details>
         </section>
 
         <p id="stageThreeError" class="stage-error hidden" role="alert"></p>

@@ -158,3 +158,42 @@ def test_one_column_key_cannot_mix_source_identity() -> None:
 def test_invalid_occurrence_count_is_rejected() -> None:
     with pytest.raises(ValueError, match="occurrence_count"):
         _outcome(occurrences=0)
+
+
+def test_checked_values_form_exact_stage_three_result_groups() -> None:
+    """The Stage 3 dial groups each checked source value exactly once."""
+    # Given: one successful rewrite, one failed rewrite, one existing match,
+    # and one value that has no approved list.
+    summaries = summarize_column_outcomes([
+        _outcome(column_index=0, original="A", final="Allowed A", source=FinalValueSource.DATA_CHORD),
+        _outcome(
+            column_index=1,
+            original="B",
+            final="Still invalid",
+            source=FinalValueSource.DATA_CHORD,
+            conformant=False,
+        ),
+        _outcome(column_index=2, original="C", final="C"),
+        _outcome(column_index=3, original="D", final="D", pv_available=False),
+    ])
+
+    # When: the result groups are read from the column summary.
+    checked_summaries = [
+        summary
+        for summary in summaries
+        if summary.review_status is not FinalValueReviewStatus.NOT_CHECKED
+    ]
+    successfully_harmonized = sum(
+        summary.successfully_harmonized_distinct_values
+        for summary in checked_summaries
+    )
+    unresolved = sum(summary.non_conformant_distinct_values for summary in checked_summaries)
+    checked = sum(summary.total_distinct_values for summary in checked_summaries)
+    already_matched = checked - successfully_harmonized - unresolved
+
+    # Then: the failed rewrite is not counted as a successful rewrite, and
+    # the three result groups form the complete checked-value total.
+    assert successfully_harmonized == 1
+    assert unresolved == 1
+    assert already_matched == 1
+    assert successfully_harmonized + unresolved + already_matched == checked
