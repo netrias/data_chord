@@ -4,7 +4,7 @@
 
 - **Backend**: FastAPI + Uvicorn (port 8000)
 - **Templates**: Jinja2 (server-rendered HTML)
-- **Frontend**: Vanilla JavaScript + HTMX, TypeScript for type checking
+- **Frontend**: Jinja templates + vanilla JavaScript ES modules + `fetch()`, TypeScript for type checking
 - **Testing**: pytest, pytest-asyncio, Playwright (E2E), Hypothesis (property-based)
 - **Code quality**: Ruff (linting/formatting), basedpyright (type checking), bandit (security)
 - **Package management**: uv (Python), npm (JS/Playwright)
@@ -24,7 +24,10 @@ just js-check          # JS syntax check
 
 ## Environment Variables
 
-The `.env` file is gitignored and contains API keys — never commit it. Symlinked from `~/.config/data_chord/.env`.
+Copy `.env.example` to `.env` for local development. The app loads it at
+startup, and existing shell variables take precedence. The file is gitignored.
+Do not commit credentials or other secrets. Cognito is configured by the AWS
+deployment, not by application environment variables.
 
 ## Architecture
 
