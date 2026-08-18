@@ -1,7 +1,7 @@
 [project]
 name = "data-chord"
 version = "0.1.0"
-description = "Data harmonization workflow with local value-overlap mapping and agentic value harmonization"
+description = "Data harmonization workflow with Bedrock CDE recommendation and agentic value harmonization"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [

@@ -69,6 +69,7 @@ resource "aws_ecs_task_definition" "application" {
   task_role_arn            = aws_iam_role.application_task.arn
 
   depends_on = [
+    aws_iam_role_policy.application_task_cde_recommendation_cache,
     aws_iam_role_policy.application_task_harmonization_cache,
     aws_iam_role_policy.application_task_reference_data,
     aws_iam_role_policy.application_task_workflow_storage,
@@ -102,6 +103,10 @@ resource "aws_ecs_task_definition" "application" {
         {
           name  = "DATA_CHORD_REFERENCE_TABLE"
           value = aws_dynamodb_table.reference_data.name
+        },
+        {
+          name  = "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE"
+          value = aws_dynamodb_table.cde_recommendation_cache.name
         },
         {
           name  = "DATA_CHORD_HARMONIZATION_CACHE_TABLE"

@@ -224,6 +224,40 @@ run "harmonization_cache_is_application_owned_and_minimal" {
   }
 }
 
+run "cde_recommendation_cache_is_application_owned_and_disposable" {
+  command = plan
+
+  # Given CDE rankings are derived data,
+  # when the application infrastructure is planned,
+  # then it creates one expiring cache with only batch read/write access.
+  assert {
+    condition = (
+      aws_dynamodb_table.cde_recommendation_cache.name == "data-chord-qa-cde-recommendation-cache" &&
+      aws_dynamodb_table.cde_recommendation_cache.billing_mode == "PAY_PER_REQUEST" &&
+      aws_dynamodb_table.cde_recommendation_cache.hash_key == "cache_key" &&
+      aws_dynamodb_table.cde_recommendation_cache.ttl[0].enabled == true &&
+      toset(jsondecode(aws_iam_role_policy.application_task_cde_recommendation_cache.policy).Statement[0].Action) == toset([
+        "dynamodb:BatchGetItem",
+        "dynamodb:BatchWriteItem",
+        "dynamodb:DescribeTable",
+      ]) &&
+      output.cde_recommendation_cache_table == aws_dynamodb_table.cde_recommendation_cache.name
+    )
+    error_message = "The CDE recommendation cache must be an expiring application-owned batch cache."
+  }
+
+  # Given the ECS task owns recommendation execution,
+  # when its environment is decoded,
+  # then it receives the managed cache table name.
+  assert {
+    condition = {
+      for item in jsondecode(aws_ecs_task_definition.application.container_definitions)[0].environment :
+      item.name => item.value
+    }["DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE"] == aws_dynamodb_table.cde_recommendation_cache.name
+    error_message = "The application task must receive the CDE recommendation cache table name."
+  }
+}
+
 run "ecs_service_output_uses_the_managed_service_identity" {
   command = plan
 

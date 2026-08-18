@@ -210,9 +210,9 @@ MOCK_SLEEP
 
 chmod +x "$MOCK_BIN/git" "$MOCK_BIN/aws" "$MOCK_BIN/tofu" "$MOCK_BIN/uv" "$MOCK_BIN/sleep"
 
-safe_plan='{"resource_changes":[{"address":"aws_ecr_repository.app","change":{"actions":["create"]}},{"address":"aws_dynamodb_table.harmonization_cache","change":{"actions":["create"]}},{"address":"aws_dynamodb_table.reference_data","change":{"actions":["create"]}},{"address":"aws_s3_bucket.workflow","change":{"actions":["create"]}}]}'
+safe_plan='{"resource_changes":[{"address":"aws_ecr_repository.app","change":{"actions":["create"]}},{"address":"aws_dynamodb_table.cde_recommendation_cache","change":{"actions":["create"]}},{"address":"aws_dynamodb_table.harmonization_cache","change":{"actions":["create"]}},{"address":"aws_dynamodb_table.reference_data","change":{"actions":["create"]}},{"address":"aws_s3_bucket.workflow","change":{"actions":["create"]}}]}'
 prerequisite_plan='{"resource_changes":[{"address":"aws_ecr_repository.app","change":{"actions":["create"]}},{"address":"aws_s3_bucket.workflow","change":{"actions":["create"]}}]}'
-application_plan='{"resource_changes":[{"address":"aws_dynamodb_table.harmonization_cache","change":{"actions":["create"]}},{"address":"aws_dynamodb_table.reference_data","change":{"actions":["create"]}}]}'
+application_plan='{"resource_changes":[{"address":"aws_dynamodb_table.cde_recommendation_cache","change":{"actions":["create"]}},{"address":"aws_dynamodb_table.harmonization_cache","change":{"actions":["create"]}},{"address":"aws_dynamodb_table.reference_data","change":{"actions":["create"]}}]}'
 
 run_command() {
   local calls="$1"

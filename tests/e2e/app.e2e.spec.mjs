@@ -799,12 +799,12 @@ test('Stage 2 submits selected column renames for harmonization', async ({ page 
   expect(new URL(page.url()).searchParams.get('job_id')).toBe('rename-job');
 });
 
-test('Stage 2 picker surfaces all value-overlap candidates as separate rows', async ({ page }) => {
+test('Stage 2 picker surfaces all AI candidates as separate rows', async ({ page }) => {
   /*
-   * Given: cde_targets["diagnosis"] contains two ranked value-overlap candidates.
+   * Given: cde_targets["diagnosis"] contains two ranked AI candidates.
    * When:  the user opens the picker for that column.
    * Then:  both candidates render as suggestion rows in similarity order
-   *        (top first) under the "Value-overlap suggestions"
+   *        (top first) under the "AI suggestions"
    *        section header, and neither key appears in the lower sections
    *        for CDEs with/without permissible values. Picking a candidate
    *        updates the row's target CDE while preserving the rewrite
@@ -885,7 +885,7 @@ test('Stage 2 picker surfaces all value-overlap candidates as separate rows', as
   // The suggestion section shows both candidates in overlap order. The
   // per-row badge is absent because the section header conveys the source.
   await expect(
-    page.locator('.dd-section-label', { hasText: 'Value-overlap suggestions' })
+    page.locator('.dd-section-label', { hasText: 'AI suggestions' })
   ).toBeVisible();
   const suggestionRows = page.locator('#pickerDropdown .dd-opt.ai');
   await expect(suggestionRows).toHaveCount(2);
@@ -913,8 +913,9 @@ test('Stage 2 picker surfaces all value-overlap candidates as separate rows', as
   await expect(
     page.locator('.mapping-row', { hasText: 'diagnosis' }).locator('.mapping-row-status.mapping-ico--rewrite')
   ).toBeVisible();
-  // The picker badge still marks that the selected CDE came from value overlap.
+  // The picker badge still marks that the selected CDE came from AI ranking.
   await expect(page.locator('#cdePicker .ai-badge')).toBeVisible();
+  await expect(page.locator('#cdePicker .ai-badge')).toHaveText('AI suggestion');
 
   // Picking another catalog CDE updates the target and still remains a rewrite
   // outcome because the selected CDE is PV-backed.

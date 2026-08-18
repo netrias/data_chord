@@ -24,6 +24,7 @@ _DATA_CHORD_ALB_ARN_VAR = "DATA_CHORD_ALB_ARN"
 _DATA_CHORD_AGENTIC_WORKERS_VAR = "DATA_CHORD_AGENTIC_WORKERS"
 _DATA_CHORD_REFERENCE_TABLE_VAR = "DATA_CHORD_REFERENCE_TABLE"
 _DATA_CHORD_HARMONIZATION_CACHE_TABLE_VAR = "DATA_CHORD_HARMONIZATION_CACHE_TABLE"
+_DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE_VAR = "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE"
 _AWS_REGION_VAR = "AWS_REGION"
 _DEFAULT_STORAGE_BACKEND = StorageBackend.LOCAL
 _DEFAULT_AGENTIC_WORKERS = 100
@@ -91,6 +92,15 @@ def get_harmonization_cache_table_name() -> str:
     return table_name
 
 
+def get_cde_recommendation_cache_table_name() -> str:
+    table_name = os.getenv(_DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE_VAR, "").strip()
+    if not table_name:
+        raise ConfigurationError(
+            f"{_DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE_VAR} environment variable is required"
+        )
+    return table_name
+
+
 def get_expected_alb_arn() -> str | None:
     raw_arn = os.getenv(_DATA_CHORD_ALB_ARN_VAR)
     if raw_arn is None:
@@ -103,6 +113,7 @@ def validate_required_config() -> None:
     """Validate all runtime configuration before service clients are created."""
     get_reference_table_name()
     get_harmonization_cache_table_name()
+    get_cde_recommendation_cache_table_name()
 
     storage_backend = get_storage_backend()
     if storage_backend is StorageBackend.S3:
