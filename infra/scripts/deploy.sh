@@ -275,7 +275,7 @@ watch_ecs() {
 }
 
 require_healthy_targets() {
-  local target_group states state
+  local target_group states state healthy=0
   target_group="$(required_tofu_output target_group_arn)"
   states="$(aws elbv2 describe-target-health \
     --target-group-arn "$target_group" \
@@ -283,8 +283,13 @@ require_healthy_targets() {
     --output text)"
   [[ -n "$states" && "$states" != "None" ]] || fail "The load balancer has no targets."
   for state in $states; do
-    [[ "$state" == "healthy" ]] || fail "A load balancer target is $state."
+    case "$state" in
+      healthy) healthy=1 ;;
+      draining) ;;
+      *) fail "A load balancer target is $state." ;;
+    esac
   done
+  ((healthy == 1)) || fail "The load balancer has no healthy targets."
 }
 
 run_deploy() {

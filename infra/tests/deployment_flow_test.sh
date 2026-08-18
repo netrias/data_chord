@@ -114,7 +114,7 @@ case "${1:-} ${2:-}" in
     fi
     ;;
   "ecs describe-services") printf 'COMPLETED\t1\t1\t0\n' ;;
-  "elbv2 describe-target-health") printf 'healthy\n' ;;
+  "elbv2 describe-target-health") printf '%s\n' "$MOCK_TARGET_STATES" ;;
   *) printf 'Unexpected AWS call: %s\n' "$*" >&2; exit 2 ;;
 esac
 MOCK_AWS
@@ -242,6 +242,7 @@ run_command() {
     MOCK_CONVERGENCE_AWS_FAILURE="${MOCK_CONVERGENCE_AWS_FAILURE:-0}" \
     MOCK_CONVERGENCE_FAILURE="${MOCK_CONVERGENCE_FAILURE:-0}" \
     MOCK_CONVERGENCE_REMAINING="${MOCK_CONVERGENCE_REMAINING:-0}" \
+    MOCK_TARGET_STATES="${MOCK_TARGET_STATES:-healthy}" \
     MOCK_CONVERGENCE_COUNTER_FILE="$calls.convergence" \
     MOCK_STATE_COUNTER_FILE="$calls.state-pulls" \
     AWS_CREDENTIAL_EXPIRATION="${MOCK_CREDENTIAL_EXPIRATION:-}" \
@@ -308,9 +309,12 @@ assert_absent "$plan_calls" "uv run"
 # Given the exact plan receipt still matches code, config, account, and state.
 deploy_calls="$TEST_ROOT/deploy-calls"
 # When deploy runs without stdin.
-MOCK_CONVERGENCE_REMAINING=4 run_command "$deploy_calls" netrias staging deploy >/dev/null
+MOCK_CONVERGENCE_REMAINING=4 \
+  MOCK_TARGET_STATES=$'healthy\tdraining' \
+  run_command "$deploy_calls" netrias staging deploy >/dev/null
 # Then the policy is applied and converges before CodeBuild, saved plans apply,
-# the workflow bucket needs no versioning wait, no data import runs, and health is checked.
+# the workflow bucket needs no versioning wait, no data import runs, and the
+# healthy new target is accepted while the old target drains.
 assert_contains "$deploy_calls" "prerequisites.tfplan"
 assert_contains "$deploy_calls" "-target=aws_iam_role_policy.application_build"
 assert_contains "$deploy_calls" "-detailed-exitcode"
@@ -327,6 +331,17 @@ assert_absent "$deploy_calls" "aws_s3_bucket_versioning.workflow"
 assert_absent "$deploy_calls" "sleep 900"
 assert_absent "$deploy_calls" "-auto-approve"
 assert_absent "$deploy_calls" "uv run"
+
+# Given a stable ECS service has no healthy load-balancer target.
+run_command "$plan_calls" netrias staging plan >/dev/null
+draining_calls="$TEST_ROOT/draining-calls"
+draining_output="$TEST_ROOT/draining-output"
+# When deploy finds only a draining target, then it reports that no healthy target exists.
+if MOCK_TARGET_STATES=draining \
+  run_command "$draining_calls" netrias staging deploy >"$draining_output" 2>&1; then
+  fail_test "Deploy accepted a target group with no healthy target"
+fi
+assert_contains "$draining_output" "The load balancer has no healthy targets."
 
 # Given an existing deployment manages workflow bucket versioning and runs an older app revision.
 versioning_handoff='{"resource_changes":[{"address":"aws_ecs_service.app","change":{"actions":["update"]}},{"address":"aws_ecs_task_definition.application","change":{"actions":["delete","create"]}},{"address":"aws_s3_bucket_versioning.workflow","change":{"actions":["forget"]}}]}'
