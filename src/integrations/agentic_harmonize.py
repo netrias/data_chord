@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -27,7 +28,15 @@ from agent_experiment import (
 from netrias_client import TabularColumn, read_tabular, write_tabular
 
 from src.domain.columns import column_key_from_string
+from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.harmonization import HarmonizeStatus, MatchFidelity
+from src.domain.harmonization_cache import (
+    EmptyHarmonizationCache,
+    HarmonizationCache,
+    HarmonizationCacheEntry,
+    HarmonizationCacheError,
+    HarmonizationCacheKey,
+)
 from src.domain.manifest import ColumnMappingManifest, ManifestRow
 from src.integrations.harmonize import HarmonizeResult
 from src.persistence.manifest_writer import write_manifest_parquet
@@ -44,7 +53,7 @@ class AgenticHarmonizeConfig:
     selector_model: Model = GPT_5_6_SOL
     reasoning_effort: ReasoningEffort = ReasoningEffort.HIGH
     exploration_turns: int = 10
-    max_workers: int = 50
+    max_workers: int = 100
 
     def __post_init__(self) -> None:
         if not self.region.strip():
@@ -53,6 +62,8 @@ class AgenticHarmonizeConfig:
             raise ValueError("Agentic exploration turns must be positive")
         if self.max_workers < 1:
             raise ValueError("Agentic worker count must be positive")
+        if self.max_workers > 100:
+            raise ValueError("Agentic worker count must not exceed 100")
 
 
 @dataclass(frozen=True)
@@ -64,6 +75,7 @@ class _TermWork:
     row_indices: tuple[int, ...]
     pvs_index: PvsIndex | None
     search_indexes: IndexBundle | None
+    is_exact_match: bool
 
     @property
     def context(self) -> str:
@@ -82,14 +94,21 @@ class _WorkerState(local):
 
 
 class AgenticHarmonizeService:
-    def __init__(self, config: AgenticHarmonizeConfig) -> None:
+    def __init__(
+        self,
+        config: AgenticHarmonizeConfig,
+        *,
+        cache: HarmonizationCache | None = None,
+    ) -> None:
         self._config = config
+        self._cache = cache or EmptyHarmonizationCache()
         self._worker_state = _WorkerState()
 
     def run(
         self,
         *,
         file_path: Path,
+        data_model_version: DataModelVersionReference,
         prepared_manifest: ColumnMappingManifest,
         column_pv_sets: ColumnPvSets,
         output_path: Path | None = None,
@@ -101,7 +120,7 @@ class AgenticHarmonizeService:
         try:
             dataset = read_tabular(file_path, sheet_name)
             work = _build_work(dataset.columns, dataset.rows, prepared_manifest, column_pv_sets)
-            outcomes = self._run_terms(work)
+            outcomes = self._run_terms(work, data_model_version)
             output_rows = _apply_outcomes(dataset.rows, outcomes)
             manifest_rows = [_manifest_row(job_id, outcome) for outcome in outcomes]
             requested_output.parent.mkdir(parents=True, exist_ok=True)
@@ -125,13 +144,49 @@ class AgenticHarmonizeService:
             output_path=requested_output,
         )
 
-    def _run_terms(self, work: list[_TermWork]) -> list[_TermOutcome]:
-        passthrough = [_passthrough(item) for item in work if item.pvs_index is None or not item.input_term.strip()]
-        provider_work = [item for item in work if item.pvs_index is not None and item.input_term.strip()]
-        if not provider_work:
-            return sorted(passthrough, key=_outcome_order)
+    def _run_terms(
+        self,
+        work: list[_TermWork],
+        data_model_version: DataModelVersionReference,
+    ) -> list[_TermOutcome]:
+        outcomes = [
+            _passthrough(item)
+            for item in work
+            if item.pvs_index is None or not item.input_term.strip()
+        ]
+        outcomes.extend(_exact_match(item) for item in work if item.is_exact_match)
+        cache_work = [
+            (item, _cache_key(data_model_version, item))
+            for item in work
+            if item.pvs_index is not None
+            and item.input_term.strip()
+            and not item.is_exact_match
+        ]
+        cached = self._load_cache([key for _item, key in cache_work])
+        provider_work: list[_TermWork] = []
+        for item, key in cache_work:
+            entry = cached.get(key)
+            if entry is None:
+                provider_work.append(item)
+            else:
+                outcomes.append(_cached_outcome(item, entry))
+        logger.info(
+            "Prepared harmonization work",
+            extra={
+                "exact_matches": sum(item.is_exact_match for item in work),
+                "cache_hits": len(cache_work) - len(provider_work),
+                "provider_terms": len(provider_work),
+            },
+        )
+        provider_outcomes = self._run_provider_terms(provider_work)
+        outcomes.extend(provider_outcomes)
+        self._save_cache(data_model_version, provider_outcomes)
+        return sorted(outcomes, key=_outcome_order)
 
-        outcomes = list(passthrough)
+    def _run_provider_terms(self, provider_work: list[_TermWork]) -> list[_TermOutcome]:
+        if not provider_work:
+            return []
+        outcomes: list[_TermOutcome] = []
         worker_count = min(self._config.max_workers, len(provider_work))
         work_iterator = iter(provider_work)
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
@@ -150,7 +205,37 @@ class AgenticHarmonizeService:
                 for future in futures:
                     future.cancel()
                 raise
-        return sorted(outcomes, key=_outcome_order)
+        return outcomes
+
+    def _load_cache(
+        self,
+        keys: list[HarmonizationCacheKey],
+    ) -> Mapping[HarmonizationCacheKey, HarmonizationCacheEntry]:
+        try:
+            return self._cache.load_many(keys)
+        except HarmonizationCacheError:
+            logger.warning("Harmonization cache read failed; using Bedrock", exc_info=True)
+            return {}
+
+    def _save_cache(
+        self,
+        data_model_version: DataModelVersionReference,
+        outcomes: list[_TermOutcome],
+    ) -> None:
+        entries = [
+            HarmonizationCacheEntry(
+                key=_cache_key(data_model_version, outcome.work),
+                matched_value=outcome.matched_value,
+                match_fidelity=outcome.match_fidelity,
+            )
+            for outcome in outcomes
+        ]
+        if not entries:
+            return
+        try:
+            self._cache.save_many(entries)
+        except HarmonizationCacheError:
+            logger.warning("Harmonization cache write failed; result remains usable", exc_info=True)
 
     def _harmonize_term(self, work: _TermWork) -> _TermOutcome:
         if work.pvs_index is None:
@@ -218,6 +303,7 @@ def _build_work(
                 row_indices=tuple(row_indices),
                 pvs_index=indexes[0] if indexes else None,
                 search_indexes=indexes[1] if indexes else None,
+                is_exact_match=pvs is not None and term in pvs,
             ))
     return work
 
@@ -236,6 +322,36 @@ def _indexes_for(
 
 def _passthrough(work: _TermWork) -> _TermOutcome:
     return _TermOutcome(work=work, matched_value=None, match_fidelity=MatchFidelity.NONE)
+
+
+def _exact_match(work: _TermWork) -> _TermOutcome:
+    return _TermOutcome(
+        work=work,
+        matched_value=work.input_term,
+        match_fidelity=MatchFidelity.STRONG,
+    )
+
+
+def _cache_key(
+    data_model_version: DataModelVersionReference,
+    work: _TermWork,
+) -> HarmonizationCacheKey:
+    return HarmonizationCacheKey(
+        data_model_version=data_model_version,
+        cde_key=work.cde_key,
+        source_value=work.input_term,
+    )
+
+
+def _cached_outcome(
+    work: _TermWork,
+    entry: HarmonizationCacheEntry,
+) -> _TermOutcome:
+    return _TermOutcome(
+        work=work,
+        matched_value=entry.matched_value,
+        match_fidelity=entry.match_fidelity,
+    )
 
 
 def _outcome_order(outcome: _TermOutcome) -> tuple[int, int]:

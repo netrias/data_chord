@@ -13,6 +13,11 @@ output "reference_data_table" {
   value       = aws_dynamodb_table.reference_data.name
 }
 
+output "harmonization_cache_table" {
+  description = "DynamoDB table used to reuse versioned harmonization results."
+  value       = aws_dynamodb_table.harmonization_cache.name
+}
+
 output "ecr_repository_url" {
   description = "ECR repository URI for the app image."
   value       = aws_ecr_repository.app.repository_url

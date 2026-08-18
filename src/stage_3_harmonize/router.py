@@ -36,6 +36,7 @@ from src.domain.column_outcomes import (
 )
 from src.domain.column_renames import ColumnRenameSet
 from src.domain.columns import ColumnKey
+from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.harmonization import (
     HarmonizationColumnBreakdown,
     HarmonizationManifestSummary,
@@ -322,6 +323,7 @@ async def _run_harmonization_workflow(
     })
     result = await _run_harmonization(
         meta.saved_path,
+        data_model_version,
         prepared_manifest,
         column_pv_sets,
         output_path,
@@ -417,6 +419,7 @@ def _next_stage_url(*, file_id: str, job_id: str, job_status: HarmonizeStatus) -
 
 async def _run_harmonization(
     file_path: Path,
+    data_model_version: DataModelVersionReference,
     prepared_manifest: ColumnMappingManifest,
     column_pv_sets: ColumnPvSets,
     output_path: Path,
@@ -427,6 +430,7 @@ async def _run_harmonization(
     return await run_in_threadpool(
         harmonizer.run,
         file_path=file_path,
+        data_model_version=data_model_version,
         prepared_manifest=prepared_manifest,
         column_pv_sets=column_pv_sets,
         output_path=output_path,

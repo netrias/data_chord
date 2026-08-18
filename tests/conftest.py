@@ -187,6 +187,7 @@ async def app_client(
 ) -> AsyncGenerator[AsyncClient]:
     """why: provide an async HTTP client for testing the full API."""
     monkeypatch.setenv("DATA_CHORD_REFERENCE_TABLE", "test-reference-table")
+    monkeypatch.setenv("DATA_CHORD_HARMONIZATION_CACHE_TABLE", "test-cache-table")
     import src.app.dependencies as deps_module
     from src.storage import LocalWorkflowStorage
 

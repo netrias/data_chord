@@ -76,11 +76,11 @@ variable "domain_label" {
 variable "agentic_workers" {
   description = "Maximum concurrent agentic term harmonizations in one task."
   type        = number
-  default     = 50
+  default     = 100
 
   validation {
-    condition     = var.agentic_workers >= 1
-    error_message = "agentic_workers must be positive."
+    condition     = var.agentic_workers >= 1 && var.agentic_workers <= 100
+    error_message = "agentic_workers must be between 1 and 100."
   }
 }
 
