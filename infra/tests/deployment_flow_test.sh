@@ -328,8 +328,8 @@ assert_absent "$deploy_calls" "sleep 900"
 assert_absent "$deploy_calls" "-auto-approve"
 assert_absent "$deploy_calls" "uv run"
 
-# Given an existing deployment still manages workflow bucket versioning.
-versioning_handoff='{"resource_changes":[{"address":"aws_s3_bucket_versioning.workflow","change":{"actions":["forget"]}}]}'
+# Given an existing deployment manages workflow bucket versioning and runs an older app revision.
+versioning_handoff='{"resource_changes":[{"address":"aws_ecs_service.app","change":{"actions":["update"]}},{"address":"aws_ecs_task_definition.application","change":{"actions":["create","delete"]}},{"address":"aws_s3_bucket_versioning.workflow","change":{"actions":["forget"]}}]}'
 migration_plan_calls="$TEST_ROOT/migration-plan-calls"
 MOCK_FORECAST_JSON_OVERRIDE="$versioning_handoff" \
   run_command "$migration_plan_calls" netrias staging plan >/dev/null

@@ -41,6 +41,9 @@ _PREREQUISITE_ADDRESSES = {
     "aws_iam_role_policy.application_build",
     "aws_s3_bucket.workflow",
 }
+_SAFE_REPLACEMENTS = {
+    "aws_ecs_task_definition.application": ["create", "delete"],
+}
 
 
 class ReceiptError(ValueError):
@@ -223,9 +226,10 @@ def _forecast_mapping(raw: object) -> dict[str, object]:
 def _reject_destructive_changes(changes: list[dict[str, object]]) -> None:
     for change in changes:
         actions = cast(list[str], change["actions"])
-        if "delete" in actions:
+        address = cast(str, change["address"])
+        if "delete" in actions and _SAFE_REPLACEMENTS.get(address) != actions:
             raise ReceiptError(
-                f"deployment would delete or replace {change['address']}; destructive deploys are not supported"
+                f"deployment would delete or replace {address}; destructive deploys are not supported"
             )
 
 
