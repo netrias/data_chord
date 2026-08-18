@@ -18,20 +18,6 @@ declare module '/assets/shared/storage-keys.js' {
 
 type StageConfig = Record<string, any>;
 
-interface ClusterizeOptions {
-  rows?: string[];
-  scrollId?: string;
-  contentId?: string;
-  callbacks?: Record<string, Function>;
-  [key: string]: any;
-}
-
-declare class Clusterize {
-  constructor(options: ClusterizeOptions);
-  update(rows: string[]): void;
-  destroy(clean?: boolean): void;
-}
-
 interface Element {
   checked?: boolean;
   dataset: DOMStringMap;

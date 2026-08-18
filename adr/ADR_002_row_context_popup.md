@@ -101,16 +101,17 @@ Users reviewing a specific value's context may want to see the full spreadsheet 
 - Debouncing prevents rapid clicks from queueing multiple fetches
 - Loading state shown in table area during fetch
 
-### 6. Virtual Scrolling with Clusterize.js
+### 6. Local Fixed-Row Virtual Scrolling
 
-For datasets with thousands of rows, DOM rendering becomes a bottleneck. We integrated Clusterize.js for virtual scrolling:
+For datasets with thousands of rows, DOM rendering becomes a bottleneck. A small Stage 4 module owns virtual scrolling:
 
-- Only ~200 rows rendered in DOM at any time (`rows_in_block: 50 × blocks_in_cluster: 4`)
-- Smooth scrolling maintained on 10k+ row datasets
+- Only the visible rows and a 10-row buffer render in the DOM
+- Row HTML is created on demand instead of copied for the full dataset
+- One-line cells give the virtual table a stable measured row height
 - Chunked data fetching (10k rows per request) with progress updates
-- Graceful fallback to full render if Clusterize unavailable
+- No runtime CDN or third-party virtual-scroll dependency
 
-**Deferred cleanup**: Clusterize.destroy() is deferred via setTimeout to prevent blocking the UI when closing the popup.
+**Cleanup**: Closing or changing the popup removes the scroll listener and cancels queued rendering.
 
 ## Files Changed
 
@@ -119,8 +120,9 @@ For datasets with thousands of rows, DOM rendering becomes a bottleneck. We inte
 - `src/stage_4_review_results/schemas.py` - `RowContextRequest`, `RowContextResponse`
 
 **Frontend**:
-- `src/stage_4_review_results/static/row_context_popup.js` - Popup dialog with Clusterize, toggle, chunked fetch
+- `src/stage_4_review_results/static/row_context_popup.js` - Popup dialog, toggle, chunked fetch
+- `src/stage_4_review_results/static/fixed_row_virtual_table.js` - Bounded fixed-row rendering and cleanup
 - `src/stage_4_review_results/static/review_mode_column.js` - Click handler, passes totalOriginalRows
 - `src/stage_4_review_results/static/stage_4_review.js` - Stores and passes totalOriginalRows
 - `src/stage_4_review_results/static/stage_4_review.css` - Dialog, toggle, and table styles
-- `src/stage_4_review_results/templates/stage_4_review.html` - Clusterize.js CDN script
+- `src/stage_4_review_results/templates/stage_4_review.html` - Stage 4 page template

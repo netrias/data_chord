@@ -1184,9 +1184,12 @@
 }
 
 .row-context-table td {
+  box-sizing: border-box;
+  height: 45px;
   padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--gray-200);
   vertical-align: top;
+  white-space: nowrap;
   color: var(--gray-700);
 }
 
@@ -1260,19 +1263,21 @@
   opacity: 0.6;
 }
 
-/* Clusterize.js virtual scrolling styles */
-.clusterize-content {
+/* Fixed-row virtual table */
+.virtual-table-content {
   outline: 0;
 }
 
-.clusterize-no-data td {
+.virtual-table-no-data td {
   text-align: center;
   padding: var(--space-8);
   color: var(--gray-500);
 }
 
-.clusterize-extra-row {
-  /* Spacer rows for scroll position - must be empty */
+.virtual-table-spacer td {
+  box-sizing: border-box;
+  padding: 0;
+  border: 0;
 }
 
 /* ==========================================================================
