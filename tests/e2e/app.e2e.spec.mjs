@@ -256,10 +256,10 @@ test('happy path flow: upload → analyze → harmonize → review → summary �
   await expect(stageThreeOutcome).toContainText('2 of 3');
   await expect(page.locator('#stageThreeDial')).toHaveAttribute(
     'aria-label',
-    'No values were checked against an approved list.',
+    'No unique values were checked against an approved list.',
   );
   await expect(page.locator('#stageThreeHeadline')).toHaveText('Harmonization complete');
-  await expect(page.getByText('No values were checked against an approved list.')).toBeVisible();
+  await expect(page.getByText('No unique values were checked against an approved list.')).toBeVisible();
   await expect(page.getByText('Confidence', { exact: true })).toHaveCount(0);
 
   await page.click('#reviewButton');
@@ -408,8 +408,10 @@ test('completed Stage 3 shows the durable dial, action table, and remaining colu
   await expect(page.getByText('Checked against GDC 3.0', { exact: true })).toBeVisible();
   await expect(page.locator('#stageThreeDial')).toHaveAttribute(
     'aria-label',
-    'Of 6 checked values: 1 was successfully harmonized; 3 already matched; 2 could not be harmonized.',
+    'Of 6 unique values checked: 1 was successfully harmonized; 3 already matched; 2 could not be harmonized.',
   );
+  await expect(page.locator('#stageThreeCheckedCount')).toHaveText('6');
+  await expect(page.locator('.stage-three-dial__content span')).toHaveText('unique values checked');
 
   const table = page.locator('[data-column-outcome-table] .column-outcome-table');
   await expect(table).toBeVisible();
@@ -420,12 +422,23 @@ test('completed Stage 3 shows the durable dial, action table, and remaining colu
     'failed_rewrite',
     'rewritten',
   ]);
+  await expect(table.locator('tbody tr td:nth-child(2)')).toHaveText([
+    '0 of 2',
+    '0 of 1',
+    '1 of 2',
+  ]);
   await expect(table).not.toContainText('already_matched');
   await expect(table).not.toContainText('not_checked');
 
   const remaining = page.locator('[data-remaining-columns]');
   await expect(remaining).toContainText('2 columns passed through unchanged');
   await remaining.locator('summary').click();
+  await expect(remaining.getByRole('heading', {
+    name: '1 value already matched the approved list',
+  })).toBeVisible();
+  await expect(remaining.getByRole('heading', {
+    name: '1 column has no approved list to check against',
+  })).toBeVisible();
   await expect(remaining).toContainText('already_matched');
   await expect(remaining).toContainText('not_checked');
   await expect(remaining).not.toContainText('unchanged_unresolved');

@@ -100,7 +100,7 @@ const _renderDial = ({ checked, harmonized, matched, unresolved }) => {
     stageThreeDial.classList.add('stage-three-dial--empty');
     stageThreeDial.style.removeProperty('--harmonized-end');
     stageThreeDial.style.removeProperty('--matched-end');
-    stageThreeDial.setAttribute('aria-label', 'No values were checked against an approved list.');
+    stageThreeDial.setAttribute('aria-label', 'No unique values were checked against an approved list.');
     return;
   }
 
@@ -111,7 +111,7 @@ const _renderDial = ({ checked, harmonized, matched, unresolved }) => {
   stageThreeDial.style.setProperty('--matched-end', `${matchedEnd}%`);
   stageThreeDial.setAttribute(
     'aria-label',
-    `Of ${_formatCount(checked)} checked ${_plural(checked, 'value')}: `
+    `Of ${_formatCount(checked)} unique ${_plural(checked, 'value')} checked: `
       + `${_formatCount(harmonized)} ${harmonized === 1 ? 'was' : 'were'} successfully harmonized; `
       + `${_formatCount(matched)} already matched; `
       + `${_formatCount(unresolved)} could not be harmonized.`,
@@ -188,15 +188,19 @@ const _renderRemainingColumns = (columns) => {
 
   const matched = columns.filter((column) => column.reviewStatus === 'clear');
   const unchecked = columns.filter((column) => column.reviewStatus === 'not_checked');
+  const matchedValues = matched.reduce(
+    (total, column) => total + column.totalDistinctValues,
+    0,
+  );
   remainingTitle.textContent = `${_formatCount(columns.length)} ${_plural(columns.length, 'column')} passed through unchanged`;
   remainingSummary.textContent = 'Nothing in them needed rewriting.';
   _remainingGroup(
-    `${_formatCount(matched.length)} already matched the approved list`,
+    `${_formatCount(matchedValues)} ${_plural(matchedValues, 'value')} already matched the approved list`,
     matched,
     'remaining-columns__item--matched',
   );
   _remainingGroup(
-    `${_formatCount(unchecked.length)} ${unchecked.length === 1 ? 'has' : 'have'} no approved list to check against`,
+    `${_formatCount(unchecked.length)} ${_plural(unchecked.length, 'column')} ${unchecked.length === 1 ? 'has' : 'have'} no approved list to check against`,
     unchecked,
     'remaining-columns__item--unchecked',
   );
@@ -255,7 +259,7 @@ const _renderMetricsDashboard = (job) => {
     stageThreeResultMessage.textContent = !exactGroupsAvailable
       ? 'Detailed value groups are not available for this earlier result. Continue to Verify to review the changes.'
       : checked === 0
-      ? 'No values were checked against an approved list.'
+      ? 'No unique values were checked against an approved list.'
       : unresolved === 0
         ? 'Every checked value now matches the approved list.'
         : `${_formatCount(unresolved)} ${_plural(unresolved, 'value')} could not be harmonized. Continue to Verify to review ${unresolved === 1 ? 'it' : 'them'}.`;

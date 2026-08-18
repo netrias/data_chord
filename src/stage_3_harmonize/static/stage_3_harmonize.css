@@ -98,7 +98,7 @@
   display: grid;
   grid-template-columns: minmax(13rem, 16rem) minmax(0, 1fr);
   align-items: center;
-  gap: clamp(var(--space-8), 6vw, var(--space-12));
+  column-gap: clamp(var(--space-12), 6vw, 5rem);
   padding-bottom: var(--space-8);
   border-bottom: 1px solid var(--gray-200);
 }
@@ -364,6 +364,7 @@
 @media (max-width: 720px) {
   .stage-three-summary {
     grid-template-columns: 1fr;
+    gap: var(--space-8);
   }
 
   .stage-three-dial-column {
