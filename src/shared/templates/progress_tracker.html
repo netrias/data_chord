@@ -1,0 +1,34 @@
+{% macro progress_tracker(active_stage, action_id=None, action_class=None) -%}
+  {% set stages = [
+    ("upload", "Upload", "stage_one_upload_page"),
+    ("mapping", "Map", "stage_two_mapping_page"),
+    ("harmonize", "Harmonize", "stage_three_entry"),
+    ("verify", "Verify", "stage_four_review_page"),
+    ("review", "Review", "stage_five_review_page")
+  ] %}
+  {% set active_index = {"upload": 0, "mapping": 1, "harmonize": 2, "verify": 3, "review": 4}[active_stage] %}
+  <nav class="progress-tracker">
+    <div class="progress-tracker-row">
+      <ol class="progress-track">
+        {% for stage, label, route_name in stages %}
+          <li class="step{% if loop.index0 < active_index %} complete{% elif loop.index0 == active_index %} active{% else %} unreachable{% endif %}" data-stage="{{ stage }}">
+            <a class="step-link" data-url="{{ request.url_for(route_name) }}"{% if loop.index0 <= active_index %} href="{{ request.url_for(route_name) }}"{% else %} aria-disabled="true" tabindex="-1"{% endif %}{% if loop.index0 == active_index %} aria-current="step"{% endif %}>
+              <span class="step-index">{{ loop.index }}</span>
+              <span class="step-label">{{ label }}</span>
+            </a>
+          </li>
+          {% if not loop.last %}
+            <li class="connector{% if loop.index0 < active_index %} complete{% endif %}" role="presentation" aria-hidden="true"></li>
+          {% endif %}
+        {% endfor %}
+      </ol>
+      <div{% if action_id %} id="{{ action_id }}"{% endif %} class="progress-tracker-action{% if action_class %} {{ action_class }}{% endif %}">
+        {{ caller() }}
+      </div>
+    </div>
+    <div id="stepInstruction" class="step-instruction">
+      <p class="step-instruction-text"></p>
+      <span class="step-instruction-tooltip" aria-hidden="true"></span>
+    </div>
+  </nav>
+{%- endmacro %}

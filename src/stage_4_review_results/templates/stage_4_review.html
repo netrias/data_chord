@@ -9,47 +9,14 @@
     <link rel="stylesheet" href="{{ request.url_for('stage_four_static', path='stage_4_review.css') }}?v={{ request.app.state.asset_version }}" />
   </head>
   <body>
-    <nav class="progress-tracker">
-      <div class="progress-tracker-row">
-        <ol class="progress-track">
-          <li class="step complete" data-stage="upload" data-url="{{ request.url_for('stage_one_upload_page') }}">
-            <span class="step-index">1</span>
-            <span class="step-label">Upload</span>
-          </li>
-          <li class="connector complete"></li>
-          <li class="step complete" data-stage="mapping" data-url="{{ request.url_for('stage_two_mapping_page') }}">
-            <span class="step-index">2</span>
-            <span class="step-label">Map</span>
-          </li>
-          <li class="connector complete"></li>
-          <li class="step complete" data-stage="harmonize" data-url="{{ request.url_for('stage_three_entry') }}">
-            <span class="step-index">3</span>
-            <span class="step-label">Harmonize</span>
-          </li>
-          <li class="connector complete"></li>
-          <li class="step active" data-stage="verify" data-url="{{ request.url_for('stage_four_review_page') }}">
-            <span class="step-index">4</span>
-            <span class="step-label">Verify</span>
-          </li>
-          <li class="connector"></li>
-          <li class="step" data-stage="review" data-url="{{ request.url_for('stage_five_review_page') }}">
-            <span class="step-index">5</span>
-            <span class="step-label">Review</span>
-          </li>
-        </ol>
-        <div class="progress-tracker-action">
-          <button id="stageFiveButton" class="btn-3d" type="button">
-            <span class="btn-3d-shadow" aria-hidden="true"></span>
-            <span class="btn-3d-edge" aria-hidden="true"></span>
-            <span class="btn-3d-front">Review →</span>
-          </button>
-        </div>
-      </div>
-      <div id="stepInstruction" class="step-instruction">
-        <p class="step-instruction-text"></p>
-        <span class="step-instruction-tooltip" aria-hidden="true"></span>
-      </div>
-    </nav>
+    {% from "progress_tracker.html" import progress_tracker with context %}
+    {% call progress_tracker("verify") %}
+      <button id="stageFiveButton" class="btn-3d" type="button">
+        <span class="btn-3d-shadow" aria-hidden="true"></span>
+        <span class="btn-3d-edge" aria-hidden="true"></span>
+        <span class="btn-3d-front">Review →</span>
+      </button>
+    {% endcall %}
 
     <main class="stage-shell stage-four-shell">
       <section class="batch-progress-panel">

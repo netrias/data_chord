@@ -12,9 +12,9 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
-from fastapi.templating import Jinja2Templates
 
 import src.app.dependencies as dependencies
+from src.shared.jinja import templates_for_stage
 from src.stage_5_review_summary.schemas import StageFiveRequest, StageFiveSummaryResponse
 from src.stage_5_review_summary.use_cases import (
     build_download_package,
@@ -25,7 +25,7 @@ from src.storage import UploadStorage
 _MODULE_DIR = Path(__file__).parent
 _TEMPLATE_DIR = _MODULE_DIR / "templates"
 
-_templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
+_templates = templates_for_stage(_TEMPLATE_DIR)
 
 stage_five_router = APIRouter(prefix="/stage-5", tags=["Stage 5 Download"])
 
@@ -34,10 +34,6 @@ stage_five_router = APIRouter(prefix="/stage-5", tags=["Stage 5 Download"])
 async def render_stage_five(request: Request) -> HTMLResponse:
     context: dict[str, object] = {
         "request": request,
-        "stage_one_url": request.url_for("stage_one_upload_page"),
-        "stage_two_url": request.url_for("stage_two_mapping_page"),
-        "stage_three_url": request.url_for("stage_three_entry"),
-        "stage_four_url": request.url_for("stage_four_review_page"),
         "summary_endpoint": str(request.url_for("stage_five_summary")),
         "download_endpoint": str(request.url_for("stage_five_download")),
     }

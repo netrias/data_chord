@@ -12,7 +12,6 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 
 import src.app.dependencies as dependencies
 from src.api.schemas import DatasetWorkflowIdField
@@ -20,6 +19,7 @@ from src.domain.cde import CDEInfo
 from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.reference_data import ReferenceDataError
 from src.persistence.workflow_state_store import WorkflowStateUnreadableError, load_workflow_state
+from src.shared.jinja import templates_for_stage
 
 from .schemas import ColumnDetailResponse, SaveMappingChoicesRequest, SaveMappingChoicesResponse
 from .use_cases import (
@@ -33,7 +33,7 @@ from .use_cases import (
 MODULE_DIR = _Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"
 
-_templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
+_templates = templates_for_stage(TEMPLATE_DIR)
 stage_two_router = APIRouter(tags=["Stage 2 Mapping"])
 
 

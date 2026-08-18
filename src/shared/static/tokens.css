@@ -323,7 +323,15 @@ button.linklike {
 }
 
 .progress-tracker-action {
+  display: flex;
+  justify-content: flex-end;
   flex-shrink: 0;
+  width: 280px;
+}
+
+.progress-tracker-action.hidden {
+  display: flex !important;
+  visibility: hidden;
 }
 
 /* Magical 3D Button */
@@ -431,18 +439,29 @@ button.linklike {
 }
 
 .step {
+  color: var(--gray-400);
+  min-width: 70px;
+}
+
+.step-link {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 0.3rem;
-  color: var(--gray-400);
+  color: inherit;
   font-weight: 600;
-  min-width: 70px;
   transition: all var(--transition-normal);
   cursor: pointer;
+  text-decoration: none;
 }
 
-.step:hover {
+.step-link:focus-visible {
+  border-radius: var(--radius-md);
+  outline: 3px solid var(--netrias-500);
+  outline-offset: 4px;
+}
+
+.step:hover .step-link {
   color: var(--teal-500);
 }
 
@@ -516,6 +535,12 @@ button.linklike {
   cursor: not-allowed;
 }
 
+.step.unreachable .step-link,
+.step.unreachable:hover .step-link {
+  color: var(--gray-400);
+  cursor: not-allowed;
+}
+
 .step.unreachable:hover {
   color: var(--gray-400);
 }
@@ -547,6 +572,7 @@ button.linklike {
   flex-shrink: 0;
   position: relative;
   order: -1;
+  width: 280px;
 }
 
 .step-instruction-text {
@@ -563,7 +589,8 @@ button.linklike {
   border: 1px dashed var(--gray-300);
   background: var(--gray-50);
   transition: background var(--transition-fast), border-color var(--transition-fast);
-  max-width: 280px;
+  width: 100%;
+  min-height: 3.9rem;
   white-space: normal;
 }
 

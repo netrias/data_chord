@@ -16,7 +16,6 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 from netrias_client import read_tabular, write_tabular
 
 import src.app.dependencies as dependencies
@@ -69,6 +68,7 @@ from src.persistence.workflow_artifacts import (
     save_harmonized_artifacts,
 )
 from src.persistence.workflow_state_store import LoadedWorkflowState
+from src.shared.jinja import templates_for_stage
 from src.stage_3_harmonize.use_cases import (
     HarmonizationStart,
     HarmonizationStartConflictError,
@@ -89,7 +89,7 @@ TEMPLATE_DIR = MODULE_DIR / "templates"
 NEXT_STAGE_PATH = "/stage-4"
 JOB_START_GRACE_SECONDS = 0.25
 
-_templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
+_templates = templates_for_stage(TEMPLATE_DIR)
 _router_logger = logging.getLogger(__name__)
 
 stage_three_router = APIRouter(prefix="/stage-3", tags=["Stage 3 Harmonize"])

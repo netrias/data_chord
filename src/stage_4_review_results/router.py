@@ -13,10 +13,10 @@ from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Path, Request, Response, status
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 
 import src.app.dependencies as dependencies
 from src.api.schemas import DatasetWorkflowIdField
+from src.shared.jinja import templates_for_stage
 from src.stage_4_review_results.schemas import (
     NonConformantResponse,
     ReviewOverridesSchema,
@@ -41,7 +41,7 @@ _MODULE_DIR = FilePath(__file__).parent
 _TEMPLATE_DIR = _MODULE_DIR / "templates"
 
 
-_templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
+_templates = templates_for_stage(_TEMPLATE_DIR)
 
 
 stage_four_router = APIRouter(prefix="/stage-4", tags=["Stage 4 Review"])
