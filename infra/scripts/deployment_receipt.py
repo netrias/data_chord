@@ -40,7 +40,6 @@ _PREREQUISITE_ADDRESSES = {
     "aws_iam_role.application_build",
     "aws_iam_role_policy.application_build",
     "aws_s3_bucket.workflow",
-    "aws_s3_bucket_versioning.workflow",
 }
 
 
@@ -133,10 +132,6 @@ def check_internal_plan(receipt_path: Path, plan_json_path: Path, phase: str) ->
             raise ReceiptError(f"prerequisite plan contains unexpected resource: {address}")
         if approved.get(address) != change["actions"]:
             raise ReceiptError(f"internal plan was not in the approved forecast: {address}")
-
-
-def plan_changes_resource(plan_json_path: Path, address: str) -> bool:
-    return any(change["address"] == address for change in _forecast(plan_json_path))
 
 
 def set_status(receipt_path: Path, expected: str, replacement: str) -> None:
@@ -305,9 +300,6 @@ def _parser() -> argparse.ArgumentParser:
     status.add_argument("--to-status", required=True)
     invalidate = commands.add_parser("invalidate")
     invalidate.add_argument("--receipt", type=Path, required=True)
-    has_change = commands.add_parser("has-change")
-    has_change.add_argument("--plan-json", type=Path, required=True)
-    has_change.add_argument("--address", required=True)
     return parser
 
 
@@ -340,8 +332,6 @@ def _main(arguments: list[str]) -> int:
             set_status(args.receipt, args.from_status, args.to_status)
         elif args.action == "invalidate":
             invalidate_receipt(args.receipt)
-        else:
-            return 0 if plan_changes_resource(args.plan_json, args.address) else 1
         return 0
     except (EnvironmentError, ReceiptError) as exc:
         print(f"error: {exc}", file=sys.stderr)

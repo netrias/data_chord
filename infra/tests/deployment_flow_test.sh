@@ -210,8 +210,8 @@ MOCK_SLEEP
 
 chmod +x "$MOCK_BIN/git" "$MOCK_BIN/aws" "$MOCK_BIN/tofu" "$MOCK_BIN/uv" "$MOCK_BIN/sleep"
 
-safe_plan='{"resource_changes":[{"address":"aws_ecr_repository.app","change":{"actions":["create"]}},{"address":"aws_dynamodb_table.reference_data","change":{"actions":["create"]}},{"address":"aws_s3_bucket.workflow","change":{"actions":["create"]}},{"address":"aws_s3_bucket_versioning.workflow","change":{"actions":["create"]}}]}'
-prerequisite_plan='{"resource_changes":[{"address":"aws_ecr_repository.app","change":{"actions":["create"]}},{"address":"aws_s3_bucket.workflow","change":{"actions":["create"]}},{"address":"aws_s3_bucket_versioning.workflow","change":{"actions":["create"]}}]}'
+safe_plan='{"resource_changes":[{"address":"aws_ecr_repository.app","change":{"actions":["create"]}},{"address":"aws_dynamodb_table.reference_data","change":{"actions":["create"]}},{"address":"aws_s3_bucket.workflow","change":{"actions":["create"]}}]}'
+prerequisite_plan='{"resource_changes":[{"address":"aws_ecr_repository.app","change":{"actions":["create"]}},{"address":"aws_s3_bucket.workflow","change":{"actions":["create"]}}]}'
 application_plan='{"resource_changes":[{"address":"aws_dynamodb_table.reference_data","change":{"actions":["create"]}}]}'
 
 run_command() {
@@ -247,7 +247,7 @@ run_command() {
     AWS_CREDENTIAL_EXPIRATION="${MOCK_CREDENTIAL_EXPIRATION:-}" \
     MOCK_FORECAST_JSON="${MOCK_FORECAST_JSON_OVERRIDE:-$safe_plan}" \
     MOCK_PREREQUISITE_JSON="${MOCK_PREREQUISITE_JSON_OVERRIDE:-$prerequisite_plan}" \
-    MOCK_APPLICATION_JSON="$application_plan" \
+    MOCK_APPLICATION_JSON="${MOCK_APPLICATION_JSON_OVERRIDE:-$application_plan}" \
     DATA_CHORD_PLAN_ROOT="$TEST_ROOT/receipts" \
     DATA_CHORD_BUILD_ROOT="$TEST_ROOT/build" \
     DATA_CHORD_BUILD_WAIT_SECONDS="${DATA_CHORD_BUILD_WAIT_SECONDS:-3900}" \
@@ -310,7 +310,7 @@ deploy_calls="$TEST_ROOT/deploy-calls"
 # When deploy runs without stdin.
 MOCK_CONVERGENCE_REMAINING=4 run_command "$deploy_calls" netrias staging deploy >/dev/null
 # Then the policy is applied and converges before CodeBuild, saved plans apply,
-# no data import runs, and health is checked.
+# the workflow bucket needs no versioning wait, no data import runs, and health is checked.
 assert_contains "$deploy_calls" "prerequisites.tfplan"
 assert_contains "$deploy_calls" "-target=aws_iam_role_policy.application_build"
 assert_contains "$deploy_calls" "-detailed-exitcode"
@@ -323,8 +323,26 @@ assert_contains "$deploy_calls" "application.tfplan"
 assert_contains "$deploy_calls" "aws codebuild start-build"
 assert_contains "$deploy_calls" "sleep "
 assert_contains "$deploy_calls" "aws elbv2 describe-target-health"
+assert_absent "$deploy_calls" "aws_s3_bucket_versioning.workflow"
+assert_absent "$deploy_calls" "sleep 900"
 assert_absent "$deploy_calls" "-auto-approve"
 assert_absent "$deploy_calls" "uv run"
+
+# Given an existing deployment still manages workflow bucket versioning.
+versioning_handoff='{"resource_changes":[{"address":"aws_s3_bucket_versioning.workflow","change":{"actions":["forget"]}}]}'
+migration_plan_calls="$TEST_ROOT/migration-plan-calls"
+MOCK_FORECAST_JSON_OVERRIDE="$versioning_handoff" \
+  run_command "$migration_plan_calls" netrias staging plan >/dev/null
+migration_deploy_calls="$TEST_ROOT/migration-deploy-calls"
+# When the normal deploy command applies the approved ownership handoff.
+MOCK_FORECAST_JSON_OVERRIDE="$versioning_handoff" \
+  MOCK_PREREQUISITE_JSON_OVERRIDE='{"resource_changes":[]}' \
+  MOCK_APPLICATION_JSON_OVERRIDE="$versioning_handoff" \
+  run_command "$migration_deploy_calls" netrias staging deploy >/dev/null
+# Then OpenTofu applies the handoff without targeting versioning or waiting 15 minutes.
+assert_contains "$migration_deploy_calls" "application.tfplan"
+assert_absent "$migration_deploy_calls" "-target=aws_s3_bucket_versioning.workflow"
+assert_absent "$migration_deploy_calls" "sleep 900"
 
 # Given the saved prerequisite apply returns but the live policy stays stale.
 run_command "$plan_calls" netrias staging plan >/dev/null
