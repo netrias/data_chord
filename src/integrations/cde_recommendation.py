@@ -5,11 +5,10 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 
-from cde_recommend.candidate_ranker import CandidateRanker
-from cde_recommend.recommendation_pipeline import match_columns_batch
-from cde_recommend.result_cache import RecommendationCache
-from cde_recommend.types import CDE, ColumnInput, ColumnResult
-
+from src.cde_recommend.candidate_ranker import CandidateRanker
+from src.cde_recommend.recommendation_pipeline import match_columns_batch
+from src.cde_recommend.result_cache import RecommendationCache
+from src.cde_recommend.types import CDE, ColumnInput, ColumnResult
 from src.domain.cde_recommendation import (
     ProfiledColumn,
     RecommendationUnavailableError,

@@ -10,9 +10,8 @@ import logging
 from pathlib import Path
 from typing import cast
 
-from cde_recommend.result_cache import DynamoRecommendationCache
-
 from src.auth.user_context import current_user_context
+from src.cde_recommend.result_cache import DynamoRecommendationCache
 from src.domain.cde_recommendation import CdeRecommender
 from src.domain.harmonization_cache import HarmonizationCache
 from src.domain.reference_data import ReferenceDataRepository

@@ -22,7 +22,6 @@ dependencies = [
     "idna>=3.15",         # CVE-2026-45409 (via requests/httpx)
     "msgpack>=1.2.1",     # GHSA-6v7p-g79w-8964
     "agent-experiment",
-    "cde-recommend",
 ]
 
 [project.optional-dependencies]
@@ -86,4 +85,3 @@ exclude-newer = "7 days"
 
 [tool.uv.sources]
 agent-experiment = { git = "https://github.com/netrias/agentic_harmonization.git", rev = "7b095c228df9497c5dd0572d31ce94e13914ce1f" }
-cde-recommend = { git = "https://github.com/netrias/cde-recommendation-lambda.git", rev = "30a70aa616a501cfd4eb85f41f94678e1ae11504" }

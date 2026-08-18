@@ -11,7 +11,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-08-11T16:47:31.194354Z"
+exclude-newer = "2026-08-11T16:59:09.775395Z"
 exclude-newer-span = "P7D"
 
 [[package]]
@@ -160,20 +160,6 @@ wheels = [
 [package.optional-dependencies]
 filecache = [
     { name = "filelock" },
-]
-
-[[package]]
-name = "cde-recommend"
-version = "0.1.0"
-source = { git = "https://github.com/netrias/cde-recommendation-lambda.git?rev=30a70aa616a501cfd4eb85f41f94678e1ae11504#30a70aa616a501cfd4eb85f41f94678e1ae11504" }
-dependencies = [
-    { name = "boto3" },
-    { name = "httpx" },
-    { name = "idna" },
-    { name = "openai" },
-    { name = "pydantic" },
-    { name = "pygments" },
-    { name = "urllib3" },
 ]
 
 [[package]]
@@ -373,7 +359,6 @@ source = { virtual = "." }
 dependencies = [
     { name = "agent-experiment" },
     { name = "boto3" },
-    { name = "cde-recommend" },
     { name = "cryptography" },
     { name = "fastapi" },
     { name = "idna" },
@@ -412,7 +397,6 @@ requires-dist = [
     { name = "bandit", marker = "extra == 'dev'", specifier = ">=1.7" },
     { name = "basedpyright", marker = "extra == 'dev'", specifier = ">=1.17.0" },
     { name = "boto3", specifier = ">=1.40.69" },
-    { name = "cde-recommend", git = "https://github.com/netrias/cde-recommendation-lambda.git?rev=30a70aa616a501cfd4eb85f41f94678e1ae11504" },
     { name = "cryptography", specifier = ">=50.0.0" },
     { name = "fastapi", specifier = ">=0.135.4,<0.136.0" },
     { name = "filelock", marker = "extra == 'dev'", specifier = ">=3.20.1" },

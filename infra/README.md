@@ -71,14 +71,13 @@ Before the first plan, the environment owner must:
 
 3. Create the Secrets Manager secret named by `github_app_secret_name`. Its
    JSON value must contain `app_id`, `installation_id`, and `private_key` for a
-   read-only GitHub App that can read these three repositories:
+   read-only GitHub App that can read these two repositories:
 
    - `netrias/data_chord`
    - `netrias/agentic_harmonization`
-   - `netrias/cde-recommendation-lambda`
 
    CodeBuild uses the same short-lived installation token for the application
-   source and both pinned application dependencies.
+   source and its pinned private dependency.
 
 4. In the AWS account and Region named by the environment file, create and
    authorize an AWS CodeConnections connection to GitHub. Register it as that

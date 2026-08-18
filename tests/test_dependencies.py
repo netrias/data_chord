@@ -6,9 +6,9 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from agent_experiment import GPT_5_6_LUNA, ReasoningEffort
-from cde_recommend.result_cache import DynamoRecommendationCache
 
 import src.app.dependencies as dependencies
+from src.cde_recommend.result_cache import DynamoRecommendationCache
 from src.integrations.agentic_harmonize import AgenticHarmonizeService
 from src.integrations.bedrock_cde_ranker import BedrockCandidateRanker
 from src.integrations.cde_recommendation import CdeRecommendationAdapter

@@ -33,10 +33,9 @@ For a detailed overview, see [app.md](app.md).
    gh auth setup-git
    uv sync --frozen
    ```
-   Data Chord is public, but its agentic harmonization and CDE recommendation
-   dependencies are private. A licensed developer needs read access to
-   `netrias/agentic_harmonization` and `netrias/cde-recommendation-lambda`, plus
-   an authenticated Git client, before the frozen install can succeed.
+   Data Chord uses the private agentic harmonization dependency. A licensed
+   developer needs read access to `netrias/agentic_harmonization` and an
+   authenticated Git client before the frozen install can succeed.
    The frozen install is an important supply-chain security control: normal setup uses the committed lockfile instead of resolving newly published packages.
 
 3. Configure the populated reference-data table, both application cache tables,

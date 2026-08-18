@@ -15,8 +15,9 @@ from agent_experiment import (
     ReasoningEffort,
     make_provider_client,
 )
-from cde_recommend.openai_response_format import CLOSEST_MATCHES_SCHEMA
-from cde_recommend.types import ClosestMatchesIndex, PotentialMatchIndex
+
+from src.cde_recommend.structured_output import CLOSEST_MATCHES_SCHEMA
+from src.cde_recommend.types import ClosestMatchesIndex, PotentialMatchIndex
 
 _TOOL_NAME = "return_cde_matches"
 _MAX_OUTPUT_TOKENS = 4096
