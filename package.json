@@ -1,7 +1,7 @@
 {
-  "name": "seattle",
+  "name": "data-chord",
   "version": "1.0.0",
-  "description": "Data harmonization workflow with local value-overlap mapping and agentic value harmonization.",
+  "description": "Data harmonization workflow with Bedrock CDE recommendations and agentic value harmonization.",
   "main": "index.js",
   "directories": {
     "test": "tests"
