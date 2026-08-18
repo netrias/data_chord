@@ -21,7 +21,7 @@ export function setActiveStage(stage) {
     return;
   }
 
-  const maxReachedIndex = _getMaxReachedStageIndex();
+  const maxReachedIndex = Math.max(_getMaxReachedStageIndex(), targetIndex);
   const progressSteps = document.querySelectorAll('.progress-tracker [data-stage]');
 
   progressSteps.forEach((step) => {
@@ -33,6 +33,20 @@ export function setActiveStage(stage) {
     step.classList.toggle('active', isActive);
     step.classList.toggle('complete', isComplete);
     step.classList.toggle('unreachable', isUnreachable);
+
+    const link = step.querySelector('.step-link');
+    if (link) {
+      if (isActive) link.setAttribute('aria-current', 'step');
+      else link.removeAttribute('aria-current');
+      link.setAttribute('aria-disabled', String(isUnreachable));
+      if (isUnreachable) {
+        link.removeAttribute('href');
+        link.setAttribute('tabindex', '-1');
+      } else {
+        link.setAttribute('href', link.dataset.url);
+        link.removeAttribute('tabindex');
+      }
+    }
   });
 }
 
@@ -86,19 +100,24 @@ function _getTargetContextForNavigation() {
 }
 
 /**
- * Attach click handlers for progress tracker step navigation.
- * Enables clicking on steps to navigate to their URLs.
+ * Keep the workflow context when a progress-tracker link is used.
+ * The real links supply native keyboard navigation.
  * Unreachable stages are blocked from navigation.
  */
 export function initNavigationEvents() {
-  document.querySelectorAll('.progress-tracker .step[data-url]').forEach((step) => {
-    step.addEventListener('click', () => {
-      if (step.classList.contains('unreachable')) {
+  document.querySelectorAll('.progress-tracker .step-link').forEach((link) => {
+    link.addEventListener('click', (event) => {
+      const step = link.closest('.step');
+      if (!step || step.classList.contains('unreachable')) {
+        event.preventDefault();
         return;
       }
-      const url = step.dataset.url;
+      const url = link.dataset.url;
       if (isSafeRelativeUrl(url)) {
+        event.preventDefault();
         window.location.href = _buildNavUrl(url);
+      } else {
+        event.preventDefault();
       }
     });
   });

@@ -10,7 +10,6 @@ from typing import Annotated
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 
 import src.app.dependencies as dependencies
 from src.app.dependencies import get_upload_constraints
@@ -39,6 +38,7 @@ from src.persistence.workflow_artifacts import (
     save_upload_metadata,
 )
 from src.persistence.workflow_state_store import load_workflow_state, save_initial_workflow_state
+from src.shared.jinja import templates_for_stage
 from src.storage import (
     UnsupportedUploadError,
     UploadedFileMeta,
@@ -62,7 +62,7 @@ MODULE_DIR = Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"
 
 _upload_constraints = get_upload_constraints()
-_templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
+_templates = templates_for_stage(TEMPLATE_DIR)
 _router_logger = logging.getLogger(__name__)
 
 stage_one_router = APIRouter(prefix="/stage-1", tags=["Stage 1 Upload"])
