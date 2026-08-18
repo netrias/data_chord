@@ -11,8 +11,10 @@ from pathlib import Path
 from typing import cast
 
 from src.auth.user_context import current_user_context
+from src.domain.harmonization_cache import HarmonizationCache
 from src.domain.reference_data import ReferenceDataRepository
 from src.integrations.agentic_harmonize import AgenticHarmonizeConfig, AgenticHarmonizeService
+from src.integrations.dynamodb_harmonization_cache import DynamoDbHarmonizationCache
 from src.integrations.dynamodb_reference_data import DynamoDbReferenceDataRepository, DynamoResource
 from src.integrations.harmonize import HarmonizeService
 from src.paths import PROJECT_ROOT
@@ -21,6 +23,7 @@ from src.settings import (
     StorageBackend,
     get_agentic_workers,
     get_aws_region,
+    get_harmonization_cache_table_name,
     get_reference_table_name,
     get_storage_backend,
     get_upload_dir,
@@ -48,6 +51,7 @@ _upload_constraints: UploadConstraints | None = None
 _storage: UploadStorage | None = None
 _workflow_storage: WorkflowStorage | None = None
 _reference_data_repository: ReferenceDataRepository | None = None
+_harmonization_cache: HarmonizationCache | None = None
 _harmonize_service: HarmonizeService | None = None
 
 
@@ -114,6 +118,18 @@ def get_reference_data_repository() -> ReferenceDataRepository:
     return _reference_data_repository
 
 
+def get_harmonization_cache() -> HarmonizationCache:
+    global _harmonization_cache  # noqa: PLW0603 - intentional singleton
+    if _harmonization_cache is None:
+        import boto3
+
+        resource = cast(DynamoResource, boto3.resource("dynamodb", region_name=get_aws_region()))
+        _harmonization_cache = DynamoDbHarmonizationCache(
+            resource.Table(get_harmonization_cache_table_name())
+        )
+    return _harmonization_cache
+
+
 def get_harmonize_service() -> HarmonizeService:
     global _harmonize_service  # noqa: PLW0603 - intentional singleton
     if _harmonize_service is None:
@@ -121,14 +137,16 @@ def get_harmonize_service() -> HarmonizeService:
             AgenticHarmonizeConfig(
                 region=get_aws_region(),
                 max_workers=get_agentic_workers(),
-            )
+            ),
+            cache=get_harmonization_cache(),
         )
     return _harmonize_service
 
 
 def cleanup_services() -> None:
     """Clean up resources held by singleton services (call on app shutdown)."""
-    global _harmonize_service, _reference_data_repository, _workflow_storage  # noqa: PLW0603
+    global _harmonization_cache, _harmonize_service, _reference_data_repository, _workflow_storage  # noqa: PLW0603
+    _harmonization_cache = None
     _harmonize_service = None
     _reference_data_repository = None
     _workflow_storage = None
@@ -139,6 +157,7 @@ __all__ = [
     "UPLOAD_BASE_DIR",
     "DEFAULT_WORKFLOW_STORAGE_DIR",
     "cleanup_services",
+    "get_harmonization_cache",
     "get_harmonize_service",
     "get_reference_data_repository",
     "get_upload_constraints",

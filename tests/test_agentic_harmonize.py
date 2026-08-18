@@ -2,17 +2,54 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import SimpleNamespace
 
 from netrias_client import read_tabular
 
 from src.domain.columns import column_key_for_index
+from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.harmonization import HarmonizeStatus, MatchFidelity
+from src.domain.harmonization_cache import (
+    HarmonizationCacheEntry,
+    HarmonizationCacheKey,
+    HarmonizationCacheUnavailableError,
+)
 from src.domain.manifest import ColumnMappingManifest
-from src.integrations.agentic_harmonize import AgenticHarmonizeConfig, AgenticHarmonizeService
+from src.integrations.agentic_harmonize import (
+    AgenticHarmonizeConfig,
+    AgenticHarmonizeService,
+)
 from src.persistence.manifest_reader import read_manifest_parquet
 from src.persistence.pv_manifest_store import ColumnPvSets
+
+MODEL_VERSION = DataModelVersionReference("gc", "11.0.4")
+
+
+class _MemoryCache:
+    def __init__(self) -> None:
+        self.entries: dict[HarmonizationCacheKey, HarmonizationCacheEntry] = {}
+        self.loaded_keys: list[HarmonizationCacheKey] = []
+
+    def load_many(
+        self, keys: Sequence[HarmonizationCacheKey]
+    ) -> Mapping[HarmonizationCacheKey, HarmonizationCacheEntry]:
+        self.loaded_keys.extend(keys)
+        return {key: self.entries[key] for key in keys if key in self.entries}
+
+    def save_many(self, entries: Sequence[HarmonizationCacheEntry]) -> None:
+        self.entries.update({entry.key: entry for entry in entries})
+
+
+class _UnavailableCache:
+    def load_many(
+        self, keys: Sequence[HarmonizationCacheKey]
+    ) -> Mapping[HarmonizationCacheKey, HarmonizationCacheEntry]:
+        raise HarmonizationCacheUnavailableError("read unavailable")
+
+    def save_many(self, entries: Sequence[HarmonizationCacheEntry]) -> None:
+        raise HarmonizationCacheUnavailableError("write unavailable")
 
 
 def _manifest() -> ColumnMappingManifest:
@@ -42,7 +79,7 @@ def test_agentic_defaults_use_bedrock_gpt_56_with_high_reasoning() -> None:
     assert config.selector_model.name == "gpt-5.6-sol"
     assert config.reasoning_effort == "high"
     assert config.exploration_turns == 10
-    assert config.max_workers == 50
+    assert config.max_workers == 100
 
 
 def test_agentic_harmonization_collapses_duplicates_only_within_each_column(
@@ -77,6 +114,7 @@ def test_agentic_harmonization_collapses_duplicates_only_within_each_column(
 
     result = service.run(
         file_path=source,
+        data_model_version=MODEL_VERSION,
         prepared_manifest=_manifest(),
         column_pv_sets=ColumnPvSets({
             column_key_for_index(0): frozenset({"Diagnosis Match"}),
@@ -125,6 +163,7 @@ def test_agentic_harmonization_passes_through_columns_without_pvs(
 
     result = service.run(
         file_path=source,
+        data_model_version=MODEL_VERSION,
         prepared_manifest=_manifest(),
         column_pv_sets=ColumnPvSets({
             column_key_for_index(0): frozenset(),
@@ -153,6 +192,7 @@ def test_agentic_no_match_keeps_the_source_value(monkeypatch, tmp_path: Path) ->
 
     result = service.run(
         file_path=source,
+        data_model_version=MODEL_VERSION,
         prepared_manifest=_manifest(),
         column_pv_sets=ColumnPvSets({
             column_key_for_index(0): frozenset({"Known"}),
@@ -187,6 +227,7 @@ def test_agentic_harmonization_fails_without_output_when_one_term_fails(
 
     result = service.run(
         file_path=source,
+        data_model_version=MODEL_VERSION,
         prepared_manifest=_manifest(),
         column_pv_sets=ColumnPvSets({
             column_key_for_index(0): frozenset({"Diagnosis Match"}),
@@ -201,3 +242,133 @@ def test_agentic_harmonization_fails_without_output_when_one_term_fails(
     assert result.output_path is None
     assert not output.exists()
     assert not output.with_name("output.manifest.parquet").exists()
+
+
+def test_exact_permissible_value_skips_cache_and_bedrock(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    # Given one exact permissible value and one value that needs harmonization.
+    source = tmp_path / "source.csv"
+    source.write_text("diagnosis\nKnown\nunknown\n", encoding="utf-8")
+    output = tmp_path / "output.csv"
+    cache = _MemoryCache()
+    calls: list[str] = []
+
+    def fake_harmonize(_client, _index, term: str, **_kwargs: object) -> SimpleNamespace:
+        calls.append(term)
+        return _prediction(term, "Matched")
+
+    monkeypatch.setattr("src.integrations.agentic_harmonize.harmonize_term", fake_harmonize)
+    monkeypatch.setattr(
+        "src.integrations.agentic_harmonize.make_provider_client",
+        lambda *args, **kwargs: object(),
+    )
+    service = AgenticHarmonizeService(
+        AgenticHarmonizeConfig(region="us-east-2"),
+        cache=cache,
+    )
+
+    # When the dataset is harmonized.
+    result = service.run(
+        file_path=source,
+        data_model_version=MODEL_VERSION,
+        prepared_manifest=_manifest(),
+        column_pv_sets=ColumnPvSets({
+            column_key_for_index(0): frozenset({"Known", "Matched"}),
+        }),
+        output_path=output,
+    )
+
+    # Then only the non-matching value reaches Bedrock or the cache.
+    assert result.status is HarmonizeStatus.SUCCEEDED
+    assert calls == ["unknown"]
+    assert read_tabular(output).rows == [["Known"], ["Matched"]]
+    assert {key.source_value for key in cache.loaded_keys} == {"unknown"}
+    assert {entry.key.source_value for entry in cache.entries.values()} == {"unknown"}
+
+
+def test_second_run_uses_the_versioned_cde_cache_without_bedrock(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    # Given an empty cache and one source value that needs Bedrock.
+    source = tmp_path / "source.csv"
+    source.write_text("diagnosis\nunknown\n", encoding="utf-8")
+    first_output = tmp_path / "first.csv"
+    second_output = tmp_path / "second.csv"
+    cache = _MemoryCache()
+    calls: list[str] = []
+
+    def fake_harmonize(_client, _index, term: str, **_kwargs: object) -> SimpleNamespace:
+        calls.append(term)
+        return _prediction(term, "Matched")
+
+    monkeypatch.setattr("src.integrations.agentic_harmonize.harmonize_term", fake_harmonize)
+    monkeypatch.setattr(
+        "src.integrations.agentic_harmonize.make_provider_client",
+        lambda *args, **kwargs: object(),
+    )
+    service = AgenticHarmonizeService(
+        AgenticHarmonizeConfig(region="us-east-2"),
+        cache=cache,
+    )
+    arguments = {
+        "file_path": source,
+        "data_model_version": MODEL_VERSION,
+        "prepared_manifest": _manifest(),
+        "column_pv_sets": ColumnPvSets({
+            column_key_for_index(0): frozenset({"Matched"}),
+        }),
+    }
+
+    # When the same model, CDE, and raw source value are harmonized twice.
+    first = service.run(**arguments, output_path=first_output)
+    second = service.run(**arguments, output_path=second_output)
+
+    # Then the first run fills the cache and the second run makes no Bedrock call.
+    assert first.status is HarmonizeStatus.SUCCEEDED
+    assert second.status is HarmonizeStatus.SUCCEEDED
+    assert calls == ["unknown"]
+    assert read_tabular(second_output).rows == [["Matched"]]
+
+
+def test_unavailable_cache_does_not_block_bedrock_or_the_result(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    # Given the cache cannot read or write, but Bedrock can harmonize the value.
+    source = tmp_path / "source.csv"
+    source.write_text("diagnosis\nunknown\n", encoding="utf-8")
+    output = tmp_path / "output.csv"
+    calls: list[str] = []
+
+    def fake_harmonize(_client, _index, term: str, **_kwargs: object) -> SimpleNamespace:
+        calls.append(term)
+        return _prediction(term, "Matched")
+
+    monkeypatch.setattr("src.integrations.agentic_harmonize.harmonize_term", fake_harmonize)
+    monkeypatch.setattr(
+        "src.integrations.agentic_harmonize.make_provider_client",
+        lambda *args, **kwargs: object(),
+    )
+    service = AgenticHarmonizeService(
+        AgenticHarmonizeConfig(region="us-east-2"),
+        cache=_UnavailableCache(),
+    )
+
+    # When the dataset is harmonized.
+    result = service.run(
+        file_path=source,
+        data_model_version=MODEL_VERSION,
+        prepared_manifest=_manifest(),
+        column_pv_sets=ColumnPvSets({
+            column_key_for_index(0): frozenset({"Matched"}),
+        }),
+        output_path=output,
+    )
+
+    # Then Bedrock produces the result and cache failure does not fail the job.
+    assert result.status is HarmonizeStatus.SUCCEEDED
+    assert calls == ["unknown"]
+    assert read_tabular(output).rows == [["Matched"]]

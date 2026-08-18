@@ -189,6 +189,41 @@ run "reference_data_has_a_dedicated_durable_table" {
   }
 }
 
+run "harmonization_cache_is_application_owned_and_minimal" {
+  command = plan
+
+  # Given Data Chord owns reusable harmonization results,
+  # when the application infrastructure is planned,
+  # then it creates one protected point-lookup table with only runtime read/write access.
+  assert {
+    condition = (
+      aws_dynamodb_table.harmonization_cache.name == "data-chord-qa-harmonization-cache" &&
+      aws_dynamodb_table.harmonization_cache.billing_mode == "PAY_PER_REQUEST" &&
+      aws_dynamodb_table.harmonization_cache.hash_key == "cache_key" &&
+      aws_dynamodb_table.harmonization_cache.deletion_protection_enabled == true &&
+      length(aws_dynamodb_table.harmonization_cache.global_secondary_index) == 0 &&
+      toset(jsondecode(aws_iam_role_policy.application_task_harmonization_cache.policy).Statement[0].Action) == toset([
+        "dynamodb:DescribeTable",
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+      ]) &&
+      output.harmonization_cache_table == aws_dynamodb_table.harmonization_cache.name
+    )
+    error_message = "The harmonization cache must be one protected point-lookup table with minimal runtime access."
+  }
+
+  # Given the task receives its infrastructure settings from OpenTofu,
+  # when its environment is decoded,
+  # then it points at the application-owned cache and uses no separate cache contract.
+  assert {
+    condition = {
+      for item in jsondecode(aws_ecs_task_definition.application.container_definitions)[0].environment :
+      item.name => item.value
+    }["DATA_CHORD_HARMONIZATION_CACHE_TABLE"] == aws_dynamodb_table.harmonization_cache.name
+    error_message = "The application task must receive the managed harmonization cache table name."
+  }
+}
+
 run "ecs_service_output_uses_the_managed_service_identity" {
   command = plan
 
@@ -251,9 +286,10 @@ run "agentic_harmonization_is_the_only_scaled_runtime" {
   assert {
     condition = (
       aws_ecs_task_definition.application.cpu == tostring(4096) &&
-      aws_ecs_task_definition.application.memory == tostring(8192)
+      aws_ecs_task_definition.application.memory == tostring(8192) &&
+      var.agentic_workers == 100
     )
-    error_message = "Agentic harmonization must default to the larger task shape."
+    error_message = "Agentic harmonization must default to the larger task shape and 100 workers."
   }
 
   # Given agentic harmonization uses AWS short-term bearer tokens and the default project,

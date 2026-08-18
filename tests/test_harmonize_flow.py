@@ -9,7 +9,12 @@ from unittest.mock import MagicMock
 from httpx import AsyncClient
 
 from src.domain.harmonization import HarmonizeStatus
-from tests.conftest import confirm_mapping_choices, upload_and_analyze
+from tests.conftest import (
+    TEST_TARGET_EXTERNAL_VERSION_NUMBER,
+    TEST_TARGET_SCHEMA,
+    confirm_mapping_choices,
+    upload_and_analyze,
+)
 
 
 def test_harmonize_status_values_remain_stable() -> None:
@@ -48,6 +53,11 @@ async def test_harmonize_uses_confirmed_mapping_and_exact_reference_values(
     assert response.status_code == 200
     assert data["status"] == "succeeded"
     arguments = mock_netrias_client.run.call_args.kwargs
+    assert arguments["data_model_version"].data_model_key == TEST_TARGET_SCHEMA
+    assert (
+        arguments["data_model_version"].external_version_number
+        == TEST_TARGET_EXTERNAL_VERSION_NUMBER
+    )
     record = arguments["prepared_manifest"].records["col_0000"]
     assert record.cde_key == "primary_diagnosis"
     assert arguments["column_pv_sets"].get("col_0000") == frozenset(
