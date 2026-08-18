@@ -6,9 +6,10 @@ default:
 sync:
 	# Security: use the committed lockfile for normal dependency installs.
 	uv sync --frozen --extra dev
+	npm ci
 
 lint:
-	uv run ruff check .
+	uv run pre-commit run --all-files --show-diff-on-failure
 
 dead-code:
 	uv run vulture
