@@ -145,7 +145,7 @@
   position: relative;
   z-index: 1;
   display: grid;
-  max-width: 9rem;
+  max-width: 6.5rem;
   justify-items: center;
   gap: var(--space-1);
   color: var(--gray-500);
