@@ -27,6 +27,7 @@ _SLUG = re.compile(r"^[a-z][a-z0-9-]*$")
 _ACCOUNT = re.compile(r"^[0-9]{12}$")
 _REGION = re.compile(r"^[a-z]{2}(?:-[a-z]+)+-[0-9]$")
 _BUCKET = re.compile(r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
+_FOUNDATION_ROLE_NAME = re.compile(r"^[a-z][a-z0-9-]*-deployer$")
 _STAGES = {"dev", "qa", "staging", "prod"}
 
 
@@ -60,6 +61,21 @@ class Environment:
     @property
     def domain_label(self) -> str:
         return self.domain_name[: -len(f".{self.hosted_zone_name}")]
+
+    @property
+    def deployer_role_name(self) -> str:
+        return self.deployer_role_arn.rsplit("/", maxsplit=1)[-1]
+
+    @property
+    def foundation_name_prefix(self) -> str:
+        return self.deployer_role_name.removesuffix("-deployer")
+
+    @property
+    def deployer_boundary_arn(self) -> str:
+        return (
+            f"arn:{self.partition}:iam::{self.account_id}:policy/"
+            f"{self.foundation_name_prefix}-deployer-boundary"
+        )
 
     def tofu_variables(self) -> dict[str, object]:
         return {
@@ -129,8 +145,6 @@ def canonical_digest(environment: Environment) -> str:
 
 
 def _validate_selection(target: str, stage: str) -> None:
-    if target == "bdf":
-        raise EnvironmentError("BDF uses legacy state and requires its manual deployment process")
     if not _SLUG.fullmatch(target):
         raise EnvironmentError("target must be a lowercase slug")
     if stage not in _STAGES:
@@ -158,15 +172,17 @@ def _validate(environment: Environment) -> None:
 
 
 def _validate_foundation_names(environment: Environment) -> None:
-    expected_role = (
+    role_prefix = (
         f"arn:{environment.partition}:iam::{environment.account_id}:"
-        "role/foundation/datachord-deployer"
+        "role/foundation/"
     )
-    if environment.deployer_role_arn != expected_role:
-        raise EnvironmentError(f"deployer_role_arn must be {expected_role}")
+    if not environment.deployer_role_arn.startswith(role_prefix):
+        raise EnvironmentError("deployer role must use the /foundation/ path")
+    if not _FOUNDATION_ROLE_NAME.fullmatch(environment.deployer_role_name):
+        raise EnvironmentError("deployer role name must end with -deployer")
     expected_boundary = (
         f"arn:{environment.partition}:iam::{environment.account_id}:"
-        "policy/datachord-application-role-boundary"
+        f"policy/{environment.foundation_name_prefix}-application-role-boundary"
     )
     if environment.application_role_boundary_arn != expected_boundary:
         raise EnvironmentError(
@@ -221,6 +237,8 @@ def _field(environment: Environment, key: str) -> str:
         "application_role_boundary_arn": environment.application_role_boundary_arn,
         "application_role_path": environment.application_role_path,
         "deployer_role_arn": environment.deployer_role_arn,
+        "deployer_role_name": environment.deployer_role_name,
+        "deployer_boundary_arn": environment.deployer_boundary_arn,
         "domain_label": environment.domain_label,
         "domain_name": environment.domain_name,
         "github_app_secret_name": environment.github_app_secret_name,

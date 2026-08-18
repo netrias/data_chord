@@ -61,15 +61,16 @@ require_deployable_git_state() {
 }
 
 assume_deployer_role() {
-  local expected_account expected_role partition identity account caller credentials expiration
+  local expected_account expected_role role_name partition identity account caller credentials expiration
   expected_account="$(environment_value account_id)"
   expected_role="$(environment_value deployer_role_arn)"
+  role_name="$(environment_value deployer_role_name)"
   partition="$(environment_value partition)"
   identity="$(aws sts get-caller-identity --query '[Account,Arn]' --output text)" ||
     fail "AWS credentials are not available."
   read -r account caller <<<"$identity"
 
-  if [[ "$account" == "$expected_account" && "$caller" == "arn:$partition:sts::$expected_account:assumed-role/datachord-deployer/"* ]]; then
+  if [[ "$account" == "$expected_account" && "$caller" == "arn:$partition:sts::$expected_account:assumed-role/$role_name/"* ]]; then
     log "The deployer role is already active."
   else
     credentials="$(aws sts assume-role \
@@ -89,7 +90,7 @@ assume_deployer_role() {
   read -r account caller <<<"$identity"
   [[ "$account" == "$expected_account" ]] ||
     fail "The active AWS account is $account, not $expected_account."
-  [[ "$caller" == "arn:$partition:sts::$expected_account:assumed-role/datachord-deployer/"* ]] ||
+  [[ "$caller" == "arn:$partition:sts::$expected_account:assumed-role/$role_name/"* ]] ||
     fail "The active AWS identity is not $expected_role."
   require_deployer_session_lifetime
 }
@@ -115,12 +116,11 @@ PY
 }
 
 verify_foundation_contract() {
-  local partition account role_details expected_boundary actual_path actual_boundary app_boundary
-  partition="$(environment_value partition)"
-  account="$(environment_value account_id)"
-  expected_boundary="arn:$partition:iam::$account:policy/datachord-deployer-boundary"
+  local role_name role_details expected_boundary actual_path actual_boundary app_boundary
+  role_name="$(environment_value deployer_role_name)"
+  expected_boundary="$(environment_value deployer_boundary_arn)"
   role_details="$(aws iam get-role \
-    --role-name datachord-deployer \
+    --role-name "$role_name" \
     --query '[Role.Path,Role.PermissionsBoundary.PermissionsBoundaryArn]' \
     --output text)" || fail "Could not inspect the foundation deployer role."
   read -r actual_path actual_boundary <<<"$role_details"

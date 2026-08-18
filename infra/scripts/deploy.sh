@@ -11,7 +11,7 @@ STAGE_NAME="${2:-}"
 MODE="${3:-}"
 ENVIRONMENT_FILE="$(environment_path "$TARGET_NAME" "$STAGE_NAME")"
 
-# This validation rejects BDF before AWS, Git, or OpenTofu can run.
+# This validation rejects missing or invalid environments before external tools run.
 validate_environment
 case "$MODE" in
   plan | deploy) ;;

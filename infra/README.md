@@ -9,7 +9,7 @@ account.
 The foundation owner provides:
 
 - the versioned OpenTofu state bucket;
-- `/foundation/datachord-deployer`;
+- one `/foundation/<name>-deployer` role;
 - the deployer permission boundary;
 - the application-role permission boundary; and
 - the `/application/` IAM path.
@@ -56,9 +56,9 @@ AWS partition comes from the region. The state key is always:
 datachord/<target>/<stage>/tofu.tfstate
 ```
 
-The role names, role path, and permission-boundary name must match the
-foundation conventions. The command checks the live foundation before it
-plans.
+The deployer role and application boundary must share the same foundation name
+prefix. The command derives the deployer boundary from that prefix and checks
+the live foundation before it plans.
 
 ## Environment-owner setup
 
@@ -137,10 +137,18 @@ and finishes it before the application starts.
 If a deployment stops after its first resource change, its receipt stays in
 progress. Inspect the failure and run `plan` again before a retry.
 
+For BDF staging:
+
+```bash
+AWS_PROFILE=strides just plan bdf staging
+AWS_PROFILE=strides just deploy bdf staging
+```
+
+There is no BDF production environment file. BDF production remains on its
+existing deployment process until a separate migration is approved.
+
 ## Current limits
 
-- BDF is rejected before AWS or OpenTofu runs. Its legacy state needs a manual
-  handoff before it can use this process.
 - The current application authentication uses an ALB Cognito action. AWS
   GovCloud does not provide this action. A GovCloud deployment branch must
   replace that application authentication design before it can plan. The
