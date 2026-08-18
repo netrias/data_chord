@@ -179,8 +179,20 @@ jobs:
           GIT_CONFIG_KEY_0: "url.https://x-access-token:${{ steps.agentic-token.outputs.token }}@github.com/.insteadOf"
           GIT_CONFIG_VALUE_0: "https://github.com/"
 
-      - name: Run ruff check
-        run: uv run ruff check src/ tests/
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.5.0'
+
+      - name: Install pinned npm
+        # Security: npm 11.10+ enforces min-release-age from .npmrc.
+        run: npm install -g npm@11.11.1
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Run repository pre-commit hooks
+        run: uv run pre-commit run --all-files --show-diff-on-failure
 
       - name: Run vulture
         run: uv run vulture

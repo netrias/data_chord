@@ -1,14 +1,12 @@
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.2
-    hooks:
-      - id: ruff-format
-        args: [src/, tests/]
-      - id: ruff
-        args: [--fix, src/, tests/]
-
   - repo: local
     hooks:
+      - id: ruff
+        name: ruff
+        entry: uv run --frozen ruff check
+        language: system
+        types: [python]
+
       - id: no-cross-stage-imports
         name: no cross-stage imports
         description: "Stages must depend on domain, not on each other"
@@ -20,7 +18,7 @@ repos:
       - id: typecheck-js
         name: typecheck javascript
         description: "Check JavaScript files for undefined references"
-        entry: bash -c 'output=$(npx tsc --noEmit 2>&1); if echo "$output" | grep -qE "TS2552|TS6133|TS2304"; then echo "$output" | grep -E "TS2552|TS6133|TS2304"; echo ""; echo "TypeScript found undefined references - please fix!"; exit 1; fi; exit 0'
+        entry: bash -c 'if [ ! -x ./node_modules/.bin/tsc ]; then echo "TypeScript is not installed. Run just sync."; exit 1; fi; output=$(./node_modules/.bin/tsc --noEmit 2>&1); if echo "$output" | grep -qE "TS2552|TS6133|TS2304"; then echo "$output" | grep -E "TS2552|TS6133|TS2304"; echo ""; echo "TypeScript found undefined references - please fix!"; exit 1; fi; exit 0'
         language: system
         pass_filenames: false
         types: [javascript]

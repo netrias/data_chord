@@ -242,7 +242,7 @@ def _cde_key_from_payload(payload: Mapping[object, object]) -> str | None:
 
 def _score_from_payload(payload: Mapping[object, object]) -> float:
     confidence = payload.get(MAPPING_FIELD_CONFIDENCE)
-    if not isinstance(confidence, bool) and isinstance(confidence, (int, float)):
+    if not isinstance(confidence, bool) and isinstance(confidence, int | float):
         return float(confidence)
     return 0.0
 
@@ -340,7 +340,7 @@ def _alternative_from_payload(
         if strict:
             raise InvalidMappingManifestError(f"mapping alternative is invalid: {column_key}")
         return None
-    if strict and (isinstance(confidence, bool) or not isinstance(confidence, (int, float))):
+    if strict and (isinstance(confidence, bool) or not isinstance(confidence, int | float)):
         raise InvalidMappingManifestError(f"mapping alternative confidence is invalid: {column_key}")
     cde_id = _int_or_none(value.get(MAPPING_FIELD_CDE_ID))
     if strict and MAPPING_FIELD_CDE_ID in value and cde_id is None:

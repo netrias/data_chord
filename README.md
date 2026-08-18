@@ -64,12 +64,19 @@ uv sync --frozen
 With [just](https://github.com/casey/just) installed, run `just --list` for shortcuts. Key commands:
 
 ```bash
-just sync        # Install with dev dependencies
+just sync        # Install locked Python and JavaScript development dependencies
 just app-reload  # Dev server with auto-reload
 just test        # Run tests
 just lint        # Lint
 just typecheck   # Type check
 ```
+
+Pull requests from forks run infrastructure, JavaScript syntax, and JavaScript
+unit checks. Python, TypeScript, and browser checks need read access to the
+private `netrias/agentic_harmonization` dependency. GitHub does not give that
+credential to forks. Before an internal test, a maintainer must review the
+external source, workflow files, package scripts, and test commands. The
+maintainer can then test the change on a branch in this repository.
 
 ### Performance Journeys
 

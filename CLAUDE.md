@@ -6,7 +6,7 @@
 - **Templates**: Jinja2 (server-rendered HTML)
 - **Frontend**: Jinja templates + vanilla JavaScript ES modules + `fetch()`, TypeScript for type checking
 - **Testing**: pytest, pytest-asyncio, Playwright (E2E), Hypothesis (property-based)
-- **Code quality**: Ruff (linting/formatting), basedpyright (type checking), bandit (security)
+- **Code quality**: Ruff (linting), basedpyright (type checking), bandit (security)
 - **Package management**: uv (Python), npm (JS/Playwright)
 
 ## Running the App
