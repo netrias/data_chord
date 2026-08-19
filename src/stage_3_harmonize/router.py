@@ -28,17 +28,10 @@ from src.app.dependencies import (
 from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.column_renames import ColumnRenameSet
 from src.domain.data_model_version_reference import DataModelVersionReference
-from src.domain.harmonization import (
-    HarmonizationManifestSummary,
-    HarmonizeStatus,
-)
+from src.domain.harmonization import HarmonizeStatus
 from src.domain.manifest import (
     ColumnMappingManifest,
-    ManifestPvAdjustment,
-    ManifestRow,
-    ManifestSummary,
 )
-from src.domain.pv_validation import compute_pv_adjustment
 from src.domain.reference_data import ReferenceDataError
 from src.domain.tabular_column_renames import (
     ResolvedTabularColumn,
@@ -48,8 +41,6 @@ from src.domain.tabular_column_renames import (
 from src.integrations.harmonize import HarmonizeResult
 from src.persistence.cde_mapping_document_store import save_cde_mapping_document
 from src.persistence.harmonization_job_store import HarmonizationJobState
-from src.persistence.manifest_reader import read_manifest_parquet
-from src.persistence.manifest_writer import apply_column_renames_batch, apply_pv_adjustments_batch
 from src.persistence.pv_manifest_store import ColumnPvSets, save_pv_snapshot
 from src.persistence.review_override_store import delete_review_overrides_state
 from src.persistence.workflow_artifacts import (
@@ -58,7 +49,7 @@ from src.persistence.workflow_artifacts import (
 )
 from src.persistence.workflow_state_store import LoadedWorkflowState
 from src.shared.jinja import templates_for_stage
-from src.stage_3_harmonize.result_summary import build_harmonization_manifest_summary
+from src.stage_3_harmonize.manifest_processing import persist_and_summarize_manifest
 from src.stage_3_harmonize.use_cases import (
     HarmonizationStart,
     HarmonizationStartConflictError,
@@ -72,7 +63,7 @@ from src.stage_3_harmonize.use_cases import (
     load_authorized_job,
     start_harmonization,
 )
-from src.storage import UploadStorage, UserContext, WorkflowFile, WorkflowNotFoundError, WorkflowStorage
+from src.storage import UserContext, WorkflowFile, WorkflowNotFoundError, WorkflowStorage
 
 MODULE_DIR = Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"
@@ -339,7 +330,7 @@ async def _run_harmonization_workflow(
         },
     )
 
-    manifest_summary = await _read_store_and_adjust_manifest(
+    manifest_summary = await persist_and_summarize_manifest(
         payload.file_id,
         result.manifest_path,
         storage,
@@ -423,71 +414,6 @@ async def _run_harmonization(
     )
 
 
-def _read_manifest_if_exists(manifest_path: Path | None) -> ManifestSummary | None:
-    if manifest_path is None or not manifest_path.exists():
-        return None
-    return read_manifest_parquet(manifest_path)
-
-
-async def _store_and_adjust_manifest(
-    file_id: str,
-    manifest_path: Path,
-    manifest_data: ManifestSummary,
-    storage: UploadStorage,
-    column_renames: ColumnRenameSet,
-    column_pv_map: ColumnPvSets,
-) -> ManifestSummary:
-    """Must store before adjusting so later stages read the adjusted version."""
-    stored_path = storage.save_harmonization_manifest(file_id, manifest_path)
-    if stored_path is None:
-        _router_logger.warning("Failed to store manifest", extra={"file_id": file_id})
-        return manifest_data
-
-    renamed_count = await _apply_column_renames_to_manifest(stored_path, column_renames)
-    if renamed_count > 0:
-        _router_logger.info("Applied column renames", extra={"file_id": file_id, "renamed_count": renamed_count})
-        manifest_data = read_manifest_parquet(stored_path) or manifest_data
-
-    adjustment_count = await _apply_pv_adjustments(stored_path, column_pv_map)
-    if adjustment_count > 0:
-        _router_logger.info("Applied PV adjustments", extra={"file_id": file_id, "adjustment_count": adjustment_count})
-        return read_manifest_parquet(stored_path) or manifest_data
-
-    return manifest_data
-
-
-async def _read_store_and_adjust_manifest(
-    file_id: str,
-    manifest_path: Path | None,
-    storage: UploadStorage,
-    column_renames: ColumnRenameSet,
-    column_pv_map: ColumnPvSets,
-    *,
-    source_file_name: str,
-    reference_model_label: str,
-    reference_model_version: str,
-) -> HarmonizationManifestSummary | None:
-    manifest_data = _read_manifest_if_exists(manifest_path)
-    if manifest_data is None or manifest_path is None:
-        return None
-
-    final_data = await _store_and_adjust_manifest(
-        file_id,
-        manifest_path,
-        manifest_data,
-        storage,
-        column_renames,
-        column_pv_map,
-    )
-    return build_harmonization_manifest_summary(
-        final_data,
-        column_pv_map,
-        source_file_name=source_file_name,
-        reference_model_label=reference_model_label,
-        reference_model_version=reference_model_version,
-    )
-
-
 async def _apply_column_renames_to_output(
     output_path: Path,
     column_renames: ColumnRenameSet,
@@ -518,86 +444,6 @@ async def _refresh_managed_harmonized_output(actual_path: Path, managed_path: Pa
     managed_path.parent.mkdir(parents=True, exist_ok=True)
     await run_in_threadpool(shutil.copy2, actual_path, managed_path)
     return managed_path
-
-
-async def _apply_column_renames_to_manifest(manifest_path: Path, column_renames: ColumnRenameSet) -> int:
-    return await run_in_threadpool(apply_column_renames_batch, manifest_path, column_renames)
-
-
-def _compute_row_adjustment(
-    row: ManifestRow, pv_set: frozenset[str]
-) -> ManifestPvAdjustment | None:
-    adjusted_value = compute_pv_adjustment(
-        original_value=row.to_harmonize,
-        top_harmonization=row.top_harmonization,
-        top_suggestions=row.top_harmonizations,
-        pv_set=pv_set,
-    )
-    if adjusted_value is None:
-        return None
-    return ManifestPvAdjustment.from_raw(
-        row.column_key,
-        row.to_harmonize,
-        adjusted_value,
-    )
-
-
-def _process_row_for_adjustment(
-    row: ManifestRow,
-    column_pv_map: ColumnPvSets,
-) -> ManifestPvAdjustment | None:
-    """Skips columns without PVs — those don't need conformance adjustment."""
-    pv_set = column_pv_map.get(row.column_key)
-    if not pv_set:
-        return None
-    return _compute_row_adjustment(row, pv_set)
-
-
-def _collect_pv_adjustments(
-    rows: list[ManifestRow],
-    column_pv_map: ColumnPvSets,
-) -> list[ManifestPvAdjustment]:
-    adjustments = [adj for row in rows if (adj := _process_row_for_adjustment(row, column_pv_map))]
-    _log_non_conformant_samples(rows, column_pv_map)
-    return adjustments
-
-
-def _log_non_conformant_samples(rows: list[ManifestRow], column_pv_map: ColumnPvSets) -> None:
-    """Capped at 5 samples from first 50 rows to avoid log spam while providing debugging signal."""
-    samples = [
-        {"column": row.column_name, "value": row.top_harmonization}
-        # A small prefix sample is enough to diagnose bad PV coverage without
-        # making large manifests expensive to log.
-        for row in rows[:50]
-        if _is_top_harmonization_non_conformant(row, column_pv_map)
-    ][:5]
-    if samples:
-        _router_logger.warning(
-            "Non-conformant values with no PV-compliant alternative",
-            extra={"count": len(samples), "samples": samples},
-        )
-
-
-def _is_top_harmonization_non_conformant(row: ManifestRow, column_pv_map: ColumnPvSets) -> bool:
-    """Logging-only check; the adjustment path in _compute_row_adjustment handles the actual fix."""
-    pv_set = column_pv_map.get(row.column_key)
-    return pv_set is not None and row.top_harmonization not in pv_set
-
-
-async def _apply_pv_adjustments(manifest_path: Path, column_pv_map: ColumnPvSets) -> int:
-    """AI harmonization may produce values outside the permissible value set; fix those."""
-    if not any(pv_set for pv_set in column_pv_map.values.values()):
-        return 0
-
-    summary = read_manifest_parquet(manifest_path)
-    if summary is None:
-        return 0
-
-    adjustments = _collect_pv_adjustments(summary.rows, column_pv_map)
-    if not adjustments:
-        return 0
-
-    return await run_in_threadpool(apply_pv_adjustments_batch, manifest_path, adjustments)
 
 
 __all__ = ["stage_three_router"]
