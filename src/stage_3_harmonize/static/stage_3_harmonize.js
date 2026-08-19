@@ -6,6 +6,7 @@ const config = window.stageThreeConfig ?? {};
 const harmonizeEndpoint = config.harmonizeEndpoint ?? '/stage-3/harmonize';
 const nextStageUrl = config.nextStageUrl ?? '/stage-4';
 const stageTwoUrl = config.stageTwoUrl ?? '/stage-2';
+const INITIAL_JOB_POLL_INTERVAL_MS = 1000;
 const JOB_POLL_INTERVAL_MS = 3000;
 
 const loadingState = document.getElementById('loadingState');
@@ -410,7 +411,7 @@ const _getJobIdFromUrl = () => {
 };
 
 /* why: update UI based on job status. */
-const _renderJob = (job) => {
+const _renderJob = (job, pollIntervalMs = JOB_POLL_INTERVAL_MS) => {
   if (!job) {
     return;
   }
@@ -447,7 +448,7 @@ const _renderJob = (job) => {
     _hideMetricsDashboard();
     reviewButton.disabled = true;
     retryButton.classList.add('hidden');
-    _scheduleJobPoll(jobForSession.job_id);
+    _scheduleJobPoll(jobForSession.job_id, pollIntervalMs);
   }
 };
 
@@ -463,13 +464,13 @@ const _jobStatusEndpoint = (jobId) => {
   return `${endpoint.pathname}${endpoint.search}`;
 };
 
-const _scheduleJobPoll = (jobId) => {
+const _scheduleJobPoll = (jobId, pollIntervalMs = JOB_POLL_INTERVAL_MS) => {
   if (!jobId) {
     return;
   }
   state.pollTimer = window.setTimeout(() => {
     _pollJob(jobId);
-  }, JOB_POLL_INTERVAL_MS);
+  }, pollIntervalMs);
 };
 
 const _pollJob = async (jobId) => {
@@ -522,7 +523,7 @@ const _startHarmonize = async (payloadOverride = null) => {
     if (!response.ok) {
       throw new Error(body.detail || 'Unable to start harmonization job.');
     }
-    _renderJob(body);
+    _renderJob(body, INITIAL_JOB_POLL_INTERVAL_MS);
   } catch (error) {
     console.error(error);
     _showError(error.message || 'Unexpected error while launching harmonization.');
@@ -553,7 +554,7 @@ const _hydrateFromStoredJob = () => {
   }
 
   state.requestBody = { file_id: currentFileId ?? storedFileId };
-  _renderJob(_jobWithCurrentFile(job));
+  _renderJob(_jobWithCurrentFile(job), INITIAL_JOB_POLL_INTERVAL_MS);
   return true;
 };
 
