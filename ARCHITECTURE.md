@@ -6,8 +6,8 @@ columns map to that model, runs Netrias harmonization, reviews value changes,
 and downloads the result with its audit evidence.
 
 This document describes the durable system boundaries. Product behavior is
-summarized in [app.md](app.md), and hosted operations are in
-[infra/README.md](infra/README.md).
+summarized in [app.md](app.md), and the hosted deployment procedure is in
+[DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## System shape
 
@@ -15,10 +15,7 @@ summarized in [app.md](app.md), and hosted operations are in
 Browser
   |
   v
-FastAPI stage routers and schemas
-  |
-  v
-Application use cases
+FastAPI stage routers and use cases
   |-----------------------------|
   v                             v
 Domain decisions           Boundary protocols
@@ -32,15 +29,15 @@ Domain decisions           Boundary protocols
 ```
 
 The browser presents the five-stage workflow. Routers translate HTTP input and
-errors. Use cases coordinate a user operation. Domain types own workflow state,
-mapping identity, permissible-value rules, and manifest meaning. Persistence
-translates those types to durable artifacts. Integrations translate Netrias
-responses into domain types.
+errors. Routers and use cases coordinate each stage. Domain types own workflow
+state, mapping identity, permissible-value rules, and manifest meaning.
+Persistence translates those types to durable artifacts. Integrations translate
+Netrias responses into domain types.
 
 Dependencies point inward: stage modules may depend on domain, application,
 persistence, integrations, and storage boundaries; the domain does not import a
-stage or web framework. The backend app factory wires routers and concrete
-implementations.
+stage or web framework. The backend app factory registers routers and
+middleware. `src/app/dependencies.py` constructs concrete services.
 
 ## Main ownership boundaries
 
@@ -52,8 +49,8 @@ implementations.
 | `src/stage_3_harmonize` | Durable job lifecycle and harmonization orchestration | Browser-only progress state |
 | `src/stage_4_review_results` | Review queries and active override commands | Final ZIP construction |
 | `src/stage_5_review_summary` | Final summary and download package | Mapping discovery |
-| `src/domain` | Stable IDs, mapping choices, workflow state, manifests, PV rules, review meaning | SDK, S3, FastAPI |
-| `src/app` | Service construction and short-lived reference-data cache | Durable workflow truth |
+| `src/domain` | Stable IDs, mapping choices, workflow state, manifests, PV rules, review meaning | HTTP routes or AWS persistence |
+| `src/app` | Service construction and short-lived column-profile cache | Durable workflow truth |
 | `src/integrations` | Netrias request/response translation | User authorization or persistence |
 | `src/persistence` | Domain-to-artifact translation | Backend selection |
 | `src/storage` | Authorization, artifact naming, version checks, local/S3 parity | Stage behavior |
@@ -79,15 +76,16 @@ per source position, so duplicate headers remain distinct. The user can accept a
 recommendation, choose another CDE, choose no mapping, and rename an output
 column.
 
-The confirm command updates `WorkflowState` with an optimistic version check.
-A stale browser receives a conflict instead of silently replacing a newer
-decision. Starting harmonization persists those choices and creates or reuses a
-durable job before the browser navigates to Stage 3.
+The confirm command loads the latest `WorkflowState` and saves it with an
+optimistic version check. This rejects a concurrent server write between the
+load and save. The request does not compare a browser-held version. Starting
+harmonization persists the current choices and creates or reuses a durable job
+before the browser navigates to Stage 3.
 
 ### 3. Harmonize
 
 Stage 3 loads the authorized durable state, derives the effective mapping plan,
-and calls Netrias with a prepared mapping manifest. A `StageThreeJobState`
+and calls Netrias with a prepared mapping manifest. A `HarmonizationJobState`
 records the accepted plan, status, lease, and progress independently of process
 memory. Polling therefore survives a worker or deployment restart.
 
@@ -137,7 +135,7 @@ the CDE mapping audit document.
 | --- | --- | --- |
 | Workflow metadata | Workflow ID, owner, creation time, storage schema | Create once |
 | `WorkflowState` | Model version, discovered mapping manifest, confirmed choices, schema version | Optimistic compare-and-swap |
-| `StageThreeJobState` | Plan identity, run status, worker lease, result or safe failure | Optimistic compare-and-swap |
+| `HarmonizationJobState` | Plan identity, run status, worker lease, result or safe failure | Optimistic compare-and-swap |
 | Original upload | Source evidence | Create once |
 | Harmonized output | Netrias output used for review/export | Safe replacement by the active job |
 | Base Parquet manifest | Transformation evidence and manual audit history | Durable append/update operations |
@@ -145,11 +143,10 @@ the CDE mapping audit document.
 | CDE mapping audit | Stable output document for the download | Rebuilt after complete mapping metadata exists |
 | `ReviewOverrides` | Current export choices and UI progress | Versioned save/delete |
 
-`SessionCache` accelerates CDE catalogs, permissible values, and column
-profiles. Its identity includes the workflow owner and workflow ID, and cached
-reference data is bound to one model version. Mapping truth is derived from
-`WorkflowState`; it is not independently synchronized into the cache. A
-fetched empty PV set is distinct from a PV set that has not been fetched.
+`SessionCache` accelerates column profiles. Its identity includes the workflow
+owner and workflow ID. The durable PV manifest stores permissible values for
+the selected model version. Mapping truth comes from `WorkflowState`; it is not
+independently synchronized into the cache.
 
 ## Storage and authorization
 
@@ -163,11 +160,9 @@ owns:
 - non-destructive artifact replacement.
 
 Hosted deployments use S3. Local development uses the same contract on disk.
-The only legacy ownerless fallback is limited to the local backend and the
-`local-user` identity; it is never available in S3. Old split workflow-state
-and mapping records remain readable during the compatibility expansion, while
-new writes use `WorkflowState` and continue emitting the established mapping
-artifact needed by older binaries.
+Both backends require workflow ownership metadata. Current reads and writes use
+the canonical `WorkflowState`. The CDE mapping document is a separate download
+audit artifact.
 
 Authorization is established from durable workflow metadata before a cache or
 local scratch path is consulted. A missing workflow is different from a
@@ -180,17 +175,19 @@ The HTTP boundary keeps failure meanings stable:
 | Condition | Result |
 | --- | --- |
 | Invalid request | 422; no durable write |
-| Missing workflow, upload, state, or run | 404 |
+| Unknown workflow or job | 404 |
 | Workflow owned by another user | 403 |
-| Stale workflow or review version | 409 |
+| Incomplete or stale workflow, or stale review version | 409 |
+| Local scratch upload was lost | 410 |
 | Same active Stage 3 plan submitted twice | Existing job, 200 |
 | Different plan submitted while one is active | 409 |
 | Storage unavailable before job acceptance | 503 |
-| Provider timeout, network failure, 5xx, or malformed response | Durable failed job; safe 502-class detail |
+| Provider timeout, network failure, 5xx, or malformed response | Durable failed job with a safe retry message |
 | Corrupt or unsupported durable schema | Conflict/error; record is not overwritten |
 
-Public errors contain useful operation and workflow identifiers but do not
-expose provider exception text, secret values, internal URLs, or storage keys.
+Public errors contain safe recovery detail and an `X-Request-ID` header. They do
+not expose provider exception text, secret values, internal URLs, or storage
+keys. Operator logs contain detailed operation and workflow context.
 
 ## Frontend
 
@@ -209,13 +206,11 @@ whether a harmonization run succeeded.
 ## Hosted deployment
 
 The hosted stack runs one FastAPI container image on ECS Fargate behind an
-Application Load Balancer. Cognito protects normal HTTPS traffic; an explicitly
-configured VPN CIDR listener rule remains available for controlled onboarding
-or recovery. Bypassed requests have no ALB identity headers and therefore share
-the fallback `local-user` principal; they do not provide per-person workflow
-isolation. S3 stores durable workflows, ECR stores immutable images, CodeBuild
-builds the selected Git commit, and CloudWatch/EventBridge/SNS provide logs and
-alerts.
+Application Load Balancer. Cognito protects all HTTPS traffic. S3 stores durable
+workflows. Three DynamoDB tables store reference data, harmonization-cache
+entries, and CDE-recommendation-cache entries. ECR stores immutable images,
+CodeBuild builds the selected Git commit, and CloudWatch stores application and
+build logs. The stack does not create alarms or alert routing.
 
 The root OpenTofu configuration is split by feature so an operator can follow
 one responsibility without changing state addresses:
@@ -223,22 +218,24 @@ one responsibility without changing state addresses:
 - `infra/app-runtime.tf`
 - `infra/web-entrypoint.tf`
 - `infra/workflow-storage.tf`
-- `infra/monitoring.tf`
+- `infra/reference-data.tf`
+- `infra/harmonization-cache.tf`
+- `infra/cde-recommendation-cache.tf`
 - `infra/image-build.tf`
 
-See [infra/README.md](infra/README.md) for mutation boundaries and commands.
+See [infra/README.md](infra/README.md) for ownership and mutation boundaries.
+See [DEPLOYMENT.md](DEPLOYMENT.md) for operator commands.
 
 ## Proof strategy
 
 Tests protect public behavior rather than private helper layout:
 
 - domain tests cover identity, version, mapping, PV, and review invariants;
-- storage contract tests run the same observable cases against local and S3
-  implementations;
+- separate local and S3 storage tests cover equivalent contract behavior;
 - application and API tests cover authorization, conflicts, provider failures,
-  job recovery, and exact download contents;
+  stale versions, job recovery, and exact download contents;
 - JavaScript tests import production modules directly;
-- Playwright journeys cover the five-stage browser path, stale state, rename
-  propagation, keyboard/focus behavior, and ZIP output;
+- Playwright journeys cover the five-stage browser path, rename propagation,
+  keyboard/focus behavior, and ZIP output;
 - OpenTofu formatting, validation, and reviewed plans protect deployment
   behavior and state-address safety.
