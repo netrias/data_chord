@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { expect } from '@playwright/test';
-import AdmZip from 'adm-zip';
 
 import { e2eEnv } from './runtime-env.mjs';
 
@@ -341,15 +340,27 @@ export const parseDownloadedTabular = async (response, suffix, delimiter) => {
 };
 
 const parseDownloadedTabularTable = async (response, suffix, delimiter) => {
-  const buffer = await response.body();
-  const zip = new AdmZip(Buffer.from(buffer));
-  const entries = zip.getEntries();
-  const entry = entries.find((item) => item.entryName.endsWith(suffix));
-  if (!entry) {
-    const entryNames = entries.map((item) => item.entryName).join(', ');
-    throw new Error(`No ${suffix} found in download zip. Entries: ${entryNames}`);
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'data-chord-e2e-tabular-'));
+  const zipPath = path.join(tmpDir, 'download.zip');
+  const contentPath = path.join(tmpDir, 'content');
+  let content;
+  try {
+    fs.writeFileSync(zipPath, Buffer.from(await response.body()));
+    execFileSync('uv', [
+      'run',
+      'python',
+      path.resolve('tests/e2e/support/extract_downloaded_tabular.py'),
+      '--zip-path',
+      zipPath,
+      '--suffix',
+      suffix,
+      '--output-path',
+      contentPath,
+    ], { env: e2eEnv, stdio: 'inherit' });
+    content = fs.readFileSync(contentPath, 'utf-8');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
-  const content = entry.getData().toString('utf-8');
   const lines = content.split(/\r?\n/);
   if (lines.length > 0 && lines[lines.length - 1] === '') {
     lines.pop();
