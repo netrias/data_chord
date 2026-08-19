@@ -1,27 +1,63 @@
 # Deploy Data Chord
 
-This guide creates one Data Chord application environment. The AWS account
-foundation must exist before you start.
+This guide deploys one Data Chord environment. It uses one complete example so
+that you can see each file name and command.
 
-## Prerequisites
+The example uses:
 
-You need:
+| Name | Example value |
+| --- | --- |
+| Foundation target | `example` |
+| Application stage | `staging` |
+| AWS Region | `us-east-2` |
+| Operator AWS profile | `example-admin` |
+| Application URL | `data-chord-staging.apps.example.org` |
 
-- Git;
-- the GitHub CLI;
-- Python 3.13 or later;
-- [uv](https://docs.astral.sh/uv/);
-- [just](https://github.com/casey/just);
-- the AWS CLI;
-- OpenTofu 1.10 or later;
-- an AWS profile that can assume the foundation deployer role; and
-- local Git access to `netrias/agentic_harmonization`; and
-- a GitHub App that can read that repository during the image build.
+Replace these values with the values for your environment.
 
-The build gets the application source through AWS CodeConnections. A GitHub
-App supplies a short-lived token for the private Python dependency.
+## 1. Prepare AWS
 
-Clone the repository and install the locked Python dependencies:
+Create the AWS foundation first. Follow the
+[foundation deployment guide](https://github.com/netrias/datachord-infrastructure/blob/main/DEPLOYMENT.md).
+Keep the handoff file in the foundation repository:
+
+```text
+.plans/example-foundation-handoff.json
+```
+
+Prepare these account resources before the first application plan:
+
+- A public Route 53 hosted zone with working DNS delegation. The example uses
+  `apps.example.org`.
+- A CodeConnections GitHub connection in `us-east-2`. Give the connection read
+  access to `netrias/data_chord`, then register it as the default GitHub source
+  credential for CodeBuild. Follow the AWS
+  [GitHub App connection procedure](https://docs.aws.amazon.com/codebuild/latest/userguide/connections-github-app.html).
+- A Secrets Manager secret named `data-chord/build/github-app`. Its JSON value
+  must contain `app_id`, `installation_id`, and `private_key`. The GitHub App
+  must have read access to the private `netrias/agentic_harmonization`
+  repository. The build also downloads the public `netrias/netrias_client`
+  repository. Follow the AWS
+  [secret creation procedure](https://docs.aws.amazon.com/secretsmanager/latest/userguide/create_secret.html)
+  and select **Other type of secret**.
+- Access to GPT-5.6 Luna in the account's default Bedrock Mantle project, with
+  enough inference quota for Data Chord.
+- An AWS profile that can assume the `deployer_role_arn` in the foundation
+  handoff.
+
+The CodeConnections credential gets the Data Chord source. The secret lets the
+image build install the private dependency. Do not put a credential or secret
+value in an environment file.
+
+## 2. Install the deployment tools
+
+Install Git, the GitHub CLI, Python 3.13 or later,
+[uv](https://docs.astral.sh/uv/), [just](https://github.com/casey/just), the AWS
+CLI, and OpenTofu 1.10 or later.
+
+Your GitHub account needs read access to Data Chord and
+`netrias/agentic_harmonization`. The install also downloads the public
+`netrias/netrias_client` repository. Then run:
 
 ```bash
 git clone https://github.com/netrias/data_chord.git
@@ -31,41 +67,21 @@ gh auth setup-git
 uv sync --frozen
 ```
 
-If `gh auth status` fails, run `gh auth login` first. This is the human Git
-credential for the local install. CodeBuild uses the separate GitHub App.
+If `gh auth status` fails, run `gh auth login` and try again. Keep the committed
+lock file during deployment. Do not update dependency versions.
 
-Normal installs use the committed lock file. Do not resolve new dependency
-versions during a deployment.
+## 3. Add the environment file
 
-## 1. Create the AWS foundation
-
-Follow the
-[DataChord foundation deployment guide](https://github.com/netrias/datachord-infrastructure/blob/main/DEPLOYMENT.md).
-It creates the state bucket, deployment role, and permission boundaries.
-
-The foundation command writes this handoff file:
+Create this file for the example:
 
 ```text
-.plans/<target>-foundation-handoff.json
+environments/example/staging.json
 ```
 
-Keep the handoff file. It contains resource identifiers, but it contains no
-secret values.
+Copy six values from the foundation repository's
+`.plans/example-foundation-handoff.json` file:
 
-## 2. Create the environment file
-
-Each application environment has one file:
-
-```text
-environments/<target>/<stage>.json
-```
-
-`<target>` is the foundation target. `<stage>` must be `dev`, `qa`, `staging`,
-or `prod`.
-
-Copy these values from the foundation handoff:
-
-| Foundation handoff | Application environment |
+| Handoff field | Environment field |
 | --- | --- |
 | `account_id` | `account_id` |
 | `region` | `region` |
@@ -74,24 +90,8 @@ Copy these values from the foundation handoff:
 | `application_role_boundary_arn` | `application_role_boundary_arn` |
 | `application_role_path` | `application_role_path` |
 
-Use `<target>` as the directory name. Confirm that `state_key_prefix` is
-`datachord/<target>/`.
-
-Do not copy `schema_version`, `partition`, `protected_state_bucket_name`,
-`state_key_prefix`, `deployer_boundary_arn`, or
-`assume_role_policy_statement` into the application file. The deployment
-derives or checks those values.
-
-Add these application values:
-
-- `domain_name`: the hosted zone plus one lowercase DNS label;
-- `hosted_zone_name`: the public Route 53 zone that contains the host name;
-- `application_repository_url`: a credential-free HTTPS Git URL that ends in
-  `.git` and has no query or fragment; and
-- `github_app_secret_name`: the name of the build credential in Secrets
-  Manager.
-
-Example:
+Add the domain, hosted zone, repository, and secret name. The complete file
+looks like this:
 
 ```json
 {
@@ -108,158 +108,130 @@ Example:
 }
 ```
 
-The file accepts only these ten fields. The deployment stores OpenTofu state
-at:
+The file accepts only these ten fields. The domain must add one lowercase DNS
+label to the hosted zone. The repository URL must be an HTTPS URL that ends in
+`.git` and contains no credential.
 
-```text
-datachord/<target>/<stage>/tofu.tfstate
-```
-
-You can validate the file without AWS access:
+Validate the file without AWS access:
 
 ```bash
-python3 infra/scripts/environment.py validate environments/<target>/<stage>.json <target> <stage>
+python3 infra/scripts/environment.py validate environments/example/staging.json example staging
 ```
 
-## 3. Prepare external AWS resources
+The deployment stores OpenTofu state at
+`datachord/example/staging/tofu.tfstate`.
 
-Complete these tasks before the first plan:
+## 4. Commit and plan
 
-- Create the public Route 53 hosted zone from `hosted_zone_name`. Complete its
-  DNS delegation.
-- Follow the AWS
-  [GitHub App connection procedure](https://docs.aws.amazon.com/codebuild/latest/userguide/connections-github-app.html)
-  to create and authorize a CodeConnections connection in the target account
-  and Region. Register it as CodeBuild's default GitHub source credential.
-- Create the Secrets Manager secret named by `github_app_secret_name`. Its JSON
-  value must contain `app_id`, `installation_id`, and `private_key` for a
-  read-only GitHub App that can read `netrias/agentic_harmonization`. Follow the
-  AWS [secret creation procedure](https://docs.aws.amazon.com/secretsmanager/latest/userguide/create_secret.html)
-  and use the **Other type of secret** option.
-- Confirm that the account's default Bedrock Mantle project can use GPT-5.6
-  Luna and has enough inference quota.
-- Confirm that the selected AWS profile can assume the exact
-  `deployer_role_arn`.
-
-Do not put credentials or secret values in the environment file.
-
-## 4. Plan the deployment
-
-Commit the environment file and push the exact deployment commit. The command
-rejects tracked changes, untracked files under `infra/`, and commits that are
-not the tip of a remote ref in `application_repository_url`.
+The deployment builds the exact Git commit that you push. Use a clean worktree.
+Commit the environment file first:
 
 ```bash
-git add environments/<target>/<stage>.json
-git commit -m "Add <target> <stage> environment"
+git add environments/example/staging.json
+git commit -m "Add example staging environment"
 git push --set-upstream origin HEAD
 ```
 
-Run:
+Create the plan:
 
 ```bash
-AWS_PROFILE=<source-profile> just plan <target> <stage>
+AWS_PROFILE=example-admin just plan example staging
 ```
 
-`plan` validates the environment and foundation, reads the current state, and
-shows a read-only resource forecast. It does not change application resources
-or build an image. It saves this receipt:
+This command validates the environment and foundation. It then shows the AWS
+resource changes and saves `.plans/example-staging.json`. It does not build an
+image or change application resources.
 
-```text
-.plans/<target>-<stage>.json
-```
-
-Review every action. Do not continue if the forecast contains an unexpected
-resource, deletion, or replacement.
+Read every change. Stop if the plan contains an unexpected resource, deletion,
+or replacement.
 
 ## 5. Deploy
 
-Run the deployment from the same commit and environment file:
+Deploy the same commit and environment file:
 
 ```bash
-AWS_PROFILE=<source-profile> just deploy <target> <stage>
+AWS_PROFILE=example-admin just deploy example staging
 ```
 
-The command has no confirmation prompt. It:
+There is no confirmation prompt. The command applies the build resources, tests
+and builds the exact commit in CodeBuild, applies the application plan, and
+waits for healthy ECS and load-balancer targets. The image tag is the full Git
+commit.
 
-- checks the saved receipt and current state;
-- applies the required build resources;
-- tests and builds the exact Git commit in CodeBuild;
-- applies the application plan; and
-- waits for a stable ECS service and healthy load-balancer targets.
-
-The image tag is the full Git commit. If the deployment changes AWS resources
-and then stops, run `plan` again before a retry.
+If the command changes AWS and then stops, run
+`AWS_PROFILE=example-admin just plan example staging` again before you retry
+the deployment.
 
 ## 6. Load reference data
 
-Deployment creates an empty reference-data table. The application is not ready
-for a workflow until an approved canonical reference-data file is loaded.
+The deployment creates an empty reference-data table. Data Chord cannot run a
+workflow until you load an approved canonical reference-data file.
 
-First, calculate the approved file's SHA-256 digest.
+Calculate the file's SHA-256 digest.
 
 On macOS:
 
 ```bash
-shasum -a 256 <approved-reference-data.json>
+shasum -a 256 approved-reference-data.json
 ```
 
 On Linux:
 
 ```bash
-sha256sum <approved-reference-data.json>
+sha256sum approved-reference-data.json
 ```
 
-Then use an AWS profile that can write the environment's reference-data table:
+Use a profile that can write to the staging reference-data table:
 
 ```bash
-AWS_PROFILE=<data-loader-profile> uv run python scripts/reference_data.py sync \
-  --input <approved-reference-data.json> \
-  --expected-sha256 <sha256> \
-  --table data-chord-<stage>-reference-data \
-  --region <region>
+AWS_PROFILE=example-data-loader uv run python scripts/reference_data.py sync \
+  --input approved-reference-data.json \
+  --expected-sha256 <sha256-from-the-command-above> \
+  --table data-chord-staging-reference-data \
+  --region us-east-2
 ```
 
-The command checks the digest, loads all model versions, reads them back, and
-verifies the published model count. Reference data is not part of the
-environment JSON or the OpenTofu deployment.
+The command checks the digest, loads the data, reads it back, and checks the
+published model count.
 
-An authorized operator can create a canonical file from the legacy service.
-Load `NETRIAS_API_KEY` from the approved secret source without putting its
-value in shell history. Then run:
+If an authorized operator must create the canonical file from the legacy
+service, load `NETRIAS_API_KEY` from the approved secret source. Do not type its
+value in the command. Then run:
 
 ```bash
 uv run python scripts/reference_data.py export \
-  --environment <staging-or-prod> \
-  --output <approved-reference-data.json>
+  --environment staging \
+  --output approved-reference-data.json
 ```
 
-Treat the export as controlled data. Review and approve it before sync.
+Review and approve the exported file before you sync it.
 
-## 7. Invite a user and test the workflow
+## 7. Invite a user and test one workflow
 
-Invite one Cognito user:
+After you have approval to add a user, invite one Cognito user:
 
 ```bash
-AWS_PROFILE=<source-profile> infra/scripts/invite-cognito-user.sh \
-  <target> <stage> <user-email>
+AWS_PROFILE=example-admin infra/scripts/invite-cognito-user.sh \
+  example staging user@example.org
 ```
 
-The user receives a temporary password by email. Open the application URL
-printed by `deploy`, then verify one complete workflow:
+Open the application URL printed by the deployment. Sign in with the temporary
+password, then:
 
-- sign in;
-- upload a small supported file;
-- select a model and review column mappings;
-- run harmonization and review the results; and
-- download and open the final ZIP file.
+1. Upload a small CSV, TSV, or XLSX file.
+2. Select a model and review the column mappings.
+3. Run harmonization and review the results.
+4. Download and open the final ZIP file.
 
-ECS and load-balancer health checks prove only that the web service responds.
-The workflow test also checks reference-data access, Bedrock access, durable
-storage, and download generation.
+This workflow checks more than the web health check. It checks reference data,
+Bedrock, durable storage, and download generation.
 
-## Current limit
+## Use another target or stage
 
-The foundation supports commercial AWS and AWS GovCloud. The current
-application deployment does not support GovCloud because its Application Load
-Balancer uses Cognito authentication.
+Use the foundation target as the environment directory name. The stage must be
+`dev`, `qa`, `staging`, or `prod`. Replace `example`, `staging`, the profile,
+Region, domain, ARNs, bucket, and table name in the examples above.
+
+The foundation supports commercial AWS and AWS GovCloud. The current Data Chord
+application deployment supports commercial AWS only because its Application
+Load Balancer uses Cognito authentication.

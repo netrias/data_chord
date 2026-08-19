@@ -33,10 +33,12 @@ For a detailed overview, see [app.md](app.md).
    gh auth setup-git
    uv sync --frozen
    ```
-   Data Chord uses the private `netrias/agentic_harmonization` dependency. A
-   licensed developer needs read access to that repository and an authenticated
-   Git client before the frozen install can succeed. The frozen install uses the
-   committed lock file instead of resolving newly published packages.
+   Data Chord installs two dependencies from pinned Git commits:
+   `netrias/agentic_harmonization` and `netrias/netrias_client`. A licensed
+   developer needs read access to the private `agentic_harmonization`
+   repository and an authenticated Git client. `netrias_client` is public. The
+   frozen install uses the committed lock file instead of resolving new
+   versions.
 
 3. Configure the populated reference-data table, both application cache tables,
    and the AWS region:
@@ -73,8 +75,9 @@ just typecheck   # Type check
 
 Pull requests from forks run infrastructure, JavaScript syntax, and JavaScript
 unit checks. Python, TypeScript, and browser checks need read access to the
-private `netrias/agentic_harmonization` dependency. GitHub does not give that
-credential to forks. Before an internal test, a maintainer must review the
+private `netrias/agentic_harmonization` dependency. They also install the public
+`netrias/netrias_client` dependency. GitHub does not give the private credential
+to forks. Before an internal test, a maintainer must review the
 external source, workflow files, package scripts, and test commands. The
 maintainer can then test the change on a branch in this repository.
 
