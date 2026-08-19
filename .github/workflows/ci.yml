@@ -235,10 +235,7 @@ jobs:
         run: uv run bandit -r src/ -c pyproject.toml
 
       - name: Run dependency audit
-        # GHSA-6v7p-g79w-8964 affects msgpack via pip-audit's CacheControl
-        # dependency. The fixed msgpack release is still blocked by the repo's
-        # package-age resolver, so keep this exception narrow and temporary.
-        run: uv run pip-audit --ignore-vuln GHSA-6v7p-g79w-8964 --ignore-vuln CVE-2026-69247
+        run: uv run pip-audit --ignore-vuln CVE-2026-69247
 
   # E2E tests using Playwright with Chromium for browser automation.
   e2e:
