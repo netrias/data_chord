@@ -10,7 +10,6 @@ import asyncio
 import logging
 import shutil
 from pathlib import Path
-from typing import NamedTuple
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -27,21 +26,11 @@ from src.app.dependencies import (
     get_harmonize_service,
 )
 from src.domain.cde_pv_catalog import CdePvCatalog
-from src.domain.column_outcomes import (
-    ColumnOutcome,
-    FinalizedValueOutcome,
-    FinalValueSource,
-    summarize_column_outcomes,
-)
 from src.domain.column_renames import ColumnRenameSet
-from src.domain.columns import ColumnKey
 from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.harmonization import (
-    HarmonizationColumnBreakdown,
     HarmonizationManifestSummary,
     HarmonizeStatus,
-    MatchFidelity,
-    MatchFidelityCount,
 )
 from src.domain.manifest import (
     ColumnMappingManifest,
@@ -49,7 +38,7 @@ from src.domain.manifest import (
     ManifestRow,
     ManifestSummary,
 )
-from src.domain.pv_validation import check_value_conformance, compute_pv_adjustment
+from src.domain.pv_validation import compute_pv_adjustment
 from src.domain.reference_data import ReferenceDataError
 from src.domain.tabular_column_renames import (
     ResolvedTabularColumn,
@@ -69,6 +58,7 @@ from src.persistence.workflow_artifacts import (
 )
 from src.persistence.workflow_state_store import LoadedWorkflowState
 from src.shared.jinja import templates_for_stage
+from src.stage_3_harmonize.result_summary import build_harmonization_manifest_summary
 from src.stage_3_harmonize.use_cases import (
     HarmonizationStart,
     HarmonizationStartConflictError,
@@ -96,14 +86,6 @@ stage_three_router = APIRouter(prefix="/stage-3", tags=["Stage 3 Harmonize"])
 
 
 _stage_three_tasks: dict[str, asyncio.Task[None]] = {}
-
-
-class ColumnStats(NamedTuple):
-    total_rows: int
-    changed_rows: int
-    unique_terms_changed: int
-    non_conformant_terms: int
-    match_fidelity_counts: dict[MatchFidelity, int]
 
 
 @stage_three_router.get("", response_class=HTMLResponse, name="stage_three_entry")
@@ -497,7 +479,7 @@ async def _read_store_and_adjust_manifest(
         column_renames,
         column_pv_map,
     )
-    return _convert_to_schema(
+    return build_harmonization_manifest_summary(
         final_data,
         column_pv_map,
         source_file_name=source_file_name,
@@ -616,135 +598,6 @@ async def _apply_pv_adjustments(manifest_path: Path, column_pv_map: ColumnPvSets
         return 0
 
     return await run_in_threadpool(apply_pv_adjustments_batch, manifest_path, adjustments)
-
-
-def _compute_column_stats(
-    col_rows: list[ManifestRow],
-    pv_set: frozenset[str] | None,
-) -> ColumnStats:
-    if not col_rows:
-        return ColumnStats(0, 0, 0, 0, {fidelity: 0 for fidelity in MatchFidelity})
-
-    finalized_outcomes = [_finalized_value_outcome(row, pv_set) for row in col_rows]
-    summary = summarize_column_outcomes(finalized_outcomes)[0]
-    fidelity_counts: dict[MatchFidelity, int] = {fidelity: 0 for fidelity in MatchFidelity}
-    for row, outcome in zip(col_rows, finalized_outcomes, strict=True):
-        if outcome.is_changed:
-            fidelity_counts[row.match_fidelity] += 1
-
-    return ColumnStats(
-        summary.total_rows,
-        summary.changed_rows,
-        summary.changed_distinct_values,
-        summary.non_conformant_distinct_values,
-        fidelity_counts,
-    )
-
-
-def _effective_ai_value(row: ManifestRow) -> str:
-    """Treat a blank provider result as the manifest's pass-through sentinel."""
-    if not row.top_harmonization.strip():
-        return row.to_harmonize
-    return row.top_harmonization
-
-
-def _finalized_value_outcome(
-    row: ManifestRow,
-    pv_set: frozenset[str] | None,
-) -> FinalizedValueOutcome:
-    final_value = _effective_ai_value(row)
-    return FinalizedValueOutcome(
-        column_key=row.column_key,
-        source_column_index=row.column_id,
-        column_label=row.column_name,
-        original_value=row.to_harmonize,
-        final_value=final_value,
-        final_value_source=(
-            FinalValueSource.DATA_CHORD
-            if final_value != row.to_harmonize
-            else FinalValueSource.SOURCE
-        ),
-        occurrence_count=len(row.row_indices) if row.row_indices else 1,
-        pv_set_available=bool(pv_set),
-        is_pv_conformant=check_value_conformance(final_value, pv_set),
-    )
-
-
-def _create_breakdown_schema(
-    outcome: ColumnOutcome,
-    col_rows: list[ManifestRow],
-    pv_set: frozenset[str] | None,
-) -> HarmonizationColumnBreakdown:
-    stats = _compute_column_stats(col_rows, pv_set)
-    return HarmonizationColumnBreakdown(
-        column_name=outcome.column_label,
-        label=outcome.column_label or "Unknown",
-        column_key=str(outcome.column_key),
-        source_column_index=outcome.source_column_index,
-        review_status=outcome.review_status,
-        total_rows=outcome.total_rows,
-        changed_rows=outcome.changed_rows,
-        unchanged_rows=outcome.total_rows - outcome.changed_rows,
-        unique_terms=outcome.total_distinct_values,
-        unique_terms_changed=outcome.changed_distinct_values,
-        successfully_harmonized_terms=outcome.successfully_harmonized_distinct_values,
-        unique_terms_unchanged=outcome.total_distinct_values - outcome.changed_distinct_values,
-        non_conformant_terms=outcome.non_conformant_distinct_values,
-        match_fidelity_counts_changed=[
-            MatchFidelityCount(id=fidelity, label=fidelity.label, term_count=stats.match_fidelity_counts[fidelity])
-            for fidelity in MatchFidelity
-        ],
-    )
-
-
-def _build_column_breakdowns(
-    rows: list[ManifestRow],
-    column_pv_map: ColumnPvSets,
-) -> list[HarmonizationColumnBreakdown]:
-    column_rows: dict[ColumnKey, list[ManifestRow]] = {}
-    for row in rows:
-        column_rows.setdefault(row.column_key, []).append(row)
-
-    outcomes = summarize_column_outcomes([
-        _finalized_value_outcome(row, column_pv_map.get(row.column_key))
-        for row in rows
-    ])
-    return [
-        _create_breakdown_schema(
-            outcome,
-            column_rows[outcome.column_key],
-            column_pv_map.get(outcome.column_key),
-        )
-        for outcome in outcomes
-    ]
-
-
-def _convert_to_schema(
-    manifest: ManifestSummary,
-    column_pv_map: ColumnPvSets,
-    *,
-    source_file_name: str | None = None,
-    reference_model_label: str | None = None,
-    reference_model_version: str | None = None,
-) -> HarmonizationManifestSummary:
-    column_breakdowns = _build_column_breakdowns(manifest.rows, column_pv_map)
-    total_non_conformant = sum(b.non_conformant_terms for b in column_breakdowns)
-    fidelity_counts = {fidelity: 0 for fidelity in MatchFidelity}
-    for row in manifest.rows:
-        fidelity_counts[row.match_fidelity] += 1
-    return HarmonizationManifestSummary(
-        total_terms=manifest.total_terms,
-        changed_terms=manifest.changed_terms,
-        match_fidelity_counts=[
-            MatchFidelityCount(id=fidelity, label=fidelity.label, term_count=fidelity_counts[fidelity])
-            for fidelity in MatchFidelity
-        ],
-        non_conformant_terms=total_non_conformant,
-        source_file_name=source_file_name,
-        reference_model_label=reference_model_label,
-        reference_model_version=reference_model_version,
-        column_breakdowns=column_breakdowns,
-    )
 
 
 __all__ = ["stage_three_router"]

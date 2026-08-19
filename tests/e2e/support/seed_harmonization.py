@@ -38,7 +38,7 @@ from src.persistence.manifest_schema import get_manifest_schema  # noqa: E402
 from src.persistence.pv_manifest_store import ColumnPvSets  # noqa: E402
 from src.persistence.workflow_artifacts import save_harmonized_artifacts  # noqa: E402
 from src.persistence.workflow_state_store import load_workflow_state, save_initial_workflow_state  # noqa: E402
-from src.stage_3_harmonize.router import _convert_to_schema  # noqa: E402
+from src.stage_3_harmonize.result_summary import build_harmonization_manifest_summary  # noqa: E402
 from src.storage import UploadConstraints, UploadStorage, UserContext  # noqa: E402
 
 
@@ -170,7 +170,7 @@ def _publish_completed_workflow(
     manifest = read_manifest_parquet(manifest_path)
     if manifest is None:
         raise ValueError(f"Unable to read seeded manifest for {file_id}")
-    manifest_summary = _convert_to_schema(manifest, ColumnPvSets({}))
+    manifest_summary = build_harmonization_manifest_summary(manifest, ColumnPvSets({}))
     existing_job = load_harmonization_job(workflow_storage, user, file_id)
     now = datetime.now(UTC)
     completed_job = replace(
