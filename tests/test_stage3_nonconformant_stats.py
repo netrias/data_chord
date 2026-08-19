@@ -7,7 +7,7 @@ from typing import cast
 from src.domain.harmonization import MatchFidelity
 from src.domain.manifest import ColumnMappingManifest, ManifestPayload, ManifestRow, ManifestSummary
 from src.persistence.pv_manifest_store import ColumnPvSets
-from src.stage_3_harmonize.router import _convert_to_schema
+from src.stage_3_harmonize.result_summary import build_harmonization_manifest_summary
 
 
 def _make_row(
@@ -33,9 +33,10 @@ def _make_row(
 
 
 class TestSummaryAggregation:
-    """_convert_to_schema aggregates non-conformant counts across columns."""
+    """The Stage 3 result summary preserves column outcome behavior."""
 
     def test_aggregates_across_columns(self) -> None:
+        # Given: two columns contain five values outside their approved lists.
         rows = [
             _make_row("col_a", "Bad1", "Bad1"),
             _make_row("col_a", "Bad2", "Bad2"),
@@ -53,11 +54,14 @@ class TestSummaryAggregation:
             rows[3].column_key: frozenset(["Good"]),
         })
 
-        schema = _convert_to_schema(manifest, column_pv_map)
+        # When: Stage 3 builds the result summary.
+        schema = build_harmonization_manifest_summary(manifest, column_pv_map)
 
+        # Then: all five values are reported as non-conformant.
         assert schema.non_conformant_terms == 5
 
     def test_columns_without_pvs_contribute_zero(self) -> None:
+        # Given: one column has an approved list and one does not.
         rows = [
             _make_row("with_pvs", "Bad", "Bad"),
             _make_row("no_pvs", "Anything", "Anything", column_id=1),
@@ -72,11 +76,14 @@ class TestSummaryAggregation:
             rows[1].column_key: None,
         })
 
-        schema = _convert_to_schema(manifest, column_pv_map)
+        # When: Stage 3 builds the result summary.
+        schema = build_harmonization_manifest_summary(manifest, column_pv_map)
 
+        # Then: only the column with an approved list contributes to the count.
         assert schema.non_conformant_terms == 1
 
     def test_blank_provider_result_is_source_pass_through_and_columns_keep_source_order(self) -> None:
+        # Given: provider output contains a blank pass-through value and columns are out of source order.
         rows = [
             _make_row("later", "Changed", "changed", row_indices=[0, 1], column_id=2),
             _make_row("first", "Something", "", column_id=0),
@@ -91,8 +98,10 @@ class TestSummaryAggregation:
             rows[1].column_key: frozenset(["Allowed"]),
         })
 
-        schema = _convert_to_schema(manifest, column_pv_map)
+        # When: Stage 3 builds the result summary.
+        schema = build_harmonization_manifest_summary(manifest, column_pv_map)
 
+        # Then: the blank value remains unchanged and column results follow source order.
         assert [column.source_column_index for column in schema.column_breakdowns] == [0, 2]
         first, later = schema.column_breakdowns
         assert first.changed_rows == 0
