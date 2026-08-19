@@ -1,12 +1,14 @@
-# Data Chord AWS deployment
+# Data Chord AWS infrastructure
 
-This repository owns the Data Chord application and its application resources.
-The foundation repository owns only the shared deployment access for one AWS
-account.
+This directory owns the application infrastructure. The separate
+[`datachord-infrastructure`](https://github.com/netrias/datachord-infrastructure)
+repository owns the AWS account foundation.
+
+See [../DEPLOYMENT.md](../DEPLOYMENT.md) for the operator procedure.
 
 ## Ownership
 
-The foundation owner provides:
+The account foundation provides:
 
 - the versioned OpenTofu state bucket;
 - one `/foundation/<name>-deployer` role;
@@ -14,161 +16,87 @@ The foundation owner provides:
 - the application-role permission boundary; and
 - the `/application/` IAM path.
 
-This repository provides:
+This directory provides:
 
 - the application VPC, load balancer, DNS record, certificate, and Cognito;
-- ECS, ECR, CodeBuild, and their logs and IAM roles;
+- ECS, ECR, CodeBuild, CloudWatch logs, and their IAM roles;
 - the application workflow S3 bucket; and
-- the DynamoDB reference-data table.
+- three DynamoDB tables for reference data, harmonization results, and CDE
+  recommendations.
 
-The foundation does not deploy application resources. Data Chord does not
-create or change the foundation.
+The foundation does not deploy application resources. The application
+deployment does not create or change the foundation.
 
-## One environment file
+## Environment contract
 
-Each deployment has one strict file:
+Each deployment reads one strict file:
 
 ```text
 environments/<target>/<stage>.json
 ```
 
-Example:
-
-```json
-{
-  "account_id": "945365518758",
-  "region": "us-east-2",
-  "state_bucket_name": "netrias-datachord-state-945365518758-us-east-2",
-  "deployer_role_arn": "arn:aws:iam::945365518758:role/foundation/datachord-deployer",
-  "application_role_boundary_arn": "arn:aws:iam::945365518758:policy/datachord-application-role-boundary",
-  "application_role_path": "/application/",
-  "domain_name": "data-chord-staging.apps.netrias.com",
-  "hosted_zone_name": "apps.netrias.com",
-  "application_repository_url": "https://github.com/netrias/data_chord.git",
-  "github_app_secret_name": "data-chord/build/github-app"
-}
-```
-
-The file accepts no other fields. The target and stage come from its path. The
-AWS partition comes from the region. The state key is always:
+The target and stage come from the path. The stage must be `dev`, `qa`,
+`staging`, or `prod`. The state key is always:
 
 ```text
 datachord/<target>/<stage>/tofu.tfstate
 ```
 
-The deployer role and application boundary must share the same foundation name
-prefix. The command derives the deployer boundary from that prefix and checks
-the live foundation before it plans.
+The environment file contains application inputs and selected foundation
+outputs. It does not contain credentials, reference data, a state key, or a
+CodeConnections ARN. `infra/scripts/environment.py` rejects missing and extra
+fields.
 
-## Environment-owner setup
+The deployer role and application boundary must use the same foundation name
+prefix. The deployment derives the deployer boundary from that prefix and
+checks the live foundation before it plans.
 
-Before the first plan, the environment owner must:
+## Mutation safety
 
-1. Apply the account foundation from `netrias/datachord-infrastructure`.
-
-2. Create the public Route 53 hosted zone named in the environment file and
-   complete external DNS delegation.
-
-3. Create the Secrets Manager secret named by `github_app_secret_name`. Its
-   JSON value must contain `app_id`, `installation_id`, and `private_key` for a
-   read-only GitHub App that can read these two repositories:
-
-   - `netrias/data_chord`
-   - `netrias/agentic_harmonization`
-
-   CodeBuild uses the same short-lived installation token for the application
-   source and its pinned private dependency.
-
-4. In the AWS account and Region named by the environment file, create and
-   authorize an AWS CodeConnections connection to GitHub. Register it as that
-   Region's default GitHub source credential for CodeBuild. The environment
-   owner controls this connection. The environment JSON does not store its ARN.
-
-5. Give the selected AWS profile permission to assume the exact
-   `deployer_role_arn`.
-
-6. Add the environment JSON to the deployment branch.
-
-7. Push the exact deployment commit. The commands reject local-only commits
-   and a dirty working tree.
-
-## Two commands
-
-Run:
-
-```bash
-AWS_PROFILE=default just plan netrias staging
-AWS_PROFILE=default just deploy netrias staging
-```
-
-`plan`:
-
-- validates the environment file;
-- assumes and verifies the foundation deployer role;
-- opens the exact state bucket and derived state key;
-- reads the current state lineage and serial;
-- displays a read-only OpenTofu forecast; and
-- saves `.plans/<target>-<stage>.json`.
+The `plan` command validates the source commit, environment, AWS identity,
+foundation, and state. It displays a read-only resource forecast and saves
+`.plans/<target>-<stage>.json`. It does not apply resources or build an image.
 
 The receipt binds the forecast to the environment file, Git commit, AWS
-account, region, state location, and state lineage and serial. `plan` does not
-apply resources or build an image.
+account, Region, state location, and state lineage and serial.
 
-The forecast is a resource and action boundary. It is not the final OpenTofu
-plan. A fresh deployment must create build prerequisites before it can build
-the image.
+The `deploy` command has no confirmation prompt. It rejects a changed receipt
+or state, then:
 
-`deploy` has no prompt and reads no stdin. It:
+- marks the receipt in progress before the first AWS change;
+- creates and checks a saved prerequisite plan;
+- builds or reuses an image tagged with the full Git commit;
+- creates and checks a saved application plan; and
+- waits for a stable ECS service and healthy load-balancer targets.
 
-1. repeats every validation and rejects a changed receipt or state;
-2. marks the receipt in progress before the first AWS resource change;
-3. displays, checks, and applies one saved prerequisite plan;
-4. builds or reuses the image tagged with the full 40-character Git commit;
-5. displays, checks, and applies one saved full application plan; and
-6. waits for a stable ECS service and healthy load-balancer targets.
+Each internal plan must stay inside the reviewed forecast. An unexpected
+resource, deletion, or replacement stops the deployment before apply. The only
+allowed replacement is the normal ECS task-definition revision for a new
+image.
 
-Each internal plan must remain inside the approved forecast. Prerequisite work
-has a smaller allow-list. A delete, replacement, or extra resource stops the
-deployment before apply. The only allowed replacement is the normal ECS
-task-definition revision for a new application image.
-
-Deployment creates the empty DynamoDB reference-data table. Loading or changing
-the table data is a separate operation. `plan` and `deploy` do not accept a data
-export and do not write table data.
-
-New workflow buckets do not use S3 versioning. DataChord uses S3 ETags for
-concurrent-write checks, so deploy does not need a versioning propagation wait.
-Existing buckets keep their current versioning setting when OpenTofu stops
-managing it.
-
-If a deployment stops after its first resource change, its receipt stays in
+If a deployment stops after its first AWS change, the receipt remains in
 progress. Inspect the failure and run `plan` again before a retry.
 
-For BDF staging:
+## Data and users
 
-```bash
-AWS_PROFILE=strides just plan bdf staging
-AWS_PROFILE=strides just deploy bdf staging
-```
+Deployment creates an empty reference-data table. Loading reference data is a
+separate controlled operation. It is not an OpenTofu input.
 
-There is no BDF production environment file. BDF production remains on its
-existing deployment process until a separate migration is approved.
+The deployment also creates the Cognito user pool. User invitations are a
+separate operation.
+
+See [../DEPLOYMENT.md](../DEPLOYMENT.md) for the supported reference-data and
+user-invitation commands.
 
 ## Current limits
 
-- The current application authentication uses an ALB Cognito action. AWS
-  GovCloud does not provide this action. A GovCloud deployment branch must
-  replace that application authentication design before it can plan. The
-  foundation repository already supports the `aws-us-gov` ARN partition.
-- The image build uses AWS CodeConnections. AWS provides CodeConnections in
-  GovCloud East, but not GovCloud West. A `us-gov-west-1` deployment branch
-  must replace this source connection design.
+- The application deployment rejects AWS GovCloud because ALB Cognito
+  authentication is unavailable there. The account foundation can still be
+  created in GovCloud.
+- A deployment requests a four-hour deployer-role session. Before apply, it
+  checks that at least three hours remain.
+- A CI job that starts with the deployer role must set
+  `AWS_CREDENTIAL_EXPIRATION` to the ISO 8601 STS expiration time.
 - The environment owner controls the AWS profile, DNS delegation, GitHub App,
-  and any controlled CI runner. The two commands work the same on a workstation
-  or in CI.
-- When it starts from another identity, `deploy` requests a four-hour
-  deployer-role session. The deployer role must allow this session length.
-  A CI job that starts with the deployer role must set
-  `AWS_CREDENTIAL_EXPIRATION` to the ISO 8601 expiry from STS. `deploy` stops
-  before apply unless it can prove that at least three hours remain. This
-  avoids the one-hour role-chaining limit.
+  CodeConnections source credential, Bedrock access, and any controlled CI
+  runner.

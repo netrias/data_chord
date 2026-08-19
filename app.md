@@ -37,12 +37,10 @@ how it was produced.
   not replaced by an AI suggestion.
 - Confirmed model, mapping, and job state are durable; browser storage and
   in-memory caches are accelerators only.
-- Every hosted workflow belongs to an authenticated principal, and
-  authorization is checked before cached or local data is used. Cognito users
-  are distinct; the optional trusted-network bypass deliberately shares one
-  fallback principal and is not per-person access control.
+- Every hosted workflow belongs to an authenticated Cognito principal, and
+  authorization is checked before cached or local data is used.
 - Repeating the same accepted harmonization request reuses its active job.
-  Competing or stale decisions return a visible conflict.
+  Competing Stage 3 plans and stale Stage 4 reviews return a visible conflict.
 - Active review overrides control export. The Parquet audit history remains
   historical evidence even if the active overrides are deleted.
 - External failures are visible and retryable without exposing provider
@@ -50,7 +48,7 @@ how it was produced.
 
 ## Output
 
-The ZIP download keeps stable artifact names and includes:
+The ZIP download includes three files:
 
 - the final CSV, TSV, or XLSX dataset;
 - a JSON representation of the harmonization manifest;
@@ -60,11 +58,11 @@ The ZIP download keeps stable artifact names and includes:
 
 Data Chord is a FastAPI application with server-rendered Jinja pages and small
 vanilla JavaScript modules. Domain types own workflow and transformation
-meaning. Application use cases coordinate the five stages. Netrias adapters and
+meaning. Routers and use cases coordinate the five stages. Netrias adapters and
 local/S3 storage implementations sit behind explicit boundaries. Hosted
 deployments run on ECS Fargate behind an authenticated Application Load
 Balancer, with durable workflow artifacts in S3.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for boundaries and state ownership,
-[README.md](README.md) for local setup, and [infra/README.md](infra/README.md)
-for hosted operations.
+[README.md](README.md) for local setup, and [DEPLOYMENT.md](DEPLOYMENT.md) for
+hosted deployment.

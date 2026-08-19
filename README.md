@@ -33,10 +33,10 @@ For a detailed overview, see [app.md](app.md).
    gh auth setup-git
    uv sync --frozen
    ```
-   Data Chord uses the private agentic harmonization dependency. A licensed
-   developer needs read access to `netrias/agentic_harmonization` and an
-   authenticated Git client before the frozen install can succeed.
-   The frozen install is an important supply-chain security control: normal setup uses the committed lockfile instead of resolving newly published packages.
+   Data Chord uses the private `netrias/agentic_harmonization` dependency. A
+   licensed developer needs read access to that repository and an authenticated
+   Git client before the frozen install can succeed. The frozen install uses the
+   committed lock file instead of resolving newly published packages.
 
 3. Configure the populated reference-data table, both application cache tables,
    and the AWS region:
@@ -101,15 +101,10 @@ Set `PERF_REMOTE_ROWS=50` to change the generated CSV size.
 
 ## AWS Hosting
 
-OpenTofu deploys the app to ECS Fargate behind an ALB and Cognito. It stores
-workflow data in S3 and reference data in DynamoDB. Each environment has one
-checked-in JSON file. Operators use two deployment commands:
+OpenTofu deploys the application to ECS Fargate behind an Application Load
+Balancer and Cognito. It stores workflow data in S3 and reference data in
+DynamoDB.
 
-```bash
-AWS_PROFILE=default just plan netrias staging
-AWS_PROFILE=default just deploy netrias staging
-```
-
-`plan` does not change AWS resources. `deploy` has no interactive prompt and
-uses the exact saved receipt from `plan`. See [infra/README.md](infra/README.md)
-for environment setup and ownership boundaries.
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the complete environment and deployment
+procedure. See [infra/README.md](infra/README.md) for infrastructure ownership
+and deployment safety rules.
