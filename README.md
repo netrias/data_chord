@@ -139,6 +139,7 @@ Run the application with the same volume:
 docker run --rm \
   --mount type=volume,src=data-chord,dst=/data \
   --env DATA_CHORD_PROFILE=portable \
+  --env DATA_CHORD_WORKFLOW_STORAGE_LIMIT_GB=10 \
   --env AWS_REGION=us-east-2 \
   --publish 8000:8000 \
   data-chord:VERSION
@@ -148,6 +149,13 @@ The AWS SDK uses its standard credential chain. On AWS, use a workload role.
 For local Docker testing, pass short-lived `AWS_ACCESS_KEY_ID`,
 `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` values from the host. Never
 put credentials in the image.
+
+Portable workflow files are temporary. After a successful upload, the app
+checks workflow storage in the background. At 80% of
+`DATA_CHORD_WORKFLOW_STORAGE_LIMIT_GB`, it removes the least recently accessed
+workflows until use is at or below 70%. A workflow accessed during the last 24
+hours is not removed. The default limit is 10 GB. Cleanup does not remove
+`/data/standards.sqlite`.
 
 To publish a changed standard, give it a new external version and run the same
 `load-sqlite` command. Existing versions cannot be replaced with different

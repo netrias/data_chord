@@ -43,6 +43,7 @@ from src.settings import (
     get_workflow_s3_bucket,
     get_workflow_s3_prefix,
     get_workflow_storage_dir,
+    get_workflow_storage_limit_bytes,
 )
 from src.storage import (
     LocalWorkflowStorage,
@@ -51,6 +52,7 @@ from src.storage import (
     UploadConstraints,
     UploadStorage,
     UserContext,
+    WorkflowCleanup,
     WorkflowStorage,
 )
 
@@ -59,10 +61,12 @@ logger = logging.getLogger(__name__)
 UPLOAD_BASE_DIR = PROJECT_ROOT / "uploads"
 DEFAULT_WORKFLOW_STORAGE_DIR = PROJECT_ROOT / "workflow_storage"
 MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024
+_UPLOAD_FREE_SPACE_RESERVE_BYTES = 4 * MAX_UPLOAD_BYTES
 
 _upload_constraints: UploadConstraints | None = None
 _storage: UploadStorage | None = None
 _workflow_storage: WorkflowStorage | None = None
+_workflow_cleanup: WorkflowCleanup | None = None
 _reference_data_repository: ReferenceDataRepository | None = None
 _harmonization_cache: HarmonizationCache | None = None
 _harmonize_service: HarmonizeService | None = None
@@ -121,6 +125,23 @@ def get_workflow_storage() -> WorkflowStorage:
         else:
             raise ConfigurationError(f"Unsupported DATA_CHORD_STORAGE value: {backend.value}")
     return _workflow_storage
+
+
+def get_workflow_cleanup() -> WorkflowCleanup | None:
+    global _workflow_cleanup  # noqa: PLW0603 - intentional singleton
+    if get_runtime_profile() is not RuntimeProfile.PORTABLE:
+        return None
+    if _workflow_cleanup is None:
+        workflow_storage = get_workflow_storage()
+        if not isinstance(workflow_storage, LocalWorkflowStorage):
+            raise ConfigurationError("Portable workflow cleanup requires local workflow storage")
+        _workflow_cleanup = WorkflowCleanup(
+            workflow_storage,
+            get_upload_storage(),
+            capacity_bytes=get_workflow_storage_limit_bytes(),
+            required_free_bytes=_UPLOAD_FREE_SPACE_RESERVE_BYTES,
+        )
+    return _workflow_cleanup
 
 
 def get_user_context() -> UserContext:
@@ -190,11 +211,12 @@ def get_cde_recommender() -> CdeRecommender:
 def cleanup_services() -> None:
     """Clean up resources held by singleton services (call on app shutdown)."""
     global _cde_recommender, _harmonization_cache, _harmonize_service  # noqa: PLW0603
-    global _reference_data_repository, _workflow_storage  # noqa: PLW0603
+    global _reference_data_repository, _workflow_cleanup, _workflow_storage  # noqa: PLW0603
     _cde_recommender = None
     _harmonization_cache = None
     _harmonize_service = None
     _reference_data_repository = None
+    _workflow_cleanup = None
     _workflow_storage = None
 
 
@@ -211,4 +233,5 @@ __all__ = [
     "get_upload_storage",
     "get_user_context",
     "get_workflow_storage",
+    "get_workflow_cleanup",
 ]

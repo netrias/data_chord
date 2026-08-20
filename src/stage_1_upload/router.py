@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 
@@ -45,6 +46,7 @@ from src.storage import (
     UploadStorage,
     UploadTooLargeError,
     UserContext,
+    WorkflowStorageFullError,
     describe_constraints,
 )
 
@@ -100,8 +102,12 @@ async def list_data_models() -> list[DataModelSummary]:
     status_code=status.HTTP_201_CREATED,
     name="stage_one_upload_upload",
 )
-async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadResponse:
+async def upload_dataset(
+    background_tasks: BackgroundTasks,
+    file: Annotated[UploadFile, File(...)],
+) -> UploadResponse:
     storage = dependencies.get_upload_storage()
+    cleanup = dependencies.get_workflow_cleanup()
     user = dependencies.get_user_context()
     dataset_workflow_id = new_dataset_workflow_id()
     log_workflow_event(
@@ -114,7 +120,11 @@ async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadRespon
         ),
         user,
     )
+    release_upload_lease: Callable[[], None] | None = None
     try:
+        if cleanup is not None:
+            release_upload_lease = await run_in_threadpool(cleanup.acquire_upload_lease)
+            await run_in_threadpool(cleanup.require_upload_space)
         meta = await storage.store(file, dataset_workflow_id)
         dependencies.get_workflow_storage().create_workflow(user, meta.dataset_workflow_id)
         save_upload_artifacts(
@@ -123,6 +133,12 @@ async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadRespon
             storage,
             meta,
         )
+    except WorkflowStorageFullError as exc:
+        _log_upload_failed(user, dataset_workflow_id, "workflow_storage_full")
+        raise HTTPException(
+            status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
+            detail="Storage is full. Please try again after older workflows are removed.",
+        ) from exc
     except UnsupportedUploadError as exc:
         _log_upload_failed(user, dataset_workflow_id, "unsupported_upload")
         raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(exc)) from exc
@@ -132,6 +148,9 @@ async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadRespon
     except Exception as exc:
         _log_upload_failed(user, dataset_workflow_id, type(exc).__name__)
         raise
+    finally:
+        if release_upload_lease is not None:
+            await run_in_threadpool(release_upload_lease)
     log_workflow_event(
         WorkflowEvent(
             stage=WorkflowStage.STAGE_1,
@@ -147,6 +166,8 @@ async def upload_dataset(file: Annotated[UploadFile, File(...)]) -> UploadRespon
         ),
         user,
     )
+    if cleanup is not None:
+        background_tasks.add_task(cleanup.run_safely)
 
     return UploadResponse(
         file_id=meta.file_id,

@@ -20,6 +20,7 @@ _RUNTIME_CONFIG_NAMES = (
     "DATA_CHORD_REFERENCE_TABLE",
     "DATA_CHORD_S3_BUCKET",
     "DATA_CHORD_STORAGE",
+    "DATA_CHORD_WORKFLOW_STORAGE_LIMIT_GB",
 )
 
 
@@ -90,6 +91,13 @@ def _run_import(module: str, settings: dict[str, str]) -> subprocess.CompletedPr
             "DATA_CHORD_AGENTIC_WORKERS must not exceed 100",
         ),
         ({"DATA_CHORD_PROFILE": "unknown"}, "DATA_CHORD_PROFILE must be one of"),
+        (
+            {
+                "DATA_CHORD_PROFILE": "portable",
+                "DATA_CHORD_WORKFLOW_STORAGE_LIMIT_GB": "zero",
+            },
+            "DATA_CHORD_WORKFLOW_STORAGE_LIMIT_GB must be a positive number",
+        ),
     ],
 )
 def test_invalid_runtime_configuration_stops_application_startup(

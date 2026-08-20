@@ -11,7 +11,12 @@ from httpx import AsyncClient
 from src.domain.cde import DataModelSummary, DataModelVersionInfo
 from src.domain.cde_recommendation import RecommendationUnavailableError
 from src.domain.reference_data import ReferenceDataUnavailableError
-from src.storage import WorkflowConflictError
+from src.storage import (
+    LocalWorkflowStorage,
+    UploadStorage,
+    WorkflowCleanup,
+    WorkflowConflictError,
+)
 from tests.conftest import TEST_CSV_CONTENT_TYPE, TEST_TARGET_EXTERNAL_VERSION_NUMBER, TEST_TARGET_SCHEMA, upload_file
 
 pytestmark = pytest.mark.asyncio
@@ -313,3 +318,36 @@ class TestUploadValidationErrors:
         # Then: 413 Payload Too Large response with generic user-facing detail
         assert response.status_code == 413
         assert response.json()["detail"] == GENERIC_API_ERROR_DETAIL
+
+    async def test_full_portable_storage_rejects_upload_before_writing(
+        self,
+        app_client: AsyncClient,
+        temp_storage: UploadStorage,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Given: the portable storage guard reports that its real filesystem is full.
+        workflow_storage = LocalWorkflowStorage(tmp_path / "workflow-storage")
+        cleanup = WorkflowCleanup(
+            workflow_storage,
+            temp_storage,
+            capacity_bytes=1024,
+            required_free_bytes=100,
+        )
+        monkeypatch.setattr(workflow_storage, "available_bytes", lambda: 0)
+        monkeypatch.setattr(temp_storage, "available_bytes", lambda: 0)
+        monkeypatch.setattr(
+            "src.stage_1_upload.router.dependencies.get_workflow_cleanup",
+            lambda: cleanup,
+        )
+        assert list((temp_storage._data_dir).iterdir()) == []
+
+        # When: a valid upload starts.
+        response = await app_client.post(
+            "/stage-1/upload",
+            files={"file": ("sample.csv", b"value\n1\n", TEST_CSV_CONTENT_TYPE)},
+        )
+
+        # Then: the API rejects it before writing scratch data.
+        assert response.status_code == 507
+        assert list((temp_storage._data_dir).iterdir()) == []

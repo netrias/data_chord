@@ -10,7 +10,7 @@ import hashlib
 import json
 import os
 import shutil
-from collections.abc import Generator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -31,7 +31,11 @@ _SHA256_PREFIX = "sha256:"
 _FIELD_FILE_ID = "file_id"
 _FIELD_OWNER_USER_ID = "owner_user_id"
 _FIELD_CREATED_AT = "created_at"
+_FIELD_LAST_ACCESSED_AT = "last_accessed_at"
 _FIELD_STORAGE_SCHEMA_VERSION = "storage_schema_version"
+_LOCKS_DIR = ".workflow-locks"
+_CLEANUP_LOCK_FILE = ".cleanup.lock"
+_UPLOAD_LOCK_FILE = ".upload.lock"
 
 JsonValue = Mapping[str, object] | list[object] | str | int | float | bool | None
 
@@ -80,14 +84,17 @@ class WorkflowMetadata:
     dataset_workflow_id: DatasetWorkflowId
     owner_user_id: str
     created_at: datetime
+    last_accessed_at: datetime
     storage_schema_version: int = STORAGE_SCHEMA_VERSION
 
     @classmethod
     def create(cls, user: UserContext, dataset_workflow_id: DatasetWorkflowId | str) -> WorkflowMetadata:
+        created_at = datetime.now(UTC)
         return cls(
             dataset_workflow_id=dataset_workflow_id_from_value(dataset_workflow_id),
             owner_user_id=user.user_id,
-            created_at=datetime.now(UTC),
+            created_at=created_at,
+            last_accessed_at=created_at,
         )
 
     @classmethod
@@ -108,11 +115,30 @@ class WorkflowMetadata:
             return None
         if schema_version != STORAGE_SCHEMA_VERSION:
             return None
-        return cls(
-            dataset_workflow_id=dataset_workflow_id_from_value(file_id),
-            owner_user_id=owner_user_id,
-            created_at=created_at,
-            storage_schema_version=schema_version,
+        if _FIELD_LAST_ACCESSED_AT not in payload:
+            last_accessed_at = created_at
+        else:
+            last_accessed_at = _datetime_from_store(payload[_FIELD_LAST_ACCESSED_AT])
+            if last_accessed_at is None or last_accessed_at < created_at:
+                return None
+        try:
+            return cls(
+                dataset_workflow_id=dataset_workflow_id_from_value(file_id),
+                owner_user_id=owner_user_id,
+                created_at=created_at,
+                last_accessed_at=last_accessed_at,
+                storage_schema_version=schema_version,
+            )
+        except ValueError:
+            return None
+
+    def accessed_at(self, accessed_at: datetime) -> WorkflowMetadata:
+        return WorkflowMetadata(
+            dataset_workflow_id=self.dataset_workflow_id,
+            owner_user_id=self.owner_user_id,
+            created_at=self.created_at,
+            last_accessed_at=accessed_at,
+            storage_schema_version=self.storage_schema_version,
         )
 
     def to_store(self) -> dict[str, object]:
@@ -120,6 +146,7 @@ class WorkflowMetadata:
             _FIELD_FILE_ID: self.dataset_workflow_id,
             _FIELD_OWNER_USER_ID: self.owner_user_id,
             _FIELD_CREATED_AT: self.created_at.isoformat(),
+            _FIELD_LAST_ACCESSED_AT: self.last_accessed_at.isoformat(),
             _FIELD_STORAGE_SCHEMA_VERSION: self.storage_schema_version,
         }
 
@@ -146,6 +173,22 @@ class StoredArtifact:
     kind: WorkflowFile
     version: VersionToken
     suffix: str
+
+
+@dataclass(frozen=True)
+class StoredWorkflowUsage:
+    """Validated workflow metadata plus its current logical file size."""
+
+    metadata: WorkflowMetadata
+    size_bytes: int
+
+
+@dataclass(frozen=True)
+class WorkflowInventory:
+    """Portable workflow disk use and safe cleanup candidates."""
+
+    usage_bytes: int
+    workflows: tuple[StoredWorkflowUsage, ...]
 
 
 class WorkflowStorageError(Exception):
@@ -228,7 +271,9 @@ class LocalWorkflowStorage:
     def __init__(self, base_dir: Path) -> None:
         self._base_dir = base_dir.resolve()
         self._workflow_dir = self._base_dir / _WORKFLOWS_DIR
+        self._locks_dir = self._base_dir / _LOCKS_DIR
         self._workflow_dir.mkdir(parents=True, exist_ok=True)
+        self._locks_dir.mkdir(parents=True, exist_ok=True)
 
     def create_workflow(self, user: UserContext, dataset_workflow_id: DatasetWorkflowId) -> WorkflowMetadata:
         workflow_dir = self._path_for_workflow(dataset_workflow_id)
@@ -336,6 +381,84 @@ class LocalWorkflowStorage:
         self._require_access(user, file_id)
         yield self._existing_artifact_path(file_id, kind)
 
+    def workflow_inventory(self) -> WorkflowInventory:
+        """Measure portable workflow files and return validated cleanup candidates."""
+        usage_bytes = 0
+        workflows: list[StoredWorkflowUsage] = []
+        for workflow_dir in self._workflow_dir.iterdir():
+            if workflow_dir.is_symlink() or not workflow_dir.is_dir():
+                continue
+            size_bytes = _directory_size(workflow_dir)
+            usage_bytes += size_bytes
+            metadata = self._read_metadata(workflow_dir.name)
+            if metadata is None or metadata.dataset_workflow_id != workflow_dir.name:
+                continue
+            workflows.append(StoredWorkflowUsage(metadata=metadata, size_bytes=size_bytes))
+        return WorkflowInventory(usage_bytes=usage_bytes, workflows=tuple(workflows))
+
+    def available_bytes(self) -> int:
+        return shutil.disk_usage(self._base_dir).free
+
+    def filesystem_capacity_bytes(self) -> int:
+        return shutil.disk_usage(self._base_dir).total
+
+    def acquire_upload_lease(self) -> Callable[[], None]:
+        """Block until this volume reserves one upload, then return its release operation."""
+        import fcntl
+
+        handle = (self._base_dir / _UPLOAD_LOCK_FILE).open("a+b")
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        except Exception:
+            handle.close()
+            raise
+        released = False
+
+        def _release() -> None:
+            nonlocal released
+            if released:
+                return
+            released = True
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            finally:
+                handle.close()
+
+        return _release
+
+    def delete_workflow_if_last_accessed(
+        self,
+        file_id: DatasetWorkflowId,
+        expected_last_accessed_at: datetime,
+        delete_scratch: Callable[[DatasetWorkflowId], None],
+    ) -> bool:
+        """Delete one unchanged workflow while excluding concurrent access."""
+        with self._workflow_lock(file_id):
+            metadata = self._read_metadata(file_id)
+            if metadata is None or metadata.last_accessed_at != expected_last_accessed_at:
+                return False
+            delete_scratch(file_id)
+            workflow_dir = self._path_for_workflow(file_id)
+            shutil.rmtree(workflow_dir)
+            return True
+
+    @contextmanager
+    def try_cleanup_lease(self) -> Generator[bool]:
+        """Allow one cleanup operation for this volume across local processes."""
+        import fcntl
+
+        lock_path = self._base_dir / _CLEANUP_LOCK_FILE
+        with lock_path.open("a+b") as handle:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                yield False
+                return
+            try:
+                yield True
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
     def _path_for_workflow(self, file_id: str) -> Path:
         path = (self._workflow_dir / file_id).resolve()
         if not path.is_relative_to(self._workflow_dir):
@@ -370,15 +493,40 @@ class LocalWorkflowStorage:
         )
 
     def _require_access(self, user: UserContext, file_id: str) -> WorkflowMetadata:
+        with self._workflow_lock(file_id):
+            metadata_path = self._metadata_path(file_id)
+            metadata = self._read_metadata(file_id)
+            if metadata is None:
+                if metadata_path.exists():
+                    raise WorkflowStorageError(f"Workflow metadata is unreadable: {file_id}")
+                raise WorkflowNotFoundError(file_id)
+            if metadata.owner_user_id != user.user_id and not user.is_admin:
+                raise WorkflowAccessDeniedError(file_id)
+            accessed = metadata.accessed_at(datetime.now(UTC))
+            self._write_json_atomic(metadata_path, accessed.to_store())
+            return accessed
+
+    def _read_metadata(self, file_id: str) -> WorkflowMetadata | None:
         metadata_path = self._metadata_path(file_id)
-        if not metadata_path.exists():
-            raise WorkflowNotFoundError(file_id)
-        metadata = WorkflowMetadata.from_store(json.loads(metadata_path.read_text(encoding="utf-8")))
-        if metadata is None:
-            raise WorkflowStorageError(f"Workflow metadata is unreadable: {file_id}")
-        if metadata.owner_user_id != user.user_id and not user.is_admin:
-            raise WorkflowAccessDeniedError(file_id)
-        return metadata
+        if metadata_path.is_symlink() or not metadata_path.is_file():
+            return None
+        try:
+            payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        return WorkflowMetadata.from_store(payload)
+
+    @contextmanager
+    def _workflow_lock(self, file_id: str) -> Generator[None]:
+        import fcntl
+
+        lock_path = self._locks_dir / f"{dataset_workflow_id_from_value(file_id)}.lock"
+        with lock_path.open("a+b") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     def _check_write_version(
         self,
@@ -469,15 +617,35 @@ def _datetime_from_store(value: object) -> datetime | None:
     if not isinstance(value, str):
         return None
     try:
-        return datetime.fromisoformat(value)
+        parsed = datetime.fromisoformat(value)
     except ValueError:
         return None
+    return parsed if parsed.utcoffset() is not None else None
+
+
+def _directory_size(path: Path) -> int:
+    size_bytes = 0
+    for root, directory_names, file_names in os.walk(path, followlinks=False):
+        root_path = Path(root)
+        directory_names[:] = [
+            name for name in directory_names if not (root_path / name).is_symlink()
+        ]
+        for name in file_names:
+            file_path = root_path / name
+            if file_path.is_symlink():
+                continue
+            try:
+                size_bytes += file_path.stat().st_size
+            except FileNotFoundError:
+                continue
+    return size_bytes
 
 
 __all__ = [
     "LocalWorkflowStorage",
     "StoredArtifact",
     "StoredJson",
+    "StoredWorkflowUsage",
     "UserContext",
     "VersionToken",
     "WorkflowAccessDeniedError",
@@ -486,6 +654,7 @@ __all__ = [
     "WorkflowArtifactTypeError",
     "WorkflowConflictError",
     "WorkflowFile",
+    "WorkflowInventory",
     "WorkflowMetadata",
     "WorkflowNotFoundError",
     "WorkflowStorage",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from pathlib import Path
 
@@ -26,6 +27,7 @@ _DATA_CHORD_DATA_DIR_VAR = "DATA_CHORD_DATA_DIR"
 _DATA_CHORD_STORAGE_VAR = "DATA_CHORD_STORAGE"
 _DATA_CHORD_UPLOAD_DIR_VAR = "DATA_CHORD_UPLOAD_DIR"
 _DATA_CHORD_WORKFLOW_STORAGE_DIR_VAR = "DATA_CHORD_WORKFLOW_STORAGE_DIR"
+_DATA_CHORD_WORKFLOW_STORAGE_LIMIT_GB_VAR = "DATA_CHORD_WORKFLOW_STORAGE_LIMIT_GB"
 _DATA_CHORD_S3_BUCKET_VAR = "DATA_CHORD_S3_BUCKET"
 _DATA_CHORD_S3_PREFIX_VAR = "DATA_CHORD_S3_PREFIX"
 _DATA_CHORD_ALB_ARN_VAR = "DATA_CHORD_ALB_ARN"
@@ -39,6 +41,8 @@ _DEFAULT_RUNTIME_PROFILE = RuntimeProfile.HOSTED
 _DEFAULT_AGENTIC_WORKERS = 100
 _DEFAULT_AWS_REGION = "us-east-2"
 _DEFAULT_DATA_DIR = Path("/data")
+_DEFAULT_WORKFLOW_STORAGE_LIMIT_GB = Decimal(10)
+_BYTES_PER_GIBIBYTE = 1024**3
 
 
 def get_runtime_profile() -> RuntimeProfile:
@@ -98,6 +102,29 @@ def get_workflow_storage_dir() -> str | None:
     return os.getenv(_DATA_CHORD_WORKFLOW_STORAGE_DIR_VAR)
 
 
+def get_workflow_storage_limit_bytes() -> int:
+    raw_limit = os.getenv(
+        _DATA_CHORD_WORKFLOW_STORAGE_LIMIT_GB_VAR,
+        str(_DEFAULT_WORKFLOW_STORAGE_LIMIT_GB),
+    ).strip()
+    try:
+        limit_gb = Decimal(raw_limit)
+    except InvalidOperation as exc:
+        raise ConfigurationError(
+            f"{_DATA_CHORD_WORKFLOW_STORAGE_LIMIT_GB_VAR} must be a positive number"
+        ) from exc
+    if not limit_gb.is_finite():
+        raise ConfigurationError(
+            f"{_DATA_CHORD_WORKFLOW_STORAGE_LIMIT_GB_VAR} must be a positive number"
+        )
+    limit_bytes = int(limit_gb * _BYTES_PER_GIBIBYTE)
+    if limit_bytes < 1:
+        raise ConfigurationError(
+            f"{_DATA_CHORD_WORKFLOW_STORAGE_LIMIT_GB_VAR} must be a positive number"
+        )
+    return limit_bytes
+
+
 def get_workflow_s3_bucket() -> str | None:
     return os.getenv(_DATA_CHORD_S3_BUCKET_VAR)
 
@@ -143,6 +170,7 @@ def validate_required_config() -> None:
     """Validate all runtime configuration before service clients are created."""
     profile = get_runtime_profile()
     if profile is RuntimeProfile.PORTABLE:
+        get_workflow_storage_limit_bytes()
         database = get_reference_database_path()
         if not database.is_file():
             raise ConfigurationError(f"Portable reference database does not exist: {database}")
