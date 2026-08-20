@@ -20,7 +20,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, utils
 from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey
 
-from src.settings import get_expected_alb_arn
+from src.settings import RuntimeProfile, get_expected_alb_arn, get_runtime_profile
 from src.storage import UserContext
 
 ALB_IDENTITY_HEADER = "x-amzn-oidc-identity"
@@ -57,6 +57,8 @@ def reset_user_context(token: Token[UserContext | None]) -> None:
 
 
 def _user_context_from_headers(headers: Mapping[str, str]) -> UserContext:
+    if get_runtime_profile() is RuntimeProfile.PORTABLE:
+        return UserContext(user_id=LOCAL_USER_ID)
     expected_alb_arn = get_expected_alb_arn()
     signed_claims = headers.get(ALB_DATA_HEADER, "").strip()
     unsigned_user_id = headers.get(ALB_IDENTITY_HEADER, "").strip()

@@ -8,12 +8,24 @@ from unittest.mock import MagicMock
 from agent_experiment import GPT_5_6_LUNA, ReasoningEffort
 
 import src.app.dependencies as dependencies
-from src.cde_recommend.result_cache import DynamoRecommendationCache
+from src.cde_recommend.result_cache import DynamoRecommendationCache, EmptyRecommendationCache
+from src.domain.cde import CDEInfo, CdeType
+from src.domain.cde_catalog import CdeCatalog
+from src.domain.cde_pv_catalog import CdePvCatalog
+from src.domain.data_model_version_reference import DataModelVersionReference
+from src.domain.dataset_workflow_ids import dataset_workflow_id_from_string
+from src.domain.harmonization_cache import EmptyHarmonizationCache
+from src.domain.reference_data import ReferenceModel
 from src.integrations.agentic_harmonize import AgenticHarmonizeService
 from src.integrations.bedrock_cde_ranker import BedrockCandidateRanker
 from src.integrations.cde_recommendation import CdeRecommendationAdapter
 from src.integrations.dynamodb_harmonization_cache import DynamoDbHarmonizationCache
 from src.integrations.dynamodb_reference_data import DynamoDbReferenceDataRepository
+from src.integrations.sqlite_reference_data import (
+    SqliteReferenceDataImporter,
+    SqliteReferenceDataRepository,
+)
+from src.storage import LocalWorkflowStorage, UserContext
 
 
 def test_upload_storage_uses_configured_scratch_dir(monkeypatch, tmp_path: Path) -> None:
@@ -102,3 +114,39 @@ def test_cde_recommender_uses_bedrock_luna_and_the_owned_cache(monkeypatch) -> N
     assert isinstance(service._cache, DynamoRecommendationCache)  # noqa: SLF001
     assert service._cache._table_name == "cde-cache-table"  # noqa: SLF001
     assert service._cache._region == "us-gov-west-1"  # noqa: SLF001
+
+
+def test_portable_profile_uses_local_clients_without_aws_data_services(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # Given one portable data directory with a published standard.
+    model = ReferenceModel(
+        version=DataModelVersionReference("model", "1"),
+        label="Model",
+        catalog=CdeCatalog.from_cdes([CDEInfo(None, "field", None, CdeType.PASSTHROUGH)]),
+        pvs=CdePvCatalog.from_mapping({"field": frozenset()}),
+    )
+    database = tmp_path / "standards.sqlite"
+    SqliteReferenceDataImporter(database).import_models([model])
+    monkeypatch.setenv("DATA_CHORD_PROFILE", "portable")
+    monkeypatch.setenv("DATA_CHORD_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("AWS_REGION", "us-east-2")
+    dependencies.cleanup_services()
+
+    # When normal application wiring creates every data client.
+    reference_repository = dependencies.get_reference_data_repository()
+    workflow_storage = dependencies.get_workflow_storage()
+    harmonization_cache = dependencies.get_harmonization_cache()
+    recommender = dependencies.get_cde_recommender()
+
+    # Then the application uses typed local boundaries and no persistent caches.
+    assert isinstance(reference_repository, SqliteReferenceDataRepository)
+    assert reference_repository.load_model(model.version) == model
+    assert isinstance(workflow_storage, LocalWorkflowStorage)
+    workflow_storage.create_workflow(
+        UserContext("local-user"),
+        dataset_workflow_id_from_string("0" * 32),
+    )
+    assert isinstance(harmonization_cache, EmptyHarmonizationCache)
+    assert isinstance(recommender, CdeRecommendationAdapter)
+    assert isinstance(recommender._cache, EmptyRecommendationCache)  # noqa: SLF001

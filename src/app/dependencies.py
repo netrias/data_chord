@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import cast
 
 from src.auth.user_context import current_user_context
-from src.cde_recommend.result_cache import DynamoRecommendationCache
+from src.cde_recommend.result_cache import DynamoRecommendationCache, EmptyRecommendationCache
 from src.domain.cde_recommendation import CdeRecommender
-from src.domain.harmonization_cache import HarmonizationCache
+from src.domain.harmonization_cache import EmptyHarmonizationCache, HarmonizationCache
 from src.domain.reference_data import ReferenceDataRepository
 from src.integrations.agentic_harmonize import AgenticHarmonizeConfig, AgenticHarmonizeService
 from src.integrations.bedrock_cde_ranker import (
@@ -24,15 +24,20 @@ from src.integrations.cde_recommendation import CdeRecommendationAdapter
 from src.integrations.dynamodb_harmonization_cache import DynamoDbHarmonizationCache
 from src.integrations.dynamodb_reference_data import DynamoDbReferenceDataRepository, DynamoResource
 from src.integrations.harmonize import HarmonizeService
+from src.integrations.sqlite_reference_data import SqliteReferenceDataRepository
 from src.paths import PROJECT_ROOT
 from src.settings import (
     ConfigurationError,
+    RuntimeProfile,
     StorageBackend,
     get_agentic_workers,
     get_aws_region,
     get_cde_recommendation_cache_table_name,
+    get_data_dir,
     get_harmonization_cache_table_name,
+    get_reference_database_path,
     get_reference_table_name,
+    get_runtime_profile,
     get_storage_backend,
     get_upload_dir,
     get_workflow_s3_bucket,
@@ -90,6 +95,11 @@ def _upload_base_dir() -> Path:
 def get_workflow_storage() -> WorkflowStorage:
     global _workflow_storage  # noqa: PLW0603 - intentional singleton
     if _workflow_storage is None:
+        if get_runtime_profile() is RuntimeProfile.PORTABLE:
+            base_dir = get_data_dir()
+            logger.info("Initializing portable workflow storage", extra={"base_dir": str(base_dir)})
+            _workflow_storage = LocalWorkflowStorage(base_dir)
+            return _workflow_storage
         backend = get_storage_backend()
         if backend == StorageBackend.LOCAL:
             storage_dir = get_workflow_storage_dir()
@@ -120,22 +130,28 @@ def get_user_context() -> UserContext:
 def get_reference_data_repository() -> ReferenceDataRepository:
     global _reference_data_repository  # noqa: PLW0603 - intentional singleton
     if _reference_data_repository is None:
-        import boto3
+        if get_runtime_profile() is RuntimeProfile.PORTABLE:
+            _reference_data_repository = SqliteReferenceDataRepository(get_reference_database_path())
+        else:
+            import boto3
 
-        resource = cast(DynamoResource, boto3.resource("dynamodb", region_name=get_aws_region()))
-        _reference_data_repository = DynamoDbReferenceDataRepository(resource.Table(get_reference_table_name()))
+            resource = cast(DynamoResource, boto3.resource("dynamodb", region_name=get_aws_region()))
+            _reference_data_repository = DynamoDbReferenceDataRepository(resource.Table(get_reference_table_name()))
     return _reference_data_repository
 
 
 def get_harmonization_cache() -> HarmonizationCache:
     global _harmonization_cache  # noqa: PLW0603 - intentional singleton
     if _harmonization_cache is None:
-        import boto3
+        if get_runtime_profile() is RuntimeProfile.PORTABLE:
+            _harmonization_cache = EmptyHarmonizationCache()
+        else:
+            import boto3
 
-        resource = cast(DynamoResource, boto3.resource("dynamodb", region_name=get_aws_region()))
-        _harmonization_cache = DynamoDbHarmonizationCache(
-            resource.Table(get_harmonization_cache_table_name())
-        )
+            resource = cast(DynamoResource, boto3.resource("dynamodb", region_name=get_aws_region()))
+            _harmonization_cache = DynamoDbHarmonizationCache(
+                resource.Table(get_harmonization_cache_table_name())
+            )
     return _harmonization_cache
 
 
@@ -156,12 +172,17 @@ def get_cde_recommender() -> CdeRecommender:
     global _cde_recommender  # noqa: PLW0603 - intentional singleton
     if _cde_recommender is None:
         region = get_aws_region()
-        _cde_recommender = CdeRecommendationAdapter(
-            BedrockCandidateRanker(BedrockCandidateRankerConfig(region)),
-            DynamoRecommendationCache(
+        cache = (
+            EmptyRecommendationCache()
+            if get_runtime_profile() is RuntimeProfile.PORTABLE
+            else DynamoRecommendationCache(
                 get_cde_recommendation_cache_table_name(),
                 region,
-            ),
+            )
+        )
+        _cde_recommender = CdeRecommendationAdapter(
+            BedrockCandidateRanker(BedrockCandidateRankerConfig(region)),
+            cache,
         )
     return _cde_recommender
 

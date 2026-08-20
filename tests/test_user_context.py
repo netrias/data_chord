@@ -59,6 +59,17 @@ async def test_local_user_fallback_is_pinned() -> None:
     assert user.user_id == LOCAL_USER_ID
 
 
+async def test_portable_profile_ignores_identity_headers(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Given the customer owns access to one shared portable installation.
+    monkeypatch.setenv("DATA_CHORD_PROFILE", "portable")
+
+    # When a caller supplies hosted identity headers.
+    user = _user_context_from_headers({ALB_IDENTITY_HEADER: "alice", ALB_DATA_HEADER: "untrusted"})
+
+    # Then the portable application keeps one fixed workflow owner.
+    assert user.user_id == LOCAL_USER_ID
+
+
 async def test_signed_alb_claims_control_workflow_ownership(monkeypatch: pytest.MonkeyPatch) -> None:
     # Given: hosted config expects one ALB signer and the request includes signed ALB claims
     alb_arn = "arn:aws:elasticloadbalancing:us-east-2:123456789012:loadbalancer/app/data-chord/abc123"

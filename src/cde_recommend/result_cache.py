@@ -51,6 +51,16 @@ class RecommendationCache(Protocol):
     async def save_many(self, entries: list[tuple[str, ColumnResult]]) -> None: ...
 
 
+class EmptyRecommendationCache:
+    """Disable recommendation persistence without changing the pipeline."""
+
+    async def load_many(self, keys: list[str]) -> dict[str, ColumnResult]:
+        return {}
+
+    async def save_many(self, entries: list[tuple[str, ColumnResult]]) -> None:
+        return None
+
+
 class DynamoRecommendationCache:
     """Run the synchronous boto3 cache adapter outside the async event loop."""
 

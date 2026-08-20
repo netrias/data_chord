@@ -184,7 +184,7 @@ sha256sum approved-reference-data.json
 Use a profile that can write to the staging reference-data table:
 
 ```bash
-AWS_PROFILE=example-data-loader uv run python scripts/reference_data.py sync \
+AWS_PROFILE=example-data-loader uv run python -m scripts.reference_data sync \
   --input approved-reference-data.json \
   --expected-sha256 <sha256-from-the-command-above> \
   --table data-chord-staging-reference-data \
@@ -199,7 +199,7 @@ service, load `NETRIAS_API_KEY` from the approved secret source. Do not type its
 value in the command. Then run:
 
 ```bash
-uv run python scripts/reference_data.py export \
+uv run python -m scripts.reference_data export \
   --environment staging \
   --output approved-reference-data.json
 ```
