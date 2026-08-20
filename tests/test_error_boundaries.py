@@ -2,16 +2,26 @@
 
 from __future__ import annotations
 
+import asyncio
+import errno
+import threading
 from pathlib import Path
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
+from starlette.types import Message, Scope
 
 from src.domain.cde import DataModelSummary, DataModelVersionInfo
 from src.domain.cde_recommendation import RecommendationUnavailableError
 from src.domain.reference_data import ReferenceDataUnavailableError
-from src.storage import WorkflowConflictError
+from src.storage import (
+    LocalWorkflowStorage,
+    UploadStorage,
+    WorkflowCleanup,
+    WorkflowConflictError,
+)
 from tests.conftest import TEST_CSV_CONTENT_TYPE, TEST_TARGET_EXTERNAL_VERSION_NUMBER, TEST_TARGET_SCHEMA, upload_file
 
 pytestmark = pytest.mark.asyncio
@@ -313,3 +323,135 @@ class TestUploadValidationErrors:
         # Then: 413 Payload Too Large response with generic user-facing detail
         assert response.status_code == 413
         assert response.json()["detail"] == GENERIC_API_ERROR_DETAIL
+
+    async def test_full_portable_storage_rejects_upload_before_writing(
+        self,
+        app_client: AsyncClient,
+        temp_storage: UploadStorage,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Given: the portable storage guard reports that its real filesystem is full.
+        workflow_storage = LocalWorkflowStorage(tmp_path / "workflow-storage")
+        cleanup = WorkflowCleanup(
+            workflow_storage,
+            temp_storage,
+            capacity_bytes=1024,
+            required_free_bytes=100,
+        )
+        monkeypatch.setattr(workflow_storage, "available_bytes", lambda: 0)
+        monkeypatch.setattr(temp_storage, "available_bytes", lambda: 0)
+        monkeypatch.setattr(
+            "src.stage_1_upload.router.dependencies.get_workflow_cleanup",
+            lambda: cleanup,
+        )
+        assert list((temp_storage._data_dir).iterdir()) == []
+
+        # When: a valid upload starts.
+        response = await app_client.post(
+            "/stage-1/upload",
+            files={"file": ("sample.csv", b"value\n1\n", TEST_CSV_CONTENT_TYPE)},
+        )
+
+        # Then: the API rejects it before writing scratch data.
+        assert response.status_code == 507
+        assert list((temp_storage._data_dir).iterdir()) == []
+
+    async def test_disk_full_during_upload_returns_storage_full(
+        self,
+        app_client: AsyncClient,
+        temp_storage: UploadStorage,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Given the preflight check passed but the scratch write reaches disk capacity.
+        monkeypatch.setattr(
+            temp_storage,
+            "store",
+            AsyncMock(side_effect=OSError(errno.ENOSPC, "disk full")),
+        )
+
+        # When a valid upload starts.
+        response = await app_client.post(
+            "/stage-1/upload",
+            files={"file": ("sample.csv", b"value\n1\n", TEST_CSV_CONTENT_TYPE)},
+        )
+
+        # Then the API reports insufficient storage instead of an internal error.
+        assert response.status_code == 507
+
+    async def test_successful_upload_runs_cleanup_failure_in_background(
+        self,
+        app_client: AsyncClient,
+        temp_storage: UploadStorage,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Given portable cleanup will wait and then fail after a successful upload.
+        workflow_storage = LocalWorkflowStorage(temp_storage._base_dir / "workflow_storage")
+        cleanup = WorkflowCleanup(workflow_storage, temp_storage, capacity_bytes=1024)
+        cleanup_started = threading.Event()
+        release_cleanup = threading.Event()
+
+        def _wait_then_fail() -> None:
+            cleanup_started.set()
+            if not release_cleanup.wait(timeout=2):
+                raise AssertionError("test did not release cleanup")
+            raise OSError("cleanup failed")
+
+        monkeypatch.setattr(cleanup, "run", _wait_then_fail)
+        monkeypatch.setattr(
+            "src.stage_1_upload.router.dependencies.get_workflow_cleanup",
+            lambda: cleanup,
+        )
+        request = app_client.build_request(
+            "POST",
+            "/stage-1/upload",
+            files={"file": ("sample.csv", b"value\n1\n", TEST_CSV_CONTENT_TYPE)},
+        )
+        request_body = await request.aread()
+        scope: Scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": request.url.path,
+            "raw_path": request.url.raw_path,
+            "query_string": request.url.query,
+            "headers": [(name.lower(), value) for name, value in request.headers.raw],
+            "client": ("127.0.0.1", 123),
+            "server": ("test", 80),
+            "root_path": "",
+        }
+        request_delivered = False
+        response_finished = asyncio.Event()
+        response_statuses: list[int] = []
+
+        async def _receive() -> Message:
+            nonlocal request_delivered
+            if not request_delivered:
+                request_delivered = True
+                return {"type": "http.request", "body": request_body, "more_body": False}
+            await asyncio.Future()
+            raise AssertionError("unreachable")
+
+        async def _send(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                response_statuses.append(message["status"])
+            if message["type"] == "http.response.body" and not message.get("more_body", False):
+                response_finished.set()
+
+        transport = cast(ASGITransport, app_client._transport)  # noqa: SLF001 - fixture application
+
+        # When the application serves the upload through its ASGI boundary.
+        application_task = asyncio.ensure_future(
+            transport.app(scope, _receive, _send),
+        )
+        await asyncio.wait_for(response_finished.wait(), timeout=2)
+        cleanup_did_start = await asyncio.to_thread(cleanup_started.wait, 2)
+
+        # Then the success response is complete while cleanup is still running.
+        assert response_statuses == [201]
+        assert cleanup_did_start
+        assert not application_task.done()
+        release_cleanup.set()
+        await asyncio.wait_for(application_task, timeout=2)

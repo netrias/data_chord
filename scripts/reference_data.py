@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export legacy reference data or synchronize one approved file to DynamoDB."""
+"""Export reference data or load one approved file into a runtime store."""
 
 from __future__ import annotations
 
@@ -24,6 +24,10 @@ from src.integrations.dynamodb_reference_data import (
     ReferenceDataImporter,
 )
 from src.integrations.reference_data_file import load_reference_models, save_reference_models
+from src.integrations.sqlite_reference_data import (
+    SqliteReferenceDataImporter,
+    SqliteReferenceDataRepository,
+)
 
 
 def main() -> None:
@@ -38,13 +42,33 @@ def main() -> None:
     sync.add_argument("--expected-sha256", required=True)
     sync.add_argument("--table", required=True)
     sync.add_argument("--region", required=True)
+    load_sqlite = commands.add_parser(
+        "load-sqlite",
+        help="Load one approved canonical file into a portable SQLite database",
+    )
+    load_sqlite.add_argument("--input", type=Path, required=True)
+    load_sqlite.add_argument("--expected-sha256", required=True)
+    load_sqlite.add_argument("--database", type=Path, required=True)
+    load_sqlite.add_argument(
+        "--replace-existing",
+        action="store_true",
+        help="Replace changed content for an existing model version",
+    )
     args = parser.parse_args()
     if args.command == "export":
         if not args.api_key:
             parser.error("export requires --api-key or NETRIAS_API_KEY")
         asyncio.run(_export(args.environment, args.api_key, args.output))
         return
-    _sync(args.input, args.expected_sha256, args.table, args.region)
+    if args.command == "sync":
+        _sync(args.input, args.expected_sha256, args.table, args.region)
+        return
+    _load_sqlite(
+        args.input,
+        args.expected_sha256,
+        args.database,
+        replace_existing=args.replace_existing,
+    )
 
 
 async def _export(environment: str, api_key: str, output: Path) -> None:
@@ -70,11 +94,7 @@ async def _export(environment: str, api_key: str, output: Path) -> None:
 
 
 def _sync(input_path: Path, expected_sha256: str, table_name: str, region: str) -> None:
-    actual_sha256 = hashlib.sha256(input_path.read_bytes()).hexdigest()
-    if actual_sha256 != expected_sha256:
-        raise RuntimeError(
-            f"Reference file SHA-256 mismatch: expected {expected_sha256}, found {actual_sha256}"
-        )
+    actual_sha256 = _require_source_digest(input_path, expected_sha256)
     models = load_reference_models(input_path)
     if not models:
         raise RuntimeError("Reference file contains no model versions")
@@ -91,6 +111,37 @@ def _sync(input_path: Path, expected_sha256: str, table_name: str, region: str) 
             f"Reference catalog has {published_count} model versions; expected {len(models)}"
         )
     print(f"Synchronized and verified {len(models)} model versions in {table_name}")
+
+
+def _load_sqlite(
+    input_path: Path,
+    expected_sha256: str,
+    database: Path,
+    *,
+    replace_existing: bool = False,
+) -> None:
+    _require_source_digest(input_path, expected_sha256)
+    models = load_reference_models(input_path)
+    if not models:
+        raise RuntimeError("Reference file contains no model versions")
+    SqliteReferenceDataImporter(database).import_models(
+        models,
+        replace_existing=replace_existing,
+    )
+    repository = SqliteReferenceDataRepository(database)
+    for model in models:
+        if repository.load_model(model.version) != model:
+            raise RuntimeError(f"Reference model did not verify: {model.version}")
+    print(f"Loaded and verified {len(models)} model versions in {database}")
+
+
+def _require_source_digest(input_path: Path, expected_sha256: str) -> str:
+    actual_sha256 = hashlib.sha256(input_path.read_bytes()).hexdigest()
+    if actual_sha256 != expected_sha256:
+        raise RuntimeError(
+            f"Reference file SHA-256 mismatch: expected {expected_sha256}, found {actual_sha256}"
+        )
+    return actual_sha256
 
 
 if __name__ == "__main__":

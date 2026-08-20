@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -87,6 +89,44 @@ def test_admin_can_read_another_users_workflow(tmp_path: Path) -> None:
     # Then: ownership does not block admin access
     assert stored is not None
     assert stored.data == {"stage": "uploaded"}
+
+
+def test_local_workflow_access_refreshes_last_accessed_time(tmp_path: Path) -> None:
+    # Given: a local workflow whose stored access time is old.
+    storage = LocalWorkflowStorage(tmp_path / "storage")
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    metadata_path = tmp_path / "storage" / "workflows" / workflow.dataset_workflow_id / "metadata.json"
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    old_access = datetime.now(UTC) - timedelta(days=2)
+    payload["created_at"] = (old_access - timedelta(hours=1)).isoformat()
+    payload["last_accessed_at"] = old_access.isoformat()
+    metadata_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    # When: the workflow is read through the local storage client.
+    storage.read_json(user, workflow.dataset_workflow_id, WorkflowFile.WORKFLOW_STATE)
+
+    # Then: the storage client records a newer access time without changing the caller contract.
+    refreshed = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert datetime.fromisoformat(refreshed["last_accessed_at"]) > old_access
+
+
+def test_local_workflow_inventory_accepts_metadata_written_before_access_tracking(tmp_path: Path) -> None:
+    # Given: workflow metadata from the earlier schema has only its creation time.
+    storage = LocalWorkflowStorage(tmp_path / "storage")
+    workflow = storage.create_workflow(UserContext(user_id="alice"), dataset_workflow_id())
+    metadata_path = tmp_path / "storage" / "workflows" / workflow.dataset_workflow_id / "metadata.json"
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    created_at = payload["created_at"]
+    del payload["last_accessed_at"]
+    metadata_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    # When: the local client inventories workflows for cleanup.
+    inventory = storage.workflow_inventory()
+
+    # Then: creation time is the compatible last-access fallback.
+    assert len(inventory.workflows) == 1
+    assert inventory.workflows[0].metadata.last_accessed_at.isoformat() == created_at
 
 
 def test_mutable_json_requires_latest_version(tmp_path: Path) -> None:

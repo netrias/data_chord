@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import cast
 
 from src.auth.user_context import current_user_context
-from src.cde_recommend.result_cache import DynamoRecommendationCache
+from src.cde_recommend.result_cache import DynamoRecommendationCache, EmptyRecommendationCache
 from src.domain.cde_recommendation import CdeRecommender
-from src.domain.harmonization_cache import HarmonizationCache
-from src.domain.reference_data import ReferenceDataRepository
+from src.domain.harmonization_cache import EmptyHarmonizationCache, HarmonizationCache
+from src.domain.reference_data import ReferenceDataError, ReferenceDataRepository
 from src.integrations.agentic_harmonize import AgenticHarmonizeConfig, AgenticHarmonizeService
 from src.integrations.bedrock_cde_ranker import (
     BedrockCandidateRanker,
@@ -24,20 +24,26 @@ from src.integrations.cde_recommendation import CdeRecommendationAdapter
 from src.integrations.dynamodb_harmonization_cache import DynamoDbHarmonizationCache
 from src.integrations.dynamodb_reference_data import DynamoDbReferenceDataRepository, DynamoResource
 from src.integrations.harmonize import HarmonizeService
+from src.integrations.sqlite_reference_data import SqliteReferenceDataRepository
 from src.paths import PROJECT_ROOT
 from src.settings import (
     ConfigurationError,
+    RuntimeProfile,
     StorageBackend,
     get_agentic_workers,
     get_aws_region,
     get_cde_recommendation_cache_table_name,
+    get_data_dir,
     get_harmonization_cache_table_name,
+    get_reference_database_path,
     get_reference_table_name,
+    get_runtime_profile,
     get_storage_backend,
     get_upload_dir,
     get_workflow_s3_bucket,
     get_workflow_s3_prefix,
     get_workflow_storage_dir,
+    get_workflow_storage_limit_bytes,
 )
 from src.storage import (
     LocalWorkflowStorage,
@@ -46,6 +52,7 @@ from src.storage import (
     UploadConstraints,
     UploadStorage,
     UserContext,
+    WorkflowCleanup,
     WorkflowStorage,
 )
 
@@ -54,10 +61,12 @@ logger = logging.getLogger(__name__)
 UPLOAD_BASE_DIR = PROJECT_ROOT / "uploads"
 DEFAULT_WORKFLOW_STORAGE_DIR = PROJECT_ROOT / "workflow_storage"
 MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024
+_UPLOAD_FREE_SPACE_RESERVE_BYTES = 4 * MAX_UPLOAD_BYTES
 
 _upload_constraints: UploadConstraints | None = None
 _storage: UploadStorage | None = None
 _workflow_storage: WorkflowStorage | None = None
+_workflow_cleanup: WorkflowCleanup | None = None
 _reference_data_repository: ReferenceDataRepository | None = None
 _harmonization_cache: HarmonizationCache | None = None
 _harmonize_service: HarmonizeService | None = None
@@ -90,6 +99,11 @@ def _upload_base_dir() -> Path:
 def get_workflow_storage() -> WorkflowStorage:
     global _workflow_storage  # noqa: PLW0603 - intentional singleton
     if _workflow_storage is None:
+        if get_runtime_profile() is RuntimeProfile.PORTABLE:
+            base_dir = get_data_dir()
+            logger.info("Initializing portable workflow storage", extra={"base_dir": str(base_dir)})
+            _workflow_storage = LocalWorkflowStorage(base_dir)
+            return _workflow_storage
         backend = get_storage_backend()
         if backend == StorageBackend.LOCAL:
             storage_dir = get_workflow_storage_dir()
@@ -113,29 +127,73 @@ def get_workflow_storage() -> WorkflowStorage:
     return _workflow_storage
 
 
+def get_workflow_cleanup() -> WorkflowCleanup | None:
+    global _workflow_cleanup  # noqa: PLW0603 - intentional singleton
+    if get_runtime_profile() is not RuntimeProfile.PORTABLE:
+        return None
+    if _workflow_cleanup is None:
+        workflow_storage = get_workflow_storage()
+        if not isinstance(workflow_storage, LocalWorkflowStorage):
+            raise ConfigurationError("Portable workflow cleanup requires local workflow storage")
+        _workflow_cleanup = WorkflowCleanup(
+            workflow_storage,
+            get_upload_storage(),
+            capacity_bytes=get_workflow_storage_limit_bytes(),
+            required_free_bytes=_UPLOAD_FREE_SPACE_RESERVE_BYTES,
+        )
+    return _workflow_cleanup
+
+
 def get_user_context() -> UserContext:
     return current_user_context()
+
+
+def validate_runtime_services() -> None:
+    """Fail portable startup before health checks can report unusable local state."""
+    if get_runtime_profile() is not RuntimeProfile.PORTABLE:
+        return
+    try:
+        summaries = get_reference_data_repository().list_models()
+    except ReferenceDataError as exc:
+        raise ConfigurationError("Portable reference database is not usable") from exc
+    if not any(summary.versions for summary in summaries):
+        raise ConfigurationError("Portable reference database contains no model versions")
+
+    try:
+        workflow_storage = get_workflow_storage()
+        if not isinstance(workflow_storage, LocalWorkflowStorage):
+            raise ConfigurationError("Portable runtime requires local workflow storage")
+        release_upload_lease = workflow_storage.acquire_upload_lease()
+        release_upload_lease()
+    except OSError as exc:
+        raise ConfigurationError(f"Portable data directory is not writable: {get_data_dir()}") from exc
 
 
 def get_reference_data_repository() -> ReferenceDataRepository:
     global _reference_data_repository  # noqa: PLW0603 - intentional singleton
     if _reference_data_repository is None:
-        import boto3
+        if get_runtime_profile() is RuntimeProfile.PORTABLE:
+            _reference_data_repository = SqliteReferenceDataRepository(get_reference_database_path())
+        else:
+            import boto3
 
-        resource = cast(DynamoResource, boto3.resource("dynamodb", region_name=get_aws_region()))
-        _reference_data_repository = DynamoDbReferenceDataRepository(resource.Table(get_reference_table_name()))
+            resource = cast(DynamoResource, boto3.resource("dynamodb", region_name=get_aws_region()))
+            _reference_data_repository = DynamoDbReferenceDataRepository(resource.Table(get_reference_table_name()))
     return _reference_data_repository
 
 
 def get_harmonization_cache() -> HarmonizationCache:
     global _harmonization_cache  # noqa: PLW0603 - intentional singleton
     if _harmonization_cache is None:
-        import boto3
+        if get_runtime_profile() is RuntimeProfile.PORTABLE:
+            _harmonization_cache = EmptyHarmonizationCache()
+        else:
+            import boto3
 
-        resource = cast(DynamoResource, boto3.resource("dynamodb", region_name=get_aws_region()))
-        _harmonization_cache = DynamoDbHarmonizationCache(
-            resource.Table(get_harmonization_cache_table_name())
-        )
+            resource = cast(DynamoResource, boto3.resource("dynamodb", region_name=get_aws_region()))
+            _harmonization_cache = DynamoDbHarmonizationCache(
+                resource.Table(get_harmonization_cache_table_name())
+            )
     return _harmonization_cache
 
 
@@ -156,12 +214,17 @@ def get_cde_recommender() -> CdeRecommender:
     global _cde_recommender  # noqa: PLW0603 - intentional singleton
     if _cde_recommender is None:
         region = get_aws_region()
-        _cde_recommender = CdeRecommendationAdapter(
-            BedrockCandidateRanker(BedrockCandidateRankerConfig(region)),
-            DynamoRecommendationCache(
+        cache = (
+            EmptyRecommendationCache()
+            if get_runtime_profile() is RuntimeProfile.PORTABLE
+            else DynamoRecommendationCache(
                 get_cde_recommendation_cache_table_name(),
                 region,
-            ),
+            )
+        )
+        _cde_recommender = CdeRecommendationAdapter(
+            BedrockCandidateRanker(BedrockCandidateRankerConfig(region)),
+            cache,
         )
     return _cde_recommender
 
@@ -169,11 +232,12 @@ def get_cde_recommender() -> CdeRecommender:
 def cleanup_services() -> None:
     """Clean up resources held by singleton services (call on app shutdown)."""
     global _cde_recommender, _harmonization_cache, _harmonize_service  # noqa: PLW0603
-    global _reference_data_repository, _workflow_storage  # noqa: PLW0603
+    global _reference_data_repository, _workflow_cleanup, _workflow_storage  # noqa: PLW0603
     _cde_recommender = None
     _harmonization_cache = None
     _harmonize_service = None
     _reference_data_repository = None
+    _workflow_cleanup = None
     _workflow_storage = None
 
 
@@ -190,4 +254,6 @@ __all__ = [
     "get_upload_storage",
     "get_user_context",
     "get_workflow_storage",
+    "get_workflow_cleanup",
+    "validate_runtime_services",
 ]

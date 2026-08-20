@@ -123,6 +123,9 @@ def create_app() -> FastAPI:
     from src.settings import validate_required_config
 
     validate_required_config()
+    from src.app.dependencies import validate_runtime_services
+
+    validate_runtime_services()
 
     app = FastAPI(title=APP_TITLE, description=APP_DESCRIPTION, lifespan=_lifespan)
     app.state.asset_version = _asset_version()

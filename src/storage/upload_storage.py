@@ -172,8 +172,9 @@ class UploadStorage:
                 total_bytes,
                 destination,
             )
-        except UnsupportedUploadError:
+        except (UnsupportedUploadError, OSError):
             destination.unlink(missing_ok=True)
+            (self._meta_dir / f"{dataset_workflow_id}.json").unlink(missing_ok=True)
             raise
 
     def _extract_upload_info(self, upload: UploadStream) -> tuple[str, str, str]:
@@ -195,6 +196,10 @@ class UploadStorage:
         except UploadTooLargeError:
             destination.unlink(missing_ok=True)
             logger.warning("Upload aborted because it was too large", extra={"destination": str(destination)})
+            raise
+        except OSError:
+            destination.unlink(missing_ok=True)
+            logger.exception("Upload write failed", extra={"destination": str(destination)})
             raise
         return total_bytes
 
@@ -303,6 +308,18 @@ class UploadStorage:
             return None
         path = self.harmonized_path_for(file_id, meta.saved_path)
         return path if path.exists() else None
+
+    def delete_workflow_files(self, file_id: DatasetWorkflowId) -> None:
+        """Delete exact scratch paths for one validated workflow identity."""
+        validated_id = dataset_workflow_id_from_value(file_id)
+        for suffix in SUPPORTED_TABULAR_SUFFIXES:
+            (self._data_dir / f"{validated_id}{suffix}").unlink(missing_ok=True)
+            (self._harmonized_dir / f"{validated_id}.harmonized{suffix}").unlink(missing_ok=True)
+        (self._meta_dir / f"{validated_id}.json").unlink(missing_ok=True)
+        (self._manifest_dir / f"{validated_id}_harmonization.parquet").unlink(missing_ok=True)
+
+    def available_bytes(self) -> int:
+        return shutil.disk_usage(self._base_dir).free
 
     def _validate_upload(self, suffix: str, content_type: str) -> None:
         if suffix not in SUPPORTED_TABULAR_SUFFIXES:

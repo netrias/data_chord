@@ -26,16 +26,20 @@ RUN --mount=type=secret,id=github_token \
 FROM public.ecr.aws/docker/library/python:3.13-slim-bookworm AS runtime
 
 ENV DATA_CHORD_UPLOAD_DIR="/tmp/data-chord/uploads" \
+    DATA_CHORD_DATA_DIR="/data" \
     FORWARDED_ALLOW_IPS="*" \
     PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1
 
-RUN useradd --create-home --shell /usr/sbin/nologin appuser
+RUN useradd --create-home --shell /usr/sbin/nologin appuser \
+    && mkdir /data \
+    && chown appuser:appuser /data
 
 WORKDIR /app
 
 COPY --from=builder /app/.venv /app/.venv
 COPY backend /app/backend
+COPY scripts /app/scripts
 COPY src /app/src
 COPY pyproject.toml README.md /app/
 
