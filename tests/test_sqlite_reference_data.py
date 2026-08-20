@@ -85,6 +85,93 @@ def test_sqlite_import_rejects_changed_content_for_a_published_version(tmp_path:
     assert SqliteReferenceDataRepository(database).load_model(_model("1").version) == _model("1")
 
 
+def test_sqlite_import_explicitly_replaces_a_published_version(tmp_path: Path) -> None:
+    # Given one published version and a corrected model with the same identity.
+    database = tmp_path / "standards.sqlite"
+    importer = SqliteReferenceDataImporter(database)
+    importer.import_models([_model("1")])
+    corrected = _model("1", description="Corrected")
+
+    # When the operator explicitly permits replacement.
+    importer.import_models([corrected], replace_existing=True)
+
+    # Then every new read returns the corrected complete model.
+    assert SqliteReferenceDataRepository(database).load_model(corrected.version) == corrected
+
+
+def test_sqlite_import_relabels_all_replaced_versions_together(tmp_path: Path) -> None:
+    # Given two published versions have the same old label.
+    database = tmp_path / "standards.sqlite"
+    importer = SqliteReferenceDataImporter(database)
+    originals = [_model("1"), _model("2")]
+    importer.import_models(originals)
+    replacements = [
+        ReferenceModel(
+            version=model.version,
+            label="Renamed model",
+            catalog=model.catalog,
+            pvs=model.pvs,
+        )
+        for model in originals
+    ]
+
+    # When the operator replaces every version in one batch.
+    importer.import_models(replacements, replace_existing=True)
+
+    # Then both versions use the new label and remain exact.
+    repository = SqliteReferenceDataRepository(database)
+    assert repository.list_models()[0].label == "Renamed model"
+    assert [repository.load_model(model.version) for model in replacements] == replacements
+
+
+def test_sqlite_import_cannot_relabel_only_some_stored_versions(tmp_path: Path) -> None:
+    # Given two published versions have the same label.
+    database = tmp_path / "standards.sqlite"
+    importer = SqliteReferenceDataImporter(database)
+    originals = [_model("1"), _model("2")]
+    importer.import_models(originals)
+    replacement = ReferenceModel(
+        version=originals[0].version,
+        label="Renamed model",
+        catalog=originals[0].catalog,
+        pvs=originals[0].pvs,
+    )
+
+    # When the operator tries to rename only one stored version.
+    with pytest.raises(SqliteReferenceImportConflictError, match="label"):
+        importer.import_models([replacement], replace_existing=True)
+
+    # Then both original versions remain exact.
+    repository = SqliteReferenceDataRepository(database)
+    assert [repository.load_model(model.version) for model in originals] == originals
+
+
+def test_failed_replacement_batch_restores_the_published_version(tmp_path: Path) -> None:
+    # Given version 1 is published before a replacement batch with a later label conflict.
+    database = tmp_path / "standards.sqlite"
+    importer = SqliteReferenceDataImporter(database)
+    original = _model("1")
+    importer.import_models([original])
+    corrected = _model("1", description="Corrected")
+    new_version = _model("2")
+    conflicting = ReferenceModel(
+        version=new_version.version,
+        label="Different label",
+        catalog=new_version.catalog,
+        pvs=new_version.pvs,
+    )
+
+    # When the later conflict fails the replacement transaction.
+    with pytest.raises(SqliteReferenceImportConflictError, match="label"):
+        importer.import_models([corrected, conflicting], replace_existing=True)
+
+    # Then the original version remains exact and the new version is absent.
+    repository = SqliteReferenceDataRepository(database)
+    assert repository.load_model(original.version) == original
+    with pytest.raises(ReferenceModelNotFoundError):
+        repository.load_model(conflicting.version)
+
+
 def test_reimporting_identical_models_is_safe(tmp_path: Path) -> None:
     # Given a standard version is already published.
     database = tmp_path / "standards.sqlite"
@@ -130,5 +217,7 @@ def test_failed_batch_import_does_not_publish_earlier_models(tmp_path: Path) -> 
         importer.import_models([_model("2"), _model("1", description="Changed")])
 
     # Then version 2 was not partly published.
+    repository = SqliteReferenceDataRepository(database)
     with pytest.raises(ReferenceModelNotFoundError):
-        SqliteReferenceDataRepository(database).load_model(_model("2").version)
+        repository.load_model(_model("2").version)
+    assert repository.load_model(_model("1").version) == _model("1")

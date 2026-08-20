@@ -159,17 +159,22 @@ def test_cleanup_skips_valid_json_with_invalid_metadata_fields(
     payload = json.loads(metadata_path.read_text(encoding="utf-8"))
     payload.update(invalid_update)
     metadata_path.write_text(json.dumps(payload), encoding="utf-8")
+    expected_usage_bytes = sum(
+        path.stat().st_size for path in invalid_dir.rglob("*") if path.is_file()
+    )
 
     # When: cleanup inventories the volume.
     result = WorkflowCleanup(
         storage,
         uploads,
-        capacity_bytes=storage.workflow_inventory().usage_bytes,
+        capacity_bytes=expected_usage_bytes,
     ).run(now=now)
 
     # Then: the malformed workflow counts toward capacity but is not deleted.
     assert invalid_dir.exists()
     assert result.deleted_workflow_ids == ()
+    assert result.usage_bytes_before == expected_usage_bytes
+    assert result.usage_bytes_after > result.target_bytes
 
 
 def test_scratch_deletion_failure_keeps_durable_workflow_for_retry(
@@ -196,14 +201,16 @@ def test_scratch_deletion_failure_keeps_durable_workflow_for_retry(
 
     monkeypatch.setattr(uploads, "delete_workflow_files", _fail_delete)
 
-    # When: cleanup tries to remove the workflow.
+    # Given the first cleanup attempt could not remove scratch data.
     first_result = cleanup.run(now=now)
-
-    # Then: durable data remains eligible, and a later cleanup can finish the deletion.
     assert first_result.deleted_workflow_ids == ()
     assert workflow_dir.exists()
     monkeypatch.setattr(uploads, "delete_workflow_files", original_delete)
+
+    # When a later cleanup retries the same workflow.
     second_result = cleanup.run(now=now)
+
+    # Then durable and scratch cleanup completes.
     assert second_result.deleted_workflow_ids == (workflow_id,)
     assert workflow_dir.exists() is False
 
@@ -223,7 +230,7 @@ def test_low_free_space_runs_cleanup_before_rejecting_upload(
     cleanup = WorkflowCleanup(
         storage,
         uploads,
-        capacity_bytes=storage.workflow_inventory().usage_bytes,
+        capacity_bytes=storage.workflow_inventory().usage_bytes * 10,
         required_free_bytes=100,
     )
     monkeypatch.setattr(storage, "available_bytes", lambda: 0 if workflow_dir.exists() else 200)
@@ -250,6 +257,9 @@ def test_upload_lease_creation_error_reports_storage_full(
 
     monkeypatch.setattr(storage, "acquire_upload_lease", _fail_lease)
 
-    # When / Then: the upload reservation reports the operator-facing storage condition.
-    with pytest.raises(WorkflowStorageFullError, match="cannot reserve"):
+    # When the upload tries to reserve the volume.
+    with pytest.raises(WorkflowStorageFullError) as raised:
         cleanup.acquire_upload_lease()
+
+    # Then it reports the operator-facing storage condition.
+    assert "cannot reserve" in str(raised.value)

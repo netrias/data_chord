@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import logging
 from collections.abc import Callable
 from pathlib import Path
@@ -133,7 +134,9 @@ async def upload_dataset(
             storage,
             meta,
         )
-    except WorkflowStorageFullError as exc:
+    except (WorkflowStorageFullError, OSError) as exc:
+        if isinstance(exc, OSError) and exc.errno not in {errno.ENOSPC, errno.EDQUOT}:
+            raise
         _log_upload_failed(user, dataset_workflow_id, "workflow_storage_full")
         raise HTTPException(
             status_code=status.HTTP_507_INSUFFICIENT_STORAGE,

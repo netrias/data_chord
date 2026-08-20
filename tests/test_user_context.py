@@ -59,15 +59,41 @@ async def test_local_user_fallback_is_pinned() -> None:
     assert user.user_id == LOCAL_USER_ID
 
 
-async def test_portable_profile_ignores_identity_headers(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Given the customer owns access to one shared portable installation.
+async def test_portable_profile_shares_workflows_across_proxy_identities(
+    app_client: AsyncClient,
+    sample_csv_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given Alice uploaded a workflow to one shared portable installation.
     monkeypatch.setenv("DATA_CHORD_PROFILE", "portable")
+    monkeypatch.setattr("src.app.dependencies._workflow_cleanup", None)
+    upload_response = await app_client.post(
+        "/stage-1/upload",
+        headers={ALB_IDENTITY_HEADER: "alice"},
+        files={
+            "file": (
+                sample_csv_path.name,
+                sample_csv_path.read_bytes(),
+                TEST_CSV_CONTENT_TYPE,
+            )
+        },
+    )
+    assert upload_response.status_code == 201
+    file_id = upload_response.json()["file_id"]
 
-    # When a caller supplies hosted identity headers.
-    user = _user_context_from_headers({ALB_IDENTITY_HEADER: "alice", ALB_DATA_HEADER: "untrusted"})
+    # When Bob uses the same workflow through the public request boundary.
+    response = await app_client.post(
+        "/stage-1/analyze",
+        headers={ALB_IDENTITY_HEADER: "bob"},
+        json={
+            "file_id": file_id,
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
+        },
+    )
 
-    # Then the portable application keeps one fixed workflow owner.
-    assert user.user_id == LOCAL_USER_ID
+    # Then the application treats both proxy identities as the shared local owner.
+    assert response.status_code == 200
 
 
 async def test_signed_alb_claims_control_workflow_ownership(monkeypatch: pytest.MonkeyPatch) -> None:

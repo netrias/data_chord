@@ -119,6 +119,9 @@ The portable profile needs one Docker image, one persistent `/data` volume,
 and AWS credentials that can call the required Bedrock models. The customer
 owns TLS, authentication, and network access to the container.
 
+Run exactly one container replica with one Uvicorn worker. Portable workflow
+files and locks do not support concurrent application processes.
+
 Load an approved reference-data export into the volume before the first run:
 
 ```bash
@@ -157,6 +160,6 @@ workflows until use is at or below 70%. A workflow accessed during the last 24
 hours is not removed. The default limit is 10 GB. Cleanup does not remove
 `/data/standards.sqlite`.
 
-To publish a changed standard, give it a new external version and run the same
-`load-sqlite` command. Existing versions cannot be replaced with different
-content.
+Run the same `load-sqlite` command to add a new standard version. To correct an
+existing model version, add `--replace-existing`. Replacement is transactional
+and takes effect immediately for every workflow that uses that model identity.

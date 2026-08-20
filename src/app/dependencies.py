@@ -14,7 +14,7 @@ from src.auth.user_context import current_user_context
 from src.cde_recommend.result_cache import DynamoRecommendationCache, EmptyRecommendationCache
 from src.domain.cde_recommendation import CdeRecommender
 from src.domain.harmonization_cache import EmptyHarmonizationCache, HarmonizationCache
-from src.domain.reference_data import ReferenceDataRepository
+from src.domain.reference_data import ReferenceDataError, ReferenceDataRepository
 from src.integrations.agentic_harmonize import AgenticHarmonizeConfig, AgenticHarmonizeService
 from src.integrations.bedrock_cde_ranker import (
     BedrockCandidateRanker,
@@ -148,6 +148,27 @@ def get_user_context() -> UserContext:
     return current_user_context()
 
 
+def validate_runtime_services() -> None:
+    """Fail portable startup before health checks can report unusable local state."""
+    if get_runtime_profile() is not RuntimeProfile.PORTABLE:
+        return
+    try:
+        summaries = get_reference_data_repository().list_models()
+    except ReferenceDataError as exc:
+        raise ConfigurationError("Portable reference database is not usable") from exc
+    if not any(summary.versions for summary in summaries):
+        raise ConfigurationError("Portable reference database contains no model versions")
+
+    try:
+        workflow_storage = get_workflow_storage()
+        if not isinstance(workflow_storage, LocalWorkflowStorage):
+            raise ConfigurationError("Portable runtime requires local workflow storage")
+        release_upload_lease = workflow_storage.acquire_upload_lease()
+        release_upload_lease()
+    except OSError as exc:
+        raise ConfigurationError(f"Portable data directory is not writable: {get_data_dir()}") from exc
+
+
 def get_reference_data_repository() -> ReferenceDataRepository:
     global _reference_data_repository  # noqa: PLW0603 - intentional singleton
     if _reference_data_repository is None:
@@ -234,4 +255,5 @@ __all__ = [
     "get_user_context",
     "get_workflow_storage",
     "get_workflow_cleanup",
+    "validate_runtime_services",
 ]

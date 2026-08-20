@@ -49,6 +49,11 @@ def main() -> None:
     load_sqlite.add_argument("--input", type=Path, required=True)
     load_sqlite.add_argument("--expected-sha256", required=True)
     load_sqlite.add_argument("--database", type=Path, required=True)
+    load_sqlite.add_argument(
+        "--replace-existing",
+        action="store_true",
+        help="Replace changed content for an existing model version",
+    )
     args = parser.parse_args()
     if args.command == "export":
         if not args.api_key:
@@ -58,7 +63,12 @@ def main() -> None:
     if args.command == "sync":
         _sync(args.input, args.expected_sha256, args.table, args.region)
         return
-    _load_sqlite(args.input, args.expected_sha256, args.database)
+    _load_sqlite(
+        args.input,
+        args.expected_sha256,
+        args.database,
+        replace_existing=args.replace_existing,
+    )
 
 
 async def _export(environment: str, api_key: str, output: Path) -> None:
@@ -103,12 +113,21 @@ def _sync(input_path: Path, expected_sha256: str, table_name: str, region: str) 
     print(f"Synchronized and verified {len(models)} model versions in {table_name}")
 
 
-def _load_sqlite(input_path: Path, expected_sha256: str, database: Path) -> None:
+def _load_sqlite(
+    input_path: Path,
+    expected_sha256: str,
+    database: Path,
+    *,
+    replace_existing: bool = False,
+) -> None:
     _require_source_digest(input_path, expected_sha256)
     models = load_reference_models(input_path)
     if not models:
         raise RuntimeError("Reference file contains no model versions")
-    SqliteReferenceDataImporter(database).import_models(models)
+    SqliteReferenceDataImporter(database).import_models(
+        models,
+        replace_existing=replace_existing,
+    )
     repository = SqliteReferenceDataRepository(database)
     for model in models:
         if repository.load_model(model.version) != model:

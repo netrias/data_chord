@@ -114,28 +114,30 @@ class SqliteReferenceDataImporter:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         _initialize_database(path)
 
-    def import_models(self, models: Sequence[ReferenceModel]) -> None:
-        identities = [model.version for model in models]
-        if len(identities) != len(set(identities)):
-            raise SqliteReferenceImportConflictError("Reference import contains duplicate model versions")
+    def import_models(
+        self,
+        models: Sequence[ReferenceModel],
+        *,
+        replace_existing: bool = False,
+    ) -> None:
+        _validate_import_batch(models)
         try:
             with closing(_connect(self._path)) as connection, connection:
-                for model in models:
-                    self._import_model(connection, model)
+                versions_to_replace, models_to_publish = _plan_import(
+                    connection,
+                    models,
+                    replace_existing=replace_existing,
+                )
+                for version in versions_to_replace:
+                    self._delete_model(connection, version)
+                for model in models_to_publish:
+                    self._publish_model(connection, model)
         except SqliteReferenceImportConflictError:
             raise
         except sqlite3.DatabaseError as exc:
             raise ReferenceDataUnavailableError("Reference data could not be imported") from exc
 
-    def _import_model(self, connection: sqlite3.Connection, model: ReferenceModel) -> None:
-        existing = _load_optional_model(connection, model.version)
-        if existing is not None:
-            if existing != model:
-                raise SqliteReferenceImportConflictError(
-                    "Reference model version is already published with different content: "
-                    f"{model.version.data_model_key}/{model.version.external_version_number}"
-                )
-            return
+    def _publish_model(self, connection: sqlite3.Connection, model: ReferenceModel) -> None:
         label_row = connection.execute(
             "SELECT label FROM data_models WHERE data_model_key = ? LIMIT 1",
             (model.version.data_model_key,),
@@ -166,6 +168,61 @@ class SqliteReferenceDataImporter:
                 """,
                 [(*identity, cde.cde_key, value) for value in sorted(model.pvs.get(cde.cde_key) or ())],
             )
+
+    def _delete_model(
+        self,
+        connection: sqlite3.Connection,
+        version: DataModelVersionReference,
+    ) -> None:
+        identity = (version.data_model_key, version.external_version_number)
+        connection.execute(
+            "DELETE FROM permissible_values WHERE data_model_key = ? AND external_version_number = ?",
+            identity,
+        )
+        connection.execute(
+            "DELETE FROM cdes WHERE data_model_key = ? AND external_version_number = ?",
+            identity,
+        )
+        connection.execute(
+            "DELETE FROM data_models WHERE data_model_key = ? AND external_version_number = ?",
+            identity,
+        )
+
+
+def _validate_import_batch(models: Sequence[ReferenceModel]) -> None:
+    identities = [model.version for model in models]
+    if len(identities) != len(set(identities)):
+        raise SqliteReferenceImportConflictError("Reference import contains duplicate model versions")
+    labels: dict[str, str] = {}
+    for model in models:
+        published_label = labels.setdefault(model.version.data_model_key, model.label)
+        if published_label != model.label:
+            raise SqliteReferenceImportConflictError(
+                f"Reference import contains conflicting labels: {model.version.data_model_key}"
+            )
+
+
+def _plan_import(
+    connection: sqlite3.Connection,
+    models: Sequence[ReferenceModel],
+    *,
+    replace_existing: bool,
+) -> tuple[list[DataModelVersionReference], list[ReferenceModel]]:
+    versions_to_replace: list[DataModelVersionReference] = []
+    models_to_publish: list[ReferenceModel] = []
+    for model in models:
+        existing = _load_optional_model(connection, model.version)
+        if existing == model:
+            continue
+        if existing is not None:
+            if not replace_existing:
+                raise SqliteReferenceImportConflictError(
+                    "Reference model version is already published with different content: "
+                    f"{model.version.data_model_key}/{model.version.external_version_number}"
+                )
+            versions_to_replace.append(model.version)
+        models_to_publish.append(model)
+    return versions_to_replace, models_to_publish
 
 
 def _connect(path: Path) -> sqlite3.Connection:

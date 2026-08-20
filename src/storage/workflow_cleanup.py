@@ -60,7 +60,7 @@ class WorkflowCleanup:
             return
         if self._available_write_bytes() >= self._required_free_bytes:
             return
-        self.run_safely()
+        self._run(emergency=True)
         if self._available_write_bytes() < self._required_free_bytes:
             raise WorkflowStorageFullError("Not enough disk space is available for another upload")
 
@@ -84,13 +84,23 @@ class WorkflowCleanup:
             logger.exception("Portable workflow cleanup failed")
 
     def run(self, now: datetime | None = None) -> WorkflowCleanupResult:
+        return self._run(now=now, emergency=False)
+
+    def _run(
+        self,
+        now: datetime | None = None,
+        *,
+        emergency: bool,
+    ) -> WorkflowCleanupResult:
         cleanup_time = now or datetime.now(UTC)
         if cleanup_time.utcoffset() is None:
             raise ValueError("Cleanup time must include a timezone")
         target_bytes = self._threshold_bytes(_TARGET_PERCENT)
         with self._workflow_storage.try_cleanup_lease() as acquired:
             inventory = self._workflow_storage.workflow_inventory()
-            if not acquired or inventory.usage_bytes <= self._threshold_bytes(_HIGH_WATER_PERCENT):
+            below_high_water = inventory.usage_bytes <= self._threshold_bytes(_HIGH_WATER_PERCENT)
+            enough_free_space = self._available_write_bytes() >= self._required_free_bytes
+            if not acquired or (emergency and enough_free_space) or (not emergency and below_high_water):
                 return WorkflowCleanupResult(
                     usage_bytes_before=inventory.usage_bytes,
                     usage_bytes_after=inventory.usage_bytes,
@@ -101,7 +111,10 @@ class WorkflowCleanup:
             usage_bytes = inventory.usage_bytes
             deleted_ids: list[DatasetWorkflowId] = []
             for candidate in self._eligible_workflows(inventory.workflows, cleanup_time):
-                if usage_bytes <= target_bytes:
+                if emergency:
+                    if self._available_write_bytes() >= self._required_free_bytes:
+                        break
+                elif usage_bytes <= target_bytes:
                     break
                 try:
                     deleted = self._workflow_storage.delete_workflow_if_last_accessed(
