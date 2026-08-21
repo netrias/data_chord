@@ -8,8 +8,9 @@ import json
 import re
 import sys
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import Enum
 from pathlib import Path
+from typing import Union
 from urllib.parse import urlsplit
 
 _FIELDS = {
@@ -51,7 +52,7 @@ class EnvironmentError(ValueError):
     """The deployment environment is missing, unsafe, or malformed."""
 
 
-class DeploymentRoot(StrEnum):
+class DeploymentRoot(str, Enum):
     FULL = "full"
     CUSTOMER_PLATFORM = "customer-platform"
 
@@ -138,7 +139,8 @@ class CustomerPlatformEnvironment:
         }
 
 
-SelectedEnvironment = Environment | CustomerPlatformEnvironment
+# Deployment scripts also run with the macOS system Python 3.9.
+SelectedEnvironment = Union[Environment, CustomerPlatformEnvironment]  # noqa: UP007
 
 
 def load_environment(path: Path, target: str, stage: str) -> Environment:

@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export DEPLOYMENT_ROOT=full
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
@@ -49,8 +50,20 @@ common_checks() {
   require_deployable_git_state
   assume_deployer_role
   verify_foundation_contract
+  reject_customer_platform_state
   init_tofu
   create_plan_directory
+}
+
+reject_customer_platform_state() {
+  local bucket customer_key output
+  bucket="$(environment_value state_bucket_name)"
+  customer_key="datachord/$TARGET_NAME/$STAGE_NAME/customer-platform/tofu.tfstate"
+  if output="$(aws s3api head-object --bucket "$bucket" --key "$customer_key" 2>&1)"; then
+    fail "Customer-platform state already exists for $TARGET_NAME/$STAGE_NAME. Use one deployment root."
+  fi
+  [[ "$output" == *"404"* || "$output" == *"Not Found"* || "$output" == *"NoSuchKey"* ]] ||
+    fail "Could not check for customer-platform state: $output"
 }
 
 state_identity() {
@@ -78,6 +91,7 @@ receipt_create() {
     --environment "$ENVIRONMENT_FILE" \
     --target "$TARGET_NAME" \
     --stage "$STAGE_NAME" \
+    --deployment-root "$DEPLOYMENT_ROOT" \
     --commit "$COMMIT" \
     --state "$state_path" \
     --plan-json "$plan_json"
@@ -91,6 +105,7 @@ receipt_validate() {
     --environment "$ENVIRONMENT_FILE" \
     --target "$TARGET_NAME" \
     --stage "$STAGE_NAME" \
+    --deployment-root "$DEPLOYMENT_ROOT" \
     --commit "$COMMIT" \
     --state "$state_path" \
     --expected-status "$expected_status"
@@ -297,6 +312,7 @@ run_deploy() {
   common_checks
   state_path="$(state_identity)"
   receipt_validate "$state_path" planned
+  claim_deployment_root
   receipt_status planned in_progress
   apply_prerequisites
   ensure_image

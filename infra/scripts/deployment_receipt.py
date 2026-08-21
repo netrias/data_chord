@@ -46,10 +46,19 @@ _PREREQUISITE_ADDRESSES = {
     "aws_ecr_repository.app",
     "aws_iam_role.application_build",
     "aws_iam_role_policy.application_build",
-    "aws_s3_bucket.workflow",
+    "module.data_plane.aws_s3_bucket.workflow",
 }
 _SAFE_REPLACEMENTS = {
     "aws_ecs_task_definition.application": ["delete", "create"],
+}
+_CUSTOMER_PLATFORM_ADDRESSES = {
+    "data.aws_caller_identity.current",
+    "data.aws_partition.current",
+    "module.data_plane.aws_dynamodb_table.cde_recommendation_cache",
+    "module.data_plane.aws_dynamodb_table.harmonization_cache",
+    "module.data_plane.aws_dynamodb_table.reference_data",
+    "module.data_plane.aws_s3_bucket.workflow",
+    "module.data_plane.aws_s3_bucket_public_access_block.workflow",
 }
 
 
@@ -81,6 +90,8 @@ def create_receipt(
     environment = load_selected_environment(environment_path, target, stage, deployment_root)
     forecast = _forecast(plan_json_path)
     _reject_destructive_changes(forecast)
+    if deployment_root is DeploymentRoot.CUSTOMER_PLATFORM:
+        _require_customer_platform_forecast(forecast)
     document: dict[str, object] = {
         "schema_version": RECEIPT_SCHEMA_VERSION,
         "status": "planned",
@@ -316,6 +327,15 @@ def _parser() -> argparse.ArgumentParser:
     invalidate = commands.add_parser("invalidate")
     invalidate.add_argument("--receipt", type=Path, required=True)
     return parser
+
+
+def _require_customer_platform_forecast(
+    changes: list[dict[str, object]],
+) -> None:
+    for change in changes:
+        address = cast(str, change["address"])
+        if address not in _CUSTOMER_PLATFORM_ADDRESSES:
+            raise ReceiptError(f"customer-platform plan contains unexpected resource: {address}")
 
 
 def _main(arguments: list[str]) -> int:

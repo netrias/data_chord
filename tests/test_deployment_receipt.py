@@ -263,6 +263,39 @@ def test_customer_platform_receipt_uses_its_own_state_identity(
     assert document["repository_url"] is None
 
 
+def test_customer_platform_receipt_rejects_resources_outside_its_data_plane(
+    tmp_path: Path,
+) -> None:
+    # Given a customer-platform plan tries to create an IAM role.
+    handoff = _handoff(tmp_path)
+    plan = _plan(tmp_path, {"aws_iam_role.application": ["create"]})
+
+    # When the bounded receipt is created.
+    result = _run(
+        "create",
+        "--receipt",
+        tmp_path / "receipt.json",
+        "--environment",
+        handoff,
+        "--target",
+        "netrias",
+        "--stage",
+        "staging",
+        "--deployment-root",
+        "customer-platform",
+        "--commit",
+        COMMIT,
+        "--state",
+        "-",
+        "--plan-json",
+        plan,
+    )
+
+    # Then deployment stops before any resource can be applied.
+    assert result.returncode == 2
+    assert "unexpected resource: aws_iam_role.application" in result.stderr
+
+
 def _create(receipt: Path, environment: Path, state: Path, plan: Path) -> None:
     result = _run(
         "create",
