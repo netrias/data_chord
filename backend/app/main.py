@@ -181,17 +181,21 @@ async def _bind_user_context(request: Request, call_next: Callable[[Request], Aw
     user_id: str | None = None
     user_token = None
     try:
-        try:
-            user_token = bind_user_context(request.headers)
-            user_id = current_user_context().user_id
-        except InvalidUserContextError:
-            status_code = 401
-            response = Response("Invalid identity headers", status_code=status_code)
-        else:
-            # ContextVar keeps route signatures clean while still scoping storage
-            # authorization to the current request.
+        if request.url.path == "/healthz":
             response = await call_next(request)
             status_code = response.status_code
+        else:
+            try:
+                user_token = bind_user_context(request.headers)
+                user_id = current_user_context().user_id
+            except InvalidUserContextError:
+                status_code = 401
+                response = Response("Invalid identity headers", status_code=status_code)
+            else:
+                # ContextVar keeps route signatures clean while still scoping storage
+                # authorization to the current request.
+                response = await call_next(request)
+                status_code = response.status_code
         response.headers[REQUEST_ID_HEADER] = request_id
         return response
     finally:
