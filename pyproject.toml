@@ -29,7 +29,7 @@ dev = [
     "hypothesis>=6.100",
     "bandit>=1.7",
     "pip-audit>=2.7",
-    "pip>=26.1.2",  # CVE remediation for the audited virtualenv pip package
+    "pip>=26.2",  # CVE remediation for the audited virtualenv pip package
     "pre-commit>=3.8",
     # transitive dep pin for security (CVE remediation)
     "filelock>=3.20.1",  # CVE-2025-68146 (via virtualenv/pre-commit)
