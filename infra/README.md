@@ -1,6 +1,6 @@
 # Data Chord AWS infrastructure
 
-This directory owns the application infrastructure. The separate
+This directory owns two application infrastructure roots. The separate
 [`datachord-infrastructure`](https://github.com/netrias/datachord-infrastructure)
 repository owns the AWS account foundation.
 
@@ -16,7 +16,7 @@ The account foundation provides:
 - the application-role permission boundary; and
 - the `/application/` IAM path.
 
-This directory provides:
+The full root in `infra/` provides:
 
 - the application VPC, load balancer, DNS record, certificate, and Cognito;
 - ECS, ECR, CodeBuild, CloudWatch logs, and their IAM roles;
@@ -26,6 +26,17 @@ This directory provides:
 
 The foundation does not deploy application resources. The application
 deployment does not create or change the foundation.
+
+The `infra/customer-platform/` root creates only the shared data-plane module:
+
+- one workflow S3 bucket;
+- one S3 public-access block; and
+- three DynamoDB tables.
+
+It creates no IAM role, network, compute, registry, TLS, authentication, or
+logging resource. It reads the foundation schema-v2 handoff directly and uses
+`datachord/<target>/<stage>/customer-platform/tofu.tfstate`. Its outputs give
+the customer the runtime environment and policies for customer-owned roles.
 
 ## Environment contract
 

@@ -11,7 +11,7 @@ import pytest
 from httpx import AsyncClient
 
 from src.app.session_cache import clear_all_session_caches
-from src.auth.user_context import ALB_IDENTITY_HEADER
+from src.auth.user_context import TRUSTED_PROXY_USER_HEADER
 from src.storage import UploadStorage
 from tests.conftest import (
     TEST_TARGET_SCHEMA,
@@ -266,8 +266,8 @@ async def test_reharmonize_cannot_clear_another_users_overrides(
 
     # Given: Alice owns a workflow with saved review overrides
     rows = [["col_a"], ["alpha"], ["beta"]]
-    alice_headers = {ALB_IDENTITY_HEADER: "alice"}
-    bob_headers = {ALB_IDENTITY_HEADER: "bob"}
+    alice_headers = {TRUSTED_PROXY_USER_HEADER: "alice"}
+    bob_headers = {TRUSTED_PROXY_USER_HEADER: "bob"}
     upload_response = await app_client.post(
         "/stage-1/upload",
         headers=alice_headers,

@@ -93,8 +93,16 @@ resource "aws_ecs_task_definition" "application" {
           value = "s3"
         },
         {
+          name  = "DATA_CHORD_PROFILE"
+          value = "hosted"
+        },
+        {
+          name  = "DATA_CHORD_IDENTITY_SOURCE"
+          value = "signed_alb"
+        },
+        {
           name  = "DATA_CHORD_S3_BUCKET"
-          value = aws_s3_bucket.workflow.bucket
+          value = module.data_plane.workflow_bucket_name
         },
         {
           name  = "DATA_CHORD_S3_PREFIX"
@@ -102,15 +110,15 @@ resource "aws_ecs_task_definition" "application" {
         },
         {
           name  = "DATA_CHORD_REFERENCE_TABLE"
-          value = aws_dynamodb_table.reference_data.name
+          value = module.data_plane.reference_data_table_name
         },
         {
           name  = "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE"
-          value = aws_dynamodb_table.cde_recommendation_cache.name
+          value = module.data_plane.cde_recommendation_cache_table_name
         },
         {
           name  = "DATA_CHORD_HARMONIZATION_CACHE_TABLE"
-          value = aws_dynamodb_table.harmonization_cache.name
+          value = module.data_plane.harmonization_cache_table_name
         },
         {
           name  = "DATA_CHORD_AGENTIC_WORKERS"

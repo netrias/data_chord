@@ -9,6 +9,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 import src.app.dependencies as dependencies
+from src.auth.user_context import TRUSTED_PROXY_USER_HEADER
 from src.observability.events import (
     REQUEST_ID_HEADER,
     WorkflowEvent,
@@ -238,7 +239,11 @@ async def test_stage1_upload_logs_failure_after_file_storage(
     from backend.app.main import create_app
 
     transport = ASGITransport(app=create_app(), raise_app_exceptions=False)
-    async with AsyncClient(transport=transport, base_url="http://test") as non_raising_client:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={TRUSTED_PROXY_USER_HEADER: "test-user"},
+    ) as non_raising_client:
         response = await non_raising_client.post(
             "/stage-1/upload",
             files={"file": ("observability.csv", content, TEST_CSV_CONTENT_TYPE)},

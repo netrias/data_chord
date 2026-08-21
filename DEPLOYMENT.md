@@ -1,7 +1,112 @@
 # Deploy Data Chord
 
-This guide deploys one Data Chord environment. It uses one complete example so
-that you can see each file name and command.
+Data Chord has three deployment offers:
+
+| Offer | Data profile | Data Chord creates | Customer creates |
+| --- | --- | --- | --- |
+| Portable | `portable` | One container image | Compute, one `/data` volume, network, TLS, and access control |
+| Customer platform | `hosted` | Workflow S3 storage and three DynamoDB tables | Registry, compute, network, TLS, authentication, logs, and workload roles |
+| Full AWS | `hosted` | The complete AWS application stack | The account foundation and external prerequisites |
+
+Portable does not use the foundation repository. Customer platform and full
+AWS use the state bucket and deployer role from the foundation handoff. Do not
+use customer platform and full AWS for the same target and stage.
+
+## Customer-platform deployment
+
+Use this offer when the end provider already owns its application platform and
+authentication system.
+
+### AWS resources created
+
+The customer-platform OpenTofu root creates exactly five managed AWS
+resources. They use only two AWS services:
+
+- Amazon S3: one private workflow bucket and its public-access block.
+- Amazon DynamoDB: one reference and permissible-values table, one
+  harmonization-cache table, and one CDE-recommendation-cache table.
+
+It does not create IAM roles or policies, ECR, ECS, EC2, Lambda, VPC resources,
+load balancers, API Gateway, Route 53, ACM, Cognito, Secrets Manager,
+CodeBuild, or CloudWatch log groups. It outputs policy JSON. The customer can
+attach this JSON to customer-owned roles.
+
+### Plan and deploy the data plane
+
+Create the foundation first. Use its schema-v2 handoff file directly:
+
+```bash
+AWS_PROFILE=example-admin just customer-plan \
+  example staging ../datachord-infrastructure/.plans/example-foundation-handoff.json
+
+AWS_PROFILE=example-admin just customer-deploy \
+  example staging ../datachord-infrastructure/.plans/example-foundation-handoff.json
+```
+
+The state key is
+`datachord/example/staging/customer-platform/tofu.tfstate`. The deploy command
+stops if full-deployment state exists at
+`datachord/example/staging/tofu.tfstate`.
+
+After deployment, read the saved
+`.plans/example-staging-customer-platform-outputs.json` file. It contains:
+
+- `runtime_environment`: the complete non-secret container configuration;
+- `runtime_data_policy_json`: S3 and DynamoDB access for the workload role;
+- `bedrock_policy_json`: optional Bedrock Mantle access; and
+- `reference_loader_policy_json`: write access for a separate data-loader role.
+
+### Host and run the image
+
+The end provider should host the image in a registry that its compute platform
+can read. In AWS, use a customer-owned ECR repository. Kubernetes can also use
+a customer-owned private OCI registry. The registry does not need network
+access to S3 or DynamoDB. The running workload needs that access.
+
+Build the exact reviewed commit and push it to the customer registry:
+
+```bash
+GITHUB_TOKEN=$(gh auth token)
+docker buildx build \
+  --secret id=github_token,env=GITHUB_TOKEN \
+  --tag 123456789012.dkr.ecr.us-east-2.amazonaws.com/data-chord:<full-git-commit> \
+  --push .
+```
+
+Use short-lived registry credentials. The token is a build secret and must not
+be stored in an image layer.
+
+Run one container replica with one Uvicorn worker. The customer must provide:
+
+- a workload role with the output policies;
+- network routes or private endpoints for S3, DynamoDB, STS, and required
+  Bedrock services;
+- writable temporary storage;
+- TLS, request limits, logs, monitoring, and restart behavior; and
+- an authentication proxy that removes any client-supplied
+  `X-Data-Chord-User-ID` header, authenticates the request, and sets exactly
+  one trusted header value. The value must be a stable, immutable subject, not
+  an email address or display name.
+
+The container must accept inbound application traffic only from this proxy. A
+client must not have any direct network path to the container.
+
+The application uses `DATA_CHORD_IDENTITY_SOURCE=trusted_proxy`. It rejects a
+missing, blank, duplicate, comma-separated, or control-character identity.
+Only `/healthz` works without identity.
+
+The customer owns S3 backup and recovery. The two durable DynamoDB tables use
+point-in-time recovery and deletion protection. The CDE cache uses expiry and
+can be rebuilt.
+
+Load and verify the approved reference data with the command in section 6
+before you expose the service. Use a separate customer-owned loader role and
+the table name from `runtime_environment`.
+
+## Full AWS deployment
+
+The rest of this guide describes the full AWS offer. It uses one complete
+example so that you can see each file name and command.
 
 The example uses:
 

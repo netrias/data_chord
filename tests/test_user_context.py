@@ -11,27 +11,30 @@ import pytest
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, utils
 from httpx import AsyncClient
+from starlette.datastructures import Headers
 
 from src.auth.user_context import (
     ALB_DATA_HEADER,
     ALB_IDENTITY_HEADER,
     LOCAL_USER_ID,
+    TRUSTED_PROXY_USER_HEADER,
     InvalidUserContextError,
     _user_context_from_headers,
+    current_user_context,
 )
 from tests.conftest import TEST_CSV_CONTENT_TYPE, TEST_TARGET_SCHEMA
 
 pytestmark = pytest.mark.asyncio
 
 
-async def test_alb_identity_header_controls_workflow_ownership(
+async def test_trusted_proxy_identity_controls_workflow_ownership(
     app_client: AsyncClient,
     sample_csv_path: Path,
 ) -> None:
     # Given: Alice uploaded a workflow and Bob has not been granted access
     upload_response = await app_client.post(
         "/stage-1/upload",
-        headers={ALB_IDENTITY_HEADER: "alice"},
+        headers={TRUSTED_PROXY_USER_HEADER: "alice"},
         files={"file": (sample_csv_path.name, sample_csv_path.read_bytes(), TEST_CSV_CONTENT_TYPE)},
     )
     assert upload_response.status_code == 201
@@ -40,7 +43,7 @@ async def test_alb_identity_header_controls_workflow_ownership(
     # When: Bob tries to analyze Alice's upload by guessing the file id
     response = await app_client.post(
         "/stage-1/analyze",
-        headers={ALB_IDENTITY_HEADER: "bob"},
+        headers={TRUSTED_PROXY_USER_HEADER: "bob"},
         json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
     )
 
@@ -48,8 +51,10 @@ async def test_alb_identity_header_controls_workflow_ownership(
     assert response.status_code == 403
 
 
-async def test_local_user_fallback_is_pinned() -> None:
+async def test_shared_identity_is_pinned(monkeypatch: pytest.MonkeyPatch) -> None:
     # Given: no request identity headers are present
+    monkeypatch.setenv("DATA_CHORD_PROFILE", "portable")
+    monkeypatch.setenv("DATA_CHORD_IDENTITY_SOURCE", "shared")
     assert _user_context_from_headers({}).user_id != ""
 
     # When: local/test code asks for the request user
@@ -66,6 +71,7 @@ async def test_portable_profile_shares_workflows_across_proxy_identities(
 ) -> None:
     # Given Alice uploaded a workflow to one shared portable installation.
     monkeypatch.setenv("DATA_CHORD_PROFILE", "portable")
+    monkeypatch.setenv("DATA_CHORD_IDENTITY_SOURCE", "shared")
     monkeypatch.setattr("src.app.dependencies._workflow_cleanup", None)
     upload_response = await app_client.post(
         "/stage-1/upload",
@@ -103,6 +109,7 @@ async def test_signed_alb_claims_control_workflow_ownership(monkeypatch: pytest.
     public_key = private_key.public_key()
     token = _signed_alb_token(private_key, alb_arn, {"sub": "alice", "email": "alice@example.test"})
     monkeypatch.setenv("DATA_CHORD_ALB_ARN", alb_arn)
+    monkeypatch.setenv("DATA_CHORD_IDENTITY_SOURCE", "signed_alb")
     monkeypatch.setattr("src.auth.user_context._public_key_for_header", lambda _key_id, _signer: public_key)
 
     # When: the app binds user context from headers
@@ -119,6 +126,7 @@ async def test_hosted_identity_header_requires_signed_alb_claims(monkeypatch: py
         "DATA_CHORD_ALB_ARN",
         "arn:aws:elasticloadbalancing:us-east-2:123456789012:loadbalancer/app/data-chord/abc123",
     )
+    monkeypatch.setenv("DATA_CHORD_IDENTITY_SOURCE", "signed_alb")
 
     # When / Then: a caller cannot spoof identity with the unsigned identity header alone
     with pytest.raises(InvalidUserContextError):
@@ -132,11 +140,65 @@ async def test_signed_alb_claims_must_match_identity_header(monkeypatch: pytest.
     public_key = private_key.public_key()
     token = _signed_alb_token(private_key, alb_arn, {"sub": "alice"})
     monkeypatch.setenv("DATA_CHORD_ALB_ARN", alb_arn)
+    monkeypatch.setenv("DATA_CHORD_IDENTITY_SOURCE", "signed_alb")
     monkeypatch.setattr("src.auth.user_context._public_key_for_header", lambda _key_id, _signer: public_key)
 
     # When / Then: the mismatch is rejected instead of trusting the spoofable value
     with pytest.raises(InvalidUserContextError):
         _user_context_from_headers({ALB_DATA_HEADER: token, ALB_IDENTITY_HEADER: "bob"})
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        Headers(),
+        Headers({TRUSTED_PROXY_USER_HEADER: ""}),
+        Headers(
+            raw=[
+                (TRUSTED_PROXY_USER_HEADER.encode(), b"alice"),
+                (TRUSTED_PROXY_USER_HEADER.encode(), b"bob"),
+            ]
+        ),
+        Headers({TRUSTED_PROXY_USER_HEADER: "alice\nadmin"}),
+    ],
+)
+async def test_trusted_proxy_rejects_missing_or_ambiguous_identity(
+    headers: Headers,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given trusted-proxy mode receives no single safe identity value.
+    monkeypatch.setenv("DATA_CHORD_IDENTITY_SOURCE", "trusted_proxy")
+
+    # When / Then the request boundary rejects it before creating user context.
+    with pytest.raises(InvalidUserContextError):
+        _user_context_from_headers(headers)
+
+
+async def test_unbound_trusted_proxy_context_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given a hosted process uses trusted-proxy identity with no bound request.
+    monkeypatch.setenv("DATA_CHORD_IDENTITY_SOURCE", "trusted_proxy")
+
+    # When / Then trusted code cannot silently become the shared local user.
+    with pytest.raises(InvalidUserContextError):
+        current_user_context()
+
+
+async def test_health_check_bypasses_invalid_identity_only(
+    app_client: AsyncClient,
+) -> None:
+    # Given a trusted-proxy request has an invalid blank identity.
+    invalid_identity = {TRUSTED_PROXY_USER_HEADER: ""}
+
+    # When the caller checks health and then requests a business page.
+    health = await app_client.get("/healthz", headers=invalid_identity)
+    business = await app_client.get("/", headers=invalid_identity, follow_redirects=False)
+
+    # Then health remains usable, but the business route fails closed.
+    assert health.status_code == 200
+    assert health.json() == {"status": "ok"}
+    assert business.status_code == 401
 
 
 def _signed_alb_token(

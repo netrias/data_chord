@@ -11,13 +11,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from environment import EnvironmentError, canonical_digest, load_environment
+from environment import (
+    DeploymentRoot,
+    Environment,
+    EnvironmentError,
+    canonical_digest,
+    load_selected_environment,
+)
 
-RECEIPT_SCHEMA_VERSION = 2
+RECEIPT_SCHEMA_VERSION = 3
 _RECEIPT_FIELDS = {
     "account_id",
     "commit",
     "config_digest",
+    "deployment_root",
     "forecast",
     "partition",
     "region",
@@ -39,10 +46,19 @@ _PREREQUISITE_ADDRESSES = {
     "aws_ecr_repository.app",
     "aws_iam_role.application_build",
     "aws_iam_role_policy.application_build",
-    "aws_s3_bucket.workflow",
+    "module.data_plane.aws_s3_bucket.workflow",
 }
 _SAFE_REPLACEMENTS = {
     "aws_ecs_task_definition.application": ["delete", "create"],
+}
+_CUSTOMER_PLATFORM_ADDRESSES = {
+    "data.aws_caller_identity.current",
+    "data.aws_partition.current",
+    "module.data_plane.aws_dynamodb_table.cde_recommendation_cache",
+    "module.data_plane.aws_dynamodb_table.harmonization_cache",
+    "module.data_plane.aws_dynamodb_table.reference_data",
+    "module.data_plane.aws_s3_bucket.workflow",
+    "module.data_plane.aws_s3_bucket_public_access_block.workflow",
 }
 
 
@@ -66,18 +82,22 @@ def create_receipt(
     environment_path: Path,
     target: str,
     stage: str,
+    deployment_root: DeploymentRoot,
     commit: str,
     state_path: Path | None,
     plan_json_path: Path,
 ) -> None:
-    environment = load_environment(environment_path, target, stage)
+    environment = load_selected_environment(environment_path, target, stage, deployment_root)
     forecast = _forecast(plan_json_path)
     _reject_destructive_changes(forecast)
+    if deployment_root is DeploymentRoot.CUSTOMER_PLATFORM:
+        _require_customer_platform_forecast(forecast)
     document: dict[str, object] = {
         "schema_version": RECEIPT_SCHEMA_VERSION,
         "status": "planned",
         "target": target,
         "stage": stage,
+        "deployment_root": deployment_root.value,
         "config_digest": canonical_digest(environment),
         "commit": _commit(commit),
         "account_id": environment.account_id,
@@ -85,7 +105,7 @@ def create_receipt(
         "region": environment.region,
         "state_bucket_name": environment.state_bucket_name,
         "state_key": environment.state_key,
-        "repository_url": environment.application_repository_url,
+        "repository_url": _repository_url(environment),
         "state": _state_identity(state_path).document(),
         "forecast": forecast,
     }
@@ -97,16 +117,18 @@ def validate_receipt(
     environment_path: Path,
     target: str,
     stage: str,
+    deployment_root: DeploymentRoot,
     commit: str,
     state_path: Path | None,
     expected_status: str,
 ) -> None:
     document = _load_receipt(receipt_path)
-    environment = load_environment(environment_path, target, stage)
+    environment = load_selected_environment(environment_path, target, stage, deployment_root)
     expected: dict[str, object] = {
         "status": expected_status,
         "target": target,
         "stage": stage,
+        "deployment_root": deployment_root.value,
         "config_digest": canonical_digest(environment),
         "commit": _commit(commit),
         "account_id": environment.account_id,
@@ -114,7 +136,7 @@ def validate_receipt(
         "region": environment.region,
         "state_bucket_name": environment.state_bucket_name,
         "state_key": environment.state_key,
-        "repository_url": environment.application_repository_url,
+        "repository_url": _repository_url(environment),
         "state": _state_identity(state_path).document(),
     }
     for key, value in expected.items():
@@ -151,10 +173,7 @@ def invalidate_receipt(receipt_path: Path) -> None:
     try:
         document = _load_receipt(receipt_path)
     except ReceiptError:
-        document: dict[str, object] = {
-            field: None
-            for field in _RECEIPT_FIELDS
-        }
+        document: dict[str, object] = {field: None for field in _RECEIPT_FIELDS}
         document["schema_version"] = RECEIPT_SCHEMA_VERSION
     document["status"] = "invalid"
     _atomic_write(receipt_path, document)
@@ -228,9 +247,7 @@ def _reject_destructive_changes(changes: list[dict[str, object]]) -> None:
         actions = cast(list[str], change["actions"])
         address = cast(str, change["address"])
         if "delete" in actions and _SAFE_REPLACEMENTS.get(address) != actions:
-            raise ReceiptError(
-                f"deployment would delete or replace {address}; destructive deploys are not supported"
-            )
+            raise ReceiptError(f"deployment would delete or replace {address}; destructive deploys are not supported")
 
 
 def _state_identity(path: Path | None) -> StateIdentity:
@@ -243,12 +260,7 @@ def _state_identity(path: Path | None) -> StateIdentity:
     if not isinstance(raw, dict):
         raise ReceiptError("OpenTofu state must contain one JSON object")
     lineage, serial = raw.get("lineage"), raw.get("serial")
-    if (
-        lineage == ""
-        and serial == 0
-        and raw.get("outputs") == {}
-        and raw.get("resources") == []
-    ):
+    if lineage == "" and serial == 0 and raw.get("outputs") == {} and raw.get("resources") == []:
         return StateIdentity(None, None)
     if not isinstance(lineage, str) or not lineage or not isinstance(serial, int):
         raise ReceiptError("OpenTofu state has no valid lineage and serial")
@@ -264,15 +276,19 @@ def _commit(value: str) -> str:
 def _atomic_write(path: Path, document: dict[str, object]) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    temporary.write_text(
-        json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    temporary.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     os.chmod(temporary, 0o600)
     temporary.replace(path)
 
 
 def _optional_path(value: str) -> Path | None:
     return None if value == "-" else Path(value)
+
+
+def _repository_url(environment: object) -> str | None:
+    if isinstance(environment, Environment):
+        return environment.application_repository_url
+    return None
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -284,6 +300,12 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("--environment", type=Path, required=True)
         command.add_argument("--target", required=True)
         command.add_argument("--stage", required=True)
+        command.add_argument(
+            "--deployment-root",
+            type=DeploymentRoot,
+            choices=list(DeploymentRoot),
+            required=True,
+        )
         command.add_argument("--commit", required=True)
         command.add_argument("--state", required=True)
         if action == "create":
@@ -307,6 +329,15 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _require_customer_platform_forecast(
+    changes: list[dict[str, object]],
+) -> None:
+    for change in changes:
+        address = cast(str, change["address"])
+        if address not in _CUSTOMER_PLATFORM_ADDRESSES:
+            raise ReceiptError(f"customer-platform plan contains unexpected resource: {address}")
+
+
 def _main(arguments: list[str]) -> int:
     try:
         args = _parser().parse_args(arguments)
@@ -316,6 +347,7 @@ def _main(arguments: list[str]) -> int:
                 args.environment,
                 args.target,
                 args.stage,
+                args.deployment_root,
                 args.commit,
                 _optional_path(args.state),
                 args.plan_json,
@@ -326,6 +358,7 @@ def _main(arguments: list[str]) -> int:
                 args.environment,
                 args.target,
                 args.stage,
+                args.deployment_root,
                 args.commit,
                 _optional_path(args.state),
                 args.expected_status,
