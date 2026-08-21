@@ -194,6 +194,9 @@ async def app_client(
     monkeypatch.setenv("DATA_CHORD_HARMONIZATION_CACHE_TABLE", "test-cache-table")
     monkeypatch.setenv("DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE", "test-cde-cache-table")
     monkeypatch.setenv("DATA_CHORD_IDENTITY_SOURCE", "trusted_proxy")
+    from src.auth.user_context import bind_user_context, reset_user_context
+
+    user_token = bind_user_context({"x-data-chord-user-id": "test-user"})
     import src.app.dependencies as deps_module
     from src.storage import LocalWorkflowStorage
 
@@ -221,6 +224,7 @@ async def app_client(
         ) as client:
             yield client
     finally:
+        reset_user_context(user_token)
         deps_module._storage = original_storage
         deps_module.get_upload_storage = original_get_storage
         deps_module._workflow_storage = original_workflow_storage

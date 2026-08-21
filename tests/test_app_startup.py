@@ -29,6 +29,7 @@ _RUNTIME_CONFIG_NAMES = (
     "DATA_CHORD_STORAGE",
     "DATA_CHORD_ALB_ARN",
     "DATA_CHORD_WORKFLOW_STORAGE_LIMIT_GB",
+    "DEV_MODE",
 )
 
 
@@ -155,6 +156,22 @@ def test_invalid_runtime_configuration_stops_application_startup(
 )
 def test_valid_runtime_configuration_starts_application(settings: dict[str, str]) -> None:
     # Given a reference table and valid storage, when the app starts, then startup succeeds.
+    result = _run_import("backend.app.main", settings)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_local_development_can_use_shared_identity() -> None:
+    # Given local development has all hosted data settings.
+    settings = {
+        "DATA_CHORD_REFERENCE_TABLE": "reference",
+        "DATA_CHORD_HARMONIZATION_CACHE_TABLE": "cache",
+        "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE": "cde-cache",
+        "DATA_CHORD_IDENTITY_SOURCE": "shared",
+        "DEV_MODE": "true",
+    }
+
+    # When the local application starts, then shared identity is accepted.
     result = _run_import("backend.app.main", settings)
 
     assert result.returncode == 0, result.stderr

@@ -43,6 +43,7 @@ _DATA_CHORD_REFERENCE_TABLE_VAR = "DATA_CHORD_REFERENCE_TABLE"
 _DATA_CHORD_HARMONIZATION_CACHE_TABLE_VAR = "DATA_CHORD_HARMONIZATION_CACHE_TABLE"
 _DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE_VAR = "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE"
 _AWS_REGION_VAR = "AWS_REGION"
+_DEV_MODE_VAR = "DEV_MODE"
 _DEFAULT_STORAGE_BACKEND = StorageBackend.LOCAL
 _DEFAULT_RUNTIME_PROFILE = RuntimeProfile.HOSTED
 _DEFAULT_IDENTITY_SOURCE = IdentitySource.SHARED
@@ -206,7 +207,11 @@ def validate_required_config() -> None:
 
     get_agentic_workers()
 
-    if profile is RuntimeProfile.HOSTED and identity_source is IdentitySource.SHARED:
+    if (
+        profile is RuntimeProfile.HOSTED
+        and identity_source is IdentitySource.SHARED
+        and os.getenv(_DEV_MODE_VAR, "").lower() != "true"
+    ):
         raise ConfigurationError("hosted profile requires trusted_proxy or signed_alb identity")
     expected_alb_arn = get_expected_alb_arn()
     if identity_source is IdentitySource.SIGNED_ALB and expected_alb_arn is None:
