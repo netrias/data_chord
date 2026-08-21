@@ -5,22 +5,22 @@ output "app_url" {
 
 output "workflow_bucket" {
   description = "S3 bucket used for durable workflow storage."
-  value       = aws_s3_bucket.workflow.bucket
+  value       = module.data_plane.workflow_bucket_name
 }
 
 output "reference_data_table" {
   description = "DynamoDB table used for standard metadata and permissible values."
-  value       = aws_dynamodb_table.reference_data.name
+  value       = module.data_plane.reference_data_table_name
 }
 
 output "harmonization_cache_table" {
   description = "DynamoDB table used to reuse versioned harmonization results."
-  value       = aws_dynamodb_table.harmonization_cache.name
+  value       = module.data_plane.harmonization_cache_table_name
 }
 
 output "cde_recommendation_cache_table" {
   description = "DynamoDB table used to reuse versioned CDE recommendations."
-  value       = aws_dynamodb_table.cde_recommendation_cache.name
+  value       = module.data_plane.cde_recommendation_cache_table_name
 }
 
 output "ecr_repository_url" {

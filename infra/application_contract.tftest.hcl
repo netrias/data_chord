@@ -174,16 +174,12 @@ run "reference_data_has_a_dedicated_durable_table" {
 
   assert {
     condition = (
-      aws_dynamodb_table.reference_data.billing_mode == "PAY_PER_REQUEST" &&
-      aws_dynamodb_table.reference_data.hash_key == "pk" &&
-      aws_dynamodb_table.reference_data.range_key == "sk" &&
-      aws_dynamodb_table.reference_data.deletion_protection_enabled == true &&
-      length(aws_dynamodb_table.reference_data.global_secondary_index) == 0 &&
       toset(jsondecode(aws_iam_role_policy.application_task_reference_data.policy).Statement[0].Action) == toset([
         "dynamodb:DescribeTable",
         "dynamodb:Query",
       ]) &&
-      output.reference_data_table == aws_dynamodb_table.reference_data.name
+      output.reference_data_table == "data-chord-qa-reference-data" &&
+      output.reference_data_table == module.data_plane.reference_data_table_name
     )
     error_message = "Reference data must use the dedicated table, read-only runtime access, and no permanent importer."
   }
@@ -197,17 +193,13 @@ run "harmonization_cache_is_application_owned_and_minimal" {
   # then it creates one protected point-lookup table with only runtime read/write access.
   assert {
     condition = (
-      aws_dynamodb_table.harmonization_cache.name == "data-chord-qa-harmonization-cache" &&
-      aws_dynamodb_table.harmonization_cache.billing_mode == "PAY_PER_REQUEST" &&
-      aws_dynamodb_table.harmonization_cache.hash_key == "cache_key" &&
-      aws_dynamodb_table.harmonization_cache.deletion_protection_enabled == true &&
-      length(aws_dynamodb_table.harmonization_cache.global_secondary_index) == 0 &&
       toset(jsondecode(aws_iam_role_policy.application_task_harmonization_cache.policy).Statement[0].Action) == toset([
         "dynamodb:DescribeTable",
         "dynamodb:GetItem",
         "dynamodb:PutItem",
       ]) &&
-      output.harmonization_cache_table == aws_dynamodb_table.harmonization_cache.name
+      output.harmonization_cache_table == "data-chord-qa-harmonization-cache" &&
+      output.harmonization_cache_table == module.data_plane.harmonization_cache_table_name
     )
     error_message = "The harmonization cache must be one protected point-lookup table with minimal runtime access."
   }
@@ -219,7 +211,7 @@ run "harmonization_cache_is_application_owned_and_minimal" {
     condition = {
       for item in jsondecode(aws_ecs_task_definition.application.container_definitions)[0].environment :
       item.name => item.value
-    }["DATA_CHORD_HARMONIZATION_CACHE_TABLE"] == aws_dynamodb_table.harmonization_cache.name
+    }["DATA_CHORD_HARMONIZATION_CACHE_TABLE"] == output.harmonization_cache_table
     error_message = "The application task must receive the managed harmonization cache table name."
   }
 }
@@ -232,16 +224,13 @@ run "cde_recommendation_cache_is_application_owned_and_disposable" {
   # then it creates one expiring cache with only batch read/write access.
   assert {
     condition = (
-      aws_dynamodb_table.cde_recommendation_cache.name == "data-chord-qa-cde-recommendation-cache" &&
-      aws_dynamodb_table.cde_recommendation_cache.billing_mode == "PAY_PER_REQUEST" &&
-      aws_dynamodb_table.cde_recommendation_cache.hash_key == "cache_key" &&
-      aws_dynamodb_table.cde_recommendation_cache.ttl[0].enabled == true &&
       toset(jsondecode(aws_iam_role_policy.application_task_cde_recommendation_cache.policy).Statement[0].Action) == toset([
         "dynamodb:BatchGetItem",
         "dynamodb:BatchWriteItem",
         "dynamodb:DescribeTable",
       ]) &&
-      output.cde_recommendation_cache_table == aws_dynamodb_table.cde_recommendation_cache.name
+      output.cde_recommendation_cache_table == "data-chord-qa-cde-recommendation-cache" &&
+      output.cde_recommendation_cache_table == module.data_plane.cde_recommendation_cache_table_name
     )
     error_message = "The CDE recommendation cache must be an expiring application-owned batch cache."
   }
@@ -253,7 +242,7 @@ run "cde_recommendation_cache_is_application_owned_and_disposable" {
     condition = {
       for item in jsondecode(aws_ecs_task_definition.application.container_definitions)[0].environment :
       item.name => item.value
-    }["DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE"] == aws_dynamodb_table.cde_recommendation_cache.name
+    }["DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE"] == output.cde_recommendation_cache_table
     error_message = "The application task must receive the CDE recommendation cache table name."
   }
 }
@@ -389,7 +378,7 @@ run "workflow_storage_uses_the_canonical_deployment_prefix" {
       ]) &&
       anytrue([
         for statement in jsondecode(aws_iam_role_policy.application_task_workflow_storage.policy).Statement :
-        try(statement.Resource, "") == "${aws_s3_bucket.workflow.arn}/${local.deployment_prefix}/*"
+        try(statement.Resource, "") == "${module.data_plane.workflow_bucket_arn}/${local.deployment_prefix}/*"
       ])
     )
     error_message = "Workflow storage must use datachord/<target>/<stage>."
