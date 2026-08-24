@@ -61,9 +61,13 @@ infra-fmt:
 
 infra-validate:
 	tofu -chdir=infra validate
+	tofu -chdir=infra/customer-platform validate
+	tofu -chdir=infra/modules/data-plane validate
 
 infra-test:
 	tofu -chdir=infra test
+	tofu -chdir=infra/customer-platform test
+	tofu -chdir=infra/modules/data-plane test
 	bash infra/tests/deployment_flow_test.sh
 	bash -n infra/scripts/*.sh infra/tests/*.sh
 
@@ -74,3 +78,11 @@ plan target stage:
 # Apply checked saved plans, build the image, and verify health.
 deploy target stage:
 	infra/scripts/deploy.sh {{target}} {{stage}} deploy
+
+# Save and show a customer-platform forecast from a bootstrap handoff.
+customer-plan target stage handoff:
+	infra/scripts/customer-platform-deploy.sh {{target}} {{stage}} plan {{handoff}}
+
+# Apply the checked customer-platform data-plane plan.
+customer-deploy target stage handoff:
+	infra/scripts/customer-platform-deploy.sh {{target}} {{stage}} deploy {{handoff}}

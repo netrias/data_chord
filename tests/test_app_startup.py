@@ -21,12 +21,15 @@ _RUNTIME_CONFIG_NAMES = (
     "DATA_CHORD_AGENTIC_WORKERS",
     "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE",
     "DATA_CHORD_HARMONIZATION_CACHE_TABLE",
+    "DATA_CHORD_IDENTITY_SOURCE",
     "DATA_CHORD_DATA_DIR",
     "DATA_CHORD_PROFILE",
     "DATA_CHORD_REFERENCE_TABLE",
     "DATA_CHORD_S3_BUCKET",
     "DATA_CHORD_STORAGE",
+    "DATA_CHORD_ALB_ARN",
     "DATA_CHORD_WORKFLOW_STORAGE_LIMIT_GB",
+    "DEV_MODE",
 )
 
 
@@ -128,6 +131,7 @@ def test_invalid_runtime_configuration_stops_application_startup(
             "DATA_CHORD_HARMONIZATION_CACHE_TABLE": "cache",
             "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE": "cde-cache",
             "DATA_CHORD_STORAGE": "local",
+            "DATA_CHORD_IDENTITY_SOURCE": "trusted_proxy",
         },
         {
             "DATA_CHORD_REFERENCE_TABLE": "reference",
@@ -135,11 +139,39 @@ def test_invalid_runtime_configuration_stops_application_startup(
             "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE": "cde-cache",
             "DATA_CHORD_STORAGE": "s3",
             "DATA_CHORD_S3_BUCKET": "data-chord-test",
+            "DATA_CHORD_IDENTITY_SOURCE": "trusted_proxy",
+        },
+        {
+            "DATA_CHORD_REFERENCE_TABLE": "reference",
+            "DATA_CHORD_HARMONIZATION_CACHE_TABLE": "cache",
+            "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE": "cde-cache",
+            "DATA_CHORD_STORAGE": "s3",
+            "DATA_CHORD_S3_BUCKET": "data-chord-test",
+            "DATA_CHORD_IDENTITY_SOURCE": "signed_alb",
+            "DATA_CHORD_ALB_ARN": (
+                "arn:aws:elasticloadbalancing:us-east-2:123456789012:loadbalancer/app/data-chord/abc123"
+            ),
         },
     ],
 )
 def test_valid_runtime_configuration_starts_application(settings: dict[str, str]) -> None:
     # Given a reference table and valid storage, when the app starts, then startup succeeds.
+    result = _run_import("backend.app.main", settings)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_local_development_can_use_shared_identity() -> None:
+    # Given local development has all hosted data settings.
+    settings = {
+        "DATA_CHORD_REFERENCE_TABLE": "reference",
+        "DATA_CHORD_HARMONIZATION_CACHE_TABLE": "cache",
+        "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE": "cde-cache",
+        "DATA_CHORD_IDENTITY_SOURCE": "shared",
+        "DEV_MODE": "true",
+    }
+
+    # When the local application starts, then shared identity is accepted.
     result = _run_import("backend.app.main", settings)
 
     assert result.returncode == 0, result.stderr
@@ -155,6 +187,7 @@ def test_portable_runtime_starts_without_aws_data_service_settings(tmp_path: Pat
         {
             "DATA_CHORD_PROFILE": "portable",
             "DATA_CHORD_DATA_DIR": str(tmp_path),
+            "DATA_CHORD_IDENTITY_SOURCE": "shared",
             "AWS_REGION": "us-east-2",
         },
     )
@@ -215,13 +248,61 @@ def test_importing_application_package_does_not_start_application() -> None:
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.parametrize(
+    ("settings", "expected_error"),
+    [
+        (
+            {
+                "DATA_CHORD_PROFILE": "hosted",
+                "DATA_CHORD_REFERENCE_TABLE": "reference",
+                "DATA_CHORD_HARMONIZATION_CACHE_TABLE": "cache",
+                "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE": "cde-cache",
+                "DATA_CHORD_IDENTITY_SOURCE": "shared",
+            },
+            "hosted profile requires trusted_proxy or signed_alb identity",
+        ),
+        (
+            {
+                "DATA_CHORD_PROFILE": "portable",
+                "DATA_CHORD_IDENTITY_SOURCE": "trusted_proxy",
+            },
+            "portable profile requires shared identity",
+        ),
+        (
+            {
+                "DATA_CHORD_PROFILE": "hosted",
+                "DATA_CHORD_REFERENCE_TABLE": "reference",
+                "DATA_CHORD_HARMONIZATION_CACHE_TABLE": "cache",
+                "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE": "cde-cache",
+                "DATA_CHORD_IDENTITY_SOURCE": "signed_alb",
+            },
+            "DATA_CHORD_ALB_ARN is required when DATA_CHORD_IDENTITY_SOURCE=signed_alb",
+        ),
+    ],
+)
+def test_unsafe_profile_and_identity_combinations_stop_startup(
+    settings: dict[str, str],
+    expected_error: str,
+) -> None:
+    # Given a data profile and identity source do not describe a supported offer.
+
+    # When the app starts.
+    result = _run_import("backend.app.main", settings)
+
+    # Then startup rejects the unsafe combination with one exact error.
+    assert result.returncode != 0
+    assert expected_error in result.stderr
+
+
 def _initialize_portable_standards(database: Path) -> None:
     model = ReferenceModel(
         version=DataModelVersionReference("model", "1"),
         label="Model",
-        catalog=CdeCatalog.from_cdes([
-            CDEInfo(None, "field", None, CdeType.PASSTHROUGH),
-        ]),
+        catalog=CdeCatalog.from_cdes(
+            [
+                CDEInfo(None, "field", None, CdeType.PASSTHROUGH),
+            ]
+        ),
         pvs=CdePvCatalog.from_mapping({"field": frozenset()}),
     )
     SqliteReferenceDataImporter(database).import_models([model])

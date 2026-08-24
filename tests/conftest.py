@@ -17,6 +17,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
+from starlette.datastructures import Headers
 
 from src.storage import UploadConstraints, UploadStorage
 
@@ -124,10 +125,9 @@ def mock_netrias_client() -> Generator[MagicMock]:
     reference_model = ReferenceModel(
         version=DataModelVersionReference(model_key, version),
         label="Test Data Model",
-        catalog=CdeCatalog.from_cdes([
-            CDEInfo(None, cde_key, cde_key.replace("_", " ").title(), CdeType.PV)
-            for cde_key in values
-        ]),
+        catalog=CdeCatalog.from_cdes(
+            [CDEInfo(None, cde_key, cde_key.replace("_", " ").title(), CdeType.PV) for cde_key in values]
+        ),
         pvs=CdePvCatalog.from_mapping(values),
     )
     repository = MagicMock()
@@ -150,6 +150,7 @@ def mock_netrias_client() -> Generator[MagicMock]:
             manifest_path=manifest_path,
             output_path=output_path,
         )
+
     harmonizer = MagicMock()
     harmonizer.run.side_effect = _successful_harmonization
     harmonizer.reference_repository = repository
@@ -193,6 +194,10 @@ async def app_client(
     monkeypatch.setenv("DATA_CHORD_REFERENCE_TABLE", "test-reference-table")
     monkeypatch.setenv("DATA_CHORD_HARMONIZATION_CACHE_TABLE", "test-cache-table")
     monkeypatch.setenv("DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE", "test-cde-cache-table")
+    monkeypatch.setenv("DATA_CHORD_IDENTITY_SOURCE", "trusted_proxy")
+    from src.auth.user_context import bind_user_context, reset_user_context
+
+    user_token = bind_user_context(Headers({"x-data-chord-user-id": "test-user"}))
     import src.app.dependencies as deps_module
     from src.storage import LocalWorkflowStorage
 
@@ -210,11 +215,17 @@ async def app_client(
 
     try:
         from backend.app.main import create_app
+
         app = create_app()
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            headers={"X-Data-Chord-User-ID": "test-user"},
+        ) as client:
             yield client
     finally:
+        reset_user_context(user_token)
         deps_module._storage = original_storage
         deps_module.get_upload_storage = original_get_storage
         deps_module._workflow_storage = original_workflow_storage
@@ -425,11 +436,7 @@ def _seed_test_workflow_state(file_id: str, rows: list[dict[str, Any]]) -> bool:
             if not isinstance(column_id, int) or not isinstance(column_name, str):
                 continue
             column_key = column_key_for_index(column_id)
-            cde_key = (
-                column_name
-                if column_name in {"primary_diagnosis", "therapeutic_agents"}
-                else f"cde_{column_id}"
-            )
+            cde_key = column_name if column_name in {"primary_diagnosis", "therapeutic_agents"} else f"cde_{column_id}"
             records[column_key] = ColumnMappingRecord(
                 column_key=column_key,
                 cde_key=cde_key,
@@ -675,20 +682,22 @@ def create_manifest_with_manual_override(
     ai_harmonized_value = "AI Harmonized Value"
     manual_override_value = "User Manual Override"
 
-    manifest_rows: list[dict[str, Any]] = [{
-        "job_id": f"test-job-{file_id}",
-        "column_id": 0,
-        "column_name": col_name,
-        "to_harmonize": original_value,
-        "top_harmonization": ai_harmonized_value,
-        "ontology_id": None,
-        "top_harmonizations": [ai_harmonized_value],
-        "match_fidelity": "partial",
-        "error": None,
-        "row_indices": [0],
-        "manual_overrides": [
-            {"user_id": "test-user", "timestamp": "2024-01-01T00:00:00Z", "value": manual_override_value}
-        ],
-    }]
+    manifest_rows: list[dict[str, Any]] = [
+        {
+            "job_id": f"test-job-{file_id}",
+            "column_id": 0,
+            "column_name": col_name,
+            "to_harmonize": original_value,
+            "top_harmonization": ai_harmonized_value,
+            "ontology_id": None,
+            "top_harmonizations": [ai_harmonized_value],
+            "match_fidelity": "partial",
+            "error": None,
+            "row_indices": [0],
+            "manual_overrides": [
+                {"user_id": "test-user", "timestamp": "2024-01-01T00:00:00Z", "value": manual_override_value}
+            ],
+        }
+    ]
 
     return store_test_harmonization_manifest(storage, file_id, manifest_rows)

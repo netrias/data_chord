@@ -7,6 +7,10 @@ export const e2eRuntimeDir = process.env.DATA_CHORD_E2E_RUNTIME_DIR
 
 export const e2eEnv = {
   ...process.env,
+  // The E2E server is a local development process. Keep its shared identity
+  // explicit so production-like hosted processes still fail closed.
+  DEV_MODE: 'true',
+  DATA_CHORD_IDENTITY_SOURCE: 'shared',
   // Keep browser-driven tests out of the repo workspace so failed runs do not
   // leave uploads that affect later tests or local development.
   DATA_CHORD_UPLOAD_DIR: path.join(e2eRuntimeDir, 'uploads'),

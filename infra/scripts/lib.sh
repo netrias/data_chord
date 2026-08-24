@@ -2,8 +2,14 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INFRA_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-REPO_DIR="$(cd "$INFRA_DIR/.." && pwd)"
+DEPLOYMENT_ROOT="${DEPLOYMENT_ROOT:-full}"
+INFRA_BASE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+if [[ "$DEPLOYMENT_ROOT" == "customer-platform" ]]; then
+  INFRA_DIR="$INFRA_BASE_DIR/customer-platform"
+else
+  INFRA_DIR="$INFRA_BASE_DIR"
+fi
+REPO_DIR="$(cd "$INFRA_BASE_DIR/.." && pwd)"
 
 log() {
   printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*" >&2
@@ -23,17 +29,19 @@ environment_path() {
 }
 
 environment_value() {
-  python3 "$SCRIPT_DIR/environment.py" get "$ENVIRONMENT_FILE" "$TARGET_NAME" "$STAGE_NAME" "$1"
+  python3 "$SCRIPT_DIR/environment.py" get \
+    "$ENVIRONMENT_FILE" "$TARGET_NAME" "$STAGE_NAME" "$1" "$DEPLOYMENT_ROOT"
 }
 
 validate_environment() {
-  python3 "$SCRIPT_DIR/environment.py" validate "$ENVIRONMENT_FILE" "$TARGET_NAME" "$STAGE_NAME" ||
+  python3 "$SCRIPT_DIR/environment.py" validate \
+    "$ENVIRONMENT_FILE" "$TARGET_NAME" "$STAGE_NAME" "$DEPLOYMENT_ROOT" ||
     fail "The deployment environment is invalid."
 }
 
 write_tofu_variables() {
   python3 "$SCRIPT_DIR/environment.py" tofu-vars \
-    "$ENVIRONMENT_FILE" "$TARGET_NAME" "$STAGE_NAME" >"$1"
+    "$ENVIRONMENT_FILE" "$TARGET_NAME" "$STAGE_NAME" "$DEPLOYMENT_ROOT" >"$1"
 }
 
 git_commit() {
@@ -47,6 +55,11 @@ require_deployable_git_state() {
   [[ -z "$dirty_status" ]] || fail "The working tree has changes. Commit or remove them before plan."
   untracked_infra="$(git -C "$REPO_DIR" ls-files --others --exclude-standard -- infra)"
   [[ -z "$untracked_infra" ]] || fail "The infra directory has untracked files. Commit or remove them before plan."
+
+  if [[ "$DEPLOYMENT_ROOT" == "customer-platform" ]]; then
+    log "Deploy source: $commit"
+    return 0
+  fi
 
   environment_relative="environments/$TARGET_NAME/$STAGE_NAME.json"
   git -C "$REPO_DIR" ls-files --error-unmatch -- "$environment_relative" >/dev/null 2>&1 ||
@@ -128,9 +141,36 @@ verify_foundation_contract() {
     fail "The deployer role path is $actual_path, not /foundation/."
   [[ "$actual_boundary" == "$expected_boundary" ]] ||
     fail "The deployer role does not use $expected_boundary."
-  app_boundary="$(environment_value application_role_boundary_arn)"
-  aws iam get-policy --policy-arn "$app_boundary" --query 'Policy.Arn' --output text >/dev/null ||
-    fail "The application role boundary does not exist: $app_boundary"
+  if [[ "$DEPLOYMENT_ROOT" == "full" ]]; then
+    app_boundary="$(environment_value application_role_boundary_arn)"
+    aws iam get-policy --policy-arn "$app_boundary" --query 'Policy.Arn' --output text >/dev/null ||
+      fail "The application role boundary does not exist: $app_boundary"
+  fi
+}
+
+claim_deployment_root() {
+  local bucket marker_key selected error_file
+  bucket="$(environment_value state_bucket_name)"
+  marker_key="datachord/$TARGET_NAME/$STAGE_NAME/root-selection/tofu.tfstate"
+  error_file="$PLAN_DIR/root-selection.err"
+  if aws s3api put-object \
+    --bucket "$bucket" \
+    --key "$marker_key" \
+    --body /dev/null \
+    --if-none-match '*' \
+    --metadata "deployment_root=$DEPLOYMENT_ROOT" >/dev/null 2>"$error_file"; then
+    log "Deployment root selected: $DEPLOYMENT_ROOT"
+    return 0
+  fi
+  if ! selected="$(aws s3api head-object \
+    --bucket "$bucket" \
+    --key "$marker_key" \
+    --query 'Metadata.deployment_root' \
+    --output text 2>>"$error_file")"; then
+    fail "Could not read the deployment-root selection: $(<"$error_file")"
+  fi
+  [[ "$selected" == "$DEPLOYMENT_ROOT" ]] ||
+    fail "Deployment root is already selected as $selected for $TARGET_NAME/$STAGE_NAME."
 }
 
 init_tofu() {
@@ -138,7 +178,7 @@ init_tofu() {
   bucket="$(environment_value state_bucket_name)"
   region="$(environment_value region)"
   state_key="$(environment_value state_key)"
-  export TF_DATA_DIR="$INFRA_DIR/.terraform-data/$TARGET_NAME/$STAGE_NAME"
+  export TF_DATA_DIR="$INFRA_BASE_DIR/.terraform-data/$TARGET_NAME/$STAGE_NAME/$DEPLOYMENT_ROOT"
   log "OpenTofu state: s3://$bucket/$state_key"
   tofu -chdir="$INFRA_DIR" init \
     -backend-config="bucket=$bucket" \

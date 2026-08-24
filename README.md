@@ -1,155 +1,150 @@
 # Data Chord
 
-Data Chord is a data harmonization workflow application. Upload CSV, TSV, or XLSX tabular data, review Bedrock CDE suggestions, run harmonization, and approve results before export.
+Data Chord is a data harmonization workflow application that helps data
+curators turn CSV, TSV, or XLSX tabular data into reviewed, standardized
+datasets. It recommends Bedrock Common Data Element (CDE) mappings and value
+changes. The curator reviews those recommendations before export.
 
-For a detailed overview, see [app.md](app.md).
+The final ZIP file contains the standardized data, the harmonization manifest,
+and the column-mapping audit document.
 
-## Setup
+## Choose your path
 
-1. Install [uv](https://docs.astral.sh/uv/) (manages Python and dependencies automatically):
-   ```bash
-   # macOS / Linux
-   curl -LsSf https://astral.sh/uv/install.sh | sh
+| Goal | Start here |
+| --- | --- |
+| Use an application that my organization hosts | [Use Data Chord](#use-data-chord) |
+| Run a tagged version from source | [Run a tagged version from source](#run-a-tagged-version-from-source) |
+| Change the application | [Develop Data Chord](#develop-data-chord) |
+| Deploy or operate the application | [Deployment options](#deployment-options) |
+| Understand the product or code structure | [Product guide](app.md) and [architecture guide](ARCHITECTURE.md) |
 
-   # Windows (PowerShell)
-   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-   ```
-   Restart your terminal after installing.
+## Use Data Chord
 
-2. Clone and check out the latest release:
-   ```bash
-   git clone https://github.com/netrias/data_chord.git
-   cd data_chord
-   git checkout $(git describe --tags --abbrev=0)
-   gh auth setup-git
-   uv sync --frozen
-   ```
-   Data Chord installs two dependencies from pinned Git commits:
-   `netrias/agentic_harmonization` and `netrias/netrias_client`. A licensed
-   developer needs read access to the private `agentic_harmonization`
-   repository and an authenticated Git client. `netrias_client` is public. The
-   frozen install uses the committed lock file instead of resolving new
-   versions.
+You do not need to install Data Chord when your organization hosts it. Ask your
+deployment owner for the application URL and access instructions.
 
-3. Configure the populated reference-data table, both application cache tables,
-   and the AWS region:
-   ```bash
-   cp .env.example .env
-   # Edit .env with the DynamoDB table names and AWS_REGION.
-   ```
+The application guides you through five stages:
 
-4. Run:
-   ```bash
-   uv run python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
-   ```
-   Open http://localhost:8000.
+1. Upload a CSV, TSV, or XLSX file. For XLSX files, select the worksheet to use.
+2. Review the recommended CDE mapping for each source column.
+3. Run value harmonization with the confirmed mapping.
+4. Review the results and apply manual value changes when needed.
+5. Review the summary and download the final ZIP file.
 
-## Updating
+See the [product guide](app.md) for the full workflow, output contents, and
+behavior that affects review decisions.
+
+## Run a tagged version from source
+
+This option runs the hosted data profile on your computer. It is for licensed
+users who have:
+
+- Git, the [GitHub CLI](https://cli.github.com/), and
+  [uv](https://docs.astral.sh/uv/);
+- Python 3.13 or later;
+- read access to `netrias/data_chord` and the private
+  `netrias/agentic_harmonization` repository;
+- AWS credentials that can use the required Amazon Bedrock models, read the
+  reference-data table, and read and write the two cache tables; and
+- one populated reference-data table and two DynamoDB cache tables. The cache
+  tables can start empty.
+
+Authenticate Git, clone the repository, and select a version from the
+[repository tags](https://github.com/netrias/data_chord/tags):
 
 ```bash
-git fetch --tags
-git checkout $(git describe --tags --abbrev=0 origin/main)
+gh auth status
+gh auth setup-git
+git clone https://github.com/netrias/data_chord.git
+cd data_chord
+git checkout vX.Y.Z
 uv sync --frozen
 ```
 
-## Development
-
-With [just](https://github.com/casey/just) installed, run `just --list` for shortcuts. Key commands:
+Create the local configuration file. Set the AWS Region and the three DynamoDB
+table names in `.env`:
 
 ```bash
-just sync        # Install locked Python and JavaScript development dependencies
-just app-reload  # Dev server with auto-reload
-just test        # Run tests
-just lint        # Lint
-just typecheck   # Type check
+cp .env.example .env
 ```
 
-Pull requests from forks run infrastructure, JavaScript syntax, and JavaScript
-unit checks. Python, TypeScript, and browser checks need read access to the
-private `netrias/agentic_harmonization` dependency. They also install the public
-`netrias/netrias_client` dependency. GitHub does not give the private credential
-to forks. Before an internal test, a maintainer must review the
-external source, workflow files, package scripts, and test commands. The
-maintainer can then test the change on a branch in this repository.
+Start the application, then open <http://localhost:8000>:
 
-### Performance Journeys
+```bash
+uv run uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
+```
 
-Use the local journey for browser/render timing while developing:
+To update, fetch the tags, select another version, and install its locked
+dependencies:
+
+```bash
+git fetch --tags
+git checkout vX.Y.Z
+uv sync --frozen
+```
+
+## Develop Data Chord
+
+Development also needs [just](https://github.com/casey/just), Node.js 24.5 or
+later, and npm 11.10 or later. Keep your development branch checked out instead
+of a version tag.
+
+From the repository root, install the locked Python and JavaScript dependencies
+and create your local configuration:
+
+```bash
+just sync
+cp .env.example .env
+# Set the AWS Region and DynamoDB table names in .env.
+just app-reload
+```
+
+Run `just --list` to see all shortcuts. These are the main development checks:
+
+| Command | Scope |
+| --- | --- |
+| `just test` | Python tests |
+| `just js-test` | JavaScript unit tests |
+| `just lint` | Repository pre-commit checks |
+| `just typecheck` | Python type check |
+| `npm run typecheck` | JavaScript and TypeScript type check |
+| `just test-e2e` | Local browser tests |
+| `just infra-test` | OpenTofu and deployment-script tests |
+
+Pull requests from forks run the infrastructure tests, JavaScript syntax check,
+and JavaScript unit tests. GitHub does not give private dependency credentials
+to forks. A maintainer must review an external change before running the Python,
+type, lint, security, and browser checks on a branch in this repository.
+
+### Measure browser performance
+
+Run the local performance journey while you develop:
 
 ```bash
 just perf-e2e
 ```
 
-Use the staging journey for deployed user-experience timing once you are on the
-company VPN and the timing instrumentation has been deployed:
+Run the deployed journey after the timing code is deployed and you are on the
+company VPN:
 
 ```bash
 just perf-staging
-# or pass an explicit URL:
+# Or use a specific URL.
 just perf-staging https://your-staging-host.example.com
 ```
 
-The staging journey drives the real app flow and prints upload, analyze,
-harmonize, Stage 4, Stage 5, and download timings.
-Set `PERF_REMOTE_ROWS=50` to change the generated CSV size.
+Set `PERF_REMOTE_ROWS=50` to change the generated CSV row count.
 
-## AWS Hosting
+## Deployment options
 
-OpenTofu deploys the application to ECS Fargate behind an Application Load
-Balancer and Cognito. It stores workflow data in S3 and reference data in
-DynamoDB.
+Data Chord supports three deployment offers:
 
-See [DEPLOYMENT.md](DEPLOYMENT.md) for the complete environment and deployment
-procedure. See [infra/README.md](infra/README.md) for infrastructure ownership
-and deployment safety rules.
+| Offer | Use this offer when | Data Chord provides |
+| --- | --- | --- |
+| Portable container | You own the container platform and want local SQLite reference data | One application image |
+| Customer platform | You own the application platform and authentication | An AWS S3 and DynamoDB data plane |
+| Full AWS | You want Data Chord to create the full application stack | ECS Fargate, load balancing, Cognito, storage, logs, and build resources |
 
-## Portable container
-
-The portable profile needs one Docker image, one persistent `/data` volume,
-and AWS credentials that can call the required Bedrock models. The customer
-owns TLS, authentication, and network access to the container.
-
-Run exactly one container replica with one Uvicorn worker. Portable workflow
-files and locks do not support concurrent application processes.
-
-Load an approved reference-data export into the volume before the first run:
-
-```bash
-REFERENCE_SHA256=$(shasum -a 256 approved-reference-data.json | awk '{print $1}')
-docker run --rm \
-  --mount type=volume,src=data-chord,dst=/data \
-  --mount type=bind,src="$(pwd)/approved-reference-data.json",dst=/import/reference.json,readonly \
-  data-chord:VERSION \
-  python -m scripts.reference_data load-sqlite \
-    --input /import/reference.json \
-    --expected-sha256 "$REFERENCE_SHA256" \
-    --database /data/standards.sqlite
-```
-
-Run the application with the same volume:
-
-```bash
-docker run --rm \
-  --mount type=volume,src=data-chord,dst=/data \
-  --env DATA_CHORD_PROFILE=portable \
-  --env DATA_CHORD_WORKFLOW_STORAGE_LIMIT_GB=10 \
-  --env AWS_REGION=us-east-2 \
-  --publish 8000:8000 \
-  data-chord:VERSION
-```
-
-The AWS SDK uses its standard credential chain. On AWS, use a workload role.
-For local Docker testing, pass short-lived `AWS_ACCESS_KEY_ID`,
-`AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` values from the host. Never
-put credentials in the image.
-
-Portable workflow files are temporary. After a successful upload, the app
-checks workflow storage in the background. At 80% of
-`DATA_CHORD_WORKFLOW_STORAGE_LIMIT_GB`, it removes the least recently accessed
-workflows until use is at or below 70%. A workflow accessed during the last 24
-hours is not removed. The default limit is 10 GB. Cleanup does not remove
-`/data/standards.sqlite`.
-
-Run the same `load-sqlite` command to add a new standard version. To correct an
-existing model version, add `--replace-existing`. Replacement is transactional
-and takes effect immediately for every workflow that uses that model identity.
+The [deployment guide](DEPLOYMENT.md) contains the requirements and procedures
+for all three offers. The [infrastructure guide](infra/README.md) defines AWS
+resource ownership and deployment safety rules.

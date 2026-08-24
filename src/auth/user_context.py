@@ -19,12 +19,14 @@ from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, utils
 from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey
+from starlette.datastructures import Headers
 
-from src.settings import RuntimeProfile, get_expected_alb_arn, get_runtime_profile
+from src.settings import IdentitySource, get_expected_alb_arn, get_identity_source
 from src.storage import UserContext
 
 ALB_IDENTITY_HEADER = "x-amzn-oidc-identity"
 ALB_DATA_HEADER = "x-amzn-oidc-data"
+TRUSTED_PROXY_USER_HEADER = "x-data-chord-user-id"
 LOCAL_USER_ID = "local-user"
 _ALB_JWT_ALGORITHM = "ES256"
 _ALB_KEY_TIMEOUT_SECONDS = 3
@@ -43,12 +45,14 @@ class InvalidUserContextError(RuntimeError):
 
 def current_user_context() -> UserContext:
     user = _current_user.get()
-    # Local development has no ALB identity headers, but storage still needs a
-    # stable owner id so the same authorization paths run in every environment.
-    return user if user is not None else UserContext(user_id=LOCAL_USER_ID)
+    if user is not None:
+        return user
+    if get_identity_source() is IdentitySource.SHARED:
+        return UserContext(user_id=LOCAL_USER_ID)
+    raise InvalidUserContextError("Request user context is not bound")
 
 
-def bind_user_context(headers: Mapping[str, str]) -> Token[UserContext | None]:
+def bind_user_context(headers: Headers) -> Token[UserContext | None]:
     return _current_user.set(_user_context_from_headers(headers))
 
 
@@ -56,32 +60,51 @@ def reset_user_context(token: Token[UserContext | None]) -> None:
     _current_user.reset(token)
 
 
-def _user_context_from_headers(headers: Mapping[str, str]) -> UserContext:
-    if get_runtime_profile() is RuntimeProfile.PORTABLE:
+def _user_context_from_headers(headers: Headers) -> UserContext:
+    identity_source = get_identity_source()
+    if identity_source is IdentitySource.SHARED:
         return UserContext(user_id=LOCAL_USER_ID)
+    if identity_source is IdentitySource.TRUSTED_PROXY:
+        return _trusted_proxy_user_context(headers)
+    return _signed_alb_user_context(headers)
+
+
+def _trusted_proxy_user_context(headers: Headers) -> UserContext:
+    values = headers.getlist(TRUSTED_PROXY_USER_HEADER)
+    if len(values) != 1:
+        raise InvalidUserContextError("Trusted proxy identity header must occur exactly once")
+    user_id = values[0]
+    if (
+        not user_id
+        or user_id != user_id.strip()
+        or "," in user_id
+        or any(ord(character) < 32 or ord(character) == 127 for character in user_id)
+    ):
+        raise InvalidUserContextError("Trusted proxy identity header is invalid")
+    return UserContext(user_id=user_id)
+
+
+def _signed_alb_user_context(headers: Headers) -> UserContext:
     expected_alb_arn = get_expected_alb_arn()
+    if expected_alb_arn is None:
+        raise InvalidUserContextError("Signed ALB identity requires an expected load balancer")
     signed_claims = headers.get(ALB_DATA_HEADER, "").strip()
-    unsigned_user_id = headers.get(ALB_IDENTITY_HEADER, "").strip()
-    if signed_claims:
-        claims = _verified_alb_claims(signed_claims, expected_alb_arn)
-        signed_user_id = _string_claim(claims, "sub")
-        if signed_user_id is None:
-            raise InvalidUserContextError("ALB identity claims are missing sub")
-        # ALB sends both headers, but only x-amzn-oidc-data is signed; require
-        # the unsigned convenience header to agree before trusting it.
-        if unsigned_user_id and unsigned_user_id != signed_user_id:
-            raise InvalidUserContextError("ALB identity header does not match signed claims")
-        return UserContext(user_id=signed_user_id, email=_string_claim(claims, "email"))
-    if expected_alb_arn and unsigned_user_id:
-        # In hosted mode, accepting only the unsigned identity header would let
-        # callers spoof workflow ownership if traffic reached the app directly.
+    if not signed_claims:
+        # Never trust the unsigned convenience header without signed claims.
         raise InvalidUserContextError("ALB identity header is missing signed claims")
-    if not unsigned_user_id:
-        return UserContext(user_id=LOCAL_USER_ID)
-    return UserContext(user_id=unsigned_user_id)
+    unsigned_user_id = headers.get(ALB_IDENTITY_HEADER, "").strip()
+    claims = _verified_alb_claims(signed_claims, expected_alb_arn)
+    signed_user_id = _string_claim(claims, "sub")
+    if signed_user_id is None:
+        raise InvalidUserContextError("ALB identity claims are missing sub")
+    # ALB sends both headers, but only x-amzn-oidc-data is signed; require
+    # the unsigned convenience header to agree before trusting it.
+    if unsigned_user_id and unsigned_user_id != signed_user_id:
+        raise InvalidUserContextError("ALB identity header does not match signed claims")
+    return UserContext(user_id=signed_user_id, email=_string_claim(claims, "email"))
 
 
-def _verified_alb_claims(encoded_jwt: str, expected_alb_arn: str | None) -> Mapping[str, object]:
+def _verified_alb_claims(encoded_jwt: str, expected_alb_arn: str) -> Mapping[str, object]:
     header_segment, payload_segment, signature_segment = _jwt_segments(encoded_jwt)
     header = _json_segment(header_segment)
     payload = _json_segment(payload_segment)
@@ -90,7 +113,7 @@ def _verified_alb_claims(encoded_jwt: str, expected_alb_arn: str | None) -> Mapp
     signer = _string_claim(header, "signer")
     if not signer:
         raise InvalidUserContextError("ALB identity claims are missing signer")
-    if expected_alb_arn is not None and signer != expected_alb_arn:
+    if signer != expected_alb_arn:
         # Pinning the signer prevents a valid token from another load balancer
         # from being replayed against this app.
         raise InvalidUserContextError("ALB identity signer does not match expected load balancer")
@@ -198,6 +221,7 @@ __all__ = [
     "ALB_IDENTITY_HEADER",
     "InvalidUserContextError",
     "LOCAL_USER_ID",
+    "TRUSTED_PROXY_USER_HEADER",
     "bind_user_context",
     "current_user_context",
     "reset_user_context",

@@ -3,6 +3,8 @@ set -Eeuo pipefail
 
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_SCRIPT="$TEST_DIR/../scripts/deploy.sh"
+FULL_DEPLOY_SCRIPT="$DEPLOY_SCRIPT"
+CUSTOMER_DEPLOY_SCRIPT="$TEST_DIR/../scripts/customer-platform-deploy.sh"
 JUSTFILE="$TEST_DIR/../../Justfile"
 BUILDSPEC="$TEST_DIR/../buildspec.yml"
 TEST_ROOT="$(mktemp -d)"
@@ -65,6 +67,25 @@ case "${1:-} ${2:-}" in
     ;;
   "iam get-policy")
     printf '%s\n' "$MOCK_APPLICATION_BOUNDARY_ARN"
+    ;;
+  "s3api put-object")
+    if [[ -n "${MOCK_SELECTED_ROOT:-}" ]]; then
+      printf 'PreconditionFailed: root selection exists\n' >&2
+      exit 254
+    fi
+    printf '{}\n'
+    ;;
+  "s3api head-object")
+    if [[ "$*" == *"root-selection/tofu.tfstate"* && -n "${MOCK_SELECTED_ROOT:-}" ]]; then
+      printf '%s\n' "$MOCK_SELECTED_ROOT"
+      exit 0
+    fi
+    if [[ "${MOCK_FULL_STATE:-0}" == "1" ]]; then
+      printf '{}\n'
+      exit 0
+    fi
+    printf 'An error occurred (404) when calling the HeadObject operation: Not Found\n' >&2
+    exit 254
     ;;
   "ecr describe-images")
     if [[ -f "$MOCK_IMAGE_FILE" ]]; then
@@ -182,15 +203,19 @@ case "$arguments" in
     fi
     ;;
   *" output "*)
-    case "${!#}" in
-      reference_data_table) printf 'data-chord-staging-reference-data\n' ;;
-      ecr_repository_url) printf '945365518758.dkr.ecr.us-east-2.amazonaws.com/data-chord-staging\n' ;;
-      codebuild_project_name) printf 'data-chord-staging-image\n' ;;
-      ecs_cluster_name | ecs_service_name) printf 'data-chord-staging\n' ;;
-      target_group_arn) printf 'arn:aws:elasticloadbalancing:us-east-2:945365518758:targetgroup/app/1\n' ;;
-      app_url) printf 'https://data-chord-staging.apps.netrias.com\n' ;;
-      *) exit 2 ;;
-    esac
+    if [[ "$arguments" == *" -json "* ]]; then
+      printf '%s\n' '{"runtime_environment":{"value":{"DATA_CHORD_PROFILE":"hosted"}},"runtime_data_policy_json":{"value":"{}"}}'
+    else
+      case "${!#}" in
+        reference_data_table) printf 'data-chord-staging-reference-data\n' ;;
+        ecr_repository_url) printf '945365518758.dkr.ecr.us-east-2.amazonaws.com/data-chord-staging\n' ;;
+        codebuild_project_name) printf 'data-chord-staging-image\n' ;;
+        ecs_cluster_name | ecs_service_name) printf 'data-chord-staging\n' ;;
+        target_group_arn) printf 'arn:aws:elasticloadbalancing:us-east-2:945365518758:targetgroup/app/1\n' ;;
+        app_url) printf 'https://data-chord-staging.apps.netrias.com\n' ;;
+        *) exit 2 ;;
+      esac
+    fi
     ;;
   *) printf 'Unexpected OpenTofu call: %s\n' "$*" >&2; exit 2 ;;
 esac
@@ -210,9 +235,9 @@ MOCK_SLEEP
 
 chmod +x "$MOCK_BIN/git" "$MOCK_BIN/aws" "$MOCK_BIN/tofu" "$MOCK_BIN/uv" "$MOCK_BIN/sleep"
 
-safe_plan='{"resource_changes":[{"address":"aws_ecr_repository.app","change":{"actions":["create"]}},{"address":"aws_dynamodb_table.cde_recommendation_cache","change":{"actions":["create"]}},{"address":"aws_dynamodb_table.harmonization_cache","change":{"actions":["create"]}},{"address":"aws_dynamodb_table.reference_data","change":{"actions":["create"]}},{"address":"aws_s3_bucket.workflow","change":{"actions":["create"]}}]}'
-prerequisite_plan='{"resource_changes":[{"address":"aws_ecr_repository.app","change":{"actions":["create"]}},{"address":"aws_s3_bucket.workflow","change":{"actions":["create"]}}]}'
-application_plan='{"resource_changes":[{"address":"aws_dynamodb_table.cde_recommendation_cache","change":{"actions":["create"]}},{"address":"aws_dynamodb_table.harmonization_cache","change":{"actions":["create"]}},{"address":"aws_dynamodb_table.reference_data","change":{"actions":["create"]}}]}'
+safe_plan='{"resource_changes":[{"address":"aws_ecr_repository.app","change":{"actions":["create"]}},{"address":"module.data_plane.aws_dynamodb_table.cde_recommendation_cache","change":{"actions":["create"]}},{"address":"module.data_plane.aws_dynamodb_table.harmonization_cache","change":{"actions":["create"]}},{"address":"module.data_plane.aws_dynamodb_table.reference_data","change":{"actions":["create"]}},{"address":"module.data_plane.aws_s3_bucket.workflow","change":{"actions":["create"]}}]}'
+prerequisite_plan='{"resource_changes":[{"address":"aws_ecr_repository.app","change":{"actions":["create"]}},{"address":"module.data_plane.aws_s3_bucket.workflow","change":{"actions":["create"]}}]}'
+application_plan='{"resource_changes":[{"address":"module.data_plane.aws_dynamodb_table.cde_recommendation_cache","change":{"actions":["create"]}},{"address":"module.data_plane.aws_dynamodb_table.harmonization_cache","change":{"actions":["create"]}},{"address":"module.data_plane.aws_dynamodb_table.reference_data","change":{"actions":["create"]}}]}'
 
 run_command() {
   local calls="$1"
@@ -230,6 +255,8 @@ run_command() {
     MOCK_IMAGE_FILE="$TEST_ROOT/image" \
     MOCK_EMPTY_STATE="${MOCK_EMPTY_STATE:-0}" \
     MOCK_ALREADY_DEPLOYER="${MOCK_ALREADY_DEPLOYER:-0}" \
+    MOCK_FULL_STATE="${MOCK_FULL_STATE:-0}" \
+    MOCK_SELECTED_ROOT="${MOCK_SELECTED_ROOT:-}" \
     MOCK_STATE_CHANGE_AFTER_PULL="${MOCK_STATE_CHANGE_AFTER_PULL:-0}" \
     MOCK_CODEBUILD_FAILURE="${MOCK_CODEBUILD_FAILURE:-0}" \
     MOCK_CODEBUILD_NOT_FOUND="${MOCK_CODEBUILD_NOT_FOUND:-0}" \
@@ -554,6 +581,82 @@ assert_contains "$JUSTFILE" "plan target stage:"
 assert_contains "$JUSTFILE" "deploy target stage:"
 assert_absent "$JUSTFILE" "status target stage"
 assert_absent "$JUSTFILE" "plan target stage profile"
+
+# Given bootstrap schema v2 identifies one customer account foundation.
+handoff="$TEST_ROOT/foundation-handoff.json"
+python3 - "$handoff" <<'PY'
+import json
+import sys
+
+role = "arn:aws:iam::945365518758:role/foundation/datachord-deployer"
+document = {
+    "schema_version": 2,
+    "target": "netrias",
+    "account_id": "945365518758",
+    "partition": "aws",
+    "region": "us-east-2",
+    "state_bucket_name": "netrias-datachord-state-945365518758-us-east-2",
+    "protected_state_bucket_name": None,
+    "state_key_prefix": "datachord/netrias/",
+    "deployer_role_arn": role,
+    "deployer_boundary_arn": "arn:aws:iam::945365518758:policy/datachord-deployer-boundary",
+    "application_role_boundary_arn": "arn:aws:iam::945365518758:policy/datachord-application-role-boundary",
+    "application_role_path": "/application/",
+    "assume_role_policy_statement": {
+        "Effect": "Allow",
+        "Action": "sts:AssumeRole",
+        "Resource": role,
+    },
+}
+with open(sys.argv[1], "w", encoding="utf-8") as stream:
+    json.dump(document, stream)
+PY
+customer_plan='{"resource_changes":[{"address":"module.data_plane.aws_dynamodb_table.cde_recommendation_cache","change":{"actions":["create"]}},{"address":"module.data_plane.aws_dynamodb_table.harmonization_cache","change":{"actions":["create"]}},{"address":"module.data_plane.aws_dynamodb_table.reference_data","change":{"actions":["create"]}},{"address":"module.data_plane.aws_s3_bucket.workflow","change":{"actions":["create"]}},{"address":"module.data_plane.aws_s3_bucket_public_access_block.workflow","change":{"actions":["create"]}}]}'
+DEPLOY_SCRIPT="$CUSTOMER_DEPLOY_SCRIPT"
+customer_calls="$TEST_ROOT/customer-calls"
+
+# When customer platform is planned and deployed, then it applies only the five data-plane resources.
+MOCK_FORECAST_JSON_OVERRIDE="$customer_plan" run_command \
+  "$customer_calls" netrias staging plan "$handoff" >/dev/null
+MOCK_FORECAST_JSON_OVERRIDE="$customer_plan" \
+  MOCK_APPLICATION_JSON_OVERRIDE="$customer_plan" \
+  run_command "$customer_calls" netrias staging deploy "$handoff" >/dev/null
+assert_contains "$customer_calls" "customer-platform/tofu.tfstate"
+assert_contains "$customer_calls" "infra/customer-platform apply"
+assert_absent "$customer_calls" "codebuild"
+assert_absent "$customer_calls" " ecr "
+assert_absent "$customer_calls" "iam get-policy"
+assert_contains "$TEST_ROOT/receipts/netrias-staging-customer-platform-outputs.json" '"DATA_CHORD_PROFILE":"hosted"'
+
+# Given full deployment wins the atomic root selection.
+# When customer deployment starts, then it stops before apply.
+selected_customer_calls="$TEST_ROOT/selected-customer-calls"
+MOCK_FORECAST_JSON_OVERRIDE="$customer_plan" run_command \
+  "$selected_customer_calls" netrias staging plan "$handoff" >/dev/null
+if MOCK_SELECTED_ROOT=full MOCK_FORECAST_JSON_OVERRIDE="$customer_plan" \
+  MOCK_APPLICATION_JSON_OVERRIDE="$customer_plan" \
+  run_command "$selected_customer_calls" netrias staging deploy "$handoff" >/dev/null 2>&1; then
+  fail_test "Customer platform replaced the atomic full-root selection"
+fi
+assert_absent "$selected_customer_calls" " apply "
+
+# Given full deployment state exists for the same target and stage.
+# When customer platform plans, then it stops before OpenTofu initialization.
+blocked_customer_calls="$TEST_ROOT/blocked-customer-calls"
+if MOCK_FULL_STATE=1 MOCK_FORECAST_JSON_OVERRIDE="$customer_plan" run_command \
+  "$blocked_customer_calls" netrias staging plan "$handoff" >/dev/null 2>&1; then
+  fail_test "Customer platform accepted an existing full deployment state"
+fi
+assert_absent "$blocked_customer_calls" " tofu init "
+DEPLOY_SCRIPT="$FULL_DEPLOY_SCRIPT"
+
+# Given customer-platform state exists for the same target and stage.
+# When full deployment plans, then it stops before OpenTofu initialization.
+blocked_full_calls="$TEST_ROOT/blocked-full-calls"
+if MOCK_FULL_STATE=1 run_command "$blocked_full_calls" netrias staging plan >/dev/null 2>&1; then
+  fail_test "Full deployment accepted existing customer-platform state"
+fi
+assert_absent "$blocked_full_calls" " tofu init "
 
 # Given the deploy command uses a full commit image tag.
 # When the CodeBuild recipe is inspected, then it keeps the same full commit.

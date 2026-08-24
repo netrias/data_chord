@@ -21,13 +21,22 @@ jobs:
         run: tofu -chdir=infra fmt -check -recursive
 
       - name: Initialize OpenTofu without a backend
-        run: tofu -chdir=infra init -backend=false -input=false
+        run: |
+          tofu -chdir=infra init -backend=false -input=false
+          tofu -chdir=infra/customer-platform init -backend=false -input=false
+          tofu -chdir=infra/modules/data-plane init -backend=false -input=false
 
       - name: Validate OpenTofu
-        run: tofu -chdir=infra validate
+        run: |
+          tofu -chdir=infra validate
+          tofu -chdir=infra/customer-platform validate
+          tofu -chdir=infra/modules/data-plane validate
 
       - name: Test OpenTofu behavior
-        run: tofu -chdir=infra test
+        run: |
+          tofu -chdir=infra test
+          tofu -chdir=infra/customer-platform test
+          tofu -chdir=infra/modules/data-plane test
 
       - name: Test deployment flow
         run: bash infra/tests/deployment_flow_test.sh

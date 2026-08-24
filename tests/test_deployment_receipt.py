@@ -30,6 +30,8 @@ def test_receipt_binds_the_preview_to_code_configuration_and_state(
         "netrias",
         "--stage",
         "staging",
+        "--deployment-root",
+        "full",
         "--commit",
         COMMIT,
         "--state",
@@ -45,13 +47,12 @@ def test_receipt_binds_the_preview_to_code_configuration_and_state(
     document = json.loads(receipt.read_text(encoding="utf-8"))
     assert document["status"] == "planned"
     assert document["state"] == {"kind": "present", "lineage": "lineage-1", "serial": 7}
-    assert document["forecast"] == [
-        {"address": "aws_ecr_repository.app", "actions": ["create"]}
-    ]
+    assert document["forecast"] == [{"address": "aws_ecr_repository.app", "actions": ["create"]}]
     assert set(document) == {
         "account_id",
         "commit",
         "config_digest",
+        "deployment_root",
         "forecast",
         "partition",
         "region",
@@ -64,6 +65,7 @@ def test_receipt_binds_the_preview_to_code_configuration_and_state(
         "status",
         "target",
     }
+    assert document["deployment_root"] == "full"
 
 
 def test_receipt_rejects_changed_state_before_deploy(tmp_path: Path) -> None:
@@ -156,12 +158,8 @@ def test_internal_plans_stay_inside_the_forecast_and_phase(tmp_path: Path) -> No
         "--to-status",
         "in_progress",
     )
-    approved = _plan(
-        tmp_path, {"aws_ecr_repository.app": ["create"]}, name="approved.json"
-    )
-    extra = _plan(
-        tmp_path, {"aws_vpc.app": ["create"]}, name="extra.json"
-    )
+    approved = _plan(tmp_path, {"aws_ecr_repository.app": ["create"]}, name="approved.json")
+    extra = _plan(tmp_path, {"aws_vpc.app": ["create"]}, name="extra.json")
 
     # When the prerequisite phase checks the approved and extra plans.
     accepted = _check(receipt, approved, "prerequisite")
@@ -177,9 +175,7 @@ def test_receipt_rejects_destructive_preview_and_reuse(tmp_path: Path) -> None:
     # Given one preview deletes durable application state and one safe receipt completes.
     environment = _environment(tmp_path)
     state = _state(tmp_path, serial=1)
-    destructive = _plan(
-        tmp_path, {"aws_dynamodb_table.reference_data": ["delete", "create"]}
-    )
+    destructive = _plan(tmp_path, {"aws_dynamodb_table.reference_data": ["delete", "create"]})
     receipt = tmp_path / "receipt.json"
 
     # When plan records the destructive forecast and deploy tries to reuse a used receipt.
@@ -193,6 +189,8 @@ def test_receipt_rejects_destructive_preview_and_reuse(tmp_path: Path) -> None:
         "netrias",
         "--stage",
         "staging",
+        "--deployment-root",
+        "full",
         "--commit",
         COMMIT,
         "--state",
@@ -219,6 +217,85 @@ def test_receipt_rejects_destructive_preview_and_reuse(tmp_path: Path) -> None:
     assert "no longer matches status" in reused.stderr
 
 
+def test_customer_platform_receipt_uses_its_own_state_identity(
+    tmp_path: Path,
+) -> None:
+    # Given one bootstrap handoff and an empty customer-platform state.
+    handoff = _handoff(tmp_path)
+    receipt = tmp_path / "customer-platform-receipt.json"
+    plan = _plan(
+        tmp_path,
+        {
+            "module.data_plane.aws_s3_bucket.workflow": ["create"],
+            "module.data_plane.aws_s3_bucket_public_access_block.workflow": ["create"],
+            "module.data_plane.aws_dynamodb_table.reference_data": ["create"],
+            "module.data_plane.aws_dynamodb_table.harmonization_cache": ["create"],
+            "module.data_plane.aws_dynamodb_table.cde_recommendation_cache": ["create"],
+        },
+    )
+
+    # When the customer-platform plan creates its bounded receipt.
+    result = _run(
+        "create",
+        "--receipt",
+        receipt,
+        "--environment",
+        handoff,
+        "--target",
+        "netrias",
+        "--stage",
+        "staging",
+        "--deployment-root",
+        "customer-platform",
+        "--commit",
+        COMMIT,
+        "--state",
+        "-",
+        "--plan-json",
+        plan,
+    )
+
+    # Then the receipt cannot be confused with the full deployment state.
+    assert result.returncode == 0, result.stderr
+    document = json.loads(receipt.read_text(encoding="utf-8"))
+    assert document["deployment_root"] == "customer-platform"
+    assert document["state_key"] == ("datachord/netrias/staging/customer-platform/tofu.tfstate")
+    assert document["repository_url"] is None
+
+
+def test_customer_platform_receipt_rejects_resources_outside_its_data_plane(
+    tmp_path: Path,
+) -> None:
+    # Given a customer-platform plan tries to create an IAM role.
+    handoff = _handoff(tmp_path)
+    plan = _plan(tmp_path, {"aws_iam_role.application": ["create"]})
+
+    # When the bounded receipt is created.
+    result = _run(
+        "create",
+        "--receipt",
+        tmp_path / "receipt.json",
+        "--environment",
+        handoff,
+        "--target",
+        "netrias",
+        "--stage",
+        "staging",
+        "--deployment-root",
+        "customer-platform",
+        "--commit",
+        COMMIT,
+        "--state",
+        "-",
+        "--plan-json",
+        plan,
+    )
+
+    # Then deployment stops before any resource can be applied.
+    assert result.returncode == 2
+    assert "unexpected resource: aws_iam_role.application" in result.stderr
+
+
 def _create(receipt: Path, environment: Path, state: Path, plan: Path) -> None:
     result = _run(
         "create",
@@ -230,6 +307,8 @@ def _create(receipt: Path, environment: Path, state: Path, plan: Path) -> None:
         "netrias",
         "--stage",
         "staging",
+        "--deployment-root",
+        "full",
         "--commit",
         COMMIT,
         "--state",
@@ -257,6 +336,8 @@ def _validate(
         "netrias",
         "--stage",
         "staging",
+        "--deployment-root",
+        "full",
         "--commit",
         COMMIT,
         "--state",
@@ -295,12 +376,9 @@ def _environment(tmp_path: Path) -> Path:
                 "account_id": "945365518758",
                 "region": "us-east-2",
                 "state_bucket_name": "netrias-datachord-state-945365518758-us-east-2",
-                "deployer_role_arn": (
-                    "arn:aws:iam::945365518758:role/foundation/datachord-deployer"
-                ),
+                "deployer_role_arn": ("arn:aws:iam::945365518758:role/foundation/datachord-deployer"),
                 "application_role_boundary_arn": (
-                    "arn:aws:iam::945365518758:policy/"
-                    "datachord-application-role-boundary"
+                    "arn:aws:iam::945365518758:policy/datachord-application-role-boundary"
                 ),
                 "application_role_path": "/application/",
                 "domain_name": "data-chord-staging.apps.netrias.com",
@@ -314,24 +392,51 @@ def _environment(tmp_path: Path) -> Path:
     return path
 
 
-def _state(tmp_path: Path, serial: int) -> Path:
-    path = tmp_path / "state.json"
+def _handoff(tmp_path: Path) -> Path:
+    path = tmp_path / "foundation-handoff.json"
+    role_arn = "arn:aws:iam::945365518758:role/foundation/datachord-deployer"
     path.write_text(
-        json.dumps({"lineage": "lineage-1", "serial": serial}), encoding="utf-8"
+        json.dumps(
+            {
+                "schema_version": 2,
+                "target": "netrias",
+                "account_id": "945365518758",
+                "partition": "aws",
+                "region": "us-east-2",
+                "state_bucket_name": ("netrias-datachord-state-945365518758-us-east-2"),
+                "protected_state_bucket_name": None,
+                "state_key_prefix": "datachord/netrias/",
+                "deployer_role_arn": role_arn,
+                "deployer_boundary_arn": ("arn:aws:iam::945365518758:policy/datachord-deployer-boundary"),
+                "application_role_boundary_arn": (
+                    "arn:aws:iam::945365518758:policy/datachord-application-role-boundary"
+                ),
+                "application_role_path": "/application/",
+                "assume_role_policy_statement": {
+                    "Effect": "Allow",
+                    "Action": "sts:AssumeRole",
+                    "Resource": role_arn,
+                },
+            }
+        ),
+        encoding="utf-8",
     )
     return path
 
 
-def _plan(
-    tmp_path: Path, changes: dict[str, list[str]], name: str = "plan.json"
-) -> Path:
+def _state(tmp_path: Path, serial: int) -> Path:
+    path = tmp_path / "state.json"
+    path.write_text(json.dumps({"lineage": "lineage-1", "serial": serial}), encoding="utf-8")
+    return path
+
+
+def _plan(tmp_path: Path, changes: dict[str, list[str]], name: str = "plan.json") -> Path:
     path = tmp_path / name
     path.write_text(
         json.dumps(
             {
                 "resource_changes": [
-                    {"address": address, "change": {"actions": actions}}
-                    for address, actions in changes.items()
+                    {"address": address, "change": {"actions": actions}} for address, actions in changes.items()
                 ]
             }
         ),
