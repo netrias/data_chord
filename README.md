@@ -12,11 +12,32 @@ and the column-mapping audit document.
 
 | Goal | Start here |
 | --- | --- |
+| Try the complete workflow with sample data | [Run the demo](#run-the-demo) |
 | Use an application that my organization hosts | [Use Data Chord](#use-data-chord) |
 | Run a tagged version from source | [Run a tagged version from source](#run-a-tagged-version-from-source) |
 | Change the application | [Develop Data Chord](#develop-data-chord) |
 | Deploy or operate the application | [Deployment options](#deployment-options) |
 | Understand the product or code structure | [Product guide](app.md) and [architecture guide](ARCHITECTURE.md) |
+
+## Run the demo
+
+The demo needs Docker, `just`, and read access to the private harmonization
+library through an existing GitHub CLI sign-in. It does not need an `.env`
+file, AWS credentials, Bedrock, or a database service.
+
+From the repository root, run:
+
+```bash
+just demo
+```
+
+The command builds one local image, starts a disposable container, and opens
+Stage 1 in your browser. The sample file is already selected and cannot be
+changed. Use the normal five stages to review its fixed mappings, correct the
+remaining unmatched value, and download the final ZIP file.
+
+Press `Ctrl+C` to stop the demo. The container and its workflow data are then
+removed. A later run starts a new demo.
 
 ## Use Data Chord
 

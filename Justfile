@@ -47,6 +47,9 @@ app:
 app-reload:
 	DEV_MODE=true uv run uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload --reload-exclude .venv
 
+demo:
+	bash scripts/run_demo.sh
+
 js-test:
 	npm test
 

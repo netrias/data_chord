@@ -1,0 +1,4 @@
+record_id,diagnosis,specimen,treatment_status
+DEMO-001,Diabetes,Blood,Active
+DEMO-002,breast ca,tumor tissue,done
+DEMO-003,unknown lesion,Plasma,Planned

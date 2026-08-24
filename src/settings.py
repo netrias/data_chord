@@ -22,6 +22,11 @@ class RuntimeProfile(StrEnum):
     PORTABLE = "portable"
 
 
+class ApplicationMode(StrEnum):
+    NORMAL = "normal"
+    DEMO = "demo"
+
+
 class IdentitySource(StrEnum):
     SHARED = "shared"
     TRUSTED_PROXY = "trusted_proxy"
@@ -29,6 +34,7 @@ class IdentitySource(StrEnum):
 
 
 _DATA_CHORD_PROFILE_VAR = "DATA_CHORD_PROFILE"
+_DATA_CHORD_MODE_VAR = "DATA_CHORD_MODE"
 _DATA_CHORD_IDENTITY_SOURCE_VAR = "DATA_CHORD_IDENTITY_SOURCE"
 _DATA_CHORD_DATA_DIR_VAR = "DATA_CHORD_DATA_DIR"
 _DATA_CHORD_STORAGE_VAR = "DATA_CHORD_STORAGE"
@@ -46,6 +52,7 @@ _AWS_REGION_VAR = "AWS_REGION"
 _DEV_MODE_VAR = "DEV_MODE"
 _DEFAULT_STORAGE_BACKEND = StorageBackend.LOCAL
 _DEFAULT_RUNTIME_PROFILE = RuntimeProfile.HOSTED
+_DEFAULT_APPLICATION_MODE = ApplicationMode.NORMAL
 _DEFAULT_IDENTITY_SOURCE = IdentitySource.SHARED
 _DEFAULT_AGENTIC_WORKERS = 100
 _DEFAULT_AWS_REGION = "us-east-2"
@@ -61,6 +68,15 @@ def get_runtime_profile() -> RuntimeProfile:
     except ValueError as exc:
         valid_profiles = ", ".join(profile.value for profile in RuntimeProfile)
         raise ConfigurationError(f"{_DATA_CHORD_PROFILE_VAR} must be one of: {valid_profiles}") from exc
+
+
+def get_application_mode() -> ApplicationMode:
+    raw_mode = os.getenv(_DATA_CHORD_MODE_VAR, _DEFAULT_APPLICATION_MODE.value).strip().lower()
+    try:
+        return ApplicationMode(raw_mode)
+    except ValueError as exc:
+        valid_modes = ", ".join(mode.value for mode in ApplicationMode)
+        raise ConfigurationError(f"{_DATA_CHORD_MODE_VAR} must be one of: {valid_modes}") from exc
 
 
 def get_identity_source() -> IdentitySource:
@@ -184,6 +200,9 @@ def get_expected_alb_arn() -> str | None:
 def validate_required_config() -> None:
     """Validate all runtime configuration before service clients are created."""
     profile = get_runtime_profile()
+    mode = get_application_mode()
+    if mode is ApplicationMode.DEMO and profile is not RuntimeProfile.PORTABLE:
+        raise ConfigurationError("DATA_CHORD_MODE=demo requires DATA_CHORD_PROFILE=portable")
     identity_source = get_identity_source()
     if profile is RuntimeProfile.PORTABLE and identity_source is not IdentitySource.SHARED:
         raise ConfigurationError("portable profile requires shared identity")

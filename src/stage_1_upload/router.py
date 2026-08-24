@@ -14,6 +14,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 
 import src.app.dependencies as dependencies
+from src.app.demo_mode import get_demo_upload
 from src.app.dependencies import get_upload_constraints
 from src.app.session_cache import get_session_cache
 from src.domain.cde import CDEInfo, DataModelSummary
@@ -40,6 +41,7 @@ from src.persistence.workflow_artifacts import (
     save_upload_metadata,
 )
 from src.persistence.workflow_state_store import load_workflow_state, save_initial_workflow_state
+from src.settings import ApplicationMode, get_application_mode
 from src.shared.jinja import templates_for_stage
 from src.storage import (
     UnsupportedUploadError,
@@ -73,9 +75,15 @@ stage_one_router = APIRouter(prefix="/stage-1", tags=["Stage 1 Upload"])
 
 @stage_one_router.get("", response_class=HTMLResponse, name="stage_one_upload_page")
 async def render_stage_one(request: Request) -> HTMLResponse:
+    demo_upload = (
+        (await _upload_response(get_demo_upload())).model_dump(mode="json")
+        if get_application_mode() is ApplicationMode.DEMO
+        else None
+    )
     context = {
         "request": request,
         "ui_constraints": describe_constraints(_upload_constraints),
+        "demo_upload": demo_upload,
     }
     return _templates.TemplateResponse(request, "stage_1_upload.html", context)
 
@@ -107,6 +115,11 @@ async def upload_dataset(
     background_tasks: BackgroundTasks,
     file: Annotated[UploadFile, File(...)],
 ) -> UploadResponse:
+    if get_application_mode() is ApplicationMode.DEMO:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Demo mode uses the packaged sample file.",
+        )
     storage = dependencies.get_upload_storage()
     cleanup = dependencies.get_workflow_cleanup()
     user = dependencies.get_user_context()
@@ -172,6 +185,10 @@ async def upload_dataset(
     if cleanup is not None:
         background_tasks.add_task(cleanup.run_safely)
 
+    return await _upload_response(meta)
+
+
+async def _upload_response(meta: UploadedFileMeta) -> UploadResponse:
     return UploadResponse(
         file_id=meta.file_id,
         file_name=meta.original_name,
