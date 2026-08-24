@@ -1,6 +1,6 @@
 # Data Chord
 
-Data harmonization workflow application. Upload CSV, TSV, or XLSX tabular data, review Bedrock CDE suggestions, run harmonization, and approve results before export.
+Data Chord is a data harmonization workflow application. Upload CSV, TSV, or XLSX tabular data, review Bedrock CDE suggestions, run harmonization, and approve results before export.
 
 CDE recommendation uses GPT-5.6 Luna through Amazon Bedrock Mantle. Value
 harmonization uses the same AWS provider boundary.
