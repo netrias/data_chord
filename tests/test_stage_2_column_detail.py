@@ -2,21 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-from src.app.session_cache import (
-    clear_all_session_caches,
-    get_session_cache,
-)
 from src.domain.cde import CDEInfo, CdeType
 from src.domain.cde_catalog import CdeCatalog
 from src.domain.cde_pv_catalog import CdePvCatalog
-from src.domain.column_profile import ColumnProfile, DistinctValue
 from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.dataset_workflow_ids import dataset_workflow_id_from_string
 from src.domain.manifest import ColumnMappingManifest
@@ -30,8 +24,35 @@ from src.stage_2_review_columns.use_cases import (
     compute_column_detail,
 )
 from src.storage import LocalWorkflowStorage, UploadConstraints, UploadStorage, UserContext
+from tests.conftest import TEST_XLSX_CONTENT_TYPE, create_xlsx_content
 
 FILE_ID = dataset_workflow_id_from_string("abcdef0123456789abcdef0123456789")
+
+
+class InMemoryUpload:
+    """Small upload stream for creating durable test artifacts."""
+
+    def __init__(
+        self,
+        content: bytes,
+        filename: str = "dataset.csv",
+        content_type: str = "text/csv",
+    ) -> None:
+        self.filename: str | None = filename
+        self.content_type: str | None = content_type
+        self._content = content
+        self._offset = 0
+
+    async def read(self, size: int = -1) -> bytes:
+        if self._offset >= len(self._content):
+            return b""
+        end = len(self._content) if size < 0 else self._offset + size
+        chunk = self._content[self._offset:end]
+        self._offset += len(chunk)
+        return chunk
+
+    async def close(self) -> None:
+        return None
 
 
 def test_cde_catalog_item_contains_only_browser_fields() -> None:
@@ -98,11 +119,23 @@ async def _compute_detail(
     )
 
 
-@pytest.fixture(autouse=True)
-def _isolate_session_cache() -> Generator[None]:
-    clear_all_session_caches()
-    yield
-    clear_all_session_caches()
+async def _store_upload(
+    context: StageTwoContext,
+    content: bytes,
+    *,
+    filename: str = "dataset.csv",
+    content_type: str = "text/csv",
+) -> None:
+    meta = await context.upload_storage.store(
+        InMemoryUpload(content, filename, content_type),
+        FILE_ID,
+    )
+    save_upload_artifacts(
+        context.workflow_storage,
+        context.user,
+        context.upload_storage,
+        meta,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -113,14 +146,10 @@ def _isolate_session_cache() -> Generator[None]:
 @pytest.mark.asyncio
 async def test_compute_column_detail_raises_when_profile_missing(stage_two_context: StageTwoContext) -> None:
     """
-    Given: a session cache with no profile for the requested column
+    Given: a workflow with no durable upload for the requested column
     When: compute_column_detail is called
     Then: ColumnDetailNotFound is raised
     """
-    # Given: cache empty (negative assertion)
-    cache = get_session_cache(FILE_ID)
-    assert cache.get_column_profile("col") is None
-
     # When / Then
     with pytest.raises(ColumnDetailNotFound):
         await _compute_detail(stage_two_context, "col", selected_cde_key=None)
@@ -140,25 +169,14 @@ async def test_compute_column_detail_returns_pv_match_and_sorted_pvs(
     When: compute_column_detail is called with that CDE selected
     Then: match_counts has the overlap; selected_pvs is the sorted PV list
     """
-    # Given
-    file_id = FILE_ID
-    cache = get_session_cache(file_id)
-    cache.set_column_profiles({
-        "col": ColumnProfile(
-            column_key="col",
-            total_rows=3,
-            distinct_values=(
-                DistinctValue("Lung", 2),
-                DistinctValue("Breast", 1),
-            ),
-            null_count=0,
-        )
-    })
+    # Given: the selected upload is durable, but no process-local profile is needed.
+    await _store_upload(stage_two_context, b"col\nLung\nLung\nBreast\n")
+
     # When
-    detail = await _compute_detail(stage_two_context, "col", selected_cde_key="dx")
+    detail = await _compute_detail(stage_two_context, "col_0000", selected_cde_key="dx")
 
     # Then
-    assert detail.column_key == "col"
+    assert detail.column_key == "col_0000"
     assert detail.match_counts == {"dx": 2, "notes": 2}
     assert detail.cde_types == {"dx": "pv", "notes": "passthrough"}
     assert detail.overlap_by_cde == {"dx": 1.0}
@@ -179,19 +197,11 @@ async def test_compute_column_detail_downgrades_to_passthrough_on_empty_pvs(
     When: compute_column_detail is called with that CDE selected
     Then: cde_types reports passthrough and selected_pvs is None
     """
-    # Given
-    file_id = FILE_ID
-    cache = get_session_cache(file_id)
-    cache.set_column_profiles({
-        "col": ColumnProfile(
-            column_key="col",
-            total_rows=2,
-            distinct_values=(DistinctValue("a", 1), DistinctValue("b", 1)),
-            null_count=0,
-        )
-    })
+    # Given: the selected upload contains values for a CDE with no permissible values.
+    await _store_upload(stage_two_context, b"col\na\nb\n")
+
     # When
-    detail = await _compute_detail(stage_two_context, "col", selected_cde_key="notes")
+    detail = await _compute_detail(stage_two_context, "col_0000", selected_cde_key="notes")
 
     # Then: PASSTHROUGH counts everything
     assert detail.cde_types == {"dx": "pv", "notes": "passthrough"}
@@ -201,35 +211,27 @@ async def test_compute_column_detail_downgrades_to_passthrough_on_empty_pvs(
 
 
 # ---------------------------------------------------------------------------
-# Test: empty CDE catalog returns an empty payload (the page hasn't loaded yet)
+# Test: reference data loads independently of the Stage 2 page
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_compute_column_detail_reloads_reference_data_without_page_cache(
+async def test_compute_column_detail_loads_reference_data_for_durable_upload(
     stage_two_context: StageTwoContext,
 ) -> None:
     """
-    Given: a profile is cached but CDEs haven't been populated by the Stage 2 page
+    Given: a durable upload exists but the Stage 2 page has not loaded CDE data
     When: compute_column_detail is called
     Then: complete reference data is returned from the repository
     """
     # Given
-    file_id = FILE_ID
-    cache = get_session_cache(file_id)
-    cache.set_column_profiles({
-        "col": ColumnProfile(
-            column_key="col",
-            total_rows=1,
-            distinct_values=(DistinctValue("x", 1),),
-            null_count=0,
-        )
-    })
+    await _store_upload(stage_two_context, b"col\nx\n")
+
     # When
-    detail = await _compute_detail(stage_two_context, "col", selected_cde_key=None)
+    detail = await _compute_detail(stage_two_context, "col_0000", selected_cde_key=None)
 
     # Then
-    assert detail.column_key == "col"
+    assert detail.column_key == "col_0000"
     assert detail.match_counts == {"notes": 1}
     assert detail.cde_types == {"dx": "pv", "notes": "passthrough"}
     assert detail.overlap_by_cde == {"dx": 0.0}
@@ -237,57 +239,36 @@ async def test_compute_column_detail_reloads_reference_data_without_page_cache(
 
 
 # ---------------------------------------------------------------------------
-# Test: missing in-memory profile is rebuilt from the uploaded file
+# Test: profile is rebuilt from the durable upload after a worker restart
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_compute_column_detail_rebuilds_profile_when_cache_lost(
+async def test_compute_column_detail_rebuilds_profile_from_durable_upload(
     stage_two_context: StageTwoContext,
+    tmp_path: Path,
 ) -> None:
     """
-    Given: browser/session state survived but the server's in-memory column
-           profile cache was cleared
+    Given: the upload and workflow metadata survive in durable storage, but a
+           new worker has an empty local upload directory
     When: compute_column_detail is called for a stored upload
     Then: the use case rebuilds that column's profile from the uploaded file and
           returns it with the detail payload
     """
-    # Given
-    storage = stage_two_context.upload_storage
-    csv_path = storage._data_dir / f"{FILE_ID}.csv"
-    csv_path.write_text("diagnosis\nLung\nLung\nBreast\n", encoding="utf-8")
-    meta_path = storage._meta_dir / f"{FILE_ID}.json"
-    meta_path.write_text(
-        """
-        {
-          "file_id": "abcdef0123456789abcdef0123456789",
-          "original_name": "diagnosis.csv",
-          "content_type": "text/csv",
-          "size_bytes": 27,
-          "saved_name": "abcdef0123456789abcdef0123456789.csv",
-          "uploaded_at": "2026-04-29T00:00:00+00:00",
-          "tabular_format": "csv",
-          "sheet_names": [],
-          "selected_sheet": null
-        }
-        """,
-        encoding="utf-8",
+    # Given: durable upload and workflow metadata survive a worker restart.
+    await _store_upload(stage_two_context, b"diagnosis\nLung\nLung\nBreast\n")
+    restarted_storage = UploadStorage(
+        tmp_path / "restarted-worker-uploads",
+        UploadConstraints(max_bytes=10_000),
     )
-    meta = storage.load(FILE_ID)
-    assert meta is not None
-    save_upload_artifacts(
-        stage_two_context.workflow_storage,
-        stage_two_context.user,
-        storage,
-        meta,
+    restarted_context = StageTwoContext(
+        upload_storage=restarted_storage,
+        workflow_storage=stage_two_context.workflow_storage,
+        user=stage_two_context.user,
     )
-
-    file_id = FILE_ID
-    cache = get_session_cache(file_id)
-    assert cache.get_column_profile("col_0000") is None
 
     # When
-    detail = await _compute_detail(stage_two_context, "col_0000", selected_cde_key="dx")
+    detail = await _compute_detail(restarted_context, "col_0000", selected_cde_key="dx")
 
     # Then
     assert detail.profile is not None
@@ -296,4 +277,41 @@ async def test_compute_column_detail_rebuilds_profile_when_cache_lost(
         ("Lung", 2),
         ("Breast", 1),
     ]
-    assert cache.get_column_profile("col_0000") is not None
+
+
+@pytest.mark.asyncio
+async def test_compute_column_detail_uses_latest_durable_sheet_selection(
+    stage_two_context: StageTwoContext,
+) -> None:
+    """A sheet change replaces the source of truth for column details."""
+    workbook = create_xlsx_content({
+        "First": [["diagnosis"], ["Lung"]],
+        "Second": [["diagnosis"], ["Breast"], ["Breast"]],
+    })
+    await _store_upload(
+        stage_two_context,
+        workbook,
+        filename="dataset.xlsx",
+        content_type=TEST_XLSX_CONTENT_TYPE,
+    )
+    first_detail = await _compute_detail(stage_two_context, "col_0000", selected_cde_key="dx")
+    assert first_detail.profile is not None
+    assert [(value.value, value.count) for value in first_detail.profile.distinct_values] == [("Lung", 1)]
+
+    save_initial_workflow_state(
+        stage_two_context.workflow_storage,
+        stage_two_context.user,
+        WorkflowState.from_data_model_version(
+            FILE_ID,
+            DataModelVersionReference("gc", "11.0.4"),
+            ColumnMappingManifest.empty(),
+            selected_sheet="Second",
+        ),
+    )
+    upload_meta = stage_two_context.upload_storage.load(FILE_ID)
+    assert upload_meta is not None
+    assert upload_meta.selected_sheet == "First"
+    second_detail = await _compute_detail(stage_two_context, "col_0000", selected_cde_key="dx")
+
+    assert second_detail.profile is not None
+    assert [(value.value, value.count) for value in second_detail.profile.distinct_values] == [("Breast", 2)]

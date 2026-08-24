@@ -12,14 +12,13 @@ from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from typing import cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import AsyncClient
 
 import src.app.dependencies as dependencies
-from src.app.session_cache import clear_session_cache, get_session_cache
-from src.domain.column_profile import build_column_profile
+from src.domain.cde_recommendation import RecommendationUnavailableError
 from src.domain.columns import column_key_from_string
 from src.domain.harmonization import HarmonizeStatus
 from src.domain.manifest import ManifestPayload
@@ -155,31 +154,6 @@ async def test_stage1_upload_persists_exact_bytes(
     assert meta is not None, "Expected stored metadata for uploaded file"
     assert meta.size_bytes == len(content), "Stored size does not match upload size"
     assert meta.saved_path.read_bytes() == content, "Stored bytes do not match uploaded bytes"
-
-
-async def test_stage1_upload_preserves_other_session_profile_cache(app_client: AsyncClient) -> None:
-    """Uploading a new file must not discard another active session's source profiles."""
-
-    first_file_id: str | None = None
-    second_file_id: str | None = None
-
-    try:
-        # Given one uploaded file has a session-scoped source profile.
-        first_file_id = await upload_content(app_client, create_csv_content([["col_a"], ["alpha"]]), "first.csv")
-        first_cache = get_session_cache(first_file_id)
-        first_cache.set_column_profile(build_column_profile("col_0000", ["alpha"]))
-
-        # When: another file is uploaded
-        second_file_id = await upload_content(app_client, create_csv_content([["col_b"], ["beta"]]), "second.csv")
-
-        # Then the first file's profile remains available for Stage 2.
-        assert second_file_id != first_file_id
-        assert get_session_cache(first_file_id).get_column_profile("col_0000") is not None
-    finally:
-        if first_file_id is not None:
-            clear_session_cache(first_file_id)
-        if second_file_id is not None:
-            clear_session_cache(second_file_id)
 
 
 async def test_stage1_upload_rejects_mismatched_content_type(
@@ -391,9 +365,62 @@ async def test_stage1_analyze_xlsx_uses_selected_sheet(
     columns = response.json()["columns"]
     assert [column["column_name"] for column in columns] == ["col_a", "col_a"]
     assert [column["column_key"] for column in columns] == ["col_0000", "col_0001"]
+    state = _load_workflow_state(file_id)
+    assert state is not None
+    assert state.selected_sheet == "Patients"
+
+
+async def test_failed_reanalysis_keeps_previous_sheet_selection(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed analysis does not replace the worksheet used by durable state."""
+    content = create_xlsx_content({
+        "First": [["first_col"], ["first-value"]],
+        "Second": [["second_col"], ["second-value"]],
+    })
+    file_id = await upload_content(app_client, content, "data.xlsx", TEST_XLSX_CONTENT_TYPE)
+    first_response = await app_client.post(
+        "/stage-1/analyze",
+        json={
+            "file_id": file_id,
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
+            "sheet_name": "First",
+        },
+    )
+    assert first_response.status_code == 200
+
+    failing_recommender = MagicMock()
+    failing_recommender.recommend = AsyncMock(
+        side_effect=RecommendationUnavailableError("provider unavailable")
+    )
+    monkeypatch.setattr(
+        dependencies,
+        "get_cde_recommender",
+        MagicMock(return_value=failing_recommender),
+    )
+    failed_response = await app_client.post(
+        "/stage-1/analyze",
+        json={
+            "file_id": file_id,
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
+            "sheet_name": "Second",
+        },
+    )
+
+    assert failed_response.status_code == 503
     meta = temp_storage.load(file_id)
     assert meta is not None
-    assert meta.selected_sheet == "Patients"
+    assert meta.selected_sheet == "First"
+    state = _load_workflow_state(file_id)
+    assert state is not None
+    assert state.selected_sheet == "First"
+    recovered_response = await app_client.get(f"/stage-1/analysis/{file_id}")
+    assert recovered_response.status_code == 200
+    assert [column["column_name"] for column in recovered_response.json()["columns"]] == ["first_col"]
 
 
 async def test_stage1_analyze_bom_and_non_bom_match_headers(
@@ -540,13 +567,13 @@ async def test_stage1_analyze_persists_selected_data_model_version(
     assert state.data_model_version.external_version_number == "11.0.4"
 
 
-async def test_stage2_mapping_page_recovers_selected_model_from_workflow_state(
+async def test_stage2_mapping_page_loads_selected_model_from_workflow_state(
     app_client: AsyncClient,
     mock_netrias_client: MagicMock,
 ) -> None:
-    """Stage 2 can reload after cache loss using the durable selected model/version."""
+    """Stage 2 reloads the selected model/version from durable workflow state."""
 
-    # Given: analysis saved GC external version 11.0.4, then the in-memory CDE cache was lost
+    # Given: analysis saved GC external version 11.0.4 in durable workflow state
     file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "stage2-selection.csv")
     analyze_response = await app_client.post(
         "/stage-1/analyze",
@@ -557,7 +584,6 @@ async def test_stage2_mapping_page_recovers_selected_model_from_workflow_state(
         },
     )
     assert analyze_response.status_code == 200
-    clear_session_cache(file_id)
     repository = mock_netrias_client.reference_repository
     repository.load_model.reset_mock()
 
@@ -624,12 +650,14 @@ async def test_static_assets_require_browser_revalidation(app_client: AsyncClien
 async def test_stage3_harmonize_uses_stored_selection(
     app_client: AsyncClient,
     mock_netrias_client: MagicMock,
+    temp_storage: UploadStorage,
 ) -> None:
     """The durable selected model/version is backend truth during harmonization."""
 
     class StubHarmonizer:
         def __init__(self) -> None:
             self.called = False
+            self.sheet_name: str | None = None
 
         def run(  # type: ignore[no-untyped-def]
             self,
@@ -642,19 +670,33 @@ async def test_stage3_harmonize_uses_stored_selection(
             sheet_name,
         ):
             self.called = True
+            self.sheet_name = sheet_name
             return _successful_stage_three_result(file_path, output_path, "job-selection")
 
-    # Given: analysis saved GC external version 11.0.4
-    file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "stage3-selection.csv")
+    # Given: analysis saved GC 11.0.4 and the second worksheet in canonical state.
+    content = create_xlsx_content({
+        "Keep": [["ignored"], ["wrong"]],
+        "Patients": [["diagnosis"], ["Lung"], ["Breast"]],
+    })
+    file_id = await upload_content(
+        app_client,
+        content,
+        "stage3-selection.xlsx",
+        TEST_XLSX_CONTENT_TYPE,
+    )
     analyze_response = await app_client.post(
         "/stage-1/analyze",
         json={
             "file_id": file_id,
             "data_model_key": "gc",
             "external_version_number": "11.0.4",
+            "sheet_name": "Patients",
         },
     )
     assert analyze_response.status_code == 200
+    upload_meta = temp_storage.load(file_id)
+    assert upload_meta is not None
+    assert upload_meta.selected_sheet == "Keep"
     await confirm_mapping_choices(app_client, file_id)
     stub = StubHarmonizer()
     repository = mock_netrias_client.reference_repository
@@ -671,10 +713,25 @@ async def test_stage3_harmonize_uses_stored_selection(
 
     # Then the stored selection loads the reference model before the harmonizer runs.
     assert response.status_code == 200
+    if response.json()["status"] != "succeeded":
+        await _wait_for_stage_three_job(app_client, response.json()["job_id"], file_id)
     loaded_version = repository.load_model.call_args.args[0]
     assert loaded_version.data_model_key == "gc"
     assert loaded_version.external_version_number == "11.0.4"
     assert stub.called
+    assert stub.sheet_name == "Patients"
+
+    # Stage 4 reads the same worksheet even though upload metadata still names
+    # the first worksheet.
+    rows_response = await app_client.post("/stage-4/rows", json={"file_id": file_id})
+    assert rows_response.status_code == 200
+    assert rows_response.json()["totalOriginalRows"] == 2
+    context_response = await app_client.post(
+        "/stage-4/row-context",
+        json={"file_id": file_id, "row_indices": [0]},
+    )
+    assert context_response.status_code == 200
+    assert context_response.json() == {"headers": ["diagnosis"], "rows": [["Lung"]]}
 
 
 async def test_stage3_rerun_removes_decisions_from_the_previous_result(
@@ -840,10 +897,10 @@ async def test_stage3_harmonize_returns_queued_while_long_job_finishes(
     assert "status=succeeded" in finished_next_stage_url
 
 
-async def test_stage3_job_status_recovers_from_durable_state_after_cache_loss(
+async def test_stage3_job_status_reads_durable_state_after_worker_task_ends(
     app_client: AsyncClient,
 ) -> None:
-    """Stage 3 polling can recover after the process-local job cache is gone."""
+    """Stage 3 polling reads the completed job from durable workflow state."""
 
     class SlowStubHarmonizer:
         def run(  # type: ignore[no-untyped-def]

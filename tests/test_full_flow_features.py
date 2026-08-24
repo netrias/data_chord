@@ -11,7 +11,6 @@ import pytest
 from httpx import AsyncClient
 
 import src.app.dependencies as dependencies
-from src.app.session_cache import clear_all_session_caches
 from src.auth.user_context import TRUSTED_PROXY_USER_HEADER
 from src.storage import UploadStorage, UserContext, WorkflowFile
 from tests.conftest import (
@@ -332,13 +331,13 @@ async def test_reharmonize_cannot_clear_another_users_overrides(
     assert overrides_response.json()["overrides"]["1"]["col_0000"]["human_value"] == "gamma"
 
 
-async def test_stage4_recovers_pvs_after_session_cache_loss(
+async def test_stage4_reads_pvs_from_durable_manifest(
     app_client: AsyncClient,
     temp_storage: UploadStorage,
 ) -> None:
-    """Stage 4 review uses durable PV manifest data after cache loss."""
+    """Stage 4 review uses durable PV manifest data."""
 
-    # Given: harmonization artifacts and a durable PV manifest exist, but cache is empty
+    # Given: harmonization artifacts and a durable PV manifest exist
     rows = [["col_a"], ["alpha"]]
     file_id = await upload_content(app_client, create_csv_content(rows), "stage4-pvs.csv")
     meta = temp_storage.load(file_id)
@@ -346,8 +345,6 @@ async def test_stage4_recovers_pvs_after_session_cache_loss(
     create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"col_a": "Denied"}})
     create_manifest_for_file(temp_storage, file_id, meta.saved_path, {0: {"col_a": "Denied"}})
     _save_test_pv_manifest(file_id, "col_0000", "diagnosis_cde", ["Allowed"])
-    clear_all_session_caches()
-
     # When: Stage 4 loads review rows and non-conformant values
     rows_response = await app_client.post("/stage-4/rows", json={"file_id": file_id})
     non_conformant_response = await app_client.get(f"/stage-4/non-conformant/{file_id}")
@@ -363,11 +360,11 @@ async def test_stage4_recovers_pvs_after_session_cache_loss(
     assert non_conformant_response.json()["count"] == 1
 
 
-async def test_stage5_summary_recovers_pvs_after_session_cache_loss(
+async def test_stage5_summary_reads_pvs_from_durable_manifest(
     app_client: AsyncClient,
     temp_storage: UploadStorage,
 ) -> None:
-    """Stage 5 summary uses durable PV manifest data after cache loss."""
+    """Stage 5 summary uses durable PV manifest data."""
 
     # Given: a changed harmonization manifest has PV recovery data on disk
     rows = [["col_a"], ["alpha"]]
@@ -377,8 +374,6 @@ async def test_stage5_summary_recovers_pvs_after_session_cache_loss(
     create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"col_a": "Denied"}})
     create_manifest_for_file(temp_storage, file_id, meta.saved_path, {0: {"col_a": "Denied"}})
     _save_test_pv_manifest(file_id, "col_0000", "diagnosis_cde", ["Allowed"])
-    clear_all_session_caches()
-
     # When: Stage 5 builds the final summary
     response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
 

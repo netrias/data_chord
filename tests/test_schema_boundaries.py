@@ -61,9 +61,26 @@ def test_workflow_state_rejects_boolean_schema_version() -> None:
 
 
 def test_workflow_state_rejects_older_and_newer_schema_versions() -> None:
-    for schema_version in (1, 3):
+    for schema_version in (1, 2, 4):
         with pytest.raises(WorkflowStateSchemaError, match="not supported"):
             WorkflowState.from_store({"schema_version": schema_version}, _FILE_ID)
+
+
+@pytest.mark.parametrize("selected_sheet", [1, True, [], {}])
+def test_workflow_state_rejects_invalid_selected_sheet(selected_sheet: object) -> None:
+    stored = _workflow_state().to_store()
+    stored["selected_sheet"] = selected_sheet
+
+    with pytest.raises(WorkflowStateSchemaError, match="invalid selected_sheet"):
+        WorkflowState.from_store(stored, _FILE_ID)
+
+
+def test_workflow_state_requires_selected_sheet_field() -> None:
+    stored = _workflow_state().to_store()
+    del stored["selected_sheet"]
+
+    with pytest.raises(WorkflowStateSchemaError, match="missing selected_sheet"):
+        WorkflowState.from_store(stored, _FILE_ID)
 
 
 @pytest.mark.parametrize(

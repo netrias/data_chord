@@ -277,7 +277,7 @@ async def _run_harmonization_workflow(
     resolved_columns = await _resolved_columns_for_source(
         meta.saved_path,
         column_renames,
-        meta.selected_sheet,
+        workflow_state.selected_sheet,
     )
 
     try:
@@ -309,7 +309,7 @@ async def _run_harmonization_workflow(
         prepared_manifest,
         column_pv_sets,
         output_path,
-        meta.selected_sheet,
+        workflow_state.selected_sheet,
     )
     if result.status == HarmonizeStatus.SUCCEEDED:
         # Provider output is still scratch at this point. Refuse to transform
@@ -321,7 +321,7 @@ async def _run_harmonization_workflow(
         await _apply_column_renames_to_output(
             harmonized_output_path,
             column_renames,
-            meta.selected_sheet,
+            workflow_state.selected_sheet,
         )
         harmonized_output_path = await _refresh_managed_harmonized_output(
             harmonized_output_path,

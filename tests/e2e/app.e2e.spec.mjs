@@ -1185,6 +1185,78 @@ test('Stage 2 submits selected column renames for harmonization', async ({ page 
   expect(new URL(page.url()).searchParams.get('job_id')).toBe('rename-job');
 });
 
+test('Stage 2 restores overridden column details one request at a time', async ({ page }) => {
+  const fileId = 'abcdef0123456789abcdef0123456789';
+  const payload = {
+    file_id: fileId,
+    file_name: 'overrides.csv',
+    external_version_number: '11.0.4',
+    total_rows: 2,
+    columns: [_stage2Column('col_0000', 'first'), _stage2Column('col_0001', 'second')],
+    cde_targets: {},
+    column_summaries: {
+      col_0000: { value_overlap_ratio: 0.0 },
+      col_0001: { value_overlap_ratio: 0.0 },
+    },
+    manual_overrides: { col_0000: 'dx', col_0001: 'dx' },
+    manifest: { column_mappings: {} },
+  };
+  const cdeCatalog = [_stage2Cde('dx', 'pv')];
+  let activeRequests = 0;
+  let maximumActiveRequests = 0;
+  let completedRequests = 0;
+
+  await page.addInitScript((stagePayload) => {
+    sessionStorage.setItem('stage2Payload', JSON.stringify(stagePayload));
+    sessionStorage.setItem('maxReachedStage', 'mapping');
+  }, payload);
+  await page.route('**/stage-2?**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/html',
+      body: _stage2HarnessHtml(cdeCatalog),
+    });
+  });
+  await page.route('**/stage-2/column-detail/**', async (route) => {
+    const url = new URL(route.request().url());
+    const columnKey = decodeURIComponent(url.pathname.split('/').at(-1) ?? '');
+    activeRequests += 1;
+    maximumActiveRequests = Math.max(maximumActiveRequests, activeRequests);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 75));
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          column_key: columnKey,
+          profile: {
+            column_key: columnKey,
+            total_rows: 1,
+            distinct_values: [{ value: columnKey, count: 1 }],
+            null_count: 0,
+            total_distinct: 1,
+            null_pct: 0.0,
+            is_all_unique: true,
+          },
+          match_counts: { dx: 0 },
+          overlap_by_cde: { dx: 0.0 },
+          cde_types: { dx: 'pv' },
+          selected_pvs: ['allowed'],
+        }),
+      });
+      completedRequests += 1;
+    } finally {
+      activeRequests -= 1;
+    }
+  });
+
+  await page.goto(`/stage-2?file_id=${fileId}&data_model_key=gc&external_version_number=11.0.4`);
+  await expect.poll(() => completedRequests).toBe(2);
+
+  expect(maximumActiveRequests).toBe(1);
+  await expect(page.locator('#mappingRows .mapping-row')).toHaveCount(2);
+});
+
 test('Stage 2 picker surfaces all AI candidates as separate rows', async ({ page }) => {
   /*
    * Given: cde_targets["diagnosis"] contains two ranked AI candidates.

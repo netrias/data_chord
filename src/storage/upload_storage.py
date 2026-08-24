@@ -281,7 +281,7 @@ class UploadStorage:
         meta = self.load(file_id)
         if meta is None:
             raise FileNotFoundError(file_id)
-        selected_sheet = _resolve_selected_sheet(meta, sheet_name)
+        selected_sheet = resolve_selected_sheet(meta, sheet_name)
         if selected_sheet is None:
             return meta
         updated = _with_selected_sheet(meta, selected_sheet)
@@ -375,7 +375,7 @@ def _tabular_format_from_metadata(payload: StoredMeta) -> TabularFormat:
     return get_tabular_format(Path(payload[_META_SAVED_NAME]), payload[_META_CONTENT_TYPE])
 
 
-def _resolve_selected_sheet(meta: UploadedFileMeta, requested_sheet: str | None) -> str | None:
+def resolve_selected_sheet(meta: UploadedFileMeta, requested_sheet: str | None) -> str | None:
     """Return the worksheet to persist, or None when the upload has no sheets."""
     if not meta.sheet_names:
         return None
@@ -410,4 +410,5 @@ __all__ = [
     "UploadTooLargeError",
     "UploadStorage",
     "describe_constraints",
+    "resolve_selected_sheet",
 ]

@@ -16,7 +16,6 @@ from fastapi.responses import HTMLResponse
 import src.app.dependencies as dependencies
 from src.app.demo_mode import get_demo_upload
 from src.app.dependencies import get_upload_constraints
-from src.app.session_cache import get_session_cache
 from src.domain.cde import CDEInfo, DataModelSummary
 from src.domain.cde_catalog import CdeCatalog
 from src.domain.cde_pv_catalog import CdePvCatalog
@@ -38,7 +37,6 @@ from src.observability.events import (
 from src.persistence.workflow_artifacts import (
     load_upload_artifact,
     save_upload_artifacts,
-    save_upload_metadata,
 )
 from src.persistence.workflow_state_store import load_workflow_state, save_initial_workflow_state
 from src.settings import ApplicationMode, get_application_mode
@@ -46,11 +44,11 @@ from src.shared.jinja import templates_for_stage
 from src.storage import (
     UnsupportedUploadError,
     UploadedFileMeta,
-    UploadStorage,
     UploadTooLargeError,
     UserContext,
     WorkflowStorageFullError,
     describe_constraints,
+    resolve_selected_sheet,
 )
 
 from .schemas import (
@@ -233,20 +231,14 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
         _log_analyze_failed(user, payload.file_id, "upload_not_found")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please upload again.")
 
-    meta = _select_sheet_safe(storage, payload.file_id, payload.sheet_name)
-    save_upload_metadata(
-        dependencies.get_workflow_storage(),
-        user,
-        storage,
-        meta,
-    )
+    selected_sheet = _resolve_sheet_safe(meta, payload.sheet_name)
     data_model_version = payload.data_model_version()
     analysis_task = asyncio.create_task(
         run_in_threadpool(
             _analyze_columns_safe,
             meta.saved_path,
             payload.file_id,
-            meta.selected_sheet,
+            selected_sheet,
         )
     )
     reference_task = run_in_threadpool(
@@ -293,12 +285,9 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
             meta.dataset_workflow_id,
             data_model_version,
             mapping_manifest,
+            selected_sheet=selected_sheet,
         ),
     )
-    # Stash profiles in the session cache so the Stage 2 column-detail endpoint
-    # can serve them without re-reading the file.
-    cache = get_session_cache(meta.dataset_workflow_id, owner_user_id=user.user_id)
-    cache.set_column_profiles(profiles)
     column_summaries = _build_column_summaries(
         profiles,
         mapping_manifest,
@@ -354,7 +343,7 @@ async def load_analysis_state(file_id: str) -> AnalyzeResponse:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please upload again.")
     try:
         (total_rows, columns, profiles), reference_model = await asyncio.gather(
-            run_in_threadpool(_analyze_columns_safe, meta.saved_path, file_id, meta.selected_sheet),
+            run_in_threadpool(_analyze_columns_safe, meta.saved_path, file_id, state.selected_sheet),
             run_in_threadpool(
                 dependencies.get_reference_data_repository().load_model,
                 state.data_model_version,
@@ -365,7 +354,6 @@ async def load_analysis_state(file_id: str) -> AnalyzeResponse:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Reference data is currently unavailable. Please try again later.",
         ) from exc
-    get_session_cache(file_id, owner_user_id=user.user_id).set_column_profiles(profiles)
     choices = state.mapping_choices
     return AnalyzeResponse(
         file_id=meta.file_id,
@@ -393,14 +381,9 @@ async def load_analysis_state(file_id: str) -> AnalyzeResponse:
     )
 
 
-def _select_sheet_safe(storage: UploadStorage, file_id: str, sheet_name: str | None) -> UploadedFileMeta:
+def _resolve_sheet_safe(meta: UploadedFileMeta, sheet_name: str | None) -> str | None:
     try:
-        return storage.select_sheet(file_id, sheet_name)
-    except FileNotFoundError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Upload not found. Please upload again.",
-        ) from exc
+        return resolve_selected_sheet(meta, sheet_name)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 

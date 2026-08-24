@@ -142,6 +142,7 @@ def _publish_completed_workflow(
     original_dataset: TabularDataset,
     harmonized_path: Path,
     manifest_path: Path,
+    selected_sheet: str | None,
 ) -> None:
     """Seed the same durable state/artifact boundary a successful Stage 3 run owns."""
     import src.app.dependencies as dependencies
@@ -163,6 +164,7 @@ def _publish_completed_workflow(
             file_id,
             DataModelVersionReference("gc", "11.0.4"),
             ColumnMappingManifest(records),
+            selected_sheet=selected_sheet,
         ).with_mapping_choices(ConfirmedMappingChoices.from_raw({}, {}))
         loaded_state = save_initial_workflow_state(workflow_storage, user, state)
 
@@ -197,6 +199,8 @@ def _publish_completed_workflow(
 
 
 def main() -> None:
+    import src.app.dependencies as dependencies
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--file-id", required=True)
     parser.add_argument("--changes", default=None)
@@ -208,7 +212,13 @@ def main() -> None:
     meta = storage.load(args.file_id)
     if meta is None:
         raise FileNotFoundError(f"No uploaded file found for {args.file_id}")
-    original_dataset = read_tabular(meta.saved_path, sheet_name=meta.selected_sheet)
+    loaded_state = load_workflow_state(
+        dependencies.get_workflow_storage(),
+        UserContext(user_id="local-user"),
+        args.file_id,
+    )
+    selected_sheet = loaded_state.state.selected_sheet if loaded_state is not None else meta.selected_sheet
+    original_dataset = read_tabular(meta.saved_path, sheet_name=selected_sheet)
     harmonized_rows = [row.copy() for row in original_dataset.rows]
     changes = _parse_changes(args.changes)
     columns_by_key = {str(column.key): column for column in original_dataset.columns}
@@ -240,6 +250,7 @@ def main() -> None:
         original_dataset,
         harmonized_path,
         manifest_path,
+        selected_sheet,
     )
 
 
