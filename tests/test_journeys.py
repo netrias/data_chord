@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import csv
+import io
+import json
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -15,6 +20,7 @@ from tests.conftest import (
     create_harmonized_csv,
     create_manifest_for_file,
     create_manifest_with_manual_override,
+    review_state_payload,
     store_test_completed_harmonization,
 )
 
@@ -164,74 +170,124 @@ async def test_review_to_summary_journey(
 
 async def test_full_pipeline_journey(
     app_client: AsyncClient,
-    temp_storage: UploadStorage,
-    sample_csv_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Complete user journey: upload -> analyze -> harmonize -> review -> summary."""
+    """Complete route journey with production Stage 3 artifact writers."""
+    from src.app import dependencies
+    from src.app.demo_mode import DEMO_REFERENCE_PATH, DEMO_SAMPLE_PATH
+    from src.integrations.agentic_harmonize import AgenticHarmonizeConfig, AgenticHarmonizeService
+    from src.integrations.demo_harmonization_cache import DemoHarmonizationCache
+    from src.integrations.reference_data_file import FileReferenceDataRepository
+    from src.integrations.value_overlap_cde_recommendation import ValueOverlapCdeRecommender
 
-    # Given: A valid CSV file to process through all pipeline stages
+    # Given: Real local services that make every harmonization decision deterministic.
+    with monkeypatch.context() as test_services:
+        test_services.setattr(
+            dependencies,
+            "_reference_data_repository",
+            FileReferenceDataRepository(DEMO_REFERENCE_PATH),
+        )
+        test_services.setattr(dependencies, "_cde_recommender", ValueOverlapCdeRecommender())
+        test_services.setattr(
+            dependencies,
+            "_harmonize_service",
+            AgenticHarmonizeService(
+                AgenticHarmonizeConfig(region="us-east-2", max_workers=2),
+                cache=DemoHarmonizationCache(),
+            ),
+        )
+        test_services.setattr(
+            "src.integrations.agentic_harmonize.make_provider_client",
+            lambda *_args, **_kwargs: pytest.fail("The deterministic cache must prevent provider calls"),
+        )
 
-    # Stage 1: Upload
-    # When: User uploads the CSV file
-    upload_response = await app_client.post(
-        "/stage-1/upload",
-        files={"file": (sample_csv_path.name, sample_csv_path.read_bytes(), TEST_CSV_CONTENT_TYPE)},
+        # When: A user completes every API stage and changes one review value.
+        upload = await app_client.post(
+            "/stage-1/upload",
+            files={"file": (DEMO_SAMPLE_PATH.name, DEMO_SAMPLE_PATH.read_bytes(), TEST_CSV_CONTENT_TYPE)},
+        )
+        assert upload.status_code == 201, upload.text
+        file_id = upload.json()["file_id"]
+
+        analysis = await app_client.post(
+            "/stage-1/analyze",
+            json={
+                "file_id": file_id,
+                "data_model_key": "data-chord-demo",
+                "external_version_number": "1.0",
+            },
+        )
+        assert analysis.status_code == 200, analysis.text
+        await confirm_mapping_choices(app_client, file_id)
+
+        harmonization = await app_client.post("/stage-3/harmonize", json={"file_id": file_id})
+        assert harmonization.status_code == 200, harmonization.text
+        job = harmonization.json()
+        for _attempt in range(100):
+            if job["status"] not in {"queued", "running"}:
+                break
+            await asyncio.sleep(0.02)
+            job_response = await app_client.get(
+                f"/stage-3/jobs/{job['job_id']}",
+                params={"file_id": file_id},
+            )
+            assert job_response.status_code == 200, job_response.text
+            job = job_response.json()
+        assert job["status"] == "succeeded", job
+
+        rows = await app_client.post("/stage-4/rows", json={"file_id": file_id})
+        assert rows.status_code == 200, rows.text
+        diagnosis = next(
+            column for column in rows.json()["columns"] if column["targetCdeKey"] == "primary_diagnosis"
+        )
+        unresolved = next(
+            item for item in diagnosis["transformations"] if item["originalValue"] == "unknown lesion"
+        )
+        source_row = str(unresolved["rowIndices"][0])
+
+        saved = await app_client.post(
+            "/stage-4/overrides",
+            headers={"If-None-Match": "*"},
+            json={
+                "file_id": file_id,
+                "overrides": {
+                    source_row: {
+                        diagnosis["columnKey"]: {
+                            "human_value": "Carcinoma NOS",
+                            "original_value": "unknown lesion",
+                        }
+                    }
+                },
+                "review_state": review_state_payload(),
+            },
+        )
+        assert saved.status_code == 200, saved.text
+
+        summary = await app_client.post("/stage-5/summary", json={"file_id": file_id})
+        download = await app_client.post("/stage-5/download", json={"file_id": file_id})
+
+    # Then: Summary and download use the real Stage 3 output plus the review decision.
+    assert summary.status_code == 200, summary.text
+    diagnosis_summary = next(
+        column for column in summary.json()["column_summaries"] if column["column_key"] == diagnosis["columnKey"]
     )
-    # Then: Upload succeeds
-    assert upload_response.status_code == 201
-    file_id = upload_response.json()["file_id"]
+    assert diagnosis_summary["manual_changes"] == 1
+    assert download.status_code == 200, download.text
 
-    # Stage 1: Analyze
-    # When: User analyzes the uploaded file
-    analyze_response = await app_client.post(
-        "/stage-1/analyze",
-        json={"file_id": file_id, "data_model_key": TEST_TARGET_SCHEMA, "external_version_number": "11.0.4"},
+    with zipfile.ZipFile(io.BytesIO(download.content)) as archive:
+        csv_name = next(name for name in archive.namelist() if name.endswith(".csv"))
+        manifest_name = next(name for name in archive.namelist() if name.endswith("_manifest.json"))
+        mapping_name = next(name for name in archive.namelist() if name.endswith("_cde_mapping.json"))
+        output_rows = list(csv.DictReader(io.StringIO(archive.read(csv_name).decode("utf-8"))))
+        manifest = json.loads(archive.read(manifest_name))
+        mapping = json.loads(archive.read(mapping_name))
+
+    assert output_rows[2]["diagnosis"] == "Carcinoma NOS"
+    manifest_row = next(
+        row for row in manifest if row["column_name"] == "diagnosis" and row["to_harmonize"] == "unknown lesion"
     )
-    # Then: Analysis succeeds
-    assert analyze_response.status_code == 200
-    await confirm_mapping_choices(app_client, file_id)
-
-    # Stage 3: Harmonize
-    # When: User triggers harmonization
-    harmonize_response = await app_client.post(
-        "/stage-3/harmonize",
-        json={"file_id": file_id},
-    )
-    # Then: Harmonization succeeds
-    assert harmonize_response.status_code == 200
-
-    # Simulate harmonized output (in production this comes from Netrias)
-    meta = temp_storage.load(file_id)
-    assert meta is not None
-    changes = {
-        0: {"primary_diagnosis": "Standardized Diagnosis"},
-        1: {"therapeutic_agents": "Standardized Agent"},
-    }
-    create_harmonized_csv(temp_storage, file_id, meta.saved_path, changes)
-    create_manifest_for_file(temp_storage, file_id, meta.saved_path, changes)
-
-    # Stage 4: Review columns
-    # When: User fetches columns for review
-    rows_response = await app_client.post(
-        "/stage-4/rows",
-        json={"file_id": file_id},
-    )
-    # Then: Columns with transformations are returned
-    assert rows_response.status_code == 200
-    assert len(rows_response.json()["columns"]) > 0
-
-    # Stage 5: Summary
-    # When: User requests final summary
-    summary_response = await app_client.post(
-        "/stage-5/summary",
-        json={"file_id": file_id},
-    )
-    # Then: Summary shows column summaries with changes
-    assert summary_response.status_code == 200
-    summary = summary_response.json()
-    assert "column_summaries" in summary
-    total_ai_changes = sum(col["ai_changes"] for col in summary["column_summaries"])
-    assert total_ai_changes >= 2
+    assert [event["value"] for event in manifest_row["manual_overrides"]] == ["Carcinoma NOS"]
+    assert mapping["data_model_key"] == "data-chord-demo"
 
 
 async def test_manual_overrides_counted_in_summary(
