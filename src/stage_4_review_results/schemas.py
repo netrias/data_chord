@@ -16,8 +16,8 @@ class CellOverrideSchema(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    human_value: str
-    original_value: str | None
+    human_value: Annotated[str, Field(min_length=1)]
+    original_value: str
 
 
 class ReviewModeStateSchema(BaseModel):
@@ -48,7 +48,7 @@ class ReviewOverridesSchema(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[2]
+    schema_version: Literal[3]
     file_id: DatasetWorkflowIdField
     created_at: datetime
     updated_at: datetime

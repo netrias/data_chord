@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from httpx import AsyncClient
 
-from src.storage import UploadStorage
+from src.domain.columns import column_key_from_string
+from src.domain.review_overrides import (
+    ReviewOverrideAction,
+    ReviewOverrideEvent,
+    ReviewOverrides,
+    ReviewProgressState,
+)
+from src.persistence.review_override_store import ReviewOverridesRecord
+from src.storage import UploadStorage, VersionToken
 from tests.conftest import (
     create_harmonized_csv,
     store_test_harmonization_manifest,
@@ -18,14 +27,13 @@ from tests.conftest import (
 pytestmark = pytest.mark.asyncio
 
 
-def _create_manifest_with_history(
+def _create_base_manifest(
     storage: UploadStorage,
     file_id: str,
     original_value: str,
     ai_value: str,
-    manual_overrides: list[dict[str, str | None]],
 ) -> Path:
-    """Create a manifest with specific transformation history for testing."""
+    """Create immutable Stage 3 facts for a history test."""
     manifest_rows = [{
         "job_id": f"test-job-{file_id}",
         "column_id": 0,
@@ -37,10 +45,37 @@ def _create_manifest_with_history(
         "match_fidelity": "partial",
         "error": None,
         "row_indices": [0],
-        "manual_overrides": manual_overrides,
     }]
 
     return store_test_harmonization_manifest(storage, file_id, manifest_rows)
+
+
+def _review_record(
+    values: list[str],
+    timestamps: list[str],
+    original_value: str = "Original Value",
+) -> ReviewOverridesRecord:
+    events = tuple(
+        ReviewOverrideEvent(
+            kind=ReviewOverrideAction.SET,
+            row_key="1",
+            column_key=column_key_from_string("col_0000"),
+            original_value=original_value,
+            selected_value=value,
+            timestamp=datetime.fromisoformat(timestamp.replace("Z", "+00:00")),
+        )
+        for value, timestamp in zip(values, timestamps, strict=True)
+    )
+    return ReviewOverridesRecord(
+        value=ReviewOverrides(
+            file_id="a" * 32,
+            created_at=events[0].timestamp,
+            updated_at=events[-1].timestamp,
+            events=events,
+            review_state=ReviewProgressState(),
+        ),
+        version=VersionToken("test-review-version"),
+    )
 
 
 class TestTransformationHistoryContract:
@@ -59,12 +94,11 @@ class TestTransformationHistoryContract:
         meta = temp_storage.load(file_id)
         assert meta is not None
         create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"therapeutic_agents": "Harmonized Agent"}})
-        _create_manifest_with_history(
+        _create_base_manifest(
             storage=temp_storage,
             file_id=file_id,
             original_value="Original Agent",
             ai_value="Harmonized Agent",
-            manual_overrides=[],
         )
 
         # When: Summary is requested
@@ -95,12 +129,11 @@ class TestTransformationHistoryContract:
         meta = temp_storage.load(file_id)
         assert meta is not None
         create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"therapeutic_agents": "AI Suggestion"}})
-        _create_manifest_with_history(
+        _create_base_manifest(
             storage=temp_storage,
             file_id=file_id,
             original_value="Original Value",
             ai_value="AI Suggestion",
-            manual_overrides=[],
         )
 
         # When: Summary is requested
@@ -119,38 +152,40 @@ class TestTransformationHistoryContract:
         assert "original" in sources, "History should include original value step"
         assert "ai" in sources, "History should include AI suggestion step"
 
-    async def test_history_includes_manual_override_with_metadata(
+    async def test_history_includes_review_decision_timestamp(
         self,
         app_client: AsyncClient,
         temp_storage: UploadStorage,
         sample_csv_path: Path,
     ) -> None:
-        """Manual overrides appear in history with user_id and timestamp."""
+        """Review decisions appear in history with their event timestamp."""
 
-        # Given: A manifest with a manual override
+        # Given: immutable Stage 3 facts and one review event.
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
         create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"therapeutic_agents": "User Override"}})
-        _create_manifest_with_history(
+        _create_base_manifest(
             storage=temp_storage,
             file_id=file_id,
             original_value="Original Value",
             ai_value="AI Suggestion",
-            manual_overrides=[{
-                "user_id": "test-user@example.com",
-                "timestamp": "2024-01-15T14:30:00Z",
-                "value": "User Override",
-            }],
         )
 
-        # When: Summary is requested
-        response = await app_client.post(
-            "/stage-5/summary",
-            json={"file_id": file_id},
-        )
+        # When: Summary is requested from the v3 event log
+        with patch(
+            "src.stage_5_review_summary.use_cases.load_readable_review_overrides_record",
+            return_value=_review_record(
+                ["User Override"],
+                ["2024-01-15T14:30:00Z"],
+            ),
+        ):
+            response = await app_client.post(
+                "/stage-5/summary",
+                json={"file_id": file_id},
+            )
 
-        # Then: History contains user override with metadata
+        # Then: History contains the v3 user decision
         assert response.status_code == 200
         mappings = response.json()["term_mappings"]
         history = mappings[0]["history"]
@@ -160,78 +195,45 @@ class TestTransformationHistoryContract:
 
         user_step = user_steps[0]
         assert user_step["value"] == "User Override"
-        assert user_step["user_id"] == "test-user@example.com"
-        assert user_step["timestamp"] == "2024-01-15T14:30:00Z"
+        assert user_step["timestamp"] == "2024-01-15T14:30:00+00:00"
 
-    async def test_history_collapses_consecutive_duplicate_overrides(
+    async def test_history_preserves_distinct_review_values(
         self,
         app_client: AsyncClient,
         temp_storage: UploadStorage,
         sample_csv_path: Path,
     ) -> None:
-        """Consecutive overrides with same value are collapsed to one step."""
+        """Different review values each appear as separate steps."""
 
-        # Given: A manifest with multiple overrides of the same value
-        file_id = await upload_file(app_client, sample_csv_path)
-        meta = temp_storage.load(file_id)
-        assert meta is not None
-        create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"therapeutic_agents": "Same Value"}})
-        _create_manifest_with_history(
-            storage=temp_storage,
-            file_id=file_id,
-            original_value="Original",
-            ai_value="AI Suggestion",
-            manual_overrides=[
-                {"user_id": "user1", "timestamp": "2024-01-15T14:30:00Z", "value": "Same Value"},
-                {"user_id": "user1", "timestamp": "2024-01-15T14:30:01Z", "value": "Same Value"},
-                {"user_id": "user1", "timestamp": "2024-01-15T14:30:02Z", "value": "Same Value"},
-            ],
-        )
-
-        # When: Summary is requested
-        response = await app_client.post(
-            "/stage-5/summary",
-            json={"file_id": file_id},
-        )
-
-        # Then: Only one user override step appears (duplicates collapsed)
-        assert response.status_code == 200
-        mappings = response.json()["term_mappings"]
-        history = mappings[0]["history"]
-
-        user_steps = [s for s in history if s["source"] == "user"]
-        assert len(user_steps) == 1, f"Expected 1 user step after dedup, got {len(user_steps)}"
-
-    async def test_history_preserves_distinct_override_values(
-        self,
-        app_client: AsyncClient,
-        temp_storage: UploadStorage,
-        sample_csv_path: Path,
-    ) -> None:
-        """Different override values each appear as separate steps."""
-
-        # Given: A manifest with multiple distinct overrides
+        # Given: immutable Stage 3 facts and distinct review events.
         file_id = await upload_file(app_client, sample_csv_path)
         meta = temp_storage.load(file_id)
         assert meta is not None
         create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"therapeutic_agents": "Final Value"}})
-        _create_manifest_with_history(
+        _create_base_manifest(
             storage=temp_storage,
             file_id=file_id,
             original_value="Original",
             ai_value="AI Suggestion",
-            manual_overrides=[
-                {"user_id": "user1", "timestamp": "2024-01-15T14:30:00Z", "value": "First Edit"},
-                {"user_id": "user1", "timestamp": "2024-01-15T14:31:00Z", "value": "Second Edit"},
-                {"user_id": "user1", "timestamp": "2024-01-15T14:32:00Z", "value": "Final Value"},
-            ],
         )
 
         # When: Summary is requested
-        response = await app_client.post(
-            "/stage-5/summary",
-            json={"file_id": file_id},
-        )
+        with patch(
+            "src.stage_5_review_summary.use_cases.load_readable_review_overrides_record",
+            return_value=_review_record(
+                ["First Edit", "Second Edit", "Final Value"],
+                [
+                    "2024-01-15T14:30:00Z",
+                    "2024-01-15T14:31:00Z",
+                    "2024-01-15T14:32:00Z",
+                ],
+                original_value="Original",
+            ),
+        ):
+            response = await app_client.post(
+                "/stage-5/summary",
+                json={"file_id": file_id},
+            )
 
         # Then: All three distinct values appear in history
         assert response.status_code == 200
@@ -257,12 +259,11 @@ class TestTransformationHistoryContract:
         meta = temp_storage.load(file_id)
         assert meta is not None
         create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"therapeutic_agents": "Changed"}})
-        _create_manifest_with_history(
+        _create_base_manifest(
             storage=temp_storage,
             file_id=file_id,
             original_value="Original",
             ai_value="Changed",
-            manual_overrides=[],
         )
 
         # When: Summary is requested
@@ -295,12 +296,11 @@ class TestTransformationHistoryContract:
         assert meta is not None
         same_value = "Unchanged Value"
         create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"therapeutic_agents": same_value}})
-        _create_manifest_with_history(
+        _create_base_manifest(
             storage=temp_storage,
             file_id=file_id,
             original_value=same_value,
             ai_value=same_value,  # Same as original
-            manual_overrides=[],
         )
 
         # When: Summary is requested
@@ -332,12 +332,11 @@ class TestTransformationHistoryContract:
         meta = temp_storage.load(file_id)
         assert meta is not None
         create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"therapeutic_agents": "Changed Value"}})
-        _create_manifest_with_history(
+        _create_base_manifest(
             storage=temp_storage,
             file_id=file_id,
             original_value="Original Value",
             ai_value="Changed Value",
-            manual_overrides=[],
         )
 
         # When: Summary is requested
@@ -367,12 +366,11 @@ class TestTransformationHistoryContract:
         meta = temp_storage.load(file_id)
         assert meta is not None
         create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"therapeutic_agents": "Conformant Value"}})
-        _create_manifest_with_history(
+        _create_base_manifest(
             storage=temp_storage,
             file_id=file_id,
             original_value="Original",
             ai_value="Conformant Value",
-            manual_overrides=[],
         )
 
         # When: Summary is requested with a mocked PV set containing the value
@@ -404,12 +402,11 @@ class TestTransformationHistoryContract:
         meta = temp_storage.load(file_id)
         assert meta is not None
         create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"therapeutic_agents": "Non Conformant"}})
-        _create_manifest_with_history(
+        _create_base_manifest(
             storage=temp_storage,
             file_id=file_id,
             original_value="Original",
             ai_value="Non Conformant",
-            manual_overrides=[],
         )
 
         # When: Summary is requested with a mocked PV set NOT containing the values
@@ -441,12 +438,11 @@ class TestTransformationHistoryContract:
         meta = temp_storage.load(file_id)
         assert meta is not None
         create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"therapeutic_agents": "Any Value"}})
-        _create_manifest_with_history(
+        _create_base_manifest(
             storage=temp_storage,
             file_id=file_id,
             original_value="Original",
             ai_value="Any Value",
-            manual_overrides=[],
         )
 
         # When: Summary is requested with no PV set (returns None)

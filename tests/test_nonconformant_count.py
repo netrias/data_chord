@@ -181,19 +181,13 @@ async def test_non_conformant_gate_matches_active_per_cell_export_values(
         json={
             "file_id": file_id,
             "overrides": {
-                "1": {
-                    "col_0000": {
-                        "human_value": "Disallowed",
-                        "original_value": "Repeated",
+                    "1": {
+                        "col_0000": {
+                            "human_value": "Disallowed",
+                            "original_value": "Repeated",
+                        },
                     },
                 },
-                "2": {
-                    "col_0000": {
-                        "human_value": "Allowed",
-                        "original_value": "Repeated",
-                    },
-                },
-            },
             "review_state": {
                 "review_mode": "column",
                 "sort_mode": "original",

@@ -8,6 +8,11 @@ import {
 } from '/assets/shared/step-instruction-ui.js';
 import { markAfterPaint, markTiming, measureTiming } from '/assets/shared/performance-timing.js';
 import {
+  isReviewStateRecovery,
+  readResponseDetail,
+  renderRecoveryError,
+} from '/assets/shared/recovery-error.js';
+import {
   clearWorkflowSession,
   isValidFileId,
   isSafeFilename,
@@ -86,9 +91,13 @@ const _triggerBrowserDownload = (blob, filename) => {
   setTimeout(() => URL.revokeObjectURL(url), _REVOKE_DELAY_MS);
 };
 
-const _showError = (message) => {
+const _showError = (message, includeRecoveryLink = false) => {
   if (!_downloadError) return;
-  _downloadError.textContent = message;
+  if (includeRecoveryLink) {
+    renderRecoveryError(_downloadError, message, _state.fileId);
+  } else {
+    _downloadError.textContent = message;
+  }
   _downloadError.classList.remove('hidden');
 };
 
@@ -147,7 +156,10 @@ const _handleDownload = async () => {
     });
     markTiming('stage5.download.response', { status: response.status });
     measureTiming('stage5.download.request', 'stage5.download.start', 'stage5.download.response');
-    if (!response.ok) throw new Error('Download failed.');
+    if (!response.ok) {
+      const detail = await readResponseDetail(response, 'Download failed. Try again.');
+      throw Object.assign(new Error(detail), { status: response.status });
+    }
 
     const blob = await response.blob();
     markTiming('stage5.download.blob_ready', { bytes: blob.size });
@@ -158,7 +170,8 @@ const _handleDownload = async () => {
     _showStartOverAction();
   } catch (error) {
     console.error('Download failed:', error);
-    _showError('Download failed. Try again.');
+    const message = error.message || 'Download failed. Try again.';
+    _showError(message, isReviewStateRecovery(message));
   } finally {
     _setDownloadButtonState(false);
     await markAfterPaint('stage5.download.usable');
@@ -230,12 +243,16 @@ const _renderSummary = (columnSummaries) => {
   _summaryGrid.replaceChildren(ledger);
 };
 
-const _showSummaryError = (message) => {
+const _showSummaryError = (message, includeRecoveryLink = false) => {
   if (!_summaryGrid) return;
   _summaryGrid.replaceChildren();
   const error = document.createElement('p');
   error.className = 'summary-empty';
-  error.textContent = message;
+  if (includeRecoveryLink) {
+    renderRecoveryError(error, message, _state.fileId);
+  } else {
+    error.textContent = message;
+  }
   _summaryGrid.appendChild(error);
 };
 
@@ -281,14 +298,14 @@ const _createHistoryStep = (step) => {
 
   const value = document.createElement('p');
   value.className = 'history-step__value';
-  value.textContent = `"${step.value ?? ''}"`;
+  value.textContent = step.action === 'clear'
+    ? 'Reviewer cleared the choice'
+    : `"${step.value ?? ''}"`;
   item.appendChild(value);
 
   const detail = document.createElement('p');
   detail.className = 'history-step__detail';
-  const actor = step.source === 'user' && step.user_id
-    ? `Reviewer ${step.user_id}`
-    : _sourceLabel(step.source);
+  const actor = _sourceLabel(step.source);
   const timestamp = _formatTimestamp(step.timestamp);
   detail.textContent = timestamp ? `${actor} · ${timestamp}` : actor;
   item.appendChild(detail);
@@ -560,7 +577,10 @@ const _fetchSummary = async () => {
     });
     markTiming('stage5.summary.fetch.response', { status: response.status });
     measureTiming('stage5.summary.request', 'stage5.summary.fetch.start', 'stage5.summary.fetch.response');
-    if (!response.ok) throw new Error('Unable to load summary.');
+    if (!response.ok) {
+      const detail = await readResponseDetail(response, 'Unable to load summary.');
+      throw Object.assign(new Error(detail), { status: response.status });
+    }
 
     const data = await response.json();
     markTiming('stage5.summary.fetch.parsed', {
@@ -584,7 +604,10 @@ const _fetchSummary = async () => {
     measureTiming('stage5.init_to_usable', 'stage5.init.start', 'stage5.usable');
   } catch (error) {
     console.error('Failed to fetch summary:', error);
-    _showSummaryError('Unable to load the harmonization summary. Refresh the page to try again.');
+    _showSummaryError(
+      error.message || 'Unable to load the harmonization summary. Refresh the page to try again.',
+      isReviewStateRecovery(error.message),
+    );
   }
 };
 

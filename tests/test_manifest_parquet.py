@@ -10,10 +10,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from src.domain.harmonization import MatchFidelity
-from src.domain.manifest import (
-    ManifestRow,
-    ManualOverride,
-)
+from src.domain.manifest import ManifestRow
 from src.persistence.manifest_reader import read_manifest_parquet
 from src.persistence.manifest_schema import get_manifest_schema
 from src.persistence.manifest_writer import _write_manifest_parquet
@@ -96,55 +93,36 @@ class TestManifestParquetSchema:
         assert summary.rows[0].column_id == 3
         assert summary.rows[0].ontology_id == "123"
         assert summary.rows[0].match_fidelity is MatchFidelity.NONE
-        assert summary.rows[0].manual_overrides == []
+        assert summary.rows[0].column_name == "diagnosis"
 
-
-class TestManifestToJson:
-    """JSON conversion preserves all manifest data for human-readable download."""
-
-    def test_manifest_to_json_preserves_nested_structures(self) -> None:
-        """All fields including nested ManualOverride are serialized."""
-        manual_overrides = [
-            ManualOverride(user_id="user_1", timestamp="2024-01-14T09:00:00Z", value="First Edit"),
-            ManualOverride(user_id="user_2", timestamp="2024-01-14T10:00:00Z", value="Second Edit"),
-        ]
-
+    def test_writer_emits_empty_legacy_override_field(self, tmp_path: Path) -> None:
+        """The provider field remains physical, but review state is not stored in it."""
         row = ManifestRow(
-            job_id="test-job-123",
+            job_id="job-1",
             column_id=0,
             column_name="diagnosis",
             to_harmonize="lung cancer",
-            top_harmonization="Lung Carcinoma",
-            ontology_id="NCIT:C3200",
-            top_harmonizations=["Lung Carcinoma", "Lung Cancer"],
-            match_fidelity=MatchFidelity.PARTIAL,
+            top_harmonization="Lung Cancer",
+            ontology_id=None,
+            top_harmonizations=["Lung Cancer"],
+            match_fidelity=MatchFidelity.STRONG,
             error=None,
-            row_indices=[0, 5, 12],
-            manual_overrides=manual_overrides,
+            row_indices=[0],
         )
 
-        with TemporaryDirectory() as tmpdir:
-            manifest_path = Path(tmpdir) / "test_manifest.parquet"
-            _write_manifest_parquet(manifest_path, [row])
+        path = tmp_path / "manifest.parquet"
+        _write_manifest_parquet(path, [row])
 
-            json_str = _manifest_to_json(manifest_path)
+        table = pq.read_table(path)
 
-            assert json_str is not None
-            data = json.loads(json_str)
-            assert len(data) == 1
+        assert table["manual_overrides"].to_pylist() == [[]]
 
-            parsed = data[0]
-            assert parsed["job_id"] == "test-job-123"
-            assert parsed["column_name"] == "diagnosis"
-            assert parsed["match_fidelity"] == "partial"
-            assert parsed["row_indices"] == [0, 5, 12]
 
-            assert len(parsed["manual_overrides"]) == 2
-            assert parsed["manual_overrides"][0]["user_id"] == "user_1"
-            assert parsed["manual_overrides"][1]["value"] == "Second Edit"
+class TestManifestToJson:
+    """JSON conversion preserves manifest data without review-audit state."""
 
     def test_manifest_to_json_handles_none_values(self) -> None:
-        """Empty manual_overrides serialize correctly."""
+        """Manifest JSON preserves nullable provider values."""
         row = ManifestRow(
             job_id="job-789",
             column_id=0,
@@ -156,7 +134,6 @@ class TestManifestToJson:
             match_fidelity=MatchFidelity.STRONG,
             error=None,
             row_indices=[0],
-            manual_overrides=[],
         )
 
         with TemporaryDirectory() as tmpdir:
@@ -169,5 +146,4 @@ class TestManifestToJson:
             data = json.loads(json_str)
             parsed = data[0]
 
-            assert parsed["manual_overrides"] == []
             assert parsed["ontology_id"] is None

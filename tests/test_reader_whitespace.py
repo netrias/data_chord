@@ -31,7 +31,6 @@ def _make_row(
         match_fidelity=MatchFidelity.STRONG,
         error=None,
         row_indices=[0],
-        manual_overrides=[],
     )
 
 

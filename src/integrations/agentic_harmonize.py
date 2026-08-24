@@ -381,7 +381,6 @@ def _manifest_row(job_id: str, outcome: _TermOutcome) -> ManifestRow:
         match_fidelity=outcome.match_fidelity,
         error=None,
         row_indices=list(outcome.work.row_indices),
-        manual_overrides=[],
     )
 
 

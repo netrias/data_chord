@@ -223,6 +223,109 @@ test('no-recommendation card warns when its displayed source value is not permis
   expect(savedOverrides.overrides['8692'].col_0000.human_value).toBe('Carcinoma NOS');
 });
 
+test('Stage 4 shows server recovery detail with a Stage 3 link', async ({ page }) => {
+  const fileId = '0123456789abcdef0123456789abcdef';
+  const recoveryDetail = 'The saved review state cannot be read. Return to Stage 3 and run harmonization again.';
+
+  // Given: Stage 4 has no active snapshot, but its row result reports unreadable review state.
+  await page.route('**/stage-4/overrides/*', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: 'null' });
+  });
+  await page.route('**/stage-4/rows', async (route) => {
+    await route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({ detail: recoveryDetail }),
+    });
+  });
+
+  // When: the reviewer opens Stage 4.
+  await page.goto(`/stage-4?file_id=${fileId}`);
+
+  // Then: the server detail is visible and the recovery link keeps the file context.
+  const error = page.locator('#reviewError');
+  await expect(error).toBeVisible();
+  await expect(error).toContainText(recoveryDetail);
+  await expect(page.locator('#reviewTable')).toBeEmpty();
+  await expect(page.locator('#stageFiveButton')).toBeDisabled();
+  await expect(page.locator('#settingsButton')).toBeDisabled();
+  const recoveryLink = error.getByRole('link', { name: 'Return to Stage 3' });
+  await expect(recoveryLink).toHaveAttribute('href', `/stage-3?file_id=${fileId}`);
+  await recoveryLink.click();
+  await expect(page).toHaveURL(new RegExp(`/stage-3\\?file_id=${fileId}`));
+});
+
+test('Stage 4 shows save detail and the correct reload action', async ({ page }) => {
+  await mockHarmonizeSuccess(page);
+  const fileId = await uploadAndAnalyze(page, fileFixture('basic.csv'));
+  await clickHarmonize(page);
+  await expect(page.locator('#reviewButton')).toBeEnabled();
+  seedHarmonization(fileId, { 0: { col_0001: 'Suggested' } });
+
+  let failure = {
+    status: 409,
+    detail: 'Review state changed. Reload this page before saving again.',
+  };
+  await page.route('**/stage-4/overrides', async (route) => {
+    await route.fulfill({
+      status: failure.status,
+      contentType: 'application/json',
+      body: JSON.stringify({ detail: failure.detail }),
+    });
+  });
+
+  // Given: another tab changes the review state before this page saves.
+  await page.goto(`/stage-4?file_id=${fileId}`);
+  await waitForReviewRows(page);
+  let input = page.locator('.target-value-input').first();
+
+  // When: autosave receives the conflict.
+  await input.fill('First local edit');
+
+  // Then: the server detail and reload action are visible, and review is blocked.
+  const error = page.locator('#reviewError');
+  await expect(error).toContainText(failure.detail);
+  await expect(error.getByRole('link', { name: 'Reload Stage 4' })).toBeVisible();
+  await expect(error.getByRole('link', { name: 'Return to Stage 3' })).toHaveCount(0);
+  await expect(page.locator('#stageFiveButton')).toBeDisabled();
+
+  // Given: a new page later receives a non-retryable validation error.
+  failure = {
+    status: 400,
+    detail: 'A review choice does not match the current harmonization result. Reload Stage 4.',
+  };
+  await page.reload();
+  await waitForReviewRows(page);
+  input = page.locator('.target-value-input').first();
+
+  // When: autosave receives the validation detail.
+  await input.fill('Second local edit');
+
+  // Then: the specific detail replaces the generic error and blocks stale review.
+  await expect(error).toContainText(failure.detail);
+  await expect(error.getByRole('link', { name: 'Reload Stage 4' })).toBeVisible();
+  await expect(page.locator('#stageFiveButton')).toBeDisabled();
+
+  // Given: a new page later finds that the saved review document is unreadable.
+  failure = {
+    status: 409,
+    detail: 'The saved review state cannot be read. Return to Stage 3 and run harmonization again.',
+  };
+  await page.reload();
+  await waitForReviewRows(page);
+  input = page.locator('.target-value-input').first();
+
+  // When: autosave receives the terminal recovery response.
+  await input.fill('Third local edit');
+
+  // Then: stale cards are removed and only the Stage 3 recovery action remains.
+  await expect(error).toContainText(failure.detail);
+  await expect(page.locator('#reviewTable')).toBeEmpty();
+  await expect(page.locator('#stageFiveButton')).toBeDisabled();
+  await expect(error.getByRole('link', { name: 'Return to Stage 3' })).toBeVisible();
+  await expect(error.getByRole('link', { name: 'Reload Stage 4' })).toHaveCount(0);
+});
+
 test('happy path flow: upload → analyze → harmonize → review → summary → download', async ({ page }) => {
   await mockHarmonizeSuccess(page);
 
@@ -611,6 +714,65 @@ test('Stage 5 confirms start-over after successful download and clears browser w
     maxReachedStage: null,
     unrelatedKey: 'keep-me',
   });
+});
+
+test('Stage 5 shows recovery detail for summary and download failures', async ({ page }) => {
+  const fileId = '0123456789abcdef0123456789abcdef';
+  const recoveryDetail = 'The saved review state cannot be read. Return to Stage 3 and run harmonization again.';
+  const downloadDetail = 'The saved review state cannot be read. Return to Stage 3 and run harmonization again.';
+
+  // Given: the summary loads, but the next download reports an unreadable review state.
+  await page.route('**/stage-5/summary', async (route) => {
+    await route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({ detail: recoveryDetail }),
+    });
+  });
+
+  // When: the reviewer opens Stage 5.
+  await page.goto(`/stage-5?file_id=${fileId}`);
+
+  // Then: summary recovery detail and a Stage 3 link are shown.
+  const summaryError = page.locator('#summaryGrid .summary-empty');
+  await expect(summaryError).toBeVisible();
+  await expect(summaryError).toContainText(recoveryDetail);
+  const summaryRecoveryLink = summaryError.getByRole('link', { name: 'Return to Stage 3' });
+  await expect(summaryRecoveryLink).toHaveAttribute('href', `/stage-3?file_id=${fileId}`);
+
+  // Given: the summary endpoint is healthy and the download endpoint reports server detail.
+  await page.unroute('**/stage-5/summary');
+  await page.route('**/stage-5/summary', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        dataset: { filename: 'recovery.csv', tabular_format: 'csv', data_model_key: 'gc', external_version_number: '11.0.4' },
+        column_summaries: [],
+        term_mappings: [],
+        non_conformant_count: 0,
+      }),
+    });
+  });
+  await page.reload();
+  await expect(page.locator('#downloadResults')).toBeEnabled();
+  await page.route('**/stage-5/download', async (route) => {
+    await route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({ detail: downloadDetail }),
+    });
+  });
+
+  // When: the reviewer requests the download.
+  await page.locator('#downloadResults').click();
+
+  // Then: the download error uses the server detail and keeps recovery available.
+  const downloadError = page.locator('#downloadError');
+  await expect(downloadError).toBeVisible();
+  await expect(downloadError).toContainText(downloadDetail);
+  await expect(downloadError.getByRole('link', { name: 'Return to Stage 3' }))
+    .toHaveAttribute('href', `/stage-3?file_id=${fileId}`);
 });
 
 test('Stage 2 list opens a takeover on row click', async ({ page }) => {
@@ -1380,8 +1542,8 @@ test('Stage 5 aggregates change impact and keeps filters keyboard accessible', a
   const history = [{
     value: 'Bad',
     source: 'original',
+    action: null,
     timestamp: null,
-    user_id: null,
     review_status: 'needs_attention',
   }];
   await page.route('**/stage-5/summary', async (route) => {
@@ -2089,6 +2251,20 @@ test('history dialog separates current output from accessible decision history',
   await clickHarmonize(page);
   await expect(page.locator('#reviewButton')).toBeEnabled();
   seedHarmonization(fileId, { 0: { col_0001: 'Changed Value' } });
+  await page.route('**/stage-5/summary', async (route) => {
+    const response = await route.fetch();
+    const summary = await response.json();
+    for (const mapping of summary.term_mappings) {
+      mapping.history.push({
+        value: mapping.final_value,
+        source: 'user',
+        action: 'clear',
+        timestamp: null,
+        review_status: 'not_checked',
+      });
+    }
+    await route.fulfill({ response, json: summary });
+  });
 
   // Navigate to Stage 5
   await page.goto(`/stage-5?file_id=${fileId}`);
@@ -2111,6 +2287,8 @@ test('history dialog separates current output from accessible decision history',
   await expect(originalStep).toContainText('Source value');
   const aiStep = dialog.locator('.history-step[data-source="ai"]');
   await expect(aiStep).toContainText('Data Chord');
+  const clearStep = dialog.locator('.history-step[data-source="user"]');
+  await expect(clearStep).toContainText('Reviewer cleared the choice');
 
   // Closing returns focus to the row that opened the dialog.
   await dialog.getByRole('button', { name: 'Close' }).click();

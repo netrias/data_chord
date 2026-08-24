@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from src.domain.dataset_workflow_ids import DatasetWorkflowId
 from src.domain.harmonization import HarmonizeStatus
+from src.domain.manifest import ManifestSummary
+from src.domain.review_overrides import ReviewOverrides
 from src.persistence.harmonization_job_store import (
     HarmonizationJobUnreadableError,
     load_harmonization_job,
@@ -88,9 +90,35 @@ def load_readable_review_overrides_record(
         raise HarmonizationNotReadyError(REVIEW_STATE_RECOVERY_DETAIL) from exc
 
 
+def require_review_state_matches_manifest(
+    review_overrides: ReviewOverrides | None,
+    manifest: ManifestSummary,
+) -> None:
+    """Reject review history that does not belong to the current Stage 3 result."""
+    if review_overrides is None:
+        return
+    expected_cells = {
+        (str(row_index + 1), row.column_key): (
+            row.to_harmonize,
+            row.top_harmonization if row.top_harmonization.strip() else row.to_harmonize,
+        )
+        for row in manifest.rows
+        for row_index in row.row_indices
+    }
+    for event in review_overrides.events:
+        expected = expected_cells.get((event.row_key, event.column_key))
+        if (
+            expected is None
+            or event.original_value != expected[0]
+            or event.selected_value == expected[1]
+        ):
+            raise HarmonizationNotReadyError(REVIEW_STATE_RECOVERY_DETAIL)
+
+
 __all__ = [
     "HarmonizationNotReadyError",
     "REVIEW_STATE_RECOVERY_DETAIL",
     "load_readable_review_overrides_record",
+    "require_review_state_matches_manifest",
     "require_ready_harmonization_workflow",
 ]
