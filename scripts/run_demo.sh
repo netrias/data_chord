@@ -36,7 +36,7 @@ docker run \
   --name "$container" \
   --publish "127.0.0.1:${port}:8000" \
   "$image" \
-  python scripts/demo.py &
+  python -m scripts.demo &
 container_pid=$!
 
 for _attempt in {1..60}; do
