@@ -101,6 +101,7 @@ def _run_import(module: str, settings: dict[str, str]) -> subprocess.CompletedPr
             "DATA_CHORD_AGENTIC_WORKERS must not exceed 100",
         ),
         ({"DATA_CHORD_PROFILE": "unknown"}, "DATA_CHORD_PROFILE must be one of"),
+        ({"DATA_CHORD_MODE": "unknown"}, "DATA_CHORD_MODE must be one of"),
         (
             {
                 "DATA_CHORD_PROFILE": "portable",

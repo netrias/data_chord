@@ -29,6 +29,7 @@
 
 /* Dropzone */
 .dropzone {
+  position: relative;
   width: 100%;
   /* Vertical breathing room scales with viewport too — taller monitors get a
      larger drop target without bloating shorter ones. */
@@ -66,6 +67,16 @@
 .dropzone.has-file:hover {
   transform: none;
   border-color: var(--gray-200);
+}
+
+.dropzone.demo-locked {
+  cursor: default;
+}
+
+.dropzone.demo-locked:hover {
+  transform: none;
+  border-color: var(--gray-200);
+  box-shadow: var(--shadow-sm), var(--shadow-md);
 }
 
 .dropzone.is-uploading {
@@ -312,6 +323,44 @@
   font-size: 0.85rem;
   color: var(--netrias-600);
   font-weight: 500;
+}
+
+.demo-file-lock {
+  margin-top: 0.55rem;
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--gray-300);
+  border-radius: 999px;
+  color: var(--gray-700);
+  background: var(--gray-50);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.demo-file-lock:focus-visible {
+  outline: 3px solid var(--netrias-500);
+  outline-offset: 3px;
+}
+
+.demo-file-lock-help {
+  position: absolute;
+  width: min(320px, calc(100% - 2rem));
+  margin-top: 9.5rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: var(--radius-md);
+  color: var(--white);
+  background: var(--gray-900);
+  font-size: 0.8rem;
+  line-height: 1.35;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+
+.demo-file-lock:hover + .demo-file-lock-help,
+.demo-file-lock:focus + .demo-file-lock-help {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 /* ==========================================================================
