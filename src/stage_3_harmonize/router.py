@@ -563,9 +563,9 @@ def _collect_pv_adjustments(
 
 
 def _log_non_conformant_samples(rows: list[ManifestRow], column_pv_map: ColumnPvSets) -> None:
-    """Capped at 5 samples from first 50 rows to avoid log spam while providing debugging signal."""
+    """Log bounded structural evidence without source headers or data values."""
     samples = [
-        {"column": row.column_name, "value": row.top_harmonization}
+        row
         # A small prefix sample is enough to diagnose bad PV coverage without
         # making large manifests expensive to log.
         for row in rows[:50]
@@ -574,7 +574,11 @@ def _log_non_conformant_samples(rows: list[ManifestRow], column_pv_map: ColumnPv
     if samples:
         _router_logger.warning(
             "Non-conformant values with no PV-compliant alternative",
-            extra={"count": len(samples), "samples": samples},
+            extra={
+                "sample_count": len(samples),
+                "sample_column_keys": sorted({str(row.column_key) for row in samples}),
+                "scanned_row_count": min(len(rows), 50),
+            },
         )
 
 

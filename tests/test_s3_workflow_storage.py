@@ -16,6 +16,7 @@ from src.storage import (
     WorkflowAccessDeniedError,
     WorkflowConflictError,
     WorkflowFile,
+    WorkflowJsonUnreadableError,
 )
 
 
@@ -27,6 +28,7 @@ class FakeS3Client:
     def __init__(self) -> None:
         self.objects: dict[str, tuple[bytes, str]] = {}
         self.failed_put_key: str | None = None
+        self.replacement_before_delete: tuple[str, bytes] | None = None
 
     def put_object(self, **kwargs: object) -> dict[str, object]:
         key = _key(kwargs)
@@ -58,7 +60,16 @@ class FakeS3Client:
         return {"ETag": self.objects[key][1]}
 
     def delete_object(self, **kwargs: object) -> dict[str, object]:
-        self.objects.pop(_key(kwargs), None)
+        key = _key(kwargs)
+        if self.replacement_before_delete is not None:
+            replacement_key, body = self.replacement_before_delete
+            if replacement_key == key:
+                self.objects[key] = (body, _etag(body))
+                self.replacement_before_delete = None
+        if_match = kwargs.get("IfMatch")
+        if isinstance(if_match, str) and self.objects.get(key, (b"", ""))[1] != if_match:
+            raise _client_error("PreconditionFailed")
+        self.objects.pop(key, None)
         return {}
 
     def list_objects_v2(self, **kwargs: object) -> dict[str, object]:
@@ -100,6 +111,67 @@ def test_s3_workflow_json_uses_owner_and_versions() -> None:
         )
     with pytest.raises(WorkflowAccessDeniedError):
         storage.read_json(bob, workflow.dataset_workflow_id, WorkflowFile.WORKFLOW_STATE)
+
+
+@pytest.mark.parametrize("invalid_content", [b"{", b"\xff"])
+def test_s3_workflow_json_reports_invalid_bytes(invalid_content: bytes) -> None:
+    # Given: Durable S3 JSON exists but is not valid UTF-8 JSON.
+    client = FakeS3Client()
+    storage = S3WorkflowStorage(bucket="bucket", prefix="app", client=client)
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    storage.write_json(
+        user,
+        workflow.dataset_workflow_id,
+        WorkflowFile.WORKFLOW_STATE,
+        {"stage": "uploaded"},
+    )
+    key = "app/workflows/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/json/workflow_state.json"
+    client.objects[key] = (invalid_content, _etag(invalid_content))
+
+    # When / Then: The storage boundary reports the same typed unreadable error.
+    with pytest.raises(WorkflowJsonUnreadableError, match="workflow_state"):
+        storage.read_json(user, workflow.dataset_workflow_id, WorkflowFile.WORKFLOW_STATE)
+
+
+def test_s3_workflow_reports_invalid_metadata_schema() -> None:
+    # Given: Existing workflow metadata is valid JSON with an invalid schema.
+    client = FakeS3Client()
+    storage = S3WorkflowStorage(bucket="bucket", prefix="app", client=client)
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    key = "app/workflows/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/metadata.json"
+    client.objects[key] = (b"{}", _etag(b"{}"))
+
+    # When / Then: Existing corrupt metadata has the same typed recovery path.
+    with pytest.raises(WorkflowJsonUnreadableError, match="metadata"):
+        storage.read_json(user, workflow.dataset_workflow_id, WorkflowFile.WORKFLOW_STATE)
+
+
+def test_s3_json_delete_preserves_a_concurrent_replacement() -> None:
+    # Given: A JSON record changes after delete reads its current version.
+    client = FakeS3Client()
+    storage = S3WorkflowStorage(bucket="bucket", prefix="app", client=client)
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    storage.write_json(
+        user,
+        workflow.dataset_workflow_id,
+        WorkflowFile.REVIEW_OVERRIDES,
+        {"review": "old"},
+    )
+    key = "app/workflows/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/json/review_overrides.json"
+    replacement = b'{"review": "new"}'
+    client.replacement_before_delete = (key, replacement)
+
+    # When: The conditional delete observes the concurrent replacement.
+    with pytest.raises(WorkflowConflictError):
+        storage.delete_json(user, workflow.dataset_workflow_id, WorkflowFile.REVIEW_OVERRIDES)
+
+    # Then: The newer record remains available.
+    stored = storage.read_json(user, workflow.dataset_workflow_id, WorkflowFile.REVIEW_OVERRIDES)
+    assert stored is not None
+    assert stored.data == {"review": "new"}
 
 
 def test_s3_workflow_artifact_materializes_to_temp_file(tmp_path: Path) -> None:

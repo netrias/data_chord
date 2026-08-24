@@ -18,14 +18,33 @@ from src.observability.events import (
     REQUEST_ID_HEADER,
     log_api_request_failed,
 )
-from src.storage import WorkflowConflictError
+from src.persistence.cde_mapping_document_store import CdeMappingUnreadableError
+from src.persistence.harmonization_job_store import HarmonizationJobUnreadableError
+from src.persistence.pv_manifest_store import PvSnapshotUnreadableError
+from src.persistence.review_override_store import ReviewOverridesUnreadableError
+from src.persistence.workflow_artifacts import UploadMetadataUnreadableError
+from src.persistence.workflow_state_store import WorkflowStateUnreadableError
+from src.storage import WorkflowConflictError, WorkflowJsonUnreadableError
 
 GENERIC_API_ERROR_DETAIL = "We couldn't process this request. Please try again."
+WORKFLOW_RECORD_RECOVERY_DETAIL = "Saved workflow data cannot be read. Restart this workflow."
+
+_WORKFLOW_RECORD_ERRORS = (
+    CdeMappingUnreadableError,
+    HarmonizationJobUnreadableError,
+    PvSnapshotUnreadableError,
+    ReviewOverridesUnreadableError,
+    UploadMetadataUnreadableError,
+    WorkflowJsonUnreadableError,
+    WorkflowStateUnreadableError,
+)
 
 
 def register_api_error_handlers(app: FastAPI) -> None:
     """Keep API error response policy in one place instead of scattering it through routes."""
     app.add_exception_handler(WorkflowConflictError, _workflow_conflict)
+    for error_type in _WORKFLOW_RECORD_ERRORS:
+        app.add_exception_handler(error_type, _workflow_record_unreadable)
     app.add_exception_handler(HarmonizationNotReadyError, _harmonization_not_ready)
     app.add_exception_handler(RequestValidationError, _request_validation_failed)
     app.add_exception_handler(StarletteHTTPException, _http_request_failed)
@@ -45,6 +64,28 @@ async def _workflow_conflict(request: Request, exc: Exception) -> Response:
         user=current_user_context(),
     )
     return _generic_api_error_response(status.HTTP_409_CONFLICT, request)
+
+
+async def _workflow_record_unreadable(request: Request, exc: Exception) -> Response:
+    """Return one safe restart instruction for corrupt durable workflow JSON."""
+    if not isinstance(exc, _WORKFLOW_RECORD_ERRORS):
+        raise exc
+    log_api_request_failed(
+        method=request.method,
+        path=request.url.path,
+        status_code=status.HTTP_409_CONFLICT,
+        error_type=type(exc).__name__,
+        request_id=_request_id_for_log(request),
+        user=current_user_context(),
+    )
+    response = JSONResponse(
+        {"detail": WORKFLOW_RECORD_RECOVERY_DETAIL},
+        status_code=status.HTTP_409_CONFLICT,
+    )
+    request_id = _request_id_for_log(request)
+    if request_id is not None:
+        response.headers[REQUEST_ID_HEADER] = request_id
+    return response
 
 
 async def _harmonization_not_ready(request: Request, exc: Exception) -> Response:

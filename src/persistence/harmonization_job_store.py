@@ -9,7 +9,14 @@ from typing import Final
 
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_value
 from src.domain.harmonization import HarmonizationManifestSummary, HarmonizeStatus
-from src.storage import UserContext, VersionToken, WorkflowConflictError, WorkflowFile, WorkflowStorage
+from src.storage import (
+    UserContext,
+    VersionToken,
+    WorkflowConflictError,
+    WorkflowFile,
+    WorkflowJsonUnreadableError,
+    WorkflowStorage,
+)
 
 _CURRENT_SCHEMA_VERSION: Final = 3
 _DEFAULT_LEASE_SECONDS: Final = 45
@@ -183,7 +190,10 @@ def load_harmonization_job(
     user: UserContext,
     file_id: DatasetWorkflowId | str,
 ) -> LoadedHarmonizationJob | None:
-    stored = storage.read_json(user, file_id, WorkflowFile.STAGE_THREE_JOB)
+    try:
+        stored = storage.read_json(user, file_id, WorkflowFile.STAGE_THREE_JOB)
+    except WorkflowJsonUnreadableError as exc:
+        raise HarmonizationJobUnreadableError("harmonization job cannot be decoded") from exc
     if stored is None:
         return None
     job = HarmonizationJobState.from_store(stored.data, file_id)

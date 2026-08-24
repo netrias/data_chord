@@ -11,7 +11,7 @@ from src.domain.column_cde_map import ColumnCdeMap
 from src.domain.columns import ColumnKey, column_key_from_string
 from src.domain.pv_manifest import PVManifest, PvManifestSchemaError
 from src.persistence.workflow_state_store import LoadedWorkflowState
-from src.storage import UserContext, WorkflowFile, WorkflowStorage
+from src.storage import UserContext, WorkflowFile, WorkflowJsonUnreadableError, WorkflowStorage
 
 
 class PvSnapshotUnreadableError(Exception):
@@ -42,7 +42,10 @@ def load_pv_snapshot(
 ) -> CdePvCatalog | None:
     """Read PVs only after an authorized workflow-state read."""
     state = loaded_state.state
-    stored = workflow_storage.read_json(user, state.file_id, WorkflowFile.PV_MANIFEST)
+    try:
+        stored = workflow_storage.read_json(user, state.file_id, WorkflowFile.PV_MANIFEST)
+    except WorkflowJsonUnreadableError as exc:
+        raise PvSnapshotUnreadableError(state.file_id) from exc
     if stored is None:
         return None
     try:
@@ -98,7 +101,10 @@ def save_pv_snapshot(
         workflow_state_version=loaded_state.version.value,
         pvs=pv_map if isinstance(pv_map, CdePvCatalog) else CdePvCatalog.from_mapping(pv_map),
     )
-    existing = workflow_storage.read_json(user, state.file_id, WorkflowFile.PV_MANIFEST)
+    try:
+        existing = workflow_storage.read_json(user, state.file_id, WorkflowFile.PV_MANIFEST)
+    except WorkflowJsonUnreadableError as exc:
+        raise PvSnapshotUnreadableError(state.file_id) from exc
     workflow_storage.write_json(
         user,
         state.file_id,

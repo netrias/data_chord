@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 from typing import cast
+
+import pytest
 
 from src.domain.harmonization import MatchFidelity
 from src.domain.manifest import ColumnMappingManifest, ManifestPayload, ManifestRow, ManifestSummary
 from src.persistence.pv_manifest_store import ColumnPvSets
 from src.stage_3_harmonize.result_summary import build_harmonization_manifest_summary
+from src.stage_3_harmonize.router import _log_non_conformant_samples
 
 
 def _make_row(
@@ -108,6 +112,28 @@ class TestSummaryAggregation:
         assert first.non_conformant_terms == 1
         assert later.unique_terms_changed == 1
         assert later.changed_rows == 2
+
+
+def test_non_conformant_warning_excludes_headers_and_values(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Given: A non-conformant row contains sensitive source text.
+    row = _make_row("SECRET_HEADER", "SECRET_SOURCE", "SECRET_VALUE")
+    column_pv_map = ColumnPvSets({row.column_key: frozenset(["Approved"])})
+    caplog.set_level(logging.WARNING, logger="src.stage_3_harmonize.router")
+
+    # When: Stage 3 records its bounded diagnostic warning.
+    _log_non_conformant_samples([row], column_pv_map)
+
+    # Then: The record contains only stable keys and counts.
+    record = caplog.records[-1]
+    assert getattr(record, "sample_count", None) == 1
+    assert getattr(record, "sample_column_keys", None) == ["col_0000"]
+    assert getattr(record, "scanned_row_count", None) == 1
+    assert not hasattr(record, "samples")
+    assert "SECRET_HEADER" not in repr(record.__dict__)
+    assert "SECRET_SOURCE" not in repr(record.__dict__)
+    assert "SECRET_VALUE" not in repr(record.__dict__)
 
 
 class TestMappingExtraction:

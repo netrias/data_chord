@@ -207,6 +207,10 @@ class WorkflowConflictError(WorkflowStorageError):
     """Raised when create-once or optimistic version checks fail."""
 
 
+class WorkflowJsonUnreadableError(WorkflowStorageError):
+    """Raised when durable workflow JSON cannot be decoded."""
+
+
 class WorkflowArtifactNotFoundError(WorkflowStorageError):
     """Raised when a known workflow artifact has not been stored."""
 
@@ -291,14 +295,18 @@ class LocalWorkflowStorage:
 
     def read_json(self, user: UserContext, file_id: str, kind: WorkflowFile) -> StoredJson | None:
         self._require_json_kind(kind)
-        self._require_access(user, file_id)
-        path = self._json_path(file_id, kind)
-        if not path.exists():
-            return None
-        return StoredJson(
-            data=json.loads(path.read_text(encoding="utf-8")),
-            version=_version_for_file(path),
-        )
+        with self._workflow_lock(file_id):
+            self._require_access_locked(user, file_id)
+            path = self._json_path(file_id, kind)
+            if not path.exists():
+                return None
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise WorkflowJsonUnreadableError(
+                    f"Workflow JSON is unreadable: {kind.value}"
+                ) from exc
+            return StoredJson(data=data, version=_version_for_file(path))
 
     def write_json(
         self,
@@ -309,20 +317,22 @@ class LocalWorkflowStorage:
         expected_version: VersionToken | None = None,
     ) -> StoredJson:
         self._require_json_kind(kind)
-        self._require_access(user, file_id)
-        path = self._json_path(file_id, kind)
-        self._check_write_version(path, kind, expected_version)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self._write_json_atomic(path, data)
-        return StoredJson(data=data, version=_version_for_file(path))
+        with self._workflow_lock(file_id):
+            self._require_access_locked(user, file_id)
+            path = self._json_path(file_id, kind)
+            self._check_write_version(path, kind, expected_version)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._write_json_atomic(path, data)
+            return StoredJson(data=data, version=_version_for_file(path))
 
     def delete_json(self, user: UserContext, file_id: str, kind: WorkflowFile) -> bool:
         self._require_json_kind(kind)
-        self._require_access(user, file_id)
-        path = self._json_path(file_id, kind)
-        existed = path.exists()
-        path.unlink(missing_ok=True)
-        return existed
+        with self._workflow_lock(file_id):
+            self._require_access_locked(user, file_id)
+            path = self._json_path(file_id, kind)
+            existed = path.exists()
+            path.unlink(missing_ok=True)
+            return existed
 
     def create_artifact(
         self,
@@ -390,7 +400,10 @@ class LocalWorkflowStorage:
                 continue
             size_bytes = _directory_size(workflow_dir)
             usage_bytes += size_bytes
-            metadata = self._read_metadata(workflow_dir.name)
+            try:
+                metadata = self._read_metadata(workflow_dir.name)
+            except WorkflowJsonUnreadableError:
+                continue
             if metadata is None or metadata.dataset_workflow_id != workflow_dir.name:
                 continue
             workflows.append(StoredWorkflowUsage(metadata=metadata, size_bytes=size_bytes))
@@ -494,17 +507,21 @@ class LocalWorkflowStorage:
 
     def _require_access(self, user: UserContext, file_id: str) -> WorkflowMetadata:
         with self._workflow_lock(file_id):
-            metadata_path = self._metadata_path(file_id)
-            metadata = self._read_metadata(file_id)
-            if metadata is None:
-                if metadata_path.exists():
-                    raise WorkflowStorageError(f"Workflow metadata is unreadable: {file_id}")
-                raise WorkflowNotFoundError(file_id)
-            if metadata.owner_user_id != user.user_id and not user.is_admin:
-                raise WorkflowAccessDeniedError(file_id)
-            accessed = metadata.accessed_at(datetime.now(UTC))
-            self._write_json_atomic(metadata_path, accessed.to_store())
-            return accessed
+            return self._require_access_locked(user, file_id)
+
+    def _require_access_locked(self, user: UserContext, file_id: str) -> WorkflowMetadata:
+        """Authorize and refresh metadata while the caller holds the workflow lock."""
+        metadata_path = self._metadata_path(file_id)
+        metadata = self._read_metadata(file_id)
+        if metadata is None:
+            if metadata_path.exists():
+                raise WorkflowJsonUnreadableError("Workflow metadata is unreadable")
+            raise WorkflowNotFoundError(file_id)
+        if metadata.owner_user_id != user.user_id and not user.is_admin:
+            raise WorkflowAccessDeniedError(file_id)
+        accessed = metadata.accessed_at(datetime.now(UTC))
+        self._write_json_atomic(metadata_path, accessed.to_store())
+        return accessed
 
     def _read_metadata(self, file_id: str) -> WorkflowMetadata | None:
         metadata_path = self._metadata_path(file_id)
@@ -512,8 +529,10 @@ class LocalWorkflowStorage:
             return None
         try:
             payload = json.loads(metadata_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except OSError:
             return None
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise WorkflowJsonUnreadableError("Workflow metadata is unreadable") from exc
         return WorkflowMetadata.from_store(payload)
 
     @contextmanager
@@ -655,6 +674,7 @@ __all__ = [
     "WorkflowConflictError",
     "WorkflowFile",
     "WorkflowInventory",
+    "WorkflowJsonUnreadableError",
     "WorkflowMetadata",
     "WorkflowNotFoundError",
     "WorkflowStorage",

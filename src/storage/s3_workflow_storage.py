@@ -29,6 +29,7 @@ from .workflow_storage import (
     WorkflowArtifactTypeError,
     WorkflowConflictError,
     WorkflowFile,
+    WorkflowJsonUnreadableError,
     WorkflowMetadata,
     WorkflowNotFoundError,
     WorkflowStorageError,
@@ -90,10 +91,13 @@ class S3WorkflowStorage:
             if _is_not_found(exc):
                 return None
             raise
-        return StoredJson(
-            data=json.loads(_body_bytes(response).decode("utf-8")),
-            version=_version_from_response(response),
-        )
+        try:
+            data = json.loads(_body_bytes(response).decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise WorkflowJsonUnreadableError(
+                f"Workflow JSON is unreadable: {kind.value}"
+            ) from exc
+        return StoredJson(data=data, version=_version_from_response(response))
 
     def write_json(
         self,
@@ -130,9 +134,20 @@ class S3WorkflowStorage:
         self._require_json_kind(kind)
         self._require_access(user, file_id)
         key = self._json_key(file_id, kind)
-        existed = self._object_version(key) is not None
-        self.client.delete_object(Bucket=self.bucket, Key=key)
-        return existed
+        version = self._object_version(key)
+        if version is None:
+            return False
+        try:
+            self.client.delete_object(
+                Bucket=self.bucket,
+                Key=key,
+                IfMatch=version.value,
+            )
+        except ClientError as exc:
+            if _is_precondition_failed(exc):
+                raise WorkflowConflictError(f"Artifact version changed: {kind.value}") from exc
+            raise
+        return True
 
     def create_artifact(
         self,
@@ -226,9 +241,13 @@ class S3WorkflowStorage:
             if _is_not_found(exc):
                 raise WorkflowNotFoundError(file_id) from exc
             raise
-        metadata = WorkflowMetadata.from_store(json.loads(_body_bytes(response).decode("utf-8")))
+        try:
+            payload = json.loads(_body_bytes(response).decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise WorkflowJsonUnreadableError("Workflow metadata is unreadable") from exc
+        metadata = WorkflowMetadata.from_store(payload)
         if metadata is None:
-            raise WorkflowStorageError(f"Workflow metadata is unreadable: {file_id}")
+            raise WorkflowJsonUnreadableError("Workflow metadata is unreadable")
         # S3 IAM limits access by environment prefix; the workflow owner check
         # keeps users inside that environment from reading each other's uploads.
         if metadata.owner_user_id != user.user_id and not user.is_admin:
@@ -334,7 +353,7 @@ def _is_not_found(exc: ClientError) -> bool:
 
 def _is_precondition_failed(exc: ClientError) -> bool:
     code = str(exc.response.get("Error", {}).get("Code", ""))
-    return code in {"PreconditionFailed", "412"}
+    return code in {"ConditionalRequestConflict", "PreconditionFailed", "409", "412"}
 
 
 __all__ = [

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -18,7 +20,9 @@ from src.storage import (
     WorkflowArtifactTypeError,
     WorkflowConflictError,
     WorkflowFile,
+    WorkflowJsonUnreadableError,
 )
+from src.storage.workflow_storage import JsonValue
 
 
 def dataset_workflow_id(raw: str = "a" * 32) -> DatasetWorkflowId:
@@ -157,6 +161,110 @@ def test_mutable_json_requires_latest_version(tmp_path: Path) -> None:
             {"stage": "harmonized"},
             expected_version=first.version,
         )
+
+
+@pytest.mark.parametrize("invalid_content", [b"{", b"\xff"])
+def test_local_workflow_json_reports_invalid_bytes(
+    tmp_path: Path,
+    invalid_content: bytes,
+) -> None:
+    # Given: Durable JSON exists but is not valid UTF-8 JSON.
+    storage = LocalWorkflowStorage(tmp_path / "storage")
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    storage.write_json(
+        user,
+        workflow.dataset_workflow_id,
+        WorkflowFile.WORKFLOW_STATE,
+        {"stage": "uploaded"},
+    )
+    state_path = (
+        tmp_path
+        / "storage"
+        / "workflows"
+        / workflow.dataset_workflow_id
+        / "json"
+        / "workflow_state.json"
+    )
+    state_path.write_bytes(invalid_content)
+
+    # When / Then: The storage boundary reports one typed unreadable error.
+    with pytest.raises(WorkflowJsonUnreadableError, match="workflow_state"):
+        storage.read_json(user, workflow.dataset_workflow_id, WorkflowFile.WORKFLOW_STATE)
+
+
+def test_local_workflow_reports_invalid_metadata_schema(tmp_path: Path) -> None:
+    # Given: Existing workflow metadata is valid JSON with an invalid schema.
+    storage = LocalWorkflowStorage(tmp_path / "storage")
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    metadata_path = (
+        tmp_path
+        / "storage"
+        / "workflows"
+        / workflow.dataset_workflow_id
+        / "metadata.json"
+    )
+    metadata_path.write_text("{}", encoding="utf-8")
+
+    # When / Then: Existing corrupt metadata is not reported as a missing workflow or a 500.
+    with pytest.raises(WorkflowJsonUnreadableError, match="metadata"):
+        storage.read_json(user, workflow.dataset_workflow_id, WorkflowFile.WORKFLOW_STATE)
+
+
+def test_two_local_clients_cannot_commit_the_same_version(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given: Two clients read the same mutable record version.
+    storage_a = LocalWorkflowStorage(tmp_path / "storage")
+    storage_b = LocalWorkflowStorage(tmp_path / "storage")
+    user = UserContext(user_id="alice")
+    workflow = storage_a.create_workflow(user, dataset_workflow_id())
+    initial = storage_a.write_json(
+        user,
+        workflow.dataset_workflow_id,
+        WorkflowFile.WORKFLOW_STATE,
+        {"writer": "initial"},
+    )
+    first_write_entered = threading.Event()
+    release_first_write = threading.Event()
+    original_write = storage_a._write_json_atomic
+
+    def _block_first_artifact_write(path: Path, data: JsonValue) -> None:
+        if path.name == "workflow_state.json":
+            first_write_entered.set()
+            assert release_first_write.wait(timeout=5)
+        original_write(path, data)
+
+    monkeypatch.setattr(storage_a, "_write_json_atomic", _block_first_artifact_write)
+
+    # When: Both clients try to commit from that version while the first holds the lock.
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(
+            storage_a.write_json,
+            user,
+            workflow.dataset_workflow_id,
+            WorkflowFile.WORKFLOW_STATE,
+            {"writer": "first"},
+            initial.version,
+        )
+        assert first_write_entered.wait(timeout=5)
+        stale = executor.submit(
+            storage_b.write_json,
+            user,
+            workflow.dataset_workflow_id,
+            WorkflowFile.WORKFLOW_STATE,
+            {"writer": "stale"},
+            initial.version,
+        )
+        assert not stale.done()
+        release_first_write.set()
+
+        # Then: The first write wins and the stale client is rejected.
+        assert first.result(timeout=5).data == {"writer": "first"}
+        with pytest.raises(WorkflowConflictError):
+            stale.result(timeout=5)
 
 
 def test_create_once_artifact_rejects_overwrite(tmp_path: Path) -> None:
