@@ -65,13 +65,14 @@ async def test_demo_stage_one_shows_one_locked_ready_file(demo_runtime: Path) ->
 
     # Then the page owns one locked file and provides its normal Map action.
     assert response.status_code == 200
-    assert 'id="fileInput"' in response.text
-    assert "disabled" in response.text
+    file_input = response.text.split('id="fileInput"', 1)[1].split("/>", 1)[0]
+    dropzone = response.text.split('id="dropzone"', 1)[1].split(">", 1)[0]
+    assert "disabled" in file_input
     assert "Demo file locked" in response.text
     assert "Normal mode lets you upload your own file" in response.text
     assert str(DEMO_WORKFLOW_ID) in response.text
-    assert 'id="dropzone"' in response.text
-    assert 'role="button"' not in response.text
+    assert 'role="button"' not in dropzone
+    assert "tabindex" not in dropzone
     assert 'id="analyzeButton"' in response.text
 
 
@@ -82,13 +83,20 @@ async def test_demo_workflow_reaches_review_without_a_model_provider(
 ) -> None:
     # Given the packaged demo and provider calls that fail if reached.
     await prepare_demo_runtime()
+
+    def _reject_provider_client(
+        region: str,
+        *,
+        provider: object,
+        reasoning_effort: object,
+    ) -> object:
+        raise AssertionError(
+            f"Bedrock must not open: {region}, {provider}, {reasoning_effort}"
+        )
+
     monkeypatch.setattr(
         "src.integrations.agentic_harmonize.make_provider_client",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Bedrock must not open")),
-    )
-    monkeypatch.setattr(
-        "src.integrations.agentic_harmonize.harmonize_term",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Bedrock must not run")),
+        _reject_provider_client,
     )
     from backend.app.main import create_app
 
