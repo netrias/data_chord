@@ -1,0 +1,61 @@
+{
+  "digest": "42952cfb3a68fa29c0e46ae9f4f4debb6cd6abbde0dfaea54ca990e9f2bc233b",
+  "model_count": 1,
+  "models": [
+    {
+      "cdes": [
+        {
+          "cde_id": 1000,
+          "cde_key": "record_id",
+          "cde_type": "pv",
+          "description": "Synthetic record identifier for the Data Chord demo",
+          "values": [
+            "DEMO-001",
+            "DEMO-002",
+            "DEMO-003"
+          ]
+        },
+        {
+          "cde_id": 1001,
+          "cde_key": "primary_diagnosis",
+          "cde_type": "pv",
+          "description": "Synthetic diagnosis field for the Data Chord demo",
+          "values": [
+            "Breast Cancer",
+            "Carcinoma NOS",
+            "Diabetes",
+            "Hypertension",
+            "Lung Cancer"
+          ]
+        },
+        {
+          "cde_id": 1002,
+          "cde_key": "specimen_type",
+          "cde_type": "pv",
+          "description": "Synthetic specimen field for the Data Chord demo",
+          "values": [
+            "Blood",
+            "Plasma",
+            "Serum",
+            "Tissue"
+          ]
+        },
+        {
+          "cde_id": 1003,
+          "cde_key": "treatment_status",
+          "cde_type": "pv",
+          "description": "Synthetic treatment status field for the Data Chord demo",
+          "values": [
+            "Active",
+            "Complete",
+            "Planned"
+          ]
+        }
+      ],
+      "data_model_key": "data-chord-demo",
+      "external_version_number": "1.0",
+      "label": "Data Chord Demo Standard"
+    }
+  ],
+  "schema_version": 1
+}

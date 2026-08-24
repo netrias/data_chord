@@ -13,13 +13,13 @@ import time
 from collections.abc import Mapping
 from contextvars import ContextVar, Token
 from functools import lru_cache
-from typing import Protocol, runtime_checkable
 
 import requests
 from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, utils
 from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey
+from starlette.datastructures import Headers
 
 from src.settings import IdentitySource, get_expected_alb_arn, get_identity_source
 from src.storage import UserContext
@@ -43,11 +43,6 @@ class InvalidUserContextError(RuntimeError):
     pass
 
 
-@runtime_checkable
-class _MultiValueHeaders(Protocol):
-    def getlist(self, key: str) -> list[str]: ...
-
-
 def current_user_context() -> UserContext:
     user = _current_user.get()
     if user is not None:
@@ -57,7 +52,7 @@ def current_user_context() -> UserContext:
     raise InvalidUserContextError("Request user context is not bound")
 
 
-def bind_user_context(headers: Mapping[str, str]) -> Token[UserContext | None]:
+def bind_user_context(headers: Headers) -> Token[UserContext | None]:
     return _current_user.set(_user_context_from_headers(headers))
 
 
@@ -65,7 +60,7 @@ def reset_user_context(token: Token[UserContext | None]) -> None:
     _current_user.reset(token)
 
 
-def _user_context_from_headers(headers: Mapping[str, str]) -> UserContext:
+def _user_context_from_headers(headers: Headers) -> UserContext:
     identity_source = get_identity_source()
     if identity_source is IdentitySource.SHARED:
         return UserContext(user_id=LOCAL_USER_ID)
@@ -74,8 +69,8 @@ def _user_context_from_headers(headers: Mapping[str, str]) -> UserContext:
     return _signed_alb_user_context(headers)
 
 
-def _trusted_proxy_user_context(headers: Mapping[str, str]) -> UserContext:
-    values = _header_values(headers, TRUSTED_PROXY_USER_HEADER)
+def _trusted_proxy_user_context(headers: Headers) -> UserContext:
+    values = headers.getlist(TRUSTED_PROXY_USER_HEADER)
     if len(values) != 1:
         raise InvalidUserContextError("Trusted proxy identity header must occur exactly once")
     user_id = values[0]
@@ -89,37 +84,27 @@ def _trusted_proxy_user_context(headers: Mapping[str, str]) -> UserContext:
     return UserContext(user_id=user_id)
 
 
-def _header_values(headers: Mapping[str, str], name: str) -> list[str]:
-    if isinstance(headers, _MultiValueHeaders):
-        return headers.getlist(name)
-    value = headers.get(name)
-    return [] if value is None else [value]
-
-
-def _signed_alb_user_context(headers: Mapping[str, str]) -> UserContext:
+def _signed_alb_user_context(headers: Headers) -> UserContext:
     expected_alb_arn = get_expected_alb_arn()
     if expected_alb_arn is None:
         raise InvalidUserContextError("Signed ALB identity requires an expected load balancer")
     signed_claims = headers.get(ALB_DATA_HEADER, "").strip()
-    unsigned_user_id = headers.get(ALB_IDENTITY_HEADER, "").strip()
-    if signed_claims:
-        claims = _verified_alb_claims(signed_claims, expected_alb_arn)
-        signed_user_id = _string_claim(claims, "sub")
-        if signed_user_id is None:
-            raise InvalidUserContextError("ALB identity claims are missing sub")
-        # ALB sends both headers, but only x-amzn-oidc-data is signed; require
-        # the unsigned convenience header to agree before trusting it.
-        if unsigned_user_id and unsigned_user_id != signed_user_id:
-            raise InvalidUserContextError("ALB identity header does not match signed claims")
-        return UserContext(user_id=signed_user_id, email=_string_claim(claims, "email"))
-    if unsigned_user_id:
-        # In hosted mode, accepting only the unsigned identity header would let
-        # callers spoof workflow ownership if traffic reached the app directly.
+    if not signed_claims:
+        # Never trust the unsigned convenience header without signed claims.
         raise InvalidUserContextError("ALB identity header is missing signed claims")
-    raise InvalidUserContextError("ALB identity header is missing signed claims")
+    unsigned_user_id = headers.get(ALB_IDENTITY_HEADER, "").strip()
+    claims = _verified_alb_claims(signed_claims, expected_alb_arn)
+    signed_user_id = _string_claim(claims, "sub")
+    if signed_user_id is None:
+        raise InvalidUserContextError("ALB identity claims are missing sub")
+    # ALB sends both headers, but only x-amzn-oidc-data is signed; require
+    # the unsigned convenience header to agree before trusting it.
+    if unsigned_user_id and unsigned_user_id != signed_user_id:
+        raise InvalidUserContextError("ALB identity header does not match signed claims")
+    return UserContext(user_id=signed_user_id, email=_string_claim(claims, "email"))
 
 
-def _verified_alb_claims(encoded_jwt: str, expected_alb_arn: str | None) -> Mapping[str, object]:
+def _verified_alb_claims(encoded_jwt: str, expected_alb_arn: str) -> Mapping[str, object]:
     header_segment, payload_segment, signature_segment = _jwt_segments(encoded_jwt)
     header = _json_segment(header_segment)
     payload = _json_segment(payload_segment)
@@ -128,7 +113,7 @@ def _verified_alb_claims(encoded_jwt: str, expected_alb_arn: str | None) -> Mapp
     signer = _string_claim(header, "signer")
     if not signer:
         raise InvalidUserContextError("ALB identity claims are missing signer")
-    if expected_alb_arn is not None and signer != expected_alb_arn:
+    if signer != expected_alb_arn:
         # Pinning the signer prevents a valid token from another load balancer
         # from being replayed against this app.
         raise InvalidUserContextError("ALB identity signer does not match expected load balancer")

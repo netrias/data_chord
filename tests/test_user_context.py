@@ -55,10 +55,10 @@ async def test_shared_identity_is_pinned(monkeypatch: pytest.MonkeyPatch) -> Non
     # Given: no request identity headers are present
     monkeypatch.setenv("DATA_CHORD_PROFILE", "portable")
     monkeypatch.setenv("DATA_CHORD_IDENTITY_SOURCE", "shared")
-    assert _user_context_from_headers({}).user_id != ""
+    assert _user_context_from_headers(Headers()).user_id != ""
 
     # When: local/test code asks for the request user
-    user = _user_context_from_headers({})
+    user = _user_context_from_headers(Headers())
 
     # Then: the documented shared fallback owner is stable
     assert user.user_id == LOCAL_USER_ID
@@ -113,11 +113,32 @@ async def test_signed_alb_claims_control_workflow_ownership(monkeypatch: pytest.
     monkeypatch.setattr("src.auth.user_context._public_key_for_header", lambda _key_id, _signer: public_key)
 
     # When: the app binds user context from headers
-    user = _user_context_from_headers({ALB_DATA_HEADER: token, ALB_IDENTITY_HEADER: "alice"})
+    user = _user_context_from_headers(Headers({ALB_DATA_HEADER: token, ALB_IDENTITY_HEADER: "alice"}))
 
     # Then: the signed claim is the source of truth
     assert user.user_id == "alice"
     assert user.email == "alice@example.test"
+
+
+async def test_signed_alb_claims_reject_another_alb_signer(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Given a valid token was signed for an ALB other than the configured ALB.
+    expected_alb_arn = "arn:aws:elasticloadbalancing:us-east-2:123456789012:loadbalancer/app/data-chord/expected"
+    other_alb_arn = "arn:aws:elasticloadbalancing:us-east-2:123456789012:loadbalancer/app/data-chord/other"
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    token = _signed_alb_token(private_key, other_alb_arn, {"sub": "alice"})
+    monkeypatch.setenv("DATA_CHORD_ALB_ARN", expected_alb_arn)
+    monkeypatch.setenv("DATA_CHORD_IDENTITY_SOURCE", "signed_alb")
+    monkeypatch.setattr(
+        "src.auth.user_context._public_key_for_header",
+        lambda _key_id, _signer: private_key.public_key(),
+    )
+
+    # When the request boundary verifies the signed identity.
+    with pytest.raises(InvalidUserContextError) as error:
+        _user_context_from_headers(Headers({ALB_DATA_HEADER: token}))
+
+    # Then it rejects the other signer before accepting its valid signature.
+    assert str(error.value) == "ALB identity signer does not match expected load balancer"
 
 
 async def test_hosted_identity_header_requires_signed_alb_claims(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -130,7 +151,7 @@ async def test_hosted_identity_header_requires_signed_alb_claims(monkeypatch: py
 
     # When / Then: a caller cannot spoof identity with the unsigned identity header alone
     with pytest.raises(InvalidUserContextError):
-        _user_context_from_headers({ALB_IDENTITY_HEADER: "alice"})
+        _user_context_from_headers(Headers({ALB_IDENTITY_HEADER: "alice"}))
 
 
 async def test_signed_alb_claims_must_match_identity_header(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -145,7 +166,7 @@ async def test_signed_alb_claims_must_match_identity_header(monkeypatch: pytest.
 
     # When / Then: the mismatch is rejected instead of trusting the spoofable value
     with pytest.raises(InvalidUserContextError):
-        _user_context_from_headers({ALB_DATA_HEADER: token, ALB_IDENTITY_HEADER: "bob"})
+        _user_context_from_headers(Headers({ALB_DATA_HEADER: token, ALB_IDENTITY_HEADER: "bob"}))
 
 
 @pytest.mark.parametrize(

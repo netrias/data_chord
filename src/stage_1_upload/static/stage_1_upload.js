@@ -4,6 +4,7 @@ import { reportApiError, reportFetchFailure } from '/assets/shared/client-events
 import { showDataModelPopup, preloadDataModels } from './data_model_popup.js';
 
 const config = window.stageOneUploadConfig ?? {};
+const isDemo = Boolean(config.demoUpload);
 
 const dropzone = document.getElementById('dropzone');
 const fileInput = document.getElementById('fileInput');
@@ -122,7 +123,7 @@ const _setFileInputDisabled = (disabled) => {
   if (fileInput) fileInput.disabled = disabled;
 };
 
-const _isFileSelectionLocked = () => state.isUploading || state.isChoosingDataModel || state.isAnalyzing;
+const _isFileSelectionLocked = () => isDemo || state.isUploading || state.isChoosingDataModel || state.isAnalyzing;
 
 const _openFilePicker = () => {
   if (!fileInput || _isFileSelectionLocked()) return;
@@ -139,7 +140,7 @@ const _resetUploadState = () => {
   state.isUploading = false;
   state.isChoosingDataModel = false;
   state.isAnalyzing = false;
-  _setFileInputDisabled(false);
+  _setFileInputDisabled(isDemo);
   if (fileInput) fileInput.value = '';
   _setAnalyzeButtonEnabled(false);
   if (dropzone) {
@@ -293,6 +294,22 @@ const _hydrateFromSession = () => {
   _renderSheetSelector();
   _setAnalyzeButtonEnabled(true);
   return true;
+};
+
+const _hydrateDemoUpload = () => {
+  const upload = config.demoUpload;
+  _clearStaleSessionData();
+  state.uploaded = upload;
+  state.file = { name: upload.file_name, humanSize: upload.human_size };
+  state.sheetNames = Array.isArray(upload.sheet_names) ? upload.sheet_names : [];
+  state.sheetPreviews = _sheetPreviewsFromPayload(upload);
+  state.selectedSheet = upload.selected_sheet ?? state.sheetNames[0] ?? null;
+  _persistFileSession(upload, upload.file_name);
+  _setFileInputDisabled(true);
+  if (dropzone) dropzone.classList.add('has-file');
+  _showDropzoneSummary(state.file, 'Ready for demo');
+  _renderSheetSelector();
+  _setAnalyzeButtonEnabled(true);
 };
 
 /* Inline SVG check used inside each active tab; declared once to keep the
@@ -690,44 +707,60 @@ const _wireDragEvents = () => {
   });
 };
 
+const _wireDemoDropProtection = () => {
+  if (!dropzone) return;
+  ['dragenter', 'dragover', 'dragleave', 'drop'].forEach((eventName) => {
+    dropzone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+  });
+};
+
 const _init = () => {
   setActiveStage('upload');
   initStepInstruction('upload');
   initNavigationEvents();
 
-  if (!_hydrateFromSession()) {
+  if (isDemo) {
+    _hydrateDemoUpload();
+  } else if (!_hydrateFromSession()) {
     _resetUploadState();
   }
 
-  _wireDragEvents();
+  if (isDemo) {
+    _wireDemoDropProtection();
+  } else {
+    _wireDragEvents();
 
-  if (dropzone) {
-    dropzone.addEventListener('click', () => _openFilePicker());
-    dropzone.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' || event.key === ' ') {
+    if (dropzone) {
+      dropzone.addEventListener('click', () => _openFilePicker());
+      dropzone.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          _openFilePicker();
+        }
+      });
+    }
+
+    if (changeFileButton) {
+      changeFileButton.addEventListener('click', (event) => {
         event.preventDefault();
+        event.stopPropagation();
+        _resetUploadState();
         _openFilePicker();
-      }
-    });
-  }
+      });
+    }
 
-  if (changeFileButton) {
-    changeFileButton.addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      _resetUploadState();
-      _openFilePicker();
-    });
-  }
-
-  if (fileInput) {
-    fileInput.addEventListener('change', (event) => {
-      const files = event.target.files || [];
-      const file = files[0];
-      if (file) {
-        _handleFileSelection(file);
-      }
-    });
+    if (fileInput) {
+      fileInput.addEventListener('change', (event) => {
+        const files = event.target.files || [];
+        const file = files[0];
+        if (file) {
+          _handleFileSelection(file);
+        }
+      });
+    }
   }
 
   /* Programmatic selectOption() (Playwright) bypasses the visual tabs, so we

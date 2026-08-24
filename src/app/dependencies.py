@@ -21,16 +21,20 @@ from src.integrations.bedrock_cde_ranker import (
     BedrockCandidateRankerConfig,
 )
 from src.integrations.cde_recommendation import CdeRecommendationAdapter
+from src.integrations.demo_harmonization_cache import DemoHarmonizationCache
 from src.integrations.dynamodb_harmonization_cache import DynamoDbHarmonizationCache
 from src.integrations.dynamodb_reference_data import DynamoDbReferenceDataRepository, DynamoResource
 from src.integrations.harmonize import HarmonizeService
 from src.integrations.sqlite_reference_data import SqliteReferenceDataRepository
+from src.integrations.value_overlap_cde_recommendation import ValueOverlapCdeRecommender
 from src.paths import PROJECT_ROOT
 from src.settings import (
+    ApplicationMode,
     ConfigurationError,
     RuntimeProfile,
     StorageBackend,
     get_agentic_workers,
+    get_application_mode,
     get_aws_region,
     get_cde_recommendation_cache_table_name,
     get_data_dir,
@@ -185,7 +189,9 @@ def get_reference_data_repository() -> ReferenceDataRepository:
 def get_harmonization_cache() -> HarmonizationCache:
     global _harmonization_cache  # noqa: PLW0603 - intentional singleton
     if _harmonization_cache is None:
-        if get_runtime_profile() is RuntimeProfile.PORTABLE:
+        if get_application_mode() is ApplicationMode.DEMO:
+            _harmonization_cache = DemoHarmonizationCache()
+        elif get_runtime_profile() is RuntimeProfile.PORTABLE:
             _harmonization_cache = EmptyHarmonizationCache()
         else:
             import boto3
@@ -213,6 +219,9 @@ def get_harmonize_service() -> HarmonizeService:
 def get_cde_recommender() -> CdeRecommender:
     global _cde_recommender  # noqa: PLW0603 - intentional singleton
     if _cde_recommender is None:
+        if get_application_mode() is ApplicationMode.DEMO:
+            _cde_recommender = ValueOverlapCdeRecommender()
+            return _cde_recommender
         region = get_aws_region()
         cache = (
             EmptyRecommendationCache()

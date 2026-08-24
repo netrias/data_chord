@@ -20,6 +20,7 @@ from src.paths import PROJECT_ROOT
 _RUNTIME_CONFIG_NAMES = (
     "DATA_CHORD_AGENTIC_WORKERS",
     "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE",
+    "DATA_CHORD_MODE",
     "DATA_CHORD_HARMONIZATION_CACHE_TABLE",
     "DATA_CHORD_IDENTITY_SOURCE",
     "DATA_CHORD_DATA_DIR",
@@ -100,6 +101,7 @@ def _run_import(module: str, settings: dict[str, str]) -> subprocess.CompletedPr
             "DATA_CHORD_AGENTIC_WORKERS must not exceed 100",
         ),
         ({"DATA_CHORD_PROFILE": "unknown"}, "DATA_CHORD_PROFILE must be one of"),
+        ({"DATA_CHORD_MODE": "unknown"}, "DATA_CHORD_MODE must be one of"),
         (
             {
                 "DATA_CHORD_PROFILE": "portable",
@@ -194,6 +196,25 @@ def test_portable_runtime_starts_without_aws_data_service_settings(tmp_path: Pat
 
     # Then startup succeeds without DynamoDB or S3 settings.
     assert result.returncode == 0, result.stderr
+
+
+def test_demo_mode_requires_the_portable_runtime_profile() -> None:
+    # Given demo behavior is requested without the portable runtime profile.
+
+    # When the application starts.
+    result = _run_import(
+        "backend.app.main",
+        {
+            "DATA_CHORD_MODE": "demo",
+            "DATA_CHORD_REFERENCE_TABLE": "reference",
+            "DATA_CHORD_HARMONIZATION_CACHE_TABLE": "cache",
+            "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE": "cde-cache",
+        },
+    )
+
+    # Then startup rejects the invalid combination before serving requests.
+    assert result.returncode != 0
+    assert "DATA_CHORD_MODE=demo requires DATA_CHORD_PROFILE=portable" in result.stderr
 
 
 def test_portable_runtime_requires_a_loaded_standards_database(tmp_path: Path) -> None:
