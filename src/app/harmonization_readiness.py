@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from src.domain.dataset_workflow_ids import DatasetWorkflowId
 from src.domain.harmonization import HarmonizeStatus
 from src.domain.manifest import ManifestSummary
 from src.domain.review_overrides import ReviewOverrides
 from src.persistence.harmonization_job_store import (
     HarmonizationJobUnreadableError,
+    LoadedHarmonizationJob,
     load_harmonization_job,
 )
 from src.persistence.review_override_store import (
@@ -20,7 +23,7 @@ from src.persistence.workflow_state_store import (
     WorkflowStateUnreadableError,
     load_workflow_state,
 )
-from src.storage import UserContext, WorkflowStorage
+from src.storage import StoredJson, UserContext, VersionToken, WorkflowFile, WorkflowStorage
 
 
 class HarmonizationNotReadyError(Exception):
@@ -35,6 +38,70 @@ REVIEW_STATE_RECOVERY_DETAIL = (
     "The saved review state cannot be read. Return to Stage 3 and run harmonization again."
 )
 
+_RESULT_CHANGED_DETAIL = "The harmonization result changed while this request was running. Retry the request."
+
+
+@dataclass(frozen=True)
+class ReadyArtifactVersions:
+    """Exact durable Stage 3 artifact versions for one ready result."""
+
+    output: VersionToken | None
+    manifest: VersionToken | None
+    pv_manifest: VersionToken | None
+    cde_mapping: VersionToken | None
+
+
+@dataclass(frozen=True)
+class ReadyHarmonization:
+    """A ready workflow plus the versions that make its reads consistent."""
+
+    workflow: LoadedWorkflowState
+    job: LoadedHarmonizationJob
+    artifacts: ReadyArtifactVersions
+
+    def require_unchanged(
+        self,
+        storage: WorkflowStorage,
+        user: UserContext,
+    ) -> None:
+        """Fail when a rerun changed any result during a later-stage read."""
+        first_workflow = load_workflow_state(storage, user, self.workflow.state.file_id)
+        first_job = load_harmonization_job(storage, user, self.workflow.state.file_id)
+        if not self._same_workflow_and_job(first_workflow, first_job):
+            raise HarmonizationNotReadyError(_RESULT_CHANGED_DETAIL)
+        if _ready_artifact_versions(storage, user, self.workflow.state.file_id) != self.artifacts:
+            raise HarmonizationNotReadyError(_RESULT_CHANGED_DETAIL)
+        final_job = load_harmonization_job(storage, user, self.workflow.state.file_id)
+        final_workflow = load_workflow_state(storage, user, self.workflow.state.file_id)
+        if not self._same_workflow_and_job(final_workflow, final_job):
+            raise HarmonizationNotReadyError(_RESULT_CHANGED_DETAIL)
+
+    def _same_workflow_and_job(
+        self,
+        workflow: LoadedWorkflowState | None,
+        job: LoadedHarmonizationJob | None,
+    ) -> bool:
+        return (
+            workflow is not None
+            and job is not None
+            and workflow.version == self.workflow.version
+            and job.version == self.job.version
+        )
+
+
+def capture_ready_harmonization(
+    storage: WorkflowStorage,
+    user: UserContext,
+    file_id: DatasetWorkflowId | str,
+) -> ReadyHarmonization:
+    """Capture one ready Stage 3 generation for a consistent later-stage read."""
+    workflow, job = _require_ready_workflow_and_job(storage, user, file_id)
+    return ReadyHarmonization(
+        workflow=workflow,
+        job=job,
+        artifacts=_ready_artifact_versions(storage, user, file_id),
+    )
+
 
 def require_ready_harmonization_workflow(
     storage: WorkflowStorage,
@@ -42,6 +109,15 @@ def require_ready_harmonization_workflow(
     file_id: DatasetWorkflowId | str,
 ) -> LoadedWorkflowState:
     """Return the current plan only when its exact Stage 3 job succeeded."""
+    workflow, _job = _require_ready_workflow_and_job(storage, user, file_id)
+    return workflow
+
+
+def _require_ready_workflow_and_job(
+    storage: WorkflowStorage,
+    user: UserContext,
+    file_id: DatasetWorkflowId | str,
+) -> tuple[LoadedWorkflowState, LoadedHarmonizationJob]:
     try:
         workflow = load_workflow_state(storage, user, str(file_id))
     except WorkflowStateUnreadableError as exc:
@@ -75,7 +151,24 @@ def require_ready_harmonization_workflow(
         raise HarmonizationNotReadyError(
             "The harmonization result is out of date. Return to Stage 3 and run harmonization again."
         )
-    return workflow
+    return workflow, job
+
+
+def _ready_artifact_versions(
+    storage: WorkflowStorage,
+    user: UserContext,
+    file_id: DatasetWorkflowId | str,
+) -> ReadyArtifactVersions:
+    return ReadyArtifactVersions(
+        output=storage.artifact_version(user, str(file_id), WorkflowFile.HARMONIZED_OUTPUT),
+        manifest=storage.artifact_version(user, str(file_id), WorkflowFile.HARMONIZATION_MANIFEST_BASE),
+        pv_manifest=_stored_version(storage.read_json(user, str(file_id), WorkflowFile.PV_MANIFEST)),
+        cde_mapping=_stored_version(storage.read_json(user, str(file_id), WorkflowFile.CDE_MAPPING)),
+    )
+
+
+def _stored_version(stored: StoredJson | None) -> VersionToken | None:
+    return stored.version if stored is not None else None
 
 
 def load_readable_review_overrides_record(
@@ -118,6 +211,8 @@ def require_review_state_matches_manifest(
 __all__ = [
     "HarmonizationNotReadyError",
     "REVIEW_STATE_RECOVERY_DETAIL",
+    "ReadyHarmonization",
+    "capture_ready_harmonization",
     "load_readable_review_overrides_record",
     "require_review_state_matches_manifest",
     "require_ready_harmonization_workflow",

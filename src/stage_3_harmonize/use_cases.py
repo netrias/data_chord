@@ -23,7 +23,7 @@ from src.persistence.workflow_state_store import (
     WorkflowStateUnreadableError,
     load_workflow_state,
 )
-from src.storage import UploadStorage, UserContext, WorkflowStorage
+from src.storage import UploadStorage, UserContext, VersionToken, WorkflowFile, WorkflowStorage
 
 _HEARTBEAT_SECONDS = 15
 
@@ -49,6 +49,47 @@ class HarmonizationStart:
     loaded_job: LoadedHarmonizationJob
     loaded_state: LoadedWorkflowState
     should_run: bool
+
+
+@dataclass(frozen=True)
+class HarmonizationArtifactVersions:
+    """Versions captured before a worker starts replacing Stage 3 artifacts."""
+
+    review_overrides: VersionToken | None
+    cde_mapping: VersionToken | None
+    pv_manifest: VersionToken | None
+    harmonized_output: VersionToken | None
+    manifest: VersionToken | None
+
+
+def capture_harmonization_artifact_versions(
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+    file_id: str,
+) -> HarmonizationArtifactVersions:
+    """Capture replace/delete guards before provider work can take time."""
+    review_overrides = workflow_storage.read_json(
+        user,
+        file_id,
+        WorkflowFile.REVIEW_OVERRIDES,
+    )
+    cde_mapping = workflow_storage.read_json(user, file_id, WorkflowFile.CDE_MAPPING)
+    pv_manifest = workflow_storage.read_json(user, file_id, WorkflowFile.PV_MANIFEST)
+    return HarmonizationArtifactVersions(
+        review_overrides=review_overrides.version if review_overrides is not None else None,
+        cde_mapping=cde_mapping.version if cde_mapping is not None else None,
+        pv_manifest=pv_manifest.version if pv_manifest is not None else None,
+        harmonized_output=workflow_storage.artifact_version(
+            user,
+            file_id,
+            WorkflowFile.HARMONIZED_OUTPUT,
+        ),
+        manifest=workflow_storage.artifact_version(
+            user,
+            file_id,
+            WorkflowFile.HARMONIZATION_MANIFEST_BASE,
+        ),
+    )
 
 
 def start_harmonization(
@@ -147,13 +188,23 @@ class RunAuthority:
         self._user = user
         self._accepted_job = accepted_job
 
+    @property
+    def worker_id(self) -> str:
+        """Return the unique run identity used for private scratch files."""
+        return self._accepted_job.worker_id
+
     def require_current(self) -> LoadedHarmonizationJob:
         loaded = load_harmonization_job(
             self._workflow_storage,
             self._user,
             self._accepted_job.file_id,
         )
-        if loaded is None or not _same_worker(loaded.job, self._accepted_job) or not loaded.job.is_active():
+        if (
+            loaded is None
+            or not _same_worker(loaded.job, self._accepted_job)
+            or not loaded.job.is_active()
+            or loaded.job.lease_expired()
+        ):
             raise StaleStageThreeWorkerError(self._accepted_job.polling_job_id)
         return loaded
 
@@ -283,6 +334,7 @@ def _safe_detail(status: HarmonizeStatus, detail: str) -> str:
 
 
 __all__ = [
+    "HarmonizationArtifactVersions",
     "HarmonizationStart",
     "HarmonizationStartConflictError",
     "HarmonizationWorkflowNotFoundError",
@@ -290,6 +342,7 @@ __all__ = [
     "RunAuthority",
     "StaleStageThreeWorkerError",
     "complete_stage_three_job",
+    "capture_harmonization_artifact_versions",
     "fail_stage_three_job",
     "heartbeat_stage_three_job",
     "load_authorized_job",

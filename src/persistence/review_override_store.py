@@ -133,9 +133,16 @@ def delete_review_overrides_state(
     storage: WorkflowStorage,
     user: UserContext,
     file_id: str,
+    *,
+    expected_version: VersionToken | None = None,
 ) -> bool:
     try:
-        return storage.delete_json(user, file_id, WorkflowFile.REVIEW_OVERRIDES)
+        return storage.delete_json(
+            user,
+            file_id,
+            WorkflowFile.REVIEW_OVERRIDES,
+            expected_version=expected_version,
+        )
     except WorkflowNotFoundError:
         return False
 

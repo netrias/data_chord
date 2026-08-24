@@ -232,11 +232,18 @@ async def test_full_flow_reharmonize_clears_overrides(
     assert meta is not None
     create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
     manifest_path = create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
-    dependencies.get_workflow_storage().write_artifact(
-        dependencies.get_user_context(),
+    workflow_storage = dependencies.get_workflow_storage()
+    user = dependencies.get_user_context()
+    workflow_storage.write_artifact(
+        user,
         file_id,
         WorkflowFile.HARMONIZATION_MANIFEST_BASE,
         manifest_path,
+        expected_version=workflow_storage.artifact_version(
+            user,
+            file_id,
+            WorkflowFile.HARMONIZATION_MANIFEST_BASE,
+        ),
     )
     save_response = await app_client.post(
         "/stage-4/overrides",
@@ -298,11 +305,18 @@ async def test_reharmonize_cannot_clear_another_users_overrides(
     assert meta is not None
     create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
     manifest_path = create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
-    dependencies.get_workflow_storage().write_artifact(
-        UserContext(user_id="alice"),
+    workflow_storage = dependencies.get_workflow_storage()
+    alice = UserContext(user_id="alice")
+    workflow_storage.write_artifact(
+        alice,
         file_id,
         WorkflowFile.HARMONIZATION_MANIFEST_BASE,
         manifest_path,
+        expected_version=workflow_storage.artifact_version(
+            alice,
+            file_id,
+            WorkflowFile.HARMONIZATION_MANIFEST_BASE,
+        ),
     )
     save_response = await app_client.post(
         "/stage-4/overrides",

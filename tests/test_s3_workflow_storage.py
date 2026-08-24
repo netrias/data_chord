@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from pathlib import Path
 
@@ -79,6 +82,32 @@ class FakeS3Client:
         return {"Contents": [{"Key": key} for key in sorted(self.objects) if key.startswith(prefix)]}
 
 
+class BlockingStaleArtifactPutClient(FakeS3Client):
+    """Pause one writer after its conditional version read for a race test."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stale_put_started = threading.Event()
+        self.release_stale_put = threading.Event()
+
+    def put_object(self, **kwargs: object) -> dict[str, object]:
+        body = kwargs.get("Body")
+        if body == b"a\nstale\n":
+            self.stale_put_started.set()
+            assert self.release_stale_put.wait(timeout=5)
+        return super().put_object(**kwargs)
+
+
+class DeletedBeforeConditionalArtifactPutClient(FakeS3Client):
+    """Simulate S3 deleting an artifact after HEAD but before conditional PUT."""
+
+    def put_object(self, **kwargs: object) -> dict[str, object]:
+        if kwargs.get("Body") == b"a\nreplacement\n" and isinstance(kwargs.get("IfMatch"), str):
+            self.objects.pop(_key(kwargs), None)
+            raise _client_error("NoSuchKey")
+        return super().put_object(**kwargs)
+
+
 def test_s3_workflow_json_uses_owner_and_versions() -> None:
     # Given: Alice owns a workflow in S3 storage
     client = FakeS3Client()
@@ -148,6 +177,28 @@ def test_s3_workflow_reports_invalid_metadata_schema() -> None:
         storage.read_json(user, workflow.dataset_workflow_id, WorkflowFile.WORKFLOW_STATE)
 
 
+def test_s3_workflow_rejects_metadata_for_another_workflow() -> None:
+    # Given: the metadata object for one workflow contains another workflow's identity.
+    client = FakeS3Client()
+    storage = S3WorkflowStorage(bucket="bucket", prefix="app", client=client)
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    key = "app/workflows/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/metadata.json"
+    payload = {
+        "file_id": "b" * 32,
+        "owner_user_id": user.user_id,
+        "created_at": workflow.created_at.isoformat(),
+        "last_accessed_at": workflow.last_accessed_at.isoformat(),
+        "storage_schema_version": 1,
+    }
+    body = json.dumps(payload).encode("utf-8")
+    client.objects[key] = (body, _etag(body))
+
+    # When / Then: access to the requested workflow reports unreadable metadata.
+    with pytest.raises(WorkflowJsonUnreadableError, match="metadata"):
+        storage.read_json(user, workflow.dataset_workflow_id, WorkflowFile.WORKFLOW_STATE)
+
+
 def test_s3_json_delete_preserves_a_concurrent_replacement() -> None:
     # Given: A JSON record changes after delete reads its current version.
     client = FakeS3Client()
@@ -171,6 +222,42 @@ def test_s3_json_delete_preserves_a_concurrent_replacement() -> None:
     # Then: The newer record remains available.
     stored = storage.read_json(user, workflow.dataset_workflow_id, WorkflowFile.REVIEW_OVERRIDES)
     assert stored is not None
+    assert stored.data == {"review": "new"}
+
+
+def test_s3_json_delete_requires_latest_version() -> None:
+    # Given: a mutable JSON artifact has been replaced after a worker read it.
+    client = FakeS3Client()
+    storage = S3WorkflowStorage(bucket="bucket", prefix="app", client=client)
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    first = storage.write_json(
+        user,
+        workflow.dataset_workflow_id,
+        WorkflowFile.REVIEW_OVERRIDES,
+        {"review": "old"},
+    )
+    current = storage.write_json(
+        user,
+        workflow.dataset_workflow_id,
+        WorkflowFile.REVIEW_OVERRIDES,
+        {"review": "new"},
+        expected_version=first.version,
+    )
+
+    # When: the stale worker attempts conditional cleanup.
+    with pytest.raises(WorkflowConflictError, match="version changed"):
+        storage.delete_json(
+            user,
+            workflow.dataset_workflow_id,
+            WorkflowFile.REVIEW_OVERRIDES,
+            expected_version=first.version,
+        )
+
+    # Then: the current JSON remains available.
+    stored = storage.read_json(user, workflow.dataset_workflow_id, WorkflowFile.REVIEW_OVERRIDES)
+    assert stored is not None
+    assert stored.version == current.version
     assert stored.data == {"review": "new"}
 
 
@@ -207,16 +294,112 @@ def test_s3_workflow_write_artifact_replaces_existing_object(tmp_path: Path) -> 
     second = tmp_path / "second.csv"
     first.write_text("a\nold\n", encoding="utf-8")
     second.write_text("a\nnew\n", encoding="utf-8")
-    storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, first)
+    stored = storage.write_artifact(
+        user,
+        workflow.dataset_workflow_id,
+        WorkflowFile.HARMONIZED_OUTPUT,
+        first,
+    )
 
     assert any(key.endswith("harmonized_output.csv") for key in client.objects)
 
     # When: the generated artifact is written again
-    storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, second)
+    storage.write_artifact(
+        user,
+        workflow.dataset_workflow_id,
+        WorkflowFile.HARMONIZED_OUTPUT,
+        second,
+        expected_version=stored.version,
+    )
 
     # Then: materialization returns the newest bytes
     with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT) as path:
         assert path.read_text(encoding="utf-8") == "a\nnew\n"
+    assert storage.artifact_version(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT) is not None
+
+
+def test_s3_artifact_version_is_none_before_publish() -> None:
+    # Given: an authorized workflow with no generated artifact.
+    client = FakeS3Client()
+    storage = S3WorkflowStorage(bucket="bucket", prefix="app", client=client)
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+
+    # When / Then: the read-only publish snapshot reports no artifact.
+    assert storage.artifact_version(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT) is None
+
+
+def test_s3_mutable_artifact_rejects_stale_concurrent_writer(tmp_path: Path) -> None:
+    # Given: a worker has read the current artifact version before another worker publishes.
+    client = BlockingStaleArtifactPutClient()
+    storage = S3WorkflowStorage(bucket="bucket", prefix="app", client=client)
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    initial = tmp_path / "initial.csv"
+    newer = tmp_path / "newer.csv"
+    stale = tmp_path / "stale.csv"
+    initial.write_text("a\nold\n", encoding="utf-8")
+    newer.write_text("a\nnewer\n", encoding="utf-8")
+    stale.write_text("a\nstale\n", encoding="utf-8")
+    initial_artifact = storage.write_artifact(
+        user,
+        workflow.dataset_workflow_id,
+        WorkflowFile.HARMONIZED_OUTPUT,
+        initial,
+    )
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        stale_future = executor.submit(
+            storage.write_artifact,
+            user,
+            workflow.dataset_workflow_id,
+            WorkflowFile.HARMONIZED_OUTPUT,
+            stale,
+            initial_artifact.version,
+        )
+        assert client.stale_put_started.wait(timeout=5)
+
+        # When: the newer worker publishes while the stale put is waiting.
+        storage.write_artifact(
+            user,
+            workflow.dataset_workflow_id,
+            WorkflowFile.HARMONIZED_OUTPUT,
+            newer,
+            initial_artifact.version,
+        )
+        client.release_stale_put.set()
+
+        # Then: S3 rejects the stale conditional put and the newer output remains.
+        with pytest.raises(WorkflowConflictError, match="already exists|version changed"):
+            stale_future.result(timeout=5)
+    with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT) as path:
+        assert path.read_text(encoding="utf-8") == "a\nnewer\n"
+
+
+def test_s3_mutable_artifact_maps_a_conditional_delete_race_to_conflict(tmp_path: Path) -> None:
+    client = DeletedBeforeConditionalArtifactPutClient()
+    storage = S3WorkflowStorage(bucket="bucket", prefix="app", client=client)
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    initial = tmp_path / "initial.csv"
+    replacement = tmp_path / "replacement.csv"
+    initial.write_text("a\nold\n", encoding="utf-8")
+    replacement.write_text("a\nreplacement\n", encoding="utf-8")
+    stored = storage.write_artifact(
+        user,
+        workflow.dataset_workflow_id,
+        WorkflowFile.HARMONIZED_OUTPUT,
+        initial,
+    )
+
+    with pytest.raises(WorkflowConflictError, match="version changed"):
+        storage.write_artifact(
+            user,
+            workflow.dataset_workflow_id,
+            WorkflowFile.HARMONIZED_OUTPUT,
+            replacement,
+            expected_version=stored.version,
+        )
 
 
 def test_s3_workflow_artifact_rejects_suffix_change_and_similar_prefix(tmp_path: Path) -> None:
@@ -285,18 +468,35 @@ def test_failed_s3_artifact_replacement_preserves_last_complete_object(tmp_path:
     replacement = tmp_path / "replacement.csv"
     previous.write_text("a\nold\n", encoding="utf-8")
     replacement.write_text("a\tnew\n", encoding="utf-8")
-    storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, previous)
+    stored = storage.write_artifact(
+        user,
+        workflow.dataset_workflow_id,
+        WorkflowFile.HARMONIZED_OUTPUT,
+        previous,
+    )
     client.failed_put_key = "app/workflows/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/artifacts/harmonized_output.csv"
 
     with pytest.raises(ClientError):
-        storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, replacement)
+        storage.write_artifact(
+            user,
+            workflow.dataset_workflow_id,
+            WorkflowFile.HARMONIZED_OUTPUT,
+            replacement,
+            expected_version=stored.version,
+        )
 
     with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT) as path:
         assert path.suffix == ".csv"
         assert path.read_text(encoding="utf-8") == "a\nold\n"
 
     client.failed_put_key = None
-    storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, replacement)
+    storage.write_artifact(
+        user,
+        workflow.dataset_workflow_id,
+        WorkflowFile.HARMONIZED_OUTPUT,
+        replacement,
+        expected_version=stored.version,
+    )
     with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT) as path:
         assert path.read_text(encoding="utf-8") == "a\tnew\n"
 

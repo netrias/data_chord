@@ -489,6 +489,9 @@ class TestRowsContract:
             WorkflowFile.CDE_MAPPING,
             {
                 "file_id": file_id,
+                "generated_at": "2026-08-24T00:00:00+00:00",
+                "data_model_key": TEST_TARGET_SCHEMA,
+                "external_version_number": "11.0.4",
                 "mappings": [
                     _mapping_entry(0, "race", "race", False),
                     _mapping_entry(1, "ethnicity", "ethnicity", False),

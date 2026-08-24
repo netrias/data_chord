@@ -130,18 +130,28 @@ class S3WorkflowStorage:
             raise
         return StoredJson(data=data, version=_version_from_response(response))
 
-    def delete_json(self, user: UserContext, file_id: str, kind: WorkflowFile) -> bool:
+    def delete_json(
+        self,
+        user: UserContext,
+        file_id: str,
+        kind: WorkflowFile,
+        expected_version: VersionToken | None = None,
+    ) -> bool:
         self._require_json_kind(kind)
         self._require_access(user, file_id)
         key = self._json_key(file_id, kind)
         version = self._object_version(key)
         if version is None:
+            if expected_version is not None:
+                raise WorkflowConflictError(f"Artifact version changed: {kind.value}")
             return False
+        if expected_version is not None and expected_version != version:
+            raise WorkflowConflictError(f"Artifact version changed: {kind.value}")
         try:
             self.client.delete_object(
                 Bucket=self.bucket,
                 Key=key,
-                IfMatch=version.value,
+                IfMatch=(expected_version or version).value,
             )
         except ClientError as exc:
             if _is_precondition_failed(exc):
@@ -181,6 +191,7 @@ class S3WorkflowStorage:
         file_id: str,
         kind: WorkflowFile,
         source_path: Path,
+        expected_version: VersionToken | None = None,
     ) -> StoredArtifact:
         self._require_artifact_kind(kind)
         self._require_access(user, file_id)
@@ -195,8 +206,17 @@ class S3WorkflowStorage:
             if Path(existing_key).suffix.lower() != suffix:
                 raise WorkflowConflictError(f"Artifact suffix changed: {kind.value}")
             key = existing_key
-            write_condition: dict[str, object] = {}
+            current_version = self._object_version(key)
+            if current_version is None:
+                raise WorkflowConflictError(f"Artifact version changed: {kind.value}")
+            if expected_version is None or expected_version != current_version:
+                raise WorkflowConflictError(f"Artifact version changed: {kind.value}")
+            # The conditional put closes the list/head/put race. If another
+            # worker publishes after the head read, S3 rejects this write.
+            write_condition = {"IfMatch": expected_version.value}
         else:
+            if expected_version is not None:
+                raise WorkflowConflictError(f"Artifact does not exist: {kind.value}")
             key = self._artifact_key(file_id, kind, suffix)
             write_condition = {"IfNoneMatch": "*"}
         try:
@@ -207,10 +227,23 @@ class S3WorkflowStorage:
                 **write_condition,
             )
         except ClientError as exc:
-            if _is_precondition_failed(exc):
-                raise WorkflowConflictError(f"Artifact already exists: {kind.value}") from exc
+            if _is_precondition_failed(exc) or (expected_version is not None and _is_not_found(exc)):
+                raise WorkflowConflictError(f"Artifact version changed: {kind.value}") from exc
             raise
         return StoredArtifact(kind=kind, version=_version_from_response(response), suffix=Path(key).suffix)
+
+    def artifact_version(
+        self,
+        user: UserContext,
+        file_id: str,
+        kind: WorkflowFile,
+    ) -> VersionToken | None:
+        self._require_artifact_kind(kind)
+        self._require_access(user, file_id)
+        keys = self._existing_artifact_keys(file_id, kind)
+        if len(keys) > 1:
+            raise WorkflowConflictError(f"Artifact has multiple suffix variants: {kind.value}")
+        return None if not keys else self._object_version(keys[0])
 
     @contextmanager
     def materialize_artifact(
@@ -247,6 +280,8 @@ class S3WorkflowStorage:
             raise WorkflowJsonUnreadableError("Workflow metadata is unreadable") from exc
         metadata = WorkflowMetadata.from_store(payload)
         if metadata is None:
+            raise WorkflowJsonUnreadableError("Workflow metadata is unreadable")
+        if str(metadata.dataset_workflow_id) != file_id:
             raise WorkflowJsonUnreadableError("Workflow metadata is unreadable")
         # S3 IAM limits access by environment prefix; the workflow owner check
         # keeps users inside that environment from reading each other's uploads.
