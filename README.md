@@ -1,9 +1,9 @@
 # Data Chord
 
-Data Chord helps data curators turn a CSV, TSV, or Excel workbook into a
-reviewed, standardized dataset. It recommends Common Data Element (CDE)
-mappings and value changes. The curator reviews those recommendations before
-export.
+Data Chord is a data harmonization workflow application that helps data
+curators turn CSV, TSV, or XLSX tabular data into reviewed, standardized
+datasets. It recommends Bedrock Common Data Element (CDE) mappings and value
+changes. The curator reviews those recommendations before export.
 
 The final ZIP file contains the standardized data, the harmonization manifest,
 and the column-mapping audit document.
