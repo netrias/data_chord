@@ -17,6 +17,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
+from starlette.datastructures import Headers
 
 from src.storage import UploadConstraints, UploadStorage
 
@@ -196,7 +197,7 @@ async def app_client(
     monkeypatch.setenv("DATA_CHORD_IDENTITY_SOURCE", "trusted_proxy")
     from src.auth.user_context import bind_user_context, reset_user_context
 
-    user_token = bind_user_context({"x-data-chord-user-id": "test-user"})
+    user_token = bind_user_context(Headers({"x-data-chord-user-id": "test-user"}))
     import src.app.dependencies as deps_module
     from src.storage import LocalWorkflowStorage
 
