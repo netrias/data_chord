@@ -11,7 +11,14 @@ url="http://127.0.0.1:${port}/stage-1"
 _stop_demo() {
   docker stop "$container" >/dev/null 2>&1 || true
 }
-trap _stop_demo EXIT INT TERM
+
+_stop_demo_and_exit() {
+  _stop_demo
+  exit 0
+}
+
+trap _stop_demo EXIT
+trap _stop_demo_and_exit INT TERM
 
 if ! docker image inspect "$image" >/dev/null 2>&1; then
   demo_github_token="${GITHUB_TOKEN:-}"
