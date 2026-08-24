@@ -80,6 +80,7 @@ class TestMissingFileErrors:
         assert response.status_code == 409
         assert "Stage 2" in response.json()["detail"]
 
+
     async def test_summary_missing_file(self, app_client: AsyncClient) -> None:
         """Summary returns recovery guidance for an unknown workflow."""
 
@@ -93,6 +94,24 @@ class TestMissingFileErrors:
 
         assert response.status_code == 409
         assert "Stage 2" in response.json()["detail"]
+
+
+async def test_demo_mode_rejects_replacement_uploads(
+    app_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given the application owns one fixed demo upload.
+    monkeypatch.setenv("DATA_CHORD_MODE", "demo")
+
+    # When a caller tries to replace it through the normal upload endpoint.
+    response = await app_client.post(
+        "/stage-1/upload",
+        files={"file": ("replacement.csv", b"value\nother\n", TEST_CSV_CONTENT_TYPE)},
+    )
+
+    # Then the server preserves the fixed demo-file contract.
+    assert response.status_code == 403
+    assert response.json() == {"detail": GENERIC_API_ERROR_DETAIL}
 
 
 class TestHarmonizationNotReadyErrors:
