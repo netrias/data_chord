@@ -12,6 +12,109 @@ Portable does not use the foundation repository. Customer platform and full
 AWS use the state bucket and deployer role from the foundation handoff. Do not
 use customer platform and full AWS for the same target and stage.
 
+## Portable container
+
+Use this offer when the customer owns the container platform and wants to keep
+reference data and workflow files on one persistent volume.
+
+The portable profile needs one Docker image, one persistent `/data` volume,
+and AWS credentials that can call the required Bedrock models. The customer
+owns TLS, authentication, and network access to the container.
+
+Run exactly one container replica with one Uvicorn worker. Portable workflow
+files and locks do not support concurrent application processes.
+
+### Get the image
+
+Use an image for an exact, reviewed Git commit. The application provider can
+supply this image. To build it from source instead, check out the reviewed
+commit and run:
+
+```bash
+git checkout <full-git-commit>
+GITHUB_TOKEN=$(gh auth token)
+export GITHUB_TOKEN
+docker buildx build \
+  --secret id=github_token,env=GITHUB_TOKEN \
+  --tag data-chord:<full-git-commit> \
+  --load .
+```
+
+The GitHub account must have read access to the private
+`netrias/agentic_harmonization` repository. The token is a build secret and is
+not stored in an image layer.
+
+### Load reference data
+
+Load an approved reference-data export into the volume before the first run:
+
+```bash
+# macOS
+shasum -a 256 approved-reference-data.json
+
+# Linux
+sha256sum approved-reference-data.json
+```
+
+Compare the result with the approved digest. Then copy that digest into the
+load command:
+
+```bash
+docker run --rm \
+  --mount type=volume,src=data-chord,dst=/data \
+  --mount type=bind,src="$(pwd)/approved-reference-data.json",dst=/import/reference.json,readonly \
+  data-chord:<full-git-commit> \
+  python -m scripts.reference_data load-sqlite \
+    --input /import/reference.json \
+    --expected-sha256 <approved-sha256> \
+    --database /data/standards.sqlite
+```
+
+### Run the application
+
+On AWS, use a workload role. Run the application with the same volume:
+
+```bash
+docker run --rm \
+  --mount type=volume,src=data-chord,dst=/data \
+  --env DATA_CHORD_PROFILE=portable \
+  --env DATA_CHORD_WORKFLOW_STORAGE_LIMIT_GB=10 \
+  --env AWS_REGION=us-east-2 \
+  --publish 8000:8000 \
+  data-chord:<full-git-commit>
+```
+
+The AWS SDK uses its standard credential chain. For local Docker testing, use
+short-lived credentials from the host:
+
+```bash
+docker run --rm \
+  --mount type=volume,src=data-chord,dst=/data \
+  --env DATA_CHORD_PROFILE=portable \
+  --env DATA_CHORD_WORKFLOW_STORAGE_LIMIT_GB=10 \
+  --env AWS_REGION=us-east-2 \
+  --env AWS_ACCESS_KEY_ID \
+  --env AWS_SECRET_ACCESS_KEY \
+  --env AWS_SESSION_TOKEN \
+  --publish 8000:8000 \
+  data-chord:<full-git-commit>
+```
+
+Do not put credentials in the image.
+
+Portable workflow files are temporary. After a successful upload, the app
+checks workflow storage in the background. At 80% of
+`DATA_CHORD_WORKFLOW_STORAGE_LIMIT_GB`, it removes the least recently accessed
+workflows until use is at or below 70%. A workflow accessed during the last 24
+hours is not removed. The default limit is 10 GB. Cleanup does not remove
+`/data/standards.sqlite`.
+
+Run the same `load-sqlite` command to add a new standard version. To correct an
+existing model version, add `--replace-existing`. Replacement is
+transactional. New reference-data reads use the correction immediately. A
+completed harmonization keeps its saved permissible-value snapshot. Rerun
+harmonization to apply the correction to an existing workflow.
+
 ## Customer-platform deployment
 
 Use this offer when the end provider already owns its application platform and
@@ -67,6 +170,7 @@ Build the exact reviewed commit and push it to the customer registry:
 
 ```bash
 GITHUB_TOKEN=$(gh auth token)
+export GITHUB_TOKEN
 docker buildx build \
   --secret id=github_token,env=GITHUB_TOKEN \
   --tag 123456789012.dkr.ecr.us-east-2.amazonaws.com/data-chord:<full-git-commit> \
