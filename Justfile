@@ -26,6 +26,19 @@ test-e2e:
 perf-e2e:
 	npm run perf:e2e
 
+perf-staging-login base_url="" target="bdf":
+	@set -euo pipefail; \
+	umask 077; \
+	url="{{base_url}}"; \
+	if [ -z "$url" ]; then url="${DATA_CHORD_STAGING_URL:-}"; fi; \
+	if [ -z "$url" ]; then \
+		url="https://$(python3 infra/scripts/environment.py get environments/{{target}}/staging.json {{target}} staging domain_name)"; \
+	fi; \
+	mkdir -p .auth; \
+	echo "Log in, open Stage 1, then close the browser to save private authentication state."; \
+	./node_modules/.bin/playwright codegen --save-storage=".auth/{{target}}-staging.json" "$url/stage-1"; \
+	chmod 600 ".auth/{{target}}-staging.json"
+
 perf-staging base_url="" target="bdf":
 	@set -euo pipefail; \
 	url="{{base_url}}"; \
@@ -33,8 +46,9 @@ perf-staging base_url="" target="bdf":
 	if [ -z "$url" ]; then \
 		url="https://$(python3 infra/scripts/environment.py get environments/{{target}}/staging.json {{target}} staging domain_name)"; \
 	fi; \
+	state_path="${PERF_STORAGE_STATE_PATH:-.auth/{{target}}-staging.json}"; \
 	echo "Running staging performance journey against $url"; \
-	PERF_TARGET="{{target}}" PLAYWRIGHT_BASE_URL="$url" npm run perf:staging
+	PERF_STORAGE_STATE_PATH="$state_path" PERF_TARGET="{{target}}" PLAYWRIGHT_BASE_URL="$url" npm run perf:staging
 
 e2e-install:
 	# Security: npm ci enforces the lockfile and .npmrc package age gate.

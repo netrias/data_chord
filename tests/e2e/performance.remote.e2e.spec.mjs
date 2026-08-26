@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
 
+import { resolvePrivateStorageState } from './performance-auth.mjs';
 import {
   collectNavigationRuns,
   printPerformanceSummary,
@@ -58,7 +59,19 @@ const _uploadAndAnalyzeRemote = async (page, csvPath) => {
   await page.addInitScript(() => sessionStorage.clear());
   await page.goto('/stage-1');
   if (page.url().includes('.auth.') || page.url().includes('/oauth2/authorize')) {
-    throw new Error('Remote performance journey reached Cognito. Use an authenticated staging URL.');
+    throw new Error(
+      'Authentication state is not valid. Run just perf-staging-login again.',
+    );
+  }
+  try {
+    await page.locator(AGENT_FILE_INPUT).waitFor({
+      state: 'attached',
+      timeout: 10_000,
+    });
+  } catch {
+    throw new Error(
+      'Authentication state did not open Stage 1. Run just perf-staging-login again.',
+    );
   }
 
   const uploadStartedAt = _now();
@@ -93,57 +106,66 @@ const _runHarmonizationRemote = async (page) => {
 };
 
 test('remote performance journey: repeated deployed click-to-render timings', async ({
-  page,
+  browser,
   baseURL,
 }, testInfo) => {
   if (!baseURL) throw new Error('PLAYWRIGHT_BASE_URL is required for remote performance checks.');
+  const storageStatePath = resolvePrivateStorageState(process.env);
   const rowCount = positiveIntegerFromEnv(process.env, 'PERF_REMOTE_ROWS', DEFAULT_ROWS);
   const coldRuns = positiveIntegerFromEnv(process.env, 'PERF_COLD_RUNS', DEFAULT_COLD_RUNS);
   const warmRuns = positiveIntegerFromEnv(process.env, 'PERF_WARM_RUNS', DEFAULT_WARM_RUNS);
   const { csvPath, columnCount } = _createRemotePerfCsv(rowCount);
+  const context = await browser.newContext({ baseURL, storageState: storageStatePath });
+  const page = await context.newPage();
 
-  // Given: one real deployed workflow completes upload, analysis, and harmonization.
-  const setup = await _uploadAndAnalyzeRemote(page, csvPath);
-  setup.harmonize_to_review_ready_ms = await _runHarmonizationRemote(page);
-  const stageThreeUrl = page.url();
+  try {
+    // Given: one real deployed workflow completes upload, analysis, and harmonization.
+    const setup = await _uploadAndAnalyzeRemote(page, csvPath);
+    setup.harmonize_to_review_ready_ms = await _runHarmonizationRemote(page);
+    const stageThreeUrl = page.url();
 
-  // When: cold browser contexts and the warm browser session repeat both navigations.
-  const runs = await collectNavigationRuns({
-    page,
-    baseURL,
-    stageThreeUrl,
-    coldRuns,
-    warmRuns,
-    timeout: REMOTE_TIMEOUT_MS,
-  });
+    // When: cold browser contexts and the warm browser session repeat both navigations.
+    const runs = await collectNavigationRuns({
+      page,
+      baseURL,
+      stageThreeUrl,
+      coldRuns,
+      warmRuns,
+      timeout: REMOTE_TIMEOUT_MS,
+    });
 
-  // Then: all samples reach the deployed post-paint markers and produce one JSON artifact.
-  expect(runs).toHaveLength(coldRuns + warmRuns);
-  for (const run of runs) {
-    for (const duration of [...Object.values(run.stage4), ...Object.values(run.stage5)]) {
-      expect(Number.isFinite(duration)).toBe(true);
+    // Then: all samples reach the deployed post-paint markers and produce one JSON artifact.
+    expect(runs).toHaveLength(coldRuns + warmRuns);
+    for (const run of runs) {
+      for (const duration of [...Object.values(run.stage4), ...Object.values(run.stage5)]) {
+        expect(Number.isFinite(duration)).toBe(true);
+      }
+      expect(run.browser_timing.stage4.navigation.response_end_ms).toBeGreaterThan(0);
+      expect(run.browser_timing.stage5.navigation.response_end_ms).toBeGreaterThan(0);
     }
+    const report = buildPerformanceReport({
+      environment: {
+        target: process.env.PERF_TARGET ?? 'bdf',
+        stage: 'staging',
+        base_url: baseURL,
+        commit: process.env.GITHUB_SHA ?? null,
+      },
+      dataset: {
+        rows: rowCount,
+        columns: columnCount,
+        mappings: Math.max(...runs.map((run) => run.mapping_count ?? 0)),
+        source: 'tests/fixtures/sample.csv',
+      },
+      runs,
+      setup,
+    });
+    await savePerformanceReport({
+      testInfo,
+      report,
+      explicitPath: process.env.PERF_REPORT_PATH,
+    });
+    printPerformanceSummary(report);
+  } finally {
+    await context.close();
   }
-  const report = buildPerformanceReport({
-    environment: {
-      target: process.env.PERF_TARGET ?? 'bdf',
-      stage: 'staging',
-      base_url: baseURL,
-      commit: process.env.GITHUB_SHA ?? null,
-    },
-    dataset: {
-      rows: rowCount,
-      columns: columnCount,
-      mappings: Math.max(...runs.map((run) => run.mapping_count ?? 0)),
-      source: 'tests/fixtures/sample.csv',
-    },
-    runs,
-    setup,
-  });
-  await savePerformanceReport({
-    testInfo,
-    report,
-    explicitPath: process.env.PERF_REPORT_PATH,
-  });
-  printPerformanceSummary(report);
 });
