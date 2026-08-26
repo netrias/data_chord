@@ -9,6 +9,11 @@ from httpx import AsyncClient
 
 pytestmark = pytest.mark.asyncio
 
+_PROGRESS_LINK_RE = re.compile(
+    r'<a class="step-link" data-url="([^"]+)"(?: href="([^"]+)")?'
+)
+_STAGE_PATHS = ("/stage-1", "/stage-2", "/stage-3", "/stage-4", "/stage-5")
+
 
 @pytest.mark.parametrize(
     ("path", "active_stage", "completed_connectors", "action_label"),
@@ -114,3 +119,31 @@ async def test_stage_pages_keep_application_urls_on_the_browser_origin(
     for expected_path in (*asset_paths, *application_paths):
         assert expected_path in response.text
     assert all(asset_response.status_code == 200 for asset_response in asset_responses)
+
+
+@pytest.mark.parametrize(
+    ("query", "expected_suffix"),
+    [
+        ("", ""),
+        ("?file_id=not-a-workflow", ""),
+        (
+            "?file_id=0123456789abcdef0123456789abcdef&file_id=fedcba9876543210fedcba9876543210",
+            "",
+        ),
+        ("?file_id=0123456789abcdef0123456789abcdef", "?file_id=0123456789abcdef0123456789abcdef"),
+    ],
+)
+async def test_progress_links_render_only_a_valid_workflow_id(
+    app_client: AsyncClient,
+    query: str,
+    expected_suffix: str,
+) -> None:
+    # Given: Stage 5 is requested with a missing, invalid, or valid workflow id
+    expected_links = [(f"{path}{expected_suffix}", f"{path}{expected_suffix}") for path in _STAGE_PATHS]
+
+    # When: the server renders every reachable progress link
+    response = await app_client.get(f"/stage-5{query}")
+
+    # Then: every link contains exactly the validated workflow context
+    assert response.status_code == 200
+    assert _PROGRESS_LINK_RE.findall(response.text) == expected_links
