@@ -65,10 +65,6 @@ class ReadyHarmonization:
         user: UserContext,
     ) -> None:
         """Fail when a rerun changed any result during a later-stage read."""
-        first_workflow = load_workflow_state(storage, user, self.workflow.state.file_id)
-        first_job = load_harmonization_job(storage, user, self.workflow.state.file_id)
-        if not self._same_workflow_and_job(first_workflow, first_job):
-            raise HarmonizationNotReadyError(_RESULT_CHANGED_DETAIL)
         if _ready_artifact_versions(storage, user, self.workflow.state.file_id) != self.artifacts:
             raise HarmonizationNotReadyError(_RESULT_CHANGED_DETAIL)
         final_job = load_harmonization_job(storage, user, self.workflow.state.file_id)
