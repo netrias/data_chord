@@ -99,10 +99,27 @@
       </form>
     </dialog>
 
+    <dialog id="conformanceWarningDialog" class="conformance-warning-dialog" aria-labelledby="conformanceWarningTitle">
+      <div class="conformance-warning-content">
+        <header class="conformance-warning-header">
+          <h2 id="conformanceWarningTitle" class="conformance-warning-title">Non-Conforming Values Detected</h2>
+        </header>
+        <div class="conformance-warning-body">
+          <p id="conformanceWarningSummary"></p>
+          <div id="conformanceWarningItems" class="conformance-warning-items"></div>
+        </div>
+        <footer class="conformance-warning-actions">
+          <button id="conformanceReturnButton" class="ghost-btn" type="button">Return to Review</button>
+          <button id="conformanceProceedButton" class="conformance-proceed-button" type="button">Proceed Anyway</button>
+        </footer>
+      </div>
+    </dialog>
+
     <script>
       window.stageFiveConfig = {
         summaryEndpoint: {{ app_path_for(request, 'stage_five_summary') | tojson }},
         downloadEndpoint: {{ app_path_for(request, 'stage_five_download') | tojson }},
+        stageFourUrl: {{ app_path_for(request, 'stage_four_review_page') | tojson }},
       };
     </script>
     <script type="module" src="{{ app_path_for(request, 'stage_five_static', path='stage_5_review.js') }}?v={{ request.app.state.asset_version }}"></script>

@@ -42,8 +42,6 @@ from src.persistence.workflow_artifacts import (
 from src.stage_4_review_results.schemas import (
     CellOverrideSchema,
     ColumnReviewData,
-    NonConformantItem,
-    NonConformantResponse,
     ReviewOverridesSchema,
     ReviewStateSchema,
     RowContextResponse,
@@ -147,48 +145,6 @@ def build_stage_four_rows(
     )
 
 
-def build_non_conformant_values(
-    *,
-    file_id: str,
-    upload_storage: UploadStorage,
-    workflow_storage: WorkflowStorage,
-    user: UserContext,
-) -> NonConformantResponse:
-    """Build the Stage 4 gating list from the current manifest values and durable PV state."""
-    with performance_span("stage4.non_conformant.ready_capture"):
-        ready = capture_ready_harmonization(workflow_storage, user, file_id)
-    loaded_state = ready.workflow
-
-    with performance_span("stage4.non_conformant.manifest_read"):
-        manifest = _load_manifest(upload_storage, workflow_storage, user, file_id)
-    if manifest is None:
-        raise HarmonizationNotReadyError(
-            "Harmonization results are incomplete. Return to Stage 3 and run harmonization again."
-        )
-
-    with performance_span("stage4.non_conformant.pv_load"):
-        column_pv_map = column_pv_sets(
-            workflow_storage,
-            user,
-            loaded_state,
-            [row.column_key for row in manifest.rows],
-        )
-    with performance_span("stage4.non_conformant.review_state"):
-        review_record = load_readable_review_overrides_record(workflow_storage, user, file_id)
-        review_overrides = review_record.value if review_record is not None else None
-        require_review_state_matches_manifest(review_overrides, manifest)
-    with performance_span("stage4.non_conformant.value_scan"):
-        non_conformant = _find_unique_non_conformant_values(
-            manifest,
-            column_pv_map,
-            review_overrides,
-        )
-    response = NonConformantResponse(count=len(non_conformant), items=non_conformant)
-    with performance_span("stage4.non_conformant.ready_check"):
-        ready.require_unchanged(workflow_storage, user)
-    return response
-
-
 def build_row_context(
     *,
     file_id: str,
@@ -282,35 +238,6 @@ def _extract_columns_from_manifest(manifest: ManifestSummary) -> list[ColumnIden
             seen.add(col_key)
             columns.append(ColumnIdentity(key=row.column_key, header=row.column_name))
     return columns
-
-
-def _find_unique_non_conformant_values(
-    manifest: ManifestSummary,
-    column_pv_map: ColumnPvSets,
-    review_overrides: ReviewOverrides | None,
-) -> list[NonConformantItem]:
-    seen: set[tuple[str, str, str]] = set()
-    non_conformant: list[NonConformantItem] = []
-
-    for row in manifest.rows:
-        pv_set = column_pv_map.get(row.column_key)
-        for current_value in _active_values_for_row(row, review_overrides):
-            col_key = str(row.column_key)
-            # Gate once per unique term/current value pair; repeated source rows
-            # should not make reviewers resolve the same problem more than once.
-            key = (col_key, row.to_harmonize, current_value)
-            if key in seen:
-                continue
-            seen.add(key)
-
-            if pv_set and current_value and not check_value_conformance(current_value, pv_set):
-                non_conformant.append(NonConformantItem(
-                    column=row.column_name,
-                    value=current_value,
-                    original=row.to_harmonize,
-                ))
-
-    return non_conformant
 
 
 def _active_values_for_row(
@@ -583,7 +510,6 @@ __all__ = [
     "ReviewStateConflictError",
     "SaveReviewOverridesResult",
     "StageFourRowsResult",
-    "build_non_conformant_values",
     "build_row_context",
     "build_stage_four_rows",
     "save_review_overrides",

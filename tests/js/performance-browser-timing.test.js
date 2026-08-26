@@ -96,16 +96,6 @@ describe('browser performance timing', () => {
           deliveryType: 'cache',
         },
         {
-          name: 'https://staging.example.test/stage-4/non-conformant/private-file-id',
-          initiatorType: 'fetch',
-          startTime: 19,
-          responseStart: 20,
-          responseEnd: 21,
-          transferSize: 30,
-          encodedBodySize: 20,
-          decodedBodySize: 40,
-        },
-        {
           name: 'https://cognito.example.test/private.js',
           initiatorType: 'script',
           startTime: 1,
@@ -121,7 +111,7 @@ describe('browser performance timing', () => {
     // When: the benchmark normalizes browser timing for its JSON report
     const result = normalizeBrowserTiming(timing);
 
-    // Then: it keeps useful numeric evidence but no query, file, or external URL values
+    // Then: it keeps useful numeric evidence but no query or external URL values
     assert.deepEqual(result, {
       navigation: {
         type: 'navigate',
@@ -145,17 +135,6 @@ describe('browser performance timing', () => {
           encoded_body_size_bytes: 700,
           decoded_body_size_bytes: 1400,
           delivery_type: 'cache',
-        },
-        {
-          path: '/stage-4/non-conformant/:file_id',
-          initiator_type: 'fetch',
-          start_ms: 19,
-          response_start_ms: 20,
-          response_end_ms: 21,
-          transfer_size_bytes: 30,
-          encoded_body_size_bytes: 20,
-          decoded_body_size_bytes: 40,
-          delivery_type: null,
         },
       ],
     });

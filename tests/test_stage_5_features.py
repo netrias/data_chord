@@ -340,3 +340,4 @@ async def test_stage5_summary_zero_changes_when_terms_equal(
     summary = response.json()
     total_ai_changes = sum(column["ai_changes"] for column in summary["column_summaries"])
     assert total_ai_changes == 0
+    assert summary["non_conformant_items"] == []

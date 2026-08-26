@@ -793,4 +793,4 @@ class TestSummaryContract:
                 "row_count": 2,
             },
         ]
-        assert data["non_conformant_count"] == 0
+        assert data["non_conformant_items"] == []

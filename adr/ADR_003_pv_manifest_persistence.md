@@ -107,7 +107,7 @@ Session caches are cleared when a new file is uploaded (Stage 1), not when downl
 - `src/stage_3_harmonize/router.py` - Added `_save_pv_manifest()` after PV fetch
 
 **Stage 4 (Review)**:
-- `src/stage_4_review_results/router.py` - Lazy load PVs in `_build_column_pvs()` and `get_non_conformant_values()`
+- Stage 4 loads PVs for the review rows.
 
 **Stage 5 (Summary)**:
-- `src/stage_5_review_summary/router.py` - Lazy load PVs in `_build_summary_from_manifest()`
+- Stage 5 loads PVs for the final summary and conformance warning.

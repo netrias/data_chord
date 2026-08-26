@@ -20,6 +20,7 @@ import {
 
 const _DEFAULT_SUMMARY_ENDPOINT = '/stage-5/summary';
 const _DEFAULT_DOWNLOAD_ENDPOINT = '/stage-5/download';
+const _DEFAULT_STAGE_FOUR_URL = '/stage-4';
 const _DEFAULT_ZIP_FILENAME = 'harmonized_data.zip';
 const _REVOKE_DELAY_MS = 100;
 const _FILTERS = new Set(['needs_attention', 'changed', 'reviewer', 'all']);
@@ -28,6 +29,7 @@ const _SORT_KEYS = new Set(['column', 'original_value', 'final_value']);
 const _config = window.stageFiveConfig ?? {};
 const _summaryEndpoint = _config.summaryEndpoint ?? _DEFAULT_SUMMARY_ENDPOINT;
 const _downloadEndpoint = _config.downloadEndpoint ?? _DEFAULT_DOWNLOAD_ENDPOINT;
+const _stageFourUrl = _config.stageFourUrl ?? _DEFAULT_STAGE_FOUR_URL;
 
 const _downloadBtn = document.getElementById('downloadResults');
 const _downloadError = document.getElementById('downloadError');
@@ -44,6 +46,11 @@ const _changesTableSection = document.getElementById('changesTableSection');
 const _changesTableBody = document.getElementById('changesTableBody');
 const _changesTable = document.getElementById('changesTable');
 const _mappingsFilter = document.getElementById('mappingsFilter');
+const _conformanceWarningDialog = document.getElementById('conformanceWarningDialog');
+const _conformanceWarningSummary = document.getElementById('conformanceWarningSummary');
+const _conformanceWarningItems = document.getElementById('conformanceWarningItems');
+const _conformanceReturnButton = document.getElementById('conformanceReturnButton');
+const _conformanceProceedButton = document.getElementById('conformanceProceedButton');
 
 const _state = {
   fileId: null,
@@ -137,6 +144,82 @@ const _confirmStartOver = () => {
   if (!isSafeRelativeUrl(target)) return;
   clearWorkflowSession();
   window.location.assign(target);
+};
+
+const _closeConformanceWarning = () => {
+  if (!_conformanceWarningDialog) return;
+  if (_conformanceWarningDialog.close) {
+    _conformanceWarningDialog.close();
+  } else {
+    _conformanceWarningDialog.removeAttribute('open');
+  }
+};
+
+const _validConformanceItems = (items) => (
+  Array.isArray(items)
+    ? items.filter((item) => (
+      typeof item?.column === 'string'
+      && Number.isInteger(item?.source_column_index)
+      && item.source_column_index >= 0
+      && typeof item?.value === 'string'
+    ))
+    : []
+);
+
+const _returnToReview = () => {
+  if (!_state.fileId || !isSafeRelativeUrl(_stageFourUrl)) return;
+  window.location.assign(`${_stageFourUrl}?file_id=${encodeURIComponent(_state.fileId)}`);
+};
+
+const _showConformanceWarning = (items) => {
+  if (
+    !_conformanceWarningDialog
+    || !_conformanceWarningSummary
+    || !_conformanceWarningItems
+    || items.length === 0
+  ) return;
+
+  const grouped = new Map();
+  for (const item of items) {
+    const group = grouped.get(item.source_column_index) ?? {
+      column: item.column,
+      values: [],
+    };
+    group.values.push(item.value);
+    grouped.set(item.source_column_index, group);
+  }
+  const labelCounts = new Map();
+  for (const { column } of grouped.values()) {
+    labelCounts.set(column, (labelCounts.get(column) ?? 0) + 1);
+  }
+
+  _conformanceWarningSummary.textContent = items.length === 1
+    ? '1 value does not match the permissible value set for its mapped ontology.'
+    : `${items.length} values do not match the permissible value set for their mapped ontologies.`;
+  _conformanceWarningItems.replaceChildren();
+  for (const [sourceColumnIndex, { column, values }] of grouped) {
+    const group = document.createElement('section');
+    group.className = 'conformance-warning-group';
+    const title = document.createElement('h3');
+    const columnLabel = labelCounts.get(column) > 1
+      ? `${column} · Column ${sourceColumnIndex + 1}`
+      : column;
+    title.textContent = `${columnLabel} (${values.length})`;
+    group.appendChild(title);
+    for (const value of values) {
+      const row = document.createElement('p');
+      row.className = 'conformance-warning-value';
+      row.textContent = `"${value}"`;
+      group.appendChild(row);
+    }
+    _conformanceWarningItems.appendChild(group);
+  }
+
+  if (_conformanceWarningDialog.showModal) {
+    _conformanceWarningDialog.showModal();
+  } else {
+    _conformanceWarningDialog.setAttribute('open', '');
+  }
 };
 
 const _handleDownload = async () => {
@@ -590,11 +673,13 @@ const _fetchSummary = async () => {
     measureTiming('stage5.summary.parse', 'stage5.summary.fetch.response', 'stage5.summary.fetch.parsed');
     markTiming('stage5.summary.render.start');
 
-    _state.nonConformantCount = _safeCount(data.non_conformant_count);
+    const conformanceItems = _validConformanceItems(data.non_conformant_items);
+    _state.nonConformantCount = conformanceItems.length;
     _state.filter = _state.nonConformantCount > 0 ? 'needs_attention' : 'changed';
     _renderCertificate(data.dataset, _state.nonConformantCount);
     _renderSummary(data.column_summaries ?? []);
     _renderMappings(data.term_mappings ?? []);
+    _showConformanceWarning(conformanceItems);
 
     markTiming('stage5.summary.render.dom_complete');
     measureTiming('stage5.summary.render.dom', 'stage5.summary.render.start', 'stage5.summary.render.dom_complete', {
@@ -627,6 +712,9 @@ const _init = () => {
   _startOverButton?.addEventListener('click', _openStartOverDialog);
   _startOverCancel?.addEventListener('click', _closeStartOverDialog);
   _startOverConfirm?.addEventListener('click', _confirmStartOver);
+  _conformanceReturnButton?.addEventListener('click', _returnToReview);
+  _conformanceProceedButton?.addEventListener('click', _closeConformanceWarning);
+  _conformanceWarningDialog?.addEventListener('cancel', (event) => event.preventDefault());
   void _fetchSummary();
 };
 

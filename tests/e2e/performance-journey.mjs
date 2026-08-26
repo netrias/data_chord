@@ -41,9 +41,8 @@ const _stageFourTiming = (report, buttonToUsableMs) => ({
   init_to_usable_ms: _latestDuration(report, 'stage4.init_to_usable'),
 });
 
-const _stageFiveTiming = (report, buttonToUsableMs, conformanceRequestMs) => ({
+const _stageFiveTiming = (report, buttonToUsableMs) => ({
   button_to_usable_ms: buttonToUsableMs,
-  conformance_request_ms: conformanceRequestMs,
   summary_request_ms: _latestDuration(report, 'stage5.summary.request'),
   parse_ms: _latestDuration(report, 'stage5.summary.parse'),
   render_ms: _latestDuration(report, 'stage5.summary.render.dom'),
@@ -78,31 +77,16 @@ export const runNavigationSample = async ({
   });
   const stageFourBrowserTiming = await captureBrowserTiming(page);
 
-  const conformanceResponsePromise = page.waitForResponse(
-    (response) => new URL(response.url()).pathname.startsWith('/stage-4/non-conformant/'),
-    { timeout },
-  );
   const stageFiveStartedAt = _now();
   await page.click('#stageFiveButton');
-  const conformanceResponse = await conformanceResponsePromise;
-  const conformanceRequestMs = _duration(stageFiveStartedAt);
-  if (!conformanceResponse.ok()) {
-    throw new Error(`Stage 5 conformance request failed: ${conformanceResponse.status()}`);
-  }
-  const proceedButton = page.locator('.pv-warning-dialog [data-action="proceed"]');
-  const warningShown = await Promise.race([
-    proceedButton.waitFor({ state: 'visible', timeout }).then(() => true),
-    page.waitForURL(/\/stage-5/, { timeout }).then(() => false),
-  ]);
-  if (warningShown) {
-    await proceedButton.click();
-  }
-
   await page.waitForURL(/\/stage-5/, { timeout });
   await _waitForMeasure(page, 'stage5.init_to_usable', timeout);
   const stageFiveButtonToUsableMs = _duration(stageFiveStartedAt);
   const stageFiveReport = await _readTimingReport(page);
   await page.locator('#summaryGrid .change-impact').waitFor({ state: 'visible', timeout });
+  const proceedButton = page.locator('#conformanceProceedButton');
+  const warningShown = await proceedButton.isVisible();
+  if (warningShown) await proceedButton.click();
   const stageFiveBrowserTiming = await captureBrowserTiming(page);
 
   return {
@@ -115,11 +99,7 @@ export const runNavigationSample = async ({
       'term_mapping_count',
     ),
     stage4: _stageFourTiming(stageFourReport, stageFourButtonToUsableMs),
-    stage5: _stageFiveTiming(
-      stageFiveReport,
-      stageFiveButtonToUsableMs,
-      conformanceRequestMs,
-    ),
+    stage5: _stageFiveTiming(stageFiveReport, stageFiveButtonToUsableMs),
     browser_timing: {
       stage4: stageFourBrowserTiming,
       stage5: stageFiveBrowserTiming,

@@ -31,6 +31,7 @@ from src.domain.column_outcomes import (
     FinalValueSource,
     summarize_column_outcomes,
 )
+from src.domain.columns import ColumnKey
 from src.domain.manifest import ManifestRow, ManifestSummary
 from src.domain.pv_validation import check_value_conformance
 from src.domain.review_overrides import (
@@ -52,6 +53,7 @@ from src.persistence.workflow_state_store import LoadedWorkflowState
 from src.stage_5_review_summary.schemas import (
     ColumnSummary,
     DatasetSummary,
+    NonConformantItem,
     StageFiveSummaryResponse,
     TermMapping,
     TransformationStep,
@@ -324,6 +326,7 @@ def _assemble_summary_response(
         )
         for key, info in sorted(unique_mappings.items())
     ]
+    non_conformant_items = _non_conformant_items(finalized_outcomes)
 
     return StageFiveSummaryResponse(
         dataset=DatasetSummary(
@@ -353,10 +356,36 @@ def _assemble_summary_response(
             for outcome in column_outcomes
         ],
         term_mappings=term_mappings,
-        non_conformant_count=sum(
-            outcome.non_conformant_distinct_values for outcome in column_outcomes
-        ),
+        non_conformant_items=non_conformant_items,
     )
+
+
+def _non_conformant_items(
+    outcomes: list[FinalizedValueOutcome],
+) -> list[NonConformantItem]:
+    """Return one warning item per column, source value, and final value."""
+    seen: set[tuple[ColumnKey, str, str]] = set()
+    items: list[NonConformantItem] = []
+    for outcome in outcomes:
+        if outcome.review_status is not FinalValueReviewStatus.NEEDS_ATTENTION:
+            continue
+        identity = (
+            outcome.column_key,
+            outcome.original_value,
+            outcome.final_value,
+        )
+        if identity in seen:
+            continue
+        seen.add(identity)
+        items.append(
+            NonConformantItem(
+                column=outcome.column_label,
+                source_column_index=outcome.source_column_index,
+                value=outcome.final_value,
+                original=outcome.original_value,
+            )
+        )
+    return items
 
 
 def _finalized_outcomes_for_manifest_row(
