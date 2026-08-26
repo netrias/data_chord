@@ -14,11 +14,6 @@ const _deliveryType = (value) => (
   typeof value === 'string' && value.length > 0 ? value : null
 );
 
-const _privatePath = (pathname) => pathname.replace(
-  /^(\/stage-4\/non-conformant)\/[^/]+$/,
-  '$1/:file_id',
-);
-
 const _navigationTiming = (entry) => ({
   type: typeof entry?.type === 'string' ? entry.type : 'navigate',
   response_start_ms: _number(entry?.responseStart),
@@ -42,7 +37,7 @@ const _resourceTiming = (entry, origin) => {
   if (resourceUrl.origin !== origin) return null;
 
   return {
-    path: _privatePath(resourceUrl.pathname),
+    path: resourceUrl.pathname,
     initiator_type: entry.initiatorType,
     start_ms: _number(entry.startTime),
     response_start_ms: _number(entry.responseStart),

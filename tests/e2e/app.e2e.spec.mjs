@@ -745,7 +745,7 @@ test('Stage 5 shows recovery detail for summary and download failures', async ({
         dataset: { filename: 'recovery.csv', tabular_format: 'csv', data_model_key: 'gc', external_version_number: '11.0.4' },
         column_summaries: [],
         term_mappings: [],
-        non_conformant_count: 0,
+        non_conformant_items: [],
       }),
     });
   });
@@ -1676,12 +1676,30 @@ test('Stage 5 aggregates change impact and keeps filters keyboard accessible', a
             history: [],
           },
         ],
-        non_conformant_count: 1,
+        non_conformant_items: [
+          {
+            column: 'diagnosis', source_column_index: 0, value: 'Bad', original: 'Bad',
+          },
+          {
+            column: 'diagnosis', source_column_index: 1, value: 'Worse', original: 'Worse',
+          },
+        ],
       }),
     });
   });
 
   await page.goto(`/stage-5?file_id=${fileId}`);
+  const warning = page.locator('#conformanceWarningDialog');
+  await expect(warning).toBeVisible();
+  await expect(warning).toContainText('2 values do not match the permissible value set');
+  await expect(warning).toContainText('diagnosis · Column 1');
+  await expect(warning).toContainText('diagnosis · Column 2');
+  await expect(warning).toContainText('Bad');
+  await page.keyboard.press('Escape');
+  await expect(warning).toBeVisible();
+  await warning.getByRole('button', { name: 'Proceed Anyway' }).click();
+  await expect(warning).not.toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/stage-5\\?file_id=${fileId}`));
   await expect(page.getByRole('heading', { level: 1, name: 'attention.csv' })).toBeVisible();
   await expect(page.locator('#datasetMetadata')).toHaveText('gc 11.0.4 · CSV');
   await expect(page.getByRole('button', { name: 'Download data' })).toBeVisible();
@@ -1715,6 +1733,18 @@ test('Stage 5 aggregates change impact and keeps filters keyboard accessible', a
   const sortButton = page.getByRole('button', { name: /Source value/ });
   await sortButton.press('Enter');
   await expect(sortButton.locator('xpath=ancestor::th')).toHaveAttribute('aria-sort', 'ascending');
+
+  await page.reload();
+  await expect(warning).toBeVisible();
+  await page.setViewportSize({ width: 320, height: 640 });
+  const returnBox = await warning.getByRole('button', { name: 'Return to Review' }).boundingBox();
+  const proceedBox = await warning.getByRole('button', { name: 'Proceed Anyway' }).boundingBox();
+  expect(returnBox).not.toBeNull();
+  expect(proceedBox).not.toBeNull();
+  expect(proceedBox.y).toBeGreaterThan(returnBox.y + returnBox.height);
+  expect(Math.max(returnBox.x + returnBox.width, proceedBox.x + proceedBox.width)).toBeLessThanOrEqual(320);
+  await warning.getByRole('button', { name: 'Return to Review' }).click();
+  await expect(page).toHaveURL(new RegExp(`/stage-4\\?file_id=${fileId}`));
 });
 
 test('autosave persists overrides and review settings across reloads', async ({ page }) => {
@@ -1815,7 +1845,8 @@ test('stage 5 advance waits for the latest override save', async ({ page }) => {
   await waitForReviewRows(page);
 
   const heldOverrideSaves = [];
-  let nonConformanceChecks = 0;
+  let summaryRequests = 0;
+  let legacyConformanceRequests = 0;
 
   await page.route('**/stage-4/overrides', async (route) => {
     if (route.request().method() === 'POST') {
@@ -1825,7 +1856,11 @@ test('stage 5 advance waits for the latest override save', async ({ page }) => {
     await route.continue();
   });
   await page.route('**/stage-4/non-conformant/**', async (route) => {
-    nonConformanceChecks += 1;
+    legacyConformanceRequests += 1;
+    await route.continue();
+  });
+  await page.route('**/stage-5/summary', async (route) => {
+    summaryRequests += 1;
     await route.continue();
   });
 
@@ -1840,9 +1875,10 @@ test('stage 5 advance waits for the latest override save', async ({ page }) => {
   await input.fill('Unknown');
   await page.click('#stageFiveButton');
 
-  // Then: Stage 5 does not check PV conformance before the latest save is written
+  // Then: Stage 5 does not request its summary before the latest save is written
   await page.waitForTimeout(100);
-  expect(nonConformanceChecks).toBe(0);
+  expect(summaryRequests).toBe(0);
+  expect(legacyConformanceRequests).toBe(0);
 
   await heldOverrideSaves[0].continue();
   await expect.poll(() => heldOverrideSaves.length).toBe(2);
@@ -1851,10 +1887,12 @@ test('stage 5 advance waits for the latest override save', async ({ page }) => {
     .flatMap((columns) => Object.values(columns).map((override) => override.human_value));
   expect(latestHumanValues).toContain('Unknown');
   expect(latestHumanValues).not.toContain('Female');
-  expect(nonConformanceChecks).toBe(0);
+  expect(summaryRequests).toBe(0);
+  expect(legacyConformanceRequests).toBe(0);
 
   await heldOverrideSaves[1].continue();
-  await expect.poll(() => nonConformanceChecks).toBe(1);
+  await expect.poll(() => summaryRequests).toBe(1);
+  expect(legacyConformanceRequests).toBe(0);
 });
 
 test('version menu lets the user choose from a long version list', async ({ page }) => {

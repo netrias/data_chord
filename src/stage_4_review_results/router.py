@@ -11,14 +11,12 @@ import binascii
 from pathlib import Path as FilePath
 from typing import Annotated
 
-from fastapi import APIRouter, Header, HTTPException, Path, Request, Response, status
+from fastapi import APIRouter, Header, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse
 
 import src.app.dependencies as dependencies
-from src.api.schemas import DatasetWorkflowIdField
 from src.shared.jinja import templates_for_stage
 from src.stage_4_review_results.schemas import (
-    NonConformantResponse,
     RowContextRequest,
     RowContextResponse,
     SaveOverridesRequest,
@@ -29,7 +27,6 @@ from src.stage_4_review_results.schemas import (
 from src.stage_4_review_results.use_cases import (
     InvalidReviewOverrideSelectionError,
     ReviewStateConflictError,
-    build_non_conformant_values,
     build_row_context,
     build_stage_four_rows,
     save_review_overrides,
@@ -68,9 +65,6 @@ async def fetch_stage_four_rows(
     return result.response
 
 
-DatasetWorkflowIdPath = Annotated[DatasetWorkflowIdField, Path()]
-
-
 @stage_four_router.post("/overrides", response_model=SaveOverridesResponse, name="stage_four_save_overrides")
 async def save_overrides(
     payload: SaveOverridesRequest,
@@ -99,22 +93,6 @@ async def save_overrides(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     response.headers["ETag"] = _review_state_etag(result.version)
     return SaveOverridesResponse(file_id=result.file_id, updated_at=result.updated_at)
-
-
-@stage_four_router.get(
-    "/non-conformant/{file_id}",
-    response_model=NonConformantResponse,
-    name="stage_four_non_conformant",
-)
-async def get_non_conformant_values(file_id: DatasetWorkflowIdPath) -> NonConformantResponse:
-    """Deduplicate by (column, original, final) to match Stage 5's unique mapping logic."""
-    storage = dependencies.get_upload_storage()
-    return build_non_conformant_values(
-        file_id=file_id,
-        upload_storage=storage,
-        workflow_storage=dependencies.get_workflow_storage(),
-        user=dependencies.get_user_context(),
-    )
 
 
 @stage_four_router.post(

@@ -19,7 +19,6 @@ import {
   renderBatchProgress as renderColumnBatchProgress,
   getAllEntries as getColumnAllEntries,
 } from './review_mode_column.js';
-import { escapeHtml } from '/assets/shared/html.js';
 import {
   getFileIdFromUrl,
   createValueCard,
@@ -28,7 +27,6 @@ import {
   cleanupCards,
 } from './shared_review_utils.js';
 import { showRowContextPopup } from './row_context_popup.js';
-import { fetchConformanceResult } from './conformance-gate.js';
 import {
   getTotalUnits as getRowTotalUnits,
   getCurrentEntries as getRowCurrentEntries,
@@ -839,7 +837,7 @@ const attachEventListeners = () => {
   if (stageFiveButton) {
     stageFiveButton.addEventListener('click', async (e) => {
       e.preventDefault();
-      await handleAdvanceToStage5();
+      await navigateToStage5();
     });
   }
 
@@ -938,153 +936,12 @@ const _syncReviewControls = () => {
  * Awaiting ensures the manifest parquet write completes before the page transitions.
  */
 const navigateToStage5 = async () => {
-  await flushPendingSaves();
+  if (state.reviewBlocked || !(await flushPendingSaves())) return;
+  const fileId = getFileIdFromUrl();
+  if (!fileId || !isValidFileId(fileId)) return;
   advanceMaxReachedStage('review');
-  const fileId = getFileIdFromUrl();
-  const url = fileId ? `${stageFiveUrl}?file_id=${encodeURIComponent(fileId)}` : stageFiveUrl;
+  const url = `${stageFiveUrl}?file_id=${encodeURIComponent(fileId)}`;
   window.location.assign(url);
-};
-
-/**
- * Group items by column for cleaner display.
- */
-const _groupByColumn = (items) => {
-  const grouped = new Map();
-  for (const item of items) {
-    if (!grouped.has(item.column)) {
-      grouped.set(item.column, []);
-    }
-    grouped.get(item.column).push(item.value);
-  }
-  return grouped;
-};
-
-/**
- * Show the PV warning dialog with non-conformant values.
- * Groups values by column for cleaner presentation.
- * @param {Object} data - { count: number, items: Array<{column, value, original}> }
- */
-const showPVWarningDialog = (data) => {
-  const { count, items } = data;
-
-  const dialog = document.createElement('dialog');
-  dialog.className = 'pv-warning-dialog';
-
-  const grouped = _groupByColumn(items);
-  let groupsHtml = '';
-
-  for (const [column, values] of grouped) {
-    const valuesHtml = values
-      .map((v) => `<div class="non-conformant-value">"${escapeHtml(v)}"</div>`)
-      .join('');
-
-    groupsHtml += `
-      <div class="non-conformant-group">
-        <h4 class="non-conformant-column">${escapeHtml(column)} <span class="value-count">(${values.length})</span></h4>
-        <div class="non-conformant-values">${valuesHtml}</div>
-      </div>
-    `;
-  }
-
-  dialog.innerHTML = `
-    <div class="pv-warning-dialog-content">
-      <div class="pv-warning-dialog-header">
-        <h3 class="pv-warning-dialog-title">Non-Conforming Values Detected</h3>
-      </div>
-      <div class="pv-warning-dialog-body">
-        <p>
-          <strong>${count}</strong> value${count === 1 ? '' : 's'} do not match the permissible value set
-          for ${count === 1 ? 'its' : 'their'} mapped ontology.
-        </p>
-        <div class="non-conformant-groups">${groupsHtml}</div>
-      </div>
-      <div class="pv-warning-dialog-footer">
-        <button class="btn-secondary" data-action="return">
-          Return to Review
-        </button>
-        <button class="btn-warning" data-action="proceed">
-          Proceed Anyway
-        </button>
-      </div>
-    </div>
-  `;
-
-  dialog.querySelector('[data-action="return"]').addEventListener('click', () => {
-    dialog.close();
-    dialog.remove();
-  });
-
-  dialog.querySelector('[data-action="proceed"]').addEventListener('click', async () => {
-    dialog.close();
-    dialog.remove();
-    await navigateToStage5();
-  });
-
-  document.body.appendChild(dialog);
-  dialog.showModal();
-};
-
-const showConformanceCheckError = () => {
-  if (document.querySelector('.conformance-error-dialog')) return;
-  const dialog = document.createElement('dialog');
-  dialog.className = 'pv-warning-dialog conformance-error-dialog';
-  dialog.innerHTML = `
-    <div class="pv-warning-dialog-content">
-      <div class="pv-warning-dialog-header">
-        <h3 class="pv-warning-dialog-title">Unable to check approved values</h3>
-      </div>
-      <div class="pv-warning-dialog-body">
-        <p>The check did not finish. Try again before you continue.</p>
-      </div>
-      <div class="pv-warning-dialog-footer">
-        <button class="btn-secondary" data-action="return">Stay in review</button>
-        <button class="btn-warning" data-action="retry">Retry check</button>
-      </div>
-    </div>
-  `;
-
-  const close = () => {
-    dialog.close();
-    dialog.remove();
-  };
-  dialog.querySelector('[data-action="return"]').addEventListener('click', close);
-  dialog.querySelector('[data-action="retry"]').addEventListener('click', async () => {
-    close();
-    await handleAdvanceToStage5();
-  });
-  document.body.appendChild(dialog);
-  dialog.showModal();
-};
-
-/**
- * Handle advancement to Stage 5 with PV conformance check.
- * @returns {Promise<void>}
- */
-const handleAdvanceToStage5 = async () => {
-  if (state.reviewBlocked) return;
-  const fileId = getFileIdFromUrl();
-  if (!fileId || !isValidFileId(fileId)) {
-    return;
-  }
-
-  try {
-    const saved = await flushPendingSaves();
-    if (!saved) {
-      return;
-    }
-
-    const data = await fetchConformanceResult(fileId);
-    if (data.count > 0) {
-      showPVWarningDialog(data);
-      return;
-    }
-  } catch (err) {
-    console.warn('Error checking PV conformance:', err);
-    showConformanceCheckError();
-    return;
-  }
-
-  navigateToStage5();
 };
 
 /**

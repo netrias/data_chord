@@ -166,14 +166,12 @@ async def test_review_workflow_logs_major_performance_spans(
     caplog.clear()
     caplog.set_level(logging.INFO)
 
-    # When: the app builds the Stage 4 screen, conformance gate, and final summary
+    # When: the app builds the Stage 4 screen and final Stage 5 summary
     stage4_response = await app_client.post("/stage-4/rows", json={"file_id": file_id})
-    conformance_response = await app_client.get(f"/stage-4/non-conformant/{file_id}")
     stage5_response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
 
     # Then: each request succeeds and its major work is visible as request-correlated spans
     assert stage4_response.status_code == 200
-    assert conformance_response.status_code == 200
     assert stage5_response.status_code == 200
     completed_spans = {
         str(_record_field(record, "span_name"))
@@ -190,12 +188,6 @@ async def test_review_workflow_logs_major_performance_spans(
         "stage4.rows.cde_mapping",
         "stage4.rows.response_build",
         "stage4.rows.ready_check",
-        "stage4.non_conformant.ready_capture",
-        "stage4.non_conformant.manifest_read",
-        "stage4.non_conformant.pv_load",
-        "stage4.non_conformant.review_state",
-        "stage4.non_conformant.value_scan",
-        "stage4.non_conformant.ready_check",
         "stage5.summary.ready_capture",
         "stage5.summary.manifest_read",
         "stage5.summary.pv_load",

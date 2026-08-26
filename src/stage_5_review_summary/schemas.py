@@ -60,16 +60,26 @@ class TermMapping(BaseModel):
     history: list[TransformationStep] = Field(default_factory=list)
 
 
+class NonConformantItem(BaseModel):
+    """One distinct final value that needs reviewer attention."""
+
+    column: str
+    source_column_index: int
+    value: str
+    original: str
+
+
 class StageFiveSummaryResponse(BaseModel):
     dataset: DatasetSummary
     column_summaries: list[ColumnSummary]
     term_mappings: list[TermMapping]
-    non_conformant_count: int = 0
+    non_conformant_items: list[NonConformantItem]
 
 
 __all__ = [
     "ColumnSummary",
     "DatasetSummary",
+    "NonConformantItem",
     "StageFiveRequest",
     "StageFiveSummaryResponse",
     "TermMapping",

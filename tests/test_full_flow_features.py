@@ -366,19 +366,16 @@ async def test_stage4_reads_pvs_from_durable_manifest(
     create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"col_a": "Denied"}})
     create_manifest_for_file(temp_storage, file_id, meta.saved_path, {0: {"col_a": "Denied"}})
     _save_test_pv_manifest(file_id, "col_0000", "diagnosis_cde", ["Allowed"])
-    # When: Stage 4 loads review rows and non-conformant values
+    # When: Stage 4 loads review rows
     rows_response = await app_client.post("/stage-4/rows", json={"file_id": file_id})
-    non_conformant_response = await app_client.get(f"/stage-4/non-conformant/{file_id}")
 
-    # Then: PV availability and non-conformance are recovered from durable state
+    # Then: PV availability and conformance are recovered from durable state
     assert rows_response.status_code == 200
     data = rows_response.json()
     assert data["columnPVs"] == {"col_0000": ["Allowed"]}
     transformation = data["columns"][0]["transformations"][0]
     assert transformation["pvSetAvailable"] is True
     assert transformation["isPVConformant"] is False
-    assert non_conformant_response.status_code == 200
-    assert non_conformant_response.json()["count"] == 1
 
 
 async def test_stage5_summary_reads_pvs_from_durable_manifest(
@@ -401,7 +398,14 @@ async def test_stage5_summary_reads_pvs_from_durable_manifest(
     # Then: non-conformance and history conformance use the durable PV manifest
     assert response.status_code == 200
     summary = response.json()
-    assert summary["non_conformant_count"] == 1
+    assert summary["non_conformant_items"] == [
+        {
+            "column": "col_a",
+            "source_column_index": 0,
+            "value": "Denied",
+            "original": "alpha",
+        },
+    ]
     ai_step = next(step for step in summary["term_mappings"][0]["history"] if step["source"] == "ai")
     assert ai_step["review_status"] == "needs_attention"
 

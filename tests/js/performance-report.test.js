@@ -61,7 +61,7 @@ describe('performance benchmark report', () => {
 
     // Then: raw evidence and separate cold and warm summaries remain available
     assert.deepEqual(report, {
-      schema_version: 3,
+      schema_version: 4,
       generated_at: '2026-08-26T12:00:00.000Z',
       environment: {
         target: 'bdf',

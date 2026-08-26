@@ -1,4 +1,4 @@
-"""Feature tests for Stage 4 non-conformant PV counting."""
+"""Feature tests for Stage 5 conformance warnings."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from src.storage import UploadStorage
 from tests.conftest import (
     create_csv_content,
     create_harmonized_csv,
+    review_state_payload,
     save_test_pvs_by_column,
     store_test_harmonization_manifest,
     upload_content,
@@ -68,7 +69,7 @@ async def _upload_file_with_manifest(
     return file_id
 
 
-async def test_non_conformant_endpoint_requires_current_harmonization(
+async def test_stage5_summary_requires_current_harmonization(
     app_client: AsyncClient,
 ) -> None:
     """A reviewer gets useful recourse when Stage 3 has not completed."""
@@ -81,19 +82,19 @@ async def test_non_conformant_endpoint_requires_current_harmonization(
     )
     assert dependencies.get_upload_storage().load_harmonization_manifest_path(file_id) is None
 
-    # When: Stage 4 asks for the non-conformant values
-    response = await app_client.get(f"/stage-4/non-conformant/{file_id}")
+    # When: Stage 5 asks for the final summary and conformance result
+    response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
 
     # Then: navigation is blocked with a clear next action
     assert response.status_code == 409
     assert "Stage 2" in response.json()["detail"]
 
 
-async def test_non_conformant_endpoint_counts_current_unique_bad_values(
+async def test_stage5_summary_returns_current_unique_bad_values(
     app_client: AsyncClient,
     temp_storage: UploadStorage,
 ) -> None:
-    """Stage 4 counts the current unique values that are outside their column PV set."""
+    """Stage 5 returns the current unique values outside their column PV set."""
 
     # Given: a manifest has unchanged, AI-changed, and conformant current values
     manifest_rows = [
@@ -128,24 +129,33 @@ async def test_non_conformant_endpoint_counts_current_unique_bad_values(
     )
     assert dependencies.get_upload_storage().load_harmonization_manifest_path(file_id) is not None
 
-    # When: Stage 4 asks for the non-conformant values
-    response = await app_client.get(f"/stage-4/non-conformant/{file_id}")
+    # When: Stage 5 asks for the final summary
+    response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
 
     # Then: only the two current bad values are shown
     assert response.status_code == 200
     data = response.json()
-    assert data["count"] == 2
-    assert data["items"] == [
-        {"column": "diagnosis", "value": "Bad", "original": "Bad"},
-        {"column": "diagnosis", "value": "Bad AI", "original": "Source"},
+    assert data["non_conformant_items"] == [
+        {
+            "column": "diagnosis",
+            "source_column_index": 0,
+            "value": "Bad",
+            "original": "Bad",
+        },
+        {
+            "column": "diagnosis",
+            "source_column_index": 0,
+            "value": "Bad AI",
+            "original": "Source",
+        },
     ]
 
 
-async def test_non_conformant_gate_matches_active_per_cell_export_values(
+async def test_stage5_summary_matches_active_per_cell_export_values(
     app_client: AsyncClient,
     temp_storage: UploadStorage,
 ) -> None:
-    """The gate checks active cell overrides, not the term-level audit tail."""
+    """The summary checks active cell overrides, not the term-level audit tail."""
 
     # Given: two cells share one source term, but their active review values differ
     source_rows = [["diagnosis"], ["Repeated"], ["Repeated"]]
@@ -181,13 +191,13 @@ async def test_non_conformant_gate_matches_active_per_cell_export_values(
         json={
             "file_id": file_id,
             "overrides": {
-                    "1": {
-                        "col_0000": {
-                            "human_value": "Disallowed",
-                            "original_value": "Repeated",
-                        },
+                "1": {
+                    "col_0000": {
+                        "human_value": "Disallowed",
+                        "original_value": "Repeated",
                     },
                 },
+            },
             "review_state": {
                 "review_mode": "column",
                 "sort_mode": "original",
@@ -201,22 +211,20 @@ async def test_non_conformant_gate_matches_active_per_cell_export_values(
     )
     assert save_response.status_code == 200
 
-    # When: the reviewer checks the gate and downloads the current output
-    gate_response = await app_client.get(f"/stage-4/non-conformant/{file_id}")
+    # When: the reviewer loads the summary and downloads the current output
+    summary_response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
     download_response = await app_client.post("/stage-5/download", json={"file_id": file_id})
 
     # Then: both operations use the same active value for each cell
-    assert gate_response.status_code == 200
-    assert gate_response.json() == {
-        "count": 1,
-        "items": [
-            {
-                "column": "diagnosis",
-                "value": "Disallowed",
-                "original": "Repeated",
-            },
-        ],
-    }
+    assert summary_response.status_code == 200
+    assert summary_response.json()["non_conformant_items"] == [
+        {
+            "column": "diagnosis",
+            "source_column_index": 0,
+            "value": "Disallowed",
+            "original": "Repeated",
+        },
+    ]
     assert download_response.status_code == 200
     with zipfile.ZipFile(io.BytesIO(download_response.content)) as archive:
         csv_name = next(name for name in archive.namelist() if name.endswith(".csv"))
@@ -224,11 +232,11 @@ async def test_non_conformant_gate_matches_active_per_cell_export_values(
     assert [row["diagnosis"] for row in exported_rows] == ["Disallowed", "Allowed"]
 
 
-async def test_stage4_and_stage5_report_same_non_conformant_count(
+async def test_stage5_summary_owns_the_non_conformant_result(
     app_client: AsyncClient,
     temp_storage: UploadStorage,
 ) -> None:
-    """The review gate and final summary count the same unique bad mappings."""
+    """One response owns the unique bad mappings."""
 
     # Given: Stage 3 stored a manifest with one repeated bad mapping and one unique bad mapping
     manifest_rows = [
@@ -251,18 +259,28 @@ async def test_stage4_and_stage5_report_same_non_conformant_count(
     )
     assert dependencies.get_upload_storage().load_harmonization_manifest_path(file_id) is not None
 
-    # When: Stage 4 and Stage 5 both summarize non-conformant values
-    stage4_response = await app_client.get(f"/stage-4/non-conformant/{file_id}")
-    stage5_response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
+    # When: Stage 5 summarizes the final values and their conformance
+    response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
 
-    # Then: both user-facing stages report the same deduplicated count
-    assert stage4_response.status_code == 200
-    assert stage5_response.status_code == 200
-    assert stage4_response.json()["count"] == 2
-    assert stage5_response.json()["non_conformant_count"] == 2
+    # Then: one response owns the exact warning items
+    assert response.status_code == 200
+    assert response.json()["non_conformant_items"] == [
+        {
+            "column": "diagnosis",
+            "source_column_index": 0,
+            "value": "Bad",
+            "original": "Bad",
+        },
+        {
+            "column": "diagnosis",
+            "source_column_index": 0,
+            "value": "Bad AI",
+            "original": "Original",
+        },
+    ]
 
 
-async def test_non_conformant_endpoint_deduplicates_by_column_original_and_final(
+async def test_stage5_summary_deduplicates_by_column_original_and_final(
     app_client: AsyncClient,
     temp_storage: UploadStorage,
 ) -> None:
@@ -282,18 +300,22 @@ async def test_non_conformant_endpoint_deduplicates_by_column_original_and_final
     )
     assert dependencies.get_upload_storage().load_harmonization_manifest_path(file_id) is not None
 
-    # When: Stage 4 asks for the non-conformant values
-    response = await app_client.get(f"/stage-4/non-conformant/{file_id}")
+    # When: Stage 5 asks for the final summary
+    response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
 
     # Then: the repeated mapping is counted once
     assert response.status_code == 200
-    assert response.json() == {
-        "count": 1,
-        "items": [{"column": "diagnosis", "value": "Bad", "original": "Bad"}],
-    }
+    assert response.json()["non_conformant_items"] == [
+        {
+            "column": "diagnosis",
+            "source_column_index": 0,
+            "value": "Bad",
+            "original": "Bad",
+        },
+    ]
 
 
-async def test_non_conformant_endpoint_ignores_columns_without_pvs_and_empty_values(
+async def test_stage5_summary_ignores_columns_without_pvs_and_empty_values(
     app_client: AsyncClient,
     temp_storage: UploadStorage,
 ) -> None:
@@ -313,12 +335,86 @@ async def test_non_conformant_endpoint_ignores_columns_without_pvs_and_empty_val
     )
     assert dependencies.get_upload_storage().load_harmonization_manifest_path(file_id) is not None
 
-    # When: Stage 4 asks for the non-conformant values
-    response = await app_client.get(f"/stage-4/non-conformant/{file_id}")
+    # When: Stage 5 asks for the final summary
+    response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
 
     # Then: only the non-empty value from the PV-backed column is counted
     assert response.status_code == 200
-    assert response.json() == {
-        "count": 1,
-        "items": [{"column": "diagnosis", "value": "Bad", "original": "Bad"}],
-    }
+    assert response.json()["non_conformant_items"] == [
+        {
+            "column": "diagnosis",
+            "source_column_index": 0,
+            "value": "Bad",
+            "original": "Bad",
+        },
+    ]
+
+
+async def test_stage5_summary_keeps_two_bad_outputs_for_one_source_value(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+) -> None:
+    """Each distinct final value is one warning issue."""
+
+    # Given: two cells share one source value but have different bad reviewer outputs
+    source_rows = [["diagnosis"], ["Repeated"], ["Repeated"]]
+    file_id = await upload_content(
+        app_client,
+        create_csv_content(source_rows),
+        "distinct-final-values.csv",
+    )
+    meta = temp_storage.load(file_id)
+    assert meta is not None
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
+    manifest_row = _manifest_row(
+        column_id=0,
+        column_name="diagnosis",
+        original="Repeated",
+        harmonized="Allowed",
+    )
+    manifest_row["row_indices"] = [0, 1]
+    store_test_harmonization_manifest(temp_storage, file_id, [manifest_row])
+    _save_pv_manifest(file_id, {"col_0000": frozenset({"Allowed"})})
+    save_response = await app_client.post(
+        "/stage-4/overrides",
+        headers={"If-None-Match": "*"},
+        json={
+            "file_id": file_id,
+            "overrides": {
+                "1": {
+                    "col_0000": {
+                        "human_value": "Bad A",
+                        "original_value": "Repeated",
+                    },
+                },
+                "2": {
+                    "col_0000": {
+                        "human_value": "Bad B",
+                        "original_value": "Repeated",
+                    },
+                },
+            },
+            "review_state": review_state_payload(),
+        },
+    )
+    assert save_response.status_code == 200
+
+    # When: Stage 5 builds its one final summary
+    response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
+
+    # Then: both current output values are separate warning issues
+    assert response.status_code == 200
+    assert response.json()["non_conformant_items"] == [
+        {
+            "column": "diagnosis",
+            "source_column_index": 0,
+            "value": "Bad A",
+            "original": "Repeated",
+        },
+        {
+            "column": "diagnosis",
+            "source_column_index": 0,
+            "value": "Bad B",
+            "original": "Repeated",
+        },
+    ]

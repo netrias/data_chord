@@ -79,21 +79,6 @@ class StageFourResultsRequest(BaseModel):
     file_id: DatasetWorkflowIdField
 
 
-class NonConformantItem(BaseModel):
-    """A single non-conformant value for the gating dialog."""
-
-    column: str
-    value: str
-    original: str
-
-
-class NonConformantResponse(BaseModel):
-    """Response containing non-conformant value count and samples."""
-
-    count: int
-    items: list[NonConformantItem]
-
-
 class RowContextRequest(BaseModel):
     """Request payload for fetching original row context."""
 
@@ -157,8 +142,6 @@ class StageFourResultsResponse(BaseModel):
 __all__ = [
     "CellOverrideSchema",
     "ColumnReviewData",
-    "NonConformantItem",
-    "NonConformantResponse",
     "ReviewOverridesSchema",
     "ReviewStateSchema",
     "RowContextRequest",
