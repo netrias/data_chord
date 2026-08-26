@@ -11,8 +11,9 @@
     <div class="progress-tracker-row">
       <ol class="progress-track">
         {% for stage, label, route_name in stages %}
+          {% set route_path = app_path_for(request, route_name) %}
           <li class="step{% if loop.index0 < active_index %} complete{% elif loop.index0 == active_index %} active{% else %} unreachable{% endif %}" data-stage="{{ stage }}">
-            <a class="step-link" data-url="{{ request.url_for(route_name) }}"{% if loop.index0 <= active_index %} href="{{ request.url_for(route_name) }}"{% else %} aria-disabled="true" tabindex="-1"{% endif %}{% if loop.index0 == active_index %} aria-current="step"{% endif %}>
+            <a class="step-link" data-url="{{ route_path }}"{% if loop.index0 <= active_index %} href="{{ route_path }}"{% else %} aria-disabled="true" tabindex="-1"{% endif %}{% if loop.index0 == active_index %} aria-current="step"{% endif %}>
               <span class="step-index">{{ loop.index }}</span>
               <span class="step-label">{{ label }}</span>
             </a>

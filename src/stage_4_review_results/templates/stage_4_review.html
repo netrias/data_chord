@@ -4,9 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Data Chord · Review Harmonization</title>
-    <link rel="stylesheet" href="/assets/shared/tokens.css?v={{ request.app.state.asset_version }}" />
-    <link rel="stylesheet" href="{{ request.url_for('stage_one_static', path='stage_1_upload.css') }}?v={{ request.app.state.asset_version }}" />
-    <link rel="stylesheet" href="{{ request.url_for('stage_four_static', path='stage_4_review.css') }}?v={{ request.app.state.asset_version }}" />
+    <link rel="stylesheet" href="{{ app_path_for(request, 'shared_static', path='tokens.css') }}?v={{ request.app.state.asset_version }}" />
+    <link rel="stylesheet" href="{{ app_path_for(request, 'stage_one_static', path='stage_1_upload.css') }}?v={{ request.app.state.asset_version }}" />
+    <link rel="stylesheet" href="{{ app_path_for(request, 'stage_four_static', path='stage_4_review.css') }}?v={{ request.app.state.asset_version }}" />
   </head>
   <body>
     {% from "progress_tracker.html" import progress_tracker with context %}
@@ -107,10 +107,10 @@
 
     <script>
       window.stageFourConfig = {
-        stageFiveUrl: "{{ request.url_for('stage_five_review_page') }}",
-        resultsEndpoint: "{{ results_endpoint }}",
+        stageFiveUrl: {{ app_path_for(request, 'stage_five_review_page') | tojson }},
+        resultsEndpoint: {{ app_path_for(request, 'stage_four_harmonized_rows') | tojson }},
       };
     </script>
-    <script type="module" src="{{ request.url_for('stage_four_static', path='stage_4_review.js') }}?v={{ request.app.state.asset_version }}"></script>
+    <script type="module" src="{{ app_path_for(request, 'stage_four_static', path='stage_4_review.js') }}?v={{ request.app.state.asset_version }}"></script>
   </body>
 </html>

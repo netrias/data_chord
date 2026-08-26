@@ -32,12 +32,7 @@ stage_five_router = APIRouter(prefix="/stage-5", tags=["Stage 5 Download"])
 
 @stage_five_router.get("", response_class=HTMLResponse, name="stage_five_review_page")
 async def render_stage_five(request: Request) -> HTMLResponse:
-    context: dict[str, object] = {
-        "request": request,
-        "summary_endpoint": str(request.url_for("stage_five_summary")),
-        "download_endpoint": str(request.url_for("stage_five_download")),
-    }
-    return _templates.TemplateResponse(request, "stage_5_review.html", context)
+    return _templates.TemplateResponse(request, "stage_5_review.html", {"request": request})
 
 
 @stage_five_router.post("/summary", response_model=StageFiveSummaryResponse, name="stage_five_summary")
