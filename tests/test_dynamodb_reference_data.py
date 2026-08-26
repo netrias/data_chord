@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import threading
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from decimal import Decimal
 
@@ -24,6 +26,7 @@ SOURCE_DIGEST = "a" * 64
 class FakeTable:
     items: dict[tuple[str, str], dict[str, object]] = field(default_factory=dict)
     page_size: int = 2
+    query_calls: int = 0
 
     def put_item(self, *, Item: Mapping[str, object], ConditionExpression: str | None = None) -> dict[str, object]:
         key = (str(Item["pk"]), str(Item["sk"]))
@@ -39,6 +42,7 @@ class FakeTable:
         return {"Item": item} if item is not None else {}
 
     def query(self, **kwargs: object) -> dict[str, object]:
+        self.query_calls += 1
         assert kwargs["ConsistentRead"] is True
         values = kwargs["ExpressionAttributeValues"]
         assert isinstance(values, Mapping)
@@ -67,6 +71,31 @@ class FailingTable(FakeTable):
         return super().put_item(Item=Item, ConditionExpression=ConditionExpression)
 
 
+class BlockingQueryTable(FakeTable):
+    """DynamoDB fake that exposes concurrent query execution."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.first_query_started = threading.Event()
+        self.release_queries = threading.Event()
+        self.concurrent_query_started = threading.Event()
+        self._active_queries = 0
+        self._active_queries_lock = threading.Lock()
+
+    def query(self, **kwargs: object) -> dict[str, object]:
+        with self._active_queries_lock:
+            self._active_queries += 1
+            if self._active_queries > 1:
+                self.concurrent_query_started.set()
+            self.first_query_started.set()
+        try:
+            assert self.release_queries.wait(timeout=2)
+            return super().query(**kwargs)
+        finally:
+            with self._active_queries_lock:
+                self._active_queries -= 1
+
+
 def _model(value_count: int = 120) -> ReferenceModel:
     values = frozenset(f"value-{index:03d}" for index in range(value_count))
     return ReferenceModel(
@@ -79,6 +108,16 @@ def _model(value_count: int = 120) -> ReferenceModel:
             ]
         ),
         pvs=CdePvCatalog.from_mapping({"cde#one": values, "empty": frozenset()}),
+    )
+
+
+def _versioned_model(version: str) -> ReferenceModel:
+    model = _model(2)
+    return ReferenceModel(
+        version=DataModelVersionReference("model#one", version),
+        label=model.label,
+        catalog=model.catalog,
+        pvs=model.pvs,
     )
 
 
@@ -96,6 +135,56 @@ def test_import_and_load_preserve_multi_page_multi_chunk_model() -> None:
     # Then all metadata and exact values are restored, including explicit empty values.
     assert loaded == _model()
     assert loaded.pvs.get("empty") == frozenset()
+
+
+def test_model_cache_hits_recent_versions_and_reloads_evicted_versions() -> None:
+    # Given five published versions and a four-version in-process cache.
+    table = FakeTable()
+    models = [_versioned_model(str(version)) for version in range(1, 6)]
+    ReferenceDataImporter(table).import_models(models, source_digest=SOURCE_DIGEST)
+    repository = DynamoDbReferenceDataRepository(table)
+    for model in models[:4]:
+        assert repository.load_model(model.version) == model
+    queries_after_fill = table.query_calls
+
+    # When a recent version is requested again, it is served from the cache.
+    assert repository.load_model(models[0].version) == models[0]
+    assert table.query_calls == queries_after_fill
+
+    # When a fifth version is loaded, the least-recently-used version is evicted.
+    assert repository.load_model(models[4].version) == models[4]
+    queries_after_eviction = table.query_calls
+
+    # Then the recent version still hits, while the evicted version reloads exactly.
+    assert repository.load_model(models[0].version) == models[0]
+    assert table.query_calls == queries_after_eviction
+    assert repository.load_model(models[1].version) == models[1]
+    assert table.query_calls > queries_after_eviction
+
+
+def test_model_cache_serializes_full_model_loads() -> None:
+    # Given two published versions that are not cached.
+    table = BlockingQueryTable()
+    models = [_versioned_model("1"), _versioned_model("2")]
+    table.release_queries.set()
+    ReferenceDataImporter(table).import_models(models, source_digest=SOURCE_DIGEST)
+    table.release_queries.clear()
+    table.first_query_started.clear()
+    table.concurrent_query_started.clear()
+    repository = DynamoDbReferenceDataRepository(table)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first_load = executor.submit(repository.load_model, models[0].version)
+        assert table.first_query_started.wait(timeout=2)
+        second_load = executor.submit(repository.load_model, models[1].version)
+        try:
+            # Then the second full-model load waits instead of adding another
+            # complete set of DynamoDB rows to process memory.
+            assert not table.concurrent_query_started.wait(timeout=0.1)
+        finally:
+            table.release_queries.set()
+        assert first_load.result(timeout=2) == models[0]
+        assert second_load.result(timeout=2) == models[1]
 
 
 def test_catalog_query_pages_and_groups_versions() -> None:

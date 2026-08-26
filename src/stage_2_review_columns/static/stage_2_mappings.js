@@ -1347,9 +1347,11 @@ const _ensureOverrideDetails = async () => {
     const meta = cde ? cdeByKey.get(cde) : null;
     return meta && !_isRenameOnly(meta.type) && !state.detailByColumn.has(colKey);
   });
-  await Promise.all(overriddenValueRows.map(async (col) => {
+  // Each detail request can read the full upload. Keep recovery sequential so
+  // several copies of a large dataset are not held in memory at the same time.
+  for (const col of overriddenValueRows) {
     await _ensureColumnDetail(_columnKey(col));
-  }));
+  }
   if (overriddenValueRows.length) {
     renderFilterTrigger();
     renderRows();

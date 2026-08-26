@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from src.app.session_cache import clear_all_session_caches
 from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.dataset_workflow_ids import dataset_workflow_id_from_string
@@ -92,8 +91,8 @@ def test_pv_manifest_rejects_non_current_boundary_schema(schema_version: object)
         PVManifest.from_store({"schema_version": schema_version})
 
 
-def test_stage_four_recovers_pvs_after_process_cache_loss(tmp_path: Path) -> None:
-    """A process restart does not remove PV dropdown and conformance data."""
+def test_stage_four_reads_pvs_from_durable_snapshot_after_reload(tmp_path: Path) -> None:
+    """Reloading workflow state does not remove PV dropdown and conformance data."""
     storage, user = _stored_workflow(tmp_path)
     loaded = _initial_state(storage, user)
     save_pv_snapshot(
@@ -106,7 +105,6 @@ def test_stage_four_recovers_pvs_after_process_cache_loss(tmp_path: Path) -> Non
         }),
     )
 
-    clear_all_session_caches()
     reloaded = load_workflow_state(storage, user, FILE_ID)
     assert reloaded is not None
 

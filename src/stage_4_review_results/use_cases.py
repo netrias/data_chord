@@ -90,7 +90,7 @@ def build_stage_four_rows(
     if not meta:
         raise HarmonizationNotReadyError("Upload not found. Return to Stage 1 and upload it again.")
 
-    original_dataset = read_tabular(meta.saved_path, sheet_name=meta.selected_sheet)
+    original_dataset = read_tabular(meta.saved_path, sheet_name=loaded_state.state.selected_sheet)
 
     manifest = _load_manifest(upload_storage, workflow_storage, user, file_id)
     if manifest is None:
@@ -167,12 +167,12 @@ def build_row_context(
     user: UserContext,
 ) -> RowContextResponse:
     """Load original spreadsheet rows for the on-demand review context popup."""
-    require_ready_harmonization_workflow(workflow_storage, user, file_id)
+    loaded_state = require_ready_harmonization_workflow(workflow_storage, user, file_id)
     meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
     if meta is None:
         raise HarmonizationNotReadyError("Upload not found. Return to Stage 1 and upload it again.")
 
-    dataset = read_tabular(meta.saved_path, sheet_name=meta.selected_sheet)
+    dataset = read_tabular(meta.saved_path, sheet_name=loaded_state.state.selected_sheet)
     selected_rows = [
         dataset.rows[index]
         for index in row_indices

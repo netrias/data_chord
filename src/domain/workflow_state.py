@@ -12,12 +12,13 @@ from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_value
 from src.domain.manifest import ColumnMappingManifest, InvalidMappingManifestError
 
-_CURRENT_SCHEMA_VERSION: Final = 2
+_CURRENT_SCHEMA_VERSION: Final = 3
 _FIELD_SCHEMA_VERSION: Final = "schema_version"
 
 _FIELD_FILE_ID: Final = "file_id"
 _FIELD_DATA_MODEL_KEY: Final = "data_model_key"
 _FIELD_EXTERNAL_VERSION_NUMBER: Final = "external_version_number"
+_FIELD_SELECTED_SHEET: Final = "selected_sheet"
 _FIELD_MANUAL_OVERRIDES: Final = "manual_overrides"
 _FIELD_COLUMN_RENAMES: Final = "column_renames"
 _FIELD_MAPPING_MANIFEST: Final = "mapping_manifest"
@@ -92,6 +93,7 @@ class WorkflowState:
     file_id: DatasetWorkflowId
     data_model_version: DataModelVersionReference
     mapping_manifest: ColumnMappingManifest
+    selected_sheet: str | None = None
     mapping_choices: ConfirmedMappingChoices | None = None
 
     @classmethod
@@ -100,11 +102,14 @@ class WorkflowState:
         file_id: DatasetWorkflowId | str,
         data_model_version: DataModelVersionReference,
         mapping_manifest: ColumnMappingManifest,
+        *,
+        selected_sheet: str | None = None,
     ) -> WorkflowState:
         return cls(
             file_id=dataset_workflow_id_from_value(file_id),
             data_model_version=data_model_version,
             mapping_manifest=mapping_manifest,
+            selected_sheet=selected_sheet,
         )
 
     def with_mapping_choices(self, choices: ConfirmedMappingChoices) -> WorkflowState:
@@ -112,6 +117,7 @@ class WorkflowState:
             file_id=self.file_id,
             data_model_version=self.data_model_version,
             mapping_manifest=self.mapping_manifest,
+            selected_sheet=self.selected_sheet,
             mapping_choices=choices,
         )
 
@@ -120,6 +126,7 @@ class WorkflowState:
             file_id=self.file_id,
             data_model_version=self.data_model_version,
             mapping_manifest=manifest,
+            selected_sheet=self.selected_sheet,
             mapping_choices=self.mapping_choices,
         )
 
@@ -129,6 +136,7 @@ class WorkflowState:
             _FIELD_FILE_ID: self.file_id,
             _FIELD_DATA_MODEL_KEY: self.data_model_version.data_model_key,
             _FIELD_EXTERNAL_VERSION_NUMBER: self.data_model_version.external_version_number,
+            _FIELD_SELECTED_SHEET: self.selected_sheet,
         }
         payload[_FIELD_MAPPING_MANIFEST] = self.mapping_manifest.to_payload()
         if self.mapping_choices is not None:
@@ -156,12 +164,18 @@ class WorkflowState:
         data_model_version = _data_model_version_from_store(data_model_key, payload)
         if data_model_version is None:
             raise WorkflowStateSchemaError("workflow state has an invalid data model version")
+        if _FIELD_SELECTED_SHEET not in payload:
+            raise WorkflowStateSchemaError("workflow state is missing selected_sheet")
+        selected_sheet = payload[_FIELD_SELECTED_SHEET]
+        if selected_sheet is not None and not isinstance(selected_sheet, str):
+            raise WorkflowStateSchemaError("workflow state has an invalid selected_sheet")
 
         mapping_manifest = _mapping_manifest_from_store(payload)
         return cls(
             file_id=dataset_workflow_id,
             data_model_version=data_model_version,
             mapping_manifest=mapping_manifest,
+            selected_sheet=selected_sheet,
             mapping_choices=ConfirmedMappingChoices.from_store(payload),
         )
 

@@ -10,6 +10,7 @@ from .upload_storage import (
     UploadStream,
     UploadTooLargeError,
     describe_constraints,
+    resolve_selected_sheet,
 )
 from .workflow_cleanup import WorkflowCleanup, WorkflowCleanupResult, WorkflowStorageFullError
 from .workflow_storage import (
@@ -65,4 +66,5 @@ __all__ = [
     "WorkflowStorageError",
     "WorkflowStorageFullError",
     "describe_constraints",
+    "resolve_selected_sheet",
 ]

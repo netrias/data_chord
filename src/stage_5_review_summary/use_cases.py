@@ -25,7 +25,6 @@ from src.app.harmonization_readiness import (
     require_ready_harmonization_workflow,
     require_review_state_matches_manifest,
 )
-from src.app.session_cache import clear_session_cache
 from src.domain.column_outcomes import (
     FinalizedValueOutcome,
     FinalValueReviewStatus,
@@ -103,15 +102,15 @@ def build_download_package(
     workflow_storage: WorkflowStorage,
     user: UserContext,
 ) -> DownloadPackage:
-    require_ready_harmonization_workflow(workflow_storage, user, file_id)
+    loaded_state = require_ready_harmonization_workflow(workflow_storage, user, file_id)
     meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
     if meta is None:
         raise HarmonizationNotReadyError("Upload not found. Return to Stage 1 and upload it again.")
 
     harmonized_path = _load_harmonized_path(upload_storage, workflow_storage, user, file_id, meta)
     manifest_path = load_harmonization_manifest_path(upload_storage, workflow_storage, user, file_id)
-    original_dataset = read_tabular(meta.saved_path, sheet_name=meta.selected_sheet)
-    harmonized_dataset = read_tabular(harmonized_path, sheet_name=meta.selected_sheet)
+    original_dataset = read_tabular(meta.saved_path, sheet_name=loaded_state.state.selected_sheet)
+    harmonized_dataset = read_tabular(harmonized_path, sheet_name=loaded_state.state.selected_sheet)
     if not original_dataset.columns or not harmonized_dataset.columns:
         raise HarmonizationNotReadyError(
             "The harmonized dataset cannot be read. Return to Stage 3 and run harmonization again."
@@ -137,9 +136,6 @@ def build_download_package(
         mapping_content,
         overrides,
     )
-
-    # Session complete: release in-memory cache to prevent unbounded growth.
-    clear_session_cache(file_id, owner_user_id=user.user_id)
 
     return DownloadPackage(base_name=base_name, content=zip_buffer)
 

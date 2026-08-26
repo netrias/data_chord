@@ -8,7 +8,6 @@ from pathlib import Path
 from fastapi.concurrency import run_in_threadpool
 from netrias_client import read_tabular
 
-from src.app.session_cache import SessionCache, get_session_cache
 from src.domain.cde import CdeType
 from src.domain.cde_catalog import CdeCatalog
 from src.domain.cde_pv_catalog import CdePvCatalog
@@ -69,8 +68,6 @@ async def compute_column_detail(
     reference_repository: ReferenceDataRepository,
 ) -> ColumnDetailResponse:
     """Build the takeover's column-detail payload."""
-    # Durable state establishes both workflow existence and ownership before a
-    # process-local cache can reveal anything about the workflow.
     loaded_state = load_workflow_state(
         workflow_storage,
         user,
@@ -79,14 +76,13 @@ async def compute_column_detail(
     if loaded_state is None:
         raise ColumnDetailNotFound(f"No workflow found for {file_id}")
     source_column_key = column_key_from_string(column_key)
-    cache = get_session_cache(file_id, owner_user_id=user.user_id)
-    profile = await _get_or_build_column_profile(
-        cache,
+    profile = await _build_column_profile_from_upload(
         upload_storage,
         workflow_storage,
         user,
         file_id,
         source_column_key,
+        loaded_state.state.selected_sheet,
     )
     model = await run_in_threadpool(reference_repository.load_model, loaded_state.state.data_model_version)
     catalog = CdeCatalogSnapshot(model.catalog, model.pvs)
@@ -124,18 +120,14 @@ def save_confirmed_mapping_choices(
     return SaveMappingChoicesResponse(file_id=payload.file_id)
 
 
-async def _get_or_build_column_profile(
-    cache: SessionCache,
+async def _build_column_profile_from_upload(
     upload_storage: UploadStorage,
     workflow_storage: WorkflowStorage,
     user: UserContext,
     file_id: str,
     column_key: ColumnKey,
+    selected_sheet: str | None,
 ) -> ColumnProfile:
-    profile = cache.get_column_profile(column_key)
-    if profile is not None:
-        return profile
-
     meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
     if meta is None:
         raise ColumnDetailNotFound(f"No upload found for {file_id}")
@@ -144,11 +136,10 @@ async def _get_or_build_column_profile(
         _build_column_profile_from_tabular,
         meta.saved_path,
         column_key,
-        meta.selected_sheet,
+        selected_sheet,
     )
     if profile is None:
         raise ColumnDetailNotFound(f"No profile available for {file_id}/{column_key}")
-    cache.set_column_profile(profile)
     return profile
 
 

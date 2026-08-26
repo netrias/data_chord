@@ -468,6 +468,7 @@ def _seed_test_workflow_state(file_id: str, rows: list[dict[str, Any]]) -> bool:
                 file_id,
                 DataModelVersionReference(TEST_TARGET_SCHEMA, TEST_TARGET_EXTERNAL_VERSION_NUMBER),
                 ColumnMappingManifest(records),
+                selected_sheet=meta.selected_sheet if meta is not None else None,
             ),
         )
         return True

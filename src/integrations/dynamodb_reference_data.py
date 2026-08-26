@@ -7,6 +7,7 @@ import gzip
 import hashlib
 import io
 import json
+from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
@@ -33,6 +34,7 @@ MAX_UNCOMPRESSED_CHUNK_BYTES = 300 * 1024
 _CATALOG_PK = "CATALOG"
 _META_SK = "META"
 _IMPORT_SK = "IMPORT"
+_MAX_CACHED_MODELS = 4
 
 
 class DynamoTable(Protocol):
@@ -58,8 +60,9 @@ class DynamoDbReferenceDataRepository:
 
     def __init__(self, table: DynamoTable) -> None:
         self._table = table
-        self._models: dict[DataModelVersionReference, ReferenceModel] = {}
+        self._models: OrderedDict[DataModelVersionReference, ReferenceModel] = OrderedDict()
         self._models_lock = Lock()
+        self._model_load_lock = Lock()
 
     def list_models(self) -> tuple[DataModelSummary, ...]:
         items = self._query_partition(_CATALOG_PK)
@@ -110,22 +113,36 @@ class DynamoDbReferenceDataRepository:
     def load_model(self, version: DataModelVersionReference) -> ReferenceModel:
         with self._models_lock:
             cached = self._models.get(version)
-        if cached is not None:
-            return cached
-        partition = _model_partition(version)
-        items = self._query_partition(partition)
-        if not items:
-            raise ReferenceModelNotFoundError(
-                f"Reference model is not published: {version.data_model_key}/{version.external_version_number}"
-            )
-        try:
-            model = _model_from_items(version, items)
+            if cached is not None:
+                self._models.move_to_end(version)
+                return cached
+
+        # A model and its DynamoDB rows can both be large. Serialize cache
+        # misses so concurrent requests cannot build several full models.
+        with self._model_load_lock:
             with self._models_lock:
-                return self._models.setdefault(version, model)
-        except ReferenceDataCorruptError:
-            raise
-        except Exception as exc:
-            raise ReferenceDataCorruptError("Reference model is malformed") from exc
+                cached = self._models.get(version)
+                if cached is not None:
+                    self._models.move_to_end(version)
+                    return cached
+            partition = _model_partition(version)
+            items = self._query_partition(partition)
+            if not items:
+                raise ReferenceModelNotFoundError(
+                    f"Reference model is not published: {version.data_model_key}/{version.external_version_number}"
+                )
+            try:
+                model = _model_from_items(version, items)
+                with self._models_lock:
+                    self._models[version] = model
+                    self._models.move_to_end(version)
+                    if len(self._models) > _MAX_CACHED_MODELS:
+                        self._models.popitem(last=False)
+                    return model
+            except ReferenceDataCorruptError:
+                raise
+            except Exception as exc:
+                raise ReferenceDataCorruptError("Reference model is malformed") from exc
 
     def _query_partition(self, pk: str) -> list[Mapping[str, object]]:
         items: list[Mapping[str, object]] = []
