@@ -40,6 +40,20 @@ export const uploadAndAnalyze = async (page, filePath, sourceColumnIndex = 1) =>
   return getFileIdFromUrl(page);
 };
 
+export const uploadAndAnalyzeReal = async (page, filePath) => {
+  await page.goto('/stage-1');
+  await page.setInputFiles(AGENT_FILE_INPUT, filePath);
+  await page.locator('#analyzeButton').waitFor({ state: 'visible' });
+  await page.waitForFunction(() => !document.querySelector('#analyzeButton')?.disabled);
+  await page.click('#analyzeButton');
+  const confirmButton = page.locator('.data-model-confirm-btn');
+  await confirmButton.waitFor({ state: 'visible' });
+  await confirmButton.click();
+  await page.waitForURL(/\/stage-2/);
+  await expect(page.locator('#mappingRows .mapping-row').first()).toBeVisible();
+  return getFileIdFromUrl(page);
+};
+
 export const uploadAndAnalyzeSheet = async (page, filePath, sheetName) => {
   await mockDataModels(page);
   await mockAnalyze(page, 0);
