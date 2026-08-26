@@ -10,14 +10,20 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from src.storage import (
+    StoredJson,
     UploadedFileMeta,
     UploadStorage,
     UserContext,
     WorkflowArtifactNotFoundError,
     WorkflowFile,
+    WorkflowJsonUnreadableError,
     WorkflowNotFoundError,
     WorkflowStorage,
 )
+
+
+class UploadMetadataUnreadableError(Exception):
+    """Raised when durable upload metadata cannot be decoded."""
 
 
 def save_upload_artifacts(
@@ -58,7 +64,7 @@ def load_upload_artifact(
     file_id: str,
 ) -> UploadedFileMeta | None:
     try:
-        stored = workflow_storage.read_json(user, file_id, WorkflowFile.UPLOAD_METADATA)
+        stored = _read_upload_metadata(workflow_storage, user, file_id)
     except WorkflowNotFoundError:
         return None
     local_meta = upload_storage.load(file_id)
@@ -96,7 +102,7 @@ def load_harmonized_output_path(
 ) -> Path | None:
     # Authorize against durable workflow metadata before consulting scratch.
     try:
-        workflow_storage.read_json(user, file_id, WorkflowFile.UPLOAD_METADATA)
+        _read_upload_metadata(workflow_storage, user, file_id)
     except WorkflowNotFoundError:
         raise
     try:
@@ -114,7 +120,7 @@ def load_harmonization_manifest_path(
 ) -> Path | None:
     # Authorize against durable workflow metadata before consulting scratch.
     try:
-        workflow_storage.read_json(user, file_id, WorkflowFile.UPLOAD_METADATA)
+        _read_upload_metadata(workflow_storage, user, file_id)
     except WorkflowNotFoundError:
         raise
     try:
@@ -137,12 +143,27 @@ def _upsert_json(
 ) -> None:
     # Write through the storage version token so browser retries do not erase a
     # newer artifact written by another request.
-    existing = workflow_storage.read_json(user, file_id, kind)
+    try:
+        existing = workflow_storage.read_json(user, file_id, kind)
+    except WorkflowJsonUnreadableError as exc:
+        raise UploadMetadataUnreadableError(file_id) from exc
     expected_version = existing.version if existing is not None else None
     workflow_storage.write_json(user, file_id, kind, data, expected_version=expected_version)
 
 
+def _read_upload_metadata(
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+    file_id: str,
+) -> StoredJson | None:
+    try:
+        return workflow_storage.read_json(user, file_id, WorkflowFile.UPLOAD_METADATA)
+    except WorkflowJsonUnreadableError as exc:
+        raise UploadMetadataUnreadableError(file_id) from exc
+
+
 __all__ = [
+    "UploadMetadataUnreadableError",
     "load_harmonization_manifest_path",
     "load_harmonized_output_path",
     "load_upload_artifact",

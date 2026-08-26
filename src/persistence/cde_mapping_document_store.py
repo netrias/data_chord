@@ -24,7 +24,18 @@ from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_value
 from src.domain.manifest import ColumnMappingManifest, ColumnMappingRecord, RecommendationSource
 from src.domain.tabular_column_renames import ResolvedTabularColumn
-from src.storage import UserContext, WorkflowFile, WorkflowNotFoundError, WorkflowStorage
+from src.storage import (
+    StoredJson,
+    UserContext,
+    WorkflowFile,
+    WorkflowJsonUnreadableError,
+    WorkflowNotFoundError,
+    WorkflowStorage,
+)
+
+
+class CdeMappingUnreadableError(Exception):
+    """Raised when the durable column mapping document cannot be decoded."""
 
 
 class MappingSource(StrEnum):
@@ -179,7 +190,7 @@ def save_cde_mapping_document(
         mappings=_build_entries(manifest, column_overrides, column_renames, columns, catalog),
     )
     try:
-        existing = workflow_storage.read_json(user, dataset_workflow_id, WorkflowFile.CDE_MAPPING)
+        existing = _read_cde_mapping(workflow_storage, user, dataset_workflow_id)
     except WorkflowNotFoundError:
         workflow_storage.create_workflow(user, dataset_workflow_id)
         existing = None
@@ -199,7 +210,7 @@ def load_cde_mapping_json(
 ) -> str | None:
     """Return a pretty JSON mapping artifact for the download bundle."""
     try:
-        stored = workflow_storage.read_json(user, file_id, WorkflowFile.CDE_MAPPING)
+        stored = _read_cde_mapping(workflow_storage, user, file_id)
     except WorkflowNotFoundError:
         return None
     if stored is None:
@@ -214,7 +225,7 @@ def load_cde_mapping_entries_by_column(
 ) -> Mapping[ColumnKey, CdeMappingEntry]:
     """Load the mapping artifact as app types keyed by canonical source column identity."""
     try:
-        stored = workflow_storage.read_json(user, file_id, WorkflowFile.CDE_MAPPING)
+        stored = _read_cde_mapping(workflow_storage, user, file_id)
     except WorkflowNotFoundError:
         return {}
     if stored is None:
@@ -235,6 +246,17 @@ def _cde_mapping_entries_by_column(payload: object) -> Mapping[ColumnKey, CdeMap
             continue
         result[entry.column_key] = entry
     return result
+
+
+def _read_cde_mapping(
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+    file_id: DatasetWorkflowId | str,
+) -> StoredJson | None:
+    try:
+        return workflow_storage.read_json(user, str(file_id), WorkflowFile.CDE_MAPPING)
+    except WorkflowJsonUnreadableError as exc:
+        raise CdeMappingUnreadableError(file_id) from exc
 
 
 def _build_entries(
@@ -331,6 +353,7 @@ def _mapping_source(
 
 
 __all__ = [
+    "CdeMappingUnreadableError",
     "CdeMappingDocument",
     "CdeMappingEntry",
     "MappingSource",

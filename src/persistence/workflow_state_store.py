@@ -10,6 +10,7 @@ from src.storage import (
     VersionToken,
     WorkflowConflictError,
     WorkflowFile,
+    WorkflowJsonUnreadableError,
     WorkflowNotFoundError,
     WorkflowStorage,
 )
@@ -41,7 +42,10 @@ def save_initial_workflow_state(
     state: WorkflowState,
 ) -> LoadedWorkflowState:
     """Create or replace the workflow plan."""
-    existing = storage.read_json(user, state.file_id, WorkflowFile.WORKFLOW_STATE)
+    try:
+        existing = storage.read_json(user, state.file_id, WorkflowFile.WORKFLOW_STATE)
+    except WorkflowJsonUnreadableError as exc:
+        raise WorkflowStateUnreadableError(state.file_id) from exc
     return save_workflow_state(
         storage,
         user,
@@ -81,6 +85,8 @@ def load_workflow_state(
         stored = storage.read_json(user, file_id, WorkflowFile.WORKFLOW_STATE)
     except WorkflowNotFoundError:
         return None
+    except WorkflowJsonUnreadableError as exc:
+        raise WorkflowStateUnreadableError(file_id) from exc
     if stored is None:
         return None
     try:

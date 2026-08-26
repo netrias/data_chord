@@ -18,6 +18,7 @@ from src.storage import (
     VersionToken,
     WorkflowConflictError,
     WorkflowFile,
+    WorkflowJsonUnreadableError,
     WorkflowNotFoundError,
     WorkflowStorage,
 )
@@ -69,6 +70,8 @@ def load_review_overrides_record(
         stored = storage.read_json(user, file_id, WorkflowFile.REVIEW_OVERRIDES)
     except WorkflowNotFoundError:
         return None
+    except WorkflowJsonUnreadableError as exc:
+        raise ReviewOverridesUnreadableError(f"Unreadable review overrides for {file_id}.") from exc
     if stored is None:
         return None
     try:
@@ -92,6 +95,8 @@ def save_review_overrides_state(
         existing = storage.read_json(user, file_id, WorkflowFile.REVIEW_OVERRIDES)
     except WorkflowNotFoundError as exc:
         raise ReviewOverridesWorkflowNotFoundError(file_id) from exc
+    except WorkflowJsonUnreadableError as exc:
+        raise ReviewOverridesUnreadableError(f"Unreadable review overrides for {file_id}.") from exc
 
     try:
         current = ReviewOverrides.from_store(existing.data, file_id) if existing is not None else None

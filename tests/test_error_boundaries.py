@@ -18,9 +18,13 @@ from src.domain.cde_recommendation import RecommendationUnavailableError
 from src.domain.reference_data import ReferenceDataUnavailableError
 from src.storage import (
     LocalWorkflowStorage,
+    StoredJson,
     UploadStorage,
+    UserContext,
     WorkflowCleanup,
     WorkflowConflictError,
+    WorkflowFile,
+    WorkflowJsonUnreadableError,
 )
 from tests.conftest import TEST_CSV_CONTENT_TYPE, TEST_TARGET_EXTERNAL_VERSION_NUMBER, TEST_TARGET_SCHEMA, upload_file
 
@@ -112,6 +116,44 @@ async def test_demo_mode_rejects_replacement_uploads(
     # Then the server preserves the fixed demo-file contract.
     assert response.status_code == 403
     assert response.json() == {"detail": GENERIC_API_ERROR_DETAIL}
+
+
+async def test_corrupt_upload_metadata_returns_restart_guidance(
+    app_client: AsyncClient,
+    sample_csv_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given: An upload whose durable metadata cannot be decoded.
+    file_id = await upload_file(app_client, sample_csv_path)
+    from src.app import dependencies
+
+    workflow_storage = dependencies.get_workflow_storage()
+    original_read = workflow_storage.read_json
+
+    def _read_corrupt_metadata(
+        user: UserContext,
+        stored_file_id: str,
+        kind: WorkflowFile,
+    ) -> StoredJson | None:
+        if kind is WorkflowFile.UPLOAD_METADATA:
+            raise WorkflowJsonUnreadableError("Workflow JSON is unreadable: upload_metadata")
+        return original_read(user, stored_file_id, kind)
+
+    monkeypatch.setattr(workflow_storage, "read_json", _read_corrupt_metadata)
+
+    # When: The user starts analysis.
+    response = await app_client.post(
+        "/stage-1/analyze",
+        json={
+            "file_id": file_id,
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": TEST_TARGET_EXTERNAL_VERSION_NUMBER,
+        },
+    )
+
+    # Then: The API returns a safe restart instruction instead of a 500.
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Saved workflow data cannot be read. Restart this workflow."
 
 
 class TestHarmonizationNotReadyErrors:
