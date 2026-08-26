@@ -66,9 +66,9 @@ class SaveReviewOverridesResult:
 
 
 @dataclass(frozen=True)
-class LoadedReviewOverridesResult:
-    payload: ReviewOverridesSchema
-    version: VersionToken
+class StageFourRowsResult:
+    response: StageFourResultsResponse
+    review_state_version: VersionToken | None
 
 
 class ReviewStateConflictError(Exception):
@@ -85,7 +85,7 @@ def build_stage_four_rows(
     upload_storage: UploadStorage,
     workflow_storage: WorkflowStorage,
     user: UserContext,
-) -> StageFourResultsResponse:
+) -> StageFourRowsResult:
     with performance_span("stage4.rows.ready_capture"):
         ready = capture_ready_harmonization(workflow_storage, user, file_id)
     loaded_state = ready.workflow
@@ -131,10 +131,20 @@ def build_stage_four_rows(
             columns=columns,
             columnPVs=column_pvs,
             totalOriginalRows=len(original_dataset.rows),
+            reviewState=(
+                ReviewOverridesSchema.model_validate(
+                    review_record.value.to_snapshot_payload()
+                )
+                if review_record is not None
+                else None
+            ),
         )
     with performance_span("stage4.rows.ready_check"):
         ready.require_unchanged(workflow_storage, user)
-    return response
+    return StageFourRowsResult(
+        response=response,
+        review_state_version=review_record.version if review_record is not None else None,
+    )
 
 
 def build_non_conformant_values(
@@ -203,37 +213,6 @@ def build_row_context(
     response = RowContextResponse(headers=dataset.headers, rows=selected_rows)
     ready.require_unchanged(workflow_storage, user)
     return response
-
-
-def get_review_overrides(
-    *,
-    workflow_storage: WorkflowStorage,
-    upload_storage: UploadStorage,
-    user: UserContext,
-    file_id: DatasetWorkflowId,
-) -> LoadedReviewOverridesResult | None:
-    with performance_span("stage4.overrides.ready_capture"):
-        ready = capture_ready_harmonization(workflow_storage, user, file_id)
-    with performance_span("stage4.overrides.review_state"):
-        record = load_readable_review_overrides_record(workflow_storage, user, file_id)
-    if record is None:
-        with performance_span("stage4.overrides.ready_check"):
-            ready.require_unchanged(workflow_storage, user)
-        return None
-    with performance_span("stage4.overrides.manifest_read"):
-        manifest = _load_manifest(upload_storage, workflow_storage, user, file_id)
-    if manifest is None:
-        raise HarmonizationNotReadyError(
-            "Harmonization results are incomplete. Return to Stage 3 and run harmonization again."
-        )
-    require_review_state_matches_manifest(record.value, manifest)
-    result = LoadedReviewOverridesResult(
-        payload=ReviewOverridesSchema.model_validate(record.value.to_snapshot_payload()),
-        version=record.version,
-    )
-    with performance_span("stage4.overrides.ready_check"):
-        ready.require_unchanged(workflow_storage, user)
-    return result
 
 
 def save_review_overrides(
@@ -600,13 +579,12 @@ def _validate_review_snapshot(
 
 
 __all__ = [
-    "LoadedReviewOverridesResult",
     "InvalidReviewOverrideSelectionError",
     "ReviewStateConflictError",
     "SaveReviewOverridesResult",
+    "StageFourRowsResult",
     "build_non_conformant_values",
     "build_row_context",
     "build_stage_four_rows",
-    "get_review_overrides",
     "save_review_overrides",
 ]

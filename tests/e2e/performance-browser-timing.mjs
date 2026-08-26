@@ -15,7 +15,7 @@ const _deliveryType = (value) => (
 );
 
 const _privatePath = (pathname) => pathname.replace(
-  /^(\/stage-4\/(?:non-conformant|overrides))\/[^/]+$/,
+  /^(\/stage-4\/non-conformant)\/[^/]+$/,
   '$1/:file_id',
 );
 

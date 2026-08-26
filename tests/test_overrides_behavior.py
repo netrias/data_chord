@@ -108,6 +108,8 @@ async def test_stage4_rows_include_grouped_indices(
     col = data["columns"][0]
     assert len(col["transformations"]) == 1  # "Foo" appears in both rows, grouped
     assert col["transformations"][0]["rowIndices"] == [1, 2]
+    assert data["reviewState"] is None
+    assert response.headers.get("etag") is None
 
 
 async def test_stage4_rows_split_grouped_terms_with_different_active_choices(
@@ -466,9 +468,9 @@ async def test_clearing_a_review_choice_restores_stage3_output_and_keeps_history
 
     # Then: Stage 4 is empty, output returns to beta, and both decisions remain.
     assert cleared.status_code == 200
-    active = await app_client.get(f"/stage-4/overrides/{file_id}")
+    active = await app_client.post("/stage-4/rows", json={"file_id": file_id})
     assert active.status_code == 200
-    assert active.json()["overrides"] == {}
+    assert active.json()["reviewState"]["overrides"] == {}
     assert [event["kind"] for event in _stored_review_events(file_id)] == ["set", "clear"]
 
     summary = await app_client.post("/stage-5/summary", json={"file_id": file_id})
@@ -553,9 +555,12 @@ async def test_stage4_review_version_rejects_stale_save_without_losing_current_s
     assert initial_save.status_code == 200
     initial_version = initial_save.headers.get("etag")
     assert initial_version
-    loaded = await app_client.get(f"/stage-4/overrides/{file_id}")
+    loaded = await app_client.post("/stage-4/rows", json={"file_id": file_id})
     assert loaded.status_code == 200
     assert loaded.headers.get("etag") == initial_version
+    assert loaded.json()["reviewState"]["overrides"] == initial_payload["overrides"]
+    assert loaded.json()["reviewState"]["review_state"] == review_state_payload()
+    assert "events" not in loaded.json()["reviewState"]
 
     newer_payload = {
         **initial_payload,
@@ -587,10 +592,10 @@ async def test_stage4_review_version_rejects_stale_save_without_losing_current_s
 
     # Then: the caller gets a conflict and the newer active event state remains intact.
     assert stale_save.status_code == 409
-    current = await app_client.get(f"/stage-4/overrides/{file_id}")
+    current = await app_client.post("/stage-4/rows", json={"file_id": file_id})
     assert current.status_code == 200
     assert current.headers.get("etag") == newer_version
-    assert current.json()["overrides"]["1"]["col_0000"]["human_value"] == "delta"
+    assert current.json()["reviewState"]["overrides"]["1"]["col_0000"]["human_value"] == "delta"
     assert [event["selected_value"] for event in _stored_review_events(file_id)] == [
         "gamma",
         "delta",
@@ -629,8 +634,8 @@ async def test_stage4_update_requires_the_loaded_review_version(
 
     # Then: the API requires the precondition and preserves current state
     assert tokenless_save.status_code == 428
-    current = await app_client.get(f"/stage-4/overrides/{file_id}")
-    assert current.json()["overrides"]["1"]["col_0000"]["human_value"] == "gamma"
+    current = await app_client.post("/stage-4/rows", json={"file_id": file_id})
+    assert current.json()["reviewState"]["overrides"]["1"]["col_0000"]["human_value"] == "gamma"
 
 
 async def test_stage4_preserves_whitespace_values_in_overrides(

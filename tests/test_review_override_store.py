@@ -281,18 +281,16 @@ def test_transition_rejects_an_earlier_update_timestamp() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("method", "path"),
+    "path",
     [
-        ("GET", "/stage-4/overrides/{file_id}"),
-        ("POST", "/stage-4/rows"),
-        ("POST", "/stage-5/summary"),
-        ("POST", "/stage-5/download"),
+        "/stage-4/rows",
+        "/stage-5/summary",
+        "/stage-5/download",
     ],
 )
 async def test_stage4_and_stage5_report_corrupt_saved_review_state_with_recovery(
     app_client: AsyncClient,
     temp_storage: UploadStorage,
-    method: str,
     path: str,
 ) -> None:
     """Review and export stop instead of using partial or default review state."""
@@ -317,10 +315,7 @@ async def test_stage4_and_stage5_report_corrupt_saved_review_state_with_recovery
     )
 
     # When: a Stage 4 or Stage 5 route reads review state.
-    if method == "GET":
-        response = await app_client.get(path.format(file_id=file_id))
-    else:
-        response = await app_client.post(path, json={"file_id": file_id})
+    response = await app_client.post(path, json={"file_id": file_id})
 
     # Then: it gives one clear restart instruction.
     assert response.status_code == 409
@@ -375,7 +370,7 @@ async def test_later_stages_reject_review_history_from_another_manifest(
 
 
 @pytest.mark.asyncio
-async def test_stage4_get_rejects_a_redundant_baseline_set_event(
+async def test_stage4_rows_reject_a_redundant_baseline_set_event(
     app_client: AsyncClient,
     temp_storage: UploadStorage,
 ) -> None:
@@ -404,7 +399,7 @@ async def test_stage4_get_rejects_a_redundant_baseline_set_event(
         redundant,
     )
 
-    response = await app_client.get(f"/stage-4/overrides/{file_id}")
+    response = await app_client.post("/stage-4/rows", json={"file_id": file_id})
 
     assert response.status_code == 409
     assert response.json() == {

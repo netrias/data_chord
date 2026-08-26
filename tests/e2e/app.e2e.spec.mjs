@@ -168,11 +168,9 @@ test('no-recommendation card warns when its displayed source value is not permis
         }],
         columnPVs: { col_0000: ['Carcinoma NOS', 'Lung Cancer'] },
         totalOriginalRows: 10000,
+        reviewState: null,
       }),
     });
-  });
-  await page.route('**/stage-4/overrides/*', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: 'null' });
   });
   await page.route('**/stage-4/overrides', async (route) => {
     savedOverrides = route.request().postDataJSON();
@@ -227,10 +225,7 @@ test('Stage 4 shows server recovery detail with a Stage 3 link', async ({ page }
   const fileId = '0123456789abcdef0123456789abcdef';
   const recoveryDetail = 'The saved review state cannot be read. Return to Stage 3 and run harmonization again.';
 
-  // Given: Stage 4 has no active snapshot, but its row result reports unreadable review state.
-  await page.route('**/stage-4/overrides/*', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: 'null' });
-  });
+  // Given: the Stage 4 response reports unreadable review state.
   await page.route('**/stage-4/rows', async (route) => {
     await route.fulfill({
       status: 409,
@@ -1722,7 +1717,7 @@ test('Stage 5 aggregates change impact and keeps filters keyboard accessible', a
   await expect(sortButton.locator('xpath=ancestor::th')).toHaveAttribute('aria-sort', 'ascending');
 });
 
-test('autosave persists overrides across reloads', async ({ page }) => {
+test('autosave persists overrides and review settings across reloads', async ({ page }) => {
   await mockHarmonizeSuccess(page);
 
   // Given: a CSV with changes and review loaded
@@ -1745,20 +1740,54 @@ test('autosave persists overrides across reloads', async ({ page }) => {
   const initialSave = await initialSavePromise;
   expect(initialSave.headers().etag).toBeTruthy();
 
+  await page.click('#settingsButton');
+  for (const [selector, value] of [
+    ['#reviewModeSelect', 'row'],
+    ['#sortModeSelect', 'fidelity-asc'],
+  ]) {
+    const settingsSavePromise = page.waitForResponse(
+      (response) => response.request().method() === 'POST'
+        && response.url().includes('/stage-4/overrides')
+        && response.ok(),
+    );
+    await page.selectOption(selector, value);
+    await settingsSavePromise;
+  }
+  const checkboxSavePromise = page.waitForResponse(
+    (response) => response.request().method() === 'POST'
+      && response.url().includes('/stage-4/overrides')
+      && response.ok(),
+  );
+  await page.check('#showUnchangedValues');
+  await checkboxSavePromise;
+  await page.click('#settingsCloseButton');
+
   // When: the page is reloaded
+  const legacyOverrideReads = [];
+  page.on('request', (request) => {
+    if (request.method() === 'GET' && request.url().includes('/stage-4/overrides/')) {
+      legacyOverrideReads.push(request.url());
+    }
+  });
   const loadPromise = page.waitForResponse(
-    (response) => response.request().method() === 'GET'
-      && response.url().includes(`/stage-4/overrides/${fileId}`)
+    (response) => response.request().method() === 'POST'
+      && response.url().includes('/stage-4/rows')
       && response.ok(),
   );
   await page.reload();
   const loaded = await loadPromise;
   await waitForReviewRows(page);
 
-  // Then: the override is restored and the next autosave protects that loaded version
-  await expect(card.locator('.target-value-input')).toHaveValue('Persisted');
+  // Then: the override, settings, and rendered review mode are restored.
+  await expect(page.locator('#reviewModeSelect')).toHaveValue('row');
+  await expect(page.locator('#sortModeSelect')).toHaveValue('fidelity-asc');
+  await expect(page.locator('#showUnchangedValues')).toBeChecked();
+  await expect(page.locator('.row-mode-wrapper')).toBeVisible();
+  const restoredInput = page.locator('.target-value-input').first();
+  await expect(restoredInput).toHaveValue('Persisted');
   const version = loaded.headers().etag;
   expect(version).toBeTruthy();
+  expect(legacyOverrideReads).toEqual([]);
   const versionedSavePromise = page.waitForRequest(
     (request) => request.method() === 'POST' && request.url().includes('/stage-4/overrides'),
   );
@@ -1767,7 +1796,7 @@ test('autosave persists overrides across reloads', async ({ page }) => {
       && response.url().includes('/stage-4/overrides')
       && response.ok(),
   );
-  await card.locator('.target-value-input').fill('Persisted again');
+  await restoredInput.fill('Persisted again');
   const versionedSave = await versionedSavePromise;
   expect(versionedSave.headers()['if-match']).toBe(version);
   await versionedSaveResponsePromise;

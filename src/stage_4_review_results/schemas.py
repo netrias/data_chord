@@ -151,6 +151,7 @@ class StageFourResultsResponse(BaseModel):
     columns: list[ColumnReviewData]
     columnPVs: dict[str, list[str]] = {}
     totalOriginalRows: int = 0
+    reviewState: ReviewOverridesSchema | None = None
 
 
 __all__ = [

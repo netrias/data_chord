@@ -266,9 +266,9 @@ async def test_full_flow_reharmonize_clears_overrides(
 
     # Then: overrides are cleared
     assert rerun_response.status_code == 200
-    overrides_response = await app_client.get(f"/stage-4/overrides/{file_id}")
+    overrides_response = await app_client.post("/stage-4/rows", json={"file_id": file_id})
     assert overrides_response.status_code == 200
-    assert overrides_response.json() is None
+    assert overrides_response.json()["reviewState"] is None
 
 
 async def test_reharmonize_cannot_clear_another_users_overrides(
@@ -340,9 +340,16 @@ async def test_reharmonize_cannot_clear_another_users_overrides(
 
     # Then: Bob is denied and Alice's overrides remain intact
     assert rerun_response.status_code == 403
-    overrides_response = await app_client.get(f"/stage-4/overrides/{file_id}", headers=alice_headers)
+    overrides_response = await app_client.post(
+        "/stage-4/rows",
+        headers=alice_headers,
+        json={"file_id": file_id},
+    )
     assert overrides_response.status_code == 200
-    assert overrides_response.json()["overrides"]["1"]["col_0000"]["human_value"] == "gamma"
+    assert (
+        overrides_response.json()["reviewState"]["overrides"]["1"]["col_0000"]["human_value"]
+        == "gamma"
+    )
 
 
 async def test_stage4_reads_pvs_from_durable_manifest(

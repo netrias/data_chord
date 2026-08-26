@@ -34,7 +34,6 @@ const _latestMarkDetail = (report, name, key) => {
 
 const _stageFourTiming = (report, buttonToUsableMs) => ({
   button_to_usable_ms: buttonToUsableMs,
-  overrides_request_ms: _latestDuration(report, 'stage4.overrides.request'),
   rows_request_ms: _latestDuration(report, 'stage4.rows.request'),
   parse_ms: _latestDuration(report, 'stage4.rows.parse'),
   render_ms: _latestDuration(report, 'stage4.render.dom'),

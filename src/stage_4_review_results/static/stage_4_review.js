@@ -150,6 +150,12 @@ const _showReviewError = (message, action = 'none', fileId = getFileIdFromUrl())
   reviewError?.classList.remove('hidden');
 };
 
+const _clearReviewError = () => {
+  if (!reviewError) return;
+  reviewError.replaceChildren();
+  reviewError.classList.add('hidden');
+};
+
 const _setReviewBlocked = (blocked, clearRows = false) => {
   state.reviewBlocked = blocked;
   if (clearRows) {
@@ -235,6 +241,10 @@ const fetchRows = async () => {
     state.columns = body.columns || [];
     state.columnPVs = body.columnPVs || {};
     state.totalOriginalRows = body.totalOriginalRows || 0;
+    overrideVersion = response.headers.get('ETag');
+    _applyReviewState(body.reviewState);
+    _clearReviewError();
+    _setReviewBlocked(false);
     return true;
   } catch (error) {
     console.error('Unable to load harmonized results:', error);
@@ -243,42 +253,6 @@ const fetchRows = async () => {
     _showReviewError(message, action);
     _setReviewBlocked(true, true);
     return false;
-  }
-};
-
-/**
- * Fetch saved overrides from server.
- * @param {string} fileId
- * @returns {Promise<Object|null>}
- */
-const fetchOverrides = async (fileId) => {
-  if (!isValidFileId(fileId)) {
-    console.warn('Invalid file ID format for fetching overrides.');
-    return null;
-  }
-
-  try {
-    const response = await fetch(`/stage-4/overrides/${encodeURIComponent(fileId)}`);
-    if (response.ok) {
-      const stored = await response.json();
-      overrideVersion = response.headers.get('ETag');
-      return stored;
-    }
-    if (response.status === 404) {
-      return null;
-    }
-    if (response.status === 409) {
-      const detail = await readResponseDetail(response, 'The saved review state cannot be read.');
-      const action = isReviewStateRecovery(detail) ? 'stage3' : 'none';
-      _showReviewError(detail, action, fileId);
-      _setReviewBlocked(true, true);
-    } else {
-      console.warn('Failed to fetch overrides', response.status);
-    }
-    return null;
-  } catch (error) {
-    console.warn('Error fetching overrides', error);
-    return null;
   }
 };
 
@@ -915,21 +889,12 @@ const attachEventListeners = () => {
 };
 
 /**
- * Load persisted state from server.
- * @returns {Promise<void>}
+ * Apply persisted review state returned with the Stage 4 rows.
+ * @param {Object|null} stored
  */
-const loadStateFromDisk = async () => {
-  const fileId = getFileIdFromUrl();
-  if (!fileId) return;
-
-  markTiming('stage4.overrides.fetch.start');
-  const stored = await fetchOverrides(fileId);
-  markTiming('stage4.overrides.fetch.complete', { found: Boolean(stored) });
-  measureTiming('stage4.overrides.request', 'stage4.overrides.fetch.start', 'stage4.overrides.fetch.complete');
-  if (!stored) return;
-
-  state.pendingOverrides = stored.overrides || {};
-  const reviewState = stored.review_state || {};
+const _applyReviewState = (stored) => {
+  state.pendingOverrides = stored?.overrides || {};
+  const reviewState = stored?.review_state || {};
 
   state.reviewMode = reviewState.review_mode || 'column';
   state.sortMode = reviewState.sort_mode || 'original';
@@ -945,6 +910,27 @@ const loadStateFromDisk = async () => {
   const rowModeState = reviewState.row_mode || {};
   state.rowMode.currentUnit = rowModeState.current_unit || 1;
   state.rowMode.batchSize = rowModeState.batch_size || DEFAULT_ROW_BATCH_SIZE;
+};
+
+/** Keep visible settings consistent with the current saved review state. */
+const _syncReviewControls = () => {
+  if (sortModeSelect) {
+    sortModeSelect.value = state.sortMode;
+  }
+  if (reviewModeSelect) {
+    reviewModeSelect.value = state.reviewMode;
+  }
+  if (showCaseOnlyChangesCheckbox) {
+    showCaseOnlyChangesCheckbox.checked = state.showCaseOnlyChanges;
+  }
+  if (showUnchangedValuesCheckbox) {
+    showUnchangedValuesCheckbox.checked = state.showUnchangedValues;
+  }
+  if (scrollModeCheckbox) {
+    scrollModeCheckbox.checked = state.scrollMode;
+  }
+  populateBatchSizeOptions();
+  updateUIForScrollMode();
 };
 
 /**
@@ -1110,29 +1096,11 @@ const init = async () => {
   setActiveStage('verify');
   initStepInstruction('verify');
 
-  await loadStateFromDisk();
-
-  if (sortModeSelect) {
-    sortModeSelect.value = state.sortMode;
-  }
-  if (reviewModeSelect) {
-    reviewModeSelect.value = state.reviewMode;
-  }
-  if (showCaseOnlyChangesCheckbox) {
-    showCaseOnlyChangesCheckbox.checked = state.showCaseOnlyChanges;
-  }
-  if (showUnchangedValuesCheckbox) {
-    showUnchangedValuesCheckbox.checked = state.showUnchangedValues;
-  }
-  if (scrollModeCheckbox) {
-    scrollModeCheckbox.checked = state.scrollMode;
-  }
-  populateBatchSizeOptions();
-  updateUIForScrollMode();
+  if (state.reviewBlocked || !(await fetchRows())) return;
+  _syncReviewControls();
 
   attachEventListeners();
 
-  if (state.reviewBlocked || !(await fetchRows())) return;
   _clampCurrentUnitsToValidRange();
   render();
   await markAfterPaint('stage4.usable', {
@@ -1171,7 +1139,9 @@ const _clampCurrentUnitsToValidRange = () => {
 /* why: re-fetch data when page is restored from browser back-forward cache. */
 window.addEventListener('pageshow', async (event) => {
   if (event.persisted) {
+    if (!(await flushPendingSaves())) return;
     if (!(await fetchRows())) return;
+    _syncReviewControls();
     _clampCurrentUnitsToValidRange();
     render();
   }

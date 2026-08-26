@@ -832,11 +832,9 @@ async def test_stage3_rerun_removes_decisions_from_the_previous_result(
             await _wait_for_stage_three_job(app_client, second_run.json()["job_id"], file_id)
 
     # Then: review starts empty against the new immutable manifest.
-    loaded = await app_client.get(f"/stage-4/overrides/{file_id}")
-    assert loaded.status_code == 200
-    assert loaded.json() is None
     rows = await app_client.post("/stage-4/rows", json={"file_id": file_id})
     assert rows.status_code == 200
+    assert rows.json()["reviewState"] is None
     assert stub.run_count == 2
 
 
