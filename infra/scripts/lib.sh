@@ -67,7 +67,7 @@ require_deployable_git_state() {
 
   repository="$(environment_value application_repository_url)"
   remote_match="$(GIT_TERMINAL_PROMPT=0 git -C "$REPO_DIR" ls-remote "$repository" |
-    awk -v expected="$commit" '$1 == expected { print $1; exit }')"
+    awk -v expected="$commit" '$1 == expected { matched = $1 } END { if (matched) print matched }')"
   [[ "$remote_match" == "$commit" ]] ||
     fail "Commit $commit is not the tip of a ref in $repository. Push it before plan."
   log "Deploy source: $commit"
