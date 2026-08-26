@@ -20,8 +20,16 @@ from src.observability.events import (
     performance_span,
     request_id_from_header,
 )
-from src.storage import UserContext
-from tests.conftest import TEST_CSV_CONTENT_TYPE, create_csv_content
+from src.storage import UploadStorage, UserContext
+from tests.conftest import (
+    TEST_CSV_CONTENT_TYPE,
+    TEST_TARGET_SCHEMA,
+    confirm_mapping_choices,
+    create_csv_content,
+    create_harmonized_csv,
+    create_manifest_for_file,
+    upload_content,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -107,6 +115,67 @@ async def test_performance_span_logs_safe_failure_and_reraises(
     assert _record_field(record, "span_name") == "stage5.summary.summary_build"
     assert _record_field(record, "error_type") == "RuntimeError"
     assert "private value" not in record.getMessage()
+
+
+async def test_review_workflow_logs_major_performance_spans(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Given: one completed workflow is ready for Stage 4 and Stage 5 reads
+    rows = [["col_a"], ["alpha"], ["beta"]]
+    file_id = await upload_content(app_client, create_csv_content(rows), "performance-spans.csv")
+    analyze_response = await app_client.post(
+        "/stage-1/analyze",
+        json={
+            "file_id": file_id,
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
+        },
+    )
+    assert analyze_response.status_code == 200
+    await confirm_mapping_choices(app_client, file_id)
+    harmonize_response = await app_client.post("/stage-3/harmonize", json={"file_id": file_id})
+    assert harmonize_response.status_code == 200
+    meta = temp_storage.load(file_id)
+    assert meta is not None
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
+    create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
+    caplog.clear()
+    caplog.set_level(logging.INFO)
+
+    # When: the app builds the review rows, conformance gate, and final summary
+    stage4_response = await app_client.post("/stage-4/rows", json={"file_id": file_id})
+    conformance_response = await app_client.get(f"/stage-4/non-conformant/{file_id}")
+    stage5_response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
+
+    # Then: each request succeeds and its major work is visible as request-correlated spans
+    assert stage4_response.status_code == 200
+    assert conformance_response.status_code == 200
+    assert stage5_response.status_code == 200
+    completed_spans = {
+        str(_record_field(record, "span_name"))
+        for record in caplog.records
+        if getattr(record, "event_name", None) == "performance.span.completed"
+    }
+    assert {
+        "stage4.rows.ready_capture",
+        "stage4.rows.upload_artifact",
+        "stage4.rows.source_dataset_read",
+        "stage4.rows.manifest_read",
+        "stage4.rows.review_state",
+        "stage4.rows.pv_load",
+        "stage4.rows.cde_mapping",
+        "stage4.rows.response_build",
+        "stage4.rows.ready_check",
+        "stage4.non_conformant.ready_capture",
+        "stage4.non_conformant.manifest_read",
+        "stage4.non_conformant.value_scan",
+        "stage5.summary.ready_capture",
+        "stage5.summary.manifest_read",
+        "stage5.summary.summary_build",
+        "stage5.summary.ready_check",
+    } <= completed_spans
 
 
 async def test_request_id_header_is_returned(app_client: AsyncClient) -> None:
