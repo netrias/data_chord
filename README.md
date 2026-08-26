@@ -149,10 +149,19 @@ Run the deployed journey after the timing code is deployed and you are on the
 company VPN. BDF staging is the default target:
 
 ```bash
+just perf-staging-login
 just perf-staging
 # Or use a specific URL.
+just perf-staging-login https://your-staging-host.example.com
 just perf-staging https://your-staging-host.example.com
 ```
+
+The login command opens a browser. Log in, open Stage 1, and close that browser.
+This saves private login state in `.auth/bdf-staging.json`. The directory is
+ignored by Git. Never commit, share, or attach this file. Failed remote runs can
+also contain private application data in traces and screenshots. Keep all
+Playwright output private. Set `PERF_STORAGE_STATE_PATH` to use another private
+state file.
 
 Set `PERF_REMOTE_ROWS=50` to change the generated CSV row count.
 Each journey uses three fresh-browser samples and ten warm-browser samples by

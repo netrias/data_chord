@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { captureBrowserTiming } from './performance-browser-timing.mjs';
+
 const _now = () => Date.now();
 
 const _duration = (startedAt) => _now() - startedAt;
@@ -75,6 +77,7 @@ export const runNavigationSample = async ({
     state: 'visible',
     timeout,
   });
+  const stageFourBrowserTiming = await captureBrowserTiming(page);
 
   const conformanceResponsePromise = page.waitForResponse(
     (response) => new URL(response.url()).pathname.startsWith('/stage-4/non-conformant/'),
@@ -101,6 +104,7 @@ export const runNavigationSample = async ({
   const stageFiveButtonToUsableMs = _duration(stageFiveStartedAt);
   const stageFiveReport = await _readTimingReport(page);
   await page.locator('#summaryGrid .change-impact').waitFor({ state: 'visible', timeout });
+  const stageFiveBrowserTiming = await captureBrowserTiming(page);
 
   return {
     id,
@@ -117,6 +121,10 @@ export const runNavigationSample = async ({
       stageFiveButtonToUsableMs,
       conformanceRequestMs,
     ),
+    browser_timing: {
+      stage4: stageFourBrowserTiming,
+      stage5: stageFiveBrowserTiming,
+    },
   };
 };
 

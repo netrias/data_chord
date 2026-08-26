@@ -44,7 +44,7 @@ export const buildPerformanceReport = ({
   generatedAt = new Date().toISOString(),
 }) => {
   const report = {
-    schema_version: 1,
+    schema_version: 2,
     generated_at: generatedAt,
     environment,
     dataset,

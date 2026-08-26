@@ -48,3 +48,6 @@ outputs/
 # Playwright / test artifacts
 .artifacts/
 test-results/
+
+# Local Playwright authentication state
+.auth/
