@@ -13,6 +13,7 @@ import pytest
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_string
 from src.storage import (
     LocalWorkflowStorage,
+    StoredArtifact,
     UserContext,
     WorkflowAccessDeniedError,
     WorkflowArtifactNotFoundError,
@@ -115,6 +116,22 @@ def test_local_workflow_access_refreshes_last_accessed_time(tmp_path: Path) -> N
     assert datetime.fromisoformat(refreshed["last_accessed_at"]) > old_access
 
 
+def test_local_workflow_rejects_metadata_for_another_workflow(tmp_path: Path) -> None:
+    # Given: the metadata path for one workflow contains another workflow's identity.
+    storage = LocalWorkflowStorage(tmp_path / "storage")
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    metadata_path = tmp_path / "storage" / "workflows" / workflow.dataset_workflow_id / "metadata.json"
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    payload["file_id"] = str(dataset_workflow_id("b" * 32))
+    metadata_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    # When: the caller accesses the requested workflow.
+    # Then: the storage boundary treats the mismatched metadata as unreadable.
+    with pytest.raises(WorkflowJsonUnreadableError, match="metadata"):
+        storage.read_json(user, workflow.dataset_workflow_id, WorkflowFile.WORKFLOW_STATE)
+
+
 def test_local_workflow_inventory_accepts_metadata_written_before_access_tracking(tmp_path: Path) -> None:
     # Given: workflow metadata from the earlier schema has only its creation time.
     storage = LocalWorkflowStorage(tmp_path / "storage")
@@ -161,6 +178,41 @@ def test_mutable_json_requires_latest_version(tmp_path: Path) -> None:
             {"stage": "harmonized"},
             expected_version=first.version,
         )
+
+
+def test_local_json_delete_requires_latest_version(tmp_path: Path) -> None:
+    # Given: a mutable JSON artifact has been replaced after a worker read it.
+    storage = LocalWorkflowStorage(tmp_path / "storage")
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    first = storage.write_json(
+        user,
+        workflow.dataset_workflow_id,
+        WorkflowFile.REVIEW_OVERRIDES,
+        {"review": "old"},
+    )
+    current = storage.write_json(
+        user,
+        workflow.dataset_workflow_id,
+        WorkflowFile.REVIEW_OVERRIDES,
+        {"review": "new"},
+        expected_version=first.version,
+    )
+
+    # When: the stale worker attempts conditional cleanup.
+    with pytest.raises(WorkflowConflictError, match="version changed"):
+        storage.delete_json(
+            user,
+            workflow.dataset_workflow_id,
+            WorkflowFile.REVIEW_OVERRIDES,
+            expected_version=first.version,
+        )
+
+    # Then: the current JSON remains available.
+    stored = storage.read_json(user, workflow.dataset_workflow_id, WorkflowFile.REVIEW_OVERRIDES)
+    assert stored is not None
+    assert stored.version == current.version
+    assert stored.data == {"review": "new"}
 
 
 @pytest.mark.parametrize("invalid_content", [b"{", b"\xff"])
@@ -391,8 +443,14 @@ def test_mutable_artifact_replaces_only_the_same_suffix(tmp_path: Path) -> None:
     second.write_text("a\nnew\n", encoding="utf-8")
     different.write_text("a\trejected\n", encoding="utf-8")
 
-    storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, first)
-    storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, second)
+    stored = storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, first)
+    storage.write_artifact(
+        user,
+        workflow.dataset_workflow_id,
+        WorkflowFile.HARMONIZED_OUTPUT,
+        second,
+        expected_version=stored.version,
+    )
     with pytest.raises(WorkflowConflictError, match="suffix"):
         storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, different)
 
@@ -400,6 +458,71 @@ def test_mutable_artifact_replaces_only_the_same_suffix(tmp_path: Path) -> None:
     assert [path.name for path in artifact_dir.iterdir()] == ["harmonized_output.csv"]
     with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT) as path:
         assert path.read_text(encoding="utf-8") == "a\nnew\n"
+
+    assert storage.artifact_version(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT) is not None
+
+
+def test_local_artifact_version_is_none_before_publish(tmp_path: Path) -> None:
+    # Given: an authorized workflow with no generated artifact.
+    storage = LocalWorkflowStorage(tmp_path / "storage")
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+
+    # When / Then: the read-only publish snapshot reports no artifact.
+    assert storage.artifact_version(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT) is None
+
+
+def test_local_mutable_artifact_rejects_stale_concurrent_writer(tmp_path: Path) -> None:
+    # Given: a worker has read the current artifact version before another worker publishes.
+    storage = LocalWorkflowStorage(tmp_path / "storage")
+    stale_storage = LocalWorkflowStorage(tmp_path / "storage")
+    user = UserContext(user_id="alice")
+    workflow = storage.create_workflow(user, dataset_workflow_id())
+    initial = tmp_path / "initial.csv"
+    newer = tmp_path / "newer.csv"
+    stale = tmp_path / "stale.csv"
+    initial.write_text("a\nold\n", encoding="utf-8")
+    newer.write_text("a\nnewer\n", encoding="utf-8")
+    stale.write_text("a\nstale\n", encoding="utf-8")
+    initial_artifact = storage.write_artifact(
+        user,
+        workflow.dataset_workflow_id,
+        WorkflowFile.HARMONIZED_OUTPUT,
+        initial,
+    )
+
+    stale_started = threading.Event()
+    release_stale = threading.Event()
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        def _stale_write() -> StoredArtifact:
+            stale_started.set()
+            assert release_stale.wait(timeout=5)
+            return stale_storage.write_artifact(
+                user,
+                workflow.dataset_workflow_id,
+                WorkflowFile.HARMONIZED_OUTPUT,
+                stale,
+                expected_version=initial_artifact.version,
+            )
+
+        stale_future = executor.submit(_stale_write)
+        assert stale_started.wait(timeout=5)
+
+        # When: the newer worker publishes the artifact first.
+        storage.write_artifact(
+            user,
+            workflow.dataset_workflow_id,
+            WorkflowFile.HARMONIZED_OUTPUT,
+            newer,
+            expected_version=initial_artifact.version,
+        )
+        release_stale.set()
+
+        # Then: the stale worker is rejected and the newer output remains.
+        with pytest.raises(WorkflowConflictError, match="version changed"):
+            stale_future.result(timeout=5)
+    with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT) as path:
+        assert path.read_text(encoding="utf-8") == "a\nnewer\n"
 
 
 def test_artifact_lookup_matches_the_exact_logical_name(tmp_path: Path) -> None:
@@ -476,21 +599,38 @@ def test_failed_local_artifact_replacement_preserves_last_complete_file(
     replacement = tmp_path / "replacement.csv"
     previous.write_text("a\nold\n", encoding="utf-8")
     replacement.write_text("a\tnew\n", encoding="utf-8")
-    storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, previous)
+    stored = storage.write_artifact(
+        user,
+        workflow.dataset_workflow_id,
+        WorkflowFile.HARMONIZED_OUTPUT,
+        previous,
+    )
 
     def _fail_copy(_source: Path, _destination: Path) -> None:
         raise OSError("simulated copy failure")
 
     monkeypatch.setattr(storage, "_copy_artifact_atomic", _fail_copy)
     with pytest.raises(OSError, match="simulated copy failure"):
-        storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, replacement)
+        storage.write_artifact(
+            user,
+            workflow.dataset_workflow_id,
+            WorkflowFile.HARMONIZED_OUTPUT,
+            replacement,
+            expected_version=stored.version,
+        )
 
     with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT) as path:
         assert path.suffix == ".csv"
         assert path.read_text(encoding="utf-8") == "a\nold\n"
 
     monkeypatch.undo()
-    storage.write_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT, replacement)
+    storage.write_artifact(
+        user,
+        workflow.dataset_workflow_id,
+        WorkflowFile.HARMONIZED_OUTPUT,
+        replacement,
+        expected_version=stored.version,
+    )
     with storage.materialize_artifact(user, workflow.dataset_workflow_id, WorkflowFile.HARMONIZED_OUTPUT) as path:
         assert path.read_text(encoding="utf-8") == "a\tnew\n"
 

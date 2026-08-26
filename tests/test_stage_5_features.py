@@ -180,7 +180,17 @@ async def test_stage5_download_includes_cde_mapping_artifact(
             "generated_at": "2026-05-13T00:00:00+00:00",
             "data_model_key": TEST_TARGET_SCHEMA,
             "external_version_number": "1",
-            "mappings": [{"column_key": "col_0000", "source_column_name": "col_a"}],
+            "mappings": [{
+                "column_key": "col_0000",
+                "source_column_name": "col_a",
+                "output_column_name": "col_a",
+                "cde_key": None,
+                "cde_id": None,
+                "cde_description": None,
+                "cde_type": None,
+                "mapping_source": "no_mapping",
+                "maps_values": False,
+            }],
         },
     )
 

@@ -14,6 +14,7 @@ from src.storage import (
     UploadedFileMeta,
     UploadStorage,
     UserContext,
+    VersionToken,
     WorkflowArtifactNotFoundError,
     WorkflowFile,
     WorkflowJsonUnreadableError,
@@ -87,10 +88,25 @@ def save_harmonized_artifacts(
     file_id: str,
     harmonized_path: Path,
     manifest_path: Path | None,
+    *,
+    expected_harmonized_output_version: VersionToken | None = None,
+    expected_manifest_version: VersionToken | None = None,
 ) -> None:
-    workflow_storage.write_artifact(user, file_id, WorkflowFile.HARMONIZED_OUTPUT, harmonized_path)
+    workflow_storage.write_artifact(
+        user,
+        file_id,
+        WorkflowFile.HARMONIZED_OUTPUT,
+        harmonized_path,
+        expected_version=expected_harmonized_output_version,
+    )
     if manifest_path is not None:
-        workflow_storage.write_artifact(user, file_id, WorkflowFile.HARMONIZATION_MANIFEST_BASE, manifest_path)
+        workflow_storage.write_artifact(
+            user,
+            file_id,
+            WorkflowFile.HARMONIZATION_MANIFEST_BASE,
+            manifest_path,
+            expected_version=expected_manifest_version,
+        )
 
 
 def load_harmonized_output_path(

@@ -27,6 +27,7 @@ from src.domain.tabular_column_renames import ResolvedTabularColumn
 from src.storage import (
     StoredJson,
     UserContext,
+    VersionToken,
     WorkflowFile,
     WorkflowJsonUnreadableError,
     WorkflowNotFoundError,
@@ -84,7 +85,7 @@ class CdeMappingDocument:
 class CdeMappingEntryStore(BaseModel):
     """Persisted JSON shape for one CDE mapping entry."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     column_key: StrictStr = Field(min_length=1)
     source_column_name: StrictStr
@@ -127,26 +128,37 @@ class CdeMappingEntryStore(BaseModel):
 class CdeMappingDocumentStore(BaseModel):
     """Persisted JSON shape for the CDE mapping audit artifact."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
-    file_id: StrictStr | None = None
-    generated_at: StrictStr | None = None
-    data_model_key: StrictStr | None = None
-    external_version_number: StrictStr | None = None
-    mappings: list[CdeMappingEntryStore] = Field(default_factory=list)
+    file_id: StrictStr = Field(min_length=1)
+    generated_at: StrictStr = Field(min_length=1)
+    data_model_key: StrictStr = Field(min_length=1)
+    external_version_number: StrictStr = Field(min_length=1)
+    mappings: list[CdeMappingEntryStore]
+
+    @field_validator("file_id")
+    @classmethod
+    def _parse_file_id(cls, value: str) -> str:
+        dataset_workflow_id_from_value(value)
+        return value
 
     @field_validator("mappings", mode="before")
     @classmethod
     def _parse_mappings(cls, value: object) -> list[CdeMappingEntryStore]:
         if not isinstance(value, list):
-            return []
-        entries: list[CdeMappingEntryStore] = []
-        for item in value:
-            try:
-                entries.append(CdeMappingEntryStore.model_validate(item))
-            except ValidationError:
-                continue
-        return entries
+            raise ValueError("mappings must be a list")
+        return value
+
+    @field_validator("generated_at")
+    @classmethod
+    def _parse_generated_at(cls, value: str) -> str:
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError("generated_at must be an ISO date and time") from exc
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            raise ValueError("generated_at must include a time zone")
+        return value
 
     @classmethod
     def from_domain(cls, document: CdeMappingDocument) -> Self:
@@ -159,11 +171,11 @@ class CdeMappingDocumentStore(BaseModel):
         )
 
     @classmethod
-    def from_store(cls, payload: object) -> Self | None:
+    def from_store(cls, payload: object) -> Self:
         try:
             return cls.model_validate(payload)
-        except ValidationError:
-            return None
+        except ValidationError as exc:
+            raise CdeMappingUnreadableError("CDE mapping document has an invalid schema") from exc
 
     def to_store(self) -> dict[str, object]:
         return self.model_dump(mode="json", exclude_none=True)
@@ -179,6 +191,8 @@ def save_cde_mapping_document(
     columns: Sequence[ResolvedTabularColumn],
     catalog: CdeCatalog,
     data_model_version: DataModelVersionReference,
+    *,
+    expected_version: VersionToken | None,
 ) -> None:
     """Save an audit-friendly mapping plan using the current column-key model."""
     dataset_workflow_id = dataset_workflow_id_from_value(file_id)
@@ -189,17 +203,12 @@ def save_cde_mapping_document(
         external_version_number=data_model_version.external_version_number,
         mappings=_build_entries(manifest, column_overrides, column_renames, columns, catalog),
     )
-    try:
-        existing = _read_cde_mapping(workflow_storage, user, dataset_workflow_id)
-    except WorkflowNotFoundError:
-        workflow_storage.create_workflow(user, dataset_workflow_id)
-        existing = None
     workflow_storage.write_json(
         user,
         dataset_workflow_id,
         WorkflowFile.CDE_MAPPING,
         document.to_store(),
-        expected_version=existing.version if existing is not None else None,
+        expected_version=expected_version,
     )
 
 
@@ -215,6 +224,7 @@ def load_cde_mapping_json(
         return None
     if stored is None:
         return None
+    _cde_mapping_entries_by_column(stored.data, expected_file_id=file_id)
     return json.dumps(stored.data, indent=2)
 
 
@@ -230,20 +240,30 @@ def load_cde_mapping_entries_by_column(
         return {}
     if stored is None:
         return {}
-    return _cde_mapping_entries_by_column(stored.data)
+    return _cde_mapping_entries_by_column(stored.data, expected_file_id=str(file_id))
 
 
-def _cde_mapping_entries_by_column(payload: object) -> Mapping[ColumnKey, CdeMappingEntry]:
+def _cde_mapping_entries_by_column(
+    payload: object,
+    *,
+    expected_file_id: str,
+) -> Mapping[ColumnKey, CdeMappingEntry]:
     document = CdeMappingDocumentStore.from_store(payload)
-    if document is None:
-        return {}
+    try:
+        document_file_id = dataset_workflow_id_from_value(document.file_id)
+    except (TypeError, ValueError) as exc:
+        raise CdeMappingUnreadableError("CDE mapping document has an invalid workflow identity") from exc
+    if str(document_file_id) != expected_file_id:
+        raise CdeMappingUnreadableError("CDE mapping document belongs to another workflow")
 
     result: dict[ColumnKey, CdeMappingEntry] = {}
     for stored_entry in document.mappings:
         try:
             entry = stored_entry.to_domain()
-        except ValueError:
-            continue
+        except (TypeError, ValueError) as exc:
+            raise CdeMappingUnreadableError("CDE mapping document has an invalid entry") from exc
+        if entry.column_key in result:
+            raise CdeMappingUnreadableError("CDE mapping document has duplicate column identities")
         result[entry.column_key] = entry
     return result
 

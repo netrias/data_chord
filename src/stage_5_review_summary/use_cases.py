@@ -21,8 +21,8 @@ from netrias_client import (
 
 from src.app.harmonization_readiness import (
     HarmonizationNotReadyError,
+    capture_ready_harmonization,
     load_readable_review_overrides_record,
-    require_ready_harmonization_workflow,
     require_review_state_matches_manifest,
 )
 from src.domain.column_outcomes import (
@@ -71,7 +71,7 @@ def build_summary(
     workflow_storage: WorkflowStorage,
     user: UserContext,
 ) -> StageFiveSummaryResponse:
-    loaded_state = require_ready_harmonization_workflow(workflow_storage, user, file_id)
+    ready = capture_ready_harmonization(workflow_storage, user, file_id)
 
     manifest_path = load_harmonization_manifest_path(upload_storage, workflow_storage, user, file_id)
     if manifest_path is None:
@@ -85,14 +85,16 @@ def build_summary(
             "Harmonization results cannot be read. Return to Stage 3 and run harmonization again."
         )
 
-    return _build_summary_from_manifest(
+    response = _build_summary_from_manifest(
         manifest_summary,
-        loaded_state,
+        ready.workflow,
         file_id,
         upload_storage,
         workflow_storage,
         user,
     )
+    ready.require_unchanged(workflow_storage, user)
+    return response
 
 
 def build_download_package(
@@ -102,7 +104,8 @@ def build_download_package(
     workflow_storage: WorkflowStorage,
     user: UserContext,
 ) -> DownloadPackage:
-    loaded_state = require_ready_harmonization_workflow(workflow_storage, user, file_id)
+    ready = capture_ready_harmonization(workflow_storage, user, file_id)
+    loaded_state = ready.workflow
     meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
     if meta is None:
         raise HarmonizationNotReadyError("Upload not found. Return to Stage 1 and upload it again.")
@@ -137,7 +140,9 @@ def build_download_package(
         overrides,
     )
 
-    return DownloadPackage(base_name=base_name, content=zip_buffer)
+    package = DownloadPackage(base_name=base_name, content=zip_buffer)
+    ready.require_unchanged(workflow_storage, user)
+    return package
 
 
 def _build_history(

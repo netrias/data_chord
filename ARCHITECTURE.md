@@ -103,12 +103,12 @@ manifest, permissible values, source row context, and active review overrides.
 The browser reviews by column or row, including keyboard and focus behavior for
 large PV lists.
 
-Two records remain deliberately distinct:
+Two concerns remain deliberately distinct:
 
-- `ReviewOverrides` is the active decision set applied to export. It uses an
-  ETag/version token so a stale tab receives a conflict.
-- Manual changes appended to the Parquet manifest are historical audit events.
-  Deleting active overrides resets export behavior but does not erase history.
+- `ReviewOverrides` owns the active decision set applied to export and its
+  immutable decision-event history. It uses an ETag/version token so a stale
+  tab receives a conflict.
+- The Parquet manifest owns the base transformation evidence from Stage 3.
 
 Saving the same active override again is idempotent: it does not create another
 audit event.
@@ -122,12 +122,12 @@ and whitespace are meaningful, so both Stage 3 and Stage 5 use the shared
 final-value review status. Columns retain stable source identity and source
 order even when display labels repeat.
 
-The Parquet manifest remains the historical audit source for the decision
-history dialog; it does not control the current final value. Deleting active
-overrides therefore resets both export values and current summary counts while
-preserving the earlier reviewer events as history. The download streams a ZIP
-containing the final tabular file, a JSON representation of the manifest, and
-the CDE mapping audit document.
+`ReviewOverrides.events` is the historical audit source for the decision
+history dialog. The active override snapshot controls the current final value.
+Deleting the review record resets export values, current summary counts, and
+its event history. The download streams a ZIP containing the final tabular
+file, a JSON representation of the manifest, and the CDE mapping audit
+document.
 
 ## Durable state and derived data
 
@@ -138,10 +138,10 @@ the CDE mapping audit document.
 | `HarmonizationJobState` | Plan identity, run status, worker lease, result or safe failure | Optimistic compare-and-swap |
 | Original upload | Source evidence | Create once |
 | Harmonized output | Netrias output used for review/export | Safe replacement by the active job |
-| Base Parquet manifest | Transformation evidence and manual audit history | Durable append/update operations |
+| Base Parquet manifest | Stage 3 transformation evidence | Safe replacement by the active job |
 | PV manifest | Permissible values recovered after cache loss | Replaced for the selected model version |
 | CDE mapping audit | Stable output document for the download | Rebuilt after complete mapping metadata exists |
-| `ReviewOverrides` | Current export choices and UI progress | Versioned save/delete |
+| `ReviewOverrides` | Current export choices, UI progress, and decision-event history | Versioned save/delete |
 
 `SessionCache` accelerates column profiles. Its identity includes the workflow
 owner and workflow ID. The durable PV manifest stores permissible values for

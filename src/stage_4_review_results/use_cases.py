@@ -12,8 +12,8 @@ from netrias_client import read_tabular
 from src.app.harmonization_readiness import (
     REVIEW_STATE_RECOVERY_DETAIL,
     HarmonizationNotReadyError,
+    capture_ready_harmonization,
     load_readable_review_overrides_record,
-    require_ready_harmonization_workflow,
     require_review_state_matches_manifest,
 )
 from src.domain.change import RecommendationType
@@ -85,7 +85,8 @@ def build_stage_four_rows(
     workflow_storage: WorkflowStorage,
     user: UserContext,
 ) -> StageFourResultsResponse:
-    loaded_state = require_ready_harmonization_workflow(workflow_storage, user, file_id)
+    ready = capture_ready_harmonization(workflow_storage, user, file_id)
+    loaded_state = ready.workflow
     meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
     if not meta:
         raise HarmonizationNotReadyError("Upload not found. Return to Stage 1 and upload it again.")
@@ -118,11 +119,13 @@ def build_stage_four_rows(
         review_overrides,
     )
 
-    return StageFourResultsResponse(
+    response = StageFourResultsResponse(
         columns=columns,
         columnPVs=column_pvs,
         totalOriginalRows=len(original_dataset.rows),
     )
+    ready.require_unchanged(workflow_storage, user)
+    return response
 
 
 def build_non_conformant_values(
@@ -133,7 +136,8 @@ def build_non_conformant_values(
     user: UserContext,
 ) -> NonConformantResponse:
     """Build the Stage 4 gating list from the current manifest values and durable PV state."""
-    loaded_state = require_ready_harmonization_workflow(workflow_storage, user, file_id)
+    ready = capture_ready_harmonization(workflow_storage, user, file_id)
+    loaded_state = ready.workflow
 
     manifest = _load_manifest(upload_storage, workflow_storage, user, file_id)
     if manifest is None:
@@ -155,7 +159,9 @@ def build_non_conformant_values(
         column_pv_map,
         review_overrides,
     )
-    return NonConformantResponse(count=len(non_conformant), items=non_conformant)
+    response = NonConformantResponse(count=len(non_conformant), items=non_conformant)
+    ready.require_unchanged(workflow_storage, user)
+    return response
 
 
 def build_row_context(
@@ -167,7 +173,8 @@ def build_row_context(
     user: UserContext,
 ) -> RowContextResponse:
     """Load original spreadsheet rows for the on-demand review context popup."""
-    loaded_state = require_ready_harmonization_workflow(workflow_storage, user, file_id)
+    ready = capture_ready_harmonization(workflow_storage, user, file_id)
+    loaded_state = ready.workflow
     meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
     if meta is None:
         raise HarmonizationNotReadyError("Upload not found. Return to Stage 1 and upload it again.")
@@ -178,7 +185,9 @@ def build_row_context(
         for index in row_indices
         if 0 <= index < len(dataset.rows)
     ]
-    return RowContextResponse(headers=dataset.headers, rows=selected_rows)
+    response = RowContextResponse(headers=dataset.headers, rows=selected_rows)
+    ready.require_unchanged(workflow_storage, user)
+    return response
 
 
 def get_review_overrides(
@@ -188,9 +197,10 @@ def get_review_overrides(
     user: UserContext,
     file_id: DatasetWorkflowId,
 ) -> LoadedReviewOverridesResult | None:
-    require_ready_harmonization_workflow(workflow_storage, user, file_id)
+    ready = capture_ready_harmonization(workflow_storage, user, file_id)
     record = load_readable_review_overrides_record(workflow_storage, user, file_id)
     if record is None:
+        ready.require_unchanged(workflow_storage, user)
         return None
     manifest = _load_manifest(upload_storage, workflow_storage, user, file_id)
     if manifest is None:
@@ -198,10 +208,12 @@ def get_review_overrides(
             "Harmonization results are incomplete. Return to Stage 3 and run harmonization again."
         )
     require_review_state_matches_manifest(record.value, manifest)
-    return LoadedReviewOverridesResult(
+    result = LoadedReviewOverridesResult(
         payload=ReviewOverridesSchema.model_validate(record.value.to_snapshot_payload()),
         version=record.version,
     )
+    ready.require_unchanged(workflow_storage, user)
+    return result
 
 
 def save_review_overrides(
@@ -215,7 +227,7 @@ def save_review_overrides(
     expected_version: VersionToken | None = None,
 ) -> SaveReviewOverridesResult:
     """Persist one complete active snapshot as append-only review decisions."""
-    require_ready_harmonization_workflow(workflow_storage, user, file_id)
+    ready = capture_ready_harmonization(workflow_storage, user, file_id)
     manifest = _load_manifest(upload_storage, workflow_storage, user, file_id)
     if manifest is None:
         raise HarmonizationNotReadyError(
@@ -241,11 +253,13 @@ def save_review_overrides(
     except ReviewOverridesUnreadableError as exc:
         raise HarmonizationNotReadyError(REVIEW_STATE_RECOVERY_DETAIL) from exc
 
-    return SaveReviewOverridesResult(
+    result = SaveReviewOverridesResult(
         file_id=file_id,
         updated_at=saved.value.updated_at,
         version=saved.version,
     )
+    ready.require_unchanged(workflow_storage, user)
+    return result
 
 
 def _load_manifest(

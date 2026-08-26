@@ -8,7 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from src.app.harmonization_readiness import HarmonizationNotReadyError, require_ready_harmonization_workflow
+from src.app.harmonization_readiness import (
+    HarmonizationNotReadyError,
+    capture_ready_harmonization,
+    require_ready_harmonization_workflow,
+)
 from src.domain.cde import CDEInfo, CdeType
 from src.domain.cde_catalog import CdeCatalog
 from src.domain.column_cde_map import ColumnCdeOverrides
@@ -337,6 +341,54 @@ def test_harmonization_readiness_accepts_exact_success(tmp_path: Path) -> None:
 
     assert ready is not None
     assert ready.state.file_id == _FILE_ID
+
+
+def test_ready_harmonization_rejects_an_artifact_change_during_read(tmp_path: Path) -> None:
+    storage, user, plan_version = _readiness_context(tmp_path)
+    save_harmonization_job(
+        storage,
+        user,
+        _job_for_readiness(plan_version=plan_version, status=HarmonizeStatus.SUCCEEDED),
+        expected_version=None,
+    )
+    output = tmp_path / "output.csv"
+    first_manifest = tmp_path / "first.parquet"
+    second_manifest = tmp_path / "second.parquet"
+    output.write_text("value\nA\n", encoding="utf-8")
+    first_manifest.write_bytes(b"first")
+    second_manifest.write_bytes(b"second")
+    storage.write_artifact(user, _FILE_ID, WorkflowFile.HARMONIZED_OUTPUT, output)
+    manifest = storage.write_artifact(
+        user,
+        _FILE_ID,
+        WorkflowFile.HARMONIZATION_MANIFEST_BASE,
+        first_manifest,
+    )
+    ready = capture_ready_harmonization(storage, user, _FILE_ID)
+
+    storage.write_artifact(
+        user,
+        _FILE_ID,
+        WorkflowFile.HARMONIZATION_MANIFEST_BASE,
+        second_manifest,
+        expected_version=manifest.version,
+    )
+
+    with pytest.raises(HarmonizationNotReadyError, match="changed"):
+        ready.require_unchanged(storage, user)
+
+
+def test_ready_harmonization_accepts_unchanged_result(tmp_path: Path) -> None:
+    storage, user, plan_version = _readiness_context(tmp_path)
+    save_harmonization_job(
+        storage,
+        user,
+        _job_for_readiness(plan_version=plan_version, status=HarmonizeStatus.SUCCEEDED),
+        expected_version=None,
+    )
+    ready = capture_ready_harmonization(storage, user, _FILE_ID)
+
+    ready.require_unchanged(storage, user)
 
 
 @pytest.mark.parametrize(

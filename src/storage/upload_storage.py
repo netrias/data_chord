@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Final, NotRequired, Protocol, TypedDict, cast
 
 from netrias_client import (
@@ -121,6 +122,18 @@ class UploadTooLargeError(UploadError):
     """Raised as soon as streamed bytes exceed the configured upload limit."""
 
     pass
+
+
+def _copy_file_atomic(source: Path, destination: Path) -> None:
+    """Replace a managed scratch file without exposing partial bytes."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with NamedTemporaryFile("wb", dir=destination.parent, delete=False) as temp_file:
+        temp_path = Path(temp_file.name)
+    try:
+        shutil.copy2(source, temp_path)
+        temp_path.replace(destination)
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 def _remove_temp_file(source: Path, destination: Path) -> None:
@@ -260,21 +273,21 @@ class UploadStorage:
         if source_path.resolve() != meta.saved_path.resolve():
             # Durable storage materializes through a temp path. Restore the file
             # to the managed upload path used by the current stage services.
-            shutil.copy2(source_path, meta.saved_path)
+            _copy_file_atomic(source_path, meta.saved_path)
         self._write_metadata(meta)
         return meta
 
     def restore_harmonization_manifest(self, file_id: str, source_path: Path) -> Path:
         destination = self._manifest_dir / f"{file_id}_harmonization.parquet"
         if source_path.resolve() != destination.resolve():
-            shutil.copy2(source_path, destination)
+            _copy_file_atomic(source_path, destination)
         return destination
 
     def restore_harmonized_output(self, file_id: str, original_path: Path, source_path: Path) -> Path:
         destination = self.harmonized_path_for(file_id, original_path)
         destination.parent.mkdir(parents=True, exist_ok=True)
         if source_path.resolve() != destination.resolve():
-            shutil.copy2(source_path, destination)
+            _copy_file_atomic(source_path, destination)
         return destination
 
     def select_sheet(self, file_id: str, sheet_name: str | None) -> UploadedFileMeta:
@@ -290,7 +303,8 @@ class UploadStorage:
 
     def save_harmonization_manifest(self, file_id: str, manifest_path: Path) -> Path:
         destination = self._manifest_dir / f"{file_id}_harmonization.parquet"
-        shutil.copy2(manifest_path, destination)
+        if manifest_path.resolve() != destination.resolve():
+            _copy_file_atomic(manifest_path, destination)
         _remove_temp_file(manifest_path, destination)
         logger.info("Stored harmonization manifest", extra={"file_id": file_id, "path": str(destination)})
         return destination

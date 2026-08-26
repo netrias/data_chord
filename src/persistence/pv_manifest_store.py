@@ -11,7 +11,7 @@ from src.domain.column_cde_map import ColumnCdeMap
 from src.domain.columns import ColumnKey, column_key_from_string
 from src.domain.pv_manifest import PVManifest, PvManifestSchemaError
 from src.persistence.workflow_state_store import LoadedWorkflowState
-from src.storage import UserContext, WorkflowFile, WorkflowJsonUnreadableError, WorkflowStorage
+from src.storage import UserContext, VersionToken, WorkflowFile, WorkflowJsonUnreadableError, WorkflowStorage
 
 
 class PvSnapshotUnreadableError(Exception):
@@ -96,21 +96,40 @@ def save_pv_snapshot(
 ) -> None:
     """Persist PVs with their exact workflow plan and model identity."""
     state = loaded_state.state
+    try:
+        existing = workflow_storage.read_json(user, state.file_id, WorkflowFile.PV_MANIFEST)
+    except WorkflowJsonUnreadableError as exc:
+        raise PvSnapshotUnreadableError(state.file_id) from exc
+    save_pv_snapshot_if_unchanged(
+        workflow_storage,
+        user,
+        loaded_state,
+        pv_map,
+        expected_version=existing.version if existing is not None else None,
+    )
+
+
+def save_pv_snapshot_if_unchanged(
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+    loaded_state: LoadedWorkflowState,
+    pv_map: CdePvCatalog | Mapping[str, frozenset[str]],
+    *,
+    expected_version: VersionToken | None,
+) -> None:
+    """Save only when the durable snapshot still has the captured version."""
+    state = loaded_state.state
     manifest = PVManifest(
         data_model_version=state.data_model_version,
         workflow_state_version=loaded_state.version.value,
         pvs=pv_map if isinstance(pv_map, CdePvCatalog) else CdePvCatalog.from_mapping(pv_map),
     )
-    try:
-        existing = workflow_storage.read_json(user, state.file_id, WorkflowFile.PV_MANIFEST)
-    except WorkflowJsonUnreadableError as exc:
-        raise PvSnapshotUnreadableError(state.file_id) from exc
     workflow_storage.write_json(
         user,
         state.file_id,
         WorkflowFile.PV_MANIFEST,
         manifest.to_store(),
-        expected_version=existing.version if existing is not None else None,
+        expected_version=expected_version,
     )
 
 
@@ -133,4 +152,5 @@ __all__ = [
     "effective_column_cde_map",
     "load_pv_snapshot",
     "save_pv_snapshot",
+    "save_pv_snapshot_if_unchanged",
 ]

@@ -486,11 +486,17 @@ def _store_test_harmonization_manifest(file_id: str, manifest_path: Path) -> Non
     workflow_storage = dependencies.get_workflow_storage()
     user = dependencies.get_user_context()
     try:
+        expected_version = workflow_storage.artifact_version(
+            user,
+            file_id,
+            WorkflowFile.HARMONIZATION_MANIFEST_BASE,
+        )
         workflow_storage.write_artifact(
             user,
             file_id,
             WorkflowFile.HARMONIZATION_MANIFEST_BASE,
             manifest_path,
+            expected_version=expected_version,
         )
     except WorkflowStorageError:
         return
@@ -504,15 +510,27 @@ def _store_test_stage_three_artifacts(
     """Persist completed Stage 3 artifacts through the production boundary."""
     import src.app.dependencies as dependencies
     from src.persistence.workflow_artifacts import save_harmonized_artifacts
-    from src.storage import WorkflowStorageError
+    from src.storage import WorkflowFile, WorkflowStorageError
 
     try:
+        workflow_storage = dependencies.get_workflow_storage()
+        user = dependencies.get_user_context()
         save_harmonized_artifacts(
-            dependencies.get_workflow_storage(),
-            dependencies.get_user_context(),
+            workflow_storage,
+            user,
             file_id,
             harmonized_path,
             manifest_path,
+            expected_harmonized_output_version=workflow_storage.artifact_version(
+                user,
+                file_id,
+                WorkflowFile.HARMONIZED_OUTPUT,
+            ),
+            expected_manifest_version=workflow_storage.artifact_version(
+                user,
+                file_id,
+                WorkflowFile.HARMONIZATION_MANIFEST_BASE,
+            ),
         )
         return True
     except WorkflowStorageError:

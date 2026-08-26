@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import shutil
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -50,7 +49,7 @@ from src.persistence.cde_mapping_document_store import save_cde_mapping_document
 from src.persistence.harmonization_job_store import HarmonizationJobState
 from src.persistence.manifest_reader import read_manifest_parquet
 from src.persistence.manifest_writer import apply_column_renames_batch, apply_pv_adjustments_batch
-from src.persistence.pv_manifest_store import ColumnPvSets, save_pv_snapshot
+from src.persistence.pv_manifest_store import ColumnPvSets, save_pv_snapshot_if_unchanged
 from src.persistence.review_override_store import delete_review_overrides_state
 from src.persistence.workflow_artifacts import (
     load_upload_artifact,
@@ -66,13 +65,20 @@ from src.stage_3_harmonize.use_cases import (
     HarmonizationWorkflowUnreadableError,
     RunAuthority,
     StaleStageThreeWorkerError,
+    capture_harmonization_artifact_versions,
     complete_stage_three_job,
     fail_stage_three_job,
     heartbeat_stage_three_job,
     load_authorized_job,
     start_harmonization,
 )
-from src.storage import UploadStorage, UserContext, WorkflowFile, WorkflowNotFoundError, WorkflowStorage
+from src.storage import (
+    UserContext,
+    VersionToken,
+    WorkflowConflictError,
+    WorkflowFile,
+    WorkflowStorage,
+)
 
 MODULE_DIR = Path(__file__).parent
 TEMPLATE_DIR = MODULE_DIR / "templates"
@@ -219,6 +225,7 @@ async def _run_stage_three_job(
             accepted_job=accepted_job,
         )
     finally:
+        _cleanup_worker_output(payload.file_id, accepted_job.worker_id)
         stop_heartbeat.set()
         await heartbeat
 
@@ -250,22 +257,12 @@ async def _run_harmonization_workflow(
     meta = load_upload_artifact(storage, workflow_storage, user, payload.file_id)
     if not meta:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please rerun analysis.")
-
-    delete_review_overrides_state(
+    artifact_versions = capture_harmonization_artifact_versions(
         workflow_storage,
         user,
         payload.file_id,
     )
-    try:
-        # A fresh harmonization invalidates any Stage 4 edits and mapping audit
-        # generated from the previous manifest.
-        workflow_storage.delete_json(
-            user,
-            payload.file_id,
-            WorkflowFile.CDE_MAPPING,
-        )
-    except WorkflowNotFoundError:
-        pass
+
     workflow_state = loaded_state.state
     manifest = workflow_state.mapping_manifest
     mapping_choices = workflow_state.mapping_choices
@@ -292,7 +289,8 @@ async def _run_harmonization_workflow(
         ) from exc
     prepared_manifest = manifest.apply_choices(column_overrides, column_renames, reference_model.catalog)
     column_cde_map = prepared_manifest.column_cde_map()
-    output_path = storage.harmonized_path_for(payload.file_id, meta.saved_path)
+    managed_output_path = storage.harmonized_path_for(payload.file_id, meta.saved_path)
+    worker_output_path = _worker_scratch_path(managed_output_path, run_authority.worker_id)
 
     selected_cde_keys = column_cde_map.cde_keys()
     pv_catalog = CdePvCatalog.from_mapping({
@@ -308,24 +306,20 @@ async def _run_harmonization_workflow(
         data_model_version,
         prepared_manifest,
         column_pv_sets,
-        output_path,
+        worker_output_path,
         workflow_state.selected_sheet,
     )
     if result.status == HarmonizeStatus.SUCCEEDED:
-        # Provider output is still scratch at this point. Refuse to transform
-        # or publish it if this worker or its workflow plan was superseded.
+        # Provider output is still private scratch at this point. Refuse
+        # to transform it if this worker or its plan was superseded.
         run_authority.require_current()
         run_authority.require_plan_current()
-    harmonized_output_path = result.output_path or output_path
+    harmonized_output_path = result.output_path or worker_output_path
     if result.status == HarmonizeStatus.SUCCEEDED:
         await _apply_column_renames_to_output(
             harmonized_output_path,
             column_renames,
             workflow_state.selected_sheet,
-        )
-        harmonized_output_path = await _refresh_managed_harmonized_output(
-            harmonized_output_path,
-            output_path,
         )
 
     _router_logger.info(
@@ -339,10 +333,8 @@ async def _run_harmonization_workflow(
         },
     )
 
-    manifest_summary = await _read_store_and_adjust_manifest(
-        payload.file_id,
+    manifest_summary = await _read_and_adjust_manifest(
         result.manifest_path,
-        storage,
         column_renames,
         column_pv_sets,
         source_file_name=meta.original_name,
@@ -350,12 +342,22 @@ async def _run_harmonization_workflow(
         reference_model_version=data_model_version.external_version_number,
     )
     if result.status == HarmonizeStatus.SUCCEEDED:
-        if not harmonized_output_path.exists() or manifest_summary is None:
+        if not harmonized_output_path.exists() or result.manifest_path is None or manifest_summary is None:
             raise RuntimeError("Harmonization completed without required output artifacts")
         run_authority.require_current()
         run_authority.require_plan_current()
-        save_pv_snapshot(workflow_storage, user, loaded_state, pv_catalog)
-        save_cde_mapping_document(
+        await run_in_threadpool(
+            save_pv_snapshot_if_unchanged,
+            workflow_storage,
+            user,
+            loaded_state,
+            pv_catalog,
+            expected_version=artifact_versions.pv_manifest,
+        )
+        run_authority.require_current()
+        run_authority.require_plan_current()
+        await run_in_threadpool(
+            save_cde_mapping_document,
             workflow_storage,
             user,
             payload.file_id,
@@ -365,13 +367,39 @@ async def _run_harmonization_workflow(
             resolved_columns,
             reference_model.catalog,
             data_model_version,
+            expected_version=artifact_versions.cde_mapping,
         )
-        save_harmonized_artifacts(
+        run_authority.require_current()
+        run_authority.require_plan_current()
+        await run_in_threadpool(
+            save_harmonized_artifacts,
             workflow_storage,
             user,
             payload.file_id,
             harmonized_output_path,
-            storage.load_harmonization_manifest_path(payload.file_id),
+            result.manifest_path,
+            expected_harmonized_output_version=artifact_versions.harmonized_output,
+            expected_manifest_version=artifact_versions.manifest,
+        )
+        await run_in_threadpool(
+            storage.save_harmonization_manifest,
+            payload.file_id,
+            result.manifest_path,
+        )
+        await run_in_threadpool(
+            storage.restore_harmonized_output,
+            payload.file_id,
+            meta.saved_path,
+            harmonized_output_path,
+        )
+        run_authority.require_current()
+        run_authority.require_plan_current()
+        await run_in_threadpool(
+            _invalidate_previous_stage_three_review,
+            workflow_storage,
+            user,
+            payload.file_id,
+            artifact_versions.review_overrides,
         )
     _router_logger.info(
         "Manifest summary result",
@@ -429,37 +457,28 @@ def _read_manifest_if_exists(manifest_path: Path | None) -> ManifestSummary | No
     return read_manifest_parquet(manifest_path)
 
 
-async def _store_and_adjust_manifest(
-    file_id: str,
+async def _adjust_manifest(
     manifest_path: Path,
     manifest_data: ManifestSummary,
-    storage: UploadStorage,
     column_renames: ColumnRenameSet,
     column_pv_map: ColumnPvSets,
 ) -> ManifestSummary:
-    """Must store before adjusting so later stages read the adjusted version."""
-    stored_path = storage.save_harmonization_manifest(file_id, manifest_path)
-    if stored_path is None:
-        _router_logger.warning("Failed to store manifest", extra={"file_id": file_id})
-        return manifest_data
-
-    renamed_count = await _apply_column_renames_to_manifest(stored_path, column_renames)
+    """Adjust one worker's private manifest before durable publication."""
+    renamed_count = await _apply_column_renames_to_manifest(manifest_path, column_renames)
     if renamed_count > 0:
-        _router_logger.info("Applied column renames", extra={"file_id": file_id, "renamed_count": renamed_count})
-        manifest_data = read_manifest_parquet(stored_path) or manifest_data
+        _router_logger.info("Applied column renames", extra={"renamed_count": renamed_count})
+        manifest_data = read_manifest_parquet(manifest_path) or manifest_data
 
-    adjustment_count = await _apply_pv_adjustments(stored_path, column_pv_map)
+    adjustment_count = await _apply_pv_adjustments(manifest_path, column_pv_map)
     if adjustment_count > 0:
-        _router_logger.info("Applied PV adjustments", extra={"file_id": file_id, "adjustment_count": adjustment_count})
-        return read_manifest_parquet(stored_path) or manifest_data
+        _router_logger.info("Applied PV adjustments", extra={"adjustment_count": adjustment_count})
+        return read_manifest_parquet(manifest_path) or manifest_data
 
     return manifest_data
 
 
-async def _read_store_and_adjust_manifest(
-    file_id: str,
+async def _read_and_adjust_manifest(
     manifest_path: Path | None,
-    storage: UploadStorage,
     column_renames: ColumnRenameSet,
     column_pv_map: ColumnPvSets,
     *,
@@ -471,11 +490,9 @@ async def _read_store_and_adjust_manifest(
     if manifest_data is None or manifest_path is None:
         return None
 
-    final_data = await _store_and_adjust_manifest(
-        file_id,
+    final_data = await _adjust_manifest(
         manifest_path,
         manifest_data,
-        storage,
         column_renames,
         column_pv_map,
     )
@@ -512,12 +529,18 @@ async def _resolved_columns_for_source(
     return resolve_tabular_columns(dataset, column_renames)
 
 
-async def _refresh_managed_harmonized_output(actual_path: Path, managed_path: Path) -> Path:
-    if actual_path.resolve() == managed_path.resolve():
-        return managed_path
-    managed_path.parent.mkdir(parents=True, exist_ok=True)
-    await run_in_threadpool(shutil.copy2, actual_path, managed_path)
-    return managed_path
+def _worker_scratch_path(managed_path: Path, worker_id: str) -> Path:
+    """Keep concurrent provider runs from sharing one mutable output path."""
+    return managed_path.with_stem(f"{managed_path.stem}.{worker_id}")
+
+
+def _cleanup_worker_output(file_id: str, worker_id: str) -> None:
+    storage = dependencies.get_upload_storage()
+    meta = storage.load(file_id)
+    if meta is None:
+        return
+    managed_path = storage.harmonized_path_for(file_id, meta.saved_path)
+    _worker_scratch_path(managed_path, worker_id).unlink(missing_ok=True)
 
 
 async def _apply_column_renames_to_manifest(manifest_path: Path, column_renames: ColumnRenameSet) -> int:
@@ -602,6 +625,33 @@ async def _apply_pv_adjustments(manifest_path: Path, column_pv_map: ColumnPvSets
         return 0
 
     return await run_in_threadpool(apply_pv_adjustments_batch, manifest_path, adjustments)
+
+
+def _invalidate_previous_stage_three_review(
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+    file_id: str,
+    expected_version: VersionToken | None,
+) -> None:
+    """Delete only review state unchanged since this worker captured it."""
+    if expected_version is not None:
+        try:
+            delete_review_overrides_state(
+                workflow_storage,
+                user,
+                file_id,
+                expected_version=expected_version,
+            )
+        except WorkflowConflictError:
+            _router_logger.info(
+                "Preserving review overrides changed during harmonization",
+                extra={"file_id": file_id},
+            )
+            raise StaleStageThreeWorkerError(file_id) from None
+        if workflow_storage.read_json(user, file_id, WorkflowFile.REVIEW_OVERRIDES) is not None:
+            raise StaleStageThreeWorkerError(file_id)
+    elif workflow_storage.read_json(user, file_id, WorkflowFile.REVIEW_OVERRIDES) is not None:
+        raise StaleStageThreeWorkerError(file_id)
 
 
 __all__ = ["stage_three_router"]
