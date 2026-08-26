@@ -19,7 +19,6 @@ from src.api.schemas import DatasetWorkflowIdField
 from src.shared.jinja import templates_for_stage
 from src.stage_4_review_results.schemas import (
     NonConformantResponse,
-    ReviewOverridesSchema,
     RowContextRequest,
     RowContextResponse,
     SaveOverridesRequest,
@@ -33,7 +32,6 @@ from src.stage_4_review_results.use_cases import (
     build_non_conformant_values,
     build_row_context,
     build_stage_four_rows,
-    get_review_overrides,
     save_review_overrides,
 )
 from src.storage import UploadStorage, VersionToken
@@ -54,38 +52,23 @@ async def render_stage_four(request: Request) -> HTMLResponse:
 
 
 @stage_four_router.post("/rows", response_model=StageFourResultsResponse, name="stage_four_harmonized_rows")
-async def fetch_stage_four_rows(payload: StageFourResultsRequest) -> StageFourResultsResponse:
+async def fetch_stage_four_rows(
+    payload: StageFourResultsRequest,
+    response: Response,
+) -> StageFourResultsResponse:
     storage: UploadStorage = dependencies.get_upload_storage()
-    return build_stage_four_rows(
+    result = build_stage_four_rows(
         file_id=payload.file_id,
         upload_storage=storage,
         workflow_storage=dependencies.get_workflow_storage(),
         user=dependencies.get_user_context(),
     )
+    if result.review_state_version is not None:
+        response.headers["ETag"] = _review_state_etag(result.review_state_version)
+    return result.response
 
 
 DatasetWorkflowIdPath = Annotated[DatasetWorkflowIdField, Path()]
-
-
-@stage_four_router.get(
-    "/overrides/{file_id}",
-    response_model=ReviewOverridesSchema | None,
-    name="stage_four_get_overrides",
-)
-async def get_overrides(
-    file_id: DatasetWorkflowIdPath,
-    response: Response,
-) -> ReviewOverridesSchema | None:
-    result = get_review_overrides(
-        workflow_storage=dependencies.get_workflow_storage(),
-        upload_storage=dependencies.get_upload_storage(),
-        user=dependencies.get_user_context(),
-        file_id=file_id,
-    )
-    if result is None:
-        return None
-    response.headers["ETag"] = _review_state_etag(result.version)
-    return result.payload
 
 
 @stage_four_router.post("/overrides", response_model=SaveOverridesResponse, name="stage_four_save_overrides")
