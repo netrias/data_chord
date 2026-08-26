@@ -10,7 +10,8 @@ import json
 import logging
 import re
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -152,6 +153,34 @@ def log_request(trace: RequestTrace) -> None:
     )
 
 
+@contextmanager
+def performance_span(span_name: str) -> Iterator[None]:
+    """Log one safe, request-correlated component duration."""
+    started_at = time.perf_counter()
+    try:
+        yield
+    except BaseException as exc:
+        _logger.info(
+            "Performance span failed",
+            extra={
+                "event_name": "performance.span.failed",
+                "span_name": span_name,
+                "duration_ms": elapsed_ms(started_at),
+                "error_type": type(exc).__name__,
+            },
+        )
+        raise
+    else:
+        _logger.info(
+            "Performance span completed",
+            extra={
+                "event_name": "performance.span.completed",
+                "span_name": span_name,
+                "duration_ms": elapsed_ms(started_at),
+            },
+        )
+
+
 def log_workflow_event(event: WorkflowEvent, user: UserContext) -> None:
     extra = {
         "event_name": f"workflow.{event.operation.value}.{event.outcome.value}",
@@ -288,6 +317,7 @@ __all__ = [
     "log_request",
     "log_api_request_failed",
     "log_workflow_event",
+    "performance_span",
     "request_id_from_header",
     "reset_request_id",
 ]

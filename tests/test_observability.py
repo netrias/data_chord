@@ -17,6 +17,7 @@ from src.observability.events import (
     WorkflowOutcome,
     WorkflowStage,
     log_workflow_event,
+    performance_span,
     request_id_from_header,
 )
 from src.storage import UserContext
@@ -58,6 +59,54 @@ async def test_workflow_event_name_is_derived_from_operation_and_outcome(
     assert _record_field(caplog.records[-1], "event_name") == (
         f"workflow.{operation.value}.{outcome.value}"
     )
+
+
+async def test_performance_span_logs_completed_duration(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given: a stable request component and a deterministic elapsed time
+    caplog.set_level(logging.INFO)
+    clock = iter([10.0, 10.125])
+    monkeypatch.setattr("src.observability.events.time.perf_counter", lambda: next(clock))
+
+    # When: the component completes
+    with performance_span("stage4.rows.manifest_read"):
+        pass
+
+    # Then: operators receive one structured completed span with its duration
+    matching_records = [
+        record
+        for record in caplog.records
+        if getattr(record, "event_name", None) == "performance.span.completed"
+    ]
+    assert len(matching_records) == 1
+    assert _record_field(matching_records[0], "span_name") == "stage4.rows.manifest_read"
+    assert _record_field(matching_records[0], "duration_ms") == 125
+
+
+async def test_performance_span_logs_safe_failure_and_reraises(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Given: a measured component fails with a message that must not enter logs
+    caplog.set_level(logging.INFO)
+
+    # When: the component raises
+    with pytest.raises(RuntimeError, match="private value"):
+        with performance_span("stage5.summary.summary_build"):
+            raise RuntimeError("private value")
+
+    # Then: the original error escapes and the span logs only its safe type
+    matching_records = [
+        record
+        for record in caplog.records
+        if getattr(record, "event_name", None) == "performance.span.failed"
+    ]
+    assert len(matching_records) == 1
+    record = matching_records[0]
+    assert _record_field(record, "span_name") == "stage5.summary.summary_build"
+    assert _record_field(record, "error_type") == "RuntimeError"
+    assert "private value" not in record.getMessage()
 
 
 async def test_request_id_header_is_returned(app_client: AsyncClient) -> None:
