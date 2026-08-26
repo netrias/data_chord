@@ -601,6 +601,11 @@ const _fetchSummary = async () => {
       term_mapping_count: data.term_mappings?.length ?? 0,
     });
     await markAfterPaint('stage5.usable');
+    measureTiming(
+      'stage5.summary.render_to_usable',
+      'stage5.summary.render.dom_complete',
+      'stage5.usable',
+    );
     measureTiming('stage5.init_to_usable', 'stage5.init.start', 'stage5.usable');
   } catch (error) {
     console.error('Failed to fetch summary:', error);

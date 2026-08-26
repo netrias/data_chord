@@ -39,6 +39,7 @@ from src.domain.review_overrides import (
     ReviewOverrideEvent,
     ReviewOverrides,
 )
+from src.observability.events import performance_span
 from src.persistence.cde_mapping_document_store import load_cde_mapping_json
 from src.persistence.manifest_reader import read_manifest_parquet
 from src.persistence.pv_manifest_store import ColumnPvSets, column_pv_sets
@@ -71,19 +72,21 @@ def build_summary(
     workflow_storage: WorkflowStorage,
     user: UserContext,
 ) -> StageFiveSummaryResponse:
-    ready = capture_ready_harmonization(workflow_storage, user, file_id)
+    with performance_span("stage5.summary.ready_capture"):
+        ready = capture_ready_harmonization(workflow_storage, user, file_id)
 
-    manifest_path = load_harmonization_manifest_path(upload_storage, workflow_storage, user, file_id)
-    if manifest_path is None:
-        raise HarmonizationNotReadyError(
-            "Harmonization results are incomplete. Return to Stage 3 and run harmonization again."
-        )
+    with performance_span("stage5.summary.manifest_read"):
+        manifest_path = load_harmonization_manifest_path(upload_storage, workflow_storage, user, file_id)
+        if manifest_path is None:
+            raise HarmonizationNotReadyError(
+                "Harmonization results are incomplete. Return to Stage 3 and run harmonization again."
+            )
 
-    manifest_summary = read_manifest_parquet(manifest_path)
-    if manifest_summary is None:
-        raise HarmonizationNotReadyError(
-            "Harmonization results cannot be read. Return to Stage 3 and run harmonization again."
-        )
+        manifest_summary = read_manifest_parquet(manifest_path)
+        if manifest_summary is None:
+            raise HarmonizationNotReadyError(
+                "Harmonization results cannot be read. Return to Stage 3 and run harmonization again."
+            )
 
     response = _build_summary_from_manifest(
         manifest_summary,
@@ -93,7 +96,8 @@ def build_summary(
         workflow_storage,
         user,
     )
-    ready.require_unchanged(workflow_storage, user)
+    with performance_span("stage5.summary.ready_check"):
+        ready.require_unchanged(workflow_storage, user)
     return response
 
 
@@ -255,26 +259,44 @@ def _build_summary_from_manifest(
     workflow_storage: WorkflowStorage,
     user: UserContext,
 ) -> StageFiveSummaryResponse:
-    column_pv_map = column_pv_sets(
-        workflow_storage,
-        user,
-        loaded_state,
-        [row.column_key for row in summary.rows],
-    )
-    meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
+    with performance_span("stage5.summary.pv_load"):
+        column_pv_map = column_pv_sets(
+            workflow_storage,
+            user,
+            loaded_state,
+            [row.column_key for row in summary.rows],
+        )
+    with performance_span("stage5.summary.upload_metadata"):
+        meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
     upload_timestamp = meta.uploaded_at if meta else None
-    review_record = load_readable_review_overrides_record(workflow_storage, user, file_id)
-    review_overrides = review_record.value if review_record is not None else None
-    require_review_state_matches_manifest(review_overrides, summary)
+    with performance_span("stage5.summary.review_state"):
+        review_record = load_readable_review_overrides_record(workflow_storage, user, file_id)
+        review_overrides = review_record.value if review_record is not None else None
+        require_review_state_matches_manifest(review_overrides, summary)
 
+    with performance_span("stage5.summary.summary_build"):
+        return _assemble_summary_response(
+            summary,
+            loaded_state,
+            meta,
+            column_pv_map,
+            upload_timestamp,
+            review_overrides,
+        )
+
+
+def _assemble_summary_response(
+    summary: ManifestSummary,
+    loaded_state: LoadedWorkflowState,
+    meta: UploadedFileMeta | None,
+    column_pv_map: ColumnPvSets,
+    upload_timestamp: datetime | None,
+    review_overrides: ReviewOverrides | None,
+) -> StageFiveSummaryResponse:
     finalized_outcomes: list[FinalizedValueOutcome] = []
     unique_mappings: dict[_UniqueTermMapping, _MappingInfo] = {}
     for row in summary.rows:
-        row_outcomes = _finalized_outcomes_for_manifest_row(
-            row,
-            column_pv_map,
-            review_overrides,
-        )
+        row_outcomes = _finalized_outcomes_for_manifest_row(row, column_pv_map, review_overrides)
         finalized_outcomes.extend(row_outcomes)
         _track_current_mappings(
             unique_mappings,
@@ -286,7 +308,6 @@ def _build_summary_from_manifest(
         )
 
     column_outcomes = summarize_column_outcomes(finalized_outcomes)
-    sorted_mappings = sorted(unique_mappings.items())
     term_mappings = [
         TermMapping(
             column=key.column_label,
@@ -301,7 +322,7 @@ def _build_summary_from_manifest(
             row_indices=info.row_indices,
             history=info.history,
         )
-        for key, info in sorted_mappings
+        for key, info in sorted(unique_mappings.items())
     ]
 
     return StageFiveSummaryResponse(

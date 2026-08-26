@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Sequence
 
@@ -12,15 +13,27 @@ import src.app.dependencies as dependencies
 from src.auth.user_context import TRUSTED_PROXY_USER_HEADER
 from src.observability.events import (
     REQUEST_ID_HEADER,
+    JsonLogFormatter,
     WorkflowEvent,
     WorkflowOperation,
     WorkflowOutcome,
     WorkflowStage,
+    bind_request_id,
     log_workflow_event,
+    performance_span,
     request_id_from_header,
+    reset_request_id,
 )
-from src.storage import UserContext
-from tests.conftest import TEST_CSV_CONTENT_TYPE, create_csv_content
+from src.storage import UploadStorage, UserContext
+from tests.conftest import (
+    TEST_CSV_CONTENT_TYPE,
+    TEST_TARGET_SCHEMA,
+    confirm_mapping_choices,
+    create_csv_content,
+    create_harmonized_csv,
+    create_manifest_for_file,
+    upload_content,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -58,6 +71,144 @@ async def test_workflow_event_name_is_derived_from_operation_and_outcome(
     assert _record_field(caplog.records[-1], "event_name") == (
         f"workflow.{operation.value}.{outcome.value}"
     )
+
+
+async def test_performance_span_logs_completed_duration(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given: a stable request component and a deterministic elapsed time
+    caplog.set_level(logging.INFO)
+    clock = iter([10.0, 10.125])
+    monkeypatch.setattr("src.observability.events.time.perf_counter", lambda: next(clock))
+
+    # When: the component completes
+    with performance_span("stage4.rows.manifest_read"):
+        pass
+
+    # Then: operators receive one structured completed span with its duration
+    matching_records = [
+        record
+        for record in caplog.records
+        if getattr(record, "event_name", None) == "performance.span.completed"
+    ]
+    assert len(matching_records) == 1
+    assert _record_field(matching_records[0], "span_name") == "stage4.rows.manifest_read"
+    assert _record_field(matching_records[0], "duration_ms") == 125
+
+
+async def test_performance_span_keeps_bound_request_id(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Given: one request id is bound while the app measures work
+    caplog.set_level(logging.INFO)
+    token = bind_request_id("request-123")
+    try:
+        # When: the component completes and the structured formatter handles its log
+        with performance_span("stage4.rows.manifest_read"):
+            pass
+        payload = json.loads(JsonLogFormatter().format(caplog.records[-1]))
+    finally:
+        reset_request_id(token)
+
+    # Then: operators can correlate the component duration with its HTTP request
+    assert payload["request_id"] == "request-123"
+
+
+async def test_performance_span_logs_safe_failure_and_reraises(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Given: a measured component fails with a message that must not enter logs
+    caplog.set_level(logging.INFO)
+
+    # When: the component raises
+    with pytest.raises(RuntimeError, match="private value"):
+        with performance_span("stage5.summary.summary_build"):
+            raise RuntimeError("private value")
+
+    # Then: the original error escapes and the span logs only its safe type
+    matching_records = [
+        record
+        for record in caplog.records
+        if getattr(record, "event_name", None) == "performance.span.failed"
+    ]
+    assert len(matching_records) == 1
+    record = matching_records[0]
+    assert _record_field(record, "span_name") == "stage5.summary.summary_build"
+    assert _record_field(record, "error_type") == "RuntimeError"
+    assert "private value" not in record.getMessage()
+
+
+async def test_review_workflow_logs_major_performance_spans(
+    app_client: AsyncClient,
+    temp_storage: UploadStorage,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Given: one completed workflow is ready for Stage 4 and Stage 5 reads
+    rows = [["col_a"], ["alpha"], ["beta"]]
+    file_id = await upload_content(app_client, create_csv_content(rows), "performance-spans.csv")
+    analyze_response = await app_client.post(
+        "/stage-1/analyze",
+        json={
+            "file_id": file_id,
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
+        },
+    )
+    assert analyze_response.status_code == 200
+    await confirm_mapping_choices(app_client, file_id)
+    harmonize_response = await app_client.post("/stage-3/harmonize", json={"file_id": file_id})
+    assert harmonize_response.status_code == 200
+    meta = temp_storage.load(file_id)
+    assert meta is not None
+    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
+    create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
+    caplog.clear()
+    caplog.set_level(logging.INFO)
+
+    # When: the app builds the review rows, saved state, conformance gate, and final summary
+    stage4_response = await app_client.post("/stage-4/rows", json={"file_id": file_id})
+    overrides_response = await app_client.get(f"/stage-4/overrides/{file_id}")
+    conformance_response = await app_client.get(f"/stage-4/non-conformant/{file_id}")
+    stage5_response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
+
+    # Then: each request succeeds and its major work is visible as request-correlated spans
+    assert stage4_response.status_code == 200
+    assert overrides_response.status_code == 200
+    assert conformance_response.status_code == 200
+    assert stage5_response.status_code == 200
+    completed_spans = {
+        str(_record_field(record, "span_name"))
+        for record in caplog.records
+        if getattr(record, "event_name", None) == "performance.span.completed"
+    }
+    assert {
+        "stage4.rows.ready_capture",
+        "stage4.rows.upload_artifact",
+        "stage4.rows.source_dataset_read",
+        "stage4.rows.manifest_read",
+        "stage4.rows.review_state",
+        "stage4.rows.pv_load",
+        "stage4.rows.cde_mapping",
+        "stage4.rows.response_build",
+        "stage4.rows.ready_check",
+        "stage4.overrides.ready_capture",
+        "stage4.overrides.review_state",
+        "stage4.overrides.ready_check",
+        "stage4.non_conformant.ready_capture",
+        "stage4.non_conformant.manifest_read",
+        "stage4.non_conformant.pv_load",
+        "stage4.non_conformant.review_state",
+        "stage4.non_conformant.value_scan",
+        "stage4.non_conformant.ready_check",
+        "stage5.summary.ready_capture",
+        "stage5.summary.manifest_read",
+        "stage5.summary.pv_load",
+        "stage5.summary.upload_metadata",
+        "stage5.summary.review_state",
+        "stage5.summary.summary_build",
+        "stage5.summary.ready_check",
+    } <= completed_spans
 
 
 async def test_request_id_header_is_returned(app_client: AsyncClient) -> None:

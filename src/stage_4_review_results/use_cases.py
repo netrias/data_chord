@@ -26,6 +26,7 @@ from src.domain.manifest import (
 )
 from src.domain.pv_validation import check_value_conformance
 from src.domain.review_overrides import ReviewOverrides, ReviewProgressState
+from src.observability.events import performance_span
 from src.persistence.cde_mapping_document_store import CdeMappingEntry, load_cde_mapping_entries_by_column
 from src.persistence.manifest_reader import read_manifest_parquet
 from src.persistence.pv_manifest_store import ColumnPvSets, column_pv_sets, effective_column_cde_map
@@ -85,46 +86,54 @@ def build_stage_four_rows(
     workflow_storage: WorkflowStorage,
     user: UserContext,
 ) -> StageFourResultsResponse:
-    ready = capture_ready_harmonization(workflow_storage, user, file_id)
+    with performance_span("stage4.rows.ready_capture"):
+        ready = capture_ready_harmonization(workflow_storage, user, file_id)
     loaded_state = ready.workflow
-    meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
+    with performance_span("stage4.rows.upload_artifact"):
+        meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
     if not meta:
         raise HarmonizationNotReadyError("Upload not found. Return to Stage 1 and upload it again.")
 
-    original_dataset = read_tabular(meta.saved_path, sheet_name=loaded_state.state.selected_sheet)
+    with performance_span("stage4.rows.source_dataset_read"):
+        original_dataset = read_tabular(meta.saved_path, sheet_name=loaded_state.state.selected_sheet)
 
-    manifest = _load_manifest(upload_storage, workflow_storage, user, file_id)
+    with performance_span("stage4.rows.manifest_read"):
+        manifest = _load_manifest(upload_storage, workflow_storage, user, file_id)
     if manifest is None:
         raise HarmonizationNotReadyError(
             "Harmonization results are incomplete. Return to Stage 3 and run harmonization again."
         )
 
-    review_record = load_readable_review_overrides_record(workflow_storage, user, file_id)
-    review_overrides = review_record.value if review_record is not None else None
-    require_review_state_matches_manifest(review_overrides, manifest)
+    with performance_span("stage4.rows.review_state"):
+        review_record = load_readable_review_overrides_record(workflow_storage, user, file_id)
+        review_overrides = review_record.value if review_record is not None else None
+        require_review_state_matches_manifest(review_overrides, manifest)
     column_info = _extract_columns_from_manifest(manifest)
-    column_pv_map = column_pv_sets(
-        workflow_storage,
-        user,
-        loaded_state,
-        [col.key for col in column_info],
-    )
-    column_pvs = _build_column_pvs(column_info, column_pv_map, file_id)
-    cde_mappings_by_column = load_cde_mapping_entries_by_column(file_id, workflow_storage, user)
-    columns = _build_columns_from_manifest(
-        manifest,
-        column_pv_map,
-        effective_column_cde_map(loaded_state).mappings,
-        cde_mappings_by_column,
-        review_overrides,
-    )
-
-    response = StageFourResultsResponse(
-        columns=columns,
-        columnPVs=column_pvs,
-        totalOriginalRows=len(original_dataset.rows),
-    )
-    ready.require_unchanged(workflow_storage, user)
+    with performance_span("stage4.rows.pv_load"):
+        column_pv_map = column_pv_sets(
+            workflow_storage,
+            user,
+            loaded_state,
+            [col.key for col in column_info],
+        )
+        column_pvs = _build_column_pvs(column_info, column_pv_map, file_id)
+    with performance_span("stage4.rows.cde_mapping"):
+        cde_mappings_by_column = load_cde_mapping_entries_by_column(file_id, workflow_storage, user)
+    with performance_span("stage4.rows.response_build"):
+        columns = _build_columns_from_manifest(
+            manifest,
+            column_pv_map,
+            effective_column_cde_map(loaded_state).mappings,
+            cde_mappings_by_column,
+            review_overrides,
+        )
+        response = StageFourResultsResponse(
+            columns=columns,
+            columnPVs=column_pvs,
+            totalOriginalRows=len(original_dataset.rows),
+        )
+    with performance_span("stage4.rows.ready_check"):
+        ready.require_unchanged(workflow_storage, user)
     return response
 
 
@@ -136,31 +145,37 @@ def build_non_conformant_values(
     user: UserContext,
 ) -> NonConformantResponse:
     """Build the Stage 4 gating list from the current manifest values and durable PV state."""
-    ready = capture_ready_harmonization(workflow_storage, user, file_id)
+    with performance_span("stage4.non_conformant.ready_capture"):
+        ready = capture_ready_harmonization(workflow_storage, user, file_id)
     loaded_state = ready.workflow
 
-    manifest = _load_manifest(upload_storage, workflow_storage, user, file_id)
+    with performance_span("stage4.non_conformant.manifest_read"):
+        manifest = _load_manifest(upload_storage, workflow_storage, user, file_id)
     if manifest is None:
         raise HarmonizationNotReadyError(
             "Harmonization results are incomplete. Return to Stage 3 and run harmonization again."
         )
 
-    column_pv_map = column_pv_sets(
-        workflow_storage,
-        user,
-        loaded_state,
-        [row.column_key for row in manifest.rows],
-    )
-    review_record = load_readable_review_overrides_record(workflow_storage, user, file_id)
-    review_overrides = review_record.value if review_record is not None else None
-    require_review_state_matches_manifest(review_overrides, manifest)
-    non_conformant = _find_unique_non_conformant_values(
-        manifest,
-        column_pv_map,
-        review_overrides,
-    )
+    with performance_span("stage4.non_conformant.pv_load"):
+        column_pv_map = column_pv_sets(
+            workflow_storage,
+            user,
+            loaded_state,
+            [row.column_key for row in manifest.rows],
+        )
+    with performance_span("stage4.non_conformant.review_state"):
+        review_record = load_readable_review_overrides_record(workflow_storage, user, file_id)
+        review_overrides = review_record.value if review_record is not None else None
+        require_review_state_matches_manifest(review_overrides, manifest)
+    with performance_span("stage4.non_conformant.value_scan"):
+        non_conformant = _find_unique_non_conformant_values(
+            manifest,
+            column_pv_map,
+            review_overrides,
+        )
     response = NonConformantResponse(count=len(non_conformant), items=non_conformant)
-    ready.require_unchanged(workflow_storage, user)
+    with performance_span("stage4.non_conformant.ready_check"):
+        ready.require_unchanged(workflow_storage, user)
     return response
 
 
@@ -197,12 +212,16 @@ def get_review_overrides(
     user: UserContext,
     file_id: DatasetWorkflowId,
 ) -> LoadedReviewOverridesResult | None:
-    ready = capture_ready_harmonization(workflow_storage, user, file_id)
-    record = load_readable_review_overrides_record(workflow_storage, user, file_id)
+    with performance_span("stage4.overrides.ready_capture"):
+        ready = capture_ready_harmonization(workflow_storage, user, file_id)
+    with performance_span("stage4.overrides.review_state"):
+        record = load_readable_review_overrides_record(workflow_storage, user, file_id)
     if record is None:
-        ready.require_unchanged(workflow_storage, user)
+        with performance_span("stage4.overrides.ready_check"):
+            ready.require_unchanged(workflow_storage, user)
         return None
-    manifest = _load_manifest(upload_storage, workflow_storage, user, file_id)
+    with performance_span("stage4.overrides.manifest_read"):
+        manifest = _load_manifest(upload_storage, workflow_storage, user, file_id)
     if manifest is None:
         raise HarmonizationNotReadyError(
             "Harmonization results are incomplete. Return to Stage 3 and run harmonization again."
@@ -212,7 +231,8 @@ def get_review_overrides(
         payload=ReviewOverridesSchema.model_validate(record.value.to_snapshot_payload()),
         version=record.version,
     )
-    ready.require_unchanged(workflow_storage, user)
+    with performance_span("stage4.overrides.ready_check"):
+        ready.require_unchanged(workflow_storage, user)
     return result
 
 

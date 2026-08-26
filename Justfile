@@ -26,7 +26,7 @@ test-e2e:
 perf-e2e:
 	npm run perf:e2e
 
-perf-staging base_url="" target="netrias":
+perf-staging base_url="" target="bdf":
 	@set -euo pipefail; \
 	url="{{base_url}}"; \
 	if [ -z "$url" ]; then url="${DATA_CHORD_STAGING_URL:-}"; fi; \
@@ -34,7 +34,7 @@ perf-staging base_url="" target="netrias":
 		url="https://$(python3 infra/scripts/environment.py get environments/{{target}}/staging.json {{target}} staging domain_name)"; \
 	fi; \
 	echo "Running staging performance journey against $url"; \
-	PLAYWRIGHT_BASE_URL="$url" npm run perf:staging
+	PERF_TARGET="{{target}}" PLAYWRIGHT_BASE_URL="$url" npm run perf:staging
 
 e2e-install:
 	# Security: npm ci enforces the lockfile and .npmrc package age gate.

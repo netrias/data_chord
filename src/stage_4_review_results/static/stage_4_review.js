@@ -1139,6 +1139,7 @@ const init = async () => {
     column_count: state.columns.length,
     total_original_rows: state.totalOriginalRows,
   });
+  measureTiming('stage4.render_to_usable', 'stage4.render.dom_complete', 'stage4.usable');
   measureTiming('stage4.init_to_usable', 'stage4.init.start', 'stage4.usable', {
     column_count: state.columns.length,
   });
