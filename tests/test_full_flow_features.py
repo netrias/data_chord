@@ -10,9 +10,10 @@ from io import BytesIO
 import pytest
 from httpx import AsyncClient
 
+import src.app.dependencies as dependencies
 from src.app.session_cache import clear_all_session_caches
 from src.auth.user_context import TRUSTED_PROXY_USER_HEADER
-from src.storage import UploadStorage
+from src.storage import UploadStorage, UserContext, WorkflowFile
 from tests.conftest import (
     TEST_TARGET_SCHEMA,
     confirm_mapping_choices,
@@ -231,7 +232,13 @@ async def test_full_flow_reharmonize_clears_overrides(
     meta = temp_storage.load(file_id)
     assert meta is not None
     create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
-    create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
+    manifest_path = create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
+    dependencies.get_workflow_storage().write_artifact(
+        dependencies.get_user_context(),
+        file_id,
+        WorkflowFile.HARMONIZATION_MANIFEST_BASE,
+        manifest_path,
+    )
     save_response = await app_client.post(
         "/stage-4/overrides",
         json={
@@ -291,7 +298,13 @@ async def test_reharmonize_cannot_clear_another_users_overrides(
     meta = temp_storage.load(file_id)
     assert meta is not None
     create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
-    create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
+    manifest_path = create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
+    dependencies.get_workflow_storage().write_artifact(
+        UserContext(user_id="alice"),
+        file_id,
+        WorkflowFile.HARMONIZATION_MANIFEST_BASE,
+        manifest_path,
+    )
     save_response = await app_client.post(
         "/stage-4/overrides",
         headers={**alice_headers, "If-None-Match": "*"},

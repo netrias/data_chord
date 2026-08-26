@@ -25,26 +25,6 @@ class ManifestTermKey:
 
 
 @dataclass(frozen=True)
-class ManifestManualOverride:
-    """Human replacement for one source term in the manifest audit trail."""
-
-    term_key: ManifestTermKey
-    override_value: str
-
-    @classmethod
-    def from_raw(
-        cls,
-        column_key: ColumnKey | str,
-        original_value: str,
-        override_value: str,
-    ) -> ManifestManualOverride:
-        return cls(
-            term_key=ManifestTermKey.from_raw(column_key, original_value),
-            override_value=override_value,
-        )
-
-
-@dataclass(frozen=True)
 class ManifestPvAdjustment:
     """PV-driven replacement for a non-conformant harmonized value."""
 
@@ -64,4 +44,4 @@ class ManifestPvAdjustment:
         )
 
 
-__all__ = ["ManifestManualOverride", "ManifestPvAdjustment", "ManifestTermKey"]
+__all__ = ["ManifestPvAdjustment", "ManifestTermKey"]

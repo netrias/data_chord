@@ -1,15 +1,9 @@
-"""
-Apply manual overrides and PV adjustments to harmonization manifests.
-
-Handles two write paths: manual overrides (with audit trail) and PV
-adjustments (transparent replacement of top_harmonization).
-"""
+"""Apply PV adjustments and column renames to harmonization manifests."""
 
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict, replace
-from datetime import UTC, datetime
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -17,8 +11,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from src.domain.column_renames import ColumnRenameSet
-from src.domain.manifest.adjustments import ManifestManualOverride, ManifestPvAdjustment, ManifestTermKey
-from src.domain.manifest.models import ManifestRow, ManualOverride
+from src.domain.manifest.adjustments import ManifestPvAdjustment, ManifestTermKey
+from src.domain.manifest.models import ManifestRow
 from src.persistence.manifest_reader import read_manifest_parquet
 from src.persistence.manifest_schema import MANUAL_OVERRIDES_FIELD, get_manifest_schema
 
@@ -28,45 +22,6 @@ logger = logging.getLogger(__name__)
 class AdjustmentResult(NamedTuple):
     rows: list[ManifestRow]
     adjustment_count: int
-
-
-def add_manual_overrides_batch(
-    manifest_path: Path,
-    overrides: list[ManifestManualOverride],
-    user_id: str | None = None,
-) -> bool:
-    """Single read/write avoids N parquet rewrites when applying N overrides."""
-    if not overrides:
-        return True
-
-    summary = read_manifest_parquet(manifest_path)
-    if summary is None:
-        logger.warning("Cannot add overrides: manifest not found", extra={"path": str(manifest_path)})
-        return False
-
-    timestamp = datetime.now(UTC).isoformat()
-    updated_rows = summary.rows
-
-    for override in overrides:
-        new_override = ManualOverride(user_id=user_id, timestamp=timestamp, value=override.override_value)
-        updated_rows = _apply_single_override(updated_rows, override.term_key, new_override)
-
-    return _write_manifest_parquet(manifest_path, updated_rows)
-
-
-def _apply_single_override(
-    rows: list[ManifestRow],
-    term_key: ManifestTermKey,
-    new_override: ManualOverride,
-) -> list[ManifestRow]:
-    updated: list[ManifestRow] = []
-    for row in rows:
-        if ManifestTermKey.from_row(row) == term_key:
-            updated_overrides = [*row.manual_overrides, new_override]
-            updated.append(replace(row, manual_overrides=updated_overrides))
-        else:
-            updated.append(row)
-    return updated
 
 
 def _build_adjustment_map(
@@ -151,7 +106,7 @@ def _write_manifest_parquet(manifest_path: Path, rows: list[ManifestRow]) -> boo
     try:
         table = _rows_to_table(rows)
         pq.write_table(table, manifest_path)
-        logger.info("Wrote manifest with overrides", extra={"path": str(manifest_path), "row_count": len(rows)})
+        logger.info("Wrote manifest", extra={"path": str(manifest_path), "row_count": len(rows)})
         return True
     except Exception as exc:
         logger.exception("Failed to write manifest parquet", exc_info=exc, extra={"path": str(manifest_path)})
@@ -177,13 +132,14 @@ def _rows_to_table(rows: list[ManifestRow]) -> pa.Table:
     for row in rows:
         for field in _MANIFEST_FIELDS:
             data[field].append(getattr(row, field))
-        data[MANUAL_OVERRIDES_FIELD].append([asdict(override) for override in row.manual_overrides])
+        # The provider still requires this legacy field, but review state is
+        # persisted in the review override store instead of the manifest.
+        data[MANUAL_OVERRIDES_FIELD].append([])
 
     return pa.Table.from_pydict(data, schema=get_manifest_schema())
 
 
 __all__ = [
-    "add_manual_overrides_batch",
     "apply_column_renames_batch",
     "apply_pv_adjustments_batch",
     "write_manifest_parquet",

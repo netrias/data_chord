@@ -7,6 +7,12 @@ import { initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxRe
 import { isValidFileId } from '/assets/shared/storage-keys.js';
 import { markAfterPaint, markTiming, measureTiming } from '/assets/shared/performance-timing.js';
 import {
+  isReviewStateRecovery,
+  readResponseDetail,
+  renderErrorLink,
+  renderRecoveryError,
+} from '/assets/shared/recovery-error.js';
+import {
   getTotalUnits as getColumnTotalUnits,
   getCurrentEntries as getColumnCurrentEntries,
   renderEntries as renderColumnEntries,
@@ -61,6 +67,7 @@ const reviewModeSelect = document.getElementById('reviewModeSelect');
 const previousBatchButton = _requireElement('previousBatchButton');
 const nextBatchButton = _requireElement('nextBatchButton');
 const reviewTable = document.getElementById('reviewTable');
+const reviewError = document.getElementById('reviewError');
 const stageFiveButton = document.getElementById('stageFiveButton');
 const batchProgressList = document.getElementById('batchProgressList');
 const settingsButton = document.getElementById('settingsButton');
@@ -122,6 +129,7 @@ const state = {
     currentUnit: 1,
     batchSize: DEFAULT_ROW_BATCH_SIZE,
   },
+  reviewBlocked: false,
 };
 
 const OVERRIDE_SAVE_DELAY_MS = 400;
@@ -129,6 +137,43 @@ let overrideSaveTimeout = null;
 let overrideSaveInFlight = null;
 let overrideSaveNeeded = false;
 let overrideVersion = null;
+
+const _showReviewError = (message, action = 'none', fileId = getFileIdFromUrl()) => {
+  if (!reviewError) return;
+  if (action === 'stage3') {
+    renderRecoveryError(reviewError, message, fileId);
+  } else if (action === 'reload') {
+    renderErrorLink(reviewError, message, window.location.href, 'Reload Stage 4');
+  } else {
+    reviewError.textContent = message;
+  }
+  reviewError?.classList.remove('hidden');
+};
+
+const _setReviewBlocked = (blocked, clearRows = false) => {
+  state.reviewBlocked = blocked;
+  if (clearRows) {
+    state.columns = [];
+    state.columnPVs = {};
+    state.totalOriginalRows = 0;
+    reviewTable?.replaceChildren();
+    batchProgressList?.replaceChildren();
+  }
+  for (const control of [
+    stageFiveButton,
+    settingsButton,
+    previousBatchButton,
+    nextBatchButton,
+    sortModeSelect,
+    batchSizeSelect,
+    reviewModeSelect,
+    showCaseOnlyChangesCheckbox,
+    showUnchangedValuesCheckbox,
+    scrollModeCheckbox,
+  ]) {
+    if (control) control.disabled = blocked;
+  }
+};
 
 /**
  * Get the state object for the current review mode.
@@ -155,7 +200,7 @@ const getCurrentBatchSize = () => {
 /**
  * Fetch harmonized rows from the server.
  * Always fetches fresh data to support back-navigation without stale caching.
- * @returns {Promise<void>}
+ * @returns {Promise<boolean>}
  */
 const fetchRows = async () => {
   const fileId = getFileIdFromUrl();
@@ -179,7 +224,8 @@ const fetchRows = async () => {
     markTiming('stage4.rows.fetch.response', { status: response.status });
     measureTiming('stage4.rows.request', 'stage4.rows.fetch.start', 'stage4.rows.fetch.response');
     if (!response.ok) {
-      throw new Error('Unable to load harmonized results.');
+      const detail = await readResponseDetail(response, 'Unable to load harmonized results.');
+      throw Object.assign(new Error(detail), { status: response.status });
     }
     const body = await response.json();
     markTiming('stage4.rows.fetch.parsed', {
@@ -189,8 +235,14 @@ const fetchRows = async () => {
     state.columns = body.columns || [];
     state.columnPVs = body.columnPVs || {};
     state.totalOriginalRows = body.totalOriginalRows || 0;
+    return true;
   } catch (error) {
     console.error('Unable to load harmonized results:', error);
+    const message = error.message || 'Unable to load harmonized results.';
+    const action = isReviewStateRecovery(message) ? 'stage3' : 'none';
+    _showReviewError(message, action);
+    _setReviewBlocked(true, true);
+    return false;
   }
 };
 
@@ -215,7 +267,14 @@ const fetchOverrides = async (fileId) => {
     if (response.status === 404) {
       return null;
     }
-    console.warn('Failed to fetch overrides', response.status);
+    if (response.status === 409) {
+      const detail = await readResponseDetail(response, 'The saved review state cannot be read.');
+      const action = isReviewStateRecovery(detail) ? 'stage3' : 'none';
+      _showReviewError(detail, action, fileId);
+      _setReviewBlocked(true, true);
+    } else {
+      console.warn('Failed to fetch overrides', response.status);
+    }
     return null;
   } catch (error) {
     console.warn('Error fetching overrides', error);
@@ -270,11 +329,9 @@ const _sendOverrideSave = async () => {
     headers,
     body: JSON.stringify(_buildSavePayload()),
   });
-  if (response.status === 409) {
-    throw new Error('Review state changed in another tab. Reload this page before saving again.');
-  }
   if (!response.ok) {
-    throw new Error('Server returned an error');
+    const detail = await readResponseDetail(response, 'Unable to save review changes.');
+    throw Object.assign(new Error(detail), { status: response.status });
   }
   overrideVersion = response.headers.get('ETag') ?? overrideVersion;
   return true;
@@ -296,8 +353,18 @@ const saveOverrides = async () => {
       try {
         await _sendOverrideSave();
       } catch (error) {
-        overrideSaveNeeded = true;
         console.warn('Failed to save overrides:', error);
+        const status = Number(error.status);
+        if (status >= 400 && status < 500) {
+          overrideSaveNeeded = false;
+          const isRecovery = isReviewStateRecovery(error.message);
+          const action = isRecovery ? 'stage3' : 'reload';
+          _showReviewError(error.message, action);
+          _setReviewBlocked(true, isRecovery);
+        } else {
+          overrideSaveNeeded = true;
+          _showReviewError(error.message || 'Unable to save review changes.');
+        }
         return false;
       }
     }
@@ -1008,6 +1075,7 @@ const showConformanceCheckError = () => {
  * @returns {Promise<void>}
  */
 const handleAdvanceToStage5 = async () => {
+  if (state.reviewBlocked) return;
   const fileId = getFileIdFromUrl();
   if (!fileId || !isValidFileId(fileId)) {
     return;
@@ -1064,7 +1132,7 @@ const init = async () => {
 
   attachEventListeners();
 
-  await fetchRows();
+  if (state.reviewBlocked || !(await fetchRows())) return;
   _clampCurrentUnitsToValidRange();
   render();
   await markAfterPaint('stage4.usable', {
@@ -1102,7 +1170,7 @@ const _clampCurrentUnitsToValidRange = () => {
 /* why: re-fetch data when page is restored from browser back-forward cache. */
 window.addEventListener('pageshow', async (event) => {
   if (event.persisted) {
-    await fetchRows();
+    if (!(await fetchRows())) return;
     _clampCurrentUnitsToValidRange();
     render();
   }

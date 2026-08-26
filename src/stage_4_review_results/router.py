@@ -28,6 +28,7 @@ from src.stage_4_review_results.schemas import (
     StageFourResultsResponse,
 )
 from src.stage_4_review_results.use_cases import (
+    InvalidReviewOverrideSelectionError,
     ReviewStateConflictError,
     build_non_conformant_values,
     build_row_context,
@@ -81,6 +82,7 @@ async def get_overrides(
 ) -> ReviewOverridesSchema | None:
     result = get_review_overrides(
         workflow_storage=dependencies.get_workflow_storage(),
+        upload_storage=dependencies.get_upload_storage(),
         user=dependencies.get_user_context(),
         file_id=file_id,
     )
@@ -114,6 +116,8 @@ async def save_overrides(
             status_code=status.HTTP_409_CONFLICT,
             detail="Review state changed. Reload this page before saving again.",
         ) from exc
+    except InvalidReviewOverrideSelectionError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     response.headers["ETag"] = _review_state_etag(result.version)
     return SaveOverridesResponse(file_id=result.file_id, updated_at=result.updated_at)
 

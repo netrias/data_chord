@@ -36,6 +36,7 @@ from tests.conftest import (
     create_csv_content,
     create_test_manifest_parquet,
     create_xlsx_content,
+    review_state_payload,
     upload_content,
 )
 
@@ -674,6 +675,112 @@ async def test_stage3_harmonize_uses_stored_selection(
     assert loaded_version.data_model_key == "gc"
     assert loaded_version.external_version_number == "11.0.4"
     assert stub.called
+
+
+async def test_stage3_rerun_removes_decisions_from_the_previous_result(
+    app_client: AsyncClient,
+    tmp_path: Path,
+) -> None:
+    """A fresh Stage 3 result cannot inherit review decisions from an old manifest."""
+
+    class StubHarmonizer:
+        def __init__(self) -> None:
+            self.run_count = 0
+
+        def run(  # type: ignore[no-untyped-def]
+            self,
+            *,
+            file_path,
+            data_model_version,
+            prepared_manifest,
+            column_pv_sets,
+            output_path,
+            sheet_name,
+        ):
+            self.run_count += 1
+            shutil.copy2(file_path, output_path)
+            manifest_path = tmp_path / f"review-reset-{self.run_count}.parquet"
+            create_test_manifest_parquet(
+                manifest_path,
+                [{
+                    "job_id": f"review-reset-{self.run_count}",
+                    "column_id": 0,
+                    "column_name": "diagnosis",
+                    "to_harmonize": "Lung",
+                    "top_harmonization": "Lung Cancer",
+                    "ontology_id": None,
+                    "top_harmonizations": ["Lung Cancer"],
+                    "match_fidelity": "strong",
+                    "error": None,
+                    "row_indices": [0],
+                }],
+            )
+            return HarmonizeResult(
+                job_id=f"review-reset-{self.run_count}",
+                status=HarmonizeStatus.SUCCEEDED,
+                detail="ok",
+                manifest_path=manifest_path,
+                output_path=output_path,
+            )
+
+    # Given: a completed Stage 3 result with one saved review decision.
+    file_id = await upload_content(
+        app_client,
+        create_csv_content([["diagnosis"], ["Lung"]]),
+        "review-reset.csv",
+    )
+    analyzed = await app_client.post(
+        "/stage-1/analyze",
+        json={
+            "file_id": file_id,
+            "data_model_key": "gc",
+            "external_version_number": "11.0.4",
+        },
+    )
+    assert analyzed.status_code == 200
+    await confirm_mapping_choices(app_client, file_id)
+    stub = StubHarmonizer()
+    import unittest.mock
+
+    with unittest.mock.patch(
+        "src.stage_3_harmonize.router.get_harmonize_service",
+        return_value=stub,
+    ):
+        first_run = await app_client.post("/stage-3/harmonize", json={"file_id": file_id})
+        assert first_run.status_code == 200
+        if first_run.json()["status"] != "succeeded":
+            await _wait_for_stage_three_job(app_client, first_run.json()["job_id"], file_id)
+        saved = await app_client.post(
+            "/stage-4/overrides",
+            headers={"If-None-Match": "*"},
+            json={
+                "file_id": file_id,
+                "overrides": {
+                    "1": {
+                        "col_0000": {
+                            "human_value": "Reviewed Lung",
+                            "original_value": "Lung",
+                        },
+                    },
+                },
+                "review_state": review_state_payload(),
+            },
+        )
+        assert saved.status_code == 200
+
+        # When: Stage 3 runs again for the same confirmed mapping.
+        second_run = await app_client.post("/stage-3/harmonize", json={"file_id": file_id})
+        assert second_run.status_code == 200
+        if second_run.json()["status"] != "succeeded":
+            await _wait_for_stage_three_job(app_client, second_run.json()["job_id"], file_id)
+
+    # Then: review starts empty against the new immutable manifest.
+    loaded = await app_client.get(f"/stage-4/overrides/{file_id}")
+    assert loaded.status_code == 200
+    assert loaded.json() is None
+    rows = await app_client.post("/stage-4/rows", json={"file_id": file_id})
+    assert rows.status_code == 200
+    assert stub.run_count == 2
 
 
 async def test_stage3_harmonize_returns_queued_while_long_job_finishes(

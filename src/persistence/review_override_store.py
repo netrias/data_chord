@@ -102,15 +102,20 @@ def save_review_overrides_state(
         current = ReviewOverrides.from_store(existing.data, file_id) if existing is not None else None
     except InvalidReviewOverridesError as exc:
         raise ReviewOverridesUnreadableError(f"Unreadable review overrides for {file_id}.") from exc
-    # Preserve created_at across saves so Stage 5 can distinguish the first
-    # review session from later edits.
-    saved = ReviewOverrides.create(
-        file_id=file_id,
-        created_at=current.created_at if current else now,
-        updated_at=now,
-        overrides=overrides,
-        review_state=review_state,
-    )
+    if current is None:
+        saved = ReviewOverrides.from_snapshot(
+            file_id=file_id,
+            created_at=now,
+            updated_at=now,
+            overrides=overrides,
+            review_state=review_state,
+        )
+    else:
+        saved = current.transition_to_snapshot(
+            overrides=overrides,
+            review_state=review_state,
+            updated_at=now,
+        )
     try:
         stored = storage.write_json(
             user,

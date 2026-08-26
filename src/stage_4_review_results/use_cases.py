@@ -14,23 +14,20 @@ from src.app.harmonization_readiness import (
     HarmonizationNotReadyError,
     load_readable_review_overrides_record,
     require_ready_harmonization_workflow,
+    require_review_state_matches_manifest,
 )
 from src.domain.change import RecommendationType
 from src.domain.columns import ColumnIdentity, ColumnKey
 from src.domain.dataset_workflow_ids import DatasetWorkflowId
 from src.domain.manifest import (
-    ManifestManualOverride,
     ManifestRow,
     ManifestSummary,
-    ManifestTermKey,
-    get_latest_override_value,
     is_value_changed,
 )
 from src.domain.pv_validation import check_value_conformance
 from src.domain.review_overrides import ReviewOverrides, ReviewProgressState
 from src.persistence.cde_mapping_document_store import CdeMappingEntry, load_cde_mapping_entries_by_column
 from src.persistence.manifest_reader import read_manifest_parquet
-from src.persistence.manifest_writer import add_manual_overrides_batch
 from src.persistence.pv_manifest_store import ColumnPvSets, column_pv_sets, effective_column_cde_map
 from src.persistence.review_override_store import (
     ReviewOverridesStoreConflictError,
@@ -53,7 +50,7 @@ from src.stage_4_review_results.schemas import (
     SuggestionInfo,
     Transformation,
 )
-from src.storage import UploadStorage, UserContext, VersionToken, WorkflowFile, WorkflowStorage
+from src.storage import UploadStorage, UserContext, VersionToken, WorkflowStorage
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +74,10 @@ class ReviewStateConflictError(Exception):
     """Raised when active review state changed after the caller loaded it."""
 
 
+class InvalidReviewOverrideSelectionError(Exception):
+    """Raised when a review snapshot refers to a cell outside the Stage 3 result."""
+
+
 def build_stage_four_rows(
     *,
     file_id: DatasetWorkflowId,
@@ -97,6 +98,9 @@ def build_stage_four_rows(
             "Harmonization results are incomplete. Return to Stage 3 and run harmonization again."
         )
 
+    review_record = load_readable_review_overrides_record(workflow_storage, user, file_id)
+    review_overrides = review_record.value if review_record is not None else None
+    require_review_state_matches_manifest(review_overrides, manifest)
     column_info = _extract_columns_from_manifest(manifest)
     column_pv_map = column_pv_sets(
         workflow_storage,
@@ -111,6 +115,7 @@ def build_stage_four_rows(
         column_pv_map,
         effective_column_cde_map(loaded_state).mappings,
         cde_mappings_by_column,
+        review_overrides,
     )
 
     return StageFourResultsResponse(
@@ -144,6 +149,7 @@ def build_non_conformant_values(
     )
     review_record = load_readable_review_overrides_record(workflow_storage, user, file_id)
     review_overrides = review_record.value if review_record is not None else None
+    require_review_state_matches_manifest(review_overrides, manifest)
     non_conformant = _find_unique_non_conformant_values(
         manifest,
         column_pv_map,
@@ -178,6 +184,7 @@ def build_row_context(
 def get_review_overrides(
     *,
     workflow_storage: WorkflowStorage,
+    upload_storage: UploadStorage,
     user: UserContext,
     file_id: DatasetWorkflowId,
 ) -> LoadedReviewOverridesResult | None:
@@ -185,8 +192,14 @@ def get_review_overrides(
     record = load_readable_review_overrides_record(workflow_storage, user, file_id)
     if record is None:
         return None
+    manifest = _load_manifest(upload_storage, workflow_storage, user, file_id)
+    if manifest is None:
+        raise HarmonizationNotReadyError(
+            "Harmonization results are incomplete. Return to Stage 3 and run harmonization again."
+        )
+    require_review_state_matches_manifest(record.value, manifest)
     return LoadedReviewOverridesResult(
-        payload=ReviewOverridesSchema.model_validate(record.value.to_store()),
+        payload=ReviewOverridesSchema.model_validate(record.value.to_snapshot_payload()),
         version=record.version,
     )
 
@@ -201,8 +214,19 @@ def save_review_overrides(
     review_state: ReviewStateSchema,
     expected_version: VersionToken | None = None,
 ) -> SaveReviewOverridesResult:
-    """Persist export overrides and append the matching manifest audit rows."""
+    """Persist one complete active snapshot as append-only review decisions."""
     require_ready_harmonization_workflow(workflow_storage, user, file_id)
+    manifest = _load_manifest(upload_storage, workflow_storage, user, file_id)
+    if manifest is None:
+        raise HarmonizationNotReadyError(
+            "Harmonization results are incomplete. Return to Stage 3 and run harmonization again."
+        )
+    existing_record = load_readable_review_overrides_record(workflow_storage, user, file_id)
+    require_review_state_matches_manifest(
+        existing_record.value if existing_record is not None else None,
+        manifest,
+    )
+    _validate_review_snapshot(overrides, manifest)
     try:
         saved = save_review_overrides_state(
             workflow_storage,
@@ -217,13 +241,6 @@ def save_review_overrides(
     except ReviewOverridesUnreadableError as exc:
         raise HarmonizationNotReadyError(REVIEW_STATE_RECOVERY_DETAIL) from exc
 
-    _sync_override_audit(
-        upload_storage,
-        workflow_storage,
-        user,
-        saved.value.file_id,
-        saved.value.manual_override_batch(),
-    )
     return SaveReviewOverridesResult(
         file_id=file_id,
         updated_at=saved.value.updated_at,
@@ -287,16 +304,35 @@ def _active_values_for_row(
     row: ManifestRow,
     review_overrides: ReviewOverrides | None,
 ) -> list[str]:
+    return _active_values_for_indices(row, row.row_indices, review_overrides)
+
+
+def _active_values_for_indices(
+    row: ManifestRow,
+    row_indices: list[int],
+    review_overrides: ReviewOverrides | None,
+) -> list[str]:
     baseline_value = _baseline_value_for_row(row)
-    if review_overrides is None or not row.row_indices:
+    if review_overrides is None or not row_indices:
         return [baseline_value]
 
     values: list[str] = []
-    for row_index in row.row_indices:
-        row_overrides = review_overrides.overrides.get(str(row_index + 1))
-        active_override = row_overrides.get(row.column_key) if row_overrides is not None else None
-        values.append(active_override.human_value if active_override is not None else baseline_value)
+    for row_index in row_indices:
+        active_value = _active_review_value_for_index(row, row_index, review_overrides)
+        values.append(active_value if active_value is not None else baseline_value)
     return values
+
+
+def _active_review_value_for_index(
+    row: ManifestRow,
+    row_index: int,
+    review_overrides: ReviewOverrides | None,
+) -> str | None:
+    if review_overrides is None:
+        return None
+    row_overrides = review_overrides.overrides.get(str(row_index + 1))
+    active_override = row_overrides.get(row.column_key) if row_overrides is not None else None
+    return active_override.human_value if active_override is not None else None
 
 
 def _baseline_value_for_row(row: ManifestRow) -> str:
@@ -304,16 +340,12 @@ def _baseline_value_for_row(row: ManifestRow) -> str:
     return row.top_harmonization if row.top_harmonization.strip() else row.to_harmonize
 
 
-def _current_value_for_row(row: ManifestRow) -> str:
-    latest_override = get_latest_override_value(row.manual_overrides)
-    return latest_override if latest_override is not None else _baseline_value_for_row(row)
-
-
 def _build_columns_from_manifest(
     manifest: ManifestSummary,
     column_pv_map: ColumnPvSets,
     target_cde_keys: Mapping[ColumnKey, str],
     cde_mappings_by_column: Mapping[ColumnKey, CdeMappingEntry],
+    review_overrides: ReviewOverrides | None,
 ) -> list[ColumnReviewData]:
     columns_map: dict[ColumnKey, list[ManifestRow]] = {}
     column_indices: dict[ColumnKey, int] = {}
@@ -331,12 +363,18 @@ def _build_columns_from_manifest(
     for col_key in sorted(columns_map.keys(), key=lambda c: column_indices[c]):
         manifest_rows = columns_map[col_key]
         mapping_entry = cde_mappings_by_column.get(col_key)
-        if _is_unchanged_passthrough(mapping_entry, manifest_rows):
+        if _is_unchanged_passthrough(mapping_entry, manifest_rows, review_overrides):
             continue
         target_cde_key = target_cde_keys.get(col_key)
         serialized_col_key = str(col_key)
         transformations = [
-            _build_transformation(row, column_pv_map.get(row.column_key)) for row in manifest_rows
+            transformation
+            for row in manifest_rows
+            for transformation in _build_transformations(
+                row,
+                column_pv_map.get(row.column_key),
+                review_overrides,
+            )
         ]
         terms_with_changes = sum(1 for transformation in transformations if transformation.isChanged)
 
@@ -357,23 +395,43 @@ def _build_columns_from_manifest(
 def _is_unchanged_passthrough(
     mapping_entry: CdeMappingEntry | None,
     manifest_rows: list[ManifestRow],
+    review_overrides: ReviewOverrides | None,
 ) -> bool:
     return (
         mapping_entry is not None
         and not mapping_entry.maps_values
-        and all(not is_value_changed(row.to_harmonize, _current_value_for_row(row)) for row in manifest_rows)
+        and all(
+            not is_value_changed(row.to_harmonize, active_value)
+            for row in manifest_rows
+            for active_value in _active_values_for_row(row, review_overrides)
+        )
     )
 
 
-def _build_transformation(row: ManifestRow, pv_set: frozenset[str] | None) -> Transformation:
+def _build_transformation(
+    row: ManifestRow,
+    pv_set: frozenset[str] | None,
+    review_overrides: ReviewOverrides | None,
+    row_indices: list[int] | None = None,
+) -> Transformation:
     original_value = row.to_harmonize or ""
     harmonized_value = row.top_harmonization or None
     is_changed = is_value_changed(original_value, harmonized_value)
     recommendation_type = _compute_recommendation_type(original_value, harmonized_value)
 
-    manual_override = get_latest_override_value(row.manual_overrides)
-    current_value = manual_override if manual_override is not None else _baseline_value_for_row(row)
-    manifest_indices_full = [idx + 1 for idx in row.row_indices]
+    grouped_row_indices = row.row_indices if row_indices is None else row_indices
+    current_values = _active_values_for_indices(row, grouped_row_indices, review_overrides)
+    active_review_values = [
+        _active_review_value_for_index(row, row_index, review_overrides)
+        for row_index in grouped_row_indices
+    ]
+    distinct_manual_values = {value for value in active_review_values if value is not None}
+    manual_override = (
+        next(iter(distinct_manual_values))
+        if len(distinct_manual_values) == 1 and all(value is not None for value in active_review_values)
+        else None
+    )
+    manifest_indices_full = [idx + 1 for idx in grouped_row_indices]
     return Transformation(
         originalValue=original_value,
         harmonizedValue=harmonized_value,
@@ -381,11 +439,31 @@ def _build_transformation(row: ManifestRow, pv_set: frozenset[str] | None) -> Tr
         isChanged=is_changed,
         recommendationType=recommendation_type.value,
         manualOverride=manual_override,
-        isPVConformant=check_value_conformance(current_value, pv_set),
+        isPVConformant=all(check_value_conformance(value, pv_set) for value in current_values),
         pvSetAvailable=pv_set is not None and len(pv_set) > 0,
         topSuggestions=_build_suggestions_with_conformance(row.top_harmonizations, pv_set),
         rowIndices=manifest_indices_full,
     )
+
+
+def _build_transformations(
+    row: ManifestRow,
+    pv_set: frozenset[str] | None,
+    review_overrides: ReviewOverrides | None,
+) -> list[Transformation]:
+    """Keep one transformation per active value when review differs by row."""
+    if not row.row_indices:
+        return [_build_transformation(row, pv_set, review_overrides)]
+
+    row_indices_by_value: dict[str | None, list[int]] = {}
+    for row_index in row.row_indices:
+        active_value = _active_review_value_for_index(row, row_index, review_overrides)
+        row_indices_by_value.setdefault(active_value, []).append(row_index)
+
+    return [
+        _build_transformation(row, pv_set, review_overrides, row_indices)
+        for row_indices in row_indices_by_value.values()
+    ]
 
 
 def _build_column_pvs(
@@ -449,7 +527,7 @@ def _compute_recommendation_type(
 
 def _override_payload_to_store(
     overrides: ReviewOverridePayload,
-) -> dict[str, dict[str, dict[str, str | None]]]:
+) -> dict[str, dict[str, dict[str, str]]]:
     return {
         row_key: {
             column_key: {
@@ -462,55 +540,34 @@ def _override_payload_to_store(
     }
 
 
-def _sync_override_audit(
-    storage: UploadStorage,
-    workflow_storage: WorkflowStorage,
-    user: UserContext,
-    file_id: str,
-    current_audit: list[ManifestManualOverride],
+def _validate_review_snapshot(
+    overrides: ReviewOverridePayload,
+    manifest: ManifestSummary,
 ) -> None:
-    if not current_audit:
-        return
-
-    manifest_path = load_harmonization_manifest_path(storage, workflow_storage, user, file_id)
-    if manifest_path is None:
-        logger.warning("Cannot sync overrides: manifest path not found", extra={"file_id": file_id})
-        return
-
-    manifest = read_manifest_parquet(manifest_path)
-    if manifest is None:
-        logger.error("Cannot sync overrides: manifest is unreadable", extra={"file_id": file_id})
-        return
-
-    latest_values = {
-        ManifestTermKey.from_row(row): get_latest_override_value(row.manual_overrides)
+    valid_cells = {
+        (str(row_index + 1), str(row.column_key)): (
+            row.to_harmonize,
+            _baseline_value_for_row(row),
+        )
         for row in manifest.rows
+        for row_index in row.row_indices
     }
-    pending_changes: list[ManifestManualOverride] = []
-    for override in current_audit:
-        if latest_values.get(override.term_key) == override.override_value:
-            continue
-        pending_changes.append(override)
-        latest_values[override.term_key] = override.override_value
-    if not pending_changes:
-        return
-
-    # Active review JSON controls export. Parquet separately records term-level
-    # history, so only changed decisions belong in the append-only audit.
-    success = add_manual_overrides_batch(
-        manifest_path=manifest_path,
-        overrides=pending_changes,
-        user_id=None,
-    )
-    if not success:
-        logger.error("Failed to sync overrides to manifest parquet", extra={"file_id": file_id})
-        return
-
-    workflow_storage.write_artifact(user, file_id, WorkflowFile.HARMONIZATION_MANIFEST_BASE, manifest_path)
+    for row_key, columns in overrides.items():
+        for column_key, override in columns.items():
+            valid_cell = valid_cells.get((row_key, column_key))
+            if (
+                valid_cell is None
+                or override.original_value != valid_cell[0]
+                or override.human_value == valid_cell[1]
+            ):
+                raise InvalidReviewOverrideSelectionError(
+                    "A review choice does not match the current harmonization result. Reload Stage 4."
+                )
 
 
 __all__ = [
     "LoadedReviewOverridesResult",
+    "InvalidReviewOverrideSelectionError",
     "ReviewStateConflictError",
     "SaveReviewOverridesResult",
     "build_non_conformant_values",

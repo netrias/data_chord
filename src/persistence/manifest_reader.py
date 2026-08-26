@@ -13,7 +13,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from src.domain.harmonization import MatchFidelity
-from src.domain.manifest.models import ManifestRow, ManifestSummary, ManualOverride, is_value_changed
+from src.domain.manifest.models import ManifestRow, ManifestSummary, is_value_changed
 from src.persistence.manifest_schema import MANUAL_OVERRIDES_FIELD, get_manifest_schema
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ def read_manifest_parquet(manifest_path: Path) -> ManifestSummary | None:
 
 
 def _validate_manifest_schema(actual: pa.Schema) -> None:
-    """Require the provider fields while allowing Arrow's compatible numeric widths."""
+    """Require provider fields while allowing compatible numeric widths."""
     required_fields = set(get_manifest_schema().names) - {MANUAL_OVERRIDES_FIELD, "match_fidelity"}
     missing_fields = required_fields - set(actual.names)
     if missing_fields:
@@ -67,7 +67,6 @@ def _extract_row(batch: pa.RecordBatch, index: int) -> ManifestRow:
         match_fidelity=_get_match_fidelity(batch, index),
         error=_get_string_nullable(batch, "error", index),
         row_indices=_get_int_list(batch, "row_indices", index),
-        manual_overrides=_get_manual_overrides(batch, MANUAL_OVERRIDES_FIELD, index),
     )
 
 
@@ -131,25 +130,6 @@ def _get_int_list(batch: pa.RecordBatch, column: str, index: int) -> list[int]:
     if value is None:
         return []
     return [int(item) for item in value]
-
-
-def _get_manual_overrides(batch: pa.RecordBatch, column: str, index: int) -> list[ManualOverride]:
-    if column not in batch.schema.names:
-        return []
-    value = batch.column(column)[index].as_py()
-    if value is None:
-        return []
-    overrides: list[ManualOverride] = []
-    for item in value:
-        if isinstance(item, dict):
-            overrides.append(
-                ManualOverride(
-                    user_id=item.get("user_id"),
-                    timestamp=str(item.get("timestamp", "")),
-                    value=str(item.get("value", "")),
-                )
-            )
-    return overrides
 
 
 __all__ = [

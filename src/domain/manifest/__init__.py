@@ -1,10 +1,10 @@
 """
-Harmonization results including AI suggestions, match fidelity, and manual overrides.
+Harmonization results including AI suggestions and match fidelity.
 
-Encapsulates manifest structure, reading, and writing; tracks override audit trail.
+Encapsulates manifest structure, reading, and writing.
 """
 
-from src.domain.manifest.adjustments import ManifestManualOverride, ManifestPvAdjustment, ManifestTermKey
+from src.domain.manifest.adjustments import ManifestPvAdjustment, ManifestTermKey
 from src.domain.manifest.mapping_manifest import (
     DEFAULT_HARMONIZATION,
     MANIFEST_FIELD_COLUMN_MAPPINGS,
@@ -31,9 +31,7 @@ from src.domain.manifest.models import (
     ManifestPayload,
     ManifestRow,
     ManifestSummary,
-    ManualOverride,
     completeness_bucket,
-    get_latest_override_value,
     is_value_changed,
 )
 from src.domain.manifest.models import (
@@ -60,16 +58,13 @@ __all__ = [
     "MAPPING_FIELD_ROUTE",
     "MAPPING_FIELD_TARGET",
     "ManifestPayload",
-    "ManifestManualOverride",
     "ManifestPvAdjustment",
     "ManifestRow",
     "ManifestSummary",
     "ManifestTermKey",
-    "ManualOverride",
     "MappingAlternative",
     "RecommendationSource",
     "completeness_bucket",
-    "get_latest_override_value",
     "is_value_changed",
     "normalize_manifest",
 ]

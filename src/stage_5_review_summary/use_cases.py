@@ -7,7 +7,7 @@ import io
 import json
 import tempfile
 import zipfile
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -23,6 +23,7 @@ from src.app.harmonization_readiness import (
     HarmonizationNotReadyError,
     load_readable_review_overrides_record,
     require_ready_harmonization_workflow,
+    require_review_state_matches_manifest,
 )
 from src.app.session_cache import clear_session_cache
 from src.domain.column_outcomes import (
@@ -33,7 +34,12 @@ from src.domain.column_outcomes import (
 )
 from src.domain.manifest import ManifestRow, ManifestSummary
 from src.domain.pv_validation import check_value_conformance
-from src.domain.review_overrides import CellOverride, ReviewOverrides
+from src.domain.review_overrides import (
+    CellOverride,
+    ReviewOverrideAction,
+    ReviewOverrideEvent,
+    ReviewOverrides,
+)
 from src.persistence.cde_mapping_document_store import load_cde_mapping_json
 from src.persistence.manifest_reader import read_manifest_parquet
 from src.persistence.pv_manifest_store import ColumnPvSets, column_pv_sets
@@ -113,10 +119,24 @@ def build_download_package(
 
     review_record = load_readable_review_overrides_record(workflow_storage, user, file_id)
     overrides = review_record.value if review_record is not None else None
+    if overrides is not None:
+        manifest = read_manifest_parquet(manifest_path) if manifest_path is not None else None
+        if manifest is None:
+            raise HarmonizationNotReadyError(
+                "Harmonization results cannot be read. Return to Stage 3 and run harmonization again."
+            )
+        require_review_state_matches_manifest(overrides, manifest)
     final_dataset = _apply_review_overrides(harmonized_dataset, original_dataset, overrides)
     base_name = _download_base_name(meta, file_id)
     mapping_content = load_cde_mapping_json(file_id, workflow_storage, user)
-    zip_buffer = _create_zip_buffer(base_name, final_dataset, manifest_path, meta.saved_path, mapping_content)
+    zip_buffer = _create_zip_buffer(
+        base_name,
+        final_dataset,
+        manifest_path,
+        meta.saved_path,
+        mapping_content,
+        overrides,
+    )
 
     # Session complete: release in-memory cache to prevent unbounded growth.
     clear_session_cache(file_id, owner_user_id=user.user_id)
@@ -128,6 +148,8 @@ def _build_history(
     row: ManifestRow,
     upload_timestamp: datetime | None,
     pv_set: frozenset[str] | None,
+    review_overrides: ReviewOverrides | None = None,
+    row_index: int | None = None,
 ) -> list[TransformationStep]:
     """Build chronologically-sorted transformation history.
 
@@ -152,18 +174,15 @@ def _build_history(
             review_status=_value_review_status(effective_ai_value, pv_set),
         ))
 
-    last_override_value: str | None = None
-    for override in row.manual_overrides:
-        if override.value == last_override_value:
-            continue
-        last_override_value = override.value
+    for event in _events_for_row(review_overrides, row, row_index):
+        selected_value = _event_selected_value(event, effective_ai_value)
         steps.append(
             TransformationStep(
-                value=override.value,
+                value=selected_value,
                 source="user",
-                timestamp=override.timestamp,
-                user_id=override.user_id,
-                review_status=_value_review_status(override.value, pv_set),
+                action=event.kind,
+                timestamp=_event_timestamp(event),
+                review_status=_value_review_status(selected_value, pv_set),
             )
         )
 
@@ -206,10 +225,11 @@ def _sort_steps_chronologically(steps: list[TransformationStep]) -> list[Transfo
 
 @dataclass
 class _MappingInfo:
-    """Current mapping facts plus the manifest's independent audit history."""
+    """Current mapping facts plus one row-specific review history."""
 
     history: list[TransformationStep]
     row_count: int
+    row_indices: list[int]
 
 
 @dataclass(frozen=True, order=True)
@@ -223,6 +243,7 @@ class _UniqueTermMapping:
     final_value: str
     final_value_source: FinalValueSource
     review_status: FinalValueReviewStatus
+    history_signature: tuple[tuple[str, str, str | None, str | None], ...]
 
 
 def _build_summary_from_manifest(
@@ -243,6 +264,7 @@ def _build_summary_from_manifest(
     upload_timestamp = meta.uploaded_at if meta else None
     review_record = load_readable_review_overrides_record(workflow_storage, user, file_id)
     review_overrides = review_record.value if review_record is not None else None
+    require_review_state_matches_manifest(review_overrides, summary)
 
     finalized_outcomes: list[FinalizedValueOutcome] = []
     unique_mappings: dict[_UniqueTermMapping, _MappingInfo] = {}
@@ -259,6 +281,7 @@ def _build_summary_from_manifest(
             row_outcomes,
             column_pv_map,
             upload_timestamp,
+            review_overrides,
         )
 
     column_outcomes = summarize_column_outcomes(finalized_outcomes)
@@ -274,6 +297,7 @@ def _build_summary_from_manifest(
             final_value_source=key.final_value_source,
             review_status=key.review_status,
             row_count=info.row_count,
+            row_indices=info.row_indices,
             history=info.history,
         )
         for key, info in sorted_mappings
@@ -384,14 +408,27 @@ def _track_current_mappings(
     row_outcomes: list[FinalizedValueOutcome],
     column_pv_map: ColumnPvSets,
     upload_timestamp: datetime | None,
+    review_overrides: ReviewOverrides | None = None,
 ) -> None:
-    """Group current term mappings while keeping manifest events as audit history."""
+    """Group current mappings without mixing histories from different rows."""
     # Empty string means no data; whitespace-only values pass through as semantically significant.
     if not row.to_harmonize:
         return
     pv_set = column_pv_map.get(row.column_key)
-    history = _build_history(row, upload_timestamp, pv_set)
-    for outcome in row_outcomes:
+    outcome_by_value = {
+        (outcome.final_value, outcome.final_value_source): outcome
+        for outcome in row_outcomes
+    }
+    row_indices = list(row.row_indices) if row.row_indices else [None]
+    for row_index in row_indices:
+        current_value, current_source = _resolve_current_value(
+            row,
+            row_index,
+            _effective_ai_value(row),
+            review_overrides,
+        )
+        outcome = outcome_by_value[(current_value, current_source)]
+        history = _build_history(row, upload_timestamp, pv_set, review_overrides, row_index)
         key = _UniqueTermMapping(
             source_column_index=outcome.source_column_index,
             column_key=str(outcome.column_key),
@@ -400,15 +437,21 @@ def _track_current_mappings(
             final_value=outcome.final_value,
             final_value_source=outcome.final_value_source,
             review_status=outcome.review_status,
+            history_signature=tuple(
+                (step.value, step.source, step.action, step.timestamp) for step in history
+            ),
         )
         existing = mappings.get(key)
         if existing is None:
             mappings[key] = _MappingInfo(
                 history=history,
-                row_count=outcome.occurrence_count,
+                row_count=1,
+                row_indices=[row_index + 1] if row_index is not None else [],
             )
         else:
-            existing.row_count += outcome.occurrence_count
+            existing.row_count += 1
+            if row_index is not None:
+                existing.row_indices.append(row_index + 1)
 
 
 def _load_harmonized_path(
@@ -452,12 +495,108 @@ def _download_base_name(meta: UploadedFileMeta, file_id: str) -> str:
     return f"{original_stem}_{file_id}_{timestamp}"
 
 
-def _manifest_to_json(manifest_path: Path) -> str | None:
-    """JSON enables human inspection of transformation history in the download."""
+def _manifest_to_json(
+    manifest_path: Path,
+    review_overrides: ReviewOverrides | None = None,
+) -> str | None:
+    """Project immutable Stage 3 facts and current review decisions as JSON."""
     summary = read_manifest_parquet(manifest_path)
     if summary is None:
         return None
-    return json.dumps([asdict(row) for row in summary.rows], indent=2)
+    return json.dumps(
+        [_manifest_row_projection(row, review_overrides) for row in summary.rows],
+        indent=2,
+    )
+
+
+def _manifest_row_projection(
+    row: ManifestRow,
+    review_overrides: ReviewOverrides | None,
+) -> dict[str, object]:
+    """Keep Stage 3 fields immutable and attach row-aware review state."""
+    active_values = {
+        str(row_index + 1): _resolve_current_value(
+            row,
+            row_index,
+            _effective_ai_value(row),
+            review_overrides,
+        )[0]
+        for row_index in row.row_indices
+    }
+    return {
+        "job_id": row.job_id,
+        "column_id": row.column_id,
+        "column_name": row.column_name,
+        "to_harmonize": row.to_harmonize,
+        "top_harmonization": row.top_harmonization,
+        "ontology_id": row.ontology_id,
+        "top_harmonizations": row.top_harmonizations,
+        "match_fidelity": row.match_fidelity.value,
+        "error": row.error,
+        "row_indices": row.row_indices,
+        "active_values": active_values,
+        "review_events": [
+            _event_to_payload(event)
+            for event in _events_for_manifest_row(review_overrides, row)
+        ],
+    }
+
+
+def _events_for_manifest_row(
+    review_overrides: ReviewOverrides | None,
+    row: ManifestRow,
+) -> list[ReviewOverrideEvent]:
+    row_keys = {str(row_index + 1) for row_index in row.row_indices}
+    return [
+        event
+        for event in _review_events(review_overrides)
+        if event.row_key in row_keys
+        and event.column_key == row.column_key
+        and event.original_value == row.to_harmonize
+    ]
+
+
+def _events_for_row(
+    review_overrides: ReviewOverrides | None,
+    row: ManifestRow,
+    row_index: int | None,
+) -> list[ReviewOverrideEvent]:
+    if row_index is None:
+        return []
+    row_key = str(row_index + 1)
+    return [
+        event
+        for event in _review_events(review_overrides)
+        if event.row_key == row_key
+        and event.column_key == row.column_key
+        and event.original_value == row.to_harmonize
+    ]
+
+
+def _review_events(review_overrides: ReviewOverrides | None) -> tuple[ReviewOverrideEvent, ...]:
+    return review_overrides.events if review_overrides is not None else ()
+
+
+def _event_selected_value(event: ReviewOverrideEvent, baseline_value: str) -> str:
+    if event.kind is ReviewOverrideAction.CLEAR:
+        return baseline_value
+    assert event.selected_value is not None
+    return event.selected_value
+
+
+def _event_timestamp(event: ReviewOverrideEvent) -> str:
+    return event.timestamp.isoformat()
+
+
+def _event_to_payload(event: ReviewOverrideEvent) -> dict[str, object]:
+    return {
+        "kind": event.kind.value,
+        "row_key": event.row_key,
+        "column_key": str(event.column_key),
+        "original_value": event.original_value,
+        "selected_value": event.selected_value,
+        "timestamp": _event_timestamp(event),
+    }
 
 
 def _create_zip_buffer(
@@ -466,6 +605,7 @@ def _create_zip_buffer(
     manifest_path: Path | None,
     template_path: Path | None = None,
     mapping_content: str | None = None,
+    review_overrides: ReviewOverrides | None = None,
 ) -> io.BytesIO:
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -473,7 +613,7 @@ def _create_zip_buffer(
         zf.writestr(temp_path.name, _tabular_bytes(dataset, template_path))
 
         if manifest_path:
-            json_content = _manifest_to_json(manifest_path)
+            json_content = _manifest_to_json(manifest_path, review_overrides)
             if json_content:
                 zf.writestr(f"{base_name}_manifest.json", json_content)
         if mapping_content:

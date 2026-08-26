@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from src.api.schemas import DatasetWorkflowIdField
 from src.domain.column_outcomes import FinalValueReviewStatus, FinalValueSource
+from src.domain.review_overrides import ReviewOverrideAction
 
 
 class StageFiveRequest(BaseModel):
@@ -40,8 +41,8 @@ class DatasetSummary(BaseModel):
 class TransformationStep(BaseModel):
     value: str
     source: str  # "original", "ai", "user"
+    action: ReviewOverrideAction | None = None
     timestamp: str | None = None
-    user_id: str | None = None
     review_status: FinalValueReviewStatus = FinalValueReviewStatus.NOT_CHECKED
 
 
@@ -55,6 +56,7 @@ class TermMapping(BaseModel):
     final_value_source: FinalValueSource
     review_status: FinalValueReviewStatus
     row_count: int
+    row_indices: list[int] = Field(default_factory=list)
     history: list[TransformationStep] = Field(default_factory=list)
 
 

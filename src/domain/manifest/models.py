@@ -52,15 +52,6 @@ class ManifestPayload(TypedDict):
 
 
 @dataclass(frozen=True)
-class ManualOverride:
-    """Audit entry for a human replacement of one harmonized value."""
-
-    user_id: str | None
-    timestamp: str
-    value: str
-
-
-@dataclass(frozen=True)
 class ManifestRow:
     """One unique source term from the harmonization parquet manifest."""
 
@@ -74,7 +65,6 @@ class ManifestRow:
     match_fidelity: MatchFidelity
     error: str | None
     row_indices: list[int]
-    manual_overrides: list[ManualOverride]
 
     @property
     def column_key(self) -> ColumnKey:
@@ -114,12 +104,6 @@ def is_value_changed(original: str | None, harmonized: str | None) -> bool:
     return original_str != harmonized_str
 
 
-def get_latest_override_value(overrides: list[ManualOverride]) -> str | None:
-    if not overrides:
-        return None
-    return overrides[-1].value
-
-
 __all__ = [
     "AlternativeEntry",
     "COMPLETENESS_HIGH_THRESHOLD",
@@ -129,8 +113,6 @@ __all__ = [
     "ManifestPayload",
     "ManifestRow",
     "ManifestSummary",
-    "ManualOverride",
     "completeness_bucket",
-    "get_latest_override_value",
     "is_value_changed",
 ]

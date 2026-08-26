@@ -286,7 +286,10 @@ async def test_full_pipeline_journey(
     manifest_row = next(
         row for row in manifest if row["column_name"] == "diagnosis" and row["to_harmonize"] == "unknown lesion"
     )
-    assert [event["value"] for event in manifest_row["manual_overrides"]] == ["Carcinoma NOS"]
+    assert manifest_row["active_values"][source_row] == "Carcinoma NOS"
+    assert [event["selected_value"] for event in manifest_row["review_events"]] == [
+        "Carcinoma NOS",
+    ]
     assert mapping["data_model_key"] == "data-chord-demo"
 
 
