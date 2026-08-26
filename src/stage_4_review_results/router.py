@@ -50,11 +50,7 @@ stage_four_router = APIRouter(prefix="/stage-4", tags=["Stage 4 Review"])
 
 @stage_four_router.get("", response_class=HTMLResponse, name="stage_four_review_page")
 async def render_stage_four(request: Request) -> HTMLResponse:
-    context = {
-        "request": request,
-        "results_endpoint": request.url_for("stage_four_harmonized_rows"),
-    }
-    return _templates.TemplateResponse(request, "stage_4_review.html", context)
+    return _templates.TemplateResponse(request, "stage_4_review.html", {"request": request})
 
 
 @stage_four_router.post("/rows", response_model=StageFourResultsResponse, name="stage_four_harmonized_rows")

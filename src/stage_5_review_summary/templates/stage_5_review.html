@@ -4,13 +4,13 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Data Chord · Review</title>
-    <link rel="stylesheet" href="/assets/shared/tokens.css?v={{ request.app.state.asset_version }}" />
-    <link rel="stylesheet" href="{{ request.url_for('stage_five_static', path='stage_5_review.css') }}?v={{ request.app.state.asset_version }}" />
+    <link rel="stylesheet" href="{{ app_path_for(request, 'shared_static', path='tokens.css') }}?v={{ request.app.state.asset_version }}" />
+    <link rel="stylesheet" href="{{ app_path_for(request, 'stage_five_static', path='stage_5_review.css') }}?v={{ request.app.state.asset_version }}" />
   </head>
   <body>
     {% from "progress_tracker.html" import progress_tracker with context %}
     {% call progress_tracker("review", "uploadNavAction", "hidden") %}
-      <button id="startOverButton" class="btn-3d" type="button" data-start-over-target="{{ request.url_for('stage_one_upload_page') }}">
+      <button id="startOverButton" class="btn-3d" type="button" data-start-over-target="{{ app_path_for(request, 'stage_one_upload_page') }}">
         <span class="btn-3d-shadow" aria-hidden="true"></span>
         <span class="btn-3d-edge" aria-hidden="true"></span>
         <span class="btn-3d-front">Harmonize New Data →</span>
@@ -101,10 +101,10 @@
 
     <script>
       window.stageFiveConfig = {
-        summaryEndpoint: {{ summary_endpoint|tojson }},
-        downloadEndpoint: {{ download_endpoint|tojson }},
+        summaryEndpoint: {{ app_path_for(request, 'stage_five_summary') | tojson }},
+        downloadEndpoint: {{ app_path_for(request, 'stage_five_download') | tojson }},
       };
     </script>
-    <script type="module" src="{{ request.url_for('stage_five_static', path='stage_5_review.js') }}?v={{ request.app.state.asset_version }}"></script>
+    <script type="module" src="{{ app_path_for(request, 'stage_five_static', path='stage_5_review.js') }}?v={{ request.app.state.asset_version }}"></script>
   </body>
 </html>
