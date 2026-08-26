@@ -76,6 +76,18 @@ case "${1:-} ${2:-}" in
     printf '%s\n' "$MOCK_APPLICATION_BOUNDARY_ARN"
     ;;
   "s3api put-object")
+    body_path=""
+    while (($#)); do
+      if [[ "$1" == "--body" ]]; then
+        body_path="${2:-}"
+        break
+      fi
+      shift
+    done
+    [[ -f "$body_path" ]] || {
+      printf 'Blob values must be a path to a regular file.\n' >&2
+      exit 252
+    }
     if [[ -n "${MOCK_SELECTED_ROOT:-}" ]]; then
       printf 'PreconditionFailed: root selection exists\n' >&2
       exit 254
