@@ -30,7 +30,7 @@ from src.persistence.harmonization_job_store import (
     save_harmonization_job,
 )
 from src.persistence.workflow_state_store import save_initial_workflow_state
-from src.storage import LocalWorkflowStorage, UserContext, WorkflowFile, WorkflowMetadata
+from src.storage import LocalWorkflowStorage, StoredJson, UserContext, WorkflowFile, WorkflowMetadata
 
 _FILE_ID = dataset_workflow_id_from_string("abcdef0123456789abcdef0123456789")
 _OTHER_FILE_ID = dataset_workflow_id_from_string("0123456789abcdef0123456789abcdef")
@@ -378,6 +378,54 @@ def test_ready_harmonization_rejects_an_artifact_change_during_read(tmp_path: Pa
         ready.require_unchanged(storage, user)
 
 
+def test_ready_harmonization_rejects_a_new_job_generation(tmp_path: Path) -> None:
+    # Given: a successful result was captured before a new run was queued.
+    storage, user, plan_version = _readiness_context(tmp_path)
+    saved_job = save_harmonization_job(
+        storage,
+        user,
+        _job_for_readiness(plan_version=plan_version, status=HarmonizeStatus.SUCCEEDED),
+        expected_version=None,
+    )
+    ready = capture_ready_harmonization(storage, user, _FILE_ID)
+    save_harmonization_job(
+        storage,
+        user,
+        _job_for_readiness(plan_version=plan_version, status=HarmonizeStatus.QUEUED),
+        expected_version=saved_job.version,
+    )
+
+    # When: the captured result is checked after the job generation changed.
+    # Then: the final job and workflow check rejects the stale result.
+    with pytest.raises(HarmonizationNotReadyError, match="changed"):
+        ready.require_unchanged(storage, user)
+
+
+def test_ready_harmonization_rejects_a_new_workflow_generation(tmp_path: Path) -> None:
+    # Given: a successful result was captured before the workflow plan was replaced.
+    storage, user, plan_version = _readiness_context(tmp_path)
+    save_harmonization_job(
+        storage,
+        user,
+        _job_for_readiness(plan_version=plan_version, status=HarmonizeStatus.SUCCEEDED),
+        expected_version=None,
+    )
+    ready = capture_ready_harmonization(storage, user, _FILE_ID)
+    changed_manifest = ColumnMappingManifest.from_payload_strict({
+        "column_mappings": {"col_0000": {"cde_key": "diagnosis"}}
+    })
+    save_initial_workflow_state(
+        storage,
+        user,
+        _workflow_state().with_mapping_manifest(changed_manifest),
+    )
+
+    # When: the captured result is checked after the workflow generation changed.
+    # Then: the final job and workflow check rejects the stale result.
+    with pytest.raises(HarmonizationNotReadyError, match="changed"):
+        ready.require_unchanged(storage, user)
+
+
 def test_ready_harmonization_accepts_unchanged_result(tmp_path: Path) -> None:
     storage, user, plan_version = _readiness_context(tmp_path)
     save_harmonization_job(
@@ -389,6 +437,44 @@ def test_ready_harmonization_accepts_unchanged_result(tmp_path: Path) -> None:
     ready = capture_ready_harmonization(storage, user, _FILE_ID)
 
     ready.require_unchanged(storage, user)
+
+
+def test_ready_harmonization_reads_current_state_once_after_artifact_versions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given: one successful result and a captured ready generation.
+    storage, user, plan_version = _readiness_context(tmp_path)
+    save_harmonization_job(
+        storage,
+        user,
+        _job_for_readiness(plan_version=plan_version, status=HarmonizeStatus.SUCCEEDED),
+        expected_version=None,
+    )
+    ready = capture_ready_harmonization(storage, user, _FILE_ID)
+    original_read_json = storage.read_json
+    read_kinds: list[WorkflowFile] = []
+
+    def _recording_read_json(
+        read_user: UserContext,
+        file_id: str,
+        kind: WorkflowFile,
+    ) -> StoredJson | None:
+        read_kinds.append(kind)
+        return original_read_json(read_user, file_id, kind)
+
+    monkeypatch.setattr(storage, "read_json", _recording_read_json)
+
+    # When: the captured generation is checked after later-stage reads.
+    ready.require_unchanged(storage, user)
+
+    # Then: artifact versions are checked before one final job and workflow read.
+    assert read_kinds == [
+        WorkflowFile.PV_MANIFEST,
+        WorkflowFile.CDE_MAPPING,
+        WorkflowFile.STAGE_THREE_JOB,
+        WorkflowFile.WORKFLOW_STATE,
+    ]
 
 
 @pytest.mark.parametrize(
