@@ -69,3 +69,57 @@ test('future workflow links stay disabled when the shared script cannot start', 
   // Then the page stays on Stage 1
   await expect(page).toHaveURL(/\/stage-1$/);
 });
+
+test('Stage 1 uses its valid session workflow when Map is selected', async ({ page }) => {
+  const fileId = '0123456789abcdef0123456789abcdef';
+
+  // Given: Stage 1 has created a valid workflow and made Map reachable
+  await page.goto('/stage-1');
+  await page.evaluate((activeFileId) => {
+    sessionStorage.setItem('currentFileSession', JSON.stringify({ file_id: activeFileId }));
+    sessionStorage.setItem('maxReachedStage', 'mapping');
+  }, fileId);
+  await page.reload();
+
+  // When: the user selects Map from the workflow tracker
+  await page.locator('.step[data-stage="mapping"] .step-link').click();
+
+  // Then: Stage 2 receives the workflow created on Stage 1
+  await expect(page).toHaveURL(`/stage-2?file_id=${fileId}`);
+});
+
+test('later stages do not replace an invalid URL workflow from session state', async ({ page }) => {
+  const sessionFileId = 'fedcba9876543210fedcba9876543210';
+
+  // Given: Stage 4 has an invalid URL identity and a different session workflow
+  await page.goto('/stage-1');
+  await page.evaluate((activeFileId) => {
+    sessionStorage.setItem('currentFileSession', JSON.stringify({ file_id: activeFileId }));
+    sessionStorage.setItem('maxReachedStage', 'review');
+  }, sessionFileId);
+  await page.goto('/stage-4?file_id=not-a-workflow');
+
+  // When: the user selects Review from the workflow tracker
+  await page.locator('.step[data-stage="review"] .step-link').click();
+
+  // Then: navigation does not select either the invalid or unrelated workflow
+  await expect(page).toHaveURL('/stage-5');
+  await expect(page.locator('#summaryGrid')).toContainText('Unable to locate this harmonization workflow.');
+});
+
+test('later stages reject duplicate workflow ids', async ({ page }) => {
+  const firstFileId = '0123456789abcdef0123456789abcdef';
+  const secondFileId = 'fedcba9876543210fedcba9876543210';
+
+  // Given: Stage 4 receives two different workflow identities
+  await page.goto('/stage-1');
+  await page.evaluate(() => sessionStorage.setItem('maxReachedStage', 'review'));
+  await page.goto(`/stage-4?file_id=${firstFileId}&file_id=${secondFileId}`);
+
+  // When: the user selects Review from the workflow tracker
+  await page.locator('.step[data-stage="review"] .step-link').click();
+
+  // Then: navigation does not select either ambiguous workflow
+  await expect(page).toHaveURL('/stage-5');
+  await expect(page.locator('#summaryGrid')).toContainText('Unable to locate this harmonization workflow.');
+});

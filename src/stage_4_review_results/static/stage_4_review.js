@@ -882,8 +882,6 @@ const attachEventListeners = () => {
   if (scrollModeCheckbox) {
     scrollModeCheckbox.addEventListener('change', handleScrollModeChange);
   }
-
-  initNavigationEvents();
 };
 
 /**
@@ -952,6 +950,7 @@ const init = async () => {
   markTiming('stage4.init.start');
   setActiveStage('verify');
   initStepInstruction('verify');
+  initNavigationEvents();
 
   if (state.reviewBlocked || !(await fetchRows())) return;
   _syncReviewControls();

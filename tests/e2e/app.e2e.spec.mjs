@@ -2183,6 +2183,45 @@ test('stage navigation links go to correct stages', async ({ page }) => {
   await page.waitForURL(/\/stage-1/);
 });
 
+test('Stage 4 keeps the workflow id when Review is clicked before rows load', async ({ page }) => {
+  await mockHarmonizeSuccess(page);
+
+  // Given: a completed workflow whose Stage 4 rows request is still pending
+  const fileId = await uploadAndAnalyze(page, fileFixture('basic.csv'));
+  await clickHarmonize(page);
+  await expect(page.locator('#reviewButton')).toBeEnabled();
+  seedHarmonization(fileId, {});
+
+  let releaseRows;
+  const rowsMayComplete = new Promise((resolve) => { releaseRows = resolve; });
+  let rowsRequestStarted;
+  const rowsStarted = new Promise((resolve) => { rowsRequestStarted = resolve; });
+  await page.route('**/stage-4/rows', async (route) => {
+    rowsRequestStarted();
+    await rowsMayComplete;
+    await route.continue().catch(() => {});
+  });
+
+  await page.goto(`/stage-4?file_id=${fileId}`);
+  await rowsStarted;
+  const reviewLink = page.locator('.progress-track .step[data-stage="review"] .step-link');
+  await expect(reviewLink).toHaveAttribute('href', `/stage-5?file_id=${fileId}`);
+
+  // When: the user clicks Review before the Stage 4 rows request completes
+  const summaryRequestPromise = page.waitForRequest('**/stage-5/summary');
+  await reviewLink.click();
+  const summaryRequest = await summaryRequestPromise;
+  releaseRows();
+
+  // Then: Stage 5 requests and renders the same workflow
+  const stageFiveUrl = new URL(page.url());
+  expect(stageFiveUrl.pathname).toBe('/stage-5');
+  expect(stageFiveUrl.searchParams.get('file_id')).toBe(fileId);
+  expect(summaryRequest.postDataJSON()).toEqual({ file_id: fileId });
+  await expect(page.locator('#certificateTitle')).toHaveText('basic.csv');
+  await expect(page.locator('#summaryGrid .change-impact')).toBeVisible();
+});
+
 test('Stage 2 locks and Stage 5 is reachable after Stage 3 completes', async ({ page }) => {
   let harmonizeRequests = 0;
   await page.route('**/stage-3/harmonize', async (route) => {

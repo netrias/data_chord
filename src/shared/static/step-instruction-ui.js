@@ -6,6 +6,7 @@ import { STEP_INSTRUCTIONS, STAGE_ORDER } from './step-instructions.js';
 import {
   CURRENT_FILE_SESSION_KEY,
   MAX_REACHED_STAGE_KEY,
+  isValidFileId,
   readFromSession,
 } from './storage-keys.js';
 
@@ -62,13 +63,18 @@ export function isSafeRelativeUrl(url) {
   }
 }
 
-/* why: preserve file_id when navigating between stages to maintain session context. */
+/* why: later stages must not select a workflow that is absent from their URL. */
 function _getFileIdForNavigation() {
   const urlParams = new URLSearchParams(window.location.search);
-  const fromUrl = urlParams.get('file_id');
-  if (fromUrl) return fromUrl;
+  const fromUrl = urlParams.getAll('file_id');
+  if (fromUrl.length > 0) {
+    return fromUrl.length === 1 && isValidFileId(fromUrl[0]) ? fromUrl[0] : null;
+  }
 
-  return readFromSession(CURRENT_FILE_SESSION_KEY)?.file_id ?? null;
+  if (!_isStageOneUrl(window.location.href)) return null;
+
+  const fromSession = readFromSession(CURRENT_FILE_SESSION_KEY)?.file_id;
+  return isValidFileId(fromSession) ? fromSession : null;
 }
 
 /* why: append file_id to navigation URLs so stages can access the active session. */
