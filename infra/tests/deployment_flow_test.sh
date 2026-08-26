@@ -44,7 +44,14 @@ case "${1:-}" in
   rev-parse) printf '%s\n' "$MOCK_COMMIT" ;;
   status) ;;
   ls-files) ;;
-  ls-remote) printf '%s\trefs/heads/test\n' "$MOCK_COMMIT" ;;
+  ls-remote)
+    printf '%s\trefs/heads/test\n' "$MOCK_COMMIT"
+    if [[ "${MOCK_LS_REMOTE_TRAILING_REFS:-0}" == "1" ]]; then
+      for ((reference = 0; reference < 20000; reference++)); do
+        printf '%040d\trefs/heads/trailing-%05d\n' "$reference" "$reference"
+      done
+    fi
+    ;;
   *) exit 2 ;;
 esac
 MOCK_GIT
@@ -69,6 +76,18 @@ case "${1:-} ${2:-}" in
     printf '%s\n' "$MOCK_APPLICATION_BOUNDARY_ARN"
     ;;
   "s3api put-object")
+    body_path=""
+    while (($#)); do
+      if [[ "$1" == "--body" ]]; then
+        body_path="${2:-}"
+        break
+      fi
+      shift
+    done
+    [[ -f "$body_path" ]] || {
+      printf 'Blob values must be a path to a regular file.\n' >&2
+      exit 252
+    }
     if [[ -n "${MOCK_SELECTED_ROOT:-}" ]]; then
       printf 'PreconditionFailed: root selection exists\n' >&2
       exit 254
@@ -253,6 +272,7 @@ run_command() {
     MOCK_APPLICATION_BOUNDARY_ARN="${MOCK_APPLICATION_BOUNDARY_ARN:-arn:aws:iam::945365518758:policy/datachord-application-role-boundary}" \
     MOCK_COMMIT="$MOCK_COMMIT" \
     MOCK_IMAGE_FILE="$TEST_ROOT/image" \
+    MOCK_LS_REMOTE_TRAILING_REFS="${MOCK_LS_REMOTE_TRAILING_REFS:-0}" \
     MOCK_EMPTY_STATE="${MOCK_EMPTY_STATE:-0}" \
     MOCK_ALREADY_DEPLOYER="${MOCK_ALREADY_DEPLOYER:-0}" \
     MOCK_FULL_STATE="${MOCK_FULL_STATE:-0}" \
@@ -318,10 +338,10 @@ with open(sys.argv[1], encoding="utf-8") as receipt_file:
     assert json.load(receipt_file)["state"] == {"kind": "absent"}
 PY
 
-# Given one clean pushed commit and unchanged remote state.
+# Given one clean pushed commit appears before many other remote refs.
 plan_calls="$TEST_ROOT/plan-calls"
 # When plan runs without stdin.
-run_command "$plan_calls" netrias staging plan >/dev/null
+MOCK_LS_REMOTE_TRAILING_REFS=1 run_command "$plan_calls" netrias staging plan >/dev/null
 # Then it assumes and checks the foundation role, creates a lock-free forecast, and makes no resource write.
 assert_contains "$plan_calls" "aws sts assume-role"
 assert_contains "$plan_calls" "--duration-seconds 3600"
@@ -344,6 +364,16 @@ MOCK_CONVERGENCE_REMAINING=4 \
 # healthy new target is accepted while the old target drains.
 assert_contains "$deploy_calls" "prerequisites.tfplan"
 assert_contains "$deploy_calls" "-target=aws_iam_role_policy.application_build"
+assert_contains "$deploy_calls" "-target=aws_s3_bucket.workflow"
+assert_contains "$deploy_calls" "-target=module.data_plane.aws_s3_bucket.workflow"
+assert_contains "$deploy_calls" "-target=aws_s3_bucket_public_access_block.workflow"
+assert_contains "$deploy_calls" "-target=module.data_plane.aws_s3_bucket_public_access_block.workflow"
+assert_contains "$deploy_calls" "-target=aws_dynamodb_table.reference_data"
+assert_contains "$deploy_calls" "-target=module.data_plane.aws_dynamodb_table.reference_data"
+assert_contains "$deploy_calls" "-target=aws_dynamodb_table.harmonization_cache"
+assert_contains "$deploy_calls" "-target=module.data_plane.aws_dynamodb_table.harmonization_cache"
+assert_contains "$deploy_calls" "-target=aws_dynamodb_table.cde_recommendation_cache"
+assert_contains "$deploy_calls" "-target=module.data_plane.aws_dynamodb_table.cde_recommendation_cache"
 assert_contains "$deploy_calls" "-detailed-exitcode"
 assert_before "$deploy_calls" " apply -input=false" " -detailed-exitcode"
 assert_before "$deploy_calls" " -detailed-exitcode" "aws codebuild start-build"

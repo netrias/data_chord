@@ -67,7 +67,7 @@ require_deployable_git_state() {
 
   repository="$(environment_value application_repository_url)"
   remote_match="$(GIT_TERMINAL_PROMPT=0 git -C "$REPO_DIR" ls-remote "$repository" |
-    awk -v expected="$commit" '$1 == expected { print $1; exit }')"
+    awk -v expected="$commit" '$1 == expected { matched = $1 } END { if (matched) print matched }')"
   [[ "$remote_match" == "$commit" ]] ||
     fail "Commit $commit is not the tip of a ref in $repository. Push it before plan."
   log "Deploy source: $commit"
@@ -149,14 +149,16 @@ verify_foundation_contract() {
 }
 
 claim_deployment_root() {
-  local bucket marker_key selected error_file
+  local bucket marker_key marker_body selected error_file
   bucket="$(environment_value state_bucket_name)"
   marker_key="datachord/$TARGET_NAME/$STAGE_NAME/root-selection/tofu.tfstate"
+  marker_body="$PLAN_DIR/root-selection.body"
   error_file="$PLAN_DIR/root-selection.err"
+  touch "$marker_body"
   if aws s3api put-object \
     --bucket "$bucket" \
     --key "$marker_key" \
-    --body /dev/null \
+    --body "$marker_body" \
     --if-none-match '*' \
     --metadata "deployment_root=$DEPLOYMENT_ROOT" >/dev/null 2>"$error_file"; then
     log "Deployment root selected: $DEPLOYMENT_ROOT"

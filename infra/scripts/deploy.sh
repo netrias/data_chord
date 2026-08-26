@@ -144,7 +144,17 @@ apply_prerequisites() {
   log "Planning the application prerequisites"
   create_saved_plan "$plan_file" \
     -target=aws_codebuild_project.app_image \
-    -target=aws_iam_role_policy.application_build
+    -target=aws_iam_role_policy.application_build \
+    -target=aws_s3_bucket.workflow \
+    -target=module.data_plane.aws_s3_bucket.workflow \
+    -target=aws_s3_bucket_public_access_block.workflow \
+    -target=module.data_plane.aws_s3_bucket_public_access_block.workflow \
+    -target=aws_dynamodb_table.reference_data \
+    -target=module.data_plane.aws_dynamodb_table.reference_data \
+    -target=aws_dynamodb_table.harmonization_cache \
+    -target=module.data_plane.aws_dynamodb_table.harmonization_cache \
+    -target=aws_dynamodb_table.cde_recommendation_cache \
+    -target=module.data_plane.aws_dynamodb_table.cde_recommendation_cache
   check_internal_plan "$plan_file.json" prerequisite
   state_path="$(state_identity)"
   receipt_validate "$state_path" in_progress
