@@ -40,15 +40,20 @@ export const buildPerformanceReport = ({
   environment,
   dataset,
   runs,
+  setup = undefined,
   generatedAt = new Date().toISOString(),
-}) => ({
-  schema_version: 1,
-  generated_at: generatedAt,
-  environment,
-  dataset,
-  runs,
-  summary: {
-    cold: _summarizeRuns(runs.filter((run) => run.kind === 'cold')),
-    warm: _summarizeRuns(runs.filter((run) => run.kind === 'warm')),
-  },
-});
+}) => {
+  const report = {
+    schema_version: 1,
+    generated_at: generatedAt,
+    environment,
+    dataset,
+    runs,
+    summary: {
+      cold: _summarizeRuns(runs.filter((run) => run.kind === 'cold')),
+      warm: _summarizeRuns(runs.filter((run) => run.kind === 'warm')),
+    },
+  };
+  if (setup !== undefined) report.setup = setup;
+  return report;
+};

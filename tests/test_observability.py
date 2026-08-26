@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Sequence
 
@@ -12,13 +13,16 @@ import src.app.dependencies as dependencies
 from src.auth.user_context import TRUSTED_PROXY_USER_HEADER
 from src.observability.events import (
     REQUEST_ID_HEADER,
+    JsonLogFormatter,
     WorkflowEvent,
     WorkflowOperation,
     WorkflowOutcome,
     WorkflowStage,
+    bind_request_id,
     log_workflow_event,
     performance_span,
     request_id_from_header,
+    reset_request_id,
 )
 from src.storage import UploadStorage, UserContext
 from tests.conftest import (
@@ -93,6 +97,24 @@ async def test_performance_span_logs_completed_duration(
     assert _record_field(matching_records[0], "duration_ms") == 125
 
 
+async def test_performance_span_keeps_bound_request_id(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Given: one request id is bound while the app measures work
+    caplog.set_level(logging.INFO)
+    token = bind_request_id("request-123")
+    try:
+        # When: the component completes and the structured formatter handles its log
+        with performance_span("stage4.rows.manifest_read"):
+            pass
+        payload = json.loads(JsonLogFormatter().format(caplog.records[-1]))
+    finally:
+        reset_request_id(token)
+
+    # Then: operators can correlate the component duration with its HTTP request
+    assert payload["request_id"] == "request-123"
+
+
 async def test_performance_span_logs_safe_failure_and_reraises(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -144,13 +166,15 @@ async def test_review_workflow_logs_major_performance_spans(
     caplog.clear()
     caplog.set_level(logging.INFO)
 
-    # When: the app builds the review rows, conformance gate, and final summary
+    # When: the app builds the review rows, saved state, conformance gate, and final summary
     stage4_response = await app_client.post("/stage-4/rows", json={"file_id": file_id})
+    overrides_response = await app_client.get(f"/stage-4/overrides/{file_id}")
     conformance_response = await app_client.get(f"/stage-4/non-conformant/{file_id}")
     stage5_response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
 
     # Then: each request succeeds and its major work is visible as request-correlated spans
     assert stage4_response.status_code == 200
+    assert overrides_response.status_code == 200
     assert conformance_response.status_code == 200
     assert stage5_response.status_code == 200
     completed_spans = {
@@ -168,11 +192,20 @@ async def test_review_workflow_logs_major_performance_spans(
         "stage4.rows.cde_mapping",
         "stage4.rows.response_build",
         "stage4.rows.ready_check",
+        "stage4.overrides.ready_capture",
+        "stage4.overrides.review_state",
+        "stage4.overrides.ready_check",
         "stage4.non_conformant.ready_capture",
         "stage4.non_conformant.manifest_read",
+        "stage4.non_conformant.pv_load",
+        "stage4.non_conformant.review_state",
         "stage4.non_conformant.value_scan",
+        "stage4.non_conformant.ready_check",
         "stage5.summary.ready_capture",
         "stage5.summary.manifest_read",
+        "stage5.summary.pv_load",
+        "stage5.summary.upload_metadata",
+        "stage5.summary.review_state",
         "stage5.summary.summary_build",
         "stage5.summary.ready_check",
     } <= completed_spans

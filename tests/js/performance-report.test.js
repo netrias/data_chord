@@ -55,6 +55,7 @@ describe('performance benchmark report', () => {
       },
       dataset: { rows: 3, columns: 8, source: 'sample.csv' },
       runs,
+      setup: { harmonize_to_review_ready_ms: 9000 },
       generatedAt: '2026-08-26T12:00:00.000Z',
     });
 
@@ -70,6 +71,7 @@ describe('performance benchmark report', () => {
       },
       dataset: { rows: 3, columns: 8, source: 'sample.csv' },
       runs,
+      setup: { harmonize_to_review_ready_ms: 9000 },
       summary: {
         cold: {
           stage4_button_to_usable_ms: {

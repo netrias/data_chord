@@ -146,7 +146,7 @@ just perf-e2e
 ```
 
 Run the deployed journey after the timing code is deployed and you are on the
-company VPN:
+company VPN. BDF staging is the default target:
 
 ```bash
 just perf-staging
@@ -155,6 +155,12 @@ just perf-staging https://your-staging-host.example.com
 ```
 
 Set `PERF_REMOTE_ROWS=50` to change the generated CSV row count.
+Each journey uses three fresh-browser samples and ten warm-browser samples by
+default. Set `PERF_COLD_RUNS` or `PERF_WARM_RUNS` to change those counts. The
+Playwright result contains `performance-report.json`; set `PERF_REPORT_PATH` to
+also write the report to a specific local path. A cold sample means a fresh
+browser context against the same completed workflow. It does not restart the
+deployed service.
 
 ## Deployment options
 
