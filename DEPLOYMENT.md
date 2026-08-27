@@ -104,19 +104,26 @@ Do not put credentials in the image.
 
 ### Use local harmonization models
 
-Local models are optional. Put one checked file and the model directories under
-`/models`. The model path is relative to the JSON file and is also its identity:
+Local harmonization is a separate method from agentic harmonization. The image
+contains `/app/config/local_models.json`. Edit `config/local_models.json` in the
+repository and build a new image when model assignments or inference settings
+change. Put only the large model directories on the mounted `/models` volume.
+The model path in the JSON file is relative to `/models` and is also its identity:
 
 ```json
 {
   "models": [
     {
       "path": "gpt2-cell-type-v1",
-      "cdes": ["cell_type"]
+      "cdes": ["cell_type"],
+      "batch_size": 8,
+      "strong_confidence": 0.9
     },
     {
       "path": "biobert-disease-v1",
-      "cdes": ["human_diseases", "medical_history"]
+      "cdes": ["human_diseases", "medical_history"],
+      "batch_size": 16,
+      "strong_confidence": 0.85
     }
   ]
 }
@@ -126,16 +133,8 @@ Use the exact CDE keys from the standard. One CDE can use only one model. One
 model can own many CDEs. The application finds the model type from its Hugging
 Face configuration. GPT-2 and BERT sequence-classification exports are
 supported. Their output labels must be exact permissible values. A model can
-also contain the `NO_MATCH` label.
-
-Check the full model files before deployment:
-
-```bash
-docker run --rm \
-  --mount type=bind,src="$(pwd)/models",dst=/models,readonly \
-  data-chord:<full-git-commit> \
-  python -m src.local_inference check /models/local_models.json --load-models
-```
+also contain the `NO_MATCH` label. Batch size and the threshold for a strong
+match can differ for each model.
 
 Mount the same directory and set one variable when the application runs:
 
@@ -144,7 +143,7 @@ docker run --rm \
   --mount type=volume,src=data-chord,dst=/data \
   --mount type=bind,src="$(pwd)/models",dst=/models,readonly \
   --env DATA_CHORD_PROFILE=portable \
-  --env DATA_CHORD_LOCAL_MODELS_CONFIG=/models/local_models.json \
+  --env DATA_CHORD_HARMONIZATION_METHOD=local \
   --env AWS_REGION=us-east-2 \
   --publish 8000:8000 \
   data-chord:<full-git-commit>
@@ -152,10 +151,11 @@ docker run --rm \
 
 All mounted model files must be readable by the image's non-root `appuser`.
 
-The application checks the complete JSON file at startup. During Stage 3 it
-groups all terms for the same model, loads that model once, runs the group, and
-releases the model before it loads the next one. CDEs that are not in the file
-continue to use Bedrock.
+The application converts the complete JSON file to typed configuration and
+checks every model directory at startup. During Stage 3 it groups all terms for
+the same model, loads that model once, runs the group, and releases the model
+before it loads the next one. Local mode does not fall back to Bedrock. A CDE
+without a model assignment causes the harmonization job to fail.
 
 Portable workflow files are temporary. After a successful upload, the app
 checks workflow storage in the background. At 80% of

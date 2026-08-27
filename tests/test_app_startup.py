@@ -23,7 +23,7 @@ _RUNTIME_CONFIG_NAMES = (
     "DATA_CHORD_MODE",
     "DATA_CHORD_HARMONIZATION_CACHE_TABLE",
     "DATA_CHORD_IDENTITY_SOURCE",
-    "DATA_CHORD_LOCAL_MODELS_CONFIG",
+    "DATA_CHORD_HARMONIZATION_METHOD",
     "DATA_CHORD_DATA_DIR",
     "DATA_CHORD_PROFILE",
     "DATA_CHORD_REFERENCE_TABLE",
@@ -103,6 +103,10 @@ def _run_import(module: str, settings: dict[str, str]) -> subprocess.CompletedPr
         ),
         ({"DATA_CHORD_PROFILE": "unknown"}, "DATA_CHORD_PROFILE must be one of"),
         ({"DATA_CHORD_MODE": "unknown"}, "DATA_CHORD_MODE must be one of"),
+        (
+            {"DATA_CHORD_HARMONIZATION_METHOD": "mixed"},
+            "DATA_CHORD_HARMONIZATION_METHOD must be one of",
+        ),
         (
             {
                 "DATA_CHORD_PROFILE": "portable",
@@ -263,15 +267,9 @@ def test_portable_runtime_rejects_an_empty_standards_catalog(tmp_path: Path) -> 
     assert "Portable reference database contains no model versions" in result.stderr
 
 
-def test_portable_runtime_rejects_an_invalid_local_model_file(tmp_path: Path) -> None:
-    # Given portable standards and a local model file that names an empty model directory.
+def test_portable_runtime_rejects_an_empty_local_model_catalog(tmp_path: Path) -> None:
+    # Given portable standards and the unconfigured image-owned local model file.
     _initialize_portable_standards(tmp_path / "standards.sqlite")
-    (tmp_path / "empty-model").mkdir()
-    config_path = tmp_path / "local_models.json"
-    config_path.write_text(
-        '{"models":[{"path":"empty-model","cdes":["cell_type"]}]}',
-        encoding="utf-8",
-    )
 
     # When the application starts with local inference enabled.
     result = _run_import(
@@ -279,13 +277,13 @@ def test_portable_runtime_rejects_an_invalid_local_model_file(tmp_path: Path) ->
         {
             "DATA_CHORD_PROFILE": "portable",
             "DATA_CHORD_DATA_DIR": str(tmp_path),
-            "DATA_CHORD_LOCAL_MODELS_CONFIG": str(config_path),
+            "DATA_CHORD_HARMONIZATION_METHOD": "local",
         },
     )
 
     # Then startup fails before health checks can report an unusable service.
     assert result.returncode != 0
-    assert "Local model check failed" in result.stderr
+    assert "Local model file must contain at least one model" in result.stderr
 
 
 def test_importing_application_package_does_not_start_application() -> None:

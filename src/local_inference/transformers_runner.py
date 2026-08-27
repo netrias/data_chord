@@ -18,16 +18,12 @@ from transformers import (
 )
 
 from src.domain.harmonization import MatchFidelity
-from src.local_inference.service import (
-    LocalInferenceError,
-    LocalInferenceRequest,
-    LocalInferenceResult,
-)
+from src.integrations.harmonize import TermHarmonizationRequest, TermHarmonizationResult
+from src.local_inference.catalog import LocalModelConfig
+from src.local_inference.service import LocalInferenceError
 
 logger = logging.getLogger(__name__)
 
-_BATCH_SIZE = 8
-_STRONG_CONFIDENCE = 0.9
 _NO_MATCH = "NO_MATCH"
 
 
@@ -37,8 +33,9 @@ class TransformersModelRunner:
     def harmonize(
         self,
         model_path: Path,
-        requests: tuple[LocalInferenceRequest, ...],
-    ) -> tuple[LocalInferenceResult, ...]:
+        model_config: LocalModelConfig,
+        requests: tuple[TermHarmonizationRequest, ...],
+    ) -> tuple[TermHarmonizationResult, ...]:
         if not requests:
             return ()
         started_at = time.perf_counter()
@@ -66,7 +63,7 @@ class TransformersModelRunner:
             torch.nn.Module.to(model, device)
             model.eval()
             loaded_at = time.perf_counter()
-            results = _run_batches(model, tokenizer, requests, device)
+            results = _run_batches(model, tokenizer, requests, device, model_config)
             finished_at = time.perf_counter()
             logger.info(
                 "Completed local model inference",
@@ -119,13 +116,14 @@ class TransformersModelRunner:
 def _run_batches(
     model: PreTrainedModel,
     tokenizer: PreTrainedTokenizerBase,
-    requests: tuple[LocalInferenceRequest, ...],
+    requests: tuple[TermHarmonizationRequest, ...],
     device: torch.device,
-) -> tuple[LocalInferenceResult, ...]:
-    results: list[LocalInferenceResult] = []
+    model_config: LocalModelConfig,
+) -> tuple[TermHarmonizationResult, ...]:
+    results: list[TermHarmonizationResult] = []
     model_labels = _model_labels(model)
-    for start in range(0, len(requests), _BATCH_SIZE):
-        batch = requests[start : start + _BATCH_SIZE]
+    for start in range(0, len(requests), model_config.batch_size):
+        batch = requests[start : start + model_config.batch_size]
         encoded = tokenizer(
             [_model_input(request) for request in batch],
             padding=True,
@@ -135,13 +133,18 @@ def _run_batches(
         with torch.inference_mode():
             logits = model(**encoded).logits.detach().to("cpu")
         results.extend(
-            _decode_result(model_labels, request, row)
+            _decode_result(
+                model_labels,
+                request,
+                row,
+                strong_confidence=model_config.strong_confidence,
+            )
             for request, row in zip(batch, logits, strict=True)
         )
     return tuple(results)
 
 
-def _model_input(request: LocalInferenceRequest) -> str:
+def _model_input(request: TermHarmonizationRequest) -> str:
     return f"CDE: {request.cde}\nSource value: {request.source_value}"
 
 
@@ -154,13 +157,13 @@ def _model_labels(model: PreTrainedModel) -> dict[int, str]:
 
 def _decode_result(
     id_to_label: dict[int, str],
-    request: LocalInferenceRequest,
+    request: TermHarmonizationRequest,
     logits: torch.Tensor,
-) -> LocalInferenceResult:
+    *,
+    strong_confidence: float,
+) -> TermHarmonizationResult:
     candidates = [
-        index
-        for index, label in id_to_label.items()
-        if label == _NO_MATCH or label in request.permissible_values
+        index for index, label in id_to_label.items() if label == _NO_MATCH or label in request.permissible_values
     ]
     if not candidates:
         raise LocalInferenceError(f"Local model has no labels for CDE {request.cde}")
@@ -168,10 +171,10 @@ def _decode_result(
     selected_index = max(candidates, key=lambda index: float(probabilities[index]))
     selected_label = id_to_label[selected_index]
     if selected_label == _NO_MATCH:
-        return LocalInferenceResult(None, MatchFidelity.NONE)
+        return TermHarmonizationResult(None, MatchFidelity.NONE)
     confidence = float(probabilities[selected_index])
-    fidelity = MatchFidelity.STRONG if confidence >= _STRONG_CONFIDENCE else MatchFidelity.PARTIAL
-    return LocalInferenceResult(selected_label, fidelity)
+    fidelity = MatchFidelity.STRONG if confidence >= strong_confidence else MatchFidelity.PARTIAL
+    return TermHarmonizationResult(selected_label, fidelity)
 
 
 def _inference_device() -> torch.device:

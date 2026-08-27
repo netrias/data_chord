@@ -18,11 +18,12 @@ from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.dataset_workflow_ids import dataset_workflow_id_from_string
 from src.domain.reference_data import ReferenceModel
-from src.integrations.agentic_harmonize import AgenticHarmonizeService
+from src.integrations.agentic_harmonize import AgenticHarmonizeService, AgenticTermHarmonizer
 from src.integrations.bedrock_cde_ranker import BedrockCandidateRanker
 from src.integrations.cde_recommendation import CdeRecommendationAdapter
 from src.integrations.dynamodb_harmonization_cache import DynamoDbHarmonizationCache
 from src.integrations.dynamodb_reference_data import DynamoDbReferenceDataRepository
+from src.integrations.harmonize import HarmonizationWorkflowService
 from src.integrations.sqlite_reference_data import SqliteReferenceDataImporter
 from src.settings import ConfigurationError
 from src.storage import LocalWorkflowStorage, UserContext
@@ -62,8 +63,8 @@ def test_reference_repository_uses_the_configured_table(monkeypatch) -> None:
     resource.Table.assert_called_once_with("reference-table")
 
 
-def test_harmonizer_uses_bedrock_only_when_local_models_are_not_configured(monkeypatch) -> None:
-    # Given a fresh service container.
+def test_agentic_method_builds_only_the_bedrock_harmonizer(monkeypatch) -> None:
+    # Given the default agentic method and a fresh service container.
     monkeypatch.setenv("AWS_REGION", "us-east-2")
     monkeypatch.setenv("DATA_CHORD_HARMONIZATION_CACHE_TABLE", "cache-table")
     monkeypatch.setattr(dependencies, "_harmonize_service", None)
@@ -76,35 +77,29 @@ def test_harmonizer_uses_bedrock_only_when_local_models_are_not_configured(monke
     # Then the in-task agentic harmonizer is the only implementation.
     assert isinstance(service, AgenticHarmonizeService)
     assert service._cache is cache  # noqa: SLF001 - verifies application wiring
-    assert service._local_inference is None  # noqa: SLF001 - verifies application wiring
+    assert isinstance(service._provider, AgenticTermHarmonizer)  # noqa: SLF001
 
 
-def test_harmonizer_loads_the_single_local_model_file(monkeypatch, tmp_path: Path) -> None:
-    # Given one checked local model file is configured for the process.
-    model_directory = tmp_path / "gpt2-v1"
-    model_directory.mkdir()
-    config_path = tmp_path / "local_models.json"
-    config_path.write_text(
-        '{"models":[{"path":"gpt2-v1","cdes":["cell_type"]}]}',
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("AWS_REGION", "us-east-2")
-    monkeypatch.setenv("DATA_CHORD_LOCAL_MODELS_CONFIG", str(config_path))
+def test_local_method_builds_only_the_local_harmonizer(monkeypatch, tmp_path: Path) -> None:
+    # Given local mode, one image-owned config path, and one mounted model root.
+    config_path = tmp_path / "config" / "local_models.json"
+    models_root = tmp_path / "models"
+    monkeypatch.setenv("DATA_CHORD_HARMONIZATION_METHOD", "local")
+    monkeypatch.setattr(dependencies, "LOCAL_MODELS_CONFIG_PATH", config_path)
+    monkeypatch.setattr(dependencies, "LOCAL_MODELS_ROOT", models_root)
     monkeypatch.setattr(dependencies, "_harmonize_service", None)
     monkeypatch.setattr(dependencies, "_local_inference", None)
-    monkeypatch.setattr(dependencies, "get_harmonization_cache", MagicMock())
     local_inference = MagicMock()
-    local_inference.supported_cdes = frozenset({"cell_type"})
     load_local_inference = MagicMock(return_value=local_inference)
     monkeypatch.setattr(dependencies, "load_local_inference", load_local_inference)
 
     # When normal application wiring creates the harmonizer.
     service = dependencies.get_harmonize_service()
 
-    # Then the application receives only the small local inference boundary.
-    assert isinstance(service, AgenticHarmonizeService)
-    assert service._local_inference is local_inference  # noqa: SLF001 - verifies application wiring
-    load_local_inference.assert_called_once_with(config_path)
+    # Then the common file workflow receives only the local provider.
+    assert type(service) is HarmonizationWorkflowService
+    assert service._provider is local_inference  # noqa: SLF001 - verifies application wiring
+    load_local_inference.assert_called_once_with(config_path, models_root)
 
 
 def test_harmonization_cache_uses_the_configured_table(monkeypatch) -> None:
@@ -193,10 +188,7 @@ async def test_portable_profile_reads_and_writes_without_aws_data_services(
     assert cached_harmonization == {}
     assert recommendations.records == {}
     boto3.resource.assert_not_called()
-    assert not any(
-        call.args and call.args[0] in {"s3", "dynamodb"}
-        for call in boto3.client.call_args_list
-    )
+    assert not any(call.args and call.args[0] in {"s3", "dynamodb"} for call in boto3.client.call_args_list)
 
 
 def test_portable_runtime_validation_rejects_an_unwritable_data_directory(

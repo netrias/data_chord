@@ -39,6 +39,7 @@ WORKDIR /app
 
 COPY --from=builder /app/.venv /app/.venv
 COPY backend /app/backend
+COPY config /app/config
 COPY demo /app/demo
 COPY scripts /app/scripts
 COPY src /app/src

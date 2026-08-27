@@ -21,7 +21,6 @@ from src.integrations.agentic_harmonize import (
     AgenticHarmonizeConfig,
     AgenticHarmonizeService,
 )
-from src.local_inference import LocalInferenceRequest, LocalInferenceResult
 from src.persistence.manifest_reader import read_manifest_parquet
 from src.persistence.pv_manifest_store import ColumnPvSets
 
@@ -54,12 +53,14 @@ class _UnavailableCache:
 
 
 def _manifest() -> ColumnMappingManifest:
-    return ColumnMappingManifest.from_payload_strict({
-        "column_mappings": {
-            "col_0000": {"cde_key": "diagnosis", "cde_id": 1},
-            "col_0001": {"cde_key": "treatment", "cde_id": 2},
+    return ColumnMappingManifest.from_payload_strict(
+        {
+            "column_mappings": {
+                "col_0000": {"cde_key": "diagnosis", "cde_id": 1},
+                "col_0001": {"cde_key": "treatment", "cde_id": 2},
+            }
         }
-    })
+    )
 
 
 def _prediction(term: str, match: str, fidelity: str = "strong") -> SimpleNamespace:
@@ -97,15 +98,18 @@ def test_agentic_harmonization_collapses_duplicates_only_within_each_column(
     def fake_harmonize(_client, _index, term: str, **kwargs: object) -> SimpleNamespace:
         context = str(kwargs["context"])
         calls.append((term, context))
-        model_calls.append((
-            kwargs["explorer_model"].name,  # type: ignore[union-attr]
-            kwargs["shortlister_model"].name,  # type: ignore[union-attr]
-            kwargs["selector_model"].name,  # type: ignore[union-attr]
-        ))
+        model_calls.append(
+            (
+                kwargs["explorer_model"].name,  # type: ignore[union-attr]
+                kwargs["shortlister_model"].name,  # type: ignore[union-attr]
+                kwargs["selector_model"].name,  # type: ignore[union-attr]
+            )
+        )
         match = "Diagnosis Match" if "diagnosis" in context else "Treatment Match"
         return _prediction(term, match)
 
     monkeypatch.setattr("src.integrations.agentic_harmonize.harmonize_term", fake_harmonize)
+
     def fake_client(region: str, *, provider: object, reasoning_effort: object) -> object:
         client_calls.append((region, provider, reasoning_effort))
         return object()
@@ -117,10 +121,12 @@ def test_agentic_harmonization_collapses_duplicates_only_within_each_column(
         file_path=source,
         data_model_version=MODEL_VERSION,
         prepared_manifest=_manifest(),
-        column_pv_sets=ColumnPvSets({
-            column_key_for_index(0): frozenset({"Diagnosis Match"}),
-            column_key_for_index(1): frozenset({"Treatment Match"}),
-        }),
+        column_pv_sets=ColumnPvSets(
+            {
+                column_key_for_index(0): frozenset({"Diagnosis Match"}),
+                column_key_for_index(1): frozenset({"Treatment Match"}),
+            }
+        ),
         output_path=output,
     )
 
@@ -166,10 +172,12 @@ def test_agentic_harmonization_passes_through_columns_without_pvs(
         file_path=source,
         data_model_version=MODEL_VERSION,
         prepared_manifest=_manifest(),
-        column_pv_sets=ColumnPvSets({
-            column_key_for_index(0): frozenset(),
-            column_key_for_index(1): None,
-        }),
+        column_pv_sets=ColumnPvSets(
+            {
+                column_key_for_index(0): frozenset(),
+                column_key_for_index(1): None,
+            }
+        ),
         output_path=output,
     )
 
@@ -195,10 +203,12 @@ def test_agentic_no_match_keeps_the_source_value(monkeypatch, tmp_path: Path) ->
         file_path=source,
         data_model_version=MODEL_VERSION,
         prepared_manifest=_manifest(),
-        column_pv_sets=ColumnPvSets({
-            column_key_for_index(0): frozenset({"Known"}),
-            column_key_for_index(1): frozenset({"Kept"}),
-        }),
+        column_pv_sets=ColumnPvSets(
+            {
+                column_key_for_index(0): frozenset({"Known"}),
+                column_key_for_index(1): frozenset({"Kept"}),
+            }
+        ),
         output_path=output,
     )
 
@@ -230,10 +240,12 @@ def test_agentic_harmonization_fails_without_output_when_one_term_fails(
         file_path=source,
         data_model_version=MODEL_VERSION,
         prepared_manifest=_manifest(),
-        column_pv_sets=ColumnPvSets({
-            column_key_for_index(0): frozenset({"Diagnosis Match"}),
-            column_key_for_index(1): frozenset({"Treatment Match"}),
-        }),
+        column_pv_sets=ColumnPvSets(
+            {
+                column_key_for_index(0): frozenset({"Diagnosis Match"}),
+                column_key_for_index(1): frozenset({"Treatment Match"}),
+            }
+        ),
         output_path=output,
     )
 
@@ -275,9 +287,11 @@ def test_exact_permissible_value_skips_cache_and_bedrock(
         file_path=source,
         data_model_version=MODEL_VERSION,
         prepared_manifest=_manifest(),
-        column_pv_sets=ColumnPvSets({
-            column_key_for_index(0): frozenset({"Known", "Matched"}),
-        }),
+        column_pv_sets=ColumnPvSets(
+            {
+                column_key_for_index(0): frozenset({"Known", "Matched"}),
+            }
+        ),
         output_path=output,
     )
 
@@ -287,68 +301,6 @@ def test_exact_permissible_value_skips_cache_and_bedrock(
     assert read_tabular(output).rows == [["Known"], ["Matched"]]
     assert {key.source_value for key in cache.loaded_keys} == {"unknown"}
     assert {entry.key.source_value for entry in cache.entries.values()} == {"unknown"}
-
-
-def test_configured_cdes_use_one_local_batch_while_other_cdes_use_bedrock(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    # Given one local CDE, one Bedrock CDE, and repeated source values in both columns.
-    source = tmp_path / "source.csv"
-    source.write_text("diagnosis,treatment\nsame,same\nsame,same\n", encoding="utf-8")
-    output = tmp_path / "output.csv"
-    cache = _MemoryCache()
-    local_requests: list[tuple[LocalInferenceRequest, ...]] = []
-    bedrock_calls: list[str] = []
-
-    class _LocalInference:
-        supported_cdes = frozenset({"diagnosis"})
-
-        def harmonize(
-            self,
-            requests: tuple[LocalInferenceRequest, ...],
-        ) -> tuple[LocalInferenceResult, ...]:
-            local_requests.append(requests)
-            return (
-                LocalInferenceResult("Local Diagnosis", MatchFidelity.STRONG),
-            )
-
-    def fake_harmonize(_client, _index, term: str, **_kwargs: object) -> SimpleNamespace:
-        bedrock_calls.append(term)
-        return _prediction(term, "Bedrock Treatment")
-
-    monkeypatch.setattr("src.integrations.agentic_harmonize.harmonize_term", fake_harmonize)
-    monkeypatch.setattr(
-        "src.integrations.agentic_harmonize.make_provider_client",
-        lambda *args, **kwargs: object(),
-    )
-    service = AgenticHarmonizeService(
-        AgenticHarmonizeConfig(region="us-east-2"),
-        cache=cache,
-        local_inference=_LocalInference(),
-    )
-
-    # When the existing file workflow performs harmonization.
-    result = service.run(
-        file_path=source,
-        data_model_version=MODEL_VERSION,
-        prepared_manifest=_manifest(),
-        column_pv_sets=ColumnPvSets({
-            column_key_for_index(0): frozenset({"Local Diagnosis"}),
-            column_key_for_index(1): frozenset({"Bedrock Treatment"}),
-        }),
-        output_path=output,
-    )
-
-    # Then local work is batched once, Bedrock handles only its CDE, and local work bypasses the cache.
-    assert result.status is HarmonizeStatus.SUCCEEDED
-    assert [[request.cde for request in batch] for batch in local_requests] == [["diagnosis"]]
-    assert bedrock_calls == ["same"]
-    assert read_tabular(output).rows == [
-        ["Local Diagnosis", "Bedrock Treatment"],
-        ["Local Diagnosis", "Bedrock Treatment"],
-    ]
-    assert {key.cde_key for key in cache.loaded_keys} == {"treatment"}
 
 
 def test_second_run_uses_the_versioned_cde_cache_without_bedrock(
@@ -380,9 +332,11 @@ def test_second_run_uses_the_versioned_cde_cache_without_bedrock(
         "file_path": source,
         "data_model_version": MODEL_VERSION,
         "prepared_manifest": _manifest(),
-        "column_pv_sets": ColumnPvSets({
-            column_key_for_index(0): frozenset({"Matched"}),
-        }),
+        "column_pv_sets": ColumnPvSets(
+            {
+                column_key_for_index(0): frozenset({"Matched"}),
+            }
+        ),
     }
 
     # When the same model, CDE, and raw source value are harmonized twice.
@@ -425,9 +379,11 @@ def test_unavailable_cache_does_not_block_bedrock_or_the_result(
         file_path=source,
         data_model_version=MODEL_VERSION,
         prepared_manifest=_manifest(),
-        column_pv_sets=ColumnPvSets({
-            column_key_for_index(0): frozenset({"Matched"}),
-        }),
+        column_pv_sets=ColumnPvSets(
+            {
+                column_key_for_index(0): frozenset({"Matched"}),
+            }
+        ),
         output_path=output,
     )
 

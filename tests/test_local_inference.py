@@ -20,21 +20,33 @@ from transformers import (
 )
 
 from src.domain.harmonization import MatchFidelity
+from src.integrations.harmonize import TermHarmonizationRequest, TermHarmonizationResult
 from src.local_inference import load_local_inference
-from src.local_inference.catalog import LocalModelConfigurationError, load_model_catalog
+from src.local_inference.catalog import (
+    LocalModelConfig,
+    LocalModelConfigurationError,
+    load_model_catalog,
+)
 from src.local_inference.service import (
     LocalInference,
     LocalInferenceError,
-    LocalInferenceRequest,
-    LocalInferenceResult,
 )
 from src.local_inference.transformers_runner import TransformersModelRunner
 
 
 def _write_config(root: Path, models: list[dict[str, object]]) -> Path:
     config_path = root / "local_models.json"
-    config_path.write_text(json.dumps({"models": models}), encoding="utf-8")
+    complete_models = [{"batch_size": 8, "strong_confidence": 0.9, **model} for model in models]
+    config_path.write_text(json.dumps({"models": complete_models}), encoding="utf-8")
     return config_path
+
+
+def _request(
+    cde: str,
+    source_value: str,
+    permissible_values: frozenset[str],
+) -> TermHarmonizationRequest:
+    return TermHarmonizationRequest(cde, source_value, permissible_values, f"Target CDE: {cde}")
 
 
 def _write_tiny_transformers_model(model_path: Path, architecture: str) -> None:
@@ -80,16 +92,17 @@ def _write_tiny_transformers_model(model_path: Path, architecture: str) -> None:
 
 class _RecordingRunner:
     def __init__(self) -> None:
-        self.calls: list[tuple[Path, tuple[LocalInferenceRequest, ...]]] = []
+        self.calls: list[tuple[Path, LocalModelConfig, tuple[TermHarmonizationRequest, ...]]] = []
 
     def harmonize(
         self,
         model_path: Path,
-        requests: tuple[LocalInferenceRequest, ...],
-    ) -> tuple[LocalInferenceResult, ...]:
-        self.calls.append((model_path, requests))
+        model_config: LocalModelConfig,
+        requests: tuple[TermHarmonizationRequest, ...],
+    ) -> tuple[TermHarmonizationResult, ...]:
+        self.calls.append((model_path, model_config, requests))
         return tuple(
-            LocalInferenceResult(
+            TermHarmonizationResult(
                 matched_value=sorted(request.permissible_values)[0],
                 match_fidelity=MatchFidelity.STRONG,
             )
@@ -110,12 +123,14 @@ def test_catalog_uses_each_model_path_as_its_identity(tmp_path: Path) -> None:
     )
 
     # When the local inference boundary loads the file.
-    catalog = load_model_catalog(config_path)
+    catalog = load_model_catalog(config_path, tmp_path / "models")
 
     # Then paths are the model identities and the CDE lookup is derived once.
     assert catalog.supported_cdes == frozenset({"sex", "gender_identity", "specimen_type"})
     assert catalog.model_for("gender_identity").relative_path == Path("gpt2-sex-v1")
     assert catalog.model_for("specimen_type").relative_path == Path("biobert-tissue-v1")
+    assert catalog.model_for("specimen_type").batch_size == 8
+    assert catalog.model_for("specimen_type").strong_confidence == 0.9
 
 
 def test_catalog_rejects_one_cde_assigned_to_two_models(tmp_path: Path) -> None:
@@ -135,7 +150,7 @@ def test_catalog_rejects_one_cde_assigned_to_two_models(tmp_path: Path) -> None:
         LocalModelConfigurationError,
         match=r"cell_type.*gpt2-v1.*biobert-v1",
     ):
-        load_model_catalog(config_path)
+        load_model_catalog(config_path, tmp_path)
 
 
 def test_catalog_rejects_a_model_path_outside_the_config_directory(tmp_path: Path) -> None:
@@ -144,7 +159,34 @@ def test_catalog_rejects_a_model_path_outside_the_config_directory(tmp_path: Pat
 
     # When the file is validated, then the escaped path is rejected at the boundary.
     with pytest.raises(LocalModelConfigurationError, match="must stay inside"):
-        load_model_catalog(config_path)
+        load_model_catalog(config_path, tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("setting", "value", "expected_error"),
+    [
+        ("batch_size", 0, "batch_size"),
+        ("strong_confidence", 1.1, "strong_confidence"),
+    ],
+)
+def test_catalog_rejects_invalid_model_execution_settings(
+    tmp_path: Path,
+    setting: str,
+    value: object,
+    expected_error: str,
+) -> None:
+    # Given one model entry has an unsafe execution setting.
+    (tmp_path / "gpt2-v1").mkdir()
+    model = {
+        "path": "gpt2-v1",
+        "cdes": ["cell_type"],
+        setting: value,
+    }
+    config_path = _write_config(tmp_path, [model])
+
+    # When the JSON file is converted, then typed configuration rejects the setting.
+    with pytest.raises(LocalModelConfigurationError, match=expected_error):
+        load_model_catalog(config_path, tmp_path)
 
 
 def test_local_inference_rejects_a_model_without_configuration_or_tokenizer(tmp_path: Path) -> None:
@@ -154,7 +196,7 @@ def test_local_inference_rejects_a_model_without_configuration_or_tokenizer(tmp_
 
     # When application wiring loads local inference, then it rejects the unusable model at startup.
     with pytest.raises(LocalInferenceError, match="Local model check failed"):
-        load_local_inference(config_path)
+        load_local_inference(config_path, tmp_path)
 
 
 def test_local_inference_groups_requests_by_model_and_restores_request_order(tmp_path: Path) -> None:
@@ -168,21 +210,22 @@ def test_local_inference_groups_requests_by_model_and_restores_request_order(tmp
                 {"path": "gpt2-v1", "cdes": ["sex", "gender_identity"]},
                 {"path": "biobert-v1", "cdes": ["specimen_type"]},
             ],
-        )
+        ),
+        tmp_path,
     )
     runner = _RecordingRunner()
     inference = LocalInference(catalog, runner)
     requests = (
-        LocalInferenceRequest("specimen_type", "tumor", frozenset({"Tissue"})),
-        LocalInferenceRequest("sex", "m", frozenset({"Male"})),
-        LocalInferenceRequest("gender_identity", "woman", frozenset({"Female"})),
+        _request("specimen_type", "tumor", frozenset({"Tissue"})),
+        _request("sex", "m", frozenset({"Male"})),
+        _request("gender_identity", "woman", frozenset({"Female"})),
     )
 
     # When all requests are harmonized in one call.
     results = inference.harmonize(requests)
 
     # Then each model runs once and results retain the caller's request order.
-    assert [(path.name, [request.cde for request in grouped]) for path, grouped in runner.calls] == [
+    assert [(path.name, [request.cde for request in grouped]) for path, _model, grouped in runner.calls] == [
         ("gpt2-v1", ["sex", "gender_identity"]),
         ("biobert-v1", ["specimen_type"]),
     ]
@@ -193,16 +236,15 @@ def test_local_inference_rejects_an_unassigned_cde_before_loading_a_model(tmp_pa
     # Given one configured model and a request for a different CDE.
     (tmp_path / "gpt2-v1").mkdir()
     catalog = load_model_catalog(
-        _write_config(tmp_path, [{"path": "gpt2-v1", "cdes": ["sex"]}])
+        _write_config(tmp_path, [{"path": "gpt2-v1", "cdes": ["sex"]}]),
+        tmp_path,
     )
     runner = _RecordingRunner()
     inference = LocalInference(catalog, runner)
 
     # When local inference receives the unsupported request, then no model is loaded.
     with pytest.raises(KeyError, match="specimen_type"):
-        inference.harmonize((
-            LocalInferenceRequest("specimen_type", "tumor", frozenset({"Tissue"})),
-        ))
+        inference.harmonize((_request("specimen_type", "tumor", frozenset({"Tissue"})),))
     assert runner.calls == []
 
 
@@ -220,12 +262,13 @@ def test_transformers_runner_loads_real_supported_architectures_and_returns_an_a
         lambda: torch.device("cpu"),
     )
     runner = TransformersModelRunner()
-    request = LocalInferenceRequest("sex", "m", frozenset({"Male", "Female"}))
+    request = _request("sex", "m", frozenset({"Male", "Female"}))
+    model_config = LocalModelConfig(Path(architecture), frozenset({"sex"}), 8, 0.9)
 
     # When metadata, weights, tokenization, batching, and decoding are exercised.
     detected_architecture = runner.check(model_path, load_model=True)
-    result = runner.harmonize(model_path, (request,))
+    result = runner.harmonize(model_path, model_config, (request,))
 
     # Then the auto-loader detects the real architecture and returns one allowed model label.
     assert detected_architecture == architecture
-    assert result == (LocalInferenceResult("Male", MatchFidelity.PARTIAL),)
+    assert result == (TermHarmonizationResult("Male", MatchFidelity.PARTIAL),)

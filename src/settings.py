@@ -27,6 +27,11 @@ class ApplicationMode(StrEnum):
     DEMO = "demo"
 
 
+class HarmonizationMethod(StrEnum):
+    AGENTIC = "agentic"
+    LOCAL = "local"
+
+
 class IdentitySource(StrEnum):
     SHARED = "shared"
     TRUSTED_PROXY = "trusted_proxy"
@@ -45,7 +50,7 @@ _DATA_CHORD_S3_BUCKET_VAR = "DATA_CHORD_S3_BUCKET"
 _DATA_CHORD_S3_PREFIX_VAR = "DATA_CHORD_S3_PREFIX"
 _DATA_CHORD_ALB_ARN_VAR = "DATA_CHORD_ALB_ARN"
 _DATA_CHORD_AGENTIC_WORKERS_VAR = "DATA_CHORD_AGENTIC_WORKERS"
-_DATA_CHORD_LOCAL_MODELS_CONFIG_VAR = "DATA_CHORD_LOCAL_MODELS_CONFIG"
+_DATA_CHORD_HARMONIZATION_METHOD_VAR = "DATA_CHORD_HARMONIZATION_METHOD"
 _DATA_CHORD_REFERENCE_TABLE_VAR = "DATA_CHORD_REFERENCE_TABLE"
 _DATA_CHORD_HARMONIZATION_CACHE_TABLE_VAR = "DATA_CHORD_HARMONIZATION_CACHE_TABLE"
 _DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE_VAR = "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE"
@@ -54,6 +59,7 @@ _DEV_MODE_VAR = "DEV_MODE"
 _DEFAULT_STORAGE_BACKEND = StorageBackend.LOCAL
 _DEFAULT_RUNTIME_PROFILE = RuntimeProfile.HOSTED
 _DEFAULT_APPLICATION_MODE = ApplicationMode.NORMAL
+_DEFAULT_HARMONIZATION_METHOD = HarmonizationMethod.AGENTIC
 _DEFAULT_IDENTITY_SOURCE = IdentitySource.SHARED
 _DEFAULT_AGENTIC_WORKERS = 100
 _DEFAULT_AWS_REGION = "us-east-2"
@@ -107,14 +113,20 @@ def get_reference_database_path() -> Path:
     return get_data_dir() / "standards.sqlite"
 
 
-def get_local_models_config_path() -> Path | None:
-    raw_path = os.getenv(_DATA_CHORD_LOCAL_MODELS_CONFIG_VAR)
-    if raw_path is None:
-        return None
-    path = Path(raw_path).expanduser()
-    if not path.is_absolute():
-        raise ConfigurationError(f"{_DATA_CHORD_LOCAL_MODELS_CONFIG_VAR} must be an absolute path")
-    return path
+def get_harmonization_method() -> HarmonizationMethod:
+    raw_method = (
+        os.getenv(
+            _DATA_CHORD_HARMONIZATION_METHOD_VAR,
+            _DEFAULT_HARMONIZATION_METHOD.value,
+        )
+        .strip()
+        .lower()
+    )
+    try:
+        return HarmonizationMethod(raw_method)
+    except ValueError as exc:
+        valid_methods = ", ".join(method.value for method in HarmonizationMethod)
+        raise ConfigurationError(f"{_DATA_CHORD_HARMONIZATION_METHOD_VAR} must be one of: {valid_methods}") from exc
 
 
 def get_agentic_workers() -> int:
@@ -210,7 +222,7 @@ def get_expected_alb_arn() -> str | None:
 
 def validate_required_config() -> None:
     """Validate all runtime configuration before service clients are created."""
-    get_local_models_config_path()
+    get_harmonization_method()
     profile = get_runtime_profile()
     mode = get_application_mode()
     if mode is ApplicationMode.DEMO and profile is not RuntimeProfile.PORTABLE:
