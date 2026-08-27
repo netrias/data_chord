@@ -385,6 +385,9 @@ def _environment(tmp_path: Path) -> Path:
                 "hosted_zone_name": "apps.netrias.com",
                 "application_repository_url": "https://github.com/netrias/data_chord.git",
                 "github_app_secret_name": "data-chord/build/github-app",
+                "programmatic_api_key_secret_name": (
+                    "data-chord/staging/programmatic-api-key"
+                ),
             }
         ),
         encoding="utf-8",

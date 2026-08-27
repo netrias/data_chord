@@ -53,10 +53,10 @@ The target and stage come from the path. The stage must be `dev`, `qa`,
 datachord/<target>/<stage>/tofu.tfstate
 ```
 
-The environment file contains application inputs and selected foundation
-outputs. It does not contain credentials, reference data, a state key, or a
-CodeConnections ARN. `infra/scripts/environment.py` rejects missing and extra
-fields.
+The environment file contains application inputs, secret names, and selected
+foundation outputs. It does not contain secret values, reference data, a state
+key, or a CodeConnections ARN. `infra/scripts/environment.py` rejects missing
+and extra fields.
 
 The deployer role and application boundary must use the same foundation name
 prefix. The deployment derives the deployer boundary from that prefix and
@@ -109,5 +109,5 @@ user-invitation commands.
 - A CI job that starts with the deployer role must set
   `AWS_CREDENTIAL_EXPIRATION` to the ISO 8601 STS expiration time.
 - The environment owner controls the AWS profile, DNS delegation, GitHub App,
-  CodeConnections source credential, Bedrock access, and any controlled CI
-  runner.
+  programmatic API key, CodeConnections source credential, Bedrock access, and
+  any controlled CI runner.

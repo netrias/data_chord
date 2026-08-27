@@ -102,6 +102,16 @@ variable "github_app_secret_name" {
   default     = "data-chord/build/github-app"
 }
 
+variable "programmatic_api_key_secret_name" {
+  description = "Secrets Manager name for the Data Chord programmatic API key."
+  type        = string
+
+  validation {
+    condition     = trimspace(var.programmatic_api_key_secret_name) != ""
+    error_message = "programmatic_api_key_secret_name must not be empty."
+  }
+}
+
 variable "application_repository_url" {
   description = "HTTPS Git repository that CodeBuild checks out."
   type        = string

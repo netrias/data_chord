@@ -52,6 +52,12 @@ mock_provider "aws" {
     }
   }
 
+  mock_resource "aws_lb_listener" {
+    defaults = {
+      arn = "arn:aws:elasticloadbalancing:us-east-2:084828580051:listener/app/data-chord-qa/0123456789abcdef/0123456789abcdef"
+    }
+  }
+
   mock_resource "aws_cognito_user_pool" {
     defaults = {
       arn = "arn:aws:cognito-idp:us-east-2:084828580051:userpool/us-east-2_012345678"
@@ -83,11 +89,12 @@ variables {
   application_role_boundary_arn = "arn:aws:iam::084828580051:policy/datachord-application-role-boundary"
   application_role_path         = "/application/"
 
-  environment       = "qa"
-  deployment_target = "bdf"
-  hosted_zone_name  = "example.com"
-  domain_label      = "data-chord-qa"
-  image_tag         = "0123456789abcdef0123456789abcdef01234567"
+  environment                      = "qa"
+  deployment_target                = "bdf"
+  hosted_zone_name                 = "example.com"
+  domain_label                     = "data-chord-qa"
+  image_tag                        = "0123456789abcdef0123456789abcdef01234567"
+  programmatic_api_key_secret_name = "data-chord/qa/programmatic-api-key"
 }
 
 run "application_roles_follow_foundation_guardrails" {
@@ -166,6 +173,37 @@ run "public_entrypoint_requires_cognito_authentication" {
       [for action in aws_lb_listener.https.default_action : action.type] == ["authenticate-cognito", "forward"]
     )
     error_message = "The public entrypoint must accept only HTTPS and authenticate with Cognito before forwarding."
+  }
+}
+
+run "programmatic_api_uses_a_private_key_and_bypasses_browser_login" {
+  command = plan
+
+  assert {
+    condition = (
+      data.aws_secretsmanager_secret.programmatic_api_key.name == "data-chord/qa/programmatic-api-key" &&
+      toset(jsondecode(aws_iam_role_policy.application_task_execution_programmatic_api_key.policy).Statement[0].Action) == toset([
+        "secretsmanager:GetSecretValue",
+      ]) &&
+      jsondecode(aws_iam_role_policy.application_task_execution_programmatic_api_key.policy).Statement[0].Resource == data.aws_secretsmanager_secret.programmatic_api_key.arn &&
+      {
+        for secret in jsondecode(aws_ecs_task_definition.application.container_definitions)[0].secrets :
+        secret.name => secret.valueFrom
+      }["DATA_CHORD_API_KEY"] == data.aws_secretsmanager_secret.programmatic_api_key.arn
+    )
+    error_message = "The application task must read its programmatic API key from the exact configured secret."
+  }
+
+  assert {
+    condition = (
+      aws_lb_listener_rule.programmatic_api.priority == 10 &&
+      length(aws_lb_listener_rule.programmatic_api.action) == 1 &&
+      aws_lb_listener_rule.programmatic_api.action[0].type == "forward" &&
+      aws_lb_listener_rule.programmatic_api.action[0].target_group_arn == aws_lb_target_group.app.arn &&
+      length(aws_lb_listener_rule.programmatic_api.condition) == 1 &&
+      toset(one(aws_lb_listener_rule.programmatic_api.condition).path_pattern[0].values) == toset(["/api/v1/*"])
+    )
+    error_message = "Only the versioned programmatic API path may bypass Cognito and rely on API-key authentication."
   }
 }
 

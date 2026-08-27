@@ -53,6 +53,20 @@ resource "aws_iam_role_policy_attachment" "application_task_execution" {
   policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
+resource "aws_iam_role_policy" "application_task_execution_programmatic_api_key" {
+  name = "${local.name_prefix}-programmatic-api-key"
+  role = aws_iam_role.application_task_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["secretsmanager:GetSecretValue"]
+      Resource = data.aws_secretsmanager_secret.programmatic_api_key.arn
+    }]
+  })
+}
+
 resource "aws_ecs_cluster" "app" {
   name = local.name_prefix
 
@@ -75,6 +89,7 @@ resource "aws_ecs_task_definition" "application" {
     aws_iam_role_policy.application_task_workflow_storage,
     aws_iam_role_policy.application_task_bedrock_mantle,
     aws_iam_role_policy_attachment.application_task_execution,
+    aws_iam_role_policy.application_task_execution_programmatic_api_key,
   ]
 
   container_definitions = jsonencode([
@@ -141,7 +156,10 @@ resource "aws_ecs_task_definition" "application" {
           value = local.app_url
         }
       ])
-      secrets = []
+      secrets = [{
+        name      = "DATA_CHORD_API_KEY"
+        valueFrom = data.aws_secretsmanager_secret.programmatic_api_key.arn
+      }]
       logConfiguration = {
         logDriver = "awslogs"
         options = {

@@ -179,6 +179,24 @@ resource "aws_lb_listener" "https" {
   tags = local.common_tags
 }
 
+resource "aws_lb_listener_rule" "programmatic_api" {
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 10
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.app.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/api/v1/*"]
+    }
+  }
+
+  tags = local.common_tags
+}
+
 resource "aws_route53_record" "app" {
   zone_id = data.aws_route53_zone.app.zone_id
   name    = local.app_host
