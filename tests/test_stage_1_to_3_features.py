@@ -24,8 +24,8 @@ from src.domain.harmonization import HarmonizeStatus, MatchFidelity
 from src.domain.harmonization_cache import EmptyHarmonizationCache
 from src.domain.manifest import ManifestPayload
 from src.domain.workflow_state import WorkflowState
-from src.integrations.agentic_harmonize import AgenticHarmonizeConfig, AgenticHarmonizeService
 from src.integrations.harmonize import (
+    FileHarmonizationService,
     HarmonizeResult,
     TermHarmonizationRequest,
     TermHarmonizationResponse,
@@ -763,11 +763,7 @@ async def test_stage3_http_workflow_runs_the_deterministic_term_provider(
             )
 
     provider = DeterministicProvider()
-    harmonizer = AgenticHarmonizeService(
-        AgenticHarmonizeConfig(region="us-east-2", max_workers=1),
-        cache=EmptyHarmonizationCache(),
-        term_harmonization_provider=provider,
-    )
+    harmonizer = FileHarmonizationService(provider, cache=EmptyHarmonizationCache())
     file_id = await upload_content(
         app_client,
         create_csv_content([["primary_diagnosis"], ["lung malignancy"]]),

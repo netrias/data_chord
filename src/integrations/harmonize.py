@@ -103,7 +103,7 @@ class _TermOutcome:
     match_fidelity: MatchFidelity
 
 
-class HarmonizationWorkflowService:
+class FileHarmonizationService:
     """Own file processing while delegating non-exact terms to one provider."""
 
     def __init__(
@@ -391,7 +391,7 @@ def _manifest_row(job_id: str, outcome: _TermOutcome) -> ManifestRow:
 
 
 __all__ = [
-    "HarmonizationWorkflowService",
+    "FileHarmonizationService",
     "HarmonizeResult",
     "HarmonizeService",
     "InvalidTermHarmonizationResponseError",

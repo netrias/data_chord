@@ -12,6 +12,7 @@ from src.domain.columns import column_key_for_index
 from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.harmonization import HarmonizeStatus, MatchFidelity
 from src.domain.harmonization_cache import (
+    HarmonizationCache,
     HarmonizationCacheEntry,
     HarmonizationCacheKey,
     HarmonizationCacheUnavailableError,
@@ -19,9 +20,10 @@ from src.domain.harmonization_cache import (
 from src.domain.manifest import ColumnMappingManifest
 from src.integrations.agentic_harmonize import (
     AgenticHarmonizeConfig,
-    AgenticHarmonizeService,
+    AgenticTermHarmonizer,
 )
 from src.integrations.harmonize import (
+    FileHarmonizationService,
     TermHarmonizationRequest,
     TermHarmonizationResponse,
 )
@@ -98,9 +100,21 @@ class _DeterministicProvider:
         )
 
 
+def _agentic_file_service(
+    config: AgenticHarmonizeConfig,
+    *,
+    cache: HarmonizationCache | None = None,
+) -> FileHarmonizationService:
+    return FileHarmonizationService(AgenticTermHarmonizer(config), cache=cache)
+
+
 def test_agentic_defaults_use_bedrock_gpt_56_with_high_reasoning() -> None:
+    # Given no agentic model overrides.
+
+    # When the default configuration is created.
     config = AgenticHarmonizeConfig(region="us-east-2")
 
+    # Then every agent role uses the approved model and reasoning settings.
     assert config.explorer_model.name == "gpt-5.6-luna"
     assert config.shortlister_model.name == "gpt-5.6-luna"
     assert config.selector_model.name == "gpt-5.6-sol"
@@ -113,6 +127,7 @@ def test_agentic_harmonization_collapses_duplicates_only_within_each_column(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
+    # Given duplicate values occur in two columns with different CDEs.
     source = tmp_path / "source.csv"
     source.write_text("diagnosis,treatment\nsame,same\nsame,same\n", encoding="utf-8")
     output = tmp_path / "output.csv"
@@ -140,8 +155,9 @@ def test_agentic_harmonization_collapses_duplicates_only_within_each_column(
         return object()
 
     monkeypatch.setattr("src.integrations.agentic_harmonize.make_provider_client", fake_client)
-    service = AgenticHarmonizeService(AgenticHarmonizeConfig(region="us-east-2", max_workers=2))
+    service = _agentic_file_service(AgenticHarmonizeConfig(region="us-east-2", max_workers=2))
 
+    # When the file service runs with the agentic term provider.
     result = service.run(
         file_path=source,
         data_model_version=MODEL_VERSION,
@@ -155,6 +171,7 @@ def test_agentic_harmonization_collapses_duplicates_only_within_each_column(
         output_path=output,
     )
 
+    # Then one provider request is made per distinct term and CDE pair.
     assert result.status is HarmonizeStatus.SUCCEEDED
     assert len(calls) == 2
     assert set(model_calls) == {("gpt-5.6-luna", "gpt-5.6-luna", "gpt-5.6-sol")}
@@ -184,6 +201,7 @@ def test_agentic_harmonization_passes_through_columns_without_pvs(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
+    # Given both mapped columns have no permissible values.
     source = tmp_path / "source.csv"
     source.write_text("diagnosis,treatment\nunknown,keep\n", encoding="utf-8")
     output = tmp_path / "output.csv"
@@ -191,8 +209,9 @@ def test_agentic_harmonization_passes_through_columns_without_pvs(
         "src.integrations.agentic_harmonize.harmonize_term",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("provider must not be called")),
     )
-    service = AgenticHarmonizeService(AgenticHarmonizeConfig(region="us-east-2"))
+    service = _agentic_file_service(AgenticHarmonizeConfig(region="us-east-2"))
 
+    # When the file service runs.
     result = service.run(
         file_path=source,
         data_model_version=MODEL_VERSION,
@@ -206,6 +225,7 @@ def test_agentic_harmonization_passes_through_columns_without_pvs(
         output_path=output,
     )
 
+    # Then source values pass through without a provider request.
     assert result.status is HarmonizeStatus.SUCCEEDED
     assert read_tabular(output).rows == [["unknown", "keep"]]
     summary = read_manifest_parquet(result.manifest_path) if result.manifest_path else None
@@ -214,6 +234,7 @@ def test_agentic_harmonization_passes_through_columns_without_pvs(
 
 
 def test_agentic_no_match_keeps_the_source_value(monkeypatch, tmp_path: Path) -> None:
+    # Given the agentic provider returns NO_MATCH for each source value.
     source = tmp_path / "source.csv"
     source.write_text("diagnosis,treatment\nunknown,keep\n", encoding="utf-8")
     output = tmp_path / "output.csv"
@@ -222,8 +243,9 @@ def test_agentic_no_match_keeps_the_source_value(monkeypatch, tmp_path: Path) ->
         lambda _client, _index, term, **_kwargs: _prediction(term, "NO_MATCH", "none"),
     )
     monkeypatch.setattr("src.integrations.agentic_harmonize.make_provider_client", lambda *args, **kwargs: object())
-    service = AgenticHarmonizeService(AgenticHarmonizeConfig(region="us-east-2", max_workers=2))
+    service = _agentic_file_service(AgenticHarmonizeConfig(region="us-east-2", max_workers=2))
 
+    # When the file service runs.
     result = service.run(
         file_path=source,
         data_model_version=MODEL_VERSION,
@@ -237,6 +259,7 @@ def test_agentic_no_match_keeps_the_source_value(monkeypatch, tmp_path: Path) ->
         output_path=output,
     )
 
+    # Then each original source value remains unchanged.
     assert result.status is HarmonizeStatus.SUCCEEDED
     assert read_tabular(output).rows == [["unknown", "keep"]]
     summary = read_manifest_parquet(result.manifest_path) if result.manifest_path else None
@@ -248,6 +271,7 @@ def test_agentic_harmonization_fails_without_output_when_one_term_fails(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
+    # Given one agentic term request fails.
     source = tmp_path / "source.csv"
     source.write_text("diagnosis,treatment\ngood,bad\n", encoding="utf-8")
     output = tmp_path / "output.csv"
@@ -259,8 +283,9 @@ def test_agentic_harmonization_fails_without_output_when_one_term_fails(
 
     monkeypatch.setattr("src.integrations.agentic_harmonize.harmonize_term", fake_harmonize)
     monkeypatch.setattr("src.integrations.agentic_harmonize.make_provider_client", lambda *args, **kwargs: object())
-    service = AgenticHarmonizeService(AgenticHarmonizeConfig(region="us-east-2", max_workers=2))
+    service = _agentic_file_service(AgenticHarmonizeConfig(region="us-east-2", max_workers=2))
 
+    # When the file service runs the complete input.
     result = service.run(
         file_path=source,
         data_model_version=MODEL_VERSION,
@@ -274,6 +299,7 @@ def test_agentic_harmonization_fails_without_output_when_one_term_fails(
         output_path=output,
     )
 
+    # Then it publishes neither a partial output nor a partial manifest.
     assert result.status is HarmonizeStatus.FAILED
     assert result.detail == "Harmonization provider failed."
     assert result.manifest_path is None
@@ -302,7 +328,7 @@ def test_exact_permissible_value_skips_cache_and_bedrock(
         "src.integrations.agentic_harmonize.make_provider_client",
         lambda *args, **kwargs: object(),
     )
-    service = AgenticHarmonizeService(
+    service = _agentic_file_service(
         AgenticHarmonizeConfig(region="us-east-2"),
         cache=cache,
     )
@@ -349,7 +375,7 @@ def test_second_run_uses_the_versioned_cde_cache_without_bedrock(
         "src.integrations.agentic_harmonize.make_provider_client",
         lambda *args, **kwargs: object(),
     )
-    service = AgenticHarmonizeService(
+    service = _agentic_file_service(
         AgenticHarmonizeConfig(region="us-east-2"),
         cache=cache,
     )
@@ -392,11 +418,7 @@ def test_stale_cached_match_is_replaced_by_current_provider_result(tmp_path: Pat
         match_fidelity=MatchFidelity.STRONG,
     )
     provider = _DeterministicProvider()
-    service = AgenticHarmonizeService(
-        AgenticHarmonizeConfig(region="us-east-2"),
-        cache=cache,
-        term_harmonization_provider=provider,
-    )
+    service = FileHarmonizationService(provider, cache=cache)
 
     # When the dataset runs against the current permissible-value set.
     result = service.run(
@@ -435,7 +457,7 @@ def test_unavailable_cache_does_not_block_bedrock_or_the_result(
         "src.integrations.agentic_harmonize.make_provider_client",
         lambda *args, **kwargs: object(),
     )
-    service = AgenticHarmonizeService(
+    service = _agentic_file_service(
         AgenticHarmonizeConfig(region="us-east-2"),
         cache=_UnavailableCache(),
     )
@@ -465,10 +487,7 @@ def test_service_uses_injected_provider_for_deterministic_output(tmp_path: Path)
     source.write_text("diagnosis\nunknown\n", encoding="utf-8")
     output = tmp_path / "output.csv"
     provider = _DeterministicProvider()
-    service = AgenticHarmonizeService(
-        AgenticHarmonizeConfig(region="us-east-2"),
-        term_harmonization_provider=provider,
-    )
+    service = FileHarmonizationService(provider)
 
     # When the real harmonization service runs the dataset.
     result = service.run(
@@ -502,11 +521,7 @@ def test_use_cache_false_skips_cache_read_and_write(tmp_path: Path) -> None:
     second_output = tmp_path / "second.csv"
     cache = _MemoryCache()
     provider = _DeterministicProvider(match_index=0)
-    service = AgenticHarmonizeService(
-        AgenticHarmonizeConfig(region="us-east-2"),
-        cache=cache,
-        term_harmonization_provider=provider,
-    )
+    service = FileHarmonizationService(provider, cache=cache)
     arguments = {
         "file_path": source,
         "data_model_version": MODEL_VERSION,
@@ -549,10 +564,7 @@ def test_service_rejects_provider_value_outside_permissible_values(tmp_path: Pat
                 for _request in requests
             )
 
-    service = AgenticHarmonizeService(
-        AgenticHarmonizeConfig(region="us-east-2"),
-        term_harmonization_provider=InvalidProvider(),
-    )
+    service = FileHarmonizationService(InvalidProvider())
 
     # When the real service receives the invalid provider result.
     result = service.run(

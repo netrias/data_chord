@@ -4,28 +4,34 @@ from pathlib import Path
 
 from src.local_inference.catalog import LocalModelConfigurationError
 from src.local_inference.service import (
-    LocalInference,
     LocalInferenceError,
+    LocalTermHarmonizer,
     UnsupportedCdeError,
 )
 
 
-def load_local_inference(config_path: "Path", models_root: "Path") -> LocalInference:
+def load_local_term_harmonizer(config_path: "Path", models_root: "Path") -> LocalTermHarmonizer:
     """Create the complete local inference boundary from one checked file."""
     from src.local_inference.catalog import load_model_catalog
-    from src.local_inference.transformers_runner import TransformersModelRunner
+
+    try:
+        from src.local_inference.transformers_runner import TransformersModelRunner
+    except ModuleNotFoundError as exc:
+        if exc.name not in {"torch", "transformers"}:
+            raise
+        raise LocalInferenceError("Image was not built with local inference support") from exc
 
     catalog = load_model_catalog(config_path, models_root)
     runner = TransformersModelRunner()
     for model in catalog.models:
         runner.check(catalog.model_path(model), load_model=False)
-    return LocalInference(catalog, runner)
+    return LocalTermHarmonizer(catalog, runner)
 
 
 __all__ = [
-    "LocalInference",
     "LocalInferenceError",
     "LocalModelConfigurationError",
+    "LocalTermHarmonizer",
     "UnsupportedCdeError",
-    "load_local_inference",
+    "load_local_term_harmonizer",
 ]

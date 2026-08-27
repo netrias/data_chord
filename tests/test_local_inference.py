@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import builtins
 import json
 from pathlib import Path
+from typing import cast
 
 import pytest
 import torch
@@ -21,15 +23,15 @@ from transformers import (
 
 from src.domain.harmonization import MatchFidelity
 from src.integrations.harmonize import TermHarmonizationRequest, TermHarmonizationResponse
-from src.local_inference import load_local_inference
+from src.local_inference import load_local_term_harmonizer
 from src.local_inference.catalog import (
     LocalModelConfig,
     LocalModelConfigurationError,
     load_model_catalog,
 )
 from src.local_inference.service import (
-    LocalInference,
     LocalInferenceError,
+    LocalTermHarmonizer,
 )
 from src.local_inference.transformers_runner import TransformersModelRunner
 
@@ -54,16 +56,24 @@ def _request(
     )
 
 
-def _write_tiny_transformers_model(model_path: Path, architecture: str) -> None:
-    vocabulary = {"[PAD]": 0, "[UNK]": 1, "CDE": 2, "sex": 3, "Source": 4, "value": 5, "m": 6}
+def _write_tiny_transformers_model(
+    model_path: Path,
+    architecture: str,
+    *,
+    include_padding_token: bool = True,
+) -> None:
+    vocabulary = {"[UNK]": 0, "CDE": 1, "sex": 2, "Source": 3, "value": 4, "m": 5}
+    if include_padding_token:
+        vocabulary["[PAD]"] = len(vocabulary)
     raw_tokenizer = Tokenizer(WordLevel(vocabulary, unk_token="[UNK]"))
     raw_tokenizer.pre_tokenizer = Whitespace()
     tokenizer = PreTrainedTokenizerFast(
         tokenizer_object=raw_tokenizer,
-        pad_token="[PAD]",
+        pad_token="[PAD]" if include_padding_token else None,
         unk_token="[UNK]",
         model_max_length=32,
     )
+    pad_token_id = cast(int | None, tokenizer.pad_token_id)
     labels = {0: "Male", 1: "Female"}
     if architecture == "gpt2":
         gpt2_config = GPT2Config(
@@ -72,7 +82,7 @@ def _write_tiny_transformers_model(model_path: Path, architecture: str) -> None:
             n_embd=8,
             n_layer=1,
             n_head=1,
-            pad_token_id=0,
+            pad_token_id=pad_token_id,
         )
         gpt2_config.id2label = labels
         gpt2_config.label2id = {label: index for index, label in labels.items()}
@@ -84,7 +94,7 @@ def _write_tiny_transformers_model(model_path: Path, architecture: str) -> None:
             num_hidden_layers=1,
             num_attention_heads=1,
             intermediate_size=16,
-            pad_token_id=0,
+            pad_token_id=pad_token_id,
         )
         bert_config.id2label = labels
         bert_config.label2id = {label: index for index, label in labels.items()}
@@ -201,7 +211,53 @@ def test_local_inference_rejects_a_model_without_configuration_or_tokenizer(tmp_
 
     # When application wiring loads local inference, then it rejects the unusable model at startup.
     with pytest.raises(LocalInferenceError, match="Local model check failed"):
-        load_local_inference(config_path, tmp_path)
+        load_local_term_harmonizer(config_path, tmp_path)
+
+
+def test_local_inference_reports_an_image_without_runtime_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # Given the image does not contain the optional local inference runtime.
+    real_import = builtins.__import__
+
+    def import_without_torch(
+        name: str,
+        globals: dict[str, object] | None = None,
+        locals: dict[str, object] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> object:
+        if name == "src.local_inference.transformers_runner":
+            raise ModuleNotFoundError("No module named 'torch'", name="torch")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", import_without_torch)
+
+    # When local inference is selected.
+    with pytest.raises(LocalInferenceError) as exc_info:
+        load_local_term_harmonizer(tmp_path / "local_models.json", tmp_path / "models")
+
+    # Then startup reports the missing image capability in operator language.
+    assert str(exc_info.value) == "Image was not built with local inference support"
+
+
+def test_local_inference_rejects_a_model_without_a_padding_token(tmp_path: Path) -> None:
+    # Given a complete GPT-2 export whose tokenizer cannot pad a batch.
+    model_path = tmp_path / "gpt2-without-padding"
+    _write_tiny_transformers_model(
+        model_path,
+        "gpt2",
+        include_padding_token=False,
+    )
+    config_path = _write_config(tmp_path, [{"path": model_path.name, "cdes": ["sex"]}])
+
+    # When application wiring checks the model before startup.
+    with pytest.raises(LocalInferenceError) as exc_info:
+        load_local_term_harmonizer(config_path, tmp_path)
+
+    # Then Stage 3 cannot receive a model that would fail during batch padding.
+    assert "padding token" in str(exc_info.value)
 
 
 def test_local_inference_groups_requests_by_model_and_restores_request_order(tmp_path: Path) -> None:
@@ -219,7 +275,7 @@ def test_local_inference_groups_requests_by_model_and_restores_request_order(tmp
         tmp_path,
     )
     runner = _RecordingRunner()
-    inference = LocalInference(catalog, runner)
+    inference = LocalTermHarmonizer(catalog, runner)
     requests = (
         _request("specimen_type", "tumor", frozenset({"Tissue"})),
         _request("sex", "m", frozenset({"Male"})),
@@ -245,7 +301,7 @@ def test_local_inference_rejects_an_unassigned_cde_before_loading_a_model(tmp_pa
         tmp_path,
     )
     runner = _RecordingRunner()
-    inference = LocalInference(catalog, runner)
+    inference = LocalTermHarmonizer(catalog, runner)
 
     # When local inference receives the unsupported request, then no model is loaded.
     with pytest.raises(KeyError, match="specimen_type"):

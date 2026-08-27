@@ -18,12 +18,12 @@ from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.dataset_workflow_ids import dataset_workflow_id_from_string
 from src.domain.reference_data import ReferenceModel
-from src.integrations.agentic_harmonize import AgenticHarmonizeService, AgenticTermHarmonizer
+from src.integrations.agentic_harmonize import AgenticTermHarmonizer
 from src.integrations.bedrock_cde_ranker import BedrockCandidateRanker
 from src.integrations.cde_recommendation import CdeRecommendationAdapter
 from src.integrations.dynamodb_harmonization_cache import DynamoDbHarmonizationCache
 from src.integrations.dynamodb_reference_data import DynamoDbReferenceDataRepository
-from src.integrations.harmonize import HarmonizationWorkflowService
+from src.integrations.harmonize import FileHarmonizationService
 from src.integrations.sqlite_reference_data import SqliteReferenceDataImporter
 from src.settings import ConfigurationError
 from src.storage import LocalWorkflowStorage, UserContext
@@ -75,7 +75,7 @@ def test_agentic_method_builds_only_the_bedrock_harmonizer(monkeypatch) -> None:
     service = dependencies.get_harmonize_service()
 
     # Then the in-task agentic harmonizer is the only implementation.
-    assert isinstance(service, AgenticHarmonizeService)
+    assert isinstance(service, FileHarmonizationService)
     assert service._cache is cache  # noqa: SLF001 - verifies application wiring
     assert isinstance(service._provider, AgenticTermHarmonizer)  # noqa: SLF001
 
@@ -88,18 +88,18 @@ def test_local_method_builds_only_the_local_harmonizer(monkeypatch, tmp_path: Pa
     monkeypatch.setattr(dependencies, "LOCAL_MODELS_CONFIG_PATH", config_path)
     monkeypatch.setattr(dependencies, "LOCAL_MODELS_ROOT", models_root)
     monkeypatch.setattr(dependencies, "_harmonize_service", None)
-    monkeypatch.setattr(dependencies, "_local_inference", None)
+    monkeypatch.setattr(dependencies, "_local_term_harmonizer", None)
     local_inference = MagicMock()
-    load_local_inference = MagicMock(return_value=local_inference)
-    monkeypatch.setattr(dependencies, "load_local_inference", load_local_inference)
+    load_local_term_harmonizer = MagicMock(return_value=local_inference)
+    monkeypatch.setattr(dependencies, "load_local_term_harmonizer", load_local_term_harmonizer)
 
     # When normal application wiring creates the harmonizer.
     service = dependencies.get_harmonize_service()
 
     # Then the common file workflow receives only the local provider.
-    assert type(service) is HarmonizationWorkflowService
+    assert type(service) is FileHarmonizationService
     assert service._provider is local_inference  # noqa: SLF001 - verifies application wiring
-    load_local_inference.assert_called_once_with(config_path, models_root)
+    load_local_term_harmonizer.assert_called_once_with(config_path, models_root)
 
 
 def test_harmonization_cache_uses_the_configured_table(monkeypatch) -> None:

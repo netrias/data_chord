@@ -95,11 +95,16 @@ class TransformersModelRunner:
                 local_files_only=True,
                 trust_remote_code=False,
             )
-            AutoTokenizer.from_pretrained(  # nosec B615
-                model_path,
-                local_files_only=True,
-                trust_remote_code=False,
+            tokenizer = cast(
+                PreTrainedTokenizerBase,
+                AutoTokenizer.from_pretrained(  # nosec B615
+                    model_path,
+                    local_files_only=True,
+                    trust_remote_code=False,
+                ),
             )
+            if tokenizer.pad_token_id is None:
+                raise LocalInferenceError("Local model tokenizer has no padding token")
             if load_model:
                 model = AutoModelForSequenceClassification.from_pretrained(  # nosec B615
                     model_path,

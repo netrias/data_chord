@@ -23,10 +23,7 @@ from agent_experiment import (
 )
 
 from src.domain.harmonization import MatchFidelity
-from src.domain.harmonization_cache import HarmonizationCache
 from src.integrations.harmonize import (
-    HarmonizationWorkflowService,
-    TermHarmonizationProvider,
     TermHarmonizationRequest,
     TermHarmonizationResponse,
 )
@@ -145,22 +142,6 @@ class AgenticTermHarmonizer:
         return client
 
 
-class AgenticHarmonizeService(HarmonizationWorkflowService):
-    """Configure the provider-neutral file workflow for Bedrock."""
-
-    def __init__(
-        self,
-        config: AgenticHarmonizeConfig,
-        *,
-        cache: HarmonizationCache | None = None,
-        term_harmonization_provider: TermHarmonizationProvider | None = None,
-    ) -> None:
-        super().__init__(
-            term_harmonization_provider or AgenticTermHarmonizer(config),
-            cache=cache,
-        )
-
-
 def _build_indexes(
     requests: tuple[TermHarmonizationRequest, ...],
 ) -> dict[tuple[str, ...], tuple[PvsIndex, IndexBundle]]:
@@ -175,6 +156,5 @@ def _build_indexes(
 
 __all__ = [
     "AgenticHarmonizeConfig",
-    "AgenticHarmonizeService",
     "AgenticTermHarmonizer",
 ]

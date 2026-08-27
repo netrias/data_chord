@@ -26,7 +26,7 @@ class LocalModelRunner(Protocol):
     ) -> tuple[TermHarmonizationResponse, ...]: ...
 
 
-class LocalInference:
+class LocalTermHarmonizer:
     """The provider-neutral harmonization boundary for local models."""
 
     def __init__(self, catalog: LocalModelCatalog, runner: LocalModelRunner) -> None:
@@ -80,7 +80,7 @@ class LocalInference:
 
 
 __all__ = [
-    "LocalInference",
+    "LocalTermHarmonizer",
     "LocalInferenceError",
     "LocalModelRunner",
     "UnsupportedCdeError",
