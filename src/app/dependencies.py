@@ -28,6 +28,7 @@ from src.integrations.harmonize import HarmonizeService
 from src.integrations.sqlite_reference_data import SqliteReferenceDataRepository
 from src.integrations.value_overlap_cde_recommendation import ValueOverlapCdeRecommender
 from src.local_inference import (
+    LocalInferenceError,
     LocalInferenceProvider,
     LocalModelConfigurationError,
     load_local_inference,
@@ -219,7 +220,7 @@ def get_local_inference() -> LocalInferenceProvider | None:
     if _local_inference is None:
         try:
             _local_inference = load_local_inference(config_path)
-        except LocalModelConfigurationError as exc:
+        except (LocalModelConfigurationError, LocalInferenceError) as exc:
             raise ConfigurationError(str(exc)) from exc
     return _local_inference
 

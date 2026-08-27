@@ -93,14 +93,18 @@ def test_harmonizer_loads_the_single_local_model_file(monkeypatch, tmp_path: Pat
     monkeypatch.setattr(dependencies, "_harmonize_service", None)
     monkeypatch.setattr(dependencies, "_local_inference", None)
     monkeypatch.setattr(dependencies, "get_harmonization_cache", MagicMock())
+    local_inference = MagicMock()
+    local_inference.supported_cdes = frozenset({"cell_type"})
+    load_local_inference = MagicMock(return_value=local_inference)
+    monkeypatch.setattr(dependencies, "load_local_inference", load_local_inference)
 
     # When normal application wiring creates the harmonizer.
     service = dependencies.get_harmonize_service()
 
     # Then the application receives only the small local inference boundary.
     assert isinstance(service, AgenticHarmonizeService)
-    assert service._local_inference is not None  # noqa: SLF001 - verifies application wiring
-    assert service._local_inference.supported_cdes == frozenset({"cell_type"})  # noqa: SLF001
+    assert service._local_inference is local_inference  # noqa: SLF001 - verifies application wiring
+    load_local_inference.assert_called_once_with(config_path)
 
 
 def test_harmonization_cache_uses_the_configured_table(monkeypatch) -> None:

@@ -264,11 +264,12 @@ def test_portable_runtime_rejects_an_empty_standards_catalog(tmp_path: Path) -> 
 
 
 def test_portable_runtime_rejects_an_invalid_local_model_file(tmp_path: Path) -> None:
-    # Given portable standards and a local model file that names a missing directory.
+    # Given portable standards and a local model file that names an empty model directory.
     _initialize_portable_standards(tmp_path / "standards.sqlite")
+    (tmp_path / "empty-model").mkdir()
     config_path = tmp_path / "local_models.json"
     config_path.write_text(
-        '{"models":[{"path":"missing-model","cdes":["cell_type"]}]}',
+        '{"models":[{"path":"empty-model","cdes":["cell_type"]}]}',
         encoding="utf-8",
     )
 
@@ -284,7 +285,7 @@ def test_portable_runtime_rejects_an_invalid_local_model_file(tmp_path: Path) ->
 
     # Then startup fails before health checks can report an unusable service.
     assert result.returncode != 0
-    assert "Local model directory does not exist" in result.stderr
+    assert "Local model check failed" in result.stderr
 
 
 def test_importing_application_package_does_not_start_application() -> None:

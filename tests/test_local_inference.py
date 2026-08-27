@@ -20,9 +20,11 @@ from transformers import (
 )
 
 from src.domain.harmonization import MatchFidelity
+from src.local_inference import load_local_inference
 from src.local_inference.catalog import LocalModelConfigurationError, load_model_catalog
 from src.local_inference.service import (
     LocalInference,
+    LocalInferenceError,
     LocalInferenceRequest,
     LocalInferenceResult,
 )
@@ -47,30 +49,29 @@ def _write_tiny_transformers_model(model_path: Path, architecture: str) -> None:
     )
     labels = {0: "Male", 1: "Female"}
     if architecture == "gpt2":
-        model: PreTrainedModel = GPT2ForSequenceClassification(GPT2Config(
+        gpt2_config = GPT2Config(
             vocab_size=len(vocabulary),
             n_positions=32,
-            n_ctx=32,
             n_embd=8,
             n_layer=1,
             n_head=1,
             pad_token_id=0,
-            num_labels=len(labels),
-            id2label=labels,
-            label2id={label: index for index, label in labels.items()},
-        ))
+        )
+        gpt2_config.id2label = labels
+        gpt2_config.label2id = {label: index for index, label in labels.items()}
+        model: PreTrainedModel = GPT2ForSequenceClassification(gpt2_config)
     else:
-        model = BertForSequenceClassification(BertConfig(
+        bert_config = BertConfig(
             vocab_size=len(vocabulary),
             hidden_size=8,
             num_hidden_layers=1,
             num_attention_heads=1,
             intermediate_size=16,
             pad_token_id=0,
-            num_labels=len(labels),
-            id2label=labels,
-            label2id={label: index for index, label in labels.items()},
-        ))
+        )
+        bert_config.id2label = labels
+        bert_config.label2id = {label: index for index, label in labels.items()}
+        model = BertForSequenceClassification(bert_config)
     for parameter in model.parameters():
         torch.nn.init.zeros_(parameter)
     model.save_pretrained(model_path)
@@ -144,6 +145,16 @@ def test_catalog_rejects_a_model_path_outside_the_config_directory(tmp_path: Pat
     # When the file is validated, then the escaped path is rejected at the boundary.
     with pytest.raises(LocalModelConfigurationError, match="must stay inside"):
         load_model_catalog(config_path)
+
+
+def test_local_inference_rejects_a_model_without_configuration_or_tokenizer(tmp_path: Path) -> None:
+    # Given the model file points to an existing but empty directory.
+    (tmp_path / "empty-model").mkdir()
+    config_path = _write_config(tmp_path, [{"path": "empty-model", "cdes": ["cell_type"]}])
+
+    # When application wiring loads local inference, then it rejects the unusable model at startup.
+    with pytest.raises(LocalInferenceError, match="Local model check failed"):
+        load_local_inference(config_path)
 
 
 def test_local_inference_groups_requests_by_model_and_restores_request_order(tmp_path: Path) -> None:

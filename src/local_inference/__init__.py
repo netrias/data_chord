@@ -18,7 +18,11 @@ def load_local_inference(config_path: "Path") -> LocalInference:
     from src.local_inference.catalog import load_model_catalog
     from src.local_inference.transformers_runner import TransformersModelRunner
 
-    return LocalInference(load_model_catalog(config_path), TransformersModelRunner())
+    catalog = load_model_catalog(config_path)
+    runner = TransformersModelRunner()
+    for model in catalog.models:
+        runner.check(catalog.model_path(model), load_model=False)
+    return LocalInference(catalog, runner)
 
 __all__ = [
     "LocalInference",

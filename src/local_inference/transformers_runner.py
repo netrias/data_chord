@@ -26,7 +26,7 @@ from src.local_inference.service import (
 
 logger = logging.getLogger(__name__)
 
-_BATCH_SIZE = 64
+_BATCH_SIZE = 8
 _STRONG_CONFIDENCE = 0.9
 _NO_MATCH = "NO_MATCH"
 
@@ -48,7 +48,8 @@ class TransformersModelRunner:
         try:
             tokenizer = cast(
                 PreTrainedTokenizerBase,
-                AutoTokenizer.from_pretrained(
+                # Bandit cannot infer that the checked path and local-only flag block Hub downloads.
+                AutoTokenizer.from_pretrained(  # nosec B615
                     model_path,
                     local_files_only=True,
                     trust_remote_code=False,
@@ -56,7 +57,7 @@ class TransformersModelRunner:
             )
             model = cast(
                 PreTrainedModel,
-                AutoModelForSequenceClassification.from_pretrained(
+                AutoModelForSequenceClassification.from_pretrained(  # nosec B615
                     model_path,
                     local_files_only=True,
                     trust_remote_code=False,
@@ -91,18 +92,19 @@ class TransformersModelRunner:
     def check(self, model_path: Path, *, load_model: bool) -> str:
         """Check local metadata, and optionally prove that all weights load."""
         try:
-            config = AutoConfig.from_pretrained(
+            # Bandit cannot infer that the checked path and local-only flag block Hub downloads.
+            config = AutoConfig.from_pretrained(  # nosec B615
                 model_path,
                 local_files_only=True,
                 trust_remote_code=False,
             )
-            AutoTokenizer.from_pretrained(
+            AutoTokenizer.from_pretrained(  # nosec B615
                 model_path,
                 local_files_only=True,
                 trust_remote_code=False,
             )
             if load_model:
-                model = AutoModelForSequenceClassification.from_pretrained(
+                model = AutoModelForSequenceClassification.from_pretrained(  # nosec B615
                     model_path,
                     local_files_only=True,
                     trust_remote_code=False,
@@ -121,6 +123,7 @@ def _run_batches(
     device: torch.device,
 ) -> tuple[LocalInferenceResult, ...]:
     results: list[LocalInferenceResult] = []
+    model_labels = _model_labels(model)
     for start in range(0, len(requests), _BATCH_SIZE):
         batch = requests[start : start + _BATCH_SIZE]
         encoded = tokenizer(
@@ -132,7 +135,7 @@ def _run_batches(
         with torch.inference_mode():
             logits = model(**encoded).logits.detach().to("cpu")
         results.extend(
-            _decode_result(_model_labels(model), request, row)
+            _decode_result(model_labels, request, row)
             for request, row in zip(batch, logits, strict=True)
         )
     return tuple(results)
