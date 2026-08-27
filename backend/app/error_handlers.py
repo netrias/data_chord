@@ -178,6 +178,8 @@ def _request_id_for_log(request: Request) -> str | None:
 def _uses_generic_api_error(request: Request) -> bool:
     """Apply generic details to JSON endpoints while leaving HTML page handlers alone."""
     path = request.url.path
+    if path.startswith("/api/"):
+        return True
     if path == CLIENT_EVENTS_ENDPOINT:
         return True
     if not path.startswith("/stage-"):
