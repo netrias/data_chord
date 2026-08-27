@@ -105,6 +105,12 @@ Do not put credentials in the image.
 ### Use local harmonization models
 
 Local harmonization is a separate method from agentic harmonization. The image
+must be built with `--build-arg DATA_CHORD_INCLUDE_LOCAL_INFERENCE=true`. This
+keeps the large Torch and NVIDIA libraries out of images that use only agentic
+harmonization. Use the same checked build command above with this one additional
+argument.
+
+The local-model image
 contains `/app/config/local_models.json`. Edit `config/local_models.json` in the
 repository and build a new image when model assignments or inference settings
 change. Put only the large model directories on the mounted `/models` volume.
@@ -150,6 +156,10 @@ docker run --rm \
 ```
 
 All mounted model files must be readable by the image's non-root `appuser`.
+
+Before delivery, run `just verify-local-inference-container`. This builds both
+image forms and runs a complete local-model job with generated GPT-2 and BERT
+models. It does not use Bedrock or store test models in the repository.
 
 The application converts the complete JSON file to typed configuration and
 checks every model directory at startup. During Stage 3 it groups all terms for
