@@ -19,6 +19,8 @@ from src.paths import PROJECT_ROOT
 
 _RUNTIME_CONFIG_NAMES = (
     "DATA_CHORD_AGENTIC_WORKERS",
+    "DATA_CHORD_API_KEY",
+    "DATA_CHORD_MAX_ACTIVE_JOBS",
     "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE",
     "DATA_CHORD_MODE",
     "DATA_CHORD_HARMONIZATION_CACHE_TABLE",
@@ -100,6 +102,24 @@ def _run_import(module: str, settings: dict[str, str]) -> subprocess.CompletedPr
                 "DATA_CHORD_AGENTIC_WORKERS": "101",
             },
             "DATA_CHORD_AGENTIC_WORKERS must not exceed 100",
+        ),
+        (
+            {
+                "DATA_CHORD_REFERENCE_TABLE": "reference",
+                "DATA_CHORD_HARMONIZATION_CACHE_TABLE": "cache",
+                "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE": "cde-cache",
+                "DATA_CHORD_MAX_ACTIVE_JOBS": "0",
+            },
+            "DATA_CHORD_MAX_ACTIVE_JOBS must be positive",
+        ),
+        (
+            {
+                "DATA_CHORD_REFERENCE_TABLE": "reference",
+                "DATA_CHORD_HARMONIZATION_CACHE_TABLE": "cache",
+                "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE": "cde-cache",
+                "DATA_CHORD_API_KEY": " invalid-key",
+            },
+            "DATA_CHORD_API_KEY must be one non-empty HTTP header value",
         ),
         ({"DATA_CHORD_PROFILE": "unknown"}, "DATA_CHORD_PROFILE must be one of"),
         ({"DATA_CHORD_MODE": "unknown"}, "DATA_CHORD_MODE must be one of"),

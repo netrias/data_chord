@@ -7,18 +7,23 @@ import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse, Response
-from starlette.types import Scope
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from backend.app.error_handlers import register_api_error_handlers
 from src.auth.user_context import (
+    InvalidProgrammaticApiKeyError,
     InvalidUserContextError,
+    ProgrammaticApiNotConfiguredError,
+    bind_programmatic_artifact_user_context,
+    bind_programmatic_user_context,
     bind_user_context,
     current_user_context,
+    is_programmatic_artifact_path,
     reset_user_context,
 )
 from src.observability.events import (
@@ -33,6 +38,7 @@ from src.observability.events import (
 )
 from src.observability.router import observability_router
 from src.paths import PROJECT_ROOT, SHARED_STATIC_DIR, get_stage_static_dir
+from src.programmatic_api.router import programmatic_api_router
 from src.stage_1_upload.router import stage_one_router
 from src.stage_2_review_columns.router import stage_two_router
 from src.stage_3_harmonize.router import stage_three_router
@@ -44,6 +50,8 @@ APP_TITLE = "Data Chord"
 APP_DESCRIPTION = "Data harmonization workflow bootstrap application."
 _DEFAULT_ASSET_VERSION = "local"
 _ASSET_VERSION_VAR = "DATA_CHORD_ASSET_VERSION"
+_PROGRAMMATIC_API_MAX_BODY_BYTES = 2 * 1024 * 1024
+_PROGRAMMATIC_HARMONIZATION_MAX_BODY_BYTES = 10 * 1024 * 1024
 
 
 def _is_dev_mode() -> bool:
@@ -110,9 +118,9 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Manage app lifecycle: shutdown cleanup for HTTP clients."""
     yield
     # Shutdown: clean up resources
-    from src.app.dependencies import cleanup_services
+    from src.app.dependencies import shutdown_services
 
-    cleanup_services()
+    await shutdown_services()
 
 
 def create_app() -> FastAPI:
@@ -136,12 +144,14 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(_ProgrammaticRequestBodyLimitMiddleware)
     app.middleware("http")(_bind_user_context)
     register_api_error_handlers(app)
     app.add_exception_handler(WorkflowAccessDeniedError, _workflow_access_denied)
     app.add_exception_handler(WorkflowNotFoundError, _workflow_not_found)
 
     app.include_router(observability_router)
+    app.include_router(programmatic_api_router)
     app.include_router(stage_one_router)
     app.include_router(stage_two_router)
     app.include_router(stage_three_router)
@@ -186,8 +196,26 @@ async def _bind_user_context(request: Request, call_next: Callable[[Request], Aw
             status_code = response.status_code
         else:
             try:
-                user_token = bind_user_context(request.headers)
+                user_token = _bind_authenticated_user_context(request)
                 user_id = current_user_context().user_id
+            except ProgrammaticApiNotConfiguredError:
+                status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+                response = JSONResponse(
+                    {"detail": "Programmatic API is not configured."},
+                    status_code=status_code,
+                )
+            except InvalidProgrammaticApiKeyError:
+                status_code = status.HTTP_401_UNAUTHORIZED
+                response = JSONResponse(
+                    {
+                        "detail": (
+                            "Invalid artifact URL."
+                            if is_programmatic_artifact_path(request.url.path)
+                            else "Invalid API key."
+                        )
+                    },
+                    status_code=status_code,
+                )
             except InvalidUserContextError:
                 status_code = 401
                 response = Response("Invalid identity headers", status_code=status_code)
@@ -213,6 +241,74 @@ async def _bind_user_context(request: Request, call_next: Callable[[Request], Aw
                 )
             )
         reset_request_id(request_token)
+
+
+def _bind_authenticated_user_context(request: Request):
+    if is_programmatic_artifact_path(request.url.path):
+        return bind_programmatic_artifact_user_context(
+            request.url.path,
+            request.query_params,
+        )
+    if _is_programmatic_api(request.url.path):
+        return bind_programmatic_user_context(request.headers)
+    return bind_user_context(request.headers)
+
+
+class _ProgrammaticRequestBodyLimitMiddleware:
+    """Bound API request memory before FastAPI parses the document."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if (
+            scope["type"] != "http"
+            or not _is_programmatic_api(scope["path"])
+            or scope["method"] not in {"POST", "PUT", "PATCH"}
+        ):
+            await self._app(scope, receive, send)
+            return
+
+        body_limit = (
+            _PROGRAMMATIC_HARMONIZATION_MAX_BODY_BYTES
+            if scope["path"] == "/api/v1/jobs/harmonize"
+            else _PROGRAMMATIC_API_MAX_BODY_BYTES
+        )
+        messages: list[Message] = []
+        body_size = 0
+        while True:
+            message = await receive()
+            messages.append(message)
+            if message["type"] == "http.disconnect":
+                break
+            if message["type"] != "http.request":
+                continue
+            body_size += len(message.get("body", b""))
+            if body_size > body_limit:
+                response = JSONResponse(
+                    {"detail": "Request body is too large."},
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                )
+                await response(scope, receive, send)
+                return
+            if not message.get("more_body", False):
+                break
+
+        message_index = 0
+
+        async def replay_body() -> Message:
+            nonlocal message_index
+            if message_index >= len(messages):
+                return {"type": "http.request", "body": b"", "more_body": False}
+            message = messages[message_index]
+            message_index += 1
+            return message
+
+        await self._app(scope, replay_body, send)
+
+
+def _is_programmatic_api(path: str) -> bool:
+    return path == "/api" or path.startswith("/api/")
 
 
 def _should_log_request(path: str) -> bool:

@@ -304,13 +304,18 @@ Prepare these account resources before the first application plan:
   repository. Follow the AWS
   [secret creation procedure](https://docs.aws.amazon.com/secretsmanager/latest/userguide/create_secret.html)
   and select **Other type of secret**.
+- A Secrets Manager secret for the programmatic API key. Store one random plain
+  string with at least 32 characters. Do not store JSON. Use the default
+  AWS-managed Secrets Manager encryption key. The example name is
+  `data-chord/staging/programmatic-api-key`.
 - Access to GPT-5.6 Luna in the account's default Bedrock Mantle project, with
   enough inference quota for Data Chord.
 - An AWS profile that can assume the `deployer_role_arn` in the foundation
   handoff.
 
-The CodeConnections credential gets the Data Chord source. The secret lets the
-image build install the private dependency. Do not put a credential or secret
+The CodeConnections credential gets the Data Chord source. The GitHub App
+secret lets the image build install the private dependency. ECS reads the API
+key secret when it starts the application. Do not put a credential or secret
 value in an environment file.
 
 ## 2. Install the deployment tools
@@ -354,7 +359,7 @@ Copy six values from the foundation repository's
 | `application_role_boundary_arn` | `application_role_boundary_arn` |
 | `application_role_path` | `application_role_path` |
 
-Add the domain, hosted zone, repository, and secret name. The complete file
+Add the domain, hosted zone, repository, and secret names. The complete file
 looks like this:
 
 ```json
@@ -368,11 +373,12 @@ looks like this:
   "domain_name": "data-chord-staging.apps.example.org",
   "hosted_zone_name": "apps.example.org",
   "application_repository_url": "https://github.com/netrias/data_chord.git",
-  "github_app_secret_name": "data-chord/build/github-app"
+  "github_app_secret_name": "data-chord/build/github-app",
+  "programmatic_api_key_secret_name": "data-chord/staging/programmatic-api-key"
 }
 ```
 
-The file accepts only these ten fields. The domain must add one lowercase DNS
+The file accepts only these eleven fields. The domain must add one lowercase DNS
 label to the hosted zone. The repository URL must be an HTTPS URL that ends in
 `.git` and contains no credential.
 

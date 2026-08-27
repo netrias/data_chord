@@ -48,34 +48,37 @@ class HarmonizeService(Protocol):
         column_pv_sets: ColumnPvSets,
         output_path: Path | None = None,
         sheet_name: str | None = None,
+        use_cache: bool = True,
     ) -> HarmonizeResult: ...
 
 
 @dataclass(frozen=True)
 class TermHarmonizationRequest:
+    """Provider-neutral input for one distinct source term."""
+
     cde: str
-    source_value: str
-    permissible_values: frozenset[str]
+    input_term: str
+    permissible_values: tuple[str, ...]
     context: str
 
 
 @dataclass(frozen=True)
-class TermHarmonizationResult:
+class TermHarmonizationResponse:
+    """Provider-neutral result for one term."""
+
     matched_value: str | None
     match_fidelity: MatchFidelity
-
-    def __post_init__(self) -> None:
-        if self.matched_value is not None and not self.matched_value.strip():
-            raise ValueError("A matched value must not be empty")
-        if (self.matched_value is None) != (self.match_fidelity is MatchFidelity.NONE):
-            raise ValueError("Match fidelity must agree with the matched value")
 
 
 class TermHarmonizationProvider(Protocol):
     def harmonize(
         self,
         requests: tuple[TermHarmonizationRequest, ...],
-    ) -> tuple[TermHarmonizationResult, ...]: ...
+    ) -> tuple[TermHarmonizationResponse, ...]: ...
+
+
+class InvalidTermHarmonizationResponseError(RuntimeError):
+    """The provider returned a result outside the requested permissible values."""
 
 
 @dataclass(frozen=True)
@@ -85,7 +88,7 @@ class _TermWork:
     cde_key: str
     input_term: str
     row_indices: tuple[int, ...]
-    permissible_values: frozenset[str] | None
+    permissible_values: tuple[str, ...] | None
     is_exact_match: bool
 
     @property
@@ -121,14 +124,17 @@ class HarmonizationWorkflowService:
         column_pv_sets: ColumnPvSets,
         output_path: Path | None = None,
         sheet_name: str | None = None,
+        use_cache: bool = True,
     ) -> HarmonizeResult:
         job_id = uuid4().hex
-        requested_output = output_path or file_path.with_name(f"{file_path.stem}.harmonized{file_path.suffix}")
+        requested_output = output_path or file_path.with_name(
+            f"{file_path.stem}.harmonized{file_path.suffix}"
+        )
         manifest_path = requested_output.with_name(f"{requested_output.stem}.manifest.parquet")
         try:
             dataset = read_tabular(file_path, sheet_name)
             work = _build_work(dataset.columns, dataset.rows, prepared_manifest, column_pv_sets)
-            outcomes = self._run_terms(work, data_model_version)
+            outcomes = self._run_terms(work, data_model_version, use_cache=use_cache)
             output_rows = _apply_outcomes(dataset.rows, outcomes)
             manifest_rows = [_manifest_row(job_id, outcome) for outcome in outcomes]
             requested_output.parent.mkdir(parents=True, exist_ok=True)
@@ -156,32 +162,45 @@ class HarmonizationWorkflowService:
         self,
         work: list[_TermWork],
         data_model_version: DataModelVersionReference,
+        *,
+        use_cache: bool,
     ) -> list[_TermOutcome]:
-        outcomes = [_passthrough(item) for item in work if not item.permissible_values or not item.input_term.strip()]
-        outcomes.extend(_exact_match(item) for item in work if item.is_exact_match)
-        provider_work = [
-            item for item in work if item.permissible_values and item.input_term.strip() and not item.is_exact_match
+        outcomes = [
+            _passthrough(item)
+            for item in work
+            if not item.permissible_values or not item.input_term.strip()
         ]
-        cache_work = [(item, _cache_key(data_model_version, item)) for item in provider_work]
-        cached = self._load_cache([key for _item, key in cache_work])
-        uncached_work: list[_TermWork] = []
+        outcomes.extend(_exact_match(item) for item in work if item.is_exact_match)
+        cache_work = [
+            (item, _cache_key(data_model_version, item))
+            for item in work
+            if item.permissible_values
+            and item.input_term.strip()
+            and not item.is_exact_match
+        ]
+        cached = self._load_cache([key for _item, key in cache_work]) if use_cache else {}
+        provider_work: list[_TermWork] = []
+        invalid_cache_entries = 0
         for item, key in cache_work:
             entry = cached.get(key)
-            if entry is None:
-                uncached_work.append(item)
+            if entry is None or not _cache_entry_matches_work(item, key, entry):
+                provider_work.append(item)
+                invalid_cache_entries += entry is not None
             else:
                 outcomes.append(_cached_outcome(item, entry))
         logger.info(
             "Prepared harmonization work",
             extra={
                 "exact_matches": sum(item.is_exact_match for item in work),
-                "cache_hits": len(cache_work) - len(uncached_work),
-                "provider_terms": len(uncached_work),
+                "cache_hits": len(cache_work) - len(provider_work),
+                "invalid_cache_entries": invalid_cache_entries,
+                "provider_terms": len(provider_work),
             },
         )
-        provider_outcomes = self._run_provider_terms(uncached_work)
+        provider_outcomes = self._run_provider_terms(provider_work)
         outcomes.extend(provider_outcomes)
-        self._save_cache(data_model_version, provider_outcomes)
+        if use_cache:
+            self._save_cache(data_model_version, provider_outcomes)
         return sorted(outcomes, key=_outcome_order)
 
     def _run_provider_terms(self, work: list[_TermWork]) -> list[_TermOutcome]:
@@ -190,27 +209,21 @@ class HarmonizationWorkflowService:
         requests = tuple(
             TermHarmonizationRequest(
                 cde=item.cde_key,
-                source_value=item.input_term,
-                permissible_values=item.permissible_values or frozenset(),
+                input_term=item.input_term,
+                permissible_values=item.permissible_values or (),
                 context=item.context,
             )
             for item in work
         )
-        results = self._provider.harmonize(requests)
-        if len(results) != len(work):
-            raise RuntimeError("Harmonization provider returned an incomplete result")
-        outcomes: list[_TermOutcome] = []
-        for item, request, result in zip(work, requests, results, strict=True):
-            if result.matched_value is not None and result.matched_value not in request.permissible_values:
-                raise RuntimeError(f"Harmonization provider returned a value outside CDE {item.cde_key}")
-            outcomes.append(
-                _TermOutcome(
-                    work=item,
-                    matched_value=result.matched_value,
-                    match_fidelity=result.match_fidelity,
-                )
+        responses = self._provider.harmonize(requests)
+        if len(responses) != len(work):
+            raise InvalidTermHarmonizationResponseError(
+                "Harmonization provider returned an incomplete result"
             )
-        return outcomes
+        return [
+            _outcome_from_response(item, request, response)
+            for item, request, response in zip(work, requests, responses, strict=True)
+        ]
 
     def _load_cache(
         self,
@@ -243,6 +256,31 @@ class HarmonizationWorkflowService:
             logger.warning("Harmonization cache write failed; result remains usable", exc_info=True)
 
 
+def _outcome_from_response(
+    work: _TermWork,
+    request: TermHarmonizationRequest,
+    response: TermHarmonizationResponse,
+) -> _TermOutcome:
+    if response.matched_value is None and response.match_fidelity is not MatchFidelity.NONE:
+        raise InvalidTermHarmonizationResponseError(
+            "An unmatched provider result must use none fidelity"
+        )
+    if response.matched_value is not None:
+        if response.matched_value not in request.permissible_values:
+            raise InvalidTermHarmonizationResponseError(
+                "The provider result is not a permissible value"
+            )
+        if response.match_fidelity is MatchFidelity.NONE:
+            raise InvalidTermHarmonizationResponseError(
+                "A matched provider result must report match fidelity"
+            )
+    return _TermOutcome(
+        work=work,
+        matched_value=response.matched_value,
+        match_fidelity=response.match_fidelity,
+    )
+
+
 def _build_work(
     columns: list[TabularColumn],
     rows: list[list[str]],
@@ -251,24 +289,24 @@ def _build_work(
 ) -> list[_TermWork]:
     work: list[_TermWork] = []
     for column in columns:
-        column_id = column.index
         record = manifest.records.get(column_key_from_string(column.key))
         if record is None:
             continue
-        permissible_values = column_pv_sets.get(column.key)
+        pvs = column_pv_sets.get(column.key)
+        permissible_values = tuple(sorted(pvs)) if pvs else None
         grouped: dict[str, list[int]] = {}
         for row_index, row in enumerate(rows):
-            grouped.setdefault(row[column_id], []).append(row_index)
+            grouped.setdefault(row[column.index], []).append(row_index)
         for term, row_indices in grouped.items():
             work.append(
                 _TermWork(
-                    column_id=column_id,
+                    column_id=column.index,
                     column_name=column.header,
                     cde_key=record.cde_key,
                     input_term=term,
                     row_indices=tuple(row_indices),
                     permissible_values=permissible_values,
-                    is_exact_match=permissible_values is not None and term in permissible_values,
+                    is_exact_match=pvs is not None and term in pvs,
                 )
             )
     return work
@@ -302,6 +340,23 @@ def _cached_outcome(work: _TermWork, entry: HarmonizationCacheEntry) -> _TermOut
         work=work,
         matched_value=entry.matched_value,
         match_fidelity=entry.match_fidelity,
+    )
+
+
+def _cache_entry_matches_work(
+    work: _TermWork,
+    expected_key: HarmonizationCacheKey,
+    entry: HarmonizationCacheEntry,
+) -> bool:
+    return (
+        entry.key == expected_key
+        and (
+            entry.matched_value is None
+            or (
+                work.permissible_values is not None
+                and entry.matched_value in work.permissible_values
+            )
+        )
     )
 
 
@@ -339,7 +394,8 @@ __all__ = [
     "HarmonizationWorkflowService",
     "HarmonizeResult",
     "HarmonizeService",
+    "InvalidTermHarmonizationResponseError",
     "TermHarmonizationProvider",
     "TermHarmonizationRequest",
-    "TermHarmonizationResult",
+    "TermHarmonizationResponse",
 ]

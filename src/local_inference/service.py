@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol, cast
 
-from src.integrations.harmonize import TermHarmonizationRequest, TermHarmonizationResult
+from src.integrations.harmonize import TermHarmonizationRequest, TermHarmonizationResponse
 from src.local_inference.catalog import LocalModelCatalog, LocalModelConfig
 
 
@@ -23,7 +23,7 @@ class LocalModelRunner(Protocol):
         model_path: Path,
         model_config: LocalModelConfig,
         requests: tuple[TermHarmonizationRequest, ...],
-    ) -> tuple[TermHarmonizationResult, ...]: ...
+    ) -> tuple[TermHarmonizationResponse, ...]: ...
 
 
 class LocalInference:
@@ -36,7 +36,7 @@ class LocalInference:
     def harmonize(
         self,
         requests: tuple[TermHarmonizationRequest, ...],
-    ) -> tuple[TermHarmonizationResult, ...]:
+    ) -> tuple[TermHarmonizationResponse, ...]:
         assignments: dict[LocalModelConfig, list[tuple[int, TermHarmonizationRequest]]] = {
             model: [] for model in self._catalog.models
         }
@@ -47,7 +47,7 @@ class LocalInference:
                 raise UnsupportedCdeError(request.cde) from exc
             assignments[model].append((index, request))
 
-        ordered_results: list[TermHarmonizationResult | None] = [None] * len(requests)
+        ordered_results: list[TermHarmonizationResponse | None] = [None] * len(requests)
         for model in self._catalog.models:
             model_assignments = assignments[model]
             if not model_assignments:
@@ -76,7 +76,7 @@ class LocalInference:
 
         if any(result is None for result in ordered_results):
             raise LocalInferenceError("Local inference did not return every requested result")
-        return tuple(cast(TermHarmonizationResult, result) for result in ordered_results)
+        return tuple(cast(TermHarmonizationResponse, result) for result in ordered_results)
 
 
 __all__ = [

@@ -18,7 +18,7 @@ from transformers import (
 )
 
 from src.domain.harmonization import MatchFidelity
-from src.integrations.harmonize import TermHarmonizationRequest, TermHarmonizationResult
+from src.integrations.harmonize import TermHarmonizationRequest, TermHarmonizationResponse
 from src.local_inference.catalog import LocalModelConfig
 from src.local_inference.service import LocalInferenceError
 
@@ -35,7 +35,7 @@ class TransformersModelRunner:
         model_path: Path,
         model_config: LocalModelConfig,
         requests: tuple[TermHarmonizationRequest, ...],
-    ) -> tuple[TermHarmonizationResult, ...]:
+    ) -> tuple[TermHarmonizationResponse, ...]:
         if not requests:
             return ()
         started_at = time.perf_counter()
@@ -119,8 +119,8 @@ def _run_batches(
     requests: tuple[TermHarmonizationRequest, ...],
     device: torch.device,
     model_config: LocalModelConfig,
-) -> tuple[TermHarmonizationResult, ...]:
-    results: list[TermHarmonizationResult] = []
+) -> tuple[TermHarmonizationResponse, ...]:
+    results: list[TermHarmonizationResponse] = []
     model_labels = _model_labels(model)
     for start in range(0, len(requests), model_config.batch_size):
         batch = requests[start : start + model_config.batch_size]
@@ -145,7 +145,7 @@ def _run_batches(
 
 
 def _model_input(request: TermHarmonizationRequest) -> str:
-    return f"CDE: {request.cde}\nSource value: {request.source_value}"
+    return f"CDE: {request.cde}\nSource value: {request.input_term}"
 
 
 def _model_labels(model: PreTrainedModel) -> dict[int, str]:
@@ -161,7 +161,7 @@ def _decode_result(
     logits: torch.Tensor,
     *,
     strong_confidence: float,
-) -> TermHarmonizationResult:
+) -> TermHarmonizationResponse:
     candidates = [
         index for index, label in id_to_label.items() if label == _NO_MATCH or label in request.permissible_values
     ]
@@ -171,10 +171,10 @@ def _decode_result(
     selected_index = max(candidates, key=lambda index: float(probabilities[index]))
     selected_label = id_to_label[selected_index]
     if selected_label == _NO_MATCH:
-        return TermHarmonizationResult(None, MatchFidelity.NONE)
+        return TermHarmonizationResponse(None, MatchFidelity.NONE)
     confidence = float(probabilities[selected_index])
     fidelity = MatchFidelity.STRONG if confidence >= strong_confidence else MatchFidelity.PARTIAL
-    return TermHarmonizationResult(selected_label, fidelity)
+    return TermHarmonizationResponse(selected_label, fidelity)
 
 
 def _inference_device() -> torch.device:

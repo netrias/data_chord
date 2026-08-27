@@ -26,8 +26,9 @@ from src.domain.harmonization import MatchFidelity
 from src.domain.harmonization_cache import HarmonizationCache
 from src.integrations.harmonize import (
     HarmonizationWorkflowService,
+    TermHarmonizationProvider,
     TermHarmonizationRequest,
-    TermHarmonizationResult,
+    TermHarmonizationResponse,
 )
 
 
@@ -66,24 +67,28 @@ class AgenticTermHarmonizer:
     def harmonize(
         self,
         requests: tuple[TermHarmonizationRequest, ...],
-    ) -> tuple[TermHarmonizationResult, ...]:
+    ) -> tuple[TermHarmonizationResponse, ...]:
         if not requests:
             return ()
         indexes = _build_indexes(requests)
-        results: list[TermHarmonizationResult | None] = [None] * len(requests)
+        responses: list[TermHarmonizationResponse | None] = [None] * len(requests)
         worker_count = min(self._config.max_workers, len(requests))
         indexed_requests = iter(enumerate(requests))
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
-            futures: dict[Future[TermHarmonizationResult], int] = {}
+            futures: dict[Future[TermHarmonizationResponse], int] = {}
             for _ in range(worker_count):
                 index, request = next(indexed_requests)
-                future = executor.submit(self._harmonize_term, request, indexes[request.permissible_values])
+                future = executor.submit(
+                    self._harmonize_term,
+                    request,
+                    indexes[request.permissible_values],
+                )
                 futures[future] = index
             try:
                 while futures:
                     completed, _pending = wait(futures, return_when=FIRST_COMPLETED)
                     for future in completed:
-                        results[futures.pop(future)] = future.result()
+                        responses[futures.pop(future)] = future.result()
                         next_item = next(indexed_requests, None)
                         if next_item is not None:
                             index, request = next_item
@@ -97,19 +102,19 @@ class AgenticTermHarmonizer:
                 for future in futures:
                     future.cancel()
                 raise
-        if any(result is None for result in results):
+        if any(response is None for response in responses):
             raise RuntimeError("Agentic harmonization returned an incomplete result")
-        return tuple(result for result in results if result is not None)
+        return tuple(response for response in responses if response is not None)
 
     def _harmonize_term(
         self,
         request: TermHarmonizationRequest,
         indexes: tuple[PvsIndex, IndexBundle],
-    ) -> TermHarmonizationResult:
+    ) -> TermHarmonizationResponse:
         result = harmonize_term(
             self._provider_client(),
             indexes[0],
-            request.source_value,
+            request.input_term,
             indexes=indexes[1],
             explorer_model=self._config.explorer_model,
             shortlister_model=self._config.shortlister_model,
@@ -118,8 +123,12 @@ class AgenticTermHarmonizer:
             context=request.context,
         )
         predicted = result.prediction.predicted_match
-        fidelity = MatchFidelity.NONE if predicted == NO_MATCH else MatchFidelity(result.prediction.match_fidelity)
-        return TermHarmonizationResult(
+        fidelity = (
+            MatchFidelity.NONE
+            if predicted == NO_MATCH
+            else MatchFidelity(result.prediction.match_fidelity)
+        )
+        return TermHarmonizationResponse(
             matched_value=None if predicted == NO_MATCH else predicted,
             match_fidelity=fidelity,
         )
@@ -144,18 +153,22 @@ class AgenticHarmonizeService(HarmonizationWorkflowService):
         config: AgenticHarmonizeConfig,
         *,
         cache: HarmonizationCache | None = None,
+        term_harmonization_provider: TermHarmonizationProvider | None = None,
     ) -> None:
-        super().__init__(AgenticTermHarmonizer(config), cache=cache)
+        super().__init__(
+            term_harmonization_provider or AgenticTermHarmonizer(config),
+            cache=cache,
+        )
 
 
 def _build_indexes(
     requests: tuple[TermHarmonizationRequest, ...],
-) -> dict[frozenset[str], tuple[PvsIndex, IndexBundle]]:
-    indexes: dict[frozenset[str], tuple[PvsIndex, IndexBundle]] = {}
+) -> dict[tuple[str, ...], tuple[PvsIndex, IndexBundle]]:
+    indexes: dict[tuple[str, ...], tuple[PvsIndex, IndexBundle]] = {}
     for request in requests:
         if request.permissible_values in indexes:
             continue
-        pvs_index = build_pvs_index(sorted(request.permissible_values))
+        pvs_index = build_pvs_index(list(request.permissible_values))
         indexes[request.permissible_values] = (pvs_index, build_all_indexes(pvs_index))
     return indexes
 

@@ -463,6 +463,7 @@ async def test_adapter_bounds_profiles_and_passes_stable_catalog_identity(
     assert request["data_model_key"] == "CCDI"
     assert request["catalog_revision"] == "2024.10"
     assert request["concurrency"] == 17
+    assert request["top_k"] == 5
     package_cdes = request["all_cdes"]
     assert isinstance(package_cdes, list)
     assert package_cdes[0].pv_values == ("Breast", "Lung")

@@ -20,10 +20,16 @@ from httpx import AsyncClient
 import src.app.dependencies as dependencies
 from src.domain.cde_recommendation import RecommendationUnavailableError
 from src.domain.columns import column_key_from_string
-from src.domain.harmonization import HarmonizeStatus
+from src.domain.harmonization import HarmonizeStatus, MatchFidelity
+from src.domain.harmonization_cache import EmptyHarmonizationCache
 from src.domain.manifest import ManifestPayload
 from src.domain.workflow_state import WorkflowState
-from src.integrations.harmonize import HarmonizeResult
+from src.integrations.agentic_harmonize import AgenticHarmonizeConfig, AgenticHarmonizeService
+from src.integrations.harmonize import (
+    HarmonizeResult,
+    TermHarmonizationRequest,
+    TermHarmonizationResponse,
+)
 from src.persistence.harmonization_job_store import HarmonizationJobState
 from src.persistence.workflow_state_store import load_workflow_state
 from src.storage import UploadStorage, WorkflowFile
@@ -668,6 +674,7 @@ async def test_stage3_harmonize_uses_stored_selection(
             column_pv_sets,
             output_path,
             sheet_name,
+            use_cache,
         ):
             self.called = True
             self.sheet_name = sheet_name
@@ -705,7 +712,7 @@ async def test_stage3_harmonize_uses_stored_selection(
     # When: harmonization is triggered from the confirmed workflow
     import unittest.mock
 
-    with unittest.mock.patch("src.stage_3_harmonize.router.get_harmonize_service", return_value=stub):
+    with unittest.mock.patch("src.app.dependencies.get_harmonize_service", return_value=stub):
         response = await app_client.post(
             "/stage-3/harmonize",
             json={"file_id": file_id},
@@ -734,6 +741,80 @@ async def test_stage3_harmonize_uses_stored_selection(
     assert context_response.json() == {"headers": ["diagnosis"], "rows": [["Lung"]]}
 
 
+async def test_stage3_http_workflow_runs_the_deterministic_term_provider(
+    app_client: AsyncClient,
+) -> None:
+    # Given: a confirmed workflow and the real harmonizer with a no-cost provider.
+    class DeterministicProvider:
+        def __init__(self) -> None:
+            self.requests: list[TermHarmonizationRequest] = []
+
+        def harmonize(
+            self,
+            requests: tuple[TermHarmonizationRequest, ...],
+        ) -> tuple[TermHarmonizationResponse, ...]:
+            self.requests.extend(requests)
+            return tuple(
+                TermHarmonizationResponse(
+                    matched_value="Lung Cancer",
+                    match_fidelity=MatchFidelity.STRONG,
+                )
+                for _request in requests
+            )
+
+    provider = DeterministicProvider()
+    harmonizer = AgenticHarmonizeService(
+        AgenticHarmonizeConfig(region="us-east-2", max_workers=1),
+        cache=EmptyHarmonizationCache(),
+        term_harmonization_provider=provider,
+    )
+    file_id = await upload_content(
+        app_client,
+        create_csv_content([["primary_diagnosis"], ["lung malignancy"]]),
+        "deterministic-provider.csv",
+    )
+    analysis = await app_client.post(
+        "/stage-1/analyze",
+        json={
+            "file_id": file_id,
+            "data_model_key": TEST_TARGET_SCHEMA,
+            "external_version_number": "11.0.4",
+        },
+    )
+    assert analysis.status_code == 200
+    await confirm_mapping_choices(
+        app_client,
+        file_id,
+        manual_overrides={"col_0000": "primary_diagnosis"},
+    )
+
+    # When: the HTTP application accepts, runs, polls, and downloads the job.
+    import unittest.mock
+
+    with unittest.mock.patch("src.app.dependencies.get_harmonize_service", return_value=harmonizer):
+        accepted = await app_client.post("/stage-3/harmonize", json={"file_id": file_id})
+    assert accepted.status_code == 200
+    completed = accepted.json()
+    if completed["status"] != "succeeded":
+        completed = await _wait_for_stage_three_job(app_client, completed["job_id"], file_id)
+    download = await app_client.post("/stage-5/download", json={"file_id": file_id})
+
+    # Then: one provider term produces the exact durable output and summary.
+    assert completed["status"] == "succeeded"
+    manifest_summary = cast(dict[str, object], completed["manifest_summary"])
+    assert manifest_summary["changed_terms"] == 1
+    assert provider.requests == [
+        TermHarmonizationRequest(
+            cde="primary_diagnosis",
+            input_term="lung malignancy",
+            permissible_values=("Breast Cancer", "Diabetes", "Hypertension", "Lung Cancer"),
+            context="Source column: primary_diagnosis\nTarget CDE: primary_diagnosis",
+        )
+    ]
+    assert download.status_code == 200
+    assert _read_downloaded_csv(download.content) == [{"primary_diagnosis": "Lung Cancer"}]
+
+
 async def test_stage3_rerun_removes_decisions_from_the_previous_result(
     app_client: AsyncClient,
     tmp_path: Path,
@@ -753,6 +834,7 @@ async def test_stage3_rerun_removes_decisions_from_the_previous_result(
             column_pv_sets,
             output_path,
             sheet_name,
+            use_cache,
         ):
             self.run_count += 1
             shutil.copy2(file_path, output_path)
@@ -800,7 +882,7 @@ async def test_stage3_rerun_removes_decisions_from_the_previous_result(
     import unittest.mock
 
     with unittest.mock.patch(
-        "src.stage_3_harmonize.router.get_harmonize_service",
+        "src.app.dependencies.get_harmonize_service",
         return_value=stub,
     ):
         first_run = await app_client.post("/stage-3/harmonize", json={"file_id": file_id})
@@ -853,6 +935,7 @@ async def test_stage3_harmonize_returns_queued_while_long_job_finishes(
             column_pv_sets,
             output_path,
             sheet_name,
+            use_cache,
         ):
             time.sleep(0.5)
             return _successful_stage_three_result(file_path, output_path, "job-slow")
@@ -869,7 +952,7 @@ async def test_stage3_harmonize_returns_queued_while_long_job_finishes(
     # When: harmonization is triggered and the harmonizer is still running
     import unittest.mock
 
-    with unittest.mock.patch("src.stage_3_harmonize.router.get_harmonize_service", return_value=SlowStubHarmonizer()):
+    with unittest.mock.patch("src.app.dependencies.get_harmonize_service", return_value=SlowStubHarmonizer()):
         response = await app_client.post(
             "/stage-3/harmonize",
             json={"file_id": file_id},
@@ -910,6 +993,7 @@ async def test_stage3_job_status_reads_durable_state_after_worker_task_ends(
             column_pv_sets,
             output_path,
             sheet_name,
+            use_cache,
         ):
             time.sleep(0.5)
             return _successful_stage_three_result(file_path, output_path, "job-durable")
@@ -926,7 +1010,7 @@ async def test_stage3_job_status_reads_durable_state_after_worker_task_ends(
 
     import unittest.mock
 
-    with unittest.mock.patch("src.stage_3_harmonize.router.get_harmonize_service", return_value=SlowStubHarmonizer()):
+    with unittest.mock.patch("src.app.dependencies.get_harmonize_service", return_value=SlowStubHarmonizer()):
         response = await app_client.post(
             "/stage-3/harmonize",
             json={"file_id": file_id},
@@ -1032,6 +1116,7 @@ async def test_stage3_harmonize_prefers_stored_mapping_choices_over_stale_reques
             column_pv_sets,
             output_path,
             sheet_name,
+            use_cache,
         ):
             self.received_manifest = prepared_manifest.to_payload()
             return _successful_stage_three_result(file_path, output_path, "job-choices")
@@ -1057,7 +1142,7 @@ async def test_stage3_harmonize_prefers_stored_mapping_choices_over_stale_reques
     # When: Stage 3 runs from the confirmed workflow
     import unittest.mock
 
-    with unittest.mock.patch("src.stage_3_harmonize.router.get_harmonize_service", return_value=stub):
+    with unittest.mock.patch("src.app.dependencies.get_harmonize_service", return_value=stub):
         response = await app_client.post(
             "/stage-3/harmonize",
             json={"file_id": file_id},
@@ -1092,6 +1177,7 @@ async def test_stage3_applies_confirmed_column_renames_to_download(
             column_pv_sets,
             output_path,
             sheet_name,
+            use_cache,
         ):
             with output_path.open("w", newline="", encoding="utf-8") as handle:
                 writer = csv.writer(handle)
@@ -1143,7 +1229,7 @@ async def test_stage3_applies_confirmed_column_renames_to_download(
     # When: Stage 3 runs and Stage 5 downloads the final dataset
     import unittest.mock
 
-    with unittest.mock.patch("src.stage_3_harmonize.router.get_harmonize_service", return_value=StubHarmonizer()):
+    with unittest.mock.patch("src.app.dependencies.get_harmonize_service", return_value=StubHarmonizer()):
         harmonize_response = await app_client.post(
             "/stage-3/harmonize",
             json={"file_id": file_id},
@@ -1181,6 +1267,7 @@ async def test_stage3_column_renames_propagate_when_output_name_matches_existing
             column_pv_sets,
             output_path,
             sheet_name,
+            use_cache,
         ):
             self.received_renames = {
                 str(column_key): record.column_name
@@ -1246,7 +1333,7 @@ async def test_stage3_column_renames_propagate_when_output_name_matches_existing
     # When: Stage 3 runs and Stage 5 downloads the final dataset
     import unittest.mock
 
-    with unittest.mock.patch("src.stage_3_harmonize.router.get_harmonize_service", return_value=stub):
+    with unittest.mock.patch("src.app.dependencies.get_harmonize_service", return_value=stub):
         harmonize_response = await app_client.post(
             "/stage-3/harmonize",
             json={"file_id": file_id},

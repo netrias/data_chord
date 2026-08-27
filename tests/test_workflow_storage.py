@@ -22,6 +22,7 @@ from src.storage import (
     WorkflowConflictError,
     WorkflowFile,
     WorkflowJsonUnreadableError,
+    WorkflowNotFoundError,
 )
 from src.storage.workflow_storage import JsonValue
 
@@ -76,6 +77,30 @@ def test_workflow_json_is_owned_by_creator(tmp_path: Path) -> None:
     assert read_back.data == {"stage": "uploaded"}
     with pytest.raises(WorkflowAccessDeniedError):
         storage.read_json(bob, workflow.dataset_workflow_id, WorkflowFile.WORKFLOW_STATE)
+
+
+def test_local_workflow_delete_removes_owned_workflow(tmp_path: Path) -> None:
+    # Given: Alice owns a durable workflow with state.
+    storage = LocalWorkflowStorage(tmp_path / "storage")
+    alice = UserContext(user_id="alice")
+    workflow = storage.create_workflow(alice, dataset_workflow_id())
+    storage.write_json(
+        alice,
+        workflow.dataset_workflow_id,
+        WorkflowFile.WORKFLOW_STATE,
+        {"stage": "uploaded"},
+    )
+
+    # When: Alice deletes the whole workflow.
+    storage.delete_workflow(alice, workflow.dataset_workflow_id)
+
+    # Then: the workflow no longer exists.
+    with pytest.raises(WorkflowNotFoundError):
+        storage.read_json(
+            alice,
+            workflow.dataset_workflow_id,
+            WorkflowFile.WORKFLOW_STATE,
+        )
 
 
 def test_admin_can_read_another_users_workflow(tmp_path: Path) -> None:

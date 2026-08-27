@@ -21,6 +21,10 @@ from src.integrations.agentic_harmonize import (
     AgenticHarmonizeConfig,
     AgenticHarmonizeService,
 )
+from src.integrations.harmonize import (
+    TermHarmonizationRequest,
+    TermHarmonizationResponse,
+)
 from src.persistence.manifest_reader import read_manifest_parquet
 from src.persistence.pv_manifest_store import ColumnPvSets
 
@@ -31,6 +35,7 @@ class _MemoryCache:
     def __init__(self) -> None:
         self.entries: dict[HarmonizationCacheKey, HarmonizationCacheEntry] = {}
         self.loaded_keys: list[HarmonizationCacheKey] = []
+        self.save_calls = 0
 
     def load_many(
         self, keys: Sequence[HarmonizationCacheKey]
@@ -39,6 +44,7 @@ class _MemoryCache:
         return {key: self.entries[key] for key in keys if key in self.entries}
 
     def save_many(self, entries: Sequence[HarmonizationCacheEntry]) -> None:
+        self.save_calls += 1
         self.entries.update({entry.key: entry for entry in entries})
 
 
@@ -71,6 +77,25 @@ def _prediction(term: str, match: str, fidelity: str = "strong") -> SimpleNamesp
             match_fidelity=fidelity,
         )
     )
+
+
+class _DeterministicProvider:
+    def __init__(self, match_index: int = 0) -> None:
+        self.match_index = match_index
+        self.requests: list[TermHarmonizationRequest] = []
+
+    def harmonize(
+        self,
+        requests: tuple[TermHarmonizationRequest, ...],
+    ) -> tuple[TermHarmonizationResponse, ...]:
+        self.requests.extend(requests)
+        return tuple(
+            TermHarmonizationResponse(
+                matched_value=request.permissible_values[self.match_index],
+                match_fidelity=MatchFidelity.STRONG,
+            )
+            for request in requests
+        )
 
 
 def test_agentic_defaults_use_bedrock_gpt_56_with_high_reasoning() -> None:
@@ -350,6 +375,47 @@ def test_second_run_uses_the_versioned_cde_cache_without_bedrock(
     assert read_tabular(second_output).rows == [["Matched"]]
 
 
+def test_stale_cached_match_is_replaced_by_current_provider_result(tmp_path: Path) -> None:
+    # Given a cache entry whose match is not in the current permissible values.
+    source = tmp_path / "source.csv"
+    source.write_text("diagnosis\nunknown\n", encoding="utf-8")
+    output = tmp_path / "output.csv"
+    key = HarmonizationCacheKey(
+        data_model_version=MODEL_VERSION,
+        cde_key="diagnosis",
+        source_value="unknown",
+    )
+    cache = _MemoryCache()
+    cache.entries[key] = HarmonizationCacheEntry(
+        key=key,
+        matched_value="Old Match",
+        match_fidelity=MatchFidelity.STRONG,
+    )
+    provider = _DeterministicProvider()
+    service = AgenticHarmonizeService(
+        AgenticHarmonizeConfig(region="us-east-2"),
+        cache=cache,
+        term_harmonization_provider=provider,
+    )
+
+    # When the dataset runs against the current permissible-value set.
+    result = service.run(
+        file_path=source,
+        data_model_version=MODEL_VERSION,
+        prepared_manifest=_manifest(),
+        column_pv_sets=ColumnPvSets({
+            column_key_for_index(0): frozenset({"New Match"}),
+        }),
+        output_path=output,
+    )
+
+    # Then the stale cache entry is ignored and replaced with the valid provider result.
+    assert result.status is HarmonizeStatus.SUCCEEDED
+    assert read_tabular(output).rows == [["New Match"]]
+    assert [request.input_term for request in provider.requests] == ["unknown"]
+    assert cache.entries[key].matched_value == "New Match"
+
+
 def test_unavailable_cache_does_not_block_bedrock_or_the_result(
     monkeypatch,
     tmp_path: Path,
@@ -391,3 +457,114 @@ def test_unavailable_cache_does_not_block_bedrock_or_the_result(
     assert result.status is HarmonizeStatus.SUCCEEDED
     assert calls == ["unknown"]
     assert read_tabular(output).rows == [["Matched"]]
+
+
+def test_service_uses_injected_provider_for_deterministic_output(tmp_path: Path) -> None:
+    # Given a deterministic term provider and one non-exact source term.
+    source = tmp_path / "source.csv"
+    source.write_text("diagnosis\nunknown\n", encoding="utf-8")
+    output = tmp_path / "output.csv"
+    provider = _DeterministicProvider()
+    service = AgenticHarmonizeService(
+        AgenticHarmonizeConfig(region="us-east-2"),
+        term_harmonization_provider=provider,
+    )
+
+    # When the real harmonization service runs the dataset.
+    result = service.run(
+        file_path=source,
+        data_model_version=MODEL_VERSION,
+        prepared_manifest=_manifest(),
+        column_pv_sets=ColumnPvSets({
+            column_key_for_index(0): frozenset({"Known", "Matched"}),
+        }),
+        output_path=output,
+    )
+
+    # Then the service writes the injected provider's result without a live provider call.
+    assert result.status is HarmonizeStatus.SUCCEEDED
+    assert read_tabular(output).rows == [["Known"]]
+    assert provider.requests == [
+        TermHarmonizationRequest(
+            cde="diagnosis",
+            input_term="unknown",
+            permissible_values=("Known", "Matched"),
+            context="Source column: diagnosis\nTarget CDE: diagnosis",
+        )
+    ]
+
+
+def test_use_cache_false_skips_cache_read_and_write(tmp_path: Path) -> None:
+    # Given a cache populated by a first run and a provider with a changed result.
+    source = tmp_path / "source.csv"
+    source.write_text("diagnosis\nunknown\n", encoding="utf-8")
+    first_output = tmp_path / "first.csv"
+    second_output = tmp_path / "second.csv"
+    cache = _MemoryCache()
+    provider = _DeterministicProvider(match_index=0)
+    service = AgenticHarmonizeService(
+        AgenticHarmonizeConfig(region="us-east-2"),
+        cache=cache,
+        term_harmonization_provider=provider,
+    )
+    arguments = {
+        "file_path": source,
+        "data_model_version": MODEL_VERSION,
+        "prepared_manifest": _manifest(),
+        "column_pv_sets": ColumnPvSets({
+            column_key_for_index(0): frozenset({"Known", "Matched"}),
+        }),
+    }
+    first = service.run(**arguments, output_path=first_output)
+    provider.match_index = 1
+    loaded_keys_before_second_run = list(cache.loaded_keys)
+
+    # When the same work runs with cache use disabled.
+    second = service.run(**arguments, output_path=second_output, use_cache=False)
+
+    # Then the service bypasses both cache operations and uses the fresh provider result.
+    assert first.status is HarmonizeStatus.SUCCEEDED
+    assert second.status is HarmonizeStatus.SUCCEEDED
+    assert read_tabular(second_output).rows == [["Matched"]]
+    assert cache.loaded_keys == loaded_keys_before_second_run
+    assert cache.save_calls == 1
+
+
+def test_service_rejects_provider_value_outside_permissible_values(tmp_path: Path) -> None:
+    # Given a provider that violates the permissible-value contract.
+    source = tmp_path / "source.csv"
+    source.write_text("diagnosis\nunknown\n", encoding="utf-8")
+    output = tmp_path / "output.csv"
+
+    class InvalidProvider:
+        def harmonize(
+            self,
+            requests: tuple[TermHarmonizationRequest, ...],
+        ) -> tuple[TermHarmonizationResponse, ...]:
+            return tuple(
+                TermHarmonizationResponse(
+                    matched_value="Not Allowed",
+                    match_fidelity=MatchFidelity.STRONG,
+                )
+                for _request in requests
+            )
+
+    service = AgenticHarmonizeService(
+        AgenticHarmonizeConfig(region="us-east-2"),
+        term_harmonization_provider=InvalidProvider(),
+    )
+
+    # When the real service receives the invalid provider result.
+    result = service.run(
+        file_path=source,
+        data_model_version=MODEL_VERSION,
+        prepared_manifest=_manifest(),
+        column_pv_sets=ColumnPvSets({
+            column_key_for_index(0): frozenset({"Known"}),
+        }),
+        output_path=output,
+    )
+
+    # Then the job fails without publishing an invalid output.
+    assert result.status is HarmonizeStatus.FAILED
+    assert not output.exists()

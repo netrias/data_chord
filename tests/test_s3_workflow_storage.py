@@ -20,6 +20,7 @@ from src.storage import (
     WorkflowConflictError,
     WorkflowFile,
     WorkflowJsonUnreadableError,
+    WorkflowNotFoundError,
 )
 
 
@@ -140,6 +141,35 @@ def test_s3_workflow_json_uses_owner_and_versions() -> None:
         )
     with pytest.raises(WorkflowAccessDeniedError):
         storage.read_json(bob, workflow.dataset_workflow_id, WorkflowFile.WORKFLOW_STATE)
+
+
+def test_s3_workflow_delete_removes_all_owned_objects() -> None:
+    # Given: Alice owns an S3 workflow with durable state.
+    client = FakeS3Client()
+    storage = S3WorkflowStorage(bucket="bucket", prefix="app", client=client)
+    alice = UserContext(user_id="alice")
+    workflow = storage.create_workflow(alice, dataset_workflow_id())
+    storage.write_json(
+        alice,
+        workflow.dataset_workflow_id,
+        WorkflowFile.WORKFLOW_STATE,
+        {"stage": "uploaded"},
+    )
+
+    # When: Alice deletes the whole workflow.
+    storage.delete_workflow(alice, workflow.dataset_workflow_id)
+
+    # Then: no object under that exact workflow prefix remains.
+    assert not any(
+        key.startswith("app/workflows/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/")
+        for key in client.objects
+    )
+    with pytest.raises(WorkflowNotFoundError):
+        storage.read_json(
+            alice,
+            workflow.dataset_workflow_id,
+            WorkflowFile.WORKFLOW_STATE,
+        )
 
 
 @pytest.mark.parametrize("invalid_content", [b"{", b"\xff"])

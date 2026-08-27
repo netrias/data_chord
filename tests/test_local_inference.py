@@ -20,7 +20,7 @@ from transformers import (
 )
 
 from src.domain.harmonization import MatchFidelity
-from src.integrations.harmonize import TermHarmonizationRequest, TermHarmonizationResult
+from src.integrations.harmonize import TermHarmonizationRequest, TermHarmonizationResponse
 from src.local_inference import load_local_inference
 from src.local_inference.catalog import (
     LocalModelConfig,
@@ -46,7 +46,12 @@ def _request(
     source_value: str,
     permissible_values: frozenset[str],
 ) -> TermHarmonizationRequest:
-    return TermHarmonizationRequest(cde, source_value, permissible_values, f"Target CDE: {cde}")
+    return TermHarmonizationRequest(
+        cde,
+        source_value,
+        tuple(sorted(permissible_values)),
+        f"Target CDE: {cde}",
+    )
 
 
 def _write_tiny_transformers_model(model_path: Path, architecture: str) -> None:
@@ -99,10 +104,10 @@ class _RecordingRunner:
         model_path: Path,
         model_config: LocalModelConfig,
         requests: tuple[TermHarmonizationRequest, ...],
-    ) -> tuple[TermHarmonizationResult, ...]:
+    ) -> tuple[TermHarmonizationResponse, ...]:
         self.calls.append((model_path, model_config, requests))
         return tuple(
-            TermHarmonizationResult(
+            TermHarmonizationResponse(
                 matched_value=sorted(request.permissible_values)[0],
                 match_fidelity=MatchFidelity.STRONG,
             )
@@ -271,4 +276,4 @@ def test_transformers_runner_loads_real_supported_architectures_and_returns_an_a
 
     # Then the auto-loader detects the real architecture and returns one allowed model label.
     assert detected_architecture == architecture
-    assert result == (TermHarmonizationResult("Male", MatchFidelity.PARTIAL),)
+    assert result == (TermHarmonizationResponse("Male", MatchFidelity.PARTIAL),)

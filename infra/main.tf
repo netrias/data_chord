@@ -13,6 +13,10 @@ data "aws_secretsmanager_secret" "github_app" {
   name = var.github_app_secret_name
 }
 
+data "aws_secretsmanager_secret" "programmatic_api_key" {
+  name = var.programmatic_api_key_secret_name
+}
+
 locals {
   name_prefix          = "data-chord-${var.environment}"
   deployment_prefix    = "datachord/${var.deployment_target}/${var.environment}"

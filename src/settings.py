@@ -51,6 +51,8 @@ _DATA_CHORD_S3_PREFIX_VAR = "DATA_CHORD_S3_PREFIX"
 _DATA_CHORD_ALB_ARN_VAR = "DATA_CHORD_ALB_ARN"
 _DATA_CHORD_AGENTIC_WORKERS_VAR = "DATA_CHORD_AGENTIC_WORKERS"
 _DATA_CHORD_HARMONIZATION_METHOD_VAR = "DATA_CHORD_HARMONIZATION_METHOD"
+_DATA_CHORD_API_KEY_VAR = "DATA_CHORD_API_KEY"
+_DATA_CHORD_MAX_ACTIVE_JOBS_VAR = "DATA_CHORD_MAX_ACTIVE_JOBS"
 _DATA_CHORD_REFERENCE_TABLE_VAR = "DATA_CHORD_REFERENCE_TABLE"
 _DATA_CHORD_HARMONIZATION_CACHE_TABLE_VAR = "DATA_CHORD_HARMONIZATION_CACHE_TABLE"
 _DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE_VAR = "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE"
@@ -62,6 +64,7 @@ _DEFAULT_APPLICATION_MODE = ApplicationMode.NORMAL
 _DEFAULT_HARMONIZATION_METHOD = HarmonizationMethod.AGENTIC
 _DEFAULT_IDENTITY_SOURCE = IdentitySource.SHARED
 _DEFAULT_AGENTIC_WORKERS = 100
+_DEFAULT_MAX_ACTIVE_JOBS = 1
 _DEFAULT_AWS_REGION = "us-east-2"
 _DEFAULT_DATA_DIR = Path("/data")
 _DEFAULT_WORKFLOW_STORAGE_LIMIT_GB = Decimal(10)
@@ -140,6 +143,31 @@ def get_agentic_workers() -> int:
     if workers > 100:
         raise ConfigurationError(f"{_DATA_CHORD_AGENTIC_WORKERS_VAR} must not exceed 100")
     return workers
+
+
+def get_max_active_jobs() -> int:
+    raw_jobs = os.getenv(_DATA_CHORD_MAX_ACTIVE_JOBS_VAR, str(_DEFAULT_MAX_ACTIVE_JOBS))
+    try:
+        jobs = int(raw_jobs)
+    except ValueError as exc:
+        raise ConfigurationError(f"{_DATA_CHORD_MAX_ACTIVE_JOBS_VAR} must be an integer") from exc
+    if jobs < 1:
+        raise ConfigurationError(f"{_DATA_CHORD_MAX_ACTIVE_JOBS_VAR} must be positive")
+    return jobs
+
+
+def get_programmatic_api_key() -> str | None:
+    api_key = os.getenv(_DATA_CHORD_API_KEY_VAR)
+    if api_key is None:
+        return None
+    if (
+        not api_key
+        or api_key != api_key.strip()
+        or "," in api_key
+        or any(ord(character) < 32 or ord(character) == 127 for character in api_key)
+    ):
+        raise ConfigurationError(f"{_DATA_CHORD_API_KEY_VAR} must be one non-empty HTTP header value")
+    return api_key
 
 
 def get_aws_region() -> str:
@@ -249,6 +277,8 @@ def validate_required_config() -> None:
                 )
 
     get_agentic_workers()
+    get_programmatic_api_key()
+    get_max_active_jobs()
 
     if (
         profile is RuntimeProfile.HOSTED
