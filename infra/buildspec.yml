@@ -19,7 +19,9 @@ phases:
       - export GIT_CONFIG_COUNT=1
       - export GIT_CONFIG_KEY_0="url.https://x-access-token:${GITHUB_INSTALLATION_TOKEN}@github.com/.insteadOf"
       - export GIT_CONFIG_VALUE_0="https://github.com/"
-      - uv sync --frozen --extra dev
+      # Install every test dependency. The production image remains minimal because
+      # its Docker build below does not enable the local-inference extra.
+      - uv sync --frozen --all-extras
       - uv run ruff check .
       - uv run basedpyright
       - uv run pytest

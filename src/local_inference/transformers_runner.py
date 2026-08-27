@@ -167,15 +167,12 @@ def _decode_result(
     *,
     strong_confidence: float,
 ) -> TermHarmonizationResponse:
-    candidates = [
-        index for index, label in id_to_label.items() if label == _NO_MATCH or label in request.permissible_values
-    ]
-    if not candidates:
-        raise LocalInferenceError(f"Local model has no labels for CDE {request.cde}")
     probabilities = torch.softmax(logits, dim=-1)
-    selected_index = max(candidates, key=lambda index: float(probabilities[index]))
-    selected_label = id_to_label[selected_index]
-    if selected_label == _NO_MATCH:
+    selected_index = int(torch.argmax(probabilities).item())
+    selected_label = id_to_label.get(selected_index)
+    if selected_label is None:
+        raise LocalInferenceError(f"Local model output {selected_index} has no label")
+    if selected_label == _NO_MATCH or selected_label not in request.permissible_values:
         return TermHarmonizationResponse(None, MatchFidelity.NONE)
     confidence = float(probabilities[selected_index])
     fidelity = MatchFidelity.STRONG if confidence >= strong_confidence else MatchFidelity.PARTIAL

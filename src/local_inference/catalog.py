@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
@@ -150,7 +151,7 @@ def _strong_confidence(raw_confidence: object, index: int) -> float:
     if not isinstance(raw_confidence, int | float) or isinstance(raw_confidence, bool):
         raise LocalModelConfigurationError(f"Local model strong_confidence at index {index} must be a number")
     confidence = float(raw_confidence)
-    if confidence < 0 or confidence > 1:
+    if not math.isfinite(confidence) or confidence < 0 or confidence > 1:
         raise LocalModelConfigurationError(f"Local model strong_confidence at index {index} must be between 0 and 1")
     return confidence
 

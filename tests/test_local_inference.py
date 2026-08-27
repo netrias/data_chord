@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import builtins
 import json
+import math
 from pathlib import Path
 from typing import cast
 
@@ -33,7 +34,7 @@ from src.local_inference.service import (
     LocalInferenceError,
     LocalTermHarmonizer,
 )
-from src.local_inference.transformers_runner import TransformersModelRunner
+from src.local_inference.transformers_runner import TransformersModelRunner, _decode_result
 
 
 def _write_config(root: Path, models: list[dict[str, object]]) -> Path:
@@ -160,21 +161,24 @@ def test_catalog_rejects_one_cde_assigned_to_two_models(tmp_path: Path) -> None:
         ],
     )
 
-    # When the file is validated, then the error identifies both conflicting paths.
-    with pytest.raises(
-        LocalModelConfigurationError,
-        match=r"cell_type.*gpt2-v1.*biobert-v1",
-    ):
+    # When the file is validated.
+    with pytest.raises(LocalModelConfigurationError) as exc_info:
         load_model_catalog(config_path, tmp_path)
+
+    # Then the error identifies both conflicting paths.
+    assert str(exc_info.value) == "CDE cell_type is assigned to both gpt2-v1 and biobert-v1"
 
 
 def test_catalog_rejects_a_model_path_outside_the_config_directory(tmp_path: Path) -> None:
     # Given a model path attempts to leave the mounted model directory.
     config_path = _write_config(tmp_path, [{"path": "../outside", "cdes": ["cell_type"]}])
 
-    # When the file is validated, then the escaped path is rejected at the boundary.
-    with pytest.raises(LocalModelConfigurationError, match="must stay inside"):
+    # When the file is validated.
+    with pytest.raises(LocalModelConfigurationError) as exc_info:
         load_model_catalog(config_path, tmp_path)
+
+    # Then the escaped path is rejected at the boundary.
+    assert "must stay inside" in str(exc_info.value)
 
 
 @pytest.mark.parametrize(
@@ -199,9 +203,28 @@ def test_catalog_rejects_invalid_model_execution_settings(
     }
     config_path = _write_config(tmp_path, [model])
 
-    # When the JSON file is converted, then typed configuration rejects the setting.
-    with pytest.raises(LocalModelConfigurationError, match=expected_error):
+    # When the JSON file is converted.
+    with pytest.raises(LocalModelConfigurationError) as exc_info:
         load_model_catalog(config_path, tmp_path)
+
+    # Then typed configuration rejects the setting.
+    assert expected_error in str(exc_info.value)
+
+
+def test_catalog_rejects_non_finite_confidence(tmp_path: Path) -> None:
+    # Given Python's JSON parser accepts a non-finite confidence value.
+    (tmp_path / "gpt2-v1").mkdir()
+    config_path = _write_config(
+        tmp_path,
+        [{"path": "gpt2-v1", "cdes": ["cell_type"], "strong_confidence": math.nan}],
+    )
+
+    # When the configuration is converted.
+    with pytest.raises(LocalModelConfigurationError) as exc_info:
+        load_model_catalog(config_path, tmp_path)
+
+    # Then the invalid threshold is rejected.
+    assert "strong_confidence" in str(exc_info.value)
 
 
 def test_local_inference_rejects_a_model_without_configuration_or_tokenizer(tmp_path: Path) -> None:
@@ -209,9 +232,12 @@ def test_local_inference_rejects_a_model_without_configuration_or_tokenizer(tmp_
     (tmp_path / "empty-model").mkdir()
     config_path = _write_config(tmp_path, [{"path": "empty-model", "cdes": ["cell_type"]}])
 
-    # When application wiring loads local inference, then it rejects the unusable model at startup.
-    with pytest.raises(LocalInferenceError, match="Local model check failed"):
+    # When application wiring loads local inference.
+    with pytest.raises(LocalInferenceError) as exc_info:
         load_local_term_harmonizer(config_path, tmp_path)
+
+    # Then it rejects the unusable model at startup.
+    assert "Local model check failed" in str(exc_info.value)
 
 
 def test_local_inference_reports_an_image_without_runtime_dependencies(
@@ -303,9 +329,12 @@ def test_local_inference_rejects_an_unassigned_cde_before_loading_a_model(tmp_pa
     runner = _RecordingRunner()
     inference = LocalTermHarmonizer(catalog, runner)
 
-    # When local inference receives the unsupported request, then no model is loaded.
-    with pytest.raises(KeyError, match="specimen_type"):
+    # When local inference receives the unsupported request.
+    with pytest.raises(KeyError) as exc_info:
         inference.harmonize((_request("specimen_type", "tumor", frozenset({"Tissue"})),))
+
+    # Then the error identifies the CDE and no model is loaded.
+    assert "specimen_type" in str(exc_info.value)
     assert runner.calls == []
 
 
@@ -333,3 +362,16 @@ def test_transformers_runner_loads_real_supported_architectures_and_returns_an_a
     # Then the auto-loader detects the real architecture and returns one allowed model label.
     assert detected_architecture == architecture
     assert result == (TermHarmonizationResponse("Male", MatchFidelity.PARTIAL),)
+
+
+def test_transformers_runner_does_not_replace_a_shared_model_prediction_with_another_label() -> None:
+    # Given one model serves two CDEs and strongly predicts a label from the other CDE.
+    request = _request("diagnosis", "sample", frozenset({"Allowed diagnosis"}))
+    labels = {0: "Allowed diagnosis", 1: "Other CDE value", 2: "NO_MATCH"}
+    logits = torch.tensor([0.0, 10.0, -1.0])
+
+    # When the output is decoded for the current CDE.
+    result = _decode_result(labels, request, logits, strong_confidence=0.9)
+
+    # Then it returns no match instead of changing the winner to a weak allowed label.
+    assert result == TermHarmonizationResponse(None, MatchFidelity.NONE)

@@ -8,9 +8,10 @@ import json
 import os
 import shutil
 import socket
-import subprocess
+import subprocess  # nosec B404
 import time
 from collections.abc import Mapping, Sequence
+from http.client import HTTPConnection
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import cast
@@ -30,7 +31,10 @@ from transformers import (
 )
 
 _API_KEY = "local-inference-container-test-key"
+# These are tokenizer control values, not secrets.
+_PADDING_TOKEN = "[PAD]"  # nosec B105
 _READY_ATTEMPTS = 120
+_UNKNOWN_TOKEN = "[UNK]"  # nosec B105
 
 
 def _run(
@@ -40,12 +44,31 @@ def _run(
     environment: Mapping[str, str] | None = None,
     capture_output: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    # Callers provide fixed local verification commands.
+    return subprocess.run(  # nosec B603
         command,
         cwd=working_directory,
         env=environment,
         check=True,
         capture_output=capture_output,
+        text=True,
+    )
+
+
+def _run_unchecked(
+    command: Sequence[str],
+    *,
+    working_directory: Path,
+    quiet: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    output = subprocess.DEVNULL if quiet else None
+    # Callers provide fixed cleanup and diagnostic commands.
+    return subprocess.run(  # nosec B603
+        command,
+        cwd=working_directory,
+        check=False,
+        stdout=output,
+        stderr=output,
         text=True,
     )
 
@@ -109,13 +132,13 @@ def _check_image_dependencies(
 
 
 def _write_model(model_path: Path, architecture: str, labels: tuple[str, ...]) -> None:
-    vocabulary = {"[PAD]": 0, "[UNK]": 1, "CDE": 2, "Source": 3, "value": 4, "lung": 5, "tumor": 6}
-    raw_tokenizer = Tokenizer(WordLevel(vocabulary, unk_token="[UNK]"))
+    vocabulary = {_PADDING_TOKEN: 0, _UNKNOWN_TOKEN: 1, "CDE": 2, "Source": 3, "value": 4, "lung": 5, "tumor": 6}
+    raw_tokenizer = Tokenizer(WordLevel(vocabulary, unk_token=_UNKNOWN_TOKEN))
     raw_tokenizer.pre_tokenizer = Whitespace()
     tokenizer = PreTrainedTokenizerFast(
         tokenizer_object=raw_tokenizer,
-        pad_token="[PAD]",
-        unk_token="[UNK]",
+        pad_token=_PADDING_TOKEN,
+        unk_token=_UNKNOWN_TOKEN,
         model_max_length=32,
     )
     label_map = dict(enumerate(labels))
@@ -235,7 +258,6 @@ def _start_container(
             "docker",
             "run",
             "--detach",
-            "--rm",
             "--name",
             container,
             "--mount",
@@ -262,15 +284,15 @@ def _start_container(
 
 def _wait_until_ready(repository_root: Path, container: str, port: int) -> None:
     for _attempt in range(_READY_ATTEMPTS):
-        health = subprocess.run(
-            ["curl", "--fail", "--silent", f"http://127.0.0.1:{port}/healthz"],
-            cwd=repository_root,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if health.returncode == 0:
-            return
+        connection = HTTPConnection("127.0.0.1", port, timeout=0.5)
+        try:
+            connection.request("GET", "/healthz")
+            if connection.getresponse().status == 200:
+                return
+        except OSError:
+            pass
+        finally:
+            connection.close()
         running = _run(
             ["docker", "inspect", "--format", "{{.State.Running}}", container],
             working_directory=repository_root,
@@ -341,19 +363,15 @@ def _verify_model_runs(repository_root: Path, container: str) -> None:
 
 
 def _remove_test_runtime(repository_root: Path, container: str, volume: str) -> None:
-    subprocess.run(
-        ["docker", "stop", container],
-        cwd=repository_root,
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+    _run_unchecked(
+        ["docker", "rm", "--force", container],
+        working_directory=repository_root,
+        quiet=True,
     )
-    subprocess.run(
+    _run_unchecked(
         ["docker", "volume", "rm", volume],
-        cwd=repository_root,
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        working_directory=repository_root,
+        quiet=True,
     )
 
 
@@ -405,10 +423,9 @@ def main() -> None:
             _run_harmonization(test_root, port)
             _verify_model_runs(repository_root, container)
         except Exception:
-            subprocess.run(
+            _run_unchecked(
                 ["docker", "logs", container],
-                cwd=repository_root,
-                check=False,
+                working_directory=repository_root,
             )
             raise
         finally:

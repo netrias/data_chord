@@ -142,6 +142,16 @@ supported. Their output labels must be exact permissible values. A model can
 also contain the `NO_MATCH` label. Batch size and the threshold for a strong
 match can differ for each model.
 
+Each model receives one string in this exact form:
+
+```text
+CDE: <CDE key>
+Source value: <uploaded value>
+```
+
+The model training input must use the same form. A model trained with a different
+input form can load correctly but return incorrect results.
+
 Mount the same directory and set one variable when the application runs:
 
 ```bash
