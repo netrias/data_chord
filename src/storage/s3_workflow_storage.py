@@ -82,6 +82,18 @@ class S3WorkflowStorage:
             raise
         return metadata
 
+    def delete_workflow(
+        self,
+        user: UserContext,
+        dataset_workflow_id: DatasetWorkflowId,
+    ) -> None:
+        """Delete all objects for a workflow that the caller owns."""
+        self._require_access(user, dataset_workflow_id)
+        workflow_prefix = f"{self._workflow_key(dataset_workflow_id)}/"
+        response = self.client.list_objects_v2(Bucket=self.bucket, Prefix=workflow_prefix)
+        for key in _listed_keys(response):
+            self.client.delete_object(Bucket=self.bucket, Key=key)
+
     def read_json(self, user: UserContext, file_id: str, kind: WorkflowFile) -> StoredJson | None:
         self._require_json_kind(kind)
         self._require_access(user, file_id)

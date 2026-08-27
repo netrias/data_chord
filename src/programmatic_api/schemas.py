@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated, Literal, Self
 
+from netrias_client import SUPPORTED_TABULAR_SUFFIXES
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 _MAX_COLUMNS = 500
@@ -13,6 +15,8 @@ _MAX_VALUE_CHARACTERS = 4096
 _MAX_REQUEST_CHARACTERS = 1_000_000
 
 SampleValue = Annotated[str, Field(max_length=_MAX_VALUE_CHARACTERS)]
+DocumentCell = Annotated[str, Field(max_length=1_000_000)]
+DocumentRow = Annotated[list[DocumentCell], Field(max_length=_MAX_COLUMNS)]
 HarmonizationKind = Literal["harmonizable", "no_permissible_values", "numeric"]
 
 
@@ -80,8 +84,111 @@ class RecommendationResponse(BaseModel):
     results: list[RecommendationColumnResponse]
 
 
+class HarmonizationAlternativeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target: str = Field(min_length=1, max_length=1024)
+    confidence: float = Field(ge=0.0, le=1.0)
+    harmonization: HarmonizationKind
+    cde_id: int | None = Field(default=None, strict=True)
+
+
+class HarmonizationMappingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    column_name: str = Field(max_length=1024)
+    cde_key: str = Field(min_length=1, max_length=1024)
+    cde_id: int = Field(strict=True)
+    harmonization: HarmonizationKind
+    alternatives: list[HarmonizationAlternativeRequest] = Field(max_length=10)
+
+
+class HarmonizationDocumentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    name: str = Field(min_length=1, max_length=1024)
+    sheet_name: str | None = Field(default=None, alias="sheetName", max_length=31)
+    header: list[Annotated[str, Field(max_length=1024)]] = Field(
+        min_length=1,
+        max_length=_MAX_COLUMNS,
+    )
+    rows: list[DocumentRow]
+
+    @field_validator("name")
+    @classmethod
+    def _require_safe_supported_name(cls, value: str) -> str:
+        if value != Path(value).name or "/" in value or "\\" in value:
+            raise ValueError("document name must be a file name")
+        if Path(value).suffix.lower() not in SUPPORTED_TABULAR_SUFFIXES:
+            raise ValueError("document name must use a supported tabular suffix")
+        return value
+
+    @model_validator(mode="after")
+    def _require_rectangular_document(self) -> Self:
+        width = len(self.header)
+        if any(len(row) != width for row in self.rows):
+            raise ValueError("document rows must match the header width")
+        is_xlsx = Path(self.name).suffix.lower() == ".xlsx"
+        if is_xlsx and not self.sheet_name:
+            raise ValueError("XLSX documents require sheetName")
+        if not is_xlsx and self.sheet_name is not None:
+            raise ValueError("sheetName is only valid for XLSX documents")
+        return self
+
+
+class HarmonizationSubmissionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    schema_version: Literal["1.0"] = Field(alias="schemaVersion")
+    data_model_key: str = Field(alias="data_commons_key", max_length=256)
+    external_version_number: str = Field(max_length=256)
+    use_cache: bool = Field(default=True, strict=True)
+    document: HarmonizationDocumentRequest
+    column_mappings: list[HarmonizationMappingRequest | None] = Field(
+        default_factory=list,
+        max_length=_MAX_COLUMNS,
+    )
+
+    @field_validator("data_model_key", "external_version_number")
+    @classmethod
+    def _normalize_harmonization_identifier(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("value must be non-empty")
+        return normalized
+
+    @field_validator("external_version_number")
+    @classmethod
+    def _require_harmonization_concrete_version(cls, value: str) -> str:
+        if value.lower() == "latest":
+            raise ValueError("external_version_number must be concrete")
+        return value
+
+    @model_validator(mode="after")
+    def _require_mapping_position_count(self) -> Self:
+        if self.column_mappings and len(self.column_mappings) != len(self.document.header):
+            raise ValueError("column_mappings must match the document width")
+        return self
+
+
+class HarmonizationSubmitResponse(BaseModel):
+    job_id: str
+
+
+class HarmonizationJobResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    status: Literal["QUEUED", "SUCCEEDED", "FAILED"]
+    final_url: str | None = None
+    manifest_url: str | None = None
+    error_message: str | None = Field(default=None, alias="errorMessage")
+
+
 __all__ = [
     "HarmonizationKind",
+    "HarmonizationJobResponse",
+    "HarmonizationSubmissionRequest",
+    "HarmonizationSubmitResponse",
     "RecommendationColumnRequest",
     "RecommendationColumnResponse",
     "RecommendationMatchResponse",

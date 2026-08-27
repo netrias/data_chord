@@ -13,6 +13,7 @@ from src.domain.columns import column_key_for_index
 from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.manifest import ColumnMappingManifest, MappingAlternative
 from src.domain.reference_data import ReferenceDataError
+from src.programmatic_api.harmonization_router import harmonization_router
 from src.programmatic_api.schemas import (
     HarmonizationKind,
     RecommendationColumnResponse,
@@ -22,6 +23,7 @@ from src.programmatic_api.schemas import (
 )
 
 programmatic_api_router = APIRouter(prefix="/api/v1", tags=["Programmatic API v1"])
+programmatic_api_router.include_router(harmonization_router)
 
 
 @programmatic_api_router.post(

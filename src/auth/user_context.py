@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
+import hmac
 import json
+import re
 import secrets
 import time
 from collections.abc import Mapping
@@ -20,7 +23,7 @@ from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, utils
 from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey
-from starlette.datastructures import Headers
+from starlette.datastructures import Headers, QueryParams
 
 from src.settings import (
     IdentitySource,
@@ -38,6 +41,10 @@ PROGRAMMATIC_API_KEY_HEADER = "x-api-key"
 PROGRAMMATIC_USER_ID = "programmatic-api"
 _ALB_JWT_ALGORITHM = "ES256"
 _ALB_KEY_TIMEOUT_SECONDS = 3
+_PROGRAMMATIC_ARTIFACT_PATH = re.compile(
+    r"^/api/v1/jobs/[a-f0-9]{32}/artifacts/(harmonized|manifest)$"
+)
+_PROGRAMMATIC_ARTIFACT_TTL_SECONDS = 15 * 60
 
 _current_user: ContextVar[UserContext | None] = ContextVar(
     "current_user",
@@ -81,6 +88,55 @@ def bind_programmatic_user_context(headers: Headers) -> Token[UserContext | None
     if len(presented_keys) != 1 or not secrets.compare_digest(presented_keys[0], configured_key):
         raise InvalidProgrammaticApiKeyError
     return _current_user.set(UserContext(user_id=PROGRAMMATIC_USER_ID))
+
+
+def is_programmatic_artifact_path(path: str) -> bool:
+    return _PROGRAMMATIC_ARTIFACT_PATH.fullmatch(path) is not None
+
+
+def signed_programmatic_artifact_query(path: str) -> dict[str, str]:
+    """Create one short-lived query that authorizes the exact artifact path."""
+    configured_key = get_programmatic_api_key()
+    if configured_key is None:
+        raise ProgrammaticApiNotConfiguredError
+    expires = int(time.time()) + _PROGRAMMATIC_ARTIFACT_TTL_SECONDS
+    return {
+        "expires": str(expires),
+        "signature": _programmatic_artifact_signature(configured_key, path, expires),
+    }
+
+
+def bind_programmatic_artifact_user_context(
+    path: str,
+    query: QueryParams,
+) -> Token[UserContext | None]:
+    """Validate a signed download URL and bind the fixed service principal."""
+    configured_key = get_programmatic_api_key()
+    if configured_key is None:
+        raise ProgrammaticApiNotConfiguredError
+    expires_values = query.getlist("expires")
+    signature_values = query.getlist("signature")
+    if (
+        set(query.keys()) != {"expires", "signature"}
+        or len(expires_values) != 1
+        or len(signature_values) != 1
+    ):
+        raise InvalidProgrammaticApiKeyError
+    try:
+        expires = int(expires_values[0])
+    except ValueError as exc:
+        raise InvalidProgrammaticApiKeyError from exc
+    if expires < int(time.time()):
+        raise InvalidProgrammaticApiKeyError
+    expected = _programmatic_artifact_signature(configured_key, path, expires)
+    if not secrets.compare_digest(signature_values[0], expected):
+        raise InvalidProgrammaticApiKeyError
+    return _current_user.set(UserContext(user_id=PROGRAMMATIC_USER_ID))
+
+
+def _programmatic_artifact_signature(api_key: str, path: str, expires: int) -> str:
+    message = f"{path}\n{expires}".encode()
+    return hmac.new(api_key.encode(), message, hashlib.sha256).hexdigest()
 
 
 def reset_user_context(token: Token[UserContext | None]) -> None:
