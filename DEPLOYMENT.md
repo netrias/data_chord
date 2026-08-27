@@ -150,6 +150,8 @@ docker run --rm \
   data-chord:<full-git-commit>
 ```
 
+All mounted model files must be readable by the image's non-root `appuser`.
+
 The application checks the complete JSON file at startup. During Stage 3 it
 groups all terms for the same model, loads that model once, runs the group, and
 releases the model before it loads the next one. CDEs that are not in the file
