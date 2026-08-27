@@ -22,6 +22,7 @@ _FIELDS = {
     "domain_name",
     "github_app_secret_name",
     "hosted_zone_name",
+    "programmatic_api_key_secret_name",
     "region",
     "state_bucket_name",
 }
@@ -69,6 +70,7 @@ class Environment:
     hosted_zone_name: str
     application_repository_url: str
     github_app_secret_name: str
+    programmatic_api_key_secret_name: str
     target: str
     stage: str
 
@@ -108,6 +110,7 @@ class Environment:
             "expected_account_id": self.account_id,
             "github_app_secret_name": self.github_app_secret_name,
             "hosted_zone_name": self.hosted_zone_name,
+            "programmatic_api_key_secret_name": self.programmatic_api_key_secret_name,
         }
 
 
@@ -166,6 +169,10 @@ def load_environment(path: Path, target: str, stage: str) -> Environment:
         hosted_zone_name=_string(document, "hosted_zone_name").removesuffix("."),
         application_repository_url=_string(document, "application_repository_url"),
         github_app_secret_name=_string(document, "github_app_secret_name"),
+        programmatic_api_key_secret_name=_string(
+            document,
+            "programmatic_api_key_secret_name",
+        ),
         target=target,
         stage=stage,
     )
@@ -236,6 +243,9 @@ def canonical_digest(environment: SelectedEnvironment) -> str:
                 "domain_name": environment.domain_name,
                 "github_app_secret_name": environment.github_app_secret_name,
                 "hosted_zone_name": environment.hosted_zone_name,
+                "programmatic_api_key_secret_name": (
+                    environment.programmatic_api_key_secret_name
+                ),
             }
         )
     else:
@@ -369,6 +379,9 @@ def _field(environment: SelectedEnvironment, key: str) -> str:
                 "domain_name": environment.domain_name,
                 "github_app_secret_name": environment.github_app_secret_name,
                 "hosted_zone_name": environment.hosted_zone_name,
+                "programmatic_api_key_secret_name": (
+                    environment.programmatic_api_key_secret_name
+                ),
             }
         )
     else:

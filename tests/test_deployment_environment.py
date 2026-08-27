@@ -16,11 +16,19 @@ def test_environment_derives_the_deployment_boundary(tmp_path: Path) -> None:
     # When the deployment reads its derived values and OpenTofu variables.
     state_key = _run("get", environment, "netrias", "staging", "state_key")
     partition = _run("get", environment, "netrias", "staging", "partition")
+    api_secret_name = _run(
+        "get",
+        environment,
+        "netrias",
+        "staging",
+        "programmatic_api_key_secret_name",
+    )
     variables = _run("tofu-vars", environment, "netrias", "staging")
 
     # Then it selects the canonical state namespace and complete application input.
     assert state_key.stdout.strip() == "datachord/netrias/staging/tofu.tfstate"
     assert partition.stdout.strip() == "aws"
+    assert api_secret_name.stdout.strip() == "data-chord/staging/programmatic-api-key"
     assert json.loads(variables.stdout) == {
         "application_repository_url": "https://github.com/netrias/data_chord.git",
         "application_role_boundary_arn": ("arn:aws:iam::945365518758:policy/datachord-application-role-boundary"),
@@ -32,6 +40,7 @@ def test_environment_derives_the_deployment_boundary(tmp_path: Path) -> None:
         "expected_account_id": "945365518758",
         "github_app_secret_name": "data-chord/build/github-app",
         "hosted_zone_name": "apps.netrias.com",
+        "programmatic_api_key_secret_name": "data-chord/staging/programmatic-api-key",
     }
 
 
@@ -211,6 +220,7 @@ def _document() -> dict[str, object]:
         "hosted_zone_name": "apps.netrias.com",
         "application_repository_url": "https://github.com/netrias/data_chord.git",
         "github_app_secret_name": "data-chord/build/github-app",
+        "programmatic_api_key_secret_name": "data-chord/staging/programmatic-api-key",
     }
 
 
@@ -226,6 +236,7 @@ def _bdf_document() -> dict[str, object]:
         "hosted_zone_name": "netriasbdf.cloud",
         "application_repository_url": "https://github.com/netrias/data_chord.git",
         "github_app_secret_name": "data-chord/build/github-app",
+        "programmatic_api_key_secret_name": "data-chord/staging/programmatic-api-key",
     }
 
 
