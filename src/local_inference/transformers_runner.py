@@ -83,7 +83,7 @@ class TransformersModelRunner:
         except LocalInferenceError:
             raise
         except Exception as exc:
-            raise LocalInferenceError(f"Local model failed: {model_path}") from exc
+            raise LocalInferenceError(f"Local model failed: {model_path}: {exc}") from exc
         finally:
             del model
             del tokenizer
@@ -113,7 +113,7 @@ class TransformersModelRunner:
                 _release_device_memory(_inference_device())
             return config.model_type
         except Exception as exc:
-            raise LocalInferenceError(f"Local model check failed: {model_path}") from exc
+            raise LocalInferenceError(f"Local model check failed: {model_path}: {exc}") from exc
 
 
 def _run_batches(
