@@ -110,9 +110,9 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Manage app lifecycle: shutdown cleanup for HTTP clients."""
     yield
     # Shutdown: clean up resources
-    from src.app.dependencies import cleanup_services
+    from src.app.dependencies import shutdown_services
 
-    cleanup_services()
+    await shutdown_services()
 
 
 def create_app() -> FastAPI:

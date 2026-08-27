@@ -10,6 +10,8 @@ import logging
 from pathlib import Path
 from typing import cast
 
+from src.app.harmonization_jobs import HarmonizationJobService
+from src.app.harmonization_workflow import HarmonizationWorkflow
 from src.auth.user_context import current_user_context
 from src.cde_recommend.result_cache import DynamoRecommendationCache, EmptyRecommendationCache
 from src.domain.cde_recommendation import CdeRecommender
@@ -39,6 +41,7 @@ from src.settings import (
     get_cde_recommendation_cache_table_name,
     get_data_dir,
     get_harmonization_cache_table_name,
+    get_max_active_jobs,
     get_reference_database_path,
     get_reference_table_name,
     get_runtime_profile,
@@ -74,6 +77,9 @@ _workflow_cleanup: WorkflowCleanup | None = None
 _reference_data_repository: ReferenceDataRepository | None = None
 _harmonization_cache: HarmonizationCache | None = None
 _harmonize_service: HarmonizeService | None = None
+
+
+_harmonization_job_service: HarmonizationJobService | None = None
 _cde_recommender: CdeRecommender | None = None
 
 
@@ -216,6 +222,24 @@ def get_harmonize_service() -> HarmonizeService:
     return _harmonize_service
 
 
+def get_harmonization_job_service() -> HarmonizationJobService:
+    global _harmonization_job_service  # noqa: PLW0603 - intentional singleton
+    if _harmonization_job_service is None:
+        workflow = HarmonizationWorkflow(
+            upload_storage=get_upload_storage(),
+            workflow_storage=get_workflow_storage(),
+            reference_data_repository=get_reference_data_repository(),
+            harmonizer=get_harmonize_service(),
+        )
+        _harmonization_job_service = HarmonizationJobService(
+            upload_storage=get_upload_storage(),
+            workflow_storage=get_workflow_storage(),
+            max_active_jobs=get_max_active_jobs(),
+            workflow_runner=workflow.run,
+        )
+    return _harmonization_job_service
+
+
 def get_cde_recommender() -> CdeRecommender:
     global _cde_recommender  # noqa: PLW0603 - intentional singleton
     if _cde_recommender is None:
@@ -242,12 +266,26 @@ def cleanup_services() -> None:
     """Clean up resources held by singleton services (call on app shutdown)."""
     global _cde_recommender, _harmonization_cache, _harmonize_service  # noqa: PLW0603
     global _reference_data_repository, _workflow_cleanup, _workflow_storage  # noqa: PLW0603
+    global _harmonization_job_service
     _cde_recommender = None
     _harmonization_cache = None
     _harmonize_service = None
+    _harmonization_job_service = None
     _reference_data_repository = None
     _workflow_cleanup = None
     _workflow_storage = None
+
+
+async def shutdown_services() -> None:
+    """Stop process-owned workers before singleton references are cleared."""
+    await shutdown_harmonization_jobs()
+    cleanup_services()
+
+
+async def shutdown_harmonization_jobs() -> None:
+    """Stop the current job service without creating one during shutdown."""
+    if _harmonization_job_service is not None:
+        await _harmonization_job_service.shutdown()
 
 
 __all__ = [
@@ -255,8 +293,11 @@ __all__ = [
     "UPLOAD_BASE_DIR",
     "DEFAULT_WORKFLOW_STORAGE_DIR",
     "cleanup_services",
+    "shutdown_services",
+    "shutdown_harmonization_jobs",
     "get_harmonization_cache",
     "get_harmonize_service",
+    "get_harmonization_job_service",
     "get_cde_recommender",
     "get_reference_data_repository",
     "get_upload_constraints",

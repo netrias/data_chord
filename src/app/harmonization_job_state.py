@@ -1,13 +1,15 @@
-"""Stage 3 commands for durable acceptance, polling, leases, and completion."""
+"""Durable harmonization job acceptance, leases, status, and completion."""
 
 from __future__ import annotations
 
 import asyncio
+import logging
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from src.api.schemas import HarmonizeRequest, HarmonizeResponse
+from src.app.harmonization_results import HarmonizationWorkflowResult
 from src.domain.harmonization import HarmonizeStatus
 from src.persistence.harmonization_job_store import (
     HarmonizationJobConflictError,
@@ -26,6 +28,7 @@ from src.persistence.workflow_state_store import (
 from src.storage import UploadStorage, UserContext, VersionToken, WorkflowFile, WorkflowStorage
 
 _HEARTBEAT_SECONDS = 15
+logger = logging.getLogger(__name__)
 
 
 class HarmonizationStartConflictError(Exception):
@@ -40,7 +43,11 @@ class HarmonizationWorkflowUnreadableError(Exception):
     """Raised when stored workflow or run state cannot be decoded safely."""
 
 
-class StaleStageThreeWorkerError(Exception):
+class HarmonizationCapacityError(Exception):
+    """Raised when the process cannot accept another active harmonization."""
+
+
+class StaleHarmonizationWorkerError(Exception):
     """Raised when a superseded worker tries to publish or complete a run."""
 
 
@@ -97,21 +104,24 @@ def start_harmonization(
     upload_storage: UploadStorage,
     workflow_storage: WorkflowStorage,
     user: UserContext,
-    payload: HarmonizeRequest,
+    file_id: str,
+    polling_job_id: str | None = None,
+    reserve_capacity: Callable[[], bool] | None = None,
+    release_capacity: Callable[[], None] | None = None,
 ) -> HarmonizationStart:
     """Persist an accepted run before the endpoint returns success."""
-    if load_upload_artifact(upload_storage, workflow_storage, user, payload.file_id) is None:
-        raise HarmonizationWorkflowNotFoundError(payload.file_id)
+    if load_upload_artifact(upload_storage, workflow_storage, user, file_id) is None:
+        raise HarmonizationWorkflowNotFoundError(file_id)
 
     loaded_state = _load_current_workflow_state(
         workflow_storage=workflow_storage,
         user=user,
-        payload=payload,
+        file_id=file_id,
     )
     try:
-        existing = load_harmonization_job(workflow_storage, user, payload.file_id)
+        existing = load_harmonization_job(workflow_storage, user, file_id)
     except HarmonizationJobUnreadableError as exc:
-        raise HarmonizationWorkflowUnreadableError(payload.file_id) from exc
+        raise HarmonizationWorkflowUnreadableError(file_id) from exc
 
     if existing is not None and existing.job.lease_expired():
         try:
@@ -122,30 +132,59 @@ def start_harmonization(
                 expected_version=existing.version,
             )
         except HarmonizationJobConflictError as exc:
-            raise HarmonizationStartConflictError(payload.file_id) from exc
+            raise HarmonizationStartConflictError(file_id) from exc
 
     if existing is not None and existing.job.is_active():
         if existing.job.plan_version == loaded_state.version.value:
             return HarmonizationStart(existing, loaded_state, should_run=False)
-        raise HarmonizationStartConflictError(payload.file_id)
+        raise HarmonizationStartConflictError(file_id)
 
-    polling_job_id = uuid4().hex
-    job = HarmonizationJobState.queued(
-        polling_job_id=polling_job_id,
-        file_id=str(payload.file_id),
+    loaded_job = _accept_harmonization_job(
+        workflow_storage=workflow_storage,
+        user=user,
+        file_id=file_id,
         plan_version=loaded_state.version.value,
-        worker_id=uuid4().hex,
+        polling_job_id=polling_job_id,
+        expected_version=existing.version if existing is not None else None,
+        reserve_capacity=reserve_capacity,
+        release_capacity=release_capacity,
     )
+    return HarmonizationStart(loaded_job, loaded_state, should_run=True)
+
+
+def _accept_harmonization_job(
+    *,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+    file_id: str,
+    plan_version: str,
+    polling_job_id: str | None,
+    expected_version: VersionToken | None,
+    reserve_capacity: Callable[[], bool] | None,
+    release_capacity: Callable[[], None] | None,
+) -> LoadedHarmonizationJob:
+    capacity_reserved = reserve_capacity is not None
+    if reserve_capacity is not None and not reserve_capacity():
+        raise HarmonizationCapacityError(file_id)
     try:
-        loaded_job = save_harmonization_job(
+        job = HarmonizationJobState.queued(
+            polling_job_id=polling_job_id or uuid4().hex,
+            file_id=file_id,
+            plan_version=plan_version,
+            worker_id=uuid4().hex,
+        )
+        return save_harmonization_job(
             workflow_storage,
             user,
             job,
-            expected_version=existing.version if existing is not None else None,
+            expected_version=expected_version,
         )
-    except HarmonizationJobConflictError as exc:
-        raise HarmonizationStartConflictError(payload.file_id) from exc
-    return HarmonizationStart(loaded_job, loaded_state, should_run=True)
+    except BaseException as exc:
+        if capacity_reserved and release_capacity is not None:
+            release_capacity()
+        if isinstance(exc, HarmonizationJobConflictError):
+            raise HarmonizationStartConflictError(file_id) from exc
+        raise
 
 
 def load_authorized_job(
@@ -205,7 +244,7 @@ class RunAuthority:
             or not loaded.job.is_active()
             or loaded.job.lease_expired()
         ):
-            raise StaleStageThreeWorkerError(self._accepted_job.polling_job_id)
+            raise StaleHarmonizationWorkerError(self._accepted_job.polling_job_id)
         return loaded
 
     def require_plan_current(self) -> LoadedWorkflowState:
@@ -215,11 +254,11 @@ class RunAuthority:
             self._accepted_job.file_id,
         )
         if loaded is None or loaded.version.value != self._accepted_job.plan_version:
-            raise StaleStageThreeWorkerError(self._accepted_job.polling_job_id)
+            raise StaleHarmonizationWorkerError(self._accepted_job.polling_job_id)
         return loaded
 
 
-async def heartbeat_stage_three_job(
+async def heartbeat_harmonization_job(
     *,
     workflow_storage: WorkflowStorage,
     user: UserContext,
@@ -233,7 +272,21 @@ async def heartbeat_stage_three_job(
             return
         except TimeoutError:
             pass
-        loaded = load_harmonization_job(workflow_storage, user, accepted_job.file_id)
+        try:
+            loaded = load_harmonization_job(workflow_storage, user, accepted_job.file_id)
+        except HarmonizationJobUnreadableError:
+            logger.exception(
+                "Harmonization heartbeat stopped because durable job state is unreadable",
+                extra={"file_id": accepted_job.file_id, "job_id": accepted_job.polling_job_id},
+            )
+            return
+        except Exception:
+            logger.warning(
+                "Harmonization heartbeat read failed; retrying",
+                exc_info=True,
+                extra={"file_id": accepted_job.file_id, "job_id": accepted_job.polling_job_id},
+            )
+            continue
         if loaded is None or not _same_worker(loaded.job, accepted_job) or not loaded.job.is_active():
             return
         try:
@@ -245,14 +298,20 @@ async def heartbeat_stage_three_job(
             )
         except HarmonizationJobConflictError:
             return
+        except Exception:
+            logger.warning(
+                "Harmonization heartbeat write failed; retrying",
+                exc_info=True,
+                extra={"file_id": accepted_job.file_id, "job_id": accepted_job.polling_job_id},
+            )
 
 
-def complete_stage_three_job(
+def complete_harmonization_job(
     *,
     workflow_storage: WorkflowStorage,
     user: UserContext,
     accepted_job: HarmonizationJobState,
-    response: HarmonizeResponse,
+    response: HarmonizationWorkflowResult,
 ) -> LoadedHarmonizationJob:
     authority = RunAuthority(workflow_storage, user, accepted_job)
     loaded = authority.require_current()
@@ -274,10 +333,10 @@ def complete_stage_three_job(
             expected_version=loaded.version,
         )
     except HarmonizationJobConflictError as exc:
-        raise StaleStageThreeWorkerError(accepted_job.polling_job_id) from exc
+        raise StaleHarmonizationWorkerError(accepted_job.polling_job_id) from exc
 
 
-def fail_stage_three_job(
+def fail_harmonization_job(
     *,
     workflow_storage: WorkflowStorage,
     user: UserContext,
@@ -298,7 +357,7 @@ def fail_stage_three_job(
             failed,
             expected_version=loaded.version,
         )
-    except (HarmonizationJobConflictError, StaleStageThreeWorkerError):
+    except (HarmonizationJobConflictError, StaleHarmonizationWorkerError):
         return
 
 
@@ -306,18 +365,18 @@ def _load_current_workflow_state(
     *,
     workflow_storage: WorkflowStorage,
     user: UserContext,
-    payload: HarmonizeRequest,
+    file_id: str,
 ) -> LoadedWorkflowState:
     try:
-        loaded = load_workflow_state(workflow_storage, user, payload.file_id)
+        loaded = load_workflow_state(workflow_storage, user, file_id)
     except WorkflowStateUnreadableError as exc:
-        raise HarmonizationWorkflowUnreadableError(payload.file_id) from exc
+        raise HarmonizationWorkflowUnreadableError(file_id) from exc
 
     if loaded is None:
-        raise HarmonizationWorkflowNotFoundError(payload.file_id)
+        raise HarmonizationWorkflowNotFoundError(file_id)
 
     if loaded.state.mapping_choices is None:
-        raise HarmonizationStartConflictError(payload.file_id)
+        raise HarmonizationStartConflictError(file_id)
     return loaded
 
 
@@ -338,13 +397,14 @@ __all__ = [
     "HarmonizationStart",
     "HarmonizationStartConflictError",
     "HarmonizationWorkflowNotFoundError",
+    "HarmonizationCapacityError",
     "HarmonizationWorkflowUnreadableError",
     "RunAuthority",
-    "StaleStageThreeWorkerError",
-    "complete_stage_three_job",
+    "StaleHarmonizationWorkerError",
+    "complete_harmonization_job",
     "capture_harmonization_artifact_versions",
-    "fail_stage_three_job",
-    "heartbeat_stage_three_job",
+    "fail_harmonization_job",
+    "heartbeat_harmonization_job",
     "load_authorized_job",
     "start_harmonization",
 ]

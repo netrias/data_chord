@@ -20,6 +20,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 # noqa: E402 - ensure repo root is on sys.path before importing application modules.
+from src.app.harmonization_result_summary import build_harmonization_manifest_summary  # noqa: E402
 from src.domain.columns import column_key_for_index  # noqa: E402
 from src.domain.data_model_version_reference import DataModelVersionReference  # noqa: E402
 from src.domain.harmonization import HarmonizeStatus  # noqa: E402
@@ -38,7 +39,6 @@ from src.persistence.manifest_schema import get_manifest_schema  # noqa: E402
 from src.persistence.pv_manifest_store import ColumnPvSets  # noqa: E402
 from src.persistence.workflow_artifacts import save_harmonized_artifacts  # noqa: E402
 from src.persistence.workflow_state_store import load_workflow_state, save_initial_workflow_state  # noqa: E402
-from src.stage_3_harmonize.result_summary import build_harmonization_manifest_summary  # noqa: E402
 from src.storage import UploadConstraints, UploadStorage, UserContext  # noqa: E402
 
 

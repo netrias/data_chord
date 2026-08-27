@@ -208,9 +208,12 @@ async def app_client(
     deps_module.get_upload_storage = lambda: temp_storage
 
     original_workflow_storage = deps_module._workflow_storage
+    original_harmonization_job_service = deps_module._harmonization_job_service
     original_get_workflow_storage = deps_module.get_workflow_storage
     test_workflow_storage = LocalWorkflowStorage(temp_storage._base_dir / "workflow_storage")
     deps_module._workflow_storage = test_workflow_storage
+    # Given each test has isolated storage, do not reuse the prior service.
+    deps_module._harmonization_job_service = None
     deps_module.get_workflow_storage = lambda: test_workflow_storage
 
     try:
@@ -225,11 +228,13 @@ async def app_client(
         ) as client:
             yield client
     finally:
+        await deps_module.shutdown_harmonization_jobs()
         reset_user_context(user_token)
         deps_module._storage = original_storage
         deps_module.get_upload_storage = original_get_storage
         deps_module._workflow_storage = original_workflow_storage
         deps_module.get_workflow_storage = original_get_workflow_storage
+        deps_module._harmonization_job_service = original_harmonization_job_service
 
 
 @pytest.fixture
