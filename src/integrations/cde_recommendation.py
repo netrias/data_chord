@@ -48,6 +48,8 @@ class CdeRecommendationAdapter:
         self,
         columns: Sequence[ProfiledColumn],
         reference_model: ReferenceModel,
+        *,
+        top_k: int = 5,
     ) -> ColumnMappingManifest:
         results = await match_columns_batch(
             columns=[
@@ -63,6 +65,7 @@ class CdeRecommendationAdapter:
             data_model_key=reference_model.version.data_model_key,
             catalog_revision=reference_model.version.external_version_number,
             concurrency=self._concurrency,
+            top_k=top_k,
         )
         if len(results) != len(columns):
             raise RecommendationUnavailableError(

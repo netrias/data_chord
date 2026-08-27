@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import secrets
 import time
 from collections.abc import Mapping
 from contextvars import ContextVar, Token
@@ -21,13 +22,20 @@ from cryptography.hazmat.primitives.asymmetric import ec, utils
 from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey
 from starlette.datastructures import Headers
 
-from src.settings import IdentitySource, get_expected_alb_arn, get_identity_source
+from src.settings import (
+    IdentitySource,
+    get_expected_alb_arn,
+    get_identity_source,
+    get_programmatic_api_key,
+)
 from src.storage import UserContext
 
 ALB_IDENTITY_HEADER = "x-amzn-oidc-identity"
 ALB_DATA_HEADER = "x-amzn-oidc-data"
 TRUSTED_PROXY_USER_HEADER = "x-data-chord-user-id"
 LOCAL_USER_ID = "local-user"
+PROGRAMMATIC_API_KEY_HEADER = "x-api-key"
+PROGRAMMATIC_USER_ID = "programmatic-api"
 _ALB_JWT_ALGORITHM = "ES256"
 _ALB_KEY_TIMEOUT_SECONDS = 3
 
@@ -43,6 +51,14 @@ class InvalidUserContextError(RuntimeError):
     pass
 
 
+class InvalidProgrammaticApiKeyError(RuntimeError):
+    """Raised when a request does not carry the image's one configured API key."""
+
+
+class ProgrammaticApiNotConfiguredError(RuntimeError):
+    """Raised when no API key is configured for programmatic routes."""
+
+
 def current_user_context() -> UserContext:
     user = _current_user.get()
     if user is not None:
@@ -54,6 +70,17 @@ def current_user_context() -> UserContext:
 
 def bind_user_context(headers: Headers) -> Token[UserContext | None]:
     return _current_user.set(_user_context_from_headers(headers))
+
+
+def bind_programmatic_user_context(headers: Headers) -> Token[UserContext | None]:
+    """Authenticate one API key and bind its fixed service principal."""
+    configured_key = get_programmatic_api_key()
+    if configured_key is None:
+        raise ProgrammaticApiNotConfiguredError
+    presented_keys = headers.getlist(PROGRAMMATIC_API_KEY_HEADER)
+    if len(presented_keys) != 1 or not secrets.compare_digest(presented_keys[0], configured_key):
+        raise InvalidProgrammaticApiKeyError
+    return _current_user.set(UserContext(user_id=PROGRAMMATIC_USER_ID))
 
 
 def reset_user_context(token: Token[UserContext | None]) -> None:
@@ -219,9 +246,14 @@ def _string_claim(claims: Mapping[str, object], key: str) -> str | None:
 __all__ = [
     "ALB_DATA_HEADER",
     "ALB_IDENTITY_HEADER",
+    "InvalidProgrammaticApiKeyError",
     "InvalidUserContextError",
     "LOCAL_USER_ID",
+    "PROGRAMMATIC_API_KEY_HEADER",
+    "PROGRAMMATIC_USER_ID",
+    "ProgrammaticApiNotConfiguredError",
     "TRUSTED_PROXY_USER_HEADER",
+    "bind_programmatic_user_context",
     "bind_user_context",
     "current_user_context",
     "reset_user_context",

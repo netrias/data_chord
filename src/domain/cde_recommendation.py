@@ -35,6 +35,8 @@ class CdeRecommender(Protocol):
         self,
         columns: Sequence[ProfiledColumn],
         reference_model: ReferenceModel,
+        *,
+        top_k: int = 5,
     ) -> ColumnMappingManifest: ...
 
 
