@@ -62,7 +62,7 @@ def test_reference_repository_uses_the_configured_table(monkeypatch) -> None:
     resource.Table.assert_called_once_with("reference-table")
 
 
-def test_harmonizer_is_agentic_only(monkeypatch) -> None:
+def test_harmonizer_uses_bedrock_only_when_local_models_are_not_configured(monkeypatch) -> None:
     # Given a fresh service container.
     monkeypatch.setenv("AWS_REGION", "us-east-2")
     monkeypatch.setenv("DATA_CHORD_HARMONIZATION_CACHE_TABLE", "cache-table")
@@ -76,6 +76,31 @@ def test_harmonizer_is_agentic_only(monkeypatch) -> None:
     # Then the in-task agentic harmonizer is the only implementation.
     assert isinstance(service, AgenticHarmonizeService)
     assert service._cache is cache  # noqa: SLF001 - verifies application wiring
+    assert service._local_inference is None  # noqa: SLF001 - verifies application wiring
+
+
+def test_harmonizer_loads_the_single_local_model_file(monkeypatch, tmp_path: Path) -> None:
+    # Given one checked local model file is configured for the process.
+    model_directory = tmp_path / "gpt2-v1"
+    model_directory.mkdir()
+    config_path = tmp_path / "local_models.json"
+    config_path.write_text(
+        '{"models":[{"path":"gpt2-v1","cdes":["cell_type"]}]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AWS_REGION", "us-east-2")
+    monkeypatch.setenv("DATA_CHORD_LOCAL_MODELS_CONFIG", str(config_path))
+    monkeypatch.setattr(dependencies, "_harmonize_service", None)
+    monkeypatch.setattr(dependencies, "_local_inference", None)
+    monkeypatch.setattr(dependencies, "get_harmonization_cache", MagicMock())
+
+    # When normal application wiring creates the harmonizer.
+    service = dependencies.get_harmonize_service()
+
+    # Then the application receives only the small local inference boundary.
+    assert isinstance(service, AgenticHarmonizeService)
+    assert service._local_inference is not None  # noqa: SLF001 - verifies application wiring
+    assert service._local_inference.supported_cdes == frozenset({"cell_type"})  # noqa: SLF001
 
 
 def test_harmonization_cache_uses_the_configured_table(monkeypatch) -> None:

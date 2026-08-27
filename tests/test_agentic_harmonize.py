@@ -21,6 +21,7 @@ from src.integrations.agentic_harmonize import (
     AgenticHarmonizeConfig,
     AgenticHarmonizeService,
 )
+from src.local_inference import LocalInferenceRequest, LocalInferenceResult
 from src.persistence.manifest_reader import read_manifest_parquet
 from src.persistence.pv_manifest_store import ColumnPvSets
 
@@ -286,6 +287,68 @@ def test_exact_permissible_value_skips_cache_and_bedrock(
     assert read_tabular(output).rows == [["Known"], ["Matched"]]
     assert {key.source_value for key in cache.loaded_keys} == {"unknown"}
     assert {entry.key.source_value for entry in cache.entries.values()} == {"unknown"}
+
+
+def test_configured_cdes_use_one_local_batch_while_other_cdes_use_bedrock(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    # Given one local CDE, one Bedrock CDE, and repeated source values in both columns.
+    source = tmp_path / "source.csv"
+    source.write_text("diagnosis,treatment\nsame,same\nsame,same\n", encoding="utf-8")
+    output = tmp_path / "output.csv"
+    cache = _MemoryCache()
+    local_requests: list[tuple[LocalInferenceRequest, ...]] = []
+    bedrock_calls: list[str] = []
+
+    class _LocalInference:
+        supported_cdes = frozenset({"diagnosis"})
+
+        def harmonize(
+            self,
+            requests: tuple[LocalInferenceRequest, ...],
+        ) -> tuple[LocalInferenceResult, ...]:
+            local_requests.append(requests)
+            return (
+                LocalInferenceResult("Local Diagnosis", MatchFidelity.STRONG),
+            )
+
+    def fake_harmonize(_client, _index, term: str, **_kwargs: object) -> SimpleNamespace:
+        bedrock_calls.append(term)
+        return _prediction(term, "Bedrock Treatment")
+
+    monkeypatch.setattr("src.integrations.agentic_harmonize.harmonize_term", fake_harmonize)
+    monkeypatch.setattr(
+        "src.integrations.agentic_harmonize.make_provider_client",
+        lambda *args, **kwargs: object(),
+    )
+    service = AgenticHarmonizeService(
+        AgenticHarmonizeConfig(region="us-east-2"),
+        cache=cache,
+        local_inference=_LocalInference(),
+    )
+
+    # When the existing file workflow performs harmonization.
+    result = service.run(
+        file_path=source,
+        data_model_version=MODEL_VERSION,
+        prepared_manifest=_manifest(),
+        column_pv_sets=ColumnPvSets({
+            column_key_for_index(0): frozenset({"Local Diagnosis"}),
+            column_key_for_index(1): frozenset({"Bedrock Treatment"}),
+        }),
+        output_path=output,
+    )
+
+    # Then local work is batched once, Bedrock handles only its CDE, and local work bypasses the cache.
+    assert result.status is HarmonizeStatus.SUCCEEDED
+    assert [[request.cde for request in batch] for batch in local_requests] == [["diagnosis"]]
+    assert bedrock_calls == ["same"]
+    assert read_tabular(output).rows == [
+        ["Local Diagnosis", "Bedrock Treatment"],
+        ["Local Diagnosis", "Bedrock Treatment"],
+    ]
+    assert {key.cde_key for key in cache.loaded_keys} == {"treatment"}
 
 
 def test_second_run_uses_the_versioned_cde_cache_without_bedrock(

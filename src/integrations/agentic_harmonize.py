@@ -39,6 +39,10 @@ from src.domain.harmonization_cache import (
 )
 from src.domain.manifest import ColumnMappingManifest, ManifestRow
 from src.integrations.harmonize import HarmonizeResult
+from src.local_inference import (
+    LocalInferenceProvider,
+    LocalInferenceRequest,
+)
 from src.persistence.manifest_writer import write_manifest_parquet
 from src.persistence.pv_manifest_store import ColumnPvSets
 
@@ -73,6 +77,7 @@ class _TermWork:
     cde_key: str
     input_term: str
     row_indices: tuple[int, ...]
+    permissible_values: frozenset[str] | None
     pvs_index: PvsIndex | None
     search_indexes: IndexBundle | None
     is_exact_match: bool
@@ -99,9 +104,11 @@ class AgenticHarmonizeService:
         config: AgenticHarmonizeConfig,
         *,
         cache: HarmonizationCache | None = None,
+        local_inference: LocalInferenceProvider | None = None,
     ) -> None:
         self._config = config
         self._cache = cache or EmptyHarmonizationCache()
+        self._local_inference = local_inference
         self._worker_state = _WorkerState()
 
     def run(
@@ -155,33 +162,69 @@ class AgenticHarmonizeService:
             if item.pvs_index is None or not item.input_term.strip()
         ]
         outcomes.extend(_exact_match(item) for item in work if item.is_exact_match)
-        cache_work = [
-            (item, _cache_key(data_model_version, item))
+        provider_work = [
+            item
             for item in work
             if item.pvs_index is not None
             and item.input_term.strip()
             and not item.is_exact_match
         ]
+        local_work: list[_TermWork] = []
+        bedrock_work: list[_TermWork] = []
+        for item in provider_work:
+            target = local_work if self._uses_local_inference(item) else bedrock_work
+            target.append(item)
+        outcomes.extend(self._run_local_terms(local_work))
+        cache_work = [(item, _cache_key(data_model_version, item)) for item in bedrock_work]
         cached = self._load_cache([key for _item, key in cache_work])
-        provider_work: list[_TermWork] = []
+        uncached_bedrock_work: list[_TermWork] = []
         for item, key in cache_work:
             entry = cached.get(key)
             if entry is None:
-                provider_work.append(item)
+                uncached_bedrock_work.append(item)
             else:
                 outcomes.append(_cached_outcome(item, entry))
         logger.info(
             "Prepared harmonization work",
             extra={
                 "exact_matches": sum(item.is_exact_match for item in work),
-                "cache_hits": len(cache_work) - len(provider_work),
-                "provider_terms": len(provider_work),
+                "local_terms": len(local_work),
+                "cache_hits": len(cache_work) - len(uncached_bedrock_work),
+                "bedrock_terms": len(uncached_bedrock_work),
             },
         )
-        provider_outcomes = self._run_provider_terms(provider_work)
+        provider_outcomes = self._run_provider_terms(uncached_bedrock_work)
         outcomes.extend(provider_outcomes)
         self._save_cache(data_model_version, provider_outcomes)
         return sorted(outcomes, key=_outcome_order)
+
+    def _uses_local_inference(self, work: _TermWork) -> bool:
+        return self._local_inference is not None and work.cde_key in self._local_inference.supported_cdes
+
+    def _run_local_terms(self, local_work: list[_TermWork]) -> list[_TermOutcome]:
+        if not local_work:
+            return []
+        if self._local_inference is None:
+            raise RuntimeError("Local harmonization work requires local inference")
+        requests = tuple(
+            LocalInferenceRequest(
+                cde=item.cde_key,
+                source_value=item.input_term,
+                permissible_values=item.permissible_values or frozenset(),
+            )
+            for item in local_work
+        )
+        results = self._local_inference.harmonize(requests)
+        if len(results) != len(local_work):
+            raise RuntimeError("Local inference returned an incomplete result")
+        return [
+            _TermOutcome(
+                work=item,
+                matched_value=result.matched_value,
+                match_fidelity=result.match_fidelity,
+            )
+            for item, result in zip(local_work, results, strict=True)
+        ]
 
     def _run_provider_terms(self, provider_work: list[_TermWork]) -> list[_TermOutcome]:
         if not provider_work:
@@ -301,6 +344,7 @@ def _build_work(
                 cde_key=record.cde_key,
                 input_term=term,
                 row_indices=tuple(row_indices),
+                permissible_values=pvs,
                 pvs_index=indexes[0] if indexes else None,
                 search_indexes=indexes[1] if indexes else None,
                 is_exact_match=pvs is not None and term in pvs,

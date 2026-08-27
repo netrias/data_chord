@@ -102,6 +102,59 @@ docker run --rm \
 
 Do not put credentials in the image.
 
+### Use local harmonization models
+
+Local models are optional. Put one checked file and the model directories under
+`/models`. The model path is relative to the JSON file and is also its identity:
+
+```json
+{
+  "models": [
+    {
+      "path": "gpt2-cell-type-v1",
+      "cdes": ["cell_type"]
+    },
+    {
+      "path": "biobert-disease-v1",
+      "cdes": ["human_diseases", "medical_history"]
+    }
+  ]
+}
+```
+
+Use the exact CDE keys from the standard. One CDE can use only one model. One
+model can own many CDEs. The application finds the model type from its Hugging
+Face configuration. GPT-2 and BERT sequence-classification exports are
+supported. Their output labels must be exact permissible values. A model can
+also contain the `NO_MATCH` label.
+
+Check the full model files before deployment:
+
+```bash
+docker run --rm \
+  --mount type=bind,src="$(pwd)/models",dst=/models,readonly \
+  data-chord:<full-git-commit> \
+  python -m src.local_inference check /models/local_models.json --load-models
+```
+
+Mount the same directory and set one variable when the application runs:
+
+```bash
+docker run --rm \
+  --mount type=volume,src=data-chord,dst=/data \
+  --mount type=bind,src="$(pwd)/models",dst=/models,readonly \
+  --env DATA_CHORD_PROFILE=portable \
+  --env DATA_CHORD_LOCAL_MODELS_CONFIG=/models/local_models.json \
+  --env AWS_REGION=us-east-2 \
+  --publish 8000:8000 \
+  data-chord:<full-git-commit>
+```
+
+The application checks the complete JSON file at startup. During Stage 3 it
+groups all terms for the same model, loads that model once, runs the group, and
+releases the model before it loads the next one. CDEs that are not in the file
+continue to use Bedrock.
+
 Portable workflow files are temporary. After a successful upload, the app
 checks workflow storage in the background. At 80% of
 `DATA_CHORD_WORKFLOW_STORAGE_LIMIT_GB`, it removes the least recently accessed

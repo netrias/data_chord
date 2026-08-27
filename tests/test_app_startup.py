@@ -23,6 +23,7 @@ _RUNTIME_CONFIG_NAMES = (
     "DATA_CHORD_MODE",
     "DATA_CHORD_HARMONIZATION_CACHE_TABLE",
     "DATA_CHORD_IDENTITY_SOURCE",
+    "DATA_CHORD_LOCAL_MODELS_CONFIG",
     "DATA_CHORD_DATA_DIR",
     "DATA_CHORD_PROFILE",
     "DATA_CHORD_REFERENCE_TABLE",
@@ -260,6 +261,30 @@ def test_portable_runtime_rejects_an_empty_standards_catalog(tmp_path: Path) -> 
     # Then startup reports that the catalog has no usable standards.
     assert result.returncode != 0
     assert "Portable reference database contains no model versions" in result.stderr
+
+
+def test_portable_runtime_rejects_an_invalid_local_model_file(tmp_path: Path) -> None:
+    # Given portable standards and a local model file that names a missing directory.
+    _initialize_portable_standards(tmp_path / "standards.sqlite")
+    config_path = tmp_path / "local_models.json"
+    config_path.write_text(
+        '{"models":[{"path":"missing-model","cdes":["cell_type"]}]}',
+        encoding="utf-8",
+    )
+
+    # When the application starts with local inference enabled.
+    result = _run_import(
+        "backend.app.main",
+        {
+            "DATA_CHORD_PROFILE": "portable",
+            "DATA_CHORD_DATA_DIR": str(tmp_path),
+            "DATA_CHORD_LOCAL_MODELS_CONFIG": str(config_path),
+        },
+    )
+
+    # Then startup fails before health checks can report an unusable service.
+    assert result.returncode != 0
+    assert "Local model directory does not exist" in result.stderr
 
 
 def test_importing_application_package_does_not_start_application() -> None:

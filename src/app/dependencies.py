@@ -27,6 +27,11 @@ from src.integrations.dynamodb_reference_data import DynamoDbReferenceDataReposi
 from src.integrations.harmonize import HarmonizeService
 from src.integrations.sqlite_reference_data import SqliteReferenceDataRepository
 from src.integrations.value_overlap_cde_recommendation import ValueOverlapCdeRecommender
+from src.local_inference import (
+    LocalInferenceProvider,
+    LocalModelConfigurationError,
+    load_local_inference,
+)
 from src.paths import PROJECT_ROOT
 from src.settings import (
     ApplicationMode,
@@ -39,6 +44,7 @@ from src.settings import (
     get_cde_recommendation_cache_table_name,
     get_data_dir,
     get_harmonization_cache_table_name,
+    get_local_models_config_path,
     get_reference_database_path,
     get_reference_table_name,
     get_runtime_profile,
@@ -75,6 +81,7 @@ _reference_data_repository: ReferenceDataRepository | None = None
 _harmonization_cache: HarmonizationCache | None = None
 _harmonize_service: HarmonizeService | None = None
 _cde_recommender: CdeRecommender | None = None
+_local_inference: LocalInferenceProvider | None = None
 
 
 def get_upload_constraints() -> UploadConstraints:
@@ -154,6 +161,7 @@ def get_user_context() -> UserContext:
 
 def validate_runtime_services() -> None:
     """Fail portable startup before health checks can report unusable local state."""
+    get_local_inference()
     if get_runtime_profile() is not RuntimeProfile.PORTABLE:
         return
     try:
@@ -203,6 +211,19 @@ def get_harmonization_cache() -> HarmonizationCache:
     return _harmonization_cache
 
 
+def get_local_inference() -> LocalInferenceProvider | None:
+    global _local_inference  # noqa: PLW0603 - intentional singleton
+    config_path = get_local_models_config_path()
+    if config_path is None:
+        return None
+    if _local_inference is None:
+        try:
+            _local_inference = load_local_inference(config_path)
+        except LocalModelConfigurationError as exc:
+            raise ConfigurationError(str(exc)) from exc
+    return _local_inference
+
+
 def get_harmonize_service() -> HarmonizeService:
     global _harmonize_service  # noqa: PLW0603 - intentional singleton
     if _harmonize_service is None:
@@ -212,6 +233,7 @@ def get_harmonize_service() -> HarmonizeService:
                 max_workers=get_agentic_workers(),
             ),
             cache=get_harmonization_cache(),
+            local_inference=get_local_inference(),
         )
     return _harmonize_service
 
@@ -241,10 +263,12 @@ def get_cde_recommender() -> CdeRecommender:
 def cleanup_services() -> None:
     """Clean up resources held by singleton services (call on app shutdown)."""
     global _cde_recommender, _harmonization_cache, _harmonize_service  # noqa: PLW0603
+    global _local_inference  # noqa: PLW0603
     global _reference_data_repository, _workflow_cleanup, _workflow_storage  # noqa: PLW0603
     _cde_recommender = None
     _harmonization_cache = None
     _harmonize_service = None
+    _local_inference = None
     _reference_data_repository = None
     _workflow_cleanup = None
     _workflow_storage = None
@@ -257,6 +281,7 @@ __all__ = [
     "cleanup_services",
     "get_harmonization_cache",
     "get_harmonize_service",
+    "get_local_inference",
     "get_cde_recommender",
     "get_reference_data_repository",
     "get_upload_constraints",
