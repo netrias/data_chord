@@ -232,6 +232,12 @@ class WorkflowStorage(Protocol):
         dataset_workflow_id: DatasetWorkflowId,
     ) -> WorkflowMetadata: ...
 
+    def delete_workflow(
+        self,
+        user: UserContext,
+        dataset_workflow_id: DatasetWorkflowId,
+    ) -> None: ...
+
     def read_json(self, user: UserContext, file_id: str, kind: WorkflowFile) -> StoredJson | None: ...
 
     def write_json(
@@ -306,6 +312,16 @@ class LocalWorkflowStorage:
         except FileExistsError as exc:
             raise WorkflowConflictError(f"Workflow already exists: {dataset_workflow_id}") from exc
         return metadata
+
+    def delete_workflow(
+        self,
+        user: UserContext,
+        dataset_workflow_id: DatasetWorkflowId,
+    ) -> None:
+        """Delete a workflow that the caller owns."""
+        with self._workflow_lock(dataset_workflow_id):
+            self._require_access_locked(user, dataset_workflow_id)
+            shutil.rmtree(self._path_for_workflow(dataset_workflow_id))
 
     def read_json(self, user: UserContext, file_id: str, kind: WorkflowFile) -> StoredJson | None:
         self._require_json_kind(kind)

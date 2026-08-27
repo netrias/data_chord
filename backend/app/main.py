@@ -19,9 +19,11 @@ from src.auth.user_context import (
     InvalidProgrammaticApiKeyError,
     InvalidUserContextError,
     ProgrammaticApiNotConfiguredError,
+    bind_programmatic_artifact_user_context,
     bind_programmatic_user_context,
     bind_user_context,
     current_user_context,
+    is_programmatic_artifact_path,
     reset_user_context,
 )
 from src.observability.events import (
@@ -49,6 +51,7 @@ APP_DESCRIPTION = "Data harmonization workflow bootstrap application."
 _DEFAULT_ASSET_VERSION = "local"
 _ASSET_VERSION_VAR = "DATA_CHORD_ASSET_VERSION"
 _PROGRAMMATIC_API_MAX_BODY_BYTES = 2 * 1024 * 1024
+_PROGRAMMATIC_HARMONIZATION_MAX_BODY_BYTES = 10 * 1024 * 1024
 
 
 def _is_dev_mode() -> bool:
@@ -191,9 +194,9 @@ async def _bind_user_context(request: Request, call_next: Callable[[Request], Aw
         if request.url.path == "/healthz":
             response = await call_next(request)
             status_code = response.status_code
-        elif _is_programmatic_api(request.url.path):
+        else:
             try:
-                user_token = bind_programmatic_user_context(request.headers)
+                user_token = _bind_authenticated_user_context(request)
                 user_id = current_user_context().user_id
             except ProgrammaticApiNotConfiguredError:
                 status_code = status.HTTP_503_SERVICE_UNAVAILABLE
@@ -204,16 +207,15 @@ async def _bind_user_context(request: Request, call_next: Callable[[Request], Aw
             except InvalidProgrammaticApiKeyError:
                 status_code = status.HTTP_401_UNAUTHORIZED
                 response = JSONResponse(
-                    {"detail": "Invalid API key."},
+                    {
+                        "detail": (
+                            "Invalid artifact URL."
+                            if is_programmatic_artifact_path(request.url.path)
+                            else "Invalid API key."
+                        )
+                    },
                     status_code=status_code,
                 )
-            else:
-                response = await call_next(request)
-                status_code = response.status_code
-        else:
-            try:
-                user_token = bind_user_context(request.headers)
-                user_id = current_user_context().user_id
             except InvalidUserContextError:
                 status_code = 401
                 response = Response("Invalid identity headers", status_code=status_code)
@@ -241,6 +243,17 @@ async def _bind_user_context(request: Request, call_next: Callable[[Request], Aw
         reset_request_id(request_token)
 
 
+def _bind_authenticated_user_context(request: Request):
+    if is_programmatic_artifact_path(request.url.path):
+        return bind_programmatic_artifact_user_context(
+            request.url.path,
+            request.query_params,
+        )
+    if _is_programmatic_api(request.url.path):
+        return bind_programmatic_user_context(request.headers)
+    return bind_user_context(request.headers)
+
+
 class _ProgrammaticRequestBodyLimitMiddleware:
     """Bound API request memory before FastAPI parses the document."""
 
@@ -256,6 +269,11 @@ class _ProgrammaticRequestBodyLimitMiddleware:
             await self._app(scope, receive, send)
             return
 
+        body_limit = (
+            _PROGRAMMATIC_HARMONIZATION_MAX_BODY_BYTES
+            if scope["path"] == "/api/v1/jobs/harmonize"
+            else _PROGRAMMATIC_API_MAX_BODY_BYTES
+        )
         messages: list[Message] = []
         body_size = 0
         while True:
@@ -266,7 +284,7 @@ class _ProgrammaticRequestBodyLimitMiddleware:
             if message["type"] != "http.request":
                 continue
             body_size += len(message.get("body", b""))
-            if body_size > _PROGRAMMATIC_API_MAX_BODY_BYTES:
+            if body_size > body_limit:
                 response = JSONResponse(
                     {"detail": "Request body is too large."},
                     status_code=status.HTTP_413_CONTENT_TOO_LARGE,
