@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, replace
 from pathlib import Path
-from threading import local
+from threading import Lock, local
 from uuid import uuid4
 
 from agent_experiment import (
@@ -38,7 +38,13 @@ from src.domain.harmonization_cache import (
     HarmonizationCacheKey,
 )
 from src.domain.manifest import ColumnMappingManifest, ManifestRow
-from src.integrations.harmonize import HarmonizeResult
+from src.integrations.harmonize import (
+    HarmonizeResult,
+    InvalidTermHarmonizationResponseError,
+    TermHarmonizationProvider,
+    TermHarmonizationRequest,
+    TermHarmonizationResponse,
+)
 from src.persistence.manifest_writer import write_manifest_parquet
 from src.persistence.pv_manifest_store import ColumnPvSets
 
@@ -73,8 +79,7 @@ class _TermWork:
     cde_key: str
     input_term: str
     row_indices: tuple[int, ...]
-    pvs_index: PvsIndex | None
-    search_indexes: IndexBundle | None
+    permissible_values: tuple[str, ...] | None
     is_exact_match: bool
 
     @property
@@ -89,8 +94,66 @@ class _TermOutcome:
     match_fidelity: MatchFidelity
 
 
-class _WorkerState(local):
+class _ProviderWorkerState(local):
     client: ConverseClient | None = None
+
+
+class _BedrockTermHarmonizationProvider:
+    """Adapt the current agent-experiment call to the provider boundary."""
+
+    def __init__(self, config: AgenticHarmonizeConfig) -> None:
+        self._config = config
+        self._worker_state = _ProviderWorkerState()
+        self._index_cache: dict[tuple[str, ...], tuple[PvsIndex, IndexBundle]] = {}
+        self._index_cache_lock = Lock()
+
+    def harmonize(self, request: TermHarmonizationRequest) -> TermHarmonizationResponse:
+        if not request.permissible_values:
+            raise RuntimeError("Provider work requires permissible values")
+        pvs_index, search_indexes = self._indexes_for(request.permissible_values)
+        result = harmonize_term(
+            self._provider_client(),
+            pvs_index,
+            request.input_term,
+            indexes=search_indexes,
+            explorer_model=self._config.explorer_model,
+            shortlister_model=self._config.shortlister_model,
+            selector_model=self._config.selector_model,
+            exploration_turns=self._config.exploration_turns,
+            context=request.context,
+        )
+        predicted = result.prediction.predicted_match
+        return TermHarmonizationResponse(
+            matched_value=None if predicted == NO_MATCH else predicted,
+            match_fidelity=(
+                MatchFidelity.NONE
+                if predicted == NO_MATCH
+                else MatchFidelity(result.prediction.match_fidelity)
+            ),
+        )
+
+    def _indexes_for(
+        self,
+        permissible_values: tuple[str, ...],
+    ) -> tuple[PvsIndex, IndexBundle]:
+        with self._index_cache_lock:
+            indexes = self._index_cache.get(permissible_values)
+            if indexes is None:
+                pvs_index = build_pvs_index(list(permissible_values))
+                indexes = (pvs_index, build_all_indexes(pvs_index))
+                self._index_cache[permissible_values] = indexes
+            return indexes
+
+    def _provider_client(self) -> ConverseClient:
+        client = self._worker_state.client
+        if client is None:
+            client = make_provider_client(
+                self._config.region,
+                provider=Provider.BEDROCK,
+                reasoning_effort=self._config.reasoning_effort,
+            )
+            self._worker_state.client = client
+        return client
 
 
 class AgenticHarmonizeService:
@@ -99,10 +162,11 @@ class AgenticHarmonizeService:
         config: AgenticHarmonizeConfig,
         *,
         cache: HarmonizationCache | None = None,
+        term_harmonization_provider: TermHarmonizationProvider | None = None,
     ) -> None:
         self._config = config
         self._cache = cache or EmptyHarmonizationCache()
-        self._worker_state = _WorkerState()
+        self._term_harmonization_provider = term_harmonization_provider
 
     def run(
         self,
@@ -113,6 +177,7 @@ class AgenticHarmonizeService:
         column_pv_sets: ColumnPvSets,
         output_path: Path | None = None,
         sheet_name: str | None = None,
+        use_cache: bool = True,
     ) -> HarmonizeResult:
         job_id = uuid4().hex
         requested_output = output_path or file_path.with_name(f"{file_path.stem}.harmonized{file_path.suffix}")
@@ -120,7 +185,15 @@ class AgenticHarmonizeService:
         try:
             dataset = read_tabular(file_path, sheet_name)
             work = _build_work(dataset.columns, dataset.rows, prepared_manifest, column_pv_sets)
-            outcomes = self._run_terms(work, data_model_version)
+            provider = self._term_harmonization_provider or _BedrockTermHarmonizationProvider(
+                self._config
+            )
+            outcomes = self._run_terms(
+                work,
+                data_model_version,
+                provider=provider,
+                use_cache=use_cache,
+            )
             output_rows = _apply_outcomes(dataset.rows, outcomes)
             manifest_rows = [_manifest_row(job_id, outcome) for outcome in outcomes]
             requested_output.parent.mkdir(parents=True, exist_ok=True)
@@ -148,26 +221,31 @@ class AgenticHarmonizeService:
         self,
         work: list[_TermWork],
         data_model_version: DataModelVersionReference,
+        *,
+        provider: TermHarmonizationProvider,
+        use_cache: bool,
     ) -> list[_TermOutcome]:
         outcomes = [
             _passthrough(item)
             for item in work
-            if item.pvs_index is None or not item.input_term.strip()
+            if not item.permissible_values or not item.input_term.strip()
         ]
         outcomes.extend(_exact_match(item) for item in work if item.is_exact_match)
         cache_work = [
             (item, _cache_key(data_model_version, item))
             for item in work
-            if item.pvs_index is not None
+            if item.permissible_values
             and item.input_term.strip()
             and not item.is_exact_match
         ]
-        cached = self._load_cache([key for _item, key in cache_work])
+        cached = self._load_cache([key for _item, key in cache_work]) if use_cache else {}
         provider_work: list[_TermWork] = []
+        invalid_cache_entries = 0
         for item, key in cache_work:
             entry = cached.get(key)
-            if entry is None:
+            if entry is None or not _cache_entry_matches_work(item, key, entry):
                 provider_work.append(item)
+                invalid_cache_entries += entry is not None
             else:
                 outcomes.append(_cached_outcome(item, entry))
         logger.info(
@@ -175,15 +253,21 @@ class AgenticHarmonizeService:
             extra={
                 "exact_matches": sum(item.is_exact_match for item in work),
                 "cache_hits": len(cache_work) - len(provider_work),
+                "invalid_cache_entries": invalid_cache_entries,
                 "provider_terms": len(provider_work),
             },
         )
-        provider_outcomes = self._run_provider_terms(provider_work)
+        provider_outcomes = self._run_provider_terms(provider_work, provider)
         outcomes.extend(provider_outcomes)
-        self._save_cache(data_model_version, provider_outcomes)
+        if use_cache:
+            self._save_cache(data_model_version, provider_outcomes)
         return sorted(outcomes, key=_outcome_order)
 
-    def _run_provider_terms(self, provider_work: list[_TermWork]) -> list[_TermOutcome]:
+    def _run_provider_terms(
+        self,
+        provider_work: list[_TermWork],
+        provider: TermHarmonizationProvider,
+    ) -> list[_TermOutcome]:
         if not provider_work:
             return []
         outcomes: list[_TermOutcome] = []
@@ -191,7 +275,7 @@ class AgenticHarmonizeService:
         work_iterator = iter(provider_work)
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
             futures: set[Future[_TermOutcome]] = {
-                executor.submit(self._harmonize_term, next(work_iterator))
+                executor.submit(self._harmonize_term, next(work_iterator), provider)
                 for _ in range(worker_count)
             }
             try:
@@ -200,7 +284,7 @@ class AgenticHarmonizeService:
                     for future in completed:
                         outcomes.append(future.result())
                         if next_work := next(work_iterator, None):
-                            futures.add(executor.submit(self._harmonize_term, next_work))
+                            futures.add(executor.submit(self._harmonize_term, next_work, provider))
             except Exception:
                 for future in futures:
                     future.cancel()
@@ -237,42 +321,38 @@ class AgenticHarmonizeService:
         except HarmonizationCacheError:
             logger.warning("Harmonization cache write failed; result remains usable", exc_info=True)
 
-    def _harmonize_term(self, work: _TermWork) -> _TermOutcome:
-        if work.pvs_index is None:
+    def _harmonize_term(
+        self,
+        work: _TermWork,
+        provider: TermHarmonizationProvider,
+    ) -> _TermOutcome:
+        if not work.permissible_values:
             raise RuntimeError("Agentic work requires a permissible value index")
-        result = harmonize_term(
-            self._provider_client(),
-            work.pvs_index,
-            work.input_term,
-            indexes=work.search_indexes,
-            explorer_model=self._config.explorer_model,
-            shortlister_model=self._config.shortlister_model,
-            selector_model=self._config.selector_model,
-            exploration_turns=self._config.exploration_turns,
-            context=work.context,
+        result = provider.harmonize(
+            TermHarmonizationRequest(
+                input_term=work.input_term,
+                permissible_values=work.permissible_values,
+                context=work.context,
+            )
         )
-        predicted = result.prediction.predicted_match
-        fidelity = (
-            MatchFidelity.NONE
-            if predicted == NO_MATCH
-            else MatchFidelity(result.prediction.match_fidelity)
-        )
+        if result.matched_value is None and result.match_fidelity is not MatchFidelity.NONE:
+            raise InvalidTermHarmonizationResponseError(
+                "An unmatched provider result must use none fidelity"
+            )
+        if result.matched_value is not None:
+            if result.matched_value not in work.permissible_values:
+                raise InvalidTermHarmonizationResponseError(
+                    "The provider result is not a permissible value"
+                )
+            if result.match_fidelity is MatchFidelity.NONE:
+                raise InvalidTermHarmonizationResponseError(
+                    "A matched provider result must report match fidelity"
+                )
         return _TermOutcome(
             work=work,
-            matched_value=None if predicted == NO_MATCH else predicted,
-            match_fidelity=fidelity,
+            matched_value=result.matched_value,
+            match_fidelity=result.match_fidelity,
         )
-
-    def _provider_client(self) -> ConverseClient:
-        client = self._worker_state.client
-        if client is None:
-            client = make_provider_client(
-                self._config.region,
-                provider=Provider.BEDROCK,
-                reasoning_effort=self._config.reasoning_effort,
-            )
-            self._worker_state.client = client
-        return client
 
 
 def _build_work(
@@ -281,7 +361,6 @@ def _build_work(
     manifest: ColumnMappingManifest,
     column_pv_sets: ColumnPvSets,
 ) -> list[_TermWork]:
-    pvs_indexes: dict[frozenset[str], tuple[PvsIndex, IndexBundle]] = {}
     work: list[_TermWork] = []
     for column in columns:
         column_id = column.index
@@ -290,7 +369,7 @@ def _build_work(
         if record is None:
             continue
         pvs = column_pv_sets.get(column_key)
-        indexes = _indexes_for(pvs, pvs_indexes)
+        permissible_values = tuple(sorted(pvs)) if pvs else None
         grouped: dict[str, list[int]] = {}
         for row_index, row in enumerate(rows):
             grouped.setdefault(row[column_id], []).append(row_index)
@@ -301,23 +380,10 @@ def _build_work(
                 cde_key=record.cde_key,
                 input_term=term,
                 row_indices=tuple(row_indices),
-                pvs_index=indexes[0] if indexes else None,
-                search_indexes=indexes[1] if indexes else None,
+                permissible_values=permissible_values,
                 is_exact_match=pvs is not None and term in pvs,
             ))
     return work
-
-
-def _indexes_for(
-    pvs: frozenset[str] | None,
-    cache: dict[frozenset[str], tuple[PvsIndex, IndexBundle]],
-) -> tuple[PvsIndex, IndexBundle] | None:
-    if not pvs:
-        return None
-    if pvs not in cache:
-        pvs_index = build_pvs_index(sorted(pvs))
-        cache[pvs] = (pvs_index, build_all_indexes(pvs_index))
-    return cache[pvs]
 
 
 def _passthrough(work: _TermWork) -> _TermOutcome:
@@ -351,6 +417,23 @@ def _cached_outcome(
         work=work,
         matched_value=entry.matched_value,
         match_fidelity=entry.match_fidelity,
+    )
+
+
+def _cache_entry_matches_work(
+    work: _TermWork,
+    expected_key: HarmonizationCacheKey,
+    entry: HarmonizationCacheEntry,
+) -> bool:
+    return (
+        entry.key == expected_key
+        and (
+            entry.matched_value is None
+            or (
+                work.permissible_values is not None
+                and entry.matched_value in work.permissible_values
+            )
+        )
     )
 
 

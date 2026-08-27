@@ -45,6 +45,7 @@ _DATA_CHORD_S3_BUCKET_VAR = "DATA_CHORD_S3_BUCKET"
 _DATA_CHORD_S3_PREFIX_VAR = "DATA_CHORD_S3_PREFIX"
 _DATA_CHORD_ALB_ARN_VAR = "DATA_CHORD_ALB_ARN"
 _DATA_CHORD_AGENTIC_WORKERS_VAR = "DATA_CHORD_AGENTIC_WORKERS"
+_DATA_CHORD_MAX_ACTIVE_JOBS_VAR = "DATA_CHORD_MAX_ACTIVE_JOBS"
 _DATA_CHORD_REFERENCE_TABLE_VAR = "DATA_CHORD_REFERENCE_TABLE"
 _DATA_CHORD_HARMONIZATION_CACHE_TABLE_VAR = "DATA_CHORD_HARMONIZATION_CACHE_TABLE"
 _DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE_VAR = "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE"
@@ -55,6 +56,7 @@ _DEFAULT_RUNTIME_PROFILE = RuntimeProfile.HOSTED
 _DEFAULT_APPLICATION_MODE = ApplicationMode.NORMAL
 _DEFAULT_IDENTITY_SOURCE = IdentitySource.SHARED
 _DEFAULT_AGENTIC_WORKERS = 100
+_DEFAULT_MAX_ACTIVE_JOBS = 1
 _DEFAULT_AWS_REGION = "us-east-2"
 _DEFAULT_DATA_DIR = Path("/data")
 _DEFAULT_WORKFLOW_STORAGE_LIMIT_GB = Decimal(10)
@@ -117,6 +119,17 @@ def get_agentic_workers() -> int:
     if workers > 100:
         raise ConfigurationError(f"{_DATA_CHORD_AGENTIC_WORKERS_VAR} must not exceed 100")
     return workers
+
+
+def get_max_active_jobs() -> int:
+    raw_jobs = os.getenv(_DATA_CHORD_MAX_ACTIVE_JOBS_VAR, str(_DEFAULT_MAX_ACTIVE_JOBS))
+    try:
+        jobs = int(raw_jobs)
+    except ValueError as exc:
+        raise ConfigurationError(f"{_DATA_CHORD_MAX_ACTIVE_JOBS_VAR} must be an integer") from exc
+    if jobs < 1:
+        raise ConfigurationError(f"{_DATA_CHORD_MAX_ACTIVE_JOBS_VAR} must be positive")
+    return jobs
 
 
 def get_aws_region() -> str:
@@ -225,6 +238,7 @@ def validate_required_config() -> None:
                 )
 
     get_agentic_workers()
+    get_max_active_jobs()
 
     if (
         profile is RuntimeProfile.HOSTED

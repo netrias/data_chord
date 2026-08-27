@@ -14,17 +14,16 @@ import pytest
 from httpx import AsyncClient
 
 import src.app.dependencies as dependencies
-import src.stage_3_harmonize.router as stage_three_router
+from src.app.harmonization_job_state import (
+    RunAuthority,
+    StaleHarmonizationWorkerError,
+    capture_harmonization_artifact_versions,
+)
 from src.domain.harmonization import HarmonizeStatus
 from src.integrations.harmonize import HarmonizeResult
 from src.persistence.harmonization_job_store import load_harmonization_job, save_harmonization_job
 from src.persistence.workflow_artifacts import save_harmonized_artifacts
 from src.persistence.workflow_state_store import load_workflow_state
-from src.stage_3_harmonize.use_cases import (
-    RunAuthority,
-    StaleStageThreeWorkerError,
-    capture_harmonization_artifact_versions,
-)
 from src.storage import WorkflowArtifactNotFoundError, WorkflowConflictError, WorkflowFile
 from tests.conftest import confirm_mapping_choices, create_csv_content, create_test_manifest_parquet, upload_content
 
@@ -57,7 +56,8 @@ async def test_confirmed_choices_and_file_only_retry_reuse_job(
     async def _hold_accepted_job(*_args: object, **_kwargs: object) -> None:
         await release_worker.wait()
 
-    monkeypatch.setattr(stage_three_router, "_run_stage_three_job", _hold_accepted_job)
+    service = dependencies.get_harmonization_job_service()
+    monkeypatch.setattr(service, "_workflow_runner", _hold_accepted_job)
 
     await confirm_mapping_choices(
         app_client,
@@ -121,7 +121,8 @@ async def test_expired_worker_fails_authority_check(
     async def _hold_accepted_job(*_args: object, **_kwargs: object) -> None:
         await release_worker.wait()
 
-    monkeypatch.setattr(stage_three_router, "_run_stage_three_job", _hold_accepted_job)
+    service = dependencies.get_harmonization_job_service()
+    monkeypatch.setattr(service, "_workflow_runner", _hold_accepted_job)
     file_id = await upload_content(
         app_client,
         create_csv_content([["diagnosis"], ["Lung"]]),
@@ -153,7 +154,7 @@ async def test_expired_worker_fails_authority_check(
         expected_version=accepted_job.version,
     )
 
-    with pytest.raises(StaleStageThreeWorkerError):
+    with pytest.raises(StaleHarmonizationWorkerError):
         RunAuthority(
             dependencies.get_workflow_storage(),
             dependencies.get_user_context(),
@@ -183,6 +184,7 @@ async def test_worker_with_superseded_plan_cannot_publish_scratch_results(
             column_pv_sets,
             output_path,
             sheet_name,
+            use_cache,
         ):
             provider_started.set()
             if not release_provider.wait(timeout=3):
@@ -209,7 +211,7 @@ async def test_worker_with_superseded_plan_cannot_publish_scratch_results(
     )
     assert analysis.status_code == 200
     await confirm_mapping_choices(app_client, file_id)
-    monkeypatch.setattr(stage_three_router, "get_harmonize_service", lambda: BlockingHarmonizer())
+    monkeypatch.setattr(dependencies, "get_harmonize_service", lambda: BlockingHarmonizer())
 
     accepted = await app_client.post("/stage-3/harmonize", json={"file_id": file_id})
     assert accepted.status_code == 200
@@ -272,6 +274,7 @@ async def test_superseded_worker_preserves_prior_review_artifacts(
             column_pv_sets,
             output_path,
             sheet_name,
+            use_cache,
         ):
             self.run_count += 1
             provider_output_paths.append(output_path)
@@ -316,7 +319,7 @@ async def test_superseded_worker_preserves_prior_review_artifacts(
     await confirm_mapping_choices(app_client, file_id)
 
     harmonizer = RerunHarmonizer()
-    monkeypatch.setattr(stage_three_router, "get_harmonize_service", lambda: harmonizer)
+    monkeypatch.setattr(dependencies, "get_harmonize_service", lambda: harmonizer)
     first = await app_client.post("/stage-3/harmonize", json={"file_id": file_id})
     assert first.status_code == 200
     assert first.json()["status"] == "succeeded"

@@ -1,4 +1,4 @@
-"""Build the Stage 3 API summary from a stored harmonization manifest."""
+"""Build the shared harmonization summary from a stored manifest."""
 
 from __future__ import annotations
 
@@ -139,7 +139,7 @@ def build_harmonization_manifest_summary(
     reference_model_label: str | None = None,
     reference_model_version: str | None = None,
 ) -> HarmonizationManifestSummary:
-    """Convert stored manifest rows into the summary returned by Stage 3."""
+    """Convert stored manifest rows into the summary returned by callers."""
     column_breakdowns = _build_column_breakdowns(manifest.rows, column_pv_map)
     total_non_conformant = sum(breakdown.non_conformant_terms for breakdown in column_breakdowns)
     fidelity_counts = {fidelity: 0 for fidelity in MatchFidelity}
