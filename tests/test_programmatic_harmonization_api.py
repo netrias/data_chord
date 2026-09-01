@@ -11,8 +11,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
+import pyarrow.parquet as pq
 import pytest
 from httpx import AsyncClient, Response
 from netrias_client import NetriasClient
@@ -25,7 +26,9 @@ from backend.app.error_handlers import GENERIC_API_ERROR_DETAIL
 from src.domain.columns import column_key_from_string
 from src.domain.dataset_workflow_ids import dataset_workflow_id_from_string
 from src.domain.harmonization import HarmonizeStatus
+from src.domain.manifest import ColumnMappingManifest, ColumnMappingRecord, MappingAlternative
 from src.integrations.harmonize import HarmonizeResult
+from src.persistence.manifest_schema import get_manifest_schema
 from src.persistence.workflow_state_store import load_workflow_state
 from src.storage import (
     LocalWorkflowStorage,
@@ -128,6 +131,30 @@ async def test_pinned_netrias_client_completes_local_service_round_trip(
 ) -> None:
     # Given: the pinned client sends requests through this no-cost local service.
     monkeypatch.setenv("DATA_CHORD_API_KEY", _API_KEY)
+    column_key = column_key_from_string("col_0000")
+    mock_recommender = MagicMock()
+    mock_recommender.recommend = AsyncMock(
+        return_value=ColumnMappingManifest(
+            {
+                column_key: ColumnMappingRecord(
+                    column_key=column_key,
+                    column_name="diagnosis",
+                    cde_key="primary_diagnosis",
+                    cde_id=42,
+                    harmonization="harmonizable",
+                    alternatives=(
+                        MappingAlternative(
+                            target="primary_diagnosis",
+                            confidence=0.95,
+                            cde_id=42,
+                            harmonization="harmonizable",
+                        ),
+                    ),
+                )
+            }
+        )
+    )
+    monkeypatch.setattr(dependencies, "_cde_recommender", mock_recommender)
 
     class _BorrowedHttpClient:
         def __init__(self, timeout: object) -> None:
@@ -148,26 +175,20 @@ async def test_pinned_netrias_client_completes_local_service_round_trip(
 
     monkeypatch.setattr(client_core.httpx, "AsyncClient", _BorrowedHttpClient)
     source_path = tmp_path / "patients.csv"
-    source_path.write_text("diagnosis\nLung\n", encoding="utf-8")
+    source_path.write_text("diagnosis\nLung Cancer\n", encoding="utf-8")
     output_path = tmp_path / "harmonized.csv"
     client = NetriasClient(_API_KEY)
     client.configure(
-        harmonization_url="http://test/api",
+        base_url="http://test",
         timeout=5,
     )
-    mapping = {
-        "column_mappings": [
-            {
-                "column_name": "diagnosis",
-                "cde_key": "primary_diagnosis",
-                "cde_id": 42,
-                "harmonization": "harmonizable",
-                "alternatives": [],
-            }
-        ]
-    }
 
-    # When: the real client submits, polls, and downloads both artifacts.
+    # When: the real client recommends a mapping, submits it, polls, and downloads both artifacts.
+    mapping = await client.discover_mapping_from_tabular_async(
+        source_path,
+        "test-data-model",
+        external_version_number="11.0.4",
+    )
     result = await client.harmonize_async(
         source_path,
         mapping,
@@ -177,11 +198,22 @@ async def test_pinned_netrias_client_completes_local_service_round_trip(
         use_cache=False,
     )
 
-    # Then: the client accepts the service contract without paid provider calls.
+    # Then: the client accepts the full service contract without paid provider calls.
+    assert mapping["column_mappings"]["col_0000"]["cde_key"] == "primary_diagnosis"
     assert result.status == "succeeded"
-    assert result.file_path.read_bytes() == b"diagnosis\nLung\n"
+    assert result.job_id is not None
+    loaded_state = load_workflow_state(
+        dependencies.get_workflow_storage(),
+        _PROGRAMMATIC_USER,
+        result.job_id,
+    )
+    assert loaded_state is not None
+    assert loaded_state.state.mapping_manifest.records[column_key].cde_key == "primary_diagnosis"
+    assert result.file_path.read_bytes() == b"diagnosis\nLung Cancer\n"
     assert result.manifest_path is not None
-    assert result.manifest_path.read_bytes()[:4] == b"PAR1"
+    manifest_table = pq.read_table(result.manifest_path)
+    assert manifest_table.num_rows == 0
+    assert manifest_table.schema.names == get_manifest_schema().names
     assert mock_netrias_client.run.call_args.kwargs["use_cache"] is False
 
 
