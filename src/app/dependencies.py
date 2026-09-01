@@ -17,7 +17,7 @@ from src.cde_recommend.result_cache import DynamoRecommendationCache, EmptyRecom
 from src.domain.cde_recommendation import CdeRecommender
 from src.domain.harmonization_cache import EmptyHarmonizationCache, HarmonizationCache
 from src.domain.reference_data import ReferenceDataError, ReferenceDataRepository
-from src.integrations.agentic_harmonize import AgenticHarmonizeConfig, AgenticHarmonizeService
+from src.integrations.agentic_harmonize import AgenticHarmonizeConfig, AgenticTermHarmonizer
 from src.integrations.bedrock_cde_ranker import (
     BedrockCandidateRanker,
     BedrockCandidateRankerConfig,
@@ -26,13 +26,20 @@ from src.integrations.cde_recommendation import CdeRecommendationAdapter
 from src.integrations.demo_harmonization_cache import DemoHarmonizationCache
 from src.integrations.dynamodb_harmonization_cache import DynamoDbHarmonizationCache
 from src.integrations.dynamodb_reference_data import DynamoDbReferenceDataRepository, DynamoResource
-from src.integrations.harmonize import HarmonizeService
+from src.integrations.harmonize import FileHarmonizationService, HarmonizeService, TermHarmonizationProvider
 from src.integrations.sqlite_reference_data import SqliteReferenceDataRepository
 from src.integrations.value_overlap_cde_recommendation import ValueOverlapCdeRecommender
+from src.local_inference import (
+    LocalInferenceError,
+    LocalModelConfigurationError,
+    LocalTermHarmonizer,
+    load_local_term_harmonizer,
+)
 from src.paths import PROJECT_ROOT
 from src.settings import (
     ApplicationMode,
     ConfigurationError,
+    HarmonizationMethod,
     RuntimeProfile,
     StorageBackend,
     get_agentic_workers,
@@ -41,6 +48,7 @@ from src.settings import (
     get_cde_recommendation_cache_table_name,
     get_data_dir,
     get_harmonization_cache_table_name,
+    get_harmonization_method,
     get_max_active_jobs,
     get_reference_database_path,
     get_reference_table_name,
@@ -67,6 +75,8 @@ logger = logging.getLogger(__name__)
 
 UPLOAD_BASE_DIR = PROJECT_ROOT / "uploads"
 DEFAULT_WORKFLOW_STORAGE_DIR = PROJECT_ROOT / "workflow_storage"
+LOCAL_MODELS_CONFIG_PATH = PROJECT_ROOT / "config" / "local_models.json"
+LOCAL_MODELS_ROOT = Path("/models")
 MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024
 _UPLOAD_FREE_SPACE_RESERVE_BYTES = 4 * MAX_UPLOAD_BYTES
 
@@ -81,6 +91,7 @@ _harmonize_service: HarmonizeService | None = None
 
 _harmonization_job_service: HarmonizationJobService | None = None
 _cde_recommender: CdeRecommender | None = None
+_local_term_harmonizer: LocalTermHarmonizer | None = None
 
 
 def get_upload_constraints() -> UploadConstraints:
@@ -160,6 +171,8 @@ def get_user_context() -> UserContext:
 
 def validate_runtime_services() -> None:
     """Fail portable startup before health checks can report unusable local state."""
+    if get_harmonization_method() is HarmonizationMethod.LOCAL:
+        get_local_term_harmonizer()
     if get_runtime_profile() is not RuntimeProfile.PORTABLE:
         return
     try:
@@ -203,21 +216,41 @@ def get_harmonization_cache() -> HarmonizationCache:
             import boto3
 
             resource = cast(DynamoResource, boto3.resource("dynamodb", region_name=get_aws_region()))
-            _harmonization_cache = DynamoDbHarmonizationCache(
-                resource.Table(get_harmonization_cache_table_name())
-            )
+            _harmonization_cache = DynamoDbHarmonizationCache(resource.Table(get_harmonization_cache_table_name()))
     return _harmonization_cache
+
+
+def get_local_term_harmonizer() -> LocalTermHarmonizer:
+    global _local_term_harmonizer  # noqa: PLW0603 - intentional singleton
+    if _local_term_harmonizer is None:
+        try:
+            _local_term_harmonizer = load_local_term_harmonizer(
+                LOCAL_MODELS_CONFIG_PATH,
+                LOCAL_MODELS_ROOT,
+            )
+        except (LocalModelConfigurationError, LocalInferenceError) as exc:
+            raise ConfigurationError(str(exc)) from exc
+    return _local_term_harmonizer
 
 
 def get_harmonize_service() -> HarmonizeService:
     global _harmonize_service  # noqa: PLW0603 - intentional singleton
     if _harmonize_service is None:
-        _harmonize_service = AgenticHarmonizeService(
-            AgenticHarmonizeConfig(
-                region=get_aws_region(),
-                max_workers=get_agentic_workers(),
-            ),
-            cache=get_harmonization_cache(),
+        provider: TermHarmonizationProvider
+        cache: HarmonizationCache | None = None
+        if get_harmonization_method() is HarmonizationMethod.LOCAL:
+            provider = get_local_term_harmonizer()
+        else:
+            provider = AgenticTermHarmonizer(
+                AgenticHarmonizeConfig(
+                    region=get_aws_region(),
+                    max_workers=get_agentic_workers(),
+                )
+            )
+            cache = get_harmonization_cache()
+        _harmonize_service = FileHarmonizationService(
+            provider,
+            cache=cache,
         )
     return _harmonize_service
 
@@ -265,11 +298,13 @@ def get_cde_recommender() -> CdeRecommender:
 def cleanup_services() -> None:
     """Clean up resources held by singleton services (call on app shutdown)."""
     global _cde_recommender, _harmonization_cache, _harmonize_service  # noqa: PLW0603
+    global _local_term_harmonizer  # noqa: PLW0603
     global _reference_data_repository, _workflow_cleanup, _workflow_storage  # noqa: PLW0603
     global _harmonization_job_service
     _cde_recommender = None
     _harmonization_cache = None
     _harmonize_service = None
+    _local_term_harmonizer = None
     _harmonization_job_service = None
     _reference_data_repository = None
     _workflow_cleanup = None
@@ -297,6 +332,7 @@ __all__ = [
     "shutdown_harmonization_jobs",
     "get_harmonization_cache",
     "get_harmonize_service",
+    "get_local_term_harmonizer",
     "get_harmonization_job_service",
     "get_cde_recommender",
     "get_reference_data_repository",

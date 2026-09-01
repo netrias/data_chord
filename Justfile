@@ -5,7 +5,7 @@ default:
 
 sync:
 	# Security: use the committed lockfile for normal dependency installs.
-	uv sync --frozen --extra dev
+	uv sync --frozen --all-extras
 	npm ci
 
 lint:
@@ -72,6 +72,9 @@ js-check:
 	@echo "Checking JavaScript syntax..."
 	@find src -path '*/static/*.js' -exec node --check {} \;
 	@echo "All JavaScript files pass syntax check"
+
+verify-local-inference-container:
+	uv run --extra local-inference python -m scripts.verify_local_inference_container
 
 infra-fmt:
 	tofu -chdir=infra fmt -recursive

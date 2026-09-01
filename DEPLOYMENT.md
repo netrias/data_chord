@@ -102,6 +102,81 @@ docker run --rm \
 
 Do not put credentials in the image.
 
+### Use local harmonization models
+
+Local harmonization is a separate method from agentic harmonization. The image
+must be built with `--build-arg DATA_CHORD_INCLUDE_LOCAL_INFERENCE=true`. This
+keeps the large Torch and NVIDIA libraries out of images that use only agentic
+harmonization. Use the same checked build command above with this one additional
+argument.
+
+The local-model image
+contains `/app/config/local_models.json`. Edit `config/local_models.json` in the
+repository and build a new image when model assignments or inference settings
+change. Put only the large model directories on the mounted `/models` volume.
+The model path in the JSON file is relative to `/models` and is also its identity:
+
+```json
+{
+  "models": [
+    {
+      "path": "gpt2-cell-type-v1",
+      "cdes": ["cell_type"],
+      "batch_size": 8,
+      "strong_confidence": 0.9
+    },
+    {
+      "path": "biobert-disease-v1",
+      "cdes": ["human_diseases", "medical_history"],
+      "batch_size": 16,
+      "strong_confidence": 0.85
+    }
+  ]
+}
+```
+
+Use the exact CDE keys from the standard. One CDE can use only one model. One
+model can own many CDEs. The application finds the model type from its Hugging
+Face configuration. GPT-2 and BERT sequence-classification exports are
+supported. Their output labels must be exact permissible values. A model can
+also contain the `NO_MATCH` label. Batch size and the threshold for a strong
+match can differ for each model.
+
+Each model receives one string in this exact form:
+
+```text
+CDE: <CDE key>
+Source value: <uploaded value>
+```
+
+The model training input must use the same form. A model trained with a different
+input form can load correctly but return incorrect results.
+
+Mount the same directory and set one variable when the application runs:
+
+```bash
+docker run --rm \
+  --mount type=volume,src=data-chord,dst=/data \
+  --mount type=bind,src="$(pwd)/models",dst=/models,readonly \
+  --env DATA_CHORD_PROFILE=portable \
+  --env DATA_CHORD_HARMONIZATION_METHOD=local \
+  --env AWS_REGION=us-east-2 \
+  --publish 8000:8000 \
+  data-chord:<full-git-commit>
+```
+
+All mounted model files must be readable by the image's non-root `appuser`.
+
+Before delivery, run `just verify-local-inference-container`. This builds both
+image forms and runs a complete local-model job with generated GPT-2 and BERT
+models. It does not use Bedrock or store test models in the repository.
+
+The application converts the complete JSON file to typed configuration and
+checks every model directory at startup. During Stage 3 it groups all terms for
+the same model, loads that model once, runs the group, and releases the model
+before it loads the next one. Local mode does not fall back to Bedrock. A CDE
+without a model assignment causes the harmonization job to fail.
+
 Portable workflow files are temporary. After a successful upload, the app
 checks workflow storage in the background. At 80% of
 `DATA_CHORD_WORKFLOW_STORAGE_LIMIT_GB`, it removes the least recently accessed

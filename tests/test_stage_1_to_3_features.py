@@ -24,8 +24,8 @@ from src.domain.harmonization import HarmonizeStatus, MatchFidelity
 from src.domain.harmonization_cache import EmptyHarmonizationCache
 from src.domain.manifest import ManifestPayload
 from src.domain.workflow_state import WorkflowState
-from src.integrations.agentic_harmonize import AgenticHarmonizeConfig, AgenticHarmonizeService
 from src.integrations.harmonize import (
+    FileHarmonizationService,
     HarmonizeResult,
     TermHarmonizationRequest,
     TermHarmonizationResponse,
@@ -749,19 +749,21 @@ async def test_stage3_http_workflow_runs_the_deterministic_term_provider(
         def __init__(self) -> None:
             self.requests: list[TermHarmonizationRequest] = []
 
-        def harmonize(self, request: TermHarmonizationRequest) -> TermHarmonizationResponse:
-            self.requests.append(request)
-            return TermHarmonizationResponse(
-                matched_value="Lung Cancer",
-                match_fidelity=MatchFidelity.STRONG,
+        def harmonize(
+            self,
+            requests: tuple[TermHarmonizationRequest, ...],
+        ) -> tuple[TermHarmonizationResponse, ...]:
+            self.requests.extend(requests)
+            return tuple(
+                TermHarmonizationResponse(
+                    matched_value="Lung Cancer",
+                    match_fidelity=MatchFidelity.STRONG,
+                )
+                for _request in requests
             )
 
     provider = DeterministicProvider()
-    harmonizer = AgenticHarmonizeService(
-        AgenticHarmonizeConfig(region="us-east-2", max_workers=1),
-        cache=EmptyHarmonizationCache(),
-        term_harmonization_provider=provider,
-    )
+    harmonizer = FileHarmonizationService(provider, cache=EmptyHarmonizationCache())
     file_id = await upload_content(
         app_client,
         create_csv_content([["primary_diagnosis"], ["lung malignancy"]]),
@@ -797,11 +799,14 @@ async def test_stage3_http_workflow_runs_the_deterministic_term_provider(
     assert completed["status"] == "succeeded"
     manifest_summary = cast(dict[str, object], completed["manifest_summary"])
     assert manifest_summary["changed_terms"] == 1
-    assert provider.requests == [TermHarmonizationRequest(
-        input_term="lung malignancy",
-        permissible_values=("Breast Cancer", "Diabetes", "Hypertension", "Lung Cancer"),
-        context="Source column: primary_diagnosis\nTarget CDE: primary_diagnosis",
-    )]
+    assert provider.requests == [
+        TermHarmonizationRequest(
+            cde="primary_diagnosis",
+            input_term="lung malignancy",
+            permissible_values=("Breast Cancer", "Diabetes", "Hypertension", "Lung Cancer"),
+            context="Source column: primary_diagnosis\nTarget CDE: primary_diagnosis",
+        )
+    ]
     assert download.status_code == 200
     assert _read_downloaded_csv(download.content) == [{"primary_diagnosis": "Lung Cancer"}]
 

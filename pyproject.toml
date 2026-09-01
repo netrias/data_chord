@@ -21,6 +21,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+local-inference = [
+    "torch>=2.13.0",
+    "transformers>=5.15.1",
+]
 dev = [
     "basedpyright>=1.17.0",
     "ruff>=0.6.5",

@@ -25,6 +25,7 @@ _RUNTIME_CONFIG_NAMES = (
     "DATA_CHORD_MODE",
     "DATA_CHORD_HARMONIZATION_CACHE_TABLE",
     "DATA_CHORD_IDENTITY_SOURCE",
+    "DATA_CHORD_HARMONIZATION_METHOD",
     "DATA_CHORD_DATA_DIR",
     "DATA_CHORD_PROFILE",
     "DATA_CHORD_REFERENCE_TABLE",
@@ -122,6 +123,10 @@ def _run_import(module: str, settings: dict[str, str]) -> subprocess.CompletedPr
         ),
         ({"DATA_CHORD_PROFILE": "unknown"}, "DATA_CHORD_PROFILE must be one of"),
         ({"DATA_CHORD_MODE": "unknown"}, "DATA_CHORD_MODE must be one of"),
+        (
+            {"DATA_CHORD_HARMONIZATION_METHOD": "mixed"},
+            "DATA_CHORD_HARMONIZATION_METHOD must be one of",
+        ),
         (
             {
                 "DATA_CHORD_PROFILE": "portable",
@@ -280,6 +285,25 @@ def test_portable_runtime_rejects_an_empty_standards_catalog(tmp_path: Path) -> 
     # Then startup reports that the catalog has no usable standards.
     assert result.returncode != 0
     assert "Portable reference database contains no model versions" in result.stderr
+
+
+def test_portable_runtime_rejects_an_empty_local_model_catalog(tmp_path: Path) -> None:
+    # Given portable standards and the unconfigured image-owned local model file.
+    _initialize_portable_standards(tmp_path / "standards.sqlite")
+
+    # When the application starts with local inference enabled.
+    result = _run_import(
+        "backend.app.main",
+        {
+            "DATA_CHORD_PROFILE": "portable",
+            "DATA_CHORD_DATA_DIR": str(tmp_path),
+            "DATA_CHORD_HARMONIZATION_METHOD": "local",
+        },
+    )
+
+    # Then startup fails before health checks can report an unusable service.
+    assert result.returncode != 0
+    assert "Local model file must contain at least one model" in result.stderr
 
 
 def test_importing_application_package_does_not_start_application() -> None:

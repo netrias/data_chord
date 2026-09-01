@@ -175,8 +175,9 @@ async def test_full_pipeline_journey(
     """Complete route journey with production Stage 3 artifact writers."""
     from src.app import dependencies
     from src.app.demo_mode import DEMO_REFERENCE_PATH, DEMO_SAMPLE_PATH
-    from src.integrations.agentic_harmonize import AgenticHarmonizeConfig, AgenticHarmonizeService
+    from src.integrations.agentic_harmonize import AgenticHarmonizeConfig, AgenticTermHarmonizer
     from src.integrations.demo_harmonization_cache import DemoHarmonizationCache
+    from src.integrations.harmonize import FileHarmonizationService
     from src.integrations.reference_data_file import FileReferenceDataRepository
     from src.integrations.value_overlap_cde_recommendation import ValueOverlapCdeRecommender
 
@@ -191,8 +192,8 @@ async def test_full_pipeline_journey(
         test_services.setattr(
             dependencies,
             "_harmonize_service",
-            AgenticHarmonizeService(
-                AgenticHarmonizeConfig(region="us-east-2", max_workers=2),
+            FileHarmonizationService(
+                AgenticTermHarmonizer(AgenticHarmonizeConfig(region="us-east-2", max_workers=2)),
                 cache=DemoHarmonizationCache(),
             ),
         )
