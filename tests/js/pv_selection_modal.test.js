@@ -301,6 +301,102 @@ describe('PV Selection Modal', () => {
   });
 
   describe('Search Filtering', () => {
+    it('finds a permissible value through a multi-word spelling mistake', async () => {
+      // Given: the modal contains several cancer values.
+      const modalPromise = showPVSelectionModal({
+        originalValue: 'test',
+        currentValue: 'test',
+        suggestions: [],
+        pvValues: ['Colon Cancer', 'Lung Canal', 'Lung Cancer'],
+      });
+      const dialog = dom.window.document.querySelector('dialog.pv-selection-dialog');
+      const searchInput = dialog.querySelector('.pv-selection-search-input');
+      assert.strictEqual(
+        dialog.querySelectorAll('.pv-selection-option:not([style*="display: none"])').length,
+        3,
+      );
+
+      // When: the user enters one exact word and one misspelled word.
+      input(searchInput, 'lung cancr');
+
+      // Then: only the intended permissible value remains visible and can be selected.
+      const visibleOptions = dialog.querySelectorAll(
+        '.pv-selection-option:not([style*="display: none"])',
+      );
+      assert.strictEqual(visibleOptions.length, 1);
+      assert.strictEqual(visibleOptions[0].dataset.value, 'Lung Cancer');
+      click(visibleOptions[0]);
+      assert.strictEqual(await modalPromise, 'Lung Cancer');
+    });
+
+    it('ranks exact values before fuzzy values inside their section', async () => {
+      // Given: one value is exact and one differs by one character.
+      const modalPromise = showPVSelectionModal({
+        originalValue: 'test',
+        currentValue: 'test',
+        suggestions: [],
+        pvValues: ['Lung Cancers', 'Lung Cancer'],
+      });
+      const dialog = dom.window.document.querySelector('dialog.pv-selection-dialog');
+      const searchInput = dialog.querySelector('.pv-selection-search-input');
+      const initialValues = Array.from(
+        dialog.querySelectorAll('[data-section="pvs"] .pv-selection-option'),
+        (option) => option.dataset.value,
+      );
+
+      // When: the exact value is searched.
+      input(searchInput, 'lung cancer');
+
+      // Then: the exact value is the first permissible-value result.
+      const visibleOptions = dialog.querySelectorAll(
+        '[data-section="pvs"] .pv-selection-option:not([style*="display: none"])',
+      );
+      assert.deepStrictEqual(
+        Array.from(visibleOptions, (option) => option.dataset.value),
+        ['Lung Cancer', 'Lung Cancers'],
+      );
+
+      // When: the user clears the search.
+      input(searchInput, '');
+
+      // Then: the exact initial order returns.
+      assert.deepStrictEqual(
+        Array.from(
+          dialog.querySelectorAll('[data-section="pvs"] .pv-selection-option'),
+          (option) => option.dataset.value,
+        ),
+        initialValues,
+      );
+
+      dialog.close();
+      await modalPromise;
+    });
+
+    it('announces the result count without moving focus', async () => {
+      // Given: the open modal has an accessible search and result status.
+      const modalPromise = showPVSelectionModal({
+        originalValue: 'test',
+        currentValue: 'test',
+        suggestions: [],
+        pvValues: ['Lung Cancer', 'Breast Cancer'],
+      });
+      const dialog = dom.window.document.querySelector('dialog.pv-selection-dialog');
+      const searchInput = dialog.querySelector('.pv-selection-search-input');
+      const resultStatus = dialog.querySelector('.pv-selection-search-status');
+      assert.strictEqual(searchInput.getAttribute('aria-label'), 'Search permissible values');
+      assert.strictEqual(resultStatus.getAttribute('role'), 'status');
+
+      // When: the user narrows the list.
+      input(searchInput, 'lung');
+
+      // Then: focus stays in the input and the new count is announced.
+      assert.strictEqual(dom.window.document.activeElement, searchInput);
+      assert.strictEqual(resultStatus.textContent, '1 result');
+
+      dialog.close();
+      await modalPromise;
+    });
+
     it('filters options case-insensitively', async () => {
       // Given: Modal is open with PV values
       const modalPromise = showPVSelectionModal({

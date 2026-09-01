@@ -20,6 +20,7 @@ import {
   readFromSession,
   writeToSession,
 } from '/assets/shared/storage-keys.js';
+import { prepareSearchCandidate, scoreSearch } from '/assets/shared/fuzzy-search.js';
 
 /* ─── Configuration ──────────────────────────────────────── */
 const config = window.stageTwoConfig ?? {};
@@ -40,6 +41,11 @@ const cdeCatalog = (config.cdeCatalog ?? []).map((c) => ({
   type: c.cde_type ?? 'pv',
 }));
 const cdeByKey = new Map(cdeCatalog.map((c) => [c.key, c]));
+const cdeSearchCandidates = new Map(cdeCatalog.map((cde) => [
+  cde.key,
+  prepareSearchCandidate([cde.label, cde.key, cde.description]),
+]));
+const columnSearchCandidates = new WeakMap();
 
 /* ─── Constants ──────────────────────────────────────────── */
 const OUTCOME = { REWRITE: 'rewrite', PASSTHROUGH: 'passthrough', UNCHANGED: 'unchanged' };
@@ -81,6 +87,7 @@ const COMPLETE_STATUSES = new Set(['completed', 'succeeded', 'success', 'done'])
 /* ─── DOM ────────────────────────────────────────────────── */
 const sourceFilterEl = document.getElementById('sourceFilter');
 const colSearchEl = document.getElementById('colSearch');
+const columnSearchStatusEl = document.getElementById('columnSearchStatus');
 const rowsEl = document.getElementById('mappingRows');
 const emptyState = document.getElementById('mappingEmptyState');
 const harmonizeButton = document.getElementById('harmonizeButton');
@@ -192,6 +199,25 @@ const _effectiveOutcome = (column) => {
 
 const _hasValues = (column) => column.has_non_empty_values === true;
 
+const _columnSearchCandidate = (column) => {
+  if (!columnSearchCandidates.has(column)) {
+    columnSearchCandidates.set(column, prepareSearchCandidate([_columnLabel(column)]));
+  }
+  return columnSearchCandidates.get(column);
+};
+
+const _rankCdesForSearch = (cdes, query) => cdes
+  .map((cde, originalIndex) => ({
+    cde,
+    originalIndex,
+    score: scoreSearch(query, cdeSearchCandidates.get(cde.key)),
+  }))
+  .filter(({ score }) => score !== null)
+  .sort((left, right) => left.score - right.score || left.originalIndex - right.originalIndex)
+  .map(({ cde }) => cde);
+
+const _resultCountText = (count) => `${count} ${count === 1 ? 'result' : 'results'}`;
+
 const _passesFilters = (column) => {
   if (!state.filters.outcomes.has(_effectiveOutcome(column))) return false;
   if (!state.filters.showEmpty && !_hasValues(column)) return false;
@@ -215,7 +241,7 @@ const _filteredColumns = () => {
   const cols = state.payload?.columns ?? [];
   const filtered = cols.filter((c) => {
     if (!_passesFilters(c)) return false;
-    if (state.filterText && !_columnLabel(c).toLowerCase().includes(state.filterText)) {
+    if (state.filterText && scoreSearch(state.filterText, _columnSearchCandidate(c)) === null) {
       return false;
     }
     return true;
@@ -581,7 +607,7 @@ sourceFilterEl.addEventListener('click', (e) => {
 });
 
 colSearchEl.addEventListener('input', (e) => {
-  state.filterText = e.target.value.toLowerCase();
+  state.filterText = e.target.value;
   renderRows();
 });
 
@@ -630,6 +656,7 @@ const renderRows = () => {
     return;
   }
   const filtered = _filteredColumns();
+  if (columnSearchStatusEl) columnSearchStatusEl.textContent = _resultCountText(filtered.length);
   if (!filtered.length) {
     rowsEl.innerHTML = '';
     emptyState.classList.remove('hidden');
@@ -818,14 +845,24 @@ const _openRenameDropdown = (colKey) => {
   dd.className = 'rename-dropdown';
   dd.id = 'renameDropdown';
   dd.innerHTML = `
-    <div class="rename-dd-search"><input type="search" placeholder="Filter standards…" autocomplete="off" /></div>
-    <div class="rename-dd-list">${_renameDropdownItemsHtml('')}</div>
+    <div class="rename-dd-search">
+      <input type="search" placeholder="Filter standards…" aria-label="Search rename standards" autocomplete="off" />
+      <span class="rename-dd-search-status sr-only" role="status" aria-live="polite"></span>
+    </div>
+    <div class="rename-dd-list"></div>
   `;
   wrap.appendChild(dd);
   const input = dd.querySelector('input');
+  const list = dd.querySelector('.rename-dd-list');
+  const status = dd.querySelector('.rename-dd-search-status');
+  const renderSearch = (query) => {
+    list.innerHTML = _renameDropdownItemsHtml(query);
+    status.textContent = _resultCountText(list.querySelectorAll('.rename-dd-opt').length);
+  };
+  renderSearch('');
   setTimeout(() => input?.focus(), 0);
   input?.addEventListener('input', (e) => {
-    dd.querySelector('.rename-dd-list').innerHTML = _renameDropdownItemsHtml(e.target.value);
+    renderSearch(e.target.value);
   });
   dd.addEventListener('click', (e) => {
     const opt = e.target.closest('.rename-dd-opt');
@@ -845,10 +882,7 @@ const _closeRenameDropdown = () => {
 };
 
 const _renameDropdownItemsHtml = (q) => {
-  const lq = q.toLowerCase();
-  const matches = cdeCatalog.filter((c) =>
-    !lq || (c.label || c.key).toLowerCase().includes(lq) || (c.description || '').toLowerCase().includes(lq)
-  );
+  const matches = _rankCdesForSearch(cdeCatalog, q);
   if (!matches.length) return `<div class="rename-dd-empty">No standards match "${_escHtml(q)}"</div>`;
   return matches.map((c) => `
     <div class="rename-dd-opt" data-label="${_escAttr(c.label || c.key)}">
@@ -1062,14 +1096,25 @@ const _togglePicker = () => {
   dd.className = 'dropdown';
   dd.id = 'pickerDropdown';
   dd.innerHTML = `
-    <div class="dd-search"><input type="search" id="ddSearch" placeholder="Filter standards by name or description…" autocomplete="off" /></div>
-    <div class="dd-list" id="ddList">${_renderDropdownItems(aiOptions, opts, '', totalDistinct)}</div>
+    <div class="dd-search">
+      <input type="search" id="ddSearch" placeholder="Filter standards by name or description…" aria-label="Search target common data elements" autocomplete="off" />
+      <span class="dd-search-status sr-only" role="status" aria-live="polite"></span>
+    </div>
+    <div class="dd-list" id="ddList"></div>
   `;
   wrap.appendChild(dd);
   state.pickerOpen = true;
-  setTimeout(() => dd.querySelector('input').focus(), 0);
-  dd.querySelector('input').addEventListener('input', (e) => {
-    document.getElementById('ddList').innerHTML = _renderDropdownItems(aiOptions, opts, e.target.value, totalDistinct);
+  const input = dd.querySelector('input');
+  const list = dd.querySelector('#ddList');
+  const status = dd.querySelector('.dd-search-status');
+  const renderSearch = (query) => {
+    list.innerHTML = _renderDropdownItems(aiOptions, opts, query, totalDistinct);
+    status.textContent = _resultCountText(list.querySelectorAll('.dd-opt').length);
+  };
+  renderSearch('');
+  setTimeout(() => input.focus(), 0);
+  input.addEventListener('input', (e) => {
+    renderSearch(e.target.value);
   });
   dd.addEventListener('click', async (e) => {
     const opt = e.target.closest('.dd-opt');
@@ -1095,19 +1140,22 @@ const _closePicker = () => {
 };
 
 const _renderDropdownItems = (aiOptions, opts, q, totalDistinct) => {
-  const lq = q.toLowerCase();
-  const matches = (c) => !lq
-    || (c.label || c.key).toLowerCase().includes(lq)
-    || (c.description || '').toLowerCase().includes(lq);
-  const matchingAi = aiOptions.filter(matches);
+  const matchingAi = _rankCdesForSearch(aiOptions, q);
   // The "No mapping" sentinel is a sticky default, not a searchable CDE —
   // suppress it entirely when a query is active so it does not crowd results.
-  const noMappingEntries = q
+  const noMappingEntries = q.trim()
     ? []
     : [{ key: NO_MAP_OPTION_VALUE, label: NO_MAPPING_LABEL, description: NO_MAP_DESC }];
-  const valueOptions = opts.filter((o) => !_isRenameOnly(o.type) && matches(o));
-  const renameOnlyOptions = opts.filter((o) => _isRenameOnly(o.type) && matches(o));
-  renameOnlyOptions.sort((a, b) => a.label.localeCompare(b.label));
+  const valueOptions = _rankCdesForSearch(
+    opts.filter((option) => !_isRenameOnly(option.type)),
+    q,
+  );
+  const renameOnlyOptions = _rankCdesForSearch(
+    opts
+      .filter((option) => _isRenameOnly(option.type))
+      .sort((left, right) => left.label.localeCompare(right.label)),
+    q,
+  );
   const sections = [
     _dropdownSectionHtml(AI_RECOMMENDED_SECTION_LABEL, matchingAi, 'ai', totalDistinct),
     _dropdownSectionHtml(NO_MAPPING_LABEL, noMappingEntries, 'none', totalDistinct),

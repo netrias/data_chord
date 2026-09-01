@@ -90,7 +90,8 @@ const _stage2HarnessHtml = (cdeCatalog) => `
     <main>
       <aside class="filter-sidebar hidden" id="filterSidebar"></aside>
       <div id="sourceFilter"></div>
-      <input id="colSearch" />
+      <input id="colSearch" aria-label="Filter source columns" />
+      <span id="columnSearchStatus" role="status" aria-live="polite"></span>
       <div class="mapping-list-head">
         <button id="columnSortBtn" type="button"><span>Your column</span><span class="mapping-list-head-sort-arrow"></span></button>
         <div></div>
@@ -122,6 +123,106 @@ const _stage2HarnessHtml = (cdeCatalog) => `
   </body>
 </html>
 `;
+
+const _openStage2SearchHarness = async (page) => {
+  const payload = {
+    file_id: 'abcdef0123456789abcdef0123456789',
+    file_name: 'search.csv',
+    external_version_number: '11.0.4',
+    total_rows: 5,
+    columns: [
+      _stage2Column('col_0000', 'diagnosis_primary'),
+      _stage2Column('col_0001', 'diagnosis_secondary'),
+      _stage2Column('col_0002', 'treatment'),
+    ],
+    cde_targets: {
+      col_0000: [{ target: 'primary_diagnosis', similarity: 0.95 }],
+      col_0001: [{ target: 'secondary_diagnosis', similarity: 0.92 }],
+      col_0002: [{ target: 'treatment_type', similarity: 0.9 }],
+    },
+    column_summaries: {
+      col_0000: { value_overlap_ratio: 0.8 },
+      col_0001: { value_overlap_ratio: 0.7 },
+      col_0002: { value_overlap_ratio: 0.6 },
+    },
+    manual_overrides: {},
+    manifest: { column_mappings: {} },
+  };
+  const cdeCatalog = [
+    {
+      cde_id: 101,
+      cde_key: 'primary_diagnosis',
+      label: 'Primary Diagnosis',
+      description: 'Primary cancer diagnosis',
+      cde_type: 'pv',
+    },
+    {
+      cde_id: 102,
+      cde_key: 'secondary_diagnosis',
+      label: 'Secondary Diagnosis',
+      description: 'Secondary cancer diagnosis',
+      cde_type: 'pv',
+    },
+    {
+      cde_id: 103,
+      cde_key: 'treatment_type',
+      label: 'Treatment Type',
+      description: 'Type of treatment',
+      cde_type: 'pv',
+    },
+  ];
+
+  await page.addInitScript((stagePayload) => {
+    sessionStorage.setItem('stage2Payload', JSON.stringify(stagePayload));
+    sessionStorage.setItem('maxReachedStage', 'mapping');
+  }, payload);
+  await page.route('**/stage-2?**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/html',
+      body: _stage2HarnessHtml(cdeCatalog),
+    });
+  });
+  await page.route('**/stage-2/column-detail/**', async (route) => {
+    const columnKey = decodeURIComponent(new URL(route.request().url()).pathname.split('/').at(-1) ?? '');
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        column_key: columnKey,
+        profile: {
+          column_key: columnKey,
+          total_rows: 5,
+          distinct_values: [{ value: 'Lung Cancer', count: 5 }],
+          null_count: 0,
+          total_distinct: 1,
+          null_pct: 0,
+          is_all_unique: false,
+        },
+        match_counts: {
+          primary_diagnosis: 5,
+          secondary_diagnosis: 3,
+          treatment_type: 0,
+        },
+        overlap_by_cde: {
+          primary_diagnosis: 1,
+          secondary_diagnosis: 0.6,
+          treatment_type: 0,
+        },
+        cde_types: {
+          primary_diagnosis: 'pv',
+          secondary_diagnosis: 'pv',
+          treatment_type: 'pv',
+        },
+        selected_pvs: ['Lung Cancer'],
+      }),
+    });
+  });
+
+  await page.goto(
+    '/stage-2?file_id=abcdef0123456789abcdef0123456789&data_model_key=gc&external_version_number=11.0.4',
+  );
+};
 
 test('no-recommendation card warns when its displayed source value is not permissible', async ({ page }) => {
   const fileId = '0123456789abcdef0123456789abcdef';
@@ -795,6 +896,62 @@ test('Stage 2 list opens a takeover on row click', async ({ page }) => {
   // Close via the ✕ button
   await page.locator('.takeover-btn--close').click();
   await expect(page.locator('#takeover')).toHaveClass(/hidden/);
+});
+
+test('Stage 2 fuzzy column search preserves the selected sort', async ({ page }) => {
+  // Given: the column list uses reverse file order and exposes an accessible result count.
+  await _openStage2SearchHarness(page);
+  await page.locator('#columnSortBtn').click();
+  const searchInput = page.locator('#colSearch');
+  await expect(searchInput).toHaveAttribute('aria-label', 'Filter source columns');
+  await expect(page.locator('#mappingRows .mapping-row')).toHaveCount(3);
+
+  // When: the user searches with an adjacent letter swap.
+  await searchInput.fill('diagonsis');
+
+  // Then: both diagnosis columns remain in reverse file order and the count is announced.
+  await expect(page.locator('.mapping-row-col-text')).toHaveText([
+    'diagnosis_secondary',
+    'diagnosis_primary',
+  ]);
+  await expect(page.locator('#columnSearchStatus')).toHaveText('2 results');
+});
+
+test('Stage 2 target search ranks typo matches inside existing sections', async ({ page }) => {
+  // Given: a column has one AI target and two alternative targets.
+  await _openStage2SearchHarness(page);
+  await page.locator('.mapping-row', { hasText: 'diagnosis_primary' }).click();
+  await page.locator('#cdePicker').click();
+  const searchInput = page.locator('#ddSearch');
+  await expect(searchInput).toHaveAttribute('aria-label', 'Search target common data elements');
+  await expect(page.locator('.dd-section-label').first()).toHaveText('AI suggestions');
+
+  // When: the user misspells both words in the target name.
+  await searchInput.fill('primry diagonsis');
+
+  // Then: the intended AI target remains, other targets disappear, and its section stays first.
+  await expect(page.locator('.dd-opt')).toHaveCount(1);
+  await expect(page.locator('.dd-opt')).toHaveAttribute('data-value', 'primary_diagnosis');
+  await expect(page.locator('.dd-section-label').first()).toHaveText('AI suggestions');
+  await expect(page.locator('.dd-search-status')).toHaveText('1 result');
+});
+
+test('Stage 2 rename search finds and selects a misspelled standard', async ({ page }) => {
+  // Given: the rename control is open for a mapped column.
+  await _openStage2SearchHarness(page);
+  await page.locator('.mapping-row', { hasText: 'diagnosis_primary' }).click();
+  await page.locator('.takeover-rename-off').click();
+  await page.locator('.takeover-rename-pick').click();
+  const searchInput = page.locator('.rename-dd-search input');
+  await expect(searchInput).toHaveAttribute('aria-label', 'Search rename standards');
+
+  // When: the user searches with two spelling mistakes and selects the result.
+  await searchInput.fill('primry diagonsis');
+  await expect(page.locator('.rename-dd-opt')).toHaveCount(1);
+  await page.locator('.rename-dd-opt').click();
+
+  // Then: the intended standard becomes the selected rename target.
+  await expect(page.locator('.takeover-rename-target')).toHaveText('Primary Diagnosis');
 });
 
 test('Stage 2 splits picker sections by mapping kind', async ({ page }) => {
