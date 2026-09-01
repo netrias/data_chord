@@ -25,7 +25,8 @@
           <div id="mappingLockBanner" class="mapping-lock-banner hidden" role="status"></div>
           <div class="mapping-toolbar">
             <div class="mapping-filter-bar" id="sourceFilter"></div>
-            <input type="search" class="mapping-col-search" id="colSearch" placeholder="Filter columns…" autocomplete="off" />
+            <input type="search" class="mapping-col-search" id="colSearch" placeholder="Filter columns…" aria-label="Filter source columns" autocomplete="off" />
+            <span id="columnSearchStatus" class="sr-only" role="status" aria-live="polite"></span>
           </div>
 
           <div class="mapping-list">

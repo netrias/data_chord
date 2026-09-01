@@ -7,6 +7,7 @@
  */
 
 import { escapeHtml } from '/assets/shared/html.js';
+import { prepareSearchCandidate, scoreSearch } from '/assets/shared/fuzzy-search.js';
 
 /**
  * Build the HTML structure for the PV selection modal.
@@ -65,7 +66,8 @@ const _buildModalHTML = ({ originalValue, currentValue, targetCdeLabel, suggesti
       </div>
 
       <div class="pv-selection-search">
-        <input type="text" placeholder="Search values..." class="pv-selection-search-input" />
+        <input type="search" placeholder="Search values..." class="pv-selection-search-input" aria-label="Search permissible values" autocomplete="off" />
+        <span class="pv-selection-search-status sr-only" role="status" aria-live="polite"></span>
       </div>
 
       <div class="pv-selection-list">
@@ -125,20 +127,28 @@ export async function showPVSelectionModal(config) {
     const suggestionsSection = dialog.querySelector('[data-section="suggestions"]');
     const pvSection = dialog.querySelector('[data-section="pvs"]');
     const emptyState = dialog.querySelector('.pv-selection-empty');
-    const allOptions = dialog.querySelectorAll('.pv-selection-option');
+    const resultStatus = dialog.querySelector('.pv-selection-search-status');
+    const allOptions = Array.from(dialog.querySelectorAll('.pv-selection-option'));
+    const searchCandidates = new Map(allOptions.map((option) => [
+      option,
+      prepareSearchCandidate([option.dataset.value]),
+    ]));
 
     // Focus search input
     searchInput?.focus();
 
     // Filter options based on search text
     const filterOptions = (filterText) => {
-      const filterLower = filterText.toLowerCase();
+      const rankedOptions = allOptions.map((option, originalIndex) => ({
+        option,
+        originalIndex,
+        score: scoreSearch(filterText, searchCandidates.get(option)),
+      }));
       let visibleSuggestions = 0;
       let visiblePVs = 0;
 
-      for (const option of allOptions) {
-        const value = option.dataset.value || '';
-        const matches = filterLower === '' || value.toLowerCase().includes(filterLower);
+      for (const { option, score } of rankedOptions) {
+        const matches = score !== null;
         option.style.display = matches ? '' : 'none';
 
         if (matches) {
@@ -148,6 +158,21 @@ export async function showPVSelectionModal(config) {
             visiblePVs++;
           }
         }
+      }
+
+      const rankedSections = [
+        { section: suggestionsSection, type: 'suggestion' },
+        { section: pvSection, type: 'pv' },
+      ];
+      for (const { section, type } of rankedSections) {
+        if (!section) continue;
+        rankedOptions
+          .filter(({ option }) => option.dataset.type === type)
+          .sort((left, right) => (
+            (left.score ?? Number.POSITIVE_INFINITY) - (right.score ?? Number.POSITIVE_INFINITY)
+            || left.originalIndex - right.originalIndex
+          ))
+          .forEach(({ option }) => section.appendChild(option));
       }
 
       // Show/hide section headers based on visible options
@@ -163,12 +188,17 @@ export async function showPVSelectionModal(config) {
       if (emptyState) {
         emptyState.style.display = hasResults ? 'none' : '';
       }
+      if (resultStatus) {
+        const resultCount = visibleSuggestions + visiblePVs;
+        resultStatus.textContent = `${resultCount} ${resultCount === 1 ? 'result' : 'results'}`;
+      }
     };
 
     // Search input handler
     searchInput?.addEventListener('input', () => {
       filterOptions(searchInput.value);
     });
+    filterOptions('');
 
     // Option click handler
     for (const option of allOptions) {
