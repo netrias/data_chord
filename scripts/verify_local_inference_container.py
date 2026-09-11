@@ -309,7 +309,7 @@ def _run_harmonization(test_root: Path, port: int) -> None:
     source_path.write_text("diagnosis,specimen\nlung,tumor\nlung,tumor\n", encoding="utf-8")
     output_path = test_root / "harmonized.csv"
     client = NetriasClient(_API_KEY)
-    client.configure(harmonization_url=f"http://127.0.0.1:{port}/api", timeout=60)
+    client.configure(base_url=f"http://127.0.0.1:{port}", timeout=60)
     result = client.harmonize(
         source_path,
         {

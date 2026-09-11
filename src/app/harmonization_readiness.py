@@ -189,7 +189,7 @@ def require_review_state_matches_manifest(
     expected_cells = {
         (str(row_index + 1), row.column_key): (
             row.to_harmonize,
-            row.top_harmonization if row.top_harmonization.strip() else row.to_harmonize,
+            row.baseline_value,
         )
         for row in manifest.rows
         for row_index in row.row_indices

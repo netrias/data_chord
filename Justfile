@@ -70,7 +70,7 @@ js-test:
 # Syntax-check all frontend JavaScript files (catches duplicate declarations, syntax errors)
 js-check:
 	@echo "Checking JavaScript syntax..."
-	@find src -path '*/static/*.js' -exec node --check {} \;
+	@bash scripts/check-js-syntax.sh
 	@echo "All JavaScript files pass syntax check"
 
 verify-local-inference-container:
@@ -89,7 +89,7 @@ infra-test:
 	tofu -chdir=infra/customer-platform test
 	tofu -chdir=infra/modules/data-plane test
 	bash infra/tests/deployment_flow_test.sh
-	bash -n infra/scripts/*.sh infra/tests/*.sh
+	bash scripts/check-shell-syntax.sh
 
 # Save and show a read-only deployment forecast.
 plan target stage:

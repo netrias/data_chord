@@ -67,6 +67,11 @@ class ManifestRow:
     row_indices: list[int]
 
     @property
+    def baseline_value(self) -> str:
+        """Keep the original value when the provider made no recommendation."""
+        return self.top_harmonization if self.top_harmonization.strip() else self.to_harmonize
+
+    @property
     def column_key(self) -> ColumnKey:
         return column_key_for_index(self.column_id)
 

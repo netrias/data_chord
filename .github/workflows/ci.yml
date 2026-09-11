@@ -42,7 +42,7 @@ jobs:
         run: bash infra/tests/deployment_flow_test.sh
 
       - name: Check shell syntax
-        run: bash -n infra/scripts/*.sh infra/tests/*.sh
+        run: bash scripts/check-shell-syntax.sh
 
   js-check:
     runs-on: ubuntu-latest
@@ -56,7 +56,7 @@ jobs:
           node-version: '24.5.0'
 
       - name: Check JavaScript syntax
-        run: find src -path '*/static/*.js' -exec node --check {} \;
+        run: bash scripts/check-js-syntax.sh
 
   test-js:
     runs-on: ubuntu-latest

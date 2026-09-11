@@ -252,7 +252,7 @@ def _active_values_for_indices(
     row_indices: list[int],
     review_overrides: ReviewOverrides | None,
 ) -> list[str]:
-    baseline_value = _baseline_value_for_row(row)
+    baseline_value = row.baseline_value
     if review_overrides is None or not row_indices:
         return [baseline_value]
 
@@ -273,11 +273,6 @@ def _active_review_value_for_index(
     row_overrides = review_overrides.overrides.get(str(row_index + 1))
     active_override = row_overrides.get(row.column_key) if row_overrides is not None else None
     return active_override.human_value if active_override is not None else None
-
-
-def _baseline_value_for_row(row: ManifestRow) -> str:
-    """Use the source value when the provider made no recommendation."""
-    return row.top_harmonization if row.top_harmonization.strip() else row.to_harmonize
 
 
 def _build_columns_from_manifest(
@@ -487,7 +482,7 @@ def _validate_review_snapshot(
     valid_cells = {
         (str(row_index + 1), str(row.column_key)): (
             row.to_harmonize,
-            _baseline_value_for_row(row),
+            row.baseline_value,
         )
         for row in manifest.rows
         for row_index in row.row_indices

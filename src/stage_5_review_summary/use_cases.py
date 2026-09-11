@@ -172,7 +172,7 @@ def _build_history(
         review_status=_value_review_status(row.to_harmonize, pv_set),
     ))
 
-    effective_ai_value = _effective_ai_value(row)
+    effective_ai_value = row.baseline_value
     if effective_ai_value != row.to_harmonize:
         steps.append(TransformationStep(
             value=effective_ai_value,
@@ -395,7 +395,7 @@ def _finalized_outcomes_for_manifest_row(
 ) -> list[FinalizedValueOutcome]:
     """Resolve active per-cell overrides into the same output Stage 5 downloads."""
     pv_set = column_pv_map.get(row.column_key)
-    effective_ai_value = _effective_ai_value(row)
+    effective_ai_value = row.baseline_value
     row_indices: list[int | None] = list(row.row_indices) if row.row_indices else [None]
     occurrence_counts: dict[tuple[str, FinalValueSource], int] = {}
     for row_index in row_indices:
@@ -448,11 +448,6 @@ def _active_cell_override(
     return row_overrides.get(row.column_key) if row_overrides is not None else None
 
 
-def _effective_ai_value(row: ManifestRow) -> str:
-    """A blank provider recommendation is a source pass-through, as in Stage 3."""
-    return row.top_harmonization if row.top_harmonization.strip() else row.to_harmonize
-
-
 def _track_current_mappings(
     mappings: dict[_UniqueTermMapping, _MappingInfo],
     row: ManifestRow,
@@ -475,7 +470,7 @@ def _track_current_mappings(
         current_value, current_source = _resolve_current_value(
             row,
             row_index,
-            _effective_ai_value(row),
+            row.baseline_value,
             review_overrides,
         )
         outcome = outcome_by_value[(current_value, current_source)]
@@ -569,7 +564,7 @@ def _manifest_row_projection(
         str(row_index + 1): _resolve_current_value(
             row,
             row_index,
-            _effective_ai_value(row),
+            row.baseline_value,
             review_overrides,
         )[0]
         for row_index in row.row_indices

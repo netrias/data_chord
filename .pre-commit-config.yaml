@@ -17,8 +17,8 @@ repos:
 
       - id: typecheck-js
         name: typecheck javascript
-        description: "Check JavaScript files for undefined references"
-        entry: bash -c 'if [ ! -x ./node_modules/.bin/tsc ]; then echo "TypeScript is not installed. Run just sync."; exit 1; fi; output=$(./node_modules/.bin/tsc --noEmit 2>&1); if echo "$output" | grep -qE "TS2552|TS6133|TS2304"; then echo "$output" | grep -E "TS2552|TS6133|TS2304"; echo ""; echo "TypeScript found undefined references - please fix!"; exit 1; fi; exit 0'
+        description: "Check all JavaScript types"
+        entry: npm run typecheck
         language: system
         pass_filenames: false
         types: [javascript]

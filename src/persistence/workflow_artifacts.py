@@ -117,10 +117,7 @@ def load_harmonized_output_path(
     meta: UploadedFileMeta,
 ) -> Path | None:
     # Authorize against durable workflow metadata before consulting scratch.
-    try:
-        _read_upload_metadata(workflow_storage, user, file_id)
-    except WorkflowNotFoundError:
-        raise
+    _read_upload_metadata(workflow_storage, user, file_id)
     try:
         with workflow_storage.materialize_artifact(user, file_id, WorkflowFile.HARMONIZED_OUTPUT) as source_path:
             return upload_storage.restore_harmonized_output(file_id, meta.saved_path, source_path)
@@ -135,10 +132,7 @@ def load_harmonization_manifest_path(
     file_id: str,
 ) -> Path | None:
     # Authorize against durable workflow metadata before consulting scratch.
-    try:
-        _read_upload_metadata(workflow_storage, user, file_id)
-    except WorkflowNotFoundError:
-        raise
+    _read_upload_metadata(workflow_storage, user, file_id)
     try:
         with workflow_storage.materialize_artifact(
             user,

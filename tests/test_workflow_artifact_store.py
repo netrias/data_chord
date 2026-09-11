@@ -15,9 +15,67 @@ from src.persistence.workflow_artifacts import (
     save_harmonized_artifacts,
     save_upload_artifacts,
 )
-from src.storage import LocalWorkflowStorage, UploadConstraints, UploadStorage, UserContext, WorkflowFile
+from src.storage import (
+    LocalWorkflowStorage,
+    UploadConstraints,
+    UploadStorage,
+    UserContext,
+    WorkflowAccessDeniedError,
+    WorkflowFile,
+    WorkflowNotFoundError,
+)
 
 pytestmark = pytest.mark.asyncio
+
+
+@pytest.mark.parametrize("load_manifest", [False, True], ids=["output", "manifest"])
+@pytest.mark.parametrize("authorized", [False, True], ids=["other-user", "owner"])
+async def test_generated_artifact_requires_access_before_missing_artifact_handling(
+    tmp_path: Path,
+    load_manifest: bool,
+    authorized: bool,
+) -> None:
+    # Given: an owned upload with no generated artifact and a caller with or without access.
+    owner = UserContext(user_id="alice")
+    caller = owner if authorized else UserContext(user_id="bob")
+    workflow_storage = LocalWorkflowStorage(tmp_path / "workflow")
+    scratch = UploadStorage(tmp_path / "scratch", UploadConstraints(max_bytes=10_000))
+    meta = await scratch.store(InMemoryUpload(b"diagnosis\nalpha\n"), dataset_workflow_id())
+    workflow_storage.create_workflow(owner, meta.dataset_workflow_id)
+    save_upload_artifacts(workflow_storage, owner, scratch, meta)
+
+    def _load_artifact() -> Path | None:
+        if load_manifest:
+            return load_harmonization_manifest_path(scratch, workflow_storage, caller, meta.file_id)
+        return load_harmonized_output_path(scratch, workflow_storage, caller, meta.file_id, meta)
+
+    # When: the caller requests the missing generated artifact.
+    # Then: the owner gets no artifact, but another user gets an authorization failure.
+    if authorized:
+        assert _load_artifact() is None
+    else:
+        with pytest.raises(WorkflowAccessDeniedError):
+            _load_artifact()
+
+
+@pytest.mark.parametrize("load_manifest", [False, True], ids=["output", "manifest"])
+async def test_generated_artifact_raises_when_workflow_metadata_is_missing(
+    tmp_path: Path,
+    load_manifest: bool,
+) -> None:
+    # Given: a local upload with no durable workflow metadata.
+    user = UserContext(user_id="alice")
+    workflow_storage = LocalWorkflowStorage(tmp_path / "workflow")
+    scratch = UploadStorage(tmp_path / "scratch", UploadConstraints(max_bytes=10_000))
+    meta = await scratch.store(InMemoryUpload(b"diagnosis\nalpha\n"), dataset_workflow_id())
+
+    # When: a generated artifact is requested.
+    # Then: missing workflow metadata is not treated as a missing artifact.
+    with pytest.raises(WorkflowNotFoundError):
+        if load_manifest:
+            load_harmonization_manifest_path(scratch, workflow_storage, user, meta.file_id)
+        else:
+            load_harmonized_output_path(scratch, workflow_storage, user, meta.file_id, meta)
 
 
 def dataset_workflow_id(raw: str = "a" * 32) -> DatasetWorkflowId:
