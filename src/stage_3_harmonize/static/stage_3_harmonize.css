@@ -96,7 +96,7 @@
 
 .stage-three-summary {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
   justify-items: center;
   text-align: center;
   row-gap: var(--space-6);
@@ -117,8 +117,7 @@
 }
 
 .stage-three-verdict {
-  grid-row: 1;
-  max-width: 48rem;
+  width: 100%;
 }
 
 .stage-three-dial {

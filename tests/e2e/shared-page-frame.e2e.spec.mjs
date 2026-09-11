@@ -39,6 +39,58 @@ test('workflow steps stay aligned through all five stages', async ({ page }) => 
   }
 });
 
+test('workflow actions stay inside narrow desktop and phone viewports', async ({ page }) => {
+  // Given: the shared workflow frame is shown at the reported desktop width and a phone width
+  for (const width of [968, 768, 390]) {
+    await page.setViewportSize({ width, height: 921 });
+
+    // When: each stage renders its action beside or below the workflow steps
+    for (const path of ['/stage-1', '/stage-2', '/stage-3', '/stage-4', '/stage-5']) {
+      await page.goto(path);
+
+      // Then: the action and the full document stay inside the viewport
+      const action = await page.locator('.progress-tracker-action').boundingBox();
+      expect(action).not.toBeNull();
+      expect(action.x).toBeGreaterThanOrEqual(0);
+      expect(action.x + action.width).toBeLessThanOrEqual(width);
+      const stepsFit = await page.locator('.progress-track').evaluate((track) => {
+        const bounds = track.getBoundingClientRect();
+        return [...track.children].every((child) => {
+          const childBounds = child.getBoundingClientRect();
+          return childBounds.left >= bounds.left && childBounds.right <= bounds.right;
+        });
+      });
+      expect(stepsFit).toBe(true);
+    }
+  }
+});
+
+test('Stage 3 puts the result dial left of centered summary text', async ({ page }) => {
+  // Given: a completed Stage 3 result at desktop width
+  await page.setViewportSize({ width: 1044, height: 921 });
+  await page.goto('/stage-3');
+  await page.locator('#stageThreeComplete').evaluate((element) => {
+    element.classList.remove('hidden');
+  });
+
+  // When: the completion summary is laid out
+  const summary = await page.locator('.stage-three-summary').boundingBox();
+  const dialColumn = await page.locator('.stage-three-dial-column').boundingBox();
+  const verdict = await page.locator('.stage-three-verdict').boundingBox();
+
+  // Then: the dial is on the left and the verdict is centered in the remaining space
+  expect(summary).not.toBeNull();
+  expect(dialColumn).not.toBeNull();
+  expect(verdict).not.toBeNull();
+  expect(dialColumn.x + dialColumn.width).toBeLessThanOrEqual(verdict.x);
+  const remainingCenter = verdict.x + (verdict.width / 2);
+  const verdictContentCenter = await page.locator('#stageThreeHeadline').evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return bounds.x + (bounds.width / 2);
+  });
+  expect(Math.abs(verdictContentCenter - remainingCenter)).toBeLessThanOrEqual(1);
+});
+
 test('workflow links identify the current step and support keyboard navigation', async ({ page }) => {
   // Given Stage 2 identifies Map as the current step
   await page.goto('/stage-2');

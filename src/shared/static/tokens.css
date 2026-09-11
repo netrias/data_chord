@@ -825,19 +825,85 @@ button.linklike {
 }
 
 /* Responsive breakpoints */
+@media (max-width: 1200px) {
+  .progress-tracker {
+    padding-inline: var(--space-4);
+    gap: var(--space-4);
+  }
+
+  .progress-tracker-row {
+    gap: var(--space-3);
+  }
+
+  .progress-tracker-action,
+  .step-instruction {
+    width: 180px;
+  }
+
+  .step {
+    min-width: 56px;
+  }
+
+  .connector {
+    min-width: 12px;
+  }
+
+  .btn-3d-front {
+    min-width: 140px;
+  }
+}
+
 @media (max-width: 960px) {
   .stage-shell {
     padding: var(--space-8) var(--space-4) var(--space-12);
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 800px) {
+  .progress-tracker {
+    flex-direction: column;
+    align-items: stretch;
+    padding: var(--space-3);
+    gap: var(--space-3);
+  }
+
+  .progress-tracker-row {
+    flex-direction: column;
+    width: 100%;
+  }
+
   .progress-track {
-    gap: var(--space-2);
+    width: 100%;
+    gap: 0;
+  }
+
+  .progress-tracker-action,
+  .step-instruction {
+    width: 100%;
+  }
+
+  .progress-tracker-action {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 640px) {
+
+  .step {
+    min-width: 44px;
+  }
+
+  .step-index {
+    width: 36px;
+    height: 36px;
+  }
+
+  .step-label {
+    font-size: 0.625rem;
   }
 
   .connector {
-    min-width: 20px;
+    min-width: 6px;
   }
 
   .stage-card {
