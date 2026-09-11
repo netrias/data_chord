@@ -226,6 +226,10 @@ const _openStage2SearchHarness = async (page) => {
 
 test('no-recommendation card warns when its displayed source value is not permissible', async ({ page }, testInfo) => {
   const fileId = '0123456789abcdef0123456789abcdef';
+  const wrappedValues = [
+    'Adenocarcinoma, Metastatic NOS',
+    'Glioma, Malignant, Diffuse Pediatric-Type High-Grade Glioma, H3-Wildtype And IDH-Wildtype, High-Grade Glioma',
+  ];
   let savedOverrides = null;
   await page.route('**/stage-4/rows', async (route) => {
     await route.fulfill({
@@ -267,7 +271,7 @@ test('no-recommendation card warns when its displayed source value is not permis
             },
           ],
         }],
-        columnPVs: { col_0000: ['Carcinoma NOS', 'Lung Cancer'] },
+        columnPVs: { col_0000: ['Carcinoma NOS', 'Lung Cancer', ...wrappedValues] },
         totalOriginalRows: 10000,
         reviewState: null,
       }),
@@ -369,6 +373,28 @@ test('no-recommendation card warns when its displayed source value is not permis
     expect(tooltipBounds.x + tooltipBounds.width).toBeLessThanOrEqual(width);
     await page.screenshot({ path: testInfo.outputPath(`review-cards-${width}.png`) });
   }
+
+  // Given: the card is shown at the reported width, with long approved values.
+  await page.setViewportSize({ width: 968, height: 921 });
+  for (const value of wrappedValues) {
+    // When: the reviewer selects a value that wraps across several lines.
+    await rejectedCard.locator('.pv-combobox-link').click();
+    await page.getByRole('searchbox', { name: 'Search permissible values' }).fill(value);
+    await page.locator('.pv-selection-option').filter({ hasText: value }).click();
+    // Then: all lines fit, without the rounded mask that clipped the first letters.
+    const link = rejectedCard.locator('.pv-combobox-link');
+    await expect(link).toHaveText(value);
+    const dimensions = await link.evaluate((element) => ({
+      height: element.clientHeight,
+      contentHeight: element.scrollHeight,
+      lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight),
+      radius: getComputedStyle(element).borderRadius,
+    }));
+    expect(dimensions.height).toBeGreaterThan(dimensions.lineHeight);
+    expect(dimensions.contentHeight).toBeLessThanOrEqual(dimensions.height + 1);
+    expect(dimensions.radius).toBe('0px');
+  }
+  await rejectedCard.screenshot({ path: testInfo.outputPath('wrapped-value.png') });
 });
 
 test('Stage 4 shows server recovery detail with a Stage 3 link', async ({ page }) => {
