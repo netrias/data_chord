@@ -206,6 +206,7 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
 
     const card = createValueCard({
       entry,
+      showColumnLabel: false,
       labelText,
       tooltipText,
       pendingOverrides,

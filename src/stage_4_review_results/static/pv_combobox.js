@@ -254,7 +254,8 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, original
   wrapper.className = 'pv-combobox';
 
   // Link element - displays committed value, click opens modal
-  const link = document.createElement('span');
+  const link = document.createElement('button');
+  link.type = 'button';
   link.className = 'pv-combobox-link';
 
   let committedValue = initialValue || '';

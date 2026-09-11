@@ -291,7 +291,7 @@ const _getInputValue = (entry, pendingOverrides) => {
  * @returns {string}
  */
 const _buildCardHTML = (params) => {
-  const { columnLabel, labelText, fidelityTooltip, matchFidelity, effectiveValue, originalValue, isPVConformant, hasPVs } = params;
+  const { columnLabel, showColumnLabel, labelText, fidelityTooltip, matchFidelity, effectiveValue, originalValue, isPVConformant, hasPVs } = params;
   const safeColumnLabel = escapeHtml(columnLabel);
   const safeLabelText = escapeHtml(labelText);
   const safeEffectiveValue = escapeHtml(effectiveValue);
@@ -301,8 +301,8 @@ const _buildCardHTML = (params) => {
   const warningHidden = isPVConformant ? ' style="display: none;"' : '';
   const checkHidden = isPVConformant ? '' : ' style="display: none;"';
   const pvStatusIcons = hasPVs
-    ? `<span class="pv-warning-icon" data-tooltip="The current output is not in the approved list." aria-label="Warning: value not in permissible values"${warningHidden}>⚠ <span>Not in approved list</span></span><span class="pv-conformant-icon" aria-label="Value is in permissible values"${checkHidden}>✓ <span>In approved list</span></span>`
-    : '<span class="card-neutral-status">No approved list</span>';
+    ? `<button type="button" class="card-icon pv-warning-icon" data-card-tooltip="The current value is not in the approved list." aria-label="Value is not in the approved list"${warningHidden}>⚠</button><button type="button" class="card-icon pv-conformant-icon" data-card-tooltip="The current value is in the approved list." aria-label="Value is in the approved list"${checkHidden}>✓</button>`
+    : '<button type="button" class="card-icon card-neutral-status" data-card-tooltip="There is no approved list for this column." aria-label="No approved list">—</button>';
 
   // Add conformant class to header when value is in PV list
   const headerClasses = ['card-header-row'];
@@ -312,14 +312,14 @@ const _buildCardHTML = (params) => {
 
   return `
     <div class="${headerClasses.join(' ')}">
-      <span class="card-column-title">${safeColumnLabel}</span>
       <div class="card-value-status">${pvStatusIcons}</div>
+      ${showColumnLabel ? `<span class="card-column-title">${safeColumnLabel}</span>` : ''}
+      ${labelText !== columnLabel ? `<button type="button" class="entry-row-label">${safeLabelText}</button>` : ''}
     </div>
     <div class="card-body" role="group" aria-label="${safeColumnLabel} transformation">
       <div class="original-context">
         <span class="original-context-label">was:</span>
         <span class="original-context-value">${originalValueHTML}</span>
-        <button type="button" class="revert-btn" aria-label="Restore source value">↩ Restore source value</button>
       </div>
       <div class="target-value-wrapper">
         <span class="target-value-label">now:</span>
@@ -341,8 +341,12 @@ const _buildCardHTML = (params) => {
       <p class="card-result-note" role="status"></p>
     </div>
     <div class="card-review-meta">
-      <span class="fidelity-indicator fidelity-${matchFidelity}" title="AI result: ${escapeHtml(fidelityTooltip)}" aria-label="${matchFidelity} match fidelity">AI match: ${escapeHtml(matchFidelity)}</span>
-      ${labelText !== columnLabel ? `<div class="entry-row-label">${safeLabelText}</div>` : ''}
+      <button type="button" class="card-icon fidelity-indicator fidelity-${matchFidelity}" data-card-tooltip="AI result: ${escapeHtml(fidelityTooltip)} This describes the original AI result, not later edits." aria-label="${escapeHtml(matchFidelity)} AI match">
+        <svg viewBox="0 0 24 24" aria-hidden="true">${matchFidelity === 'none' ? '<circle cx="12" cy="12" r="8"/><path d="M8 12h8"/>' : '<path d="M5 20V14"/><path class="match-middle" d="M12 20V9"/><path class="match-top" d="M19 20V4"/>'}</svg>
+      </button>
+      <span data-card-tooltip="Restore original value" class="restore-control">
+        <button type="button" class="card-icon revert-btn" aria-label="Restore original value"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v6h6M4 10a8 8 0 1 1 2 9"/></svg></button>
+      </span>
     </div>
   `;
 };
@@ -405,11 +409,7 @@ const _applyCardState = (params) => {
   }
 
   // Show revert button when original differs from current effective value
-  const originalContext = card.querySelector('.original-context');
-  if (originalContext) {
-    const canRevertToOriginal = originalValue !== state.activeValue;
-    originalContext.classList.toggle('can-revert', canRevertToOriginal);
-  }
+  _updateRestoreControl(card, originalValue, state.activeValue);
 
   // Apply PV conformance styling (only when PVs exist)
   const headerRow = card.querySelector('.card-header-row');
@@ -446,17 +446,13 @@ const _applyCardState = (params) => {
 const _attachInputListener = (card, entry, baselineValue, onOverrideChange) => {
   const input = card.querySelector('.target-value-input');
   const revertBtn = card.querySelector('.revert-btn');
-  const originalContext = card.querySelector('.original-context');
   if (!input) return () => {};
 
   const originalValue = entry.originalValue ?? '';
   // Helper to update revert button visibility based on current effective value
   const updateRevertState = (currentValue) => {
     _updateResultNote(card, originalValue, currentValue, entry.pvSetAvailable);
-    if (originalContext) {
-      const canRevertToOriginal = originalValue !== currentValue;
-      originalContext.classList.toggle('can-revert', canRevertToOriginal);
-    }
+    _updateRestoreControl(card, originalValue, currentValue);
   };
 
   // Handle input changes - determine override from current input value
@@ -518,51 +514,98 @@ const _addTooltip = (card, tooltipText) => {
 };
 
 /**
- * Attach JS-based tooltip to warning icon for fixed positioning.
+ * Attach immediate tooltips to card controls, outside clipping containers.
  * Returns cleanup function to remove listeners and orphaned tooltips.
  * @param {HTMLElement} card
  * @returns {Function|null} Cleanup function, or null if no warning icon
  */
-const _attachWarningTooltip = (card) => {
-  const warningIcon = card.querySelector('.pv-warning-icon');
-  if (!warningIcon) return null;
-
+const _attachCardTooltips = (card) => {
   let tooltip = null;
-
-  const showTooltip = () => {
-    if (tooltip) return;
-
+  let activeControl = null;
+  let describedControl = null;
+  const hideTooltip = () => {
+    describedControl?.removeAttribute('aria-describedby');
+    describedControl = null;
+    tooltip?.remove();
+    tooltip = null;
+  };
+  const showTooltip = (event) => {
+    const control = event.target.closest('[data-card-tooltip]');
+    if (!control || !card.contains(control)) return;
+    hideTooltip();
+    activeControl = control;
     tooltip = document.createElement('div');
+    tooltip.id = `card-tooltip-${crypto.randomUUID()}`;
     tooltip.className = 'pv-warning-tooltip';
-    tooltip.textContent = warningIcon.dataset.tooltip;
+    tooltip.setAttribute('role', 'tooltip');
+    tooltip.textContent = control.dataset.cardTooltip;
+    describedControl = event.target.closest('button') ?? control;
+    describedControl.setAttribute('aria-describedby', tooltip.id);
     document.body.appendChild(tooltip);
-
-    // Position tooltip below the warning icon, centered
-    const iconRect = warningIcon.getBoundingClientRect();
+    const iconRect = control.getBoundingClientRect();
     const tooltipRect = tooltip.getBoundingClientRect();
     let left = iconRect.left + (iconRect.width / 2) - (tooltipRect.width / 2);
     left = Math.max(10, Math.min(left, window.innerWidth - tooltipRect.width - 10));
 
     tooltip.style.left = `${left}px`;
-    tooltip.style.top = `${iconRect.bottom + 6}px`;
+    const top = iconRect.bottom + tooltipRect.height + 6 > window.innerHeight
+      ? Math.max(6, iconRect.top - tooltipRect.height - 6)
+      : iconRect.bottom + 6;
+    tooltip.style.top = `${top}px`;
   };
-
-  const hideTooltip = () => {
-    if (tooltip) {
-      tooltip.remove();
-      tooltip = null;
-    }
+  const dismiss = (event) => {
+    if (event.type !== 'keydown' || event.key === 'Escape') hideTooltip();
   };
-
-  warningIcon.addEventListener('mouseenter', showTooltip);
-  warningIcon.addEventListener('mouseleave', hideTooltip);
-
-  // Return cleanup function
+  const leaveControl = (event) => {
+    if (!activeControl?.contains(event.relatedTarget)) hideTooltip();
+  };
+  const dismissOutside = (event) => {
+    if (!activeControl?.contains(event.target)) hideTooltip();
+  };
+  card.addEventListener('pointerover', showTooltip);
+  card.addEventListener('focusin', showTooltip);
+  card.addEventListener('click', showTooltip);
+  card.addEventListener('pointerout', leaveControl);
+  card.addEventListener('focusout', leaveControl);
+  document.addEventListener('keydown', dismiss);
+  document.addEventListener('pointerdown', dismissOutside);
+  window.addEventListener('scroll', hideTooltip, true);
   return () => {
     hideTooltip();
-    warningIcon.removeEventListener('mouseenter', showTooltip);
-    warningIcon.removeEventListener('mouseleave', hideTooltip);
+    card.removeEventListener('pointerover', showTooltip);
+    card.removeEventListener('focusin', showTooltip);
+    card.removeEventListener('click', showTooltip);
+    card.removeEventListener('pointerout', leaveControl);
+    card.removeEventListener('focusout', leaveControl);
+    document.removeEventListener('keydown', dismiss);
+    document.removeEventListener('pointerdown', dismissOutside);
+    window.removeEventListener('scroll', hideTooltip, true);
   };
+};
+
+const _updateRestoreControl = (card, originalValue, activeValue) => {
+  const button = card.querySelector('.revert-btn');
+  if (!button) return;
+  button.disabled = originalValue === activeValue;
+  const control = button.parentElement;
+  control.tabIndex = button.disabled ? 0 : -1;
+  control.dataset.cardTooltip = button.disabled
+    ? 'The current value is already the original value.'
+    : 'Restore original value';
+};
+
+// Card background is a pointer shortcut. The editor itself remains the single
+// keyboard control; nested actions and text selection must keep their meaning.
+const _attachCardEditing = (card) => {
+  const edit = (event) => {
+    if (event.target.closest('button, input, label, a, [data-card-tooltip], .pv-combobox-link')) return;
+    if (window.getSelection()?.toString()) return;
+    const link = card.querySelector('.pv-combobox-link');
+    if (link) link.click();
+    else card.querySelector('.target-value-input')?.focus();
+  };
+  card.addEventListener('click', edit);
+  return () => card.removeEventListener('click', edit);
 };
 
 /**
@@ -684,10 +727,11 @@ const _attachPVCombobox = (card, entry, pvValues, baselineValue, initialValue, o
  * @param {Object} config.pendingOverrides - Map of pending overrides by row index
  * @param {Function} config.onOverrideChange - Callback when override value changes
  * @param {Object} [config.columnPVs] - Optional map of column_key -> PV list
+ * @param {boolean} [config.showColumnLabel] - Keep the title when cards mix columns
  * @returns {HTMLElement}
  */
 export const createValueCard = (config) => {
-  const { entry, labelText, tooltipText, pendingOverrides, onOverrideChange, columnPVs } = config;
+  const { entry, labelText, tooltipText, pendingOverrides, onOverrideChange, columnPVs, showColumnLabel = true } = config;
 
   const card = document.createElement('div');
   card.className = _buildCardClasses(entry);
@@ -715,6 +759,7 @@ export const createValueCard = (config) => {
 
   card.innerHTML = _buildCardHTML({
     columnLabel,
+    showColumnLabel,
     labelText,
     fidelityTooltip,
     matchFidelity: entry.matchFidelity,
@@ -724,8 +769,7 @@ export const createValueCard = (config) => {
     hasPVs: entry.pvSetAvailable,
   });
 
-  const originalContext = card.querySelector('.original-context');
-  originalContext?.classList.toggle('can-revert', (entry.originalValue ?? '') !== initialState.activeValue);
+  _updateRestoreControl(card, entry.originalValue ?? '', initialState.activeValue);
   _updateResultNote(card, entry.originalValue ?? '', initialState.activeValue, entry.pvSetAvailable);
 
   // Collect cleanup functions for proper resource management
@@ -748,8 +792,7 @@ export const createValueCard = (config) => {
   }
 
   _addTooltip(card, tooltipText);
-  const tooltipCleanup = _attachWarningTooltip(card);
-  if (tooltipCleanup) cleanupFns.push(tooltipCleanup);
+  cleanupFns.push(_attachCardTooltips(card), _attachCardEditing(card));
 
   // Attach cleanup method to card for resource management when cards are removed
   card.destroy = () => {
