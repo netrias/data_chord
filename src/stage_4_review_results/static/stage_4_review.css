@@ -389,15 +389,6 @@
     0 8px 16px rgba(0, 0, 0, 0.04);
 }
 
-/* Elevate card when warning icon is hovered so tooltip appears above adjacent cards */
-.row-cell:has(.pv-warning-icon:hover) {
-  z-index: 101;
-  position: relative;
-}
-
-/* Match fidelity states - neutral cards, color only on indicator badges */
-/* All match fidelity levels use the same neutral card styling */
-
 /* Card header row - compact height, border-radius to match card corners since overflow is visible */
 .card-header-row {
   display: flex;
@@ -407,12 +398,6 @@
   background: var(--gray-50);
   border-bottom: 1px solid var(--gray-100);
   border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
-}
-
-/* Keep the same neutral surface for both conformance states. */
-.card-header-row.pv-conformant {
-  background: var(--gray-50);
-  border-bottom-color: var(--gray-100);
 }
 
 .card-column-title {
@@ -449,16 +434,8 @@
 }
 
 .fidelity-indicator {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.75rem;
-  font-weight: 500;
   flex-shrink: 0;
   color: var(--gray-500);
-  cursor: help;
-  position: relative;
-  margin-right: 0;
 }
 
 .entry-row-label {
@@ -714,7 +691,7 @@
   position: relative;
 }
 
-/* PV status icons (in card header row, right-aligned) */
+/* PV status icons in the card header */
 .pv-warning-icon,
 .pv-conformant-icon {
   display: inline-flex;
@@ -727,18 +704,16 @@
   flex-shrink: 0;
 }
 
-/* First icon gets margin-left: auto to push to right side of header */
 .pv-warning-icon {
   color: var(--warning-600);
   cursor: help;
 }
 
-/* When warning is hidden, conformant icon gets the margin instead */
 .pv-conformant-icon {
   color: var(--netrias-600);
 }
 
-/* JS-based tooltip for warning icon - fixed positioning to escape stacking contexts */
+/* Card control tooltips use fixed positioning outside card stacking contexts. */
 .pv-warning-tooltip {
   position: fixed;
   background: var(--gray-800);

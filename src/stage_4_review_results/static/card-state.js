@@ -22,7 +22,7 @@
  * @property {boolean} isConformant - Whether active value is PV-conformant
  * @property {boolean} hasOverride - Whether user has an override that differs from AI
  * @property {boolean} showWarningIcon - Whether to show PV warning icon
- * @property {boolean} showConformantHeader - Whether to show green conformant header
+ * @property {boolean} showConformantHeader - Whether to show the approved-value icon in the header
  */
 
 /**

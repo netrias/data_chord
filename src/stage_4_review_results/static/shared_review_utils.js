@@ -304,14 +304,8 @@ const _buildCardHTML = (params) => {
     ? `<button type="button" class="card-icon pv-warning-icon" data-card-tooltip="The current value is not in the approved list." aria-label="Value is not in the approved list"${warningHidden}>⚠</button><button type="button" class="card-icon pv-conformant-icon" data-card-tooltip="The current value is in the approved list." aria-label="Value is in the approved list"${checkHidden}>✓</button>`
     : '<button type="button" class="card-icon card-neutral-status" data-card-tooltip="There is no approved list for this column." aria-label="No approved list">—</button>';
 
-  // Add conformant class to header when value is in PV list
-  const headerClasses = ['card-header-row'];
-  if (isPVConformant) {
-    headerClasses.push('pv-conformant');
-  }
-
   return `
-    <div class="${headerClasses.join(' ')}">
+    <div class="card-header-row">
       <div class="card-value-status">${pvStatusIcons}</div>
       ${showColumnLabel ? `<span class="card-column-title">${safeColumnLabel}</span>` : ''}
       ${labelText !== columnLabel ? `<button type="button" class="entry-row-label">${safeLabelText}</button>` : ''}
@@ -408,11 +402,10 @@ const _applyCardState = (params) => {
     inputEl.value = state.activeValue;
   }
 
-  // Show revert button when original differs from current effective value
+  // Enable restore only when the current value differs from the original.
   _updateRestoreControl(card, originalValue, state.activeValue);
 
-  // Apply PV conformance styling (only when PVs exist)
-  const headerRow = card.querySelector('.card-header-row');
+  // Update PV status icons (only when PVs exist).
   const warningIcon = card.querySelector('.pv-warning-icon');
   const conformantIcon = card.querySelector('.pv-conformant-icon');
 
@@ -423,10 +416,6 @@ const _applyCardState = (params) => {
 
   if (conformantIcon) {
     conformantIcon.style.display = state.showConformantHeader ? '' : 'none';
-  }
-
-  if (headerRow) {
-    headerRow.classList.toggle('pv-conformant', state.showConformantHeader);
   }
 
   _updateResultNote(card, originalValue, state.activeValue, hasPVs);
@@ -449,7 +438,7 @@ const _attachInputListener = (card, entry, baselineValue, onOverrideChange) => {
   if (!input) return () => {};
 
   const originalValue = entry.originalValue ?? '';
-  // Helper to update revert button visibility based on current effective value
+  // Keep the result note and restore availability in sync with the value.
   const updateRevertState = (currentValue) => {
     _updateResultNote(card, originalValue, currentValue, entry.pvSetAvailable);
     _updateRestoreControl(card, originalValue, currentValue);
@@ -517,7 +506,7 @@ const _addTooltip = (card, tooltipText) => {
  * Attach immediate tooltips to card controls, outside clipping containers.
  * Returns cleanup function to remove listeners and orphaned tooltips.
  * @param {HTMLElement} card
- * @returns {Function|null} Cleanup function, or null if no warning icon
+ * @returns {Function} Cleanup function
  */
 const _attachCardTooltips = (card) => {
   let tooltip = null;

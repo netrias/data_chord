@@ -313,10 +313,8 @@ test('no-recommendation card warns when its displayed source value is not permis
   await page.keyboard.press('Escape');
   await expect(page.getByRole('tooltip')).toHaveCount(0);
   await expect(rejectedCard.locator('.pv-conformant-icon')).toBeHidden();
-  await expect(rejectedCard.locator('.card-header-row')).not.toHaveClass(/pv-conformant/);
   await expect(permittedCard.locator('.pv-warning-icon')).toBeHidden();
   await expect(permittedCard.locator('.pv-conformant-icon')).toBeVisible();
-  await expect(permittedCard.locator('.card-header-row')).toHaveClass(/pv-conformant/);
   for (const card of await cards.all()) {
     const markerContent = await card.evaluate((element) => getComputedStyle(element, '::after').content);
     expect(markerContent).toBe('none');
@@ -334,7 +332,6 @@ test('no-recommendation card warns when its displayed source value is not permis
   // Then: the card becomes conformant, stays a no-recommendation card, and saves the override
   await expect(rejectedCard.locator('.pv-warning-icon')).toBeHidden();
   await expect(rejectedCard.locator('.pv-conformant-icon')).toBeVisible();
-  await expect(rejectedCard.locator('.card-header-row')).toHaveClass(/pv-conformant/);
   await expect(rejectedCard).toHaveClass(/no-recommendation/);
   expect(savedOverrides.overrides['8692'].col_0000.human_value).toBe('Carcinoma NOS');
   await expect(rejectedCard.locator('.card-result-note')).toHaveText('You changed the output.');
