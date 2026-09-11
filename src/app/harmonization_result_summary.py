@@ -53,18 +53,11 @@ def _compute_column_stats(
     )
 
 
-def _effective_ai_value(row: ManifestRow) -> str:
-    """Treat a blank provider result as the manifest's pass-through sentinel."""
-    if not row.top_harmonization.strip():
-        return row.to_harmonize
-    return row.top_harmonization
-
-
 def _finalized_value_outcome(
     row: ManifestRow,
     pv_set: frozenset[str] | None,
 ) -> FinalizedValueOutcome:
-    final_value = _effective_ai_value(row)
+    final_value = row.baseline_value
     return FinalizedValueOutcome(
         column_key=row.column_key,
         source_column_index=row.column_id,
