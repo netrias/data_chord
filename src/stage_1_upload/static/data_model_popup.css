@@ -45,6 +45,7 @@
 }
 
 .data-model-close-btn {
+  font-weight: 600;
   background: var(--gray-100);
   border: none;
   font-size: 1.25rem;
@@ -135,6 +136,7 @@
 }
 
 .data-model-dropdown-trigger {
+  font-weight: 600;
   width: 100%;
   border: 1px solid var(--gray-200);
   border-radius: var(--radius-md);

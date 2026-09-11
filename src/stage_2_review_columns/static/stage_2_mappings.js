@@ -21,6 +21,7 @@ import {
   writeToSession,
 } from '/assets/shared/storage-keys.js';
 import { prepareSearchCandidate, scoreSearch } from '/assets/shared/fuzzy-search.js';
+import { escapeHtml } from '/assets/shared/html.js';
 
 /* ─── Configuration ──────────────────────────────────────── */
 const config = window.stageTwoConfig ?? {};
@@ -501,7 +502,7 @@ const _ghostRowHtml = (col) => {
     ? `<span class="mapping-row-target">${_escHtml(cde)}</span>`
     : `<span class="mapping-row-target mapping-row-target--empty">—</span>`;
   return `
-    <div class="mapping-row mapping-row--ghost" data-key="${_escAttr(colKey)}">
+    <div class="mapping-row mapping-row--ghost" data-key="${_escHtml(colKey)}">
       <div class="mapping-row-col">${_escHtml(_columnLabel(col))}</div>
       <div class="mapping-row-status ${OUTCOME_CLASS[outcome]}">${OUTCOME_ICON[outcome]}</div>
       ${target}
@@ -681,14 +682,14 @@ const _rowHtml = (col) => {
   } else {
     const cde = _effectiveCde(col);
     target = cde
-      ? `<span class="mapping-row-target" data-fast-tooltip="${_escAttr(cde)}"><span class="mapping-row-target-text">${_escHtml(cde)}</span></span>`
+      ? `<span class="mapping-row-target" data-fast-tooltip="${_escHtml(cde)}"><span class="mapping-row-target-text">${_escHtml(cde)}</span></span>`
       : `<span class="mapping-row-target mapping-row-target--empty"></span>`;
   }
   const fit = _overlapCellHtml(col);
   return `
-    <div class="mapping-row${seen ? ' mapping-row--seen' : ''}" data-key="${_escAttr(colKey)}" data-outcome="${outcome}" data-has-values="${_hasValues(col) ? '1' : '0'}">
-      <div class="mapping-row-col" data-fast-tooltip="${_escAttr(colLabel)}"><span class="mapping-row-col-text">${_escHtml(colLabel)}</span></div>
-      <div class="mapping-row-status ${OUTCOME_CLASS[outcome]}" data-fast-tooltip="${_escAttr(OUTCOME_TIP[outcome])}">${OUTCOME_ICON[outcome]}</div>
+    <div class="mapping-row${seen ? ' mapping-row--seen' : ''}" data-key="${_escHtml(colKey)}" data-outcome="${outcome}" data-has-values="${_hasValues(col) ? '1' : '0'}">
+      <div class="mapping-row-col" data-fast-tooltip="${_escHtml(colLabel)}"><span class="mapping-row-col-text">${_escHtml(colLabel)}</span></div>
+      <div class="mapping-row-status ${OUTCOME_CLASS[outcome]}" data-fast-tooltip="${_escHtml(OUTCOME_TIP[outcome])}">${OUTCOME_ICON[outcome]}</div>
       ${target}
       ${fit}
       <div class="mapping-row-chev"${seen ? ' data-fast-tooltip="Reviewed"' : ''}>${seen ? '✓' : '›'}</div>
@@ -699,12 +700,12 @@ const _rowHtml = (col) => {
 const _overlapCellHtml = (col) => {
   const outcome = _effectiveOutcome(col);
   if (outcome === OUTCOME.PASSTHROUGH) {
-    return `<div class="mapping-row-fit mapping-row-fit--na" data-fast-tooltip="${_escAttr(PASSTHROUGH_TOOLTIP)}">N/A</div>`;
+    return `<div class="mapping-row-fit mapping-row-fit--na" data-fast-tooltip="${_escHtml(PASSTHROUGH_TOOLTIP)}">N/A</div>`;
   }
   if (outcome === OUTCOME.REWRITE) {
     const ratio = _overlapRatioFor(col);
     if (ratio !== null) {
-      return `<div class="mapping-row-fit mapping-row-fit--ratio" data-fast-tooltip="${_escAttr(MATCH_TIP)}">${_formatRatio(ratio)}</div>`;
+      return `<div class="mapping-row-fit mapping-row-fit--ratio" data-fast-tooltip="${_escHtml(MATCH_TIP)}">${_formatRatio(ratio)}</div>`;
     }
   }
   return `<div class="mapping-row-fit mapping-row-fit--empty">—</div>`;
@@ -885,7 +886,7 @@ const _renameDropdownItemsHtml = (q) => {
   const matches = _rankCdesForSearch(cdeCatalog, q);
   if (!matches.length) return `<div class="rename-dd-empty">No standards match "${_escHtml(q)}"</div>`;
   return matches.map((c) => `
-    <div class="rename-dd-opt" data-label="${_escAttr(c.label || c.key)}">
+    <div class="rename-dd-opt" data-label="${_escHtml(c.label || c.key)}">
       <span class="rename-dd-name">${_escHtml(c.label || c.key)}</span>
       ${c.description ? `<span class="rename-dd-desc">${_escHtml(c.description)}</span>` : ''}
     </div>
@@ -914,7 +915,7 @@ const renderTakeover = () => {
       <div class="takeover-head-left">
         <span class="takeover-head-status ${OUTCOME_CLASS[outcome]}">${OUTCOME_ICON[outcome]}</span>
         <div class="takeover-head-names">
-          <h2 class="takeover-head-name" data-fast-tooltip="${_escAttr(_columnLabel(col))}">${_escHtml(_columnLabel(col))}</h2>
+          <h2 class="takeover-head-name" data-fast-tooltip="${_escHtml(_columnLabel(col))}">${_escHtml(_columnLabel(col))}</h2>
           ${_renameIndicatorHtml(col, colKey, cde)}
         </div>
       </div>
@@ -984,7 +985,7 @@ const _sampleHtml = (s, pvSet) => {
   const isMatch = pvSet ? pvSet.has(s.value) : false;
   const liClass = isMatch ? 'match' : '';
   const okGlyph = isMatch ? '✓' : '';
-  return `<li class="${liClass}"><span class="ok">${okGlyph}</span><span class="v" title="${_escAttr(s.value)}">${_escHtml(s.value)}</span><span class="c">${(s.count ?? 0).toLocaleString()}</span></li>`;
+  return `<li class="${liClass}"><span class="ok">${okGlyph}</span><span class="v" title="${_escHtml(s.value)}">${_escHtml(s.value)}</span><span class="c">${(s.count ?? 0).toLocaleString()}</span></li>`;
 };
 
 const _targetPaneHtml = (col, cde, detail, profile) => {
@@ -1009,7 +1010,7 @@ const _targetPaneHtml = (col, cde, detail, profile) => {
       ? `<span class="type-badge type-badge--passthrough">Pass-through</span>`
       : '';
     pickerInner = `
-      <span class="cde-picker-name" title="${_escAttr(cde)}">${_escHtml(cde)}</span>
+      <span class="cde-picker-name" title="${_escHtml(cde)}">${_escHtml(cde)}</span>
       ${typeBadge}
       ${isAi ? `<span class="ai-badge">AI suggestion</span>` : ''}
       <span class="cde-picker-caret cde-picker-caret--end">▾</span>
@@ -1186,19 +1187,19 @@ const _optHtml = (c, kind, totalDistinct) => {
     if (_isRenameOnly(c.type)) {
       // The right-edge cell carries the canonical pass-through signal — the pill
       // next to the name is intentionally omitted to avoid duplicate indicators.
-      matchHtml = `<span class="count" data-fast-tooltip="${_escAttr(PASSTHROUGH_TOOLTIP)}">Pass-through</span>`;
+      matchHtml = `<span class="count" data-fast-tooltip="${_escHtml(PASSTHROUGH_TOOLTIP)}">Pass-through</span>`;
     } else if (totalDistinct > 0) {
       const pct = _formatRatio(matchCount / totalDistinct);
-      matchHtml = `<span class="count ${matchCount > 0 ? 'high' : 'zero'}" data-fast-tooltip="${_escAttr(MATCH_TIP)}">${pct} value fit</span>`;
+      matchHtml = `<span class="count ${matchCount > 0 ? 'high' : 'zero'}" data-fast-tooltip="${_escHtml(MATCH_TIP)}">${pct} value fit</span>`;
     } else {
-      matchHtml = `<span class="count zero" data-fast-tooltip="${_escAttr(MATCH_TIP)}">0% value fit</span>`;
+      matchHtml = `<span class="count zero" data-fast-tooltip="${_escHtml(MATCH_TIP)}">0% value fit</span>`;
     }
   }
   const desc = c.description ? `<div class="dd-desc">${_escHtml(c.description)}</div>` : '';
   return `
-    <div class="dd-opt ${kind}" data-value="${_escAttr(c.key)}">
+    <div class="dd-opt ${kind}" data-value="${_escHtml(c.key)}">
       <div class="dd-row">
-        <span class="name" title="${_escAttr(c.label || c.key)}">${_escHtml(c.label || c.key)}</span>
+        <span class="name" title="${_escHtml(c.label || c.key)}">${_escHtml(c.label || c.key)}</span>
         ${matchHtml}
       </div>
       ${desc}
@@ -1451,10 +1452,7 @@ function _formatRatio(ratio) {
 }
 
 function _escHtml(s) {
-  return String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-}
-function _escAttr(s) {
-  return String(s ?? '').replace(/["'&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  return escapeHtml(String(s ?? ''));
 }
 
 void _init();

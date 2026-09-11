@@ -185,15 +185,9 @@ body {
   border: 0;
 }
 
-/* Shared button styles */
+/* Neutral button behavior; component classes own their appearance. */
 button {
-  border: none;
-  border-radius: var(--radius-full);
-  padding: 0.9rem 2.25rem;
-  font-size: 1rem;
-  font-weight: 600;
   cursor: pointer;
-  transition: transform var(--transition-fast), opacity var(--transition-fast);
 }
 
 button:disabled {
@@ -202,6 +196,10 @@ button:disabled {
 }
 
 button.linklike {
+  border: none;
+  border-radius: var(--radius-full);
+  font-weight: 600;
+  transition: transform var(--transition-fast), opacity var(--transition-fast);
   background: transparent;
   color: var(--netrias-500);
   padding: 0;
@@ -215,6 +213,7 @@ button.linklike {
 
 /* Secondary actions (Previous, Next) - tactile 3D with highlight */
 .ghost-btn {
+  font-size: 1rem;
   position: relative;
   border: none;
   border-radius: var(--radius-full);
@@ -257,6 +256,10 @@ button.linklike {
 
 /* Primary actions (Mark complete) - elevated 3D with highlight like hero button */
 .netrias-btn {
+  border-radius: var(--radius-full);
+  padding: 0.9rem 2.25rem;
+  font-size: 1rem;
+  font-weight: 600;
   position: relative;
   background: linear-gradient(180deg, #8bc727 0%, var(--netrias-500) 50%, var(--netrias-600) 100%);
   color: var(--white);
@@ -336,6 +339,9 @@ button.linklike {
 
 /* Magical 3D Button */
 .btn-3d {
+  border-radius: var(--radius-full);
+  font-size: 1rem;
+  font-weight: 600;
   position: relative;
   border: none;
   background: transparent;

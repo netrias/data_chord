@@ -970,6 +970,40 @@ test('Stage 2 list opens a takeover on row click', async ({ page }) => {
   await expect(page.locator('#takeover')).toHaveClass(/hidden/);
 });
 
+test('Stage 2 displays special and non-string source values as plain text', async ({ page }) => {
+  // Given: the mapping list has source values that include HTML and quotes.
+  await _openStage2SearchHarness(page);
+  const values = ['<b title="quoted">A & B</b> \'single\'', null, 42, false];
+  await page.route('**/stage-2/column-detail/**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        column_key: 'col_0000',
+        profile: {
+          total_rows: 4,
+          distinct_values: values.map((value) => ({ value, count: 1 })),
+          null_count: 1,
+          total_distinct: 4,
+        },
+        selected_pvs: [],
+      }),
+    });
+  });
+  await expect(page.locator('#takeover')).toHaveClass(/hidden/);
+
+  // When: the user opens the source column.
+  await page.locator('.mapping-row[data-key="col_0000"]').click();
+
+  // Then: labels and tooltip attributes preserve the values without markup.
+  const samples = page.locator('#dataList .v');
+  await expect(samples).toHaveText([values[0], '', '42', 'false']);
+  for (let index = 0; index < values.length; index += 1) {
+    await expect(samples.nth(index)).toHaveAttribute('title', String(values[index] ?? ''));
+  }
+  await expect(samples.locator('*')).toHaveCount(0);
+});
+
 test('Stage 2 fuzzy column search preserves the selected sort', async ({ page }) => {
   // Given: the column list uses reverse file order and exposes an accessible result count.
   await _openStage2SearchHarness(page);

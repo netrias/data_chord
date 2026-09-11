@@ -544,6 +544,7 @@ hr.fm-divider {
 }
 
 .mapping-list-head-sort {
+  border-radius: var(--radius-full);
   justify-self: end;
   display: inline-flex;
   align-items: center;
@@ -963,6 +964,7 @@ hr.fm-divider {
 }
 
 .takeover-rename-btn {
+  font-weight: 600;
   background: none;
   border: none;
   color: var(--gray-400);
@@ -981,6 +983,8 @@ hr.fm-divider {
 }
 
 .takeover-rename-pick {
+  font-size: 1rem;
+  font-weight: 600;
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
@@ -1010,6 +1014,7 @@ hr.fm-divider {
 }
 
 .takeover-rename-off {
+  font-weight: 600;
   background: none;
   border: 1px dashed var(--gray-300);
   color: var(--gray-400);
@@ -1126,6 +1131,7 @@ hr.fm-divider {
 }
 
 .takeover-btn {
+  transition: transform var(--transition-fast), opacity var(--transition-fast);
   padding: 0.45rem 0.8rem;
   font-size: 0.83rem;
   font-weight: 500;
@@ -1313,6 +1319,9 @@ hr.fm-divider {
 }
 
 .cde-picker {
+  transition: transform var(--transition-fast), opacity var(--transition-fast);
+  font-size: 1rem;
+  font-weight: 600;
   display: flex;
   align-items: center;
   gap: 0.6rem;

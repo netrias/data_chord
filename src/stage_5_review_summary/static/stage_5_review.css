@@ -159,6 +159,7 @@
 }
 
 .segmented-control__option {
+  transition: transform var(--transition-fast), opacity var(--transition-fast);
   min-height: 2rem;
   padding: 0.4rem 0.85rem;
   border: 0;
@@ -276,6 +277,7 @@
 }
 
 .table-sort {
+  transition: transform var(--transition-fast), opacity var(--transition-fast);
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
@@ -574,6 +576,7 @@
 }
 
 .conformance-proceed-button {
+  transition: transform var(--transition-fast), opacity var(--transition-fast);
   padding: 0.65rem 1.15rem;
   border: 1px solid var(--warning-600);
   border-radius: var(--radius-lg);
