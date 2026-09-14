@@ -12,8 +12,6 @@
  * @property {string} overrideValue - User's manual override (empty string = no override)
  * @property {boolean} hasPVs - Whether permissible values exist for this column
  * @property {Set<string>|null} pvSet - Set of valid PVs (null if hasPVs is false)
- * @property {boolean} baselineIsConformant - Whether the baseline value is PV-conformant
- * @property {boolean} [overrideIsKnownConformant] - If true, skip pvSet check for override (value came from verified dropdown selection)
  */
 
 /**
@@ -46,8 +44,6 @@ export const determineCardState = (input) => {
     overrideValue,
     hasPVs,
     pvSet,
-    baselineIsConformant,
-    overrideIsKnownConformant,
   } = input;
 
   const hasOverride = isEffectiveOverride(overrideValue, baselineValue);
@@ -55,21 +51,9 @@ export const determineCardState = (input) => {
   // Derive: what value is currently "active"?
   const activeValue = hasOverride ? overrideValue : baselineValue;
 
-  // Derive: is the active value conformant?
-  // If no PVs exist for this column, treat as neutral (not conformant, not non-conformant)
-  let isConformant;
-  if (!hasPVs) {
-    // No PVs = conformance doesn't apply
-    isConformant = false;
-  } else if (hasOverride) {
-    // Trust the flag when value came from a verified dropdown selection
-    isConformant = overrideIsKnownConformant === true
-      ? true
-      : pvSet !== null && pvSet.has(overrideValue);
-  } else {
-    // The server has already checked the baseline value.
-    isConformant = baselineIsConformant;
-  }
+  // Check the displayed value, not the server flag for a previously saved edit.
+  // Empty values are missing data, as in the server's conformance rule.
+  const isConformant = hasPVs && (activeValue === '' || (pvSet !== null && pvSet.has(activeValue)));
 
   return {
     activeValue,

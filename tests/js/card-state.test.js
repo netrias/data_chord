@@ -13,7 +13,6 @@ const createInput = (overrides = {}) => ({
   overrideValue: '',
   hasPVs: true,
   pvSet: PV_SET,
-  baselineIsConformant: true,
   ...overrides,
 });
 
@@ -32,9 +31,9 @@ describe('value card display state', () => {
     },
     {
       name: 'warns when the AI suggestion is not permissible',
-      input: { baselineIsConformant: false },
+      input: { baselineValue: 'Unapproved original' },
       expected: {
-        activeValue: AI_SUGGESTION,
+        activeValue: 'Unapproved original',
         isConformant: false,
         hasOverride: false,
         showWarningIcon: true,
@@ -53,15 +52,26 @@ describe('value card display state', () => {
       },
     },
     {
-      name: 'trusts a value selected from the verified permissible-value modal',
+      name: 'checks a selected value against the full permissible-value set',
       input: {
         overrideValue: 'Verified Value From Modal',
-        overrideIsKnownConformant: true,
+        pvSet: new Set([...PV_SET, 'Verified Value From Modal']),
       },
       expected: {
         activeValue: 'Verified Value From Modal',
         isConformant: true,
         hasOverride: true,
+        showWarningIcon: false,
+        showConformantHeader: true,
+      },
+    },
+    {
+      name: 'treats an empty baseline as missing data rather than an invalid value',
+      input: { baselineValue: '' },
+      expected: {
+        activeValue: '',
+        isConformant: true,
+        hasOverride: false,
         showWarningIcon: false,
         showConformantHeader: true,
       },

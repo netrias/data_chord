@@ -246,7 +246,7 @@ export async function showPVSelectionModal(config) {
  * @param {string} [config.initialValue] - Current value
  * @param {string} [config.originalValue] - Original value from source data (for "was: X" display)
  * @param {string} [config.targetCdeLabel] - Target common data element display label
- * @param {function(string, boolean): void} config.onChange - Callback when value changes (value, isKnownConformant)
+ * @param {function(string): void} config.onChange - Callback with the selected value
  * @returns {HTMLElement}
  */
 export const createPVCombobox = ({ suggestions, pvValues, initialValue, originalValue, targetCdeLabel, onChange }) => {
@@ -264,7 +264,7 @@ export const createPVCombobox = ({ suggestions, pvValues, initialValue, original
   const selectValue = (value) => {
     committedValue = value;
     link.textContent = value;
-    onChange(value, true);
+    onChange(value);
   };
 
   // Link click: open modal for selection
