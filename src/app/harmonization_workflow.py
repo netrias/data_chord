@@ -81,7 +81,7 @@ class HarmonizationWorkflow:
         column_overrides = mapping_choices.column_overrides
         column_renames = mapping_choices.column_renames
         data_model_version = workflow_state.data_model_version
-        resolved_columns = await _resolved_columns_for_source(
+        resolved_columns, source_row_count = await _read_source_structure(
             meta.saved_path,
             column_renames,
             workflow_state.selected_sheet,
@@ -131,6 +131,7 @@ class HarmonizationWorkflow:
             result.manifest_path,
             column_renames,
             column_pv_sets,
+            source_row_count=source_row_count,
             source_file_name=meta.original_name,
             reference_model_label=reference_model.label,
             reference_model_version=data_model_version.external_version_number,
@@ -216,6 +217,7 @@ async def _read_and_adjust_manifest(
     column_renames: ColumnRenameSet,
     column_pv_map: ColumnPvSets,
     *,
+    source_row_count: int,
     source_file_name: str,
     reference_model_label: str,
     reference_model_version: str,
@@ -237,6 +239,7 @@ async def _read_and_adjust_manifest(
         manifest_data = read_manifest_parquet(manifest_path) or manifest_data
     return build_harmonization_manifest_summary(
         manifest_data, column_pv_map,
+        source_row_count=source_row_count,
         source_file_name=source_file_name,
         reference_model_label=reference_model_label,
         reference_model_version=reference_model_version,
@@ -255,15 +258,15 @@ async def _apply_column_renames_to_output(
     await asyncio.to_thread(write_tabular, output_path, renamed, output_path)
 
 
-async def _resolved_columns_for_source(
+async def _read_source_structure(
     source_path: Path,
     column_renames: ColumnRenameSet,
     sheet_name: str | None,
-) -> tuple[ResolvedTabularColumn, ...]:
+) -> tuple[tuple[ResolvedTabularColumn, ...], int]:
     if not source_path.exists():
-        return ()
+        return (), 0
     dataset = await asyncio.to_thread(read_tabular, source_path, sheet_name)
-    return resolve_tabular_columns(dataset, column_renames)
+    return resolve_tabular_columns(dataset, column_renames), len(dataset.rows)
 
 
 def _worker_scratch_path(managed_path: Path, worker_id: str) -> Path:

@@ -22,6 +22,7 @@ from src.domain.harmonization_cache import (
     HarmonizationCacheKey,
 )
 from src.domain.manifest import ColumnMappingManifest, ManifestRow
+from src.domain.value_presence import is_missing_value
 from src.persistence.manifest_writer import write_manifest_parquet
 from src.persistence.pv_manifest_store import ColumnPvSets
 
@@ -168,17 +169,16 @@ class FileHarmonizationService:
         outcomes = [
             _passthrough(item)
             for item in work
-            if not item.permissible_values or not item.input_term.strip()
+            if not item.permissible_values
         ]
         outcomes.extend(_exact_match(item) for item in work if item.is_exact_match)
         cache_work = [
             (item, _cache_key(data_model_version, item))
             for item in work
             if item.permissible_values
-            and item.input_term.strip()
             and not item.is_exact_match
         ]
-        cached = self._load_cache([key for _item, key in cache_work]) if use_cache else {}
+        cached = self._load_cache([key for _item, key in cache_work]) if use_cache and cache_work else {}
         provider_work: list[_TermWork] = []
         invalid_cache_entries = 0
         for item, key in cache_work:
@@ -296,6 +296,8 @@ def _build_work(
         permissible_values = tuple(sorted(pvs)) if pvs else None
         grouped: dict[str, list[int]] = {}
         for row_index, row in enumerate(rows):
+            if is_missing_value(row[column.index]):
+                continue
             grouped.setdefault(row[column.index], []).append(row_index)
         for term, row_indices in grouped.items():
             work.append(

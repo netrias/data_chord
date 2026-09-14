@@ -51,6 +51,7 @@ class HarmonizationColumnBreakdown(BaseModel):
 
 class HarmonizationManifestSummary(BaseModel):
     total_terms: int
+    source_row_count: int | None = Field(default=None, ge=0)
     changed_terms: int
     match_fidelity_counts: list[MatchFidelityCount]
     non_conformant_terms: int = 0

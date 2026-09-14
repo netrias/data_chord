@@ -6,6 +6,8 @@
  * making it testable independently of the DOM rendering layer.
  */
 
+import { isMissingValue } from '/assets/shared/value-presence.js';
+
 /**
  * @typedef {Object} CardStateInput
  * @property {string} baselineValue - Model result, or source value when no result exists
@@ -52,15 +54,16 @@ export const determineCardState = (input) => {
   const activeValue = hasOverride ? overrideValue : baselineValue;
 
   // Check the displayed value, not the server flag for a previously saved edit.
-  // Empty values are missing data, as in the server's conformance rule.
-  const isConformant = hasPVs && (activeValue === '' || (pvSet !== null && pvSet.has(activeValue)));
+  // Missing data is neither an approved term nor an invalid review value.
+  const hasValue = !isMissingValue(activeValue);
+  const isConformant = hasPVs && hasValue && pvSet !== null && pvSet.has(activeValue);
 
   return {
     activeValue,
     isConformant,
     hasOverride,
     // Only show warning/conformant styling when PVs exist
-    showWarningIcon: hasPVs && !isConformant,
+    showWarningIcon: hasPVs && hasValue && !isConformant,
     showConformantHeader: hasPVs && isConformant,
   };
 };

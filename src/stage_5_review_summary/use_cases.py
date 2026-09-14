@@ -270,6 +270,10 @@ def _build_summary_from_manifest(
         )
     with performance_span("stage5.summary.upload_metadata"):
         meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
+    if meta is None:
+        raise HarmonizationNotReadyError("Upload not found. Return to Stage 1 and upload it again.")
+    with performance_span("stage5.summary.source_row_count"):
+        source_row_count = len(read_tabular(meta.saved_path, sheet_name=loaded_state.state.selected_sheet).rows)
     upload_timestamp = meta.uploaded_at if meta else None
     with performance_span("stage5.summary.review_state"):
         review_record = load_readable_review_overrides_record(workflow_storage, user, file_id)
@@ -284,6 +288,7 @@ def _build_summary_from_manifest(
             column_pv_map,
             upload_timestamp,
             review_overrides,
+            source_row_count,
         )
 
 
@@ -294,6 +299,7 @@ def _assemble_summary_response(
     column_pv_map: ColumnPvSets,
     upload_timestamp: datetime | None,
     review_overrides: ReviewOverrides | None,
+    source_row_count: int,
 ) -> StageFiveSummaryResponse:
     finalized_outcomes: list[FinalizedValueOutcome] = []
     unique_mappings: dict[_UniqueTermMapping, _MappingInfo] = {}
@@ -344,7 +350,7 @@ def _assemble_summary_response(
                 source_column_index=outcome.source_column_index,
                 distinct_terms=outcome.total_distinct_values,
                 changed_distinct_values=outcome.changed_distinct_values,
-                total_rows=outcome.total_rows,
+                total_rows=source_row_count,
                 changed_rows=outcome.changed_rows,
                 reviewer_edited_rows=outcome.reviewer_edited_rows,
                 non_conformant_values=outcome.non_conformant_distinct_values,

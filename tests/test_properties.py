@@ -71,12 +71,14 @@ def test_whitespace_differences_are_significant(base: str, ws: str) -> None:
 
 
 @given(st.text(), st.lists(st.text(), min_size=1))
-def test_check_conformance_matches_membership(value: str, pv_list: list[str]) -> None:
-    """check_value_conformance agrees with set membership for non-empty values."""
+def test_check_conformance_exempts_missing_values_and_checks_membership(value: str, pv_list: list[str]) -> None:
+    """Missing text is exempt; present text must match an approved term exactly."""
+    # Given: arbitrary source text and a non-empty approved-value set.
     pv_set = frozenset(pv_list)
-    assume(value != "" and value is not None)
+    # When: the source is checked against that set.
     result = check_value_conformance(value, pv_set)
-    assert result == (value in pv_set)
+    # Then: only missing text or exact set membership passes.
+    assert result == (not value.strip() or value in pv_set)
 
 
 @given(st.text())

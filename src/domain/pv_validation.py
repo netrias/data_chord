@@ -4,6 +4,9 @@ Pure functions for validating values against permissible value sets.
 Validation logic is kept pure (no I/O) to enable testing without mocks.
 """
 
+from src.domain.value_presence import is_missing_value
+
+
 def compute_pv_adjustment(
     original_value: str,
     top_harmonization: str,
@@ -29,10 +32,10 @@ def check_value_conformance(
 ) -> bool:
     """Assume conformant when PVs unavailable (graceful degradation).
 
-    None/empty values are conformant since they represent missing data, not invalid data.
+    Missing values are exempt: they are not invalid data or approved terms.
     """
     if pv_set is None or not pv_set:
         return True
-    if value is None or value == "":
+    if is_missing_value(value):
         return True
     return value in pv_set

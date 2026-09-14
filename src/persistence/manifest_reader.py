@@ -14,6 +14,7 @@ import pyarrow.parquet as pq
 
 from src.domain.harmonization import MatchFidelity
 from src.domain.manifest.models import ManifestRow, ManifestSummary, is_value_changed
+from src.domain.value_presence import is_missing_value
 from src.persistence.manifest_schema import MANUAL_OVERRIDES_FIELD, get_manifest_schema
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,8 @@ def _parse_manifest_rows(table: pa.Table) -> list[ManifestRow]:
     for batch in table.to_batches():
         for i in range(batch.num_rows):
             row = _extract_row(batch, i)
-            rows.append(row)
+            if not is_missing_value(row.to_harmonize):
+                rows.append(row)
     return rows
 
 

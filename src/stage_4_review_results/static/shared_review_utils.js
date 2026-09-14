@@ -4,6 +4,7 @@
  */
 
 import { createPVCombobox } from './pv_combobox.js';
+import { isMissingValue } from '/assets/shared/value-presence.js';
 import { determineCardState } from './card-state.js';
 import { escapeHtml } from '/assets/shared/html.js';
 
@@ -193,7 +194,7 @@ export const cellNeedsReview = (cell, options = {}) => {
   const harmonized = cell.harmonizedValue ?? '';
 
   // Nothing to review if no original value
-  if (!original) return false;
+  if (isMissingValue(original)) return false;
 
   // Include cells with no AI recommendation (but only if there's an original value)
   if (cell.recommendationType === RECOMMENDATION_TYPE.NO_RECOMMENDATION) {
@@ -293,15 +294,15 @@ const _getInputValue = (entry, pendingOverrides) => {
  * @returns {string}
  */
 const _buildCardHTML = (params) => {
-  const { columnLabel, showColumnLabel, labelText, fidelityTooltip, matchFidelity, effectiveValue, originalValue, isPVConformant, hasPVs } = params;
+  const { columnLabel, showColumnLabel, labelText, fidelityTooltip, matchFidelity, effectiveValue, originalValue, showWarningIcon, showConformantHeader, hasPVs } = params;
   const safeColumnLabel = escapeHtml(columnLabel);
   const safeLabelText = escapeHtml(labelText);
   const safeEffectiveValue = escapeHtml(effectiveValue);
   const originalValueHTML = formatWhitespaceMarkers(originalValue);
 
   // Both icons always present when PVs exist - toggle visibility based on conformance
-  const warningHidden = isPVConformant ? ' style="display: none;"' : '';
-  const checkHidden = isPVConformant ? '' : ' style="display: none;"';
+  const warningHidden = showWarningIcon ? '' : ' style="display: none;"';
+  const checkHidden = showConformantHeader ? '' : ' style="display: none;"';
   const pvStatusIcons = hasPVs
     ? `<button type="button" class="card-icon pv-warning-icon" data-card-tooltip="The current value is not in the approved list." aria-label="Value is not in the approved list"${warningHidden}>⚠</button><button type="button" class="card-icon pv-conformant-icon" data-card-tooltip="The current value is in the approved list." aria-label="Value is in the approved list"${checkHidden}>✓</button>`
     : '<button type="button" class="card-icon card-neutral-status" data-card-tooltip="There is no approved list for this column." aria-label="No approved list">—</button>';
@@ -744,7 +745,8 @@ export const createValueCard = (config) => {
     matchFidelity: entry.matchFidelity,
     effectiveValue: initialState.activeValue,
     originalValue: entry.originalValue ?? '',
-    isPVConformant: initialState.isConformant,
+    showWarningIcon: initialState.showWarningIcon,
+    showConformantHeader: initialState.showConformantHeader,
     hasPVs: entry.pvSetAvailable,
   });
 

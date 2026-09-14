@@ -137,7 +137,8 @@ const _renderDial = ({ checked, harmonized, matched, unresolved }) => {
 
 const _setDisplayContext = (summary, columns) => {
   const sourceFileName = summary.source_file_name?.trim();
-  const totalRows = columns.reduce((largest, column) => Math.max(largest, column.totalRows), 0);
+  const totalRows = summary.source_row_count
+    ?? columns.reduce((largest, column) => Math.max(largest, column.totalRows), 0);
   if (sourceFileName && stageThreeDatasetContext && stageThreeSourceFile && stageThreeRowCount) {
     stageThreeSourceFile.textContent = sourceFileName;
     stageThreeRowCount.textContent = totalRows > 0 ? ` · ${_formatCount(totalRows)} rows` : '';
@@ -213,7 +214,7 @@ const _renderMetricsDashboard = (job) => {
     return;
   }
   const breakdowns = job?.manifest_summary?.column_breakdowns;
-  if (!Array.isArray(breakdowns) || breakdowns.length === 0) {
+  if (!Array.isArray(breakdowns)) {
     _hideMetricsDashboard();
     return;
   }

@@ -66,14 +66,22 @@ describe('value card display state', () => {
       },
     },
     {
-      name: 'treats an empty baseline as missing data rather than an invalid value',
+      name: 'keeps an empty baseline neutral rather than approved or invalid',
       input: { baselineValue: '' },
       expected: {
         activeValue: '',
-        isConformant: true,
+        isConformant: false,
         hasOverride: false,
         showWarningIcon: false,
-        showConformantHeader: true,
+        showConformantHeader: false,
+      },
+    },
+    {
+      name: 'keeps BOM as present text rather than JavaScript trim whitespace',
+      input: { baselineValue: '\ufeff' },
+      expected: {
+        activeValue: '\ufeff', isConformant: false, hasOverride: false,
+        showWarningIcon: true, showConformantHeader: false,
       },
     },
     {
@@ -154,6 +162,20 @@ describe('value card display state', () => {
 
       // Then: the active value and presentation match the behavior contract
       assert.deepEqual(actual, scenario.expected);
+    });
+  }
+
+  for (const value of ['  ', '\t', '\n', '\u0085', '\u001c', '\u00a0']) {
+    it(`keeps missing whitespace ${JSON.stringify(value)} neutral`, () => {
+      // Given: the active source consists only of the server's whitespace characters.
+      const input = createInput({ baselineValue: value });
+      // When: card state is derived.
+      const actual = determineCardState(input);
+      // Then: it has neither an approved check nor an invalid-value warning.
+      assert.deepEqual(actual, {
+        activeValue: value, isConformant: false, hasOverride: false,
+        showWarningIcon: false, showConformantHeader: false,
+      });
     });
   }
 });

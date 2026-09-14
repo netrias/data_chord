@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pydantic import BaseModel
 
 from src.domain.columns import ColumnKey, column_key_from_string
+from src.domain.value_presence import is_missing_value
 
 
 @dataclass(frozen=True)
@@ -79,7 +80,7 @@ class ColumnProfilePayload(BaseModel):
 def build_column_profile(column_key: ColumnKey | str, values: Iterable[str | None]) -> ColumnProfile:
     """Tally an iterable of values into a ``ColumnProfile``.
 
-    Treats ``None`` and the empty string as null; everything else is counted
+    Treats ``None`` and whitespace-only strings as null; everything else is counted
     by exact-string equality (per the project's whitespace-sensitive domain
     rules — see CLAUDE.md).
     """
@@ -89,9 +90,10 @@ def build_column_profile(column_key: ColumnKey | str, values: Iterable[str | Non
 
     for value in values:
         total_rows += 1
-        if value is None or value == "":
+        if is_missing_value(value):
             null_count += 1
             continue
+        assert value is not None
         counter[value] += 1
 
     # most_common returns ties in insertion order, which is fine — the UI
