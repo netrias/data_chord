@@ -364,30 +364,23 @@ const parseDownloadedTabularTable = async (response, suffix, delimiter) => {
     throw new Error(`No ${suffix} found in download zip. Entries: ${entryNames}`);
   }
   const content = entry.getData().toString('utf-8');
-  const lines = content.split(/\r?\n/);
-  if (lines.length > 0 && lines[lines.length - 1] === '') {
-    lines.pop();
-  }
-  const headerLine = lines.shift();
-  if (!headerLine) {
-    return { headers: [], rows: [] };
-  }
-  const headers = parseDelimitedLine(headerLine, delimiter);
-  return {
-    headers,
-    rows: lines.map((line) => parseDelimitedLine(line, delimiter)),
-  };
+  const records = parseDelimitedRecords(content, delimiter);
+  return { headers: records.shift() ?? [], rows: records };
 };
 
-const parseDelimitedLine = (line, delimiter) => {
-  const values = [];
+// A quoted cell can span physical lines. Split records only outside quotes.
+const parseDelimitedRecords = (content, delimiter) => {
+  const records = [];
+  let values = [];
   let current = '';
   let inQuotes = false;
+  let recordStarted = false;
 
-  for (let i = 0; i < line.length; i += 1) {
-    const char = line[i];
+  for (let i = 0; i < content.length; i += 1) {
+    const char = content[i];
     if (char === '"') {
-      if (inQuotes && line[i + 1] === '"') {
+      recordStarted = true;
+      if (inQuotes && content[i + 1] === '"') {
         current += '"';
         i += 1;
       } else {
@@ -396,11 +389,19 @@ const parseDelimitedLine = (line, delimiter) => {
     } else if (char === delimiter && !inQuotes) {
       values.push(current);
       current = '';
+      recordStarted = true;
+    } else if ((char === '\n' || char === '\r') && !inQuotes) {
+      records.push(recordStarted ? [...values, current] : []);
+      values = [];
+      current = '';
+      recordStarted = false;
+      if (char === '\r' && content[i + 1] === '\n') i += 1;
     } else {
       current += char;
+      recordStarted = true;
     }
   }
 
-  values.push(current);
-  return values;
+  if (recordStarted) records.push([...values, current]);
+  return records;
 };

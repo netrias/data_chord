@@ -132,6 +132,9 @@ Run `just --list` to see all shortcuts. These are the main development checks:
 | `just test-e2e` | Local browser tests |
 | `just infra-test` | OpenTofu and deployment-script tests |
 
+Use the [workflow test data guide](TESTING.md) for a small synthetic dataset,
+exact expected results, malformed-input checks, and private recording rules.
+
 Pull requests from forks run the infrastructure tests, JavaScript syntax check,
 and JavaScript unit tests. GitHub does not give private dependency credentials
 to forks. A maintainer must review an external change before running the Python,

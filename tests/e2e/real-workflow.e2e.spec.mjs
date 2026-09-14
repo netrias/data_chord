@@ -1,9 +1,13 @@
+import { execFileSync } from 'node:child_process';
 import { test, expect } from '@playwright/test';
+
+import { e2eEnv } from './runtime-env.mjs';
 
 import {
   clickHarmonize,
   fileFixture,
   parseDownloadedCsv,
+  parseDownloadedCsvTable,
   uploadAndAnalyzeReal,
 } from './utils.mjs';
 
@@ -292,3 +296,139 @@ test('real workflow: restoring an original value keeps its warning and clears th
   const rows = await parseDownloadedCsv(downloadResponse);
   expect(rows.map((row) => row.diagnosis)).toEqual(['Breast Cancer', 'adamantinoma', 'Diabetes']);
 });
+
+test('classic dataset: confirmed mappings, full text, restore, and exact export', async ({ page }) => {
+  test.setTimeout(60_000);
+  // Given: the reusable CSV has 20 identified cases and 11 position-stable columns.
+  // Python's standard reader is independent of the JavaScript download reader.
+  const records = JSON.parse(execFileSync('uv', ['run', 'python', '-c',
+    'import csv,json,sys; print(json.dumps(list(csv.reader(open(sys.argv[1],newline="",encoding="utf-8")))))',
+    fileFixture('classic-workflow.csv')], { encoding: 'utf8', env: e2eEnv }));
+  const [headers, ...sourceRows] = records;
+  expect(headers).toEqual(['case_id', 'diagnosis', 'disease_type', 'primary_site', 'morphology',
+    'site_of_origin', 'sample_anatomic_site', 'sample_type', 'gender', 'race', 'ethnicity']);
+  expect(sourceRows.map((row) => row[0])).toEqual(
+    Array.from({ length: 20 }, (_, i) => `C${String(i + 1).padStart(2, '0')}`),
+  );
+  expect(sourceRows.every((row) => row.length === 11)).toBe(true);
+  const presentValues = sourceRows.filter((row) => !['C05', 'C06', 'C07', 'C08', 'C09', 'C20'].includes(row[0]))
+    .map((row) => row[1]);
+  const distinctSources = [...new Set(presentValues)];
+  expect(distinctSources).toHaveLength(13);
+  const expectedRows = sourceRows.map((row) => (
+    row[1] === 'breast ca' ? [row[0], 'Breast Cancer', ...row.slice(2)] : row
+  ));
+  const fileId = await uploadAndAnalyzeReal(page, fileFixture('classic-workflow.csv'));
+  const mappings = Object.fromEntries(headers.map((_, i) => [
+    `col_${String(i).padStart(4, '0')}`, i === 1 ? 'primary_diagnosis' : null,
+  ]));
+
+  // When: the real mapping endpoint saves every column choice, then the page reloads.
+  const saved = await page.request.post('/stage-2/choices', {
+    data: { file_id: fileId, manual_overrides: mappings, column_renames: {} },
+  });
+  expect(saved.ok()).toBe(true);
+  await page.reload();
+  await expect(page.locator('#mappingRows .mapping-row').first()).toBeVisible();
+  const analysisResponse = await page.request.get(`/stage-1/analysis/${fileId}`);
+  expect(analysisResponse.ok()).toBe(true);
+  const analysis = await analysisResponse.json();
+
+  // Then: persisted choices prove that only diagnosis is mapped; all other cells pass through.
+  expect(analysis.manual_overrides).toEqual(mappings);
+  expect(analysis.total_rows).toBe(20);
+
+  // When: a real no-cost job runs through the normal Stage 3 controls.
+  await clickHarmonize(page);
+  await expect(page.locator('#reviewButton')).toBeEnabled({ timeout: 15_000 });
+  // Then: missing sources and repeated terms do not inflate unique checked counts.
+  await expect(page.locator('#stageThreeCheckedCount')).toHaveText('13');
+  await expect(page.locator('#stageThreeRowCount')).toContainText('20 rows');
+  const reviewReady = page.waitForResponse((response) => response.url().endsWith('/stage-4/rows') && response.ok());
+  await page.click('#reviewButton');
+  const review = await (await reviewReady).json();
+  expect(review.totalOriginalRows).toBe(20);
+  expect(review.columns.map((column) => column.columnKey)).toEqual(['col_0001']);
+  expect(review.columns.flatMap((column) => column.transformations.map((item) => item.originalValue)).sort())
+    .toEqual([...distinctSources].sort());
+  await expect(page.locator('.row-cell')).toHaveCount(12);
+  await page.click('#settingsButton');
+  await page.check('#showUnchangedValues');
+  await page.click('#settingsCloseButton');
+  await expect(page.locator('.row-cell')).toHaveCount(13);
+  expect((await page.locator('.pv-combobox-link').allTextContents()).sort())
+    .toEqual([...new Set(expectedRows.filter((row) => presentValues.includes(row[1]) || row[1] === 'Breast Cancer')
+      .map((row) => row[1]))].sort());
+
+  // When: long values render at a normal laptop width and the card opens value editing.
+  await page.setViewportSize({ width: 1044, height: 921 });
+  await assertCompleteCardValues(page, sourceRows);
+
+
+  const original = page.locator('.row-cell').filter({ hasText: 'adamantinoma' });
+  await expect(original.locator('.pv-warning-icon')).toBeVisible();
+  const nextSave = () => page.waitForResponse((response) => response.url().endsWith('/stage-4/overrides')
+    && response.request().method() === 'POST');
+  // When: an approved edit is saved and loaded again.
+  const editSaved = nextSave();
+  await original.locator('.pv-combobox-link').click();
+  await page.locator('.pv-selection-option[data-value="Carcinoma NOS"]').click();
+  expect((await editSaved).ok()).toBe(true);
+  await page.reload();
+  // Then: the saved edit has approval, not the original warning.
+  await expect(original.locator('.pv-combobox-link')).toHaveText('Carcinoma NOS');
+  await expect(original.locator('.pv-conformant-icon')).toBeVisible();
+  await expect(original.locator('.pv-warning-icon')).toBeHidden();
+
+  // When: restore is saved, row mode is selected, and review is loaded again.
+  const restored = nextSave();
+  await original.getByRole('button', { name: 'Restore original value' }).click();
+  const restoreResponse = await restored;
+  expect(restoreResponse.ok()).toBe(true);
+  expect(restoreResponse.request().postDataJSON().overrides).toEqual({});
+  await expect(original.locator('.pv-warning-icon')).toBeVisible();
+  await page.click('#settingsButton');
+  await page.selectOption('#reviewModeSelect', 'row');
+  const modeSaved = nextSave();
+  await page.selectOption('#batchSizeSelect', '15');
+  expect((await modeSaved).ok()).toBe(true);
+  await page.click('#settingsCloseButton');
+  await page.reload();
+  // Then: every present source row appears, including repeated rows, but no missing row appears.
+  await expect(page.locator('.row-cell')).toHaveCount(14);
+  expect(await page.locator('.pv-combobox-link').allTextContents())
+    .toEqual(expectedRows.filter((row) => !['C05', 'C06', 'C07', 'C08', 'C09', 'C20'].includes(row[0]))
+      .map((row) => row[1]));
+  await expect(original.locator('.pv-warning-icon')).toBeVisible();
+  await expect(original.locator('.pv-combobox-link')).toHaveText('adamantinoma');
+  await assertCompleteCardValues(page, sourceRows);
+
+  // When: the reviewer continues and downloads the actual completed output.
+  await page.click('#stageFiveButton');
+  await page.waitForURL(/\/stage-5/);
+  await expect(page.locator('#conformanceWarningDialog')).toContainText('11 values');
+  await page.click('#conformanceProceedButton');
+  await expect(page.locator('[data-impact-metric="manual_values"]')).toContainText('0');
+  const response = await page.request.post('/stage-5/download', { data: { file_id: fileId } });
+  expect(response.ok()).toBe(true);
+  // Then: the whole export has the expected columns and cells, including exact line breaks and whitespace.
+  expect(await parseDownloadedCsvTable(response)).toEqual({ headers, rows: expectedRows });
+});
+
+async function assertCompleteCardValues(page, sourceRows) {
+  for (const id of ['C12', 'C13', 'C17']) {
+    const value = sourceRows.find((row) => row[0] === id)[1];
+    const card = page.locator('.row-cell').filter({ has: page.locator('.pv-combobox-link', { hasText: value }) });
+    const link = card.locator('.pv-combobox-link');
+    // Then: the active value is complete and the control does not clip its content.
+    expect(await link.textContent()).toBe(value);
+    expect(await link.evaluate((element) => ({
+      clipsWidth: element.scrollWidth > element.clientWidth + 1,
+      clipsHeight: element.scrollHeight > element.clientHeight + 1,
+    }))).toEqual({ clipsWidth: false, clipsHeight: false });
+    await card.locator('.card-body').click({ position: { x: 4, y: 4 } });
+    await expect(page.locator('#pv-modal-title')).toBeVisible();
+    expect(await page.locator('.pv-selection-current').textContent()).toBe(value);
+    await page.locator('.pv-selection-close-btn').click();
+  }
+}
