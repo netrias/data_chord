@@ -444,6 +444,85 @@ test('no-recommendation card warns when its displayed source value is not permis
   await rejectedCard.screenshot({ path: testInfo.outputPath('wrapped-value.png') });
 });
 
+test('Stage 4 shows large square marks for AI match quality', async ({ page }) => {
+  const fileId = '0123456789abcdef0123456789abcdef';
+  const matchCases = [
+    { fidelity: 'strong', original: 'Ductal carcinoma, NOS', current: 'Ductal Carcinoma NOS' },
+    { fidelity: 'partial', original: 'Unclassified tumor, malignant', current: 'Malignant Tumor' },
+    { fidelity: 'approximate', original: 'Metastatic cancer', current: 'Adenocarcinoma, Metastatic NOS' },
+    { fidelity: 'none', original: 'adamantinoma', current: null },
+  ];
+
+  // Given: Stage 4 has one result at each match-quality level.
+  await page.route('**/stage-4/rows', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        columns: [{
+          columnKey: 'col_0000',
+          columnLabel: 'diagnosis',
+          targetCdeKey: 'primary_diagnosis',
+          targetCdeLabel: 'primary_diagnosis',
+          sourceColumnIndex: 0,
+          termCount: 4,
+          termsWithChanges: 3,
+          transformations: matchCases.map((entry, index) => ({
+            originalValue: entry.original,
+            harmonizedValue: entry.current,
+            matchFidelity: entry.fidelity,
+            isChanged: entry.current !== null,
+            recommendationType: entry.current === null ? 'no_recommendation' : 'ai_changed',
+            isPVConformant: entry.current !== null,
+            pvSetAvailable: true,
+            topSuggestions: [],
+            rowIndices: [index],
+            manualOverride: null,
+          })),
+        }],
+        columnPVs: { col_0000: matchCases.map((entry) => entry.current).filter(Boolean) },
+        totalOriginalRows: 4,
+        reviewState: null,
+      }),
+    });
+  });
+
+  // When: the reviewer opens the cards at desktop and phone widths.
+  await page.goto(`/stage-4?file_id=${fileId}`);
+  await waitForReviewRows(page);
+  const cards = page.locator('.column-mode-grid .row-cell');
+  await expect(cards).toHaveCount(4);
+  for (const width of [968, 390]) {
+    await page.setViewportSize({ width, height: 921 });
+
+    // Then: filled square count encodes quality; no match keeps its distinct minus icon.
+    for (const [index, entry] of matchCases.entries()) {
+      const icon = cards.nth(index).locator('.fidelity-indicator');
+      await expect(icon).toHaveAttribute('aria-label', `${entry.fidelity} AI match`);
+      if (entry.fidelity === 'none') {
+        await expect(icon.locator('svg circle')).toHaveCount(1);
+        await expect(icon.locator('svg rect')).toHaveCount(0);
+        continue;
+      }
+      const buttonWidth = await icon.evaluate((element) => element.getBoundingClientRect().width);
+      expect(buttonWidth).toBeGreaterThanOrEqual(39);
+      const squares = await icon.locator('svg rect').evaluateAll((elements) => elements.map((element) => ({
+        width: element.getBoundingClientRect().width,
+        height: element.getBoundingClientRect().height,
+        opacity: Number.parseFloat(getComputedStyle(element).opacity),
+      })));
+      expect(squares).toHaveLength(3);
+      expect(squares.map((square) => square.opacity)).toEqual(
+        [0, 1, 2].map((squareIndex) => squareIndex < 3 - index ? 1 : 0.2),
+      );
+      for (const square of squares) {
+        expect(square.width).toBeGreaterThanOrEqual(6.5);
+        expect(square.height).toBeGreaterThanOrEqual(6.5);
+      }
+    }
+  }
+});
+
 test('Stage 4 shows server recovery detail with a Stage 3 link', async ({ page }) => {
   const fileId = '0123456789abcdef0123456789abcdef';
   const recoveryDetail = 'The saved review state cannot be read. Return to Stage 3 and run harmonization again.';

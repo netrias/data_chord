@@ -446,9 +446,21 @@
   line-height: 1.5;
 }
 
-.fidelity-indicator {
+.card-icon.fidelity-indicator {
   flex-shrink: 0;
   color: var(--gray-500);
+  width: 2.5rem;
+  height: 2.5rem;
+}
+
+.fidelity-indicator:not(.fidelity-none) svg {
+  width: 1.75rem;
+  height: 1.75rem;
+}
+
+.fidelity-indicator svg rect {
+  fill: currentColor;
+  stroke: none;
 }
 
 .entry-row-label {

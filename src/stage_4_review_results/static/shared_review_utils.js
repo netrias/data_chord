@@ -310,7 +310,7 @@ const _buildCardHTML = (params) => {
   return `
     <div class="card-header-row">
       <button type="button" class="card-icon fidelity-indicator fidelity-${matchFidelity}" data-card-tooltip="AI result: ${escapeHtml(fidelityTooltip)} This describes the original AI result, not later edits." aria-label="${escapeHtml(matchFidelity)} AI match">
-        <svg viewBox="0 0 24 24" aria-hidden="true">${matchFidelity === 'none' ? '<circle cx="12" cy="12" r="8"/><path d="M8 12h8"/>' : '<path d="M5 20V14"/><path class="match-middle" d="M12 20V9"/><path class="match-top" d="M19 20V4"/>'}</svg>
+        <svg viewBox="0 0 24 24" aria-hidden="true">${matchFidelity === 'none' ? '<circle cx="12" cy="12" r="8"/><path d="M8 12h8"/>' : '<rect x="1" y="8.5" width="7" height="7"/><rect class="match-middle" x="9" y="8.5" width="7" height="7"/><rect class="match-top" x="17" y="8.5" width="7" height="7"/>'}</svg>
       </button>
       ${showColumnLabel ? `<span class="card-column-title">${safeColumnLabel}</span>` : ''}
       ${labelText !== columnLabel ? `<button type="button" class="entry-row-label">${safeLabelText}</button>` : ''}
