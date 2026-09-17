@@ -449,8 +449,9 @@ test('Stage 4 shows large square marks for AI match quality', async ({ page }) =
   const matchCases = [
     { fidelity: 'strong', original: 'Ductal carcinoma, NOS', current: 'Ductal Carcinoma NOS' },
     { fidelity: 'partial', original: 'Unclassified tumor, malignant', current: 'Malignant Tumor' },
-    { fidelity: 'approximate', original: 'Metastatic cancer', current: 'Adenocarcinoma, Metastatic NOS' },
+    { fidelity: 'approximate', original: 'Adenocarcinoma, metastatic, NOS', current: 'Adenocarcinoma, Metastatic NOS' },
     { fidelity: 'none', original: 'adamantinoma', current: null },
+    { fidelity: 'strong', original: 'Carcinoma, NOS', current: 'Carcinoma NOS' },
   ];
 
   // Given: Stage 4 has one result at each match-quality level.
@@ -465,8 +466,8 @@ test('Stage 4 shows large square marks for AI match quality', async ({ page }) =
           targetCdeKey: 'primary_diagnosis',
           targetCdeLabel: 'primary_diagnosis',
           sourceColumnIndex: 0,
-          termCount: 4,
-          termsWithChanges: 3,
+          termCount: 5,
+          termsWithChanges: 4,
           transformations: matchCases.map((entry, index) => ({
             originalValue: entry.original,
             harmonizedValue: entry.current,
@@ -481,8 +482,8 @@ test('Stage 4 shows large square marks for AI match quality', async ({ page }) =
           })),
         }],
         columnPVs: { col_0000: matchCases.map((entry) => entry.current).filter(Boolean) },
-        totalOriginalRows: 4,
-        reviewState: null,
+        totalOriginalRows: 5,
+        reviewState: { review_state: { column_mode: { batch_size: 5 } } },
       }),
     });
   });
@@ -491,9 +492,27 @@ test('Stage 4 shows large square marks for AI match quality', async ({ page }) =
   await page.goto(`/stage-4?file_id=${fileId}`);
   await waitForReviewRows(page);
   const cards = page.locator('.column-mode-grid .row-cell');
-  await expect(cards).toHaveCount(4);
-  for (const width of [968, 390]) {
+  await expect(cards).toHaveCount(5);
+  for (const width of [1600, 1300, 1120, 900, 650, 390, 320]) {
     await page.setViewportSize({ width, height: 921 });
+
+    // Then: the selected grid size is a cap, and every card keeps usable text width.
+    const gridGeometry = await page.locator('.column-mode-grid').evaluate((grid) => {
+      const bounds = grid.getBoundingClientRect();
+      const cardBounds = [...grid.querySelectorAll('.row-cell')].map((card) => card.getBoundingClientRect());
+      return {
+        columns: cardBounds.filter((card) => Math.abs(card.top - cardBounds[0].top) < 1).length,
+        minCardWidth: Math.min(...cardBounds.map((card) => card.width)),
+        gridWidth: bounds.width,
+        rightEdge: Math.max(...cardBounds.map((card) => card.right)),
+        gridRight: bounds.right,
+      };
+    });
+    expect(gridGeometry.minCardWidth).toBeGreaterThanOrEqual(Math.min(260, gridGeometry.gridWidth) - 0.5);
+    expect(gridGeometry.rightEdge).toBeLessThanOrEqual(gridGeometry.gridRight + 1);
+    expect(gridGeometry.columns).toBeLessThanOrEqual(5);
+    if (width === 1600) expect(gridGeometry.columns).toBe(5);
+    if (width <= 390) expect(gridGeometry.columns).toBe(1);
 
     // Then: filled square count encodes quality; no match keeps its distinct minus icon.
     for (const [index, entry] of matchCases.entries()) {
@@ -505,21 +524,61 @@ test('Stage 4 shows large square marks for AI match quality', async ({ page }) =
         continue;
       }
       const buttonWidth = await icon.evaluate((element) => element.getBoundingClientRect().width);
-      expect(buttonWidth).toBeGreaterThanOrEqual(39);
+      expect(buttonWidth).toBeGreaterThanOrEqual(65);
       const squares = await icon.locator('svg rect').evaluateAll((elements) => elements.map((element) => ({
+        left: element.getBoundingClientRect().left,
+        right: element.getBoundingClientRect().right,
         width: element.getBoundingClientRect().width,
         height: element.getBoundingClientRect().height,
         opacity: Number.parseFloat(getComputedStyle(element).opacity),
       })));
       expect(squares).toHaveLength(3);
+      const filledSquares = { strong: 3, partial: 2, approximate: 1 }[entry.fidelity];
       expect(squares.map((square) => square.opacity)).toEqual(
-        [0, 1, 2].map((squareIndex) => squareIndex < 3 - index ? 1 : 0.2),
+        [0, 1, 2].map((squareIndex) => squareIndex < filledSquares ? 1 : 0.2),
       );
       for (const square of squares) {
-        expect(square.width).toBeGreaterThanOrEqual(6.5);
-        expect(square.height).toBeGreaterThanOrEqual(6.5);
+        expect(square.width).toBeGreaterThanOrEqual(11.5);
+        expect(square.height).toBeGreaterThanOrEqual(11.5);
       }
+      expect(squares[1].left - squares[0].right).toBeGreaterThanOrEqual(5.5);
+      expect(squares[2].left - squares[1].right).toBeGreaterThanOrEqual(5.5);
     }
+    if (width === 1120) {
+      const originalComparison = await cards.nth(2).evaluate((card) => {
+        const current = card.querySelector('.pv-combobox-link');
+        const original = card.querySelector('.original-context-value');
+        const restore = card.querySelector('.restore-control');
+        const firstWord = 'Adenocarcinoma';
+        const range = document.createRange();
+        range.setStart(original.firstChild, 0);
+        range.setEnd(original.firstChild, firstWord.length);
+        return {
+          offset: Math.abs(current.getBoundingClientRect().left - original.getBoundingClientRect().left),
+          restoreRight: restore.getBoundingClientRect().right,
+          originalLeft: original.getBoundingClientRect().left,
+          firstWordLines: range.getClientRects().length,
+        };
+      });
+      expect(originalComparison.offset).toBeLessThan(2);
+      expect(originalComparison.restoreRight).toBeLessThan(originalComparison.originalLeft);
+      expect(originalComparison.firstWordLines).toBe(1);
+    }
+  }
+
+  // When: the browser text size increases, the minimum card width increases with it.
+  await page.addStyleTag({ content: ':root { font-size: 20px; }' });
+  for (const width of [1300, 390]) {
+    await page.setViewportSize({ width, height: 921 });
+    // Then: wide screens scale the card minimum; narrow phones show one full-width card.
+    const scaledGeometry = await page.locator('.column-mode-grid').evaluate((grid) => ({
+      gridWidth: grid.getBoundingClientRect().width,
+      cardWidth: grid.querySelector('.row-cell').getBoundingClientRect().width,
+      rightEdge: Math.max(...[...grid.querySelectorAll('.row-cell')].map((card) => card.getBoundingClientRect().right)),
+      gridRight: grid.getBoundingClientRect().right,
+    }));
+    expect(scaledGeometry.cardWidth).toBeGreaterThanOrEqual(Math.min(325, scaledGeometry.gridWidth) - 0.5);
+    expect(scaledGeometry.rightEdge).toBeLessThanOrEqual(scaledGeometry.gridRight + 1);
   }
 });
 

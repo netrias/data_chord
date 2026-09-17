@@ -306,11 +306,14 @@ const _buildCardHTML = (params) => {
   const pvStatusIcons = hasPVs
     ? `<button type="button" class="card-icon pv-warning-icon" data-card-tooltip="The current value is not in the approved list." aria-label="Value is not in the approved list"${warningHidden}>⚠</button><button type="button" class="card-icon pv-conformant-icon" data-card-tooltip="The current value is in the approved list." aria-label="Value is in the approved list"${checkHidden}>✓</button>`
     : '<button type="button" class="card-icon card-neutral-status" data-card-tooltip="There is no approved list for this column." aria-label="No approved list">—</button>';
+  const fidelityIcon = matchFidelity === 'none'
+    ? '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M8 12h8"/></svg>'
+    : '<svg viewBox="0 0 54 24" aria-hidden="true"><rect x="2" y="6" width="12" height="12"/><rect class="match-middle" x="20" y="6" width="12" height="12"/><rect class="match-top" x="38" y="6" width="12" height="12"/></svg>';
 
   return `
     <div class="card-header-row">
       <button type="button" class="card-icon fidelity-indicator fidelity-${matchFidelity}" data-card-tooltip="AI result: ${escapeHtml(fidelityTooltip)} This describes the original AI result, not later edits." aria-label="${escapeHtml(matchFidelity)} AI match">
-        <svg viewBox="0 0 24 24" aria-hidden="true">${matchFidelity === 'none' ? '<circle cx="12" cy="12" r="8"/><path d="M8 12h8"/>' : '<rect x="1" y="8.5" width="7" height="7"/><rect class="match-middle" x="9" y="8.5" width="7" height="7"/><rect class="match-top" x="17" y="8.5" width="7" height="7"/>'}</svg>
+        ${fidelityIcon}
       </button>
       ${showColumnLabel ? `<span class="card-column-title">${safeColumnLabel}</span>` : ''}
       ${labelText !== columnLabel ? `<button type="button" class="entry-row-label">${safeLabelText}</button>` : ''}
