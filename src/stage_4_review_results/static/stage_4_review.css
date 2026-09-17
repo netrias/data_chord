@@ -394,7 +394,8 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-1) var(--space-4);
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
   background: var(--gray-50);
   border-bottom: 1px solid var(--gray-100);
   border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
@@ -403,11 +404,15 @@
 .card-column-title {
   font-size: 0.85rem;
   font-weight: 600;
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 
 .card-value-status {
-  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid var(--gray-200);
 }
 
 .card-icon.card-neutral-status {
@@ -415,14 +420,14 @@
   font-size: 0.75rem;
 }
 
-.card-review-meta {
+.card-footer {
   margin-top: auto;
   display: flex;
-  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-1) var(--space-4);
+  min-width: 0;
+  padding: var(--space-2) var(--space-4);
   border-top: 1px solid var(--gray-100);
 }
 
@@ -439,10 +444,11 @@
 }
 
 .entry-row-label {
-  padding: 0.9rem 2.25rem;
+  padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-full);
   transition: transform var(--transition-fast), opacity var(--transition-fast);
   margin-left: auto;
+  flex-shrink: 0;
   border: 0;
   background: transparent;
   font-size: 0.75rem;
@@ -473,20 +479,27 @@
   box-shadow: var(--shadow-md);
 }
 
-/* ==========================================================================
-   Card Body - Compact layout with original context and target value
-   ========================================================================== */
+/* The status rail owns a fixed column; the editable value owns the rest. */
 
 .card-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4) var(--space-4);
+  display: grid;
+  grid-template-columns: 3.25rem minmax(0, 1fr);
+  min-height: 8.5rem;
+  flex: 1;
 }
 
-/* Original context - label above, value below */
+.card-current-value {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-4);
+}
+
 .original-context {
   position: relative;
+  min-width: 0;
   font-size: 0.85rem;
   line-height: 1.4;
 }
@@ -512,13 +525,6 @@
 .ws-marker {
   color: var(--gray-400);
   opacity: 0.7;
-}
-
-/* Target value label - matches original context styling */
-.target-value-label {
-  color: var(--gray-400);
-  font-weight: 500;
-  font-size: 0.85rem;
 }
 
 .card-icon {
@@ -560,11 +566,12 @@
   outline-offset: 3px;
 }
 
-/* Target value wrapper - label above, input below */
+/* Keep both editor forms inside the flexible value pane. */
 .target-value-wrapper {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  min-width: 0;
 }
 
 .target-value {
@@ -690,7 +697,19 @@
   position: relative;
 }
 
-/* PV status icons in the card header */
+/* The border describes the displayed value, not the original AI result. */
+.row-cell.is-nonconformant,
+.row-cell.is-nonconformant:hover {
+  border: 1px solid var(--warning-600);
+  border-left-width: 5px;
+  background: var(--white);
+}
+
+.row-cell.is-nonconformant .card-value-status {
+  background: var(--warning-50);
+}
+
+/* PV status icons remain next to the value as that value wraps. */
 .pv-warning-icon,
 .pv-conformant-icon {
   display: inline-flex;

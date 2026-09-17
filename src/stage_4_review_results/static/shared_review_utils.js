@@ -294,7 +294,7 @@ const _getInputValue = (entry, pendingOverrides) => {
  * @returns {string}
  */
 const _buildCardHTML = (params) => {
-  const { columnLabel, showColumnLabel, labelText, fidelityTooltip, matchFidelity, effectiveValue, originalValue, showWarningIcon, showConformantHeader, hasPVs } = params;
+  const { columnLabel, showColumnLabel, labelText, fidelityTooltip, matchFidelity, effectiveValue, originalValue, showWarningIcon, showConformantIcon, hasPVs } = params;
   const safeColumnLabel = escapeHtml(columnLabel);
   const safeLabelText = escapeHtml(labelText);
   const safeEffectiveValue = escapeHtml(effectiveValue);
@@ -302,45 +302,46 @@ const _buildCardHTML = (params) => {
 
   // Both icons always present when PVs exist - toggle visibility based on conformance
   const warningHidden = showWarningIcon ? '' : ' style="display: none;"';
-  const checkHidden = showConformantHeader ? '' : ' style="display: none;"';
+  const checkHidden = showConformantIcon ? '' : ' style="display: none;"';
   const pvStatusIcons = hasPVs
     ? `<button type="button" class="card-icon pv-warning-icon" data-card-tooltip="The current value is not in the approved list." aria-label="Value is not in the approved list"${warningHidden}>⚠</button><button type="button" class="card-icon pv-conformant-icon" data-card-tooltip="The current value is in the approved list." aria-label="Value is in the approved list"${checkHidden}>✓</button>`
     : '<button type="button" class="card-icon card-neutral-status" data-card-tooltip="There is no approved list for this column." aria-label="No approved list">—</button>';
 
   return `
     <div class="card-header-row">
-      <div class="card-value-status">${pvStatusIcons}</div>
+      <button type="button" class="card-icon fidelity-indicator fidelity-${matchFidelity}" data-card-tooltip="AI result: ${escapeHtml(fidelityTooltip)} This describes the original AI result, not later edits." aria-label="${escapeHtml(matchFidelity)} AI match">
+        <svg viewBox="0 0 24 24" aria-hidden="true">${matchFidelity === 'none' ? '<circle cx="12" cy="12" r="8"/><path d="M8 12h8"/>' : '<path d="M5 20V14"/><path class="match-middle" d="M12 20V9"/><path class="match-top" d="M19 20V4"/>'}</svg>
+      </button>
       ${showColumnLabel ? `<span class="card-column-title">${safeColumnLabel}</span>` : ''}
       ${labelText !== columnLabel ? `<button type="button" class="entry-row-label">${safeLabelText}</button>` : ''}
     </div>
     <div class="card-body" role="group" aria-label="${safeColumnLabel} transformation">
+      <div class="card-value-status">${pvStatusIcons}</div>
+      <div class="card-current-value">
+        <div class="target-value-wrapper">
+          <label class="target-value">
+            <span class="sr-only">Target value for ${safeColumnLabel}</span>
+            <span class="target-value-input-wrapper">
+              <svg class="target-value-icon" viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M2 14.5V18h3.5l8.4-8.4-3.5-3.5L2 14.5zm11.8-9.1a1 1 0 0 1 1.4 0l1.4 1.4a1 1 0 0 1 0 1.4l-1.2 1.2-3.5-3.5 1.2-1.2z"/>
+              </svg>
+              <input
+                class="target-value-input"
+                type="text"
+                value="${safeEffectiveValue}"
+                aria-label="Target value for ${safeColumnLabel}"
+              />
+            </span>
+          </label>
+        </div>
+        <p class="card-result-note" role="status"></p>
+      </div>
+    </div>
+    <div class="card-footer">
       <div class="original-context">
         <span class="original-context-label">was:</span>
         <span class="original-context-value">${originalValueHTML}</span>
       </div>
-      <div class="target-value-wrapper">
-        <span class="target-value-label">now:</span>
-        <label class="target-value">
-          <span class="sr-only">Target value for ${safeColumnLabel}</span>
-          <span class="target-value-input-wrapper">
-            <svg class="target-value-icon" viewBox="0 0 20 20" aria-hidden="true">
-              <path d="M2 14.5V18h3.5l8.4-8.4-3.5-3.5L2 14.5zm11.8-9.1a1 1 0 0 1 1.4 0l1.4 1.4a1 1 0 0 1 0 1.4l-1.2 1.2-3.5-3.5 1.2-1.2z"/>
-            </svg>
-            <input
-              class="target-value-input"
-              type="text"
-              value="${safeEffectiveValue}"
-              aria-label="Target value for ${safeColumnLabel}"
-            />
-          </span>
-        </label>
-      </div>
-      <p class="card-result-note" role="status"></p>
-    </div>
-    <div class="card-review-meta">
-      <button type="button" class="card-icon fidelity-indicator fidelity-${matchFidelity}" data-card-tooltip="AI result: ${escapeHtml(fidelityTooltip)} This describes the original AI result, not later edits." aria-label="${escapeHtml(matchFidelity)} AI match">
-        <svg viewBox="0 0 24 24" aria-hidden="true">${matchFidelity === 'none' ? '<circle cx="12" cy="12" r="8"/><path d="M8 12h8"/>' : '<path d="M5 20V14"/><path class="match-middle" d="M12 20V9"/><path class="match-top" d="M19 20V4"/>'}</svg>
-      </button>
       <span data-card-tooltip="Restore original value" class="restore-control">
         <button type="button" class="card-icon revert-btn" aria-label="Restore original value"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v6h6M4 10a8 8 0 1 1 2 9"/></svg></button>
       </span>
@@ -412,8 +413,10 @@ const _applyCardState = (params) => {
   }
 
   if (conformantIcon) {
-    conformantIcon.style.display = state.showConformantHeader ? '' : 'none';
+    conformantIcon.style.display = state.showConformantIcon ? '' : 'none';
   }
+
+  card.classList.toggle('is-nonconformant', state.showWarningIcon);
 
   _updateResultNote(card, originalValue, state.activeValue, hasPVs);
 
@@ -595,8 +598,8 @@ const _attachCardEditing = (card) => {
 };
 
 /**
- * Attach revert click handler to original context value.
- * In the compact design, clicking "was: X" reverts to original.
+ * Attach the footer's restore action.
+ * Clicking the original value itself still opens the editor.
  * Revert to AI is handled via the dropdown (AI suggestion is top option).
  * @param {HTMLElement} card - The card element
  * @param {Object} entry - Entry with values
@@ -746,10 +749,11 @@ export const createValueCard = (config) => {
     effectiveValue: initialState.activeValue,
     originalValue: entry.originalValue ?? '',
     showWarningIcon: initialState.showWarningIcon,
-    showConformantHeader: initialState.showConformantHeader,
+    showConformantIcon: initialState.showConformantIcon,
     hasPVs: entry.pvSetAvailable,
   });
 
+  card.classList.toggle('is-nonconformant', initialState.showWarningIcon);
   _updateRestoreControl(card, entry.originalValue ?? '', initialState.activeValue);
   _updateResultNote(card, entry.originalValue ?? '', initialState.activeValue, entry.pvSetAvailable);
 

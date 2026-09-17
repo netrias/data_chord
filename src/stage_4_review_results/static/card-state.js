@@ -22,7 +22,7 @@ import { isMissingValue } from '/assets/shared/value-presence.js';
  * @property {boolean} isConformant - Whether active value is PV-conformant
  * @property {boolean} hasOverride - Whether user has an override that differs from AI
  * @property {boolean} showWarningIcon - Whether to show PV warning icon
- * @property {boolean} showConformantHeader - Whether to show the approved-value icon in the header
+ * @property {boolean} showConformantIcon - Whether the active value gets an approved-list check
  */
 
 /**
@@ -64,6 +64,6 @@ export const determineCardState = (input) => {
     hasOverride,
     // Only show warning/conformant styling when PVs exist
     showWarningIcon: hasPVs && hasValue && !isConformant,
-    showConformantHeader: hasPVs && isConformant,
+    showConformantIcon: hasPVs && isConformant,
   };
 };

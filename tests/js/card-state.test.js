@@ -26,7 +26,7 @@ describe('value card display state', () => {
         isConformant: true,
         hasOverride: false,
         showWarningIcon: false,
-        showConformantHeader: true,
+        showConformantIcon: true,
       },
     },
     {
@@ -37,7 +37,7 @@ describe('value card display state', () => {
         isConformant: false,
         hasOverride: false,
         showWarningIcon: true,
-        showConformantHeader: false,
+        showConformantIcon: false,
       },
     },
     {
@@ -48,7 +48,7 @@ describe('value card display state', () => {
         isConformant: true,
         hasOverride: true,
         showWarningIcon: false,
-        showConformantHeader: true,
+        showConformantIcon: true,
       },
     },
     {
@@ -62,7 +62,7 @@ describe('value card display state', () => {
         isConformant: true,
         hasOverride: true,
         showWarningIcon: false,
-        showConformantHeader: true,
+        showConformantIcon: true,
       },
     },
     {
@@ -73,7 +73,7 @@ describe('value card display state', () => {
         isConformant: false,
         hasOverride: false,
         showWarningIcon: false,
-        showConformantHeader: false,
+        showConformantIcon: false,
       },
     },
     {
@@ -81,7 +81,7 @@ describe('value card display state', () => {
       input: { baselineValue: '\ufeff' },
       expected: {
         activeValue: '\ufeff', isConformant: false, hasOverride: false,
-        showWarningIcon: true, showConformantHeader: false,
+        showWarningIcon: true, showConformantIcon: false,
       },
     },
     {
@@ -92,7 +92,7 @@ describe('value card display state', () => {
         isConformant: false,
         hasOverride: true,
         showWarningIcon: true,
-        showConformantHeader: false,
+        showConformantIcon: false,
       },
     },
     {
@@ -103,7 +103,7 @@ describe('value card display state', () => {
         isConformant: true,
         hasOverride: false,
         showWarningIcon: false,
-        showConformantHeader: true,
+        showConformantIcon: true,
       },
     },
     {
@@ -114,7 +114,7 @@ describe('value card display state', () => {
         isConformant: false,
         hasOverride: false,
         showWarningIcon: false,
-        showConformantHeader: false,
+        showConformantIcon: false,
       },
     },
     {
@@ -125,7 +125,7 @@ describe('value card display state', () => {
         isConformant: false,
         hasOverride: true,
         showWarningIcon: false,
-        showConformantHeader: false,
+        showConformantIcon: false,
       },
     },
     {
@@ -136,7 +136,7 @@ describe('value card display state', () => {
         isConformant: false,
         hasOverride: true,
         showWarningIcon: true,
-        showConformantHeader: false,
+        showConformantIcon: false,
       },
     },
     {
@@ -147,7 +147,7 @@ describe('value card display state', () => {
         isConformant: false,
         hasOverride: true,
         showWarningIcon: true,
-        showConformantHeader: false,
+        showConformantIcon: false,
       },
     },
   ];
@@ -174,7 +174,7 @@ describe('value card display state', () => {
       // Then: it has neither an approved check nor an invalid-value warning.
       assert.deepEqual(actual, {
         activeValue: value, isConformant: false, hasOverride: false,
-        showWarningIcon: false, showConformantHeader: false,
+        showWarningIcon: false, showConformantIcon: false,
       });
     });
   }

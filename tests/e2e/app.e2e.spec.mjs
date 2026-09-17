@@ -305,6 +305,27 @@ test('no-recommendation card warns when its displayed source value is not permis
   await expect(rejectedCard.locator('.card-column-title')).toHaveCount(0);
   await expect(page.locator('.pv-selection-dialog')).toHaveCount(0);
 
+  // Then: AI quality is in the header, while approval sits beside the editable value.
+  await expect(rejectedCard.locator('.card-header-row .fidelity-indicator')).toBeVisible();
+  await expect(rejectedCard.locator('.card-header-row .entry-row-label')).toBeVisible();
+  await expect(rejectedCard.locator('.card-body .card-value-status .pv-warning-icon')).toBeVisible();
+  await expect(rejectedCard.locator('.card-body .pv-combobox-link')).toHaveText('adamantinoma');
+  await expect(rejectedCard.locator('.card-footer .original-context-value')).toHaveText('adamantinoma');
+  await expect(rejectedCard.locator('.card-footer .revert-btn')).toBeDisabled();
+  await expect(rejectedCard.locator('.target-value-label')).toHaveCount(0);
+  const cardGeometry = await rejectedCard.evaluate((card) => {
+    const body = card.querySelector('.card-body').getBoundingClientRect();
+    const rail = card.querySelector('.card-value-status').getBoundingClientRect();
+    const value = card.querySelector('.target-value-wrapper').getBoundingClientRect();
+    return { railHeight: rail.height, bodyHeight: body.height, railRight: rail.right, valueLeft: value.left };
+  });
+  expect(cardGeometry.railHeight).toBeCloseTo(cardGeometry.bodyHeight, 0);
+  expect(cardGeometry.railRight).toBeLessThanOrEqual(cardGeometry.valueLeft);
+  const borderWidth = async () => rejectedCard.evaluate((card) => Number.parseFloat(getComputedStyle(card).borderLeftWidth));
+  expect(await borderWidth()).toBeGreaterThanOrEqual(4);
+  expect(await permittedCard.evaluate((card) => Number.parseFloat(getComputedStyle(card).borderLeftWidth)))
+    .toBeLessThan(4);
+
   // When: the reviewer focuses the status icon.
   await rejectedCard.locator('.pv-warning-icon').focus();
   // Then: its explanation appears without opening the editor.
@@ -333,6 +354,7 @@ test('no-recommendation card warns when its displayed source value is not permis
   await expect(rejectedCard.locator('.pv-warning-icon')).toBeHidden();
   await expect(rejectedCard.locator('.pv-conformant-icon')).toBeVisible();
   await expect(rejectedCard).toHaveClass(/no-recommendation/);
+  expect(await borderWidth()).toBeLessThan(4);
   expect(savedOverrides.overrides['8692'].col_0000.human_value).toBe('Carcinoma NOS');
   await expect(rejectedCard.locator('.card-result-note')).toHaveText('You changed the output.');
   await expect(rejectedCard.getByRole('button', { name: 'Restore original value' })).toBeEnabled();
@@ -343,6 +365,7 @@ test('no-recommendation card warns when its displayed source value is not permis
   // Then: the source and its warning return, with the correct no-match explanation.
   await expect(rejectedCard.locator('.pv-combobox-link')).toHaveText('adamantinoma');
   await expect(rejectedCard.locator('.pv-warning-icon')).toBeVisible();
+  expect(await borderWidth()).toBeGreaterThanOrEqual(4);
   await expect(rejectedCard.locator('.card-result-note')).toHaveText('No match found. Source value kept. Choose an approved value.');
   await expect(page.locator('.pv-selection-dialog')).toHaveCount(0);
 
@@ -368,6 +391,8 @@ test('no-recommendation card warns when its displayed source value is not permis
     const tooltipBounds = await page.getByRole('tooltip').boundingBox();
     expect(tooltipBounds.x).toBeGreaterThanOrEqual(0);
     expect(tooltipBounds.x + tooltipBounds.width).toBeLessThanOrEqual(width);
+    await page.keyboard.press('Escape');
+    await page.mouse.move(0, 0);
     await page.screenshot({ path: testInfo.outputPath(`review-cards-${width}.png`) });
   }
 
@@ -2094,6 +2119,12 @@ test('autosave persists overrides and review settings across reloads', async ({ 
   await expect(page.locator('.row-mode-wrapper')).toBeVisible();
   const restoredInput = page.locator('.target-value-input').first();
   await expect(restoredInput).toHaveValue('Persisted');
+  const restoredCard = page.locator('.row-mode-wrapper .row-cell').first();
+  await expect(restoredCard.locator('.card-header-row .fidelity-indicator')).toBeVisible();
+  await expect(restoredCard.locator('.card-header-row .card-column-title')).toBeVisible();
+  await expect(restoredCard.locator('.card-body .card-neutral-status')).toBeVisible();
+  await expect(restoredCard).not.toHaveClass(/is-nonconformant/);
+  await expect(restoredCard.locator('.card-footer .revert-btn')).toBeEnabled();
   const version = loaded.headers().etag;
   expect(version).toBeTruthy();
   expect(legacyOverrideReads).toEqual([]);
