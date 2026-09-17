@@ -360,6 +360,8 @@
 
 /* Value card - clean flat card with subtle shadow */
 .row-cell {
+  --card-status-rail-width: 3.25rem;
+  --card-edit-icon-width: 0.875rem;
   border-radius: var(--radius-2xl);
   border: 1px solid var(--gray-200);
   padding: 0;
@@ -428,7 +430,13 @@
   gap: var(--space-2);
   min-width: 0;
   padding: var(--space-2) var(--space-4);
+  padding-left: calc(var(--card-status-rail-width) + var(--space-4));
   border-top: 1px solid var(--gray-100);
+}
+
+/* A free-text input has padding and a pencil before its text. Match that text edge. */
+.row-cell:has(.target-value-input) .card-footer {
+  padding-left: calc(var(--card-status-rail-width) + var(--space-4) + var(--space-3) + var(--card-edit-icon-width) + var(--space-2) + 1px);
 }
 
 .card-result-note {
@@ -483,7 +491,7 @@
 
 .card-body {
   display: grid;
-  grid-template-columns: 3.25rem minmax(0, 1fr);
+  grid-template-columns: var(--card-status-rail-width) minmax(0, 1fr);
   min-height: 8.5rem;
   flex: 1;
 }
@@ -500,25 +508,21 @@
 .original-context {
   position: relative;
   min-width: 0;
-  font-size: 0.85rem;
   line-height: 1.4;
 }
 
 .original-context-label {
   display: block;
   color: var(--gray-400);
+  font-size: 0.85rem;
   font-weight: 500;
   margin-bottom: var(--space-1);
 }
 
 .original-context-value {
-  color: var(--gray-600);
-  font-weight: 500;
-  /* Allow wrapping up to 3 lines, truncate beyond */
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  display: block;
+  color: var(--gray-900);
+  overflow-wrap: anywhere;
 }
 
 /* Whitespace markers — visible middle dots for leading/trailing spaces */
@@ -604,8 +608,8 @@
 }
 
 .target-value-icon {
-  width: 0.875rem;
-  height: 0.875rem;
+  width: var(--card-edit-icon-width);
+  height: var(--card-edit-icon-width);
   flex-shrink: 0;
   fill: var(--gray-400);
 }
@@ -616,8 +620,6 @@
   border: none;
   padding: 0;
   background: transparent;
-  font-size: 0.9rem;
-  font-weight: 500;
   color: var(--gray-900);
 }
 
@@ -769,8 +771,6 @@
   color: var(--azure-600);
   text-decoration: underline;
   cursor: pointer;
-  font-size: 1rem;
-  font-weight: 600;
   display: block;
   border-radius: 0;
   max-width: 100%;
@@ -783,6 +783,16 @@
 
 .pv-combobox-link:hover {
   color: var(--azure-700);
+}
+
+/* Source and current values use the same type for direct comparison. */
+.original-context-value,
+.target-value-input,
+.pv-combobox-link {
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.4;
 }
 
 /* Remove bounding box when combobox is present */

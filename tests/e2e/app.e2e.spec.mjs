@@ -226,6 +226,7 @@ const _openStage2SearchHarness = async (page) => {
 
 test('no-recommendation card warns when its displayed source value is not permissible', async ({ page }, testInfo) => {
   const fileId = '0123456789abcdef0123456789abcdef';
+  const longOriginal = 'Lung Cancer With A Very Long Descriptor That Wraps Across Several Lines On Narrow Cards';
   const wrappedValues = [
     'Adenocarcinoma, Metastatic NOS',
     'Glioma, Malignant, Diffuse Pediatric-Type High-Grade Glioma, H3-Wildtype And IDH-Wildtype, High-Grade Glioma',
@@ -258,7 +259,7 @@ test('no-recommendation card warns when its displayed source value is not permis
               manualOverride: null,
             },
             {
-              originalValue: 'Lung Cancer',
+              originalValue: longOriginal,
               harmonizedValue: null,
               matchFidelity: 'none',
               isChanged: false,
@@ -271,7 +272,7 @@ test('no-recommendation card warns when its displayed source value is not permis
             },
           ],
         }],
-        columnPVs: { col_0000: ['Carcinoma NOS', 'Lung Cancer', ...wrappedValues] },
+        columnPVs: { col_0000: ['Carcinoma NOS', longOriginal, ...wrappedValues] },
         totalOriginalRows: 10000,
         reviewState: null,
       }),
@@ -294,7 +295,7 @@ test('no-recommendation card warns when its displayed source value is not permis
   await waitForReviewRows(page);
   const cards = page.locator('.row-cell.no-recommendation');
   const rejectedCard = cards.filter({ has: page.locator('.original-context-value', { hasText: 'adamantinoma' }) });
-  const permittedCard = cards.filter({ has: page.locator('.original-context-value', { hasText: 'Lung Cancer' }) });
+  const permittedCard = cards.filter({ has: page.locator('.original-context-value', { hasText: longOriginal }) });
 
   // Then: each displayed source has one clear conformance state and no question marker
   await expect(cards).toHaveCount(2);
@@ -321,6 +322,22 @@ test('no-recommendation card warns when its displayed source value is not permis
   });
   expect(cardGeometry.railHeight).toBeCloseTo(cardGeometry.bodyHeight, 0);
   expect(cardGeometry.railRight).toBeLessThanOrEqual(cardGeometry.valueLeft);
+  const valueComparison = await permittedCard.evaluate((card) => {
+    const current = card.querySelector('.pv-combobox-link');
+    const original = card.querySelector('.original-context-value');
+    const currentStyle = getComputedStyle(current);
+    const originalStyle = getComputedStyle(original);
+    return {
+      horizontalOffset: Math.abs(current.getBoundingClientRect().left - original.getBoundingClientRect().left),
+      currentFont: [currentStyle.fontFamily, currentStyle.fontSize, currentStyle.fontWeight, currentStyle.lineHeight],
+      originalFont: [originalStyle.fontFamily, originalStyle.fontSize, originalStyle.fontWeight, originalStyle.lineHeight],
+      originalHeight: original.clientHeight,
+      originalContentHeight: original.scrollHeight,
+    };
+  });
+  expect(valueComparison.horizontalOffset).toBeLessThan(2);
+  expect(valueComparison.originalFont).toEqual(valueComparison.currentFont);
+  expect(valueComparison.originalContentHeight).toBeLessThanOrEqual(valueComparison.originalHeight + 1);
   const borderWidth = async () => rejectedCard.evaluate((card) => Number.parseFloat(getComputedStyle(card).borderLeftWidth));
   expect(await borderWidth()).toBeGreaterThanOrEqual(4);
   expect(await permittedCard.evaluate((card) => Number.parseFloat(getComputedStyle(card).borderLeftWidth)))
@@ -384,6 +401,14 @@ test('no-recommendation card warns when its displayed source value is not permis
     const bounds = await rejectedCard.boundingBox();
     expect(bounds.x).toBeGreaterThanOrEqual(0);
     expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+    const alignedSource = await permittedCard.evaluate((card) => ({
+      currentLeft: card.querySelector('.pv-combobox-link').getBoundingClientRect().left,
+      originalLeft: card.querySelector('.original-context-value').getBoundingClientRect().left,
+      originalHeight: card.querySelector('.original-context-value').clientHeight,
+      originalContentHeight: card.querySelector('.original-context-value').scrollHeight,
+    }));
+    expect(Math.abs(alignedSource.currentLeft - alignedSource.originalLeft)).toBeLessThan(2);
+    expect(alignedSource.originalContentHeight).toBeLessThanOrEqual(alignedSource.originalHeight + 1);
     await expect(rejectedCard.locator('.fidelity-indicator')).toBeVisible();
     await rejectedCard.locator('.pv-warning-icon').focus();
     await rejectedCard.locator('.fidelity-indicator').focus();
@@ -1805,6 +1830,19 @@ test('an override for a repeated value reaches every matching row', async ({ pag
     has: page.locator('.original-context-value', { hasText: 'Foo' }),
   });
   await expect(card.locator('.entry-row-label')).toHaveText('60 rows');
+  const plainTextComparison = await card.evaluate((element) => {
+    const current = element.querySelector('.target-value-input');
+    const original = element.querySelector('.original-context-value');
+    const currentStyle = getComputedStyle(current);
+    const originalStyle = getComputedStyle(original);
+    return {
+      horizontalOffset: Math.abs(current.getBoundingClientRect().left - original.getBoundingClientRect().left),
+      currentFont: [currentStyle.fontFamily, currentStyle.fontSize, currentStyle.fontWeight, currentStyle.lineHeight],
+      originalFont: [originalStyle.fontFamily, originalStyle.fontSize, originalStyle.fontWeight, originalStyle.lineHeight],
+    };
+  });
+  expect(plainTextComparison.horizontalOffset).toBeLessThan(2);
+  expect(plainTextComparison.originalFont).toEqual(plainTextComparison.currentFont);
   // When: the row count is selected, only source context opens.
   await card.locator('.entry-row-label').click();
   // Then: the popup shows the matching source rows, not the value editor.
@@ -1853,6 +1891,12 @@ test('whitespace-significant terms remain distinct', async ({ page }) => {
   await page.selectOption('#reviewModeSelect', 'row');
   await page.click('#settingsCloseButton');
   const row = page.locator('.row-mode-row').first();
+  const rowCard = row.locator('.row-cell:has(.target-value-input)').first();
+  const rowAlignment = await rowCard.evaluate((element) => ({
+    currentLeft: element.querySelector('.target-value-input').getBoundingClientRect().left,
+    originalLeft: element.querySelector('.original-context-value').getBoundingClientRect().left,
+  }));
+  expect(Math.abs(rowAlignment.currentLeft - rowAlignment.originalLeft)).toBeLessThan(2);
   await row.locator('.target-value-input').fill('Quux');
   await page.waitForResponse((response) => response.url().includes('/stage-4/overrides') && response.ok());
 
