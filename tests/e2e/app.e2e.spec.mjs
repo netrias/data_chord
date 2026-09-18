@@ -332,14 +332,20 @@ test('no-recommendation card warns when its displayed source value is not permis
     const originalStyle = getComputedStyle(original);
     return {
       horizontalOffset: Math.abs(current.getBoundingClientRect().left - original.getBoundingClientRect().left),
-      currentFont: [currentStyle.fontFamily, currentStyle.fontSize, currentStyle.fontWeight, currentStyle.lineHeight],
-      originalFont: [originalStyle.fontFamily, originalStyle.fontSize, originalStyle.fontWeight, originalStyle.lineHeight],
+      currentFont: [currentStyle.fontFamily, currentStyle.fontSize, currentStyle.lineHeight],
+      originalFont: [originalStyle.fontFamily, originalStyle.fontSize, originalStyle.lineHeight],
+      currentWeight: currentStyle.fontWeight,
+      originalWeight: originalStyle.fontWeight,
+      originalColor: originalStyle.color,
       originalHeight: original.clientHeight,
       originalContentHeight: original.scrollHeight,
     };
   });
   expect(valueComparison.horizontalOffset).toBeLessThan(2);
   expect(valueComparison.originalFont).toEqual(valueComparison.currentFont);
+  expect(valueComparison.currentWeight).toBe('600');
+  expect(valueComparison.originalWeight).toBe('500');
+  expect(valueComparison.originalColor).toBe('rgb(71, 85, 105)');
   expect(valueComparison.originalContentHeight).toBeLessThanOrEqual(valueComparison.originalHeight + 1);
   const borderWidth = async () => rejectedCard.evaluate((card) => Number.parseFloat(getComputedStyle(card).borderLeftWidth));
   expect(await borderWidth()).toBeGreaterThanOrEqual(4);
@@ -2060,12 +2066,16 @@ test('an override for a repeated value reaches every matching row', async ({ pag
     const originalStyle = getComputedStyle(original);
     return {
       horizontalOffset: Math.abs(current.getBoundingClientRect().left - original.getBoundingClientRect().left),
-      currentFont: [currentStyle.fontFamily, currentStyle.fontSize, currentStyle.fontWeight, currentStyle.lineHeight],
-      originalFont: [originalStyle.fontFamily, originalStyle.fontSize, originalStyle.fontWeight, originalStyle.lineHeight],
+      currentFont: [currentStyle.fontFamily, currentStyle.fontSize, currentStyle.lineHeight],
+      originalFont: [originalStyle.fontFamily, originalStyle.fontSize, originalStyle.lineHeight],
+      currentWeight: currentStyle.fontWeight,
+      originalWeight: originalStyle.fontWeight,
     };
   });
   expect(plainTextComparison.horizontalOffset).toBeLessThan(2);
   expect(plainTextComparison.originalFont).toEqual(plainTextComparison.currentFont);
+  expect(plainTextComparison.currentWeight).toBe('600');
+  expect(plainTextComparison.originalWeight).toBe('500');
   // When: the row count is selected, only source context opens.
   await card.locator('.entry-row-label').click();
   // Then: the popup shows the matching source rows, not the value editor.
