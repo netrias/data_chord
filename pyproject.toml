@@ -5,6 +5,7 @@ description = "Data harmonization workflow with Bedrock CDE recommendation and a
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "anyio>=4.14.2",  # CVE-2026-63374 and CVE-2026-64847
     "fastapi>=0.135.4,<0.136.0",  # allows Starlette security fix line
     "jinja2>=3.1.4",
     "python-multipart>=0.0.31",  # CVE remediation
