@@ -226,6 +226,7 @@ const _openStage2SearchHarness = async (page) => {
 
 test('no-recommendation card warns when its displayed source value is not permissible', async ({ page }, testInfo) => {
   const fileId = '0123456789abcdef0123456789abcdef';
+  const longOriginal = 'Lung Cancer With A Very Long Descriptor That Wraps Across Several Lines On Narrow Cards';
   const wrappedValues = [
     'Adenocarcinoma, Metastatic NOS',
     'Glioma, Malignant, Diffuse Pediatric-Type High-Grade Glioma, H3-Wildtype And IDH-Wildtype, High-Grade Glioma',
@@ -258,7 +259,7 @@ test('no-recommendation card warns when its displayed source value is not permis
               manualOverride: null,
             },
             {
-              originalValue: 'Lung Cancer',
+              originalValue: longOriginal,
               harmonizedValue: null,
               matchFidelity: 'none',
               isChanged: false,
@@ -271,7 +272,7 @@ test('no-recommendation card warns when its displayed source value is not permis
             },
           ],
         }],
-        columnPVs: { col_0000: ['Carcinoma NOS', 'Lung Cancer', ...wrappedValues] },
+        columnPVs: { col_0000: ['Carcinoma NOS', longOriginal, ...wrappedValues] },
         totalOriginalRows: 10000,
         reviewState: null,
       }),
@@ -294,16 +295,56 @@ test('no-recommendation card warns when its displayed source value is not permis
   await waitForReviewRows(page);
   const cards = page.locator('.row-cell.no-recommendation');
   const rejectedCard = cards.filter({ has: page.locator('.original-context-value', { hasText: 'adamantinoma' }) });
-  const permittedCard = cards.filter({ has: page.locator('.original-context-value', { hasText: 'Lung Cancer' }) });
+  const permittedCard = cards.filter({ has: page.locator('.original-context-value', { hasText: longOriginal }) });
+  const diagnosisTab = page.locator('.batch-progress-item.column-pill');
 
   // Then: each displayed source has one clear conformance state and no question marker
   await expect(cards).toHaveCount(2);
+  await expect(diagnosisTab).toHaveAttribute('aria-label', /values not in the approved list/);
+  await expect(diagnosisTab.locator('.tab-review-warning')).toBeVisible();
   await expect(rejectedCard.locator('.pv-combobox-link')).toHaveText('adamantinoma');
   await expect(rejectedCard.locator('.pv-warning-icon')).toBeVisible();
   await expect(rejectedCard.locator('.card-result-note')).toHaveText('No match found. Source value kept. Choose an approved value.');
   await expect(rejectedCard.getByRole('button', { name: 'Restore original value' })).toBeDisabled();
   await expect(rejectedCard.locator('.card-column-title')).toHaveCount(0);
   await expect(page.locator('.pv-selection-dialog')).toHaveCount(0);
+
+  // Then: AI quality is in the header, while approval sits beside the editable value.
+  await expect(rejectedCard.locator('.card-header-row .fidelity-indicator')).toBeVisible();
+  await expect(rejectedCard.locator('.card-header-row .entry-row-label')).toBeVisible();
+  await expect(rejectedCard.locator('.card-body .card-value-status .pv-warning-icon')).toBeVisible();
+  await expect(rejectedCard.locator('.card-body .pv-combobox-link')).toHaveText('adamantinoma');
+  await expect(rejectedCard.locator('.card-footer .original-context-value')).toHaveText('adamantinoma');
+  await expect(rejectedCard.locator('.card-footer .revert-btn')).toBeDisabled();
+  await expect(rejectedCard.locator('.target-value-label')).toHaveCount(0);
+  const cardGeometry = await rejectedCard.evaluate((card) => {
+    const body = card.querySelector('.card-body').getBoundingClientRect();
+    const rail = card.querySelector('.card-value-status').getBoundingClientRect();
+    const value = card.querySelector('.target-value-wrapper').getBoundingClientRect();
+    return { railHeight: rail.height, bodyHeight: body.height, railRight: rail.right, valueLeft: value.left };
+  });
+  expect(cardGeometry.railHeight).toBeCloseTo(cardGeometry.bodyHeight, 0);
+  expect(cardGeometry.railRight).toBeLessThanOrEqual(cardGeometry.valueLeft);
+  const valueComparison = await permittedCard.evaluate((card) => {
+    const current = card.querySelector('.pv-combobox-link');
+    const original = card.querySelector('.original-context-value');
+    const currentStyle = getComputedStyle(current);
+    const originalStyle = getComputedStyle(original);
+    return {
+      horizontalOffset: Math.abs(current.getBoundingClientRect().left - original.getBoundingClientRect().left),
+      currentFont: [currentStyle.fontFamily, currentStyle.fontSize, currentStyle.fontWeight, currentStyle.lineHeight],
+      originalFont: [originalStyle.fontFamily, originalStyle.fontSize, originalStyle.fontWeight, originalStyle.lineHeight],
+      originalHeight: original.clientHeight,
+      originalContentHeight: original.scrollHeight,
+    };
+  });
+  expect(valueComparison.horizontalOffset).toBeLessThan(2);
+  expect(valueComparison.originalFont).toEqual(valueComparison.currentFont);
+  expect(valueComparison.originalContentHeight).toBeLessThanOrEqual(valueComparison.originalHeight + 1);
+  const borderWidth = async () => rejectedCard.evaluate((card) => Number.parseFloat(getComputedStyle(card).borderLeftWidth));
+  expect(await borderWidth()).toBeGreaterThanOrEqual(4);
+  expect(await permittedCard.evaluate((card) => Number.parseFloat(getComputedStyle(card).borderLeftWidth)))
+    .toBeLessThan(4);
 
   // When: the reviewer focuses the status icon.
   await rejectedCard.locator('.pv-warning-icon').focus();
@@ -315,6 +356,17 @@ test('no-recommendation card warns when its displayed source value is not permis
   await expect(rejectedCard.locator('.pv-conformant-icon')).toBeHidden();
   await expect(permittedCard.locator('.pv-warning-icon')).toBeHidden();
   await expect(permittedCard.locator('.pv-conformant-icon')).toBeVisible();
+  // When: the reviewer hovers over the approved-value mark.
+  await permittedCard.locator('.pv-conformant-icon').hover();
+  // Then: it explains the status without acting like the value editor.
+  await expect(page.getByRole('tooltip')).toHaveText('The current value is in the approved list.');
+  await expect(page.locator('.pv-selection-dialog')).toHaveCount(0);
+  await page.mouse.move(0, 0);
+  await permittedCard.locator('.pv-conformant-icon').focus();
+  await expect(page.getByRole('tooltip')).toHaveText('The current value is in the approved list.');
+  expect(await permittedCard.locator('.pv-conformant-icon').evaluate((icon) => getComputedStyle(icon).cursor)).toBe('help');
+  await expect(page.locator('.pv-selection-dialog')).toHaveCount(0);
+  await page.keyboard.press('Escape');
   for (const card of await cards.all()) {
     const markerContent = await card.evaluate((element) => getComputedStyle(element, '::after').content);
     expect(markerContent).toBe('none');
@@ -332,7 +384,9 @@ test('no-recommendation card warns when its displayed source value is not permis
   // Then: the card becomes conformant, stays a no-recommendation card, and saves the override
   await expect(rejectedCard.locator('.pv-warning-icon')).toBeHidden();
   await expect(rejectedCard.locator('.pv-conformant-icon')).toBeVisible();
+  await expect(diagnosisTab.locator('.tab-review-warning')).toHaveCount(0);
   await expect(rejectedCard).toHaveClass(/no-recommendation/);
+  expect(await borderWidth()).toBeLessThan(4);
   expect(savedOverrides.overrides['8692'].col_0000.human_value).toBe('Carcinoma NOS');
   await expect(rejectedCard.locator('.card-result-note')).toHaveText('You changed the output.');
   await expect(rejectedCard.getByRole('button', { name: 'Restore original value' })).toBeEnabled();
@@ -343,6 +397,8 @@ test('no-recommendation card warns when its displayed source value is not permis
   // Then: the source and its warning return, with the correct no-match explanation.
   await expect(rejectedCard.locator('.pv-combobox-link')).toHaveText('adamantinoma');
   await expect(rejectedCard.locator('.pv-warning-icon')).toBeVisible();
+  await expect(diagnosisTab.locator('.tab-review-warning')).toBeVisible();
+  expect(await borderWidth()).toBeGreaterThanOrEqual(4);
   await expect(rejectedCard.locator('.card-result-note')).toHaveText('No match found. Source value kept. Choose an approved value.');
   await expect(page.locator('.pv-selection-dialog')).toHaveCount(0);
 
@@ -361,6 +417,14 @@ test('no-recommendation card warns when its displayed source value is not permis
     const bounds = await rejectedCard.boundingBox();
     expect(bounds.x).toBeGreaterThanOrEqual(0);
     expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+    const alignedSource = await permittedCard.evaluate((card) => ({
+      currentLeft: card.querySelector('.pv-combobox-link').getBoundingClientRect().left,
+      originalLeft: card.querySelector('.original-context-value').getBoundingClientRect().left,
+      originalHeight: card.querySelector('.original-context-value').clientHeight,
+      originalContentHeight: card.querySelector('.original-context-value').scrollHeight,
+    }));
+    expect(Math.abs(alignedSource.currentLeft - alignedSource.originalLeft)).toBeLessThan(2);
+    expect(alignedSource.originalContentHeight).toBeLessThanOrEqual(alignedSource.originalHeight + 1);
     await expect(rejectedCard.locator('.fidelity-indicator')).toBeVisible();
     await rejectedCard.locator('.pv-warning-icon').focus();
     await rejectedCard.locator('.fidelity-indicator').focus();
@@ -368,6 +432,8 @@ test('no-recommendation card warns when its displayed source value is not permis
     const tooltipBounds = await page.getByRole('tooltip').boundingBox();
     expect(tooltipBounds.x).toBeGreaterThanOrEqual(0);
     expect(tooltipBounds.x + tooltipBounds.width).toBeLessThanOrEqual(width);
+    await page.keyboard.press('Escape');
+    await page.mouse.move(0, 0);
     await page.screenshot({ path: testInfo.outputPath(`review-cards-${width}.png`) });
   }
 
@@ -392,6 +458,213 @@ test('no-recommendation card warns when its displayed source value is not permis
     expect(dimensions.radius).toBe('0px');
   }
   await rejectedCard.screenshot({ path: testInfo.outputPath('wrapped-value.png') });
+});
+
+test('column tabs flag only batches with values outside the approved list', async ({ page }) => {
+  const fileId = '0123456789abcdef0123456789abcdef';
+  const approved = Array.from({ length: 16 }, (_, index) => `Approved ${index + 1}`);
+  const transformation = (value, rowIndex, pvSetAvailable = true) => ({
+    originalValue: value,
+    harmonizedValue: null,
+    matchFidelity: 'none',
+    isChanged: false,
+    recommendationType: 'no_recommendation',
+    isPVConformant: pvSetAvailable && value !== 'Needs correction',
+    pvSetAvailable,
+    topSuggestions: [],
+    rowIndices: [rowIndex],
+    manualOverride: null,
+  });
+  const column = (key, label, index, transformations) => ({
+    columnKey: key,
+    columnLabel: label,
+    targetCdeKey: label,
+    targetCdeLabel: label,
+    sourceColumnIndex: index,
+    termCount: transformations.length,
+    termsWithChanges: 0,
+    transformations,
+  });
+
+  // Given: an unapproved value is in the second diagnosis batch, while
+  // another column is approved and a third has no approved list.
+  await page.route('**/stage-4/rows', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        columns: [
+          column('col_0000', 'diagnosis', 0, [
+            ...approved.map((value, index) => transformation(value, index + 1)),
+            transformation('Needs correction', 17),
+          ]),
+          column('col_0001', 'sample_type', 1, [transformation('Known type', 18)]),
+          column('col_0002', 'notes', 2, [transformation('Free text', 19, false)]),
+        ],
+        columnPVs: { col_0000: approved, col_0001: ['Known type'] },
+        totalOriginalRows: 19,
+        reviewState: null,
+      }),
+    });
+  });
+
+  // When: the reviewer opens the first diagnosis batch.
+  await page.goto(`/stage-4?file_id=${fileId}`);
+  await waitForReviewRows(page);
+
+  // Then: only the second diagnosis tab has the warning, even before it is opened.
+  const tabs = page.locator('.batch-progress-item.column-pill');
+  await expect(tabs).toHaveCount(4);
+  await expect(tabs).toContainText(['diagnosis (1/2)', 'diagnosis (2/2)', 'sample_type', 'notes']);
+  await expect(tabs.nth(0).locator('.tab-review-warning')).toHaveCount(0);
+  await expect(tabs.nth(1).locator('.tab-review-warning')).toBeVisible();
+  await expect(tabs.nth(1)).toHaveAttribute('aria-label', /values not in the approved list/);
+  await expect(tabs.nth(2).locator('.tab-review-warning')).toHaveCount(0);
+  await expect(tabs.nth(3).locator('.tab-review-warning')).toHaveCount(0);
+
+  // When: the reviewer opens the marked batch.
+  await tabs.nth(1).click();
+  // Then: its card shows the same unapproved-value condition.
+  await expect(page.locator('.row-cell.is-nonconformant')).toHaveCount(1);
+  await expect(page.locator('.pv-warning-icon')).toBeVisible();
+});
+
+test('Stage 4 shows large square marks for AI match quality', async ({ page }) => {
+  const fileId = '0123456789abcdef0123456789abcdef';
+  const matchCases = [
+    { fidelity: 'strong', original: 'Ductal carcinoma, NOS', current: 'Ductal Carcinoma NOS' },
+    { fidelity: 'partial', original: 'Unclassified tumor, malignant', current: 'Malignant Tumor' },
+    { fidelity: 'approximate', original: 'Adenocarcinoma, metastatic, NOS', current: 'Adenocarcinoma, Metastatic NOS' },
+    { fidelity: 'none', original: 'adamantinoma', current: null },
+    { fidelity: 'strong', original: 'Carcinoma, NOS', current: 'Carcinoma NOS' },
+  ];
+
+  // Given: Stage 4 has one result at each match-quality level.
+  await page.route('**/stage-4/rows', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        columns: [{
+          columnKey: 'col_0000',
+          columnLabel: 'diagnosis',
+          targetCdeKey: 'primary_diagnosis',
+          targetCdeLabel: 'primary_diagnosis',
+          sourceColumnIndex: 0,
+          termCount: 5,
+          termsWithChanges: 4,
+          transformations: matchCases.map((entry, index) => ({
+            originalValue: entry.original,
+            harmonizedValue: entry.current,
+            matchFidelity: entry.fidelity,
+            isChanged: entry.current !== null,
+            recommendationType: entry.current === null ? 'no_recommendation' : 'ai_changed',
+            isPVConformant: entry.current !== null,
+            pvSetAvailable: true,
+            topSuggestions: [],
+            rowIndices: [index],
+            manualOverride: null,
+          })),
+        }],
+        columnPVs: { col_0000: matchCases.map((entry) => entry.current).filter(Boolean) },
+        totalOriginalRows: 5,
+        reviewState: { review_state: { column_mode: { batch_size: 5 } } },
+      }),
+    });
+  });
+
+  // When: the reviewer opens the cards at desktop and phone widths.
+  await page.goto(`/stage-4?file_id=${fileId}`);
+  await waitForReviewRows(page);
+  const cards = page.locator('.column-mode-grid .row-cell');
+  await expect(cards).toHaveCount(5);
+  for (const width of [1600, 1300, 1120, 900, 650, 390, 320]) {
+    await page.setViewportSize({ width, height: 921 });
+
+    // Then: the selected grid size is a cap, and every card keeps usable text width.
+    const gridGeometry = await page.locator('.column-mode-grid').evaluate((grid) => {
+      const bounds = grid.getBoundingClientRect();
+      const cardBounds = [...grid.querySelectorAll('.row-cell')].map((card) => card.getBoundingClientRect());
+      return {
+        columns: cardBounds.filter((card) => Math.abs(card.top - cardBounds[0].top) < 1).length,
+        minCardWidth: Math.min(...cardBounds.map((card) => card.width)),
+        gridWidth: bounds.width,
+        rightEdge: Math.max(...cardBounds.map((card) => card.right)),
+        gridRight: bounds.right,
+      };
+    });
+    expect(gridGeometry.minCardWidth).toBeGreaterThanOrEqual(Math.min(260, gridGeometry.gridWidth) - 0.5);
+    expect(gridGeometry.rightEdge).toBeLessThanOrEqual(gridGeometry.gridRight + 1);
+    expect(gridGeometry.columns).toBeLessThanOrEqual(5);
+    if (width === 1600) expect(gridGeometry.columns).toBe(5);
+    if (width <= 390) expect(gridGeometry.columns).toBe(1);
+
+    // Then: filled square count encodes quality; no match keeps its distinct minus icon.
+    for (const [index, entry] of matchCases.entries()) {
+      const icon = cards.nth(index).locator('.fidelity-indicator');
+      await expect(icon).toHaveAttribute('aria-label', `${entry.fidelity} AI match`);
+      if (entry.fidelity === 'none') {
+        await expect(icon.locator('svg circle')).toHaveCount(1);
+        await expect(icon.locator('svg rect')).toHaveCount(0);
+        continue;
+      }
+      const buttonWidth = await icon.evaluate((element) => element.getBoundingClientRect().width);
+      expect(buttonWidth).toBeGreaterThanOrEqual(65);
+      const squares = await icon.locator('svg rect').evaluateAll((elements) => elements.map((element) => ({
+        left: element.getBoundingClientRect().left,
+        right: element.getBoundingClientRect().right,
+        width: element.getBoundingClientRect().width,
+        height: element.getBoundingClientRect().height,
+        opacity: Number.parseFloat(getComputedStyle(element).opacity),
+      })));
+      expect(squares).toHaveLength(3);
+      const filledSquares = { strong: 3, partial: 2, approximate: 1 }[entry.fidelity];
+      expect(squares.map((square) => square.opacity)).toEqual(
+        [0, 1, 2].map((squareIndex) => squareIndex < filledSquares ? 1 : 0.2),
+      );
+      for (const square of squares) {
+        expect(square.width).toBeGreaterThanOrEqual(11.5);
+        expect(square.height).toBeGreaterThanOrEqual(11.5);
+      }
+      expect(squares[1].left - squares[0].right).toBeGreaterThanOrEqual(5.5);
+      expect(squares[2].left - squares[1].right).toBeGreaterThanOrEqual(5.5);
+    }
+    if (width === 1120) {
+      const originalComparison = await cards.nth(2).evaluate((card) => {
+        const current = card.querySelector('.pv-combobox-link');
+        const original = card.querySelector('.original-context-value');
+        const restore = card.querySelector('.restore-control');
+        const firstWord = 'Adenocarcinoma';
+        const range = document.createRange();
+        range.setStart(original.firstChild, 0);
+        range.setEnd(original.firstChild, firstWord.length);
+        return {
+          offset: Math.abs(current.getBoundingClientRect().left - original.getBoundingClientRect().left),
+          restoreRight: restore.getBoundingClientRect().right,
+          originalLeft: original.getBoundingClientRect().left,
+          firstWordLines: range.getClientRects().length,
+        };
+      });
+      expect(originalComparison.offset).toBeLessThan(2);
+      expect(originalComparison.restoreRight).toBeLessThan(originalComparison.originalLeft);
+      expect(originalComparison.firstWordLines).toBe(1);
+    }
+  }
+
+  // When: the browser text size increases, the minimum card width increases with it.
+  await page.addStyleTag({ content: ':root { font-size: 20px; }' });
+  for (const width of [1300, 390]) {
+    await page.setViewportSize({ width, height: 921 });
+    // Then: wide screens scale the card minimum; narrow phones show one full-width card.
+    const scaledGeometry = await page.locator('.column-mode-grid').evaluate((grid) => ({
+      gridWidth: grid.getBoundingClientRect().width,
+      cardWidth: grid.querySelector('.row-cell').getBoundingClientRect().width,
+      rightEdge: Math.max(...[...grid.querySelectorAll('.row-cell')].map((card) => card.getBoundingClientRect().right)),
+      gridRight: grid.getBoundingClientRect().right,
+    }));
+    expect(scaledGeometry.cardWidth).toBeGreaterThanOrEqual(Math.min(325, scaledGeometry.gridWidth) - 0.5);
+    expect(scaledGeometry.rightEdge).toBeLessThanOrEqual(scaledGeometry.gridRight + 1);
+  }
 });
 
 test('Stage 4 shows server recovery detail with a Stage 3 link', async ({ page }) => {
@@ -1780,6 +2053,19 @@ test('an override for a repeated value reaches every matching row', async ({ pag
     has: page.locator('.original-context-value', { hasText: 'Foo' }),
   });
   await expect(card.locator('.entry-row-label')).toHaveText('60 rows');
+  const plainTextComparison = await card.evaluate((element) => {
+    const current = element.querySelector('.target-value-input');
+    const original = element.querySelector('.original-context-value');
+    const currentStyle = getComputedStyle(current);
+    const originalStyle = getComputedStyle(original);
+    return {
+      horizontalOffset: Math.abs(current.getBoundingClientRect().left - original.getBoundingClientRect().left),
+      currentFont: [currentStyle.fontFamily, currentStyle.fontSize, currentStyle.fontWeight, currentStyle.lineHeight],
+      originalFont: [originalStyle.fontFamily, originalStyle.fontSize, originalStyle.fontWeight, originalStyle.lineHeight],
+    };
+  });
+  expect(plainTextComparison.horizontalOffset).toBeLessThan(2);
+  expect(plainTextComparison.originalFont).toEqual(plainTextComparison.currentFont);
   // When: the row count is selected, only source context opens.
   await card.locator('.entry-row-label').click();
   // Then: the popup shows the matching source rows, not the value editor.
@@ -1828,6 +2114,12 @@ test('whitespace-significant terms remain distinct', async ({ page }) => {
   await page.selectOption('#reviewModeSelect', 'row');
   await page.click('#settingsCloseButton');
   const row = page.locator('.row-mode-row').first();
+  const rowCard = row.locator('.row-cell:has(.target-value-input)').first();
+  const rowAlignment = await rowCard.evaluate((element) => ({
+    currentLeft: element.querySelector('.target-value-input').getBoundingClientRect().left,
+    originalLeft: element.querySelector('.original-context-value').getBoundingClientRect().left,
+  }));
+  expect(Math.abs(rowAlignment.currentLeft - rowAlignment.originalLeft)).toBeLessThan(2);
   await row.locator('.target-value-input').fill('Quux');
   await page.waitForResponse((response) => response.url().includes('/stage-4/overrides') && response.ok());
 
@@ -2094,6 +2386,12 @@ test('autosave persists overrides and review settings across reloads', async ({ 
   await expect(page.locator('.row-mode-wrapper')).toBeVisible();
   const restoredInput = page.locator('.target-value-input').first();
   await expect(restoredInput).toHaveValue('Persisted');
+  const restoredCard = page.locator('.row-mode-wrapper .row-cell').first();
+  await expect(restoredCard.locator('.card-header-row .fidelity-indicator')).toBeVisible();
+  await expect(restoredCard.locator('.card-header-row .card-column-title')).toBeVisible();
+  await expect(restoredCard.locator('.card-body .card-neutral-status')).toBeVisible();
+  await expect(restoredCard).not.toHaveClass(/is-nonconformant/);
+  await expect(restoredCard.locator('.card-footer .revert-btn')).toBeEnabled();
   const version = loaded.headers().etag;
   expect(version).toBeTruthy();
   expect(legacyOverrideReads).toEqual([]);

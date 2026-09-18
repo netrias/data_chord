@@ -122,6 +122,12 @@
   white-space: nowrap;
 }
 
+.tab-review-warning {
+  color: var(--warning-600);
+  font-size: 1rem;
+  margin-left: var(--space-2);
+}
+
 .control-group {
   display: flex;
   flex-direction: column;
@@ -308,6 +314,7 @@
 
 /* Review table container */
 .review-table {
+  container: review-cards / inline-size;
   margin-top: var(--space-4);
   padding: 0 var(--space-4) var(--space-4);
   display: flex;
@@ -360,6 +367,8 @@
 
 /* Value card - clean flat card with subtle shadow */
 .row-cell {
+  --card-status-rail-width: 3.25rem;
+  --card-edit-icon-width: 0.875rem;
   border-radius: var(--radius-2xl);
   border: 1px solid var(--gray-200);
   padding: 0;
@@ -394,7 +403,8 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-1) var(--space-4);
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
   background: var(--gray-50);
   border-bottom: 1px solid var(--gray-100);
   border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
@@ -403,11 +413,15 @@
 .card-column-title {
   font-size: 0.85rem;
   font-weight: 600;
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 
 .card-value-status {
-  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid var(--gray-200);
 }
 
 .card-icon.card-neutral-status {
@@ -415,15 +429,17 @@
   font-size: 0.75rem;
 }
 
-.card-review-meta {
+.card-footer {
   margin-top: auto;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-1) var(--space-4);
+  display: grid;
+  grid-template-columns: var(--card-status-rail-width) minmax(0, 1fr);
+  min-width: 0;
   border-top: 1px solid var(--gray-100);
+}
+
+/* A free-text input has padding and a pencil before its text. Match that text edge. */
+.row-cell:has(.target-value-input) .original-context {
+  padding-left: calc(var(--space-4) + var(--space-3) + var(--card-edit-icon-width) + var(--space-2) + 1px);
 }
 
 .card-result-note {
@@ -433,16 +449,33 @@
   line-height: 1.5;
 }
 
-.fidelity-indicator {
+.card-icon.fidelity-indicator {
   flex-shrink: 0;
   color: var(--gray-500);
+  width: 4.125rem;
+  height: 2.5rem;
+}
+
+.fidelity-indicator:not(.fidelity-none) svg {
+  width: 3.375rem;
+  height: 1.5rem;
+}
+
+.card-icon.fidelity-none {
+  width: 2.5rem;
+}
+
+.fidelity-indicator svg rect {
+  fill: currentColor;
+  stroke: none;
 }
 
 .entry-row-label {
-  padding: 0.9rem 2.25rem;
+  padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-full);
   transition: transform var(--transition-fast), opacity var(--transition-fast);
   margin-left: auto;
+  flex-shrink: 0;
   border: 0;
   background: transparent;
   font-size: 0.75rem;
@@ -473,52 +506,60 @@
   box-shadow: var(--shadow-md);
 }
 
-/* ==========================================================================
-   Card Body - Compact layout with original context and target value
-   ========================================================================== */
+/* The status rail owns a fixed column; the editable value owns the rest. */
 
 .card-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4) var(--space-4);
+  display: grid;
+  grid-template-columns: var(--card-status-rail-width) minmax(0, 1fr);
+  min-height: 8.5rem;
+  flex: 1;
 }
 
-/* Original context - label above, value below */
+.card-current-value {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-4);
+}
+
 .original-context {
+  grid-column: 2;
+  grid-row: 1;
   position: relative;
-  font-size: 0.85rem;
+  min-width: 0;
+  padding: var(--space-2) var(--space-4);
   line-height: 1.4;
+}
+
+.restore-control {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid var(--gray-200);
 }
 
 .original-context-label {
   display: block;
   color: var(--gray-400);
+  font-size: 0.85rem;
   font-weight: 500;
   margin-bottom: var(--space-1);
 }
 
 .original-context-value {
-  color: var(--gray-600);
-  font-weight: 500;
-  /* Allow wrapping up to 3 lines, truncate beyond */
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  display: block;
+  color: var(--gray-900);
+  overflow-wrap: anywhere;
 }
 
 /* Whitespace markers — visible middle dots for leading/trailing spaces */
 .ws-marker {
   color: var(--gray-400);
   opacity: 0.7;
-}
-
-/* Target value label - matches original context styling */
-.target-value-label {
-  color: var(--gray-400);
-  font-weight: 500;
-  font-size: 0.85rem;
 }
 
 .card-icon {
@@ -560,11 +601,12 @@
   outline-offset: 3px;
 }
 
-/* Target value wrapper - label above, input below */
+/* Keep both editor forms inside the flexible value pane. */
 .target-value-wrapper {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  min-width: 0;
 }
 
 .target-value {
@@ -597,8 +639,8 @@
 }
 
 .target-value-icon {
-  width: 0.875rem;
-  height: 0.875rem;
+  width: var(--card-edit-icon-width);
+  height: var(--card-edit-icon-width);
   flex-shrink: 0;
   fill: var(--gray-400);
 }
@@ -609,8 +651,6 @@
   border: none;
   padding: 0;
   background: transparent;
-  font-size: 0.9rem;
-  font-weight: 500;
   color: var(--gray-900);
 }
 
@@ -623,7 +663,7 @@
   font-weight: 400;
 }
 
-/* Column mode - configurable grid layout via --grid-columns CSS variable */
+/* Keep the chosen grid size as a cap, but leave each card room for its value. */
 .column-mode-grid {
   --grid-columns: 5;
   display: grid;
@@ -631,19 +671,26 @@
   gap: var(--space-4);
 }
 
-@media (max-width: 1100px) {
+/* Fit 16.25rem cards plus 1rem gaps; below one card width, fill the viewport. */
+@container review-cards (max-width: 85.25rem) {
+  .column-mode-grid {
+    --visible-columns: 4;
+  }
+}
+
+@container review-cards (max-width: 68rem) {
   .column-mode-grid {
     --visible-columns: 3;
   }
 }
 
-@media (max-width: 850px) {
+@container review-cards (max-width: 50.75rem) {
   .column-mode-grid {
     --visible-columns: 2;
   }
 }
 
-@media (max-width: 600px) {
+@container review-cards (max-width: 33.5rem) {
   .column-mode-grid {
     --visible-columns: 1;
   }
@@ -690,7 +737,19 @@
   position: relative;
 }
 
-/* PV status icons in the card header */
+/* The border describes the displayed value, not the original AI result. */
+.row-cell.is-nonconformant,
+.row-cell.is-nonconformant:hover {
+  border: 1px solid var(--warning-600);
+  border-left-width: 5px;
+  background: var(--white);
+}
+
+.row-cell.is-nonconformant .card-value-status {
+  background: var(--warning-50);
+}
+
+/* PV status icons remain next to the value as that value wraps. */
 .pv-warning-icon,
 .pv-conformant-icon {
   display: inline-flex;
@@ -710,6 +769,7 @@
 
 .pv-conformant-icon {
   color: var(--netrias-600);
+  cursor: help;
 }
 
 /* Card control tooltips use fixed positioning outside card stacking contexts. */
@@ -750,8 +810,6 @@
   color: var(--azure-600);
   text-decoration: underline;
   cursor: pointer;
-  font-size: 1rem;
-  font-weight: 600;
   display: block;
   border-radius: 0;
   max-width: 100%;
@@ -764,6 +822,16 @@
 
 .pv-combobox-link:hover {
   color: var(--azure-700);
+}
+
+/* Source and current values use the same type for direct comparison. */
+.original-context-value,
+.target-value-input,
+.pv-combobox-link {
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.4;
 }
 
 /* Remove bounding box when combobox is present */

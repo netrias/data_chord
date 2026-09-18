@@ -407,6 +407,10 @@ const recordOverrideForRows = (rowIndices, columnKey, humanValue, originalValue)
     }
   }
   scheduleOverrideSave();
+  // Free-text columns cannot change an approved-list cue and can save on each keystroke.
+  if (state.reviewMode === 'column' && !state.scrollMode && state.columnPVs[columnKey]?.length) {
+    renderProgressPillsUI(getCurrentBatchMeta());
+  }
 };
 
 /**
@@ -477,7 +481,7 @@ const renderProgressPillsUI = (batchMeta) => {
   };
 
   if (state.reviewMode === 'column') {
-    renderColumnBatchProgress(batchProgressList, batchMeta, modeState.currentUnit, onUnitClick);
+    renderColumnBatchProgress(batchProgressList, batchMeta, modeState.currentUnit, onUnitClick, state.pendingOverrides, state.columnPVs);
   } else {
     renderRowBatchProgress(batchProgressList, batchMeta, modeState.currentUnit, onUnitClick);
   }
