@@ -10,6 +10,7 @@ import {
   cellNeedsReview,
   createEmptyState,
   createValueCard,
+  getEntryCardState,
   renderProgressPills,
   formatRowReference,
   cleanupCards,
@@ -244,10 +245,25 @@ export const renderEntries = (container, batchMeta, pendingOverrides, onOverride
  * @param {number} currentUnit - Current unit index
  * @param {Function} onUnitClick - Callback when unit is clicked
  */
-export const renderBatchProgress = (container, batchMeta, currentUnit, onUnitClick) => {
+export const renderBatchProgress = (container, batchMeta, currentUnit, onUnitClick, pendingOverrides, columnPVs) => {
+  const pvSets = new Map();
+  const summaries = batchMeta.summaries.map((summary) => {
+    if (!pvSets.has(summary.columnKey)) {
+      const values = columnPVs?.[summary.columnKey];
+      pvSets.set(summary.columnKey, values ? new Set(values) : null);
+    }
+    const pvSet = pvSets.get(summary.columnKey);
+    const hasUnapprovedValues = summary.sortedEntries
+      .slice(summary.startEntry, summary.endEntry)
+      .some((entry) => getEntryCardState(
+        { ...entry, columnKey: summary.columnKey }, pendingOverrides, pvSet,
+      ).displayState.showWarningIcon);
+    return { ...summary, hasUnapprovedValues };
+  });
+
   renderProgressPills({
     container,
-    summaries: batchMeta.summaries,
+    summaries,
     currentUnit,
     onUnitClick,
     isColumnMode: true,

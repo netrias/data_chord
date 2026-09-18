@@ -287,6 +287,25 @@ const _getInputValue = (entry, pendingOverrides) => {
   return existingOverride?.human_value ?? '';
 };
 
+/** Derive the current card state for both the card and its column tab. */
+export const getEntryCardState = (entry, pendingOverrides, pvSet) => {
+  const overrideValue = _getInputValue(entry, pendingOverrides);
+  const baselineValue = entry.recommendationType === RECOMMENDATION_TYPE.NO_RECOMMENDATION
+    ? (entry.originalValue ?? '')
+    : (entry.harmonizedValue ?? entry.originalValue ?? '');
+
+  return {
+    baselineValue,
+    overrideValue,
+    displayState: determineCardState({
+      baselineValue,
+      overrideValue,
+      hasPVs: entry.pvSetAvailable,
+      pvSet,
+    }),
+  };
+};
+
 /**
  * Build compact card HTML with original context and target value input.
  * The input IS the primary display - it shows the current effective value.
@@ -724,24 +743,11 @@ export const createValueCard = (config) => {
   card.className = _buildCardClasses(entry);
 
   const columnLabel = entry.columnLabel ?? entry.columnKey ?? '';
-  const overrideValue = _getInputValue(entry, pendingOverrides);
-
-  // The baseline is the model result, or the source when no recommendation exists.
-  const isNoRecommendation = entry.recommendationType === RECOMMENDATION_TYPE.NO_RECOMMENDATION;
-  const baselineValue = isNoRecommendation
-    ? (entry.originalValue ?? '')
-    : (entry.harmonizedValue ?? entry.originalValue ?? '');
-
   const fidelityTooltip = FIDELITY_TOOLTIPS[entry.matchFidelity] ?? '';
 
   const pvValues = columnPVs?.[entry.columnKey];
   const pvSet = pvValues ? new Set(pvValues) : null;
-  const initialState = determineCardState({
-    baselineValue,
-    overrideValue,
-    hasPVs: entry.pvSetAvailable,
-    pvSet,
-  });
+  const { baselineValue, overrideValue, displayState: initialState } = getEntryCardState(entry, pendingOverrides, pvSet);
 
   card.innerHTML = _buildCardHTML({
     columnLabel,
@@ -813,7 +819,16 @@ const _createProgressPill = (params) => {
   pill.className = pillClasses.join(' ');
 
   pill.textContent = getLabelForSummary(summary);
-  pill.setAttribute('aria-label', getAriaLabelForSummary(summary, status));
+  const label = getAriaLabelForSummary(summary, status);
+  pill.setAttribute('aria-label', summary.hasUnapprovedValues ? `${label}; values not in the approved list` : label);
+  if (summary.hasUnapprovedValues) {
+    const warning = document.createElement('span');
+    warning.className = 'tab-review-warning';
+    warning.setAttribute('aria-hidden', 'true');
+    warning.textContent = '⚠';
+    pill.append(warning);
+    pill.title = 'This tab has values not in the approved list.';
+  }
 
   pill.addEventListener('click', () => {
     if (summary.unitIndex !== currentUnit) {

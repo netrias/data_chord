@@ -296,9 +296,12 @@ test('no-recommendation card warns when its displayed source value is not permis
   const cards = page.locator('.row-cell.no-recommendation');
   const rejectedCard = cards.filter({ has: page.locator('.original-context-value', { hasText: 'adamantinoma' }) });
   const permittedCard = cards.filter({ has: page.locator('.original-context-value', { hasText: longOriginal }) });
+  const diagnosisTab = page.locator('.batch-progress-item.column-pill');
 
   // Then: each displayed source has one clear conformance state and no question marker
   await expect(cards).toHaveCount(2);
+  await expect(diagnosisTab).toHaveAttribute('aria-label', /values not in the approved list/);
+  await expect(diagnosisTab.locator('.tab-review-warning')).toBeVisible();
   await expect(rejectedCard.locator('.pv-combobox-link')).toHaveText('adamantinoma');
   await expect(rejectedCard.locator('.pv-warning-icon')).toBeVisible();
   await expect(rejectedCard.locator('.card-result-note')).toHaveText('No match found. Source value kept. Choose an approved value.');
@@ -353,6 +356,17 @@ test('no-recommendation card warns when its displayed source value is not permis
   await expect(rejectedCard.locator('.pv-conformant-icon')).toBeHidden();
   await expect(permittedCard.locator('.pv-warning-icon')).toBeHidden();
   await expect(permittedCard.locator('.pv-conformant-icon')).toBeVisible();
+  // When: the reviewer hovers over the approved-value mark.
+  await permittedCard.locator('.pv-conformant-icon').hover();
+  // Then: it explains the status without acting like the value editor.
+  await expect(page.getByRole('tooltip')).toHaveText('The current value is in the approved list.');
+  await expect(page.locator('.pv-selection-dialog')).toHaveCount(0);
+  await page.mouse.move(0, 0);
+  await permittedCard.locator('.pv-conformant-icon').focus();
+  await expect(page.getByRole('tooltip')).toHaveText('The current value is in the approved list.');
+  expect(await permittedCard.locator('.pv-conformant-icon').evaluate((icon) => getComputedStyle(icon).cursor)).toBe('help');
+  await expect(page.locator('.pv-selection-dialog')).toHaveCount(0);
+  await page.keyboard.press('Escape');
   for (const card of await cards.all()) {
     const markerContent = await card.evaluate((element) => getComputedStyle(element, '::after').content);
     expect(markerContent).toBe('none');
@@ -370,6 +384,7 @@ test('no-recommendation card warns when its displayed source value is not permis
   // Then: the card becomes conformant, stays a no-recommendation card, and saves the override
   await expect(rejectedCard.locator('.pv-warning-icon')).toBeHidden();
   await expect(rejectedCard.locator('.pv-conformant-icon')).toBeVisible();
+  await expect(diagnosisTab.locator('.tab-review-warning')).toHaveCount(0);
   await expect(rejectedCard).toHaveClass(/no-recommendation/);
   expect(await borderWidth()).toBeLessThan(4);
   expect(savedOverrides.overrides['8692'].col_0000.human_value).toBe('Carcinoma NOS');
@@ -382,6 +397,7 @@ test('no-recommendation card warns when its displayed source value is not permis
   // Then: the source and its warning return, with the correct no-match explanation.
   await expect(rejectedCard.locator('.pv-combobox-link')).toHaveText('adamantinoma');
   await expect(rejectedCard.locator('.pv-warning-icon')).toBeVisible();
+  await expect(diagnosisTab.locator('.tab-review-warning')).toBeVisible();
   expect(await borderWidth()).toBeGreaterThanOrEqual(4);
   await expect(rejectedCard.locator('.card-result-note')).toHaveText('No match found. Source value kept. Choose an approved value.');
   await expect(page.locator('.pv-selection-dialog')).toHaveCount(0);
@@ -442,6 +458,75 @@ test('no-recommendation card warns when its displayed source value is not permis
     expect(dimensions.radius).toBe('0px');
   }
   await rejectedCard.screenshot({ path: testInfo.outputPath('wrapped-value.png') });
+});
+
+test('column tabs flag only batches with values outside the approved list', async ({ page }) => {
+  const fileId = '0123456789abcdef0123456789abcdef';
+  const approved = Array.from({ length: 16 }, (_, index) => `Approved ${index + 1}`);
+  const transformation = (value, rowIndex, pvSetAvailable = true) => ({
+    originalValue: value,
+    harmonizedValue: null,
+    matchFidelity: 'none',
+    isChanged: false,
+    recommendationType: 'no_recommendation',
+    isPVConformant: pvSetAvailable && value !== 'Needs correction',
+    pvSetAvailable,
+    topSuggestions: [],
+    rowIndices: [rowIndex],
+    manualOverride: null,
+  });
+  const column = (key, label, index, transformations) => ({
+    columnKey: key,
+    columnLabel: label,
+    targetCdeKey: label,
+    targetCdeLabel: label,
+    sourceColumnIndex: index,
+    termCount: transformations.length,
+    termsWithChanges: 0,
+    transformations,
+  });
+
+  // Given: an unapproved value is in the second diagnosis batch, while
+  // another column is approved and a third has no approved list.
+  await page.route('**/stage-4/rows', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        columns: [
+          column('col_0000', 'diagnosis', 0, [
+            ...approved.map((value, index) => transformation(value, index + 1)),
+            transformation('Needs correction', 17),
+          ]),
+          column('col_0001', 'sample_type', 1, [transformation('Known type', 18)]),
+          column('col_0002', 'notes', 2, [transformation('Free text', 19, false)]),
+        ],
+        columnPVs: { col_0000: approved, col_0001: ['Known type'] },
+        totalOriginalRows: 19,
+        reviewState: null,
+      }),
+    });
+  });
+
+  // When: the reviewer opens the first diagnosis batch.
+  await page.goto(`/stage-4?file_id=${fileId}`);
+  await waitForReviewRows(page);
+
+  // Then: only the second diagnosis tab has the warning, even before it is opened.
+  const tabs = page.locator('.batch-progress-item.column-pill');
+  await expect(tabs).toHaveCount(4);
+  await expect(tabs).toContainText(['diagnosis (1/2)', 'diagnosis (2/2)', 'sample_type', 'notes']);
+  await expect(tabs.nth(0).locator('.tab-review-warning')).toHaveCount(0);
+  await expect(tabs.nth(1).locator('.tab-review-warning')).toBeVisible();
+  await expect(tabs.nth(1)).toHaveAttribute('aria-label', /values not in the approved list/);
+  await expect(tabs.nth(2).locator('.tab-review-warning')).toHaveCount(0);
+  await expect(tabs.nth(3).locator('.tab-review-warning')).toHaveCount(0);
+
+  // When: the reviewer opens the marked batch.
+  await tabs.nth(1).click();
+  // Then: its card shows the same unapproved-value condition.
+  await expect(page.locator('.row-cell.is-nonconformant')).toHaveCount(1);
+  await expect(page.locator('.pv-warning-icon')).toBeVisible();
 });
 
 test('Stage 4 shows large square marks for AI match quality', async ({ page }) => {

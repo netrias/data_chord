@@ -122,6 +122,12 @@
   white-space: nowrap;
 }
 
+.tab-review-warning {
+  color: var(--warning-600);
+  font-size: 1rem;
+  margin-left: var(--space-2);
+}
+
 .control-group {
   display: flex;
   flex-direction: column;
@@ -763,6 +769,7 @@
 
 .pv-conformant-icon {
   color: var(--netrias-600);
+  cursor: help;
 }
 
 /* Card control tooltips use fixed positioning outside card stacking contexts. */
