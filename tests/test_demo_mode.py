@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Generator
+from io import BytesIO
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -100,7 +102,7 @@ async def test_demo_workflow_reaches_review_without_a_model_provider(
     )
     from backend.app.main import create_app
 
-    # When the normal Stage 1 through Stage 4 APIs process the demo.
+    # When the normal Stage 1 through Stage 5 APIs process the demo.
     async with AsyncClient(
         transport=ASGITransport(app=create_app()),
         base_url="http://test",
@@ -133,8 +135,16 @@ async def test_demo_workflow_reaches_review_without_a_model_provider(
             "/stage-4/rows",
             json={"file_id": str(DEMO_WORKFLOW_ID)},
         )
+        summary = await client.post(
+            "/stage-5/summary",
+            json={"file_id": str(DEMO_WORKFLOW_ID)},
+        )
+        download = await client.post(
+            "/stage-5/download",
+            json={"file_id": str(DEMO_WORKFLOW_ID)},
+        )
 
-    # Then fixed mappings and harmonizations reach a real review result.
+    # Then fixed mappings and harmonizations reach review and a complete download.
     assert analysis.status_code == 200, analysis.text
     targets = analysis.json()["cde_targets"]
     assert [targets[f"col_{index:04d}"][0]["target"] for index in range(4)] == [
@@ -146,3 +156,12 @@ async def test_demo_workflow_reaches_review_without_a_model_provider(
     assert job["status"] == "succeeded"
     assert review.status_code == 200, review.text
     assert review.json()["totalOriginalRows"] == 3
+    assert summary.status_code == 200, summary.text
+    assert download.status_code == 200, download.text
+    assert download.headers["content-type"] == "application/zip"
+    with ZipFile(BytesIO(download.content)) as archive:
+        names = archive.namelist()
+    assert len(names) == 3
+    assert any(name.endswith(".csv") for name in names)
+    assert any(name.endswith("_manifest.json") for name in names)
+    assert any(name.endswith("_cde_mapping.json") for name in names)

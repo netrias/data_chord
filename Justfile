@@ -61,8 +61,20 @@ app:
 app-reload:
 	DEV_MODE=true uv run uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload --reload-exclude .venv
 
-demo:
+# Compatibility alias for the isolated container demo.
+demo: demo-docker
+
+# Build and run the current working tree in a disposable Docker container.
+demo-docker:
 	bash scripts/run_demo.sh
+
+# Run the current working tree with reload from the synchronized local environment.
+demo-local:
+	@if [ ! -x "${UV_PROJECT_ENVIRONMENT:-.venv}/bin/python" ]; then \
+		echo "The local demo needs a synchronized environment. Run 'just sync' first." >&2; \
+		exit 1; \
+	fi
+	"${UV_PROJECT_ENVIRONMENT:-.venv}/bin/python" -m scripts.run_demo_local
 
 js-test:
 	npm test

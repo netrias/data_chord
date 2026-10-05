@@ -21,23 +21,53 @@ and the column-mapping audit document.
 
 ## Run the demo
 
-The demo needs Docker, `just`, and read access to the private harmonization
-library through an existing GitHub CLI sign-in. It does not need an `.env`
+Choose the demo that matches the work you are doing:
+
+| Command | Use it for | Needs Docker | Reloads working-tree changes |
+| --- | --- | --- | --- |
+| `just demo-local` | Fast application and design iteration | No | Yes |
+| `just demo-docker` | Checking the complete container build | Yes | No |
+| `just demo` | Compatibility alias for `demo-docker` | Yes | No |
+
+Both demos open Stage 1 with the same packaged sample file and synthetic
+reference data. The sample is already selected and cannot be changed. Use the
+normal five stages to review its fixed mappings, correct the remaining
+unmatched value, and download the final ZIP file. Neither demo needs an `.env`
 file, AWS credentials, Bedrock, or a database service.
 
-From the repository root, run:
+### Run directly from the working tree
+
+Install the locked development environment once, then start the local demo:
 
 ```bash
-just demo
+just sync
+just demo-local
 ```
 
-The command builds one local image, starts a disposable container, and opens
-Stage 1 in your browser. The sample file is already selected and cannot be
-changed. Use the normal five stages to review its fixed mappings, correct the
-remaining unmatched value, and download the final ZIP file.
+The first sync needs read access to the private harmonization library. The
+local demo does not install or update packages when it starts. It runs the
+current working tree with reload, creates temporary demo data, and removes that
+data after all server processes stop. Press `Ctrl+C` to stop it.
 
-Press `Ctrl+C` to stop the demo. The container and its workflow data are then
-removed. A later run starts a new demo.
+### Run the Docker image
+
+The Docker demo needs Docker, `just`, and read access to the private
+harmonization library through an existing GitHub CLI sign-in:
+
+```bash
+just demo-docker
+```
+
+The command builds the current working tree, starts a disposable container,
+and opens Stage 1. Docker layer caching keeps repeat builds fast. Press
+`Ctrl+C` to stop the demo and remove the container and its workflow data.
+
+Set another host port when port 8000 is in use:
+
+```bash
+DATA_CHORD_DEMO_PORT=8010 just demo-local
+DATA_CHORD_DEMO_PORT=8011 just demo-docker
+```
 
 ## Use Data Chord
 
