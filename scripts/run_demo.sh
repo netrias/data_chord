@@ -3,13 +3,23 @@ set -euo pipefail
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 commit_id="$(git -C "$repository_root" rev-parse --short=12 HEAD)"
-image="data-chord-demo:${commit_id}"
 container="data-chord-demo-$$"
+image="${container}:${commit_id}"
 port="${DATA_CHORD_DEMO_PORT:-8000}"
 url="http://127.0.0.1:${port}/stage-1"
 
+if ! command -v docker >/dev/null 2>&1; then
+  echo "The Docker demo needs Docker. Install and start Docker, then run 'just demo-docker' again." >&2
+  exit 1
+fi
+if ! docker info >/dev/null 2>&1; then
+  echo "The Docker demo cannot reach the Docker service. Start Docker, then run 'just demo-docker' again." >&2
+  exit 1
+fi
+
 _stop_demo() {
   docker stop "$container" >/dev/null 2>&1 || true
+  docker image rm "$image" >/dev/null 2>&1 || true
 }
 
 _stop_demo_and_exit() {
@@ -20,23 +30,22 @@ _stop_demo_and_exit() {
 trap _stop_demo EXIT
 trap _stop_demo_and_exit INT TERM
 
-if ! docker image inspect "$image" >/dev/null 2>&1; then
-  demo_github_token="${GITHUB_TOKEN:-}"
-  if [[ -z "$demo_github_token" ]] && command -v gh >/dev/null 2>&1; then
-    demo_github_token="$(gh auth token 2>/dev/null || true)"
-  fi
-  if [[ -z "$demo_github_token" ]]; then
-    echo "The first demo build needs GitHub access to the private harmonization library."
-    echo "Sign in with 'gh auth login', then run 'just demo' again."
-    exit 1
-  fi
-  export DATA_CHORD_DEMO_GITHUB_TOKEN="$demo_github_token"
-  docker build \
-    --secret id=github_token,env=DATA_CHORD_DEMO_GITHUB_TOKEN \
-    --tag "$image" \
-    "$repository_root"
-  unset DATA_CHORD_DEMO_GITHUB_TOKEN
+demo_github_token="${GITHUB_TOKEN:-}"
+if [[ -z "$demo_github_token" ]] && command -v gh >/dev/null 2>&1; then
+  demo_github_token="$(gh auth token 2>/dev/null || true)"
 fi
+if [[ -z "$demo_github_token" ]]; then
+  echo "The Docker demo build needs GitHub access to the private harmonization library."
+  echo "Sign in with 'gh auth login', then run 'just demo-docker' again."
+  exit 1
+fi
+export DATA_CHORD_DEMO_GITHUB_TOKEN="$demo_github_token"
+echo "Building the current working tree for the Docker demo."
+docker build \
+  --secret id=github_token,env=DATA_CHORD_DEMO_GITHUB_TOKEN \
+  --tag "$image" \
+  "$repository_root"
+unset DATA_CHORD_DEMO_GITHUB_TOKEN
 
 docker run \
   --rm \
