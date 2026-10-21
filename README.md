@@ -91,7 +91,7 @@ This option runs the hosted data profile on your computer. It is for licensed
 users who have:
 
 - Git, the [GitHub CLI](https://cli.github.com/), and
-  [uv](https://docs.astral.sh/uv/);
+  [uv](https://docs.astral.sh/uv/) 0.13.4 or later;
 - Python 3.13 or later;
 - read access to `netrias/data_chord` and the private
   `netrias/agentic_harmonization` repository;

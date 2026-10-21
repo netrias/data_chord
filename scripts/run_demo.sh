@@ -41,7 +41,7 @@ if [[ -z "$demo_github_token" ]]; then
 fi
 export DATA_CHORD_DEMO_GITHUB_TOKEN="$demo_github_token"
 echo "Building the current working tree for the Docker demo."
-docker build \
+docker build --pull --no-cache \
   --secret id=github_token,env=DATA_CHORD_DEMO_GITHUB_TOKEN \
   --tag "$image" \
   "$repository_root"
