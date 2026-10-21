@@ -136,9 +136,14 @@ uv sync --frozen
 
 ## Develop Data Chord
 
-Development also needs [just](https://github.com/casey/just), Node.js 24.5 or
-later, and npm 11.10 or later. Keep your development branch checked out instead
-of a version tag.
+Development also needs [just](https://github.com/casey/just), Node.js 24 LTS
+(24.22.1 or later in the 24.x line), and npm 11.10 or later. Keep your
+development branch checked out instead of a version tag. CI uses the exact
+Node version in `.nvmrc`; with nvm, run `nvm install` and `nvm use` from the
+repository root to match it. Node 25 and later are outside the supported range.
+
+The Node 24.22.1 minimum includes the
+[October 2026 security fixes](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases).
 
 From the repository root, install the locked Python and JavaScript dependencies
 and create your local configuration:
