@@ -23,6 +23,15 @@ from src.storage import UploadConstraints, UploadStorage
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
+
+@pytest.fixture(autouse=True)
+def _ignore_local_data_model_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A developer's .env is loaded into the environment at import, and pointing
+    # it at a Data Model Store changes which reference source the app selects.
+    # Tests assert on the default source, so they must not inherit that choice.
+    monkeypatch.delenv("DATA_CHORD_DMS_URL", raising=False)
+    monkeypatch.delenv("DATA_CHORD_DMS_API_KEY", raising=False)
+
 # Test constants
 TEST_CSV_CONTENT_TYPE = "text/csv"
 TEST_TSV_CONTENT_TYPE = "text/tab-separated-values"

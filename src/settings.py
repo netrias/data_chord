@@ -54,6 +54,10 @@ _DATA_CHORD_HARMONIZATION_METHOD_VAR = "DATA_CHORD_HARMONIZATION_METHOD"
 _DATA_CHORD_API_KEY_VAR = "DATA_CHORD_API_KEY"
 _DATA_CHORD_MAX_ACTIVE_JOBS_VAR = "DATA_CHORD_MAX_ACTIVE_JOBS"
 _DATA_CHORD_REFERENCE_TABLE_VAR = "DATA_CHORD_REFERENCE_TABLE"
+# Set both to read reference data from the Data Model Store API instead of the
+# reference table. Unset, nothing changes.
+_DATA_CHORD_DMS_URL_VAR = "DATA_CHORD_DMS_URL"
+_DATA_CHORD_DMS_API_KEY_VAR = "DATA_CHORD_DMS_API_KEY"
 _DATA_CHORD_HARMONIZATION_CACHE_TABLE_VAR = "DATA_CHORD_HARMONIZATION_CACHE_TABLE"
 _DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE_VAR = "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE"
 _AWS_REGION_VAR = "AWS_REGION"
@@ -226,6 +230,19 @@ def get_reference_table_name() -> str:
     return table_name
 
 
+def get_data_model_store_api() -> tuple[str, str] | None:
+    """None keeps the reference table; both are required together, as a URL alone 403s later."""
+    url = os.getenv(_DATA_CHORD_DMS_URL_VAR, "").strip()
+    api_key = os.getenv(_DATA_CHORD_DMS_API_KEY_VAR, "").strip()
+    if not url and not api_key:
+        return None
+    if not url or not api_key:
+        raise ConfigurationError(
+            f"{_DATA_CHORD_DMS_URL_VAR} and {_DATA_CHORD_DMS_API_KEY_VAR} must be set together"
+        )
+    return url, api_key
+
+
 def get_harmonization_cache_table_name() -> str:
     table_name = os.getenv(_DATA_CHORD_HARMONIZATION_CACHE_TABLE_VAR, "").strip()
     if not table_name:
@@ -248,6 +265,23 @@ def get_expected_alb_arn() -> str | None:
     return arn or None
 
 
+def _validate_hosted_config() -> None:
+    # The reference table is only required when it is the reference source.
+    # Pointing at the Data Model Store replaces it, so demanding a table name
+    # would be asking for something the app will never read.
+    if get_data_model_store_api() is None:
+        get_reference_table_name()
+    get_harmonization_cache_table_name()
+    get_cde_recommendation_cache_table_name()
+
+    if get_storage_backend() is StorageBackend.S3:
+        bucket = get_workflow_s3_bucket()
+        if bucket is None or not bucket.strip():
+            raise ConfigurationError(
+                f"{_DATA_CHORD_S3_BUCKET_VAR} is required when {_DATA_CHORD_STORAGE_VAR}={StorageBackend.S3.value}"
+            )
+
+
 def validate_required_config() -> None:
     """Validate all runtime configuration before service clients are created."""
     get_harmonization_method()
@@ -264,17 +298,7 @@ def validate_required_config() -> None:
         if not database.is_file():
             raise ConfigurationError(f"Portable reference database does not exist: {database}")
     else:
-        get_reference_table_name()
-        get_harmonization_cache_table_name()
-        get_cde_recommendation_cache_table_name()
-
-        storage_backend = get_storage_backend()
-        if storage_backend is StorageBackend.S3:
-            bucket = get_workflow_s3_bucket()
-            if bucket is None or not bucket.strip():
-                raise ConfigurationError(
-                    f"{_DATA_CHORD_S3_BUCKET_VAR} is required when {_DATA_CHORD_STORAGE_VAR}={StorageBackend.S3.value}"
-                )
+        _validate_hosted_config()
 
     get_agentic_workers()
     get_programmatic_api_key()

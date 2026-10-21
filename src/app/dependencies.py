@@ -23,6 +23,7 @@ from src.integrations.bedrock_cde_ranker import (
     BedrockCandidateRankerConfig,
 )
 from src.integrations.cde_recommendation import CdeRecommendationAdapter
+from src.integrations.data_model_store_api import DataModelStoreApiRepository
 from src.integrations.demo_harmonization_cache import DemoHarmonizationCache
 from src.integrations.dynamodb_harmonization_cache import DynamoDbHarmonizationCache
 from src.integrations.dynamodb_reference_data import DynamoDbReferenceDataRepository, DynamoResource
@@ -47,6 +48,7 @@ from src.settings import (
     get_aws_region,
     get_cde_recommendation_cache_table_name,
     get_data_dir,
+    get_data_model_store_api,
     get_harmonization_cache_table_name,
     get_harmonization_method,
     get_max_active_jobs,
@@ -195,7 +197,12 @@ def validate_runtime_services() -> None:
 def get_reference_data_repository() -> ReferenceDataRepository:
     global _reference_data_repository  # noqa: PLW0603 - intentional singleton
     if _reference_data_repository is None:
-        if get_runtime_profile() is RuntimeProfile.PORTABLE:
+        data_model_store = get_data_model_store_api()
+        if data_model_store is not None:
+            # Set explicitly, so it wins over the profile's usual source.
+            base_url, api_key = data_model_store
+            _reference_data_repository = DataModelStoreApiRepository(base_url, api_key)
+        elif get_runtime_profile() is RuntimeProfile.PORTABLE:
             _reference_data_repository = SqliteReferenceDataRepository(get_reference_database_path())
         else:
             import boto3

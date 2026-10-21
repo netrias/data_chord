@@ -21,6 +21,7 @@ from src.domain.reference_data import ReferenceModel
 from src.integrations.agentic_harmonize import AgenticTermHarmonizer
 from src.integrations.bedrock_cde_ranker import BedrockCandidateRanker
 from src.integrations.cde_recommendation import CdeRecommendationAdapter
+from src.integrations.data_model_store_api import DataModelStoreApiRepository
 from src.integrations.dynamodb_harmonization_cache import DynamoDbHarmonizationCache
 from src.integrations.dynamodb_reference_data import DynamoDbReferenceDataRepository
 from src.integrations.harmonize import FileHarmonizationService
@@ -61,6 +62,33 @@ def test_reference_repository_uses_the_configured_table(monkeypatch) -> None:
     # Then it uses the configured DynamoDB table.
     assert isinstance(repository, DynamoDbReferenceDataRepository)
     resource.Table.assert_called_once_with("reference-table")
+
+
+def test_the_data_model_store_api_wins_over_the_reference_table(monkeypatch) -> None:
+    # Given both a reference table and a Data Model Store, which is the state
+    # during the migration.
+    monkeypatch.setenv("DATA_CHORD_REFERENCE_TABLE", "reference-table")
+    monkeypatch.setenv("DATA_CHORD_DMS_URL", "https://example.invalid/staging")
+    monkeypatch.setenv("DATA_CHORD_DMS_API_KEY", "secret")
+    monkeypatch.setattr(dependencies, "_reference_data_repository", None)
+
+    # When the repository is initialized.
+    repository = dependencies.get_reference_data_repository()
+
+    # Then the explicit store wins and the table is left alone.
+    assert isinstance(repository, DataModelStoreApiRepository)
+
+
+def test_a_store_url_without_a_key_fails_at_startup(monkeypatch) -> None:
+    # Given a Data Model Store URL with no key, which cannot authenticate.
+    monkeypatch.setenv("DATA_CHORD_DMS_URL", "https://example.invalid/staging")
+    monkeypatch.delenv("DATA_CHORD_DMS_API_KEY", raising=False)
+    monkeypatch.setattr(dependencies, "_reference_data_repository", None)
+
+    # When the repository is initialized.
+    # Then it fails at startup rather than with a 403 on the first request.
+    with pytest.raises(ConfigurationError, match="must be set together"):
+        dependencies.get_reference_data_repository()
 
 
 def test_agentic_method_builds_only_the_bedrock_harmonizer(monkeypatch) -> None:
