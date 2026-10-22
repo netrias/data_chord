@@ -1,8 +1,33 @@
 # syntax=docker/dockerfile:1.7
 # Security: keep uv pinned so dependency age enforcement stays stable in container builds.
-FROM ghcr.io/astral-sh/uv:0.12.3 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.4 AS uv
 
-FROM public.ecr.aws/docker/library/python:3.13-slim-bookworm AS builder
+FROM public.ecr.aws/docker/library/python:3.13-slim-bookworm AS base
+
+# DLA-4845-1: refresh OS trust and reject stale CA packages.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge '20250419~deb12u2' \
+    && rm -rf /var/lib/apt/lists/*
+# uv owns build isolation; the application does not need the base image's
+# installers, whose vendored trust bundles may lag behind system certificates.
+RUN /usr/local/bin/python -I - <<'PYTHON'
+import importlib.util
+import shutil
+import sys
+import sysconfig
+from pathlib import Path
+
+packages = Path(sysconfig.get_path("purelib"))
+for path in [packages / "pip", *packages.glob("pip-*.dist-info"), Path(sysconfig.get_path("stdlib")) / "ensurepip"]:
+    shutil.rmtree(path, ignore_errors=True)
+for name in ("pip", "pip3", f"pip{sys.version_info.major}.{sys.version_info.minor}"):
+    (Path(sysconfig.get_path("scripts")) / name).unlink(missing_ok=True)
+assert importlib.util.find_spec("pip") is None
+assert importlib.util.find_spec("ensurepip") is None
+PYTHON
+
+FROM base AS builder
 
 ARG DATA_CHORD_INCLUDE_LOCAL_INFERENCE=false
 
@@ -29,7 +54,7 @@ RUN --mount=type=secret,id=github_token \
     esac \
     && git config --global --unset-all url."https://x-access-token:${github_token}@github.com/".insteadOf
 
-FROM public.ecr.aws/docker/library/python:3.13-slim-bookworm AS runtime
+FROM base AS runtime
 
 ENV DATA_CHORD_UPLOAD_DIR="/tmp/data-chord/uploads" \
     DATA_CHORD_DATA_DIR="/data" \
