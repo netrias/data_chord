@@ -87,6 +87,11 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: '.nvmrc'
+
       - name: Create agentic dependency token
         id: agentic-token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
@@ -150,8 +155,19 @@ jobs:
           GIT_CONFIG_KEY_0: "url.https://x-access-token:${{ steps.agentic-token.outputs.token }}@github.com/.insteadOf"
           GIT_CONFIG_VALUE_0: "https://github.com/"
 
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Install pinned npm
+        run: npm install -g npm@11.11.1
+
+      - name: Install npm dependencies
+        run: npm ci
+
       - name: Run basedpyright
-        run: uv run basedpyright --level error src/
+        run: npm run typecheck:py -- --level error src/
 
   lint:
     if: >-

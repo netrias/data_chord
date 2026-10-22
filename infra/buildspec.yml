@@ -8,6 +8,11 @@ env:
 phases:
   install:
     commands:
+      - NODE_RUNTIME_DIRECTORY="$(bash scripts/install-node-runtime.sh)"
+      - export PATH="$NODE_RUNTIME_DIRECTORY/bin:$PATH"
+      - node --version
+      - npm install -g npm@11.11.1
+      - npm ci
       - curl -LsSf "https://astral.sh/uv/$UV_VERSION/install.sh" | sh
       - export PATH="$HOME/.local/bin:$PATH"
   pre_build:
@@ -23,7 +28,7 @@ phases:
       # its Docker build below does not enable the local-inference extra.
       - uv sync --frozen --all-extras
       - uv run ruff check .
-      - uv run basedpyright
+      - npm run typecheck:py
       - uv run pytest
       - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - export SOURCE_TAG="${CODEBUILD_RESOLVED_SOURCE_VERSION:-}"
