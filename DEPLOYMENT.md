@@ -340,6 +340,20 @@ value in an environment file.
 
 ## 2. Install the deployment tools
 
+The CodeBuild worker checks its CA bundle and hashed CA directory before running
+installers or retrieving application build credentials. It aborts if either
+distrusted root from DLA-4845-1 is present or the trust files cannot be parsed.
+Later curl, Git and AWS CLI calls use the checked system trust paths. This
+check does not remove certificates or update the worker.
+
+CodeBuild's managed `DOWNLOAD_SOURCE` phase runs before buildspec commands.
+This check cannot protect that earlier fetch or its source credential. The
+managed source phase remains an AWS trust boundary; this repository does not
+claim that a buildspec check attests the complete worker image. If verification
+before source download is required, use a separately reviewed sourceless
+bootstrap or a verified immutable worker image. Neither is selected by the
+normal deployment command.
+
 Install Git, the GitHub CLI, Python 3.13 or later,
 [uv](https://docs.astral.sh/uv/) 0.13.4 or later, [just](https://github.com/casey/just), the AWS
 CLI, and OpenTofu 1.10 or later.

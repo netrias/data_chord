@@ -7,7 +7,11 @@ env:
 
 phases:
   install:
+    on-failure: ABORT
     commands:
+      # DOWNLOAD_SOURCE precedes this phase and remains an AWS-managed trust boundary.
+      - python3 -I scripts/check-build-host-trust.py
+      - export CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt GIT_SSL_CAINFO=/etc/ssl/certs/ca-certificates.crt SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt SSL_CERT_DIR=/etc/ssl/certs
       - NODE_RUNTIME_DIRECTORY="$(bash scripts/install-node-runtime.sh)"
       - export PATH="$NODE_RUNTIME_DIRECTORY/bin:$PATH"
       - node --version
