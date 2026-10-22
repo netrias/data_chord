@@ -11,6 +11,7 @@ dependencies = [
     "python-multipart>=0.0.31",  # CVE remediation
     "uvicorn[standard]>=0.30.0",
     "boto3>=1.40.69",
+    "certifi>=2026.10.19",  # emSign CA compromise (GHSA-6q48-6c7w-9gw2)
     "cryptography>=50.0.0",
     "httpx>=0.27",
     "netrias_client @ git+https://github.com/netrias/netrias_client.git@f0bc8291630e428fe04f1ebef454bda956570923",
@@ -34,11 +35,11 @@ dev = [
     "hypothesis>=6.100",
     "bandit>=1.7",
     "pip-audit>=2.7",
-    "pip>=26.2",  # CVE remediation for the audited virtualenv pip package
+    "pip>=26.2.2",  # patched vendored CA bundle for the development environment
     "pre-commit>=3.8",
     # transitive dep pin for security (CVE remediation)
     "filelock>=3.20.1",  # CVE-2025-68146 (via virtualenv/pre-commit)
-    "virtualenv>=21.7.13",  # PYSEC-2026-4011 through PYSEC-2026-4014
+    "virtualenv>=21.14.12",  # patched pip seed; includes PYSEC-2026-4011 through PYSEC-2026-4014
     "vulture>=2.16",
 ]
 
@@ -83,6 +84,9 @@ min_confidence = 100
 # Security: require Python packages to be at least 7 days old before resolution.
 # This is an important supply-chain protection against newly published compromised packages.
 exclude-newer = "7 days"
+# Emergency CA fixes; preserve the age gate for all other packages.
+# Remove certifi/pip cutoffs on/after 2026-10-28 UTC and virtualenv on/after 2026-10-29 UTC.
+exclude-newer-package = { certifi = "2026-10-21T00:00:00Z", pip = "2026-10-21T00:00:00Z", virtualenv = "2026-10-22T00:00:00Z" }
 
 [tool.uv.sources]
 agent-experiment = { git = "https://github.com/netrias/agentic_harmonization.git", rev = "2c71e1807d5181021944524209b75ecf6c40f025" }

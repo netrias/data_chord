@@ -34,7 +34,7 @@ commit and run:
 git checkout <full-git-commit>
 GITHUB_TOKEN=$(gh auth token)
 export GITHUB_TOKEN
-docker buildx build \
+docker buildx build --pull --no-cache \
   --secret id=github_token,env=GITHUB_TOKEN \
   --tag data-chord:<full-git-commit> \
   --load .
@@ -246,7 +246,7 @@ Build the exact reviewed commit and push it to the customer registry:
 ```bash
 GITHUB_TOKEN=$(gh auth token)
 export GITHUB_TOKEN
-docker buildx build \
+docker buildx build --pull --no-cache \
   --secret id=github_token,env=GITHUB_TOKEN \
   --tag 123456789012.dkr.ecr.us-east-2.amazonaws.com/data-chord:<full-git-commit> \
   --push .
@@ -341,7 +341,7 @@ value in an environment file.
 ## 2. Install the deployment tools
 
 Install Git, the GitHub CLI, Python 3.13 or later,
-[uv](https://docs.astral.sh/uv/), [just](https://github.com/casey/just), the AWS
+[uv](https://docs.astral.sh/uv/) 0.13.4 or later, [just](https://github.com/casey/just), the AWS
 CLI, and OpenTofu 1.10 or later.
 
 Your GitHub account needs read access to Data Chord and

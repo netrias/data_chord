@@ -99,6 +99,8 @@ def _build_image(
     command = [
         "docker",
         "build",
+        "--pull",
+        "--no-cache",
         "--secret",
         "id=github_token,env=DATA_CHORD_TEST_GITHUB_TOKEN",
         "--build-arg",
