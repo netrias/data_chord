@@ -152,6 +152,9 @@ Python interpreter, including a custom `UV_PROJECT_ENVIRONMENT`, and fails if
 that environment cannot be selected. CodeBuild downloads the same Node release
 and verifies its committed SHA-256 before extraction. Update
 `config/node-runtime-sha256.txt` whenever the Node pin changes.
+After updating an existing checkout, run `just sync` to remove the former Python
+checker and its bundled Node from the environment; `uv run` alone can retain
+packages that are no longer declared.
 
 From the repository root, install the locked Python and JavaScript dependencies
 and create your local configuration:
