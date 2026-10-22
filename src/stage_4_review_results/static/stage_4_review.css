@@ -552,7 +552,8 @@
 
 .original-context-value {
   display: block;
-  color: var(--gray-900);
+  color: var(--gray-600);
+  font-weight: 500;
   overflow-wrap: anywhere;
 }
 
@@ -824,14 +825,18 @@
   color: var(--azure-700);
 }
 
-/* Source and current values use the same type for direct comparison. */
+/* Match size and line height for comparison; keep the original quieter. */
 .original-context-value,
 .target-value-input,
 .pv-combobox-link {
   font-family: inherit;
   font-size: 1rem;
-  font-weight: 600;
   line-height: 1.4;
+}
+
+.target-value-input,
+.pv-combobox-link {
+  font-weight: 600;
 }
 
 /* Remove bounding box when combobox is present */

@@ -322,7 +322,19 @@ async def test_superseded_worker_preserves_prior_review_artifacts(
     monkeypatch.setattr(dependencies, "get_harmonize_service", lambda: harmonizer)
     first = await app_client.post("/stage-3/harmonize", json={"file_id": file_id})
     assert first.status_code == 200
-    assert first.json()["status"] == "succeeded"
+    # The accepted job can finish after the start response returns.
+    first_job = first.json()
+    for _ in range(500):
+        if first_job["status"] in {"succeeded", "failed"}:
+            break
+        await asyncio.sleep(0.01)
+        first_status = await app_client.get(
+            f"/stage-3/jobs/{first_job['job_id']}",
+            params={"file_id": file_id},
+        )
+        assert first_status.status_code == 200
+        first_job = first_status.json()
+    assert first_job["status"] == "succeeded"
 
     saved = await app_client.post(
         "/stage-4/overrides",
@@ -354,7 +366,7 @@ async def test_superseded_worker_preserves_prior_review_artifacts(
     second = await app_client.post("/stage-3/harmonize", json={"file_id": file_id})
     assert second.status_code == 200
     assert second.json()["status"] == "queued"
-    assert provider_started.is_set()
+    assert await asyncio.to_thread(provider_started.wait, 2)
     assert len(provider_output_paths) == 2
     assert provider_output_paths[0] != provider_output_paths[1]
 
