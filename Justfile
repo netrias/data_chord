@@ -15,7 +15,7 @@ dead-code:
 	uv run vulture
 
 typecheck:
-	uv run basedpyright
+	npm run typecheck:py
 
 test:
 	uv run pytest

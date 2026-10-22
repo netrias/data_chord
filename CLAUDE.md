@@ -18,7 +18,7 @@ just app               # Production server (port 8000)
 just test              # Python tests (excludes E2E)
 just test-e2e          # E2E tests (Playwright)
 just lint              # Ruff linting
-just typecheck         # basedpyright
+just typecheck         # npm-managed basedpyright with the uv project interpreter
 just js-check          # JS syntax check
 ```
 

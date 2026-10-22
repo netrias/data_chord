@@ -145,6 +145,14 @@ repository root to match it. Node 25 and later are outside the supported range.
 The Node 24.22.1 minimum includes the
 [October 2026 security fixes](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases).
 
+Python typechecking uses the npm-managed Basedpyright 1.33.0 on the exact Node
+version in `.nvmrc`, rather than a separate Python-packaged Node binary. Run
+`just typecheck` or `npm run typecheck:py`; the command asks uv for the project's
+Python interpreter, including a custom `UV_PROJECT_ENVIRONMENT`, and fails if
+that environment cannot be selected. CodeBuild downloads the same Node release
+and verifies its committed SHA-256 before extraction. Update
+`config/node-runtime-sha256.txt` whenever the Node pin changes.
+
 From the repository root, install the locked Python and JavaScript dependencies
 and create your local configuration:
 

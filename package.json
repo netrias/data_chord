@@ -9,6 +9,7 @@
   "scripts": {
     "test": "node --import ./tests/js/register-assets.js --test tests/js/*.test.js",
     "typecheck": "tsc --noEmit",
+    "typecheck:py": "node scripts/typecheck-python.mjs",
     "test:e2e": "playwright test",
     "perf:e2e": "RUN_PERF=true playwright test tests/e2e/performance.e2e.spec.mjs --reporter=line",
     "perf:virtual-table": "RUN_VIRTUAL_TABLE_PERF=true playwright test tests/e2e/virtual-table.performance.spec.mjs --reporter=line",
@@ -26,6 +27,7 @@
   "devDependencies": {
     "@playwright/test": "^1.50.0",
     "adm-zip": "^0.5.16",
+    "basedpyright": "1.33.0",
     "jsdom": "^26.0.0",
     "typescript": "^5.9.3"
   }
