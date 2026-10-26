@@ -338,6 +338,22 @@ secret lets the image build install the private dependency. ECS reads the API
 key secret when it starts the application. Do not put a credential or secret
 value in an environment file.
 
+### Local access to staging AWS services
+
+The optional `task_role_local_principal_arns` list in an environment file grants
+named IAM users or roles access to assume the application task role. Only staging
+supports this list. It defaults to empty. BDF staging lists Rohith's
+`arn:aws:iam::084828580051:user/rchalla_strides` user.
+
+Keep this access in the environment file. A manual trust change in AWS is replaced
+by the next deployment. A change to this list requires a new plan and receipt.
+The trusted user also needs `sts:AssumeRole` on the task role in their IAM policy;
+Rohith already has that grant. Sessions last at most one hour.
+
+To revoke local access, remove the ARN from the list and deploy the new plan.
+This changes task-role trust only. It preserves ECS task access and does not add
+trust to the task execution role or production role.
+
 ## 2. Install the deployment tools
 
 Install Git, the GitHub CLI, Python 3.13 or later,

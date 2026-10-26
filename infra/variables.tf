@@ -18,6 +18,25 @@ variable "application_role_boundary_arn" {
   }
 }
 
+variable "task_role_local_principal_arns" {
+  description = "Same-account IAM users or roles allowed to run the staging app locally."
+  type        = set(string)
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for arn in var.task_role_local_principal_arns :
+      can(regex("^arn:aws:iam::${var.expected_account_id}:(user|role)/[A-Za-z0-9_+=,.@/-]+$", arn))
+    ])
+    error_message = "Local task principals must be exact same-account IAM user or role ARNs."
+  }
+
+  validation {
+    condition     = length(var.task_role_local_principal_arns) == 0 || var.environment == "staging"
+    error_message = "Local task access is only supported in staging."
+  }
+}
+
 variable "application_role_path" {
   description = "Foundation-owned IAM path for Data Chord application roles."
   type        = string

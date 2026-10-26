@@ -5,6 +5,9 @@
   "deployer_role_arn": "arn:aws:iam::084828580051:role/foundation/bdf-datachord-deployer",
   "application_role_boundary_arn": "arn:aws:iam::084828580051:policy/bdf-datachord-application-role-boundary",
   "application_role_path": "/application/",
+  "task_role_local_principal_arns": [
+    "arn:aws:iam::084828580051:user/rchalla_strides"
+  ],
   "domain_name": "netrias-data-chord-staging.netriasbdf.cloud",
   "hosted_zone_name": "netriasbdf.cloud",
   "application_repository_url": "https://github.com/netrias/data_chord.git",

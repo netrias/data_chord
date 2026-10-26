@@ -14,13 +14,19 @@ resource "aws_iam_role" "application_task" {
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
+    Statement = concat([{
       Effect = "Allow"
       Principal = {
         Service = "ecs-tasks.amazonaws.com"
       }
       Action = "sts:AssumeRole"
-    }]
+      }], length(var.task_role_local_principal_arns) == 0 ? [] : [{
+      # Keep local access in deployment state so apply cannot erase an approved grant.
+      Sid       = "AllowLocalStagingApp"
+      Effect    = "Allow"
+      Action    = "sts:AssumeRole"
+      Principal = { AWS = sort(tolist(var.task_role_local_principal_arns)) }
+    }])
   })
 
   tags = local.common_tags

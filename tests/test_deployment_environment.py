@@ -4,6 +4,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "infra" / "scripts" / "environment.py"
 
@@ -41,6 +43,7 @@ def test_environment_derives_the_deployment_boundary(tmp_path: Path) -> None:
         "github_app_secret_name": "data-chord/build/github-app",
         "hosted_zone_name": "apps.netrias.com",
         "programmatic_api_key_secret_name": "data-chord/staging/programmatic-api-key",
+        "task_role_local_principal_arns": [],
     }
 
 
@@ -60,6 +63,53 @@ def test_environment_accepts_the_parallel_bdf_foundation(tmp_path: Path) -> None
     assert state_key.stdout.strip() == "datachord/bdf/staging/tofu.tfstate"
     assert role_name.stdout.strip() == "bdf-datachord-deployer"
     assert boundary.stdout.strip() == ("arn:aws:iam::084828580051:policy/bdf-datachord-deployer-boundary")
+
+
+def test_staging_local_access_reaches_deployment_inputs_and_receipt(tmp_path: Path) -> None:
+    # Given a staging environment without local role access.
+    environment = tmp_path / "staging.json"
+    document = _bdf_document()
+    environment.write_text(json.dumps(document), encoding="utf-8")
+    original_digest = _run("digest", environment, "bdf", "staging").stdout
+    principal = "arn:aws:iam::084828580051:user/rchalla_strides"
+
+    # When the operator enables Rohith's local staging access.
+    document["task_role_local_principal_arns"] = [principal]
+    environment.write_text(json.dumps(document), encoding="utf-8")
+    variables = _run("tofu-vars", environment, "bdf", "staging")
+    changed_digest = _run("digest", environment, "bdf", "staging")
+
+    # Then deployment receives the exact principal and cannot reuse the old receipt.
+    assert variables.returncode == 0, variables.stderr
+    assert json.loads(variables.stdout)["task_role_local_principal_arns"] == [principal]
+    assert changed_digest.returncode == 0, changed_digest.stderr
+    assert changed_digest.stdout != original_digest
+
+
+@pytest.mark.parametrize(
+    "stage, principals",
+    [
+        ("prod", ["arn:aws:iam::084828580051:user/rchalla_strides"]),
+        ("staging", ["arn:aws:iam::945365518758:user/rchalla"]),
+        ("staging", ["arn:aws:iam::084828580051:root"]),
+        ("staging", ["arn:aws:iam::084828580051:user/*"]),
+        ("staging", "arn:aws:iam::084828580051:user/rchalla_strides"),
+        ("staging", [42]),
+    ],
+)
+def test_local_task_access_rejects_unsafe_inputs(tmp_path: Path, stage: str, principals: object) -> None:
+    # Given local access targets production, another account, or an invalid principal.
+    environment = tmp_path / "environment.json"
+    environment.write_text(
+        json.dumps({**_bdf_document(), "task_role_local_principal_arns": principals}), encoding="utf-8"
+    )
+
+    # When the deployment validates the environment.
+    result = _run("validate", environment, "bdf", stage)
+
+    # Then it stops before AWS with a useful local-access error.
+    assert result.returncode == 2
+    assert "task_role_local_principal_arns" in result.stderr
 
 
 def test_environment_rejects_unknown_fields_and_mismatched_foundation_names(

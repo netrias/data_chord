@@ -26,6 +26,7 @@ _FIELDS = {
     "region",
     "state_bucket_name",
 }
+_OPTIONAL_FIELDS = {"task_role_local_principal_arns"}
 _HANDOFF_FIELDS = {
     "account_id",
     "application_role_boundary_arn",
@@ -73,6 +74,7 @@ class Environment:
     programmatic_api_key_secret_name: str
     target: str
     stage: str
+    task_role_local_principal_arns: tuple[str, ...] = ()
 
     @property
     def partition(self) -> str:
@@ -111,6 +113,7 @@ class Environment:
             "github_app_secret_name": self.github_app_secret_name,
             "hosted_zone_name": self.hosted_zone_name,
             "programmatic_api_key_secret_name": self.programmatic_api_key_secret_name,
+            "task_role_local_principal_arns": list(self.task_role_local_principal_arns),
         }
 
 
@@ -157,7 +160,7 @@ def load_environment(path: Path, target: str, stage: str) -> Environment:
     if not isinstance(raw, dict):
         raise EnvironmentError("environment must contain one JSON object")
     document = {str(key): value for key, value in raw.items()}
-    _require_exact_fields(document, _FIELDS, "environment")
+    _require_exact_fields(document, _FIELDS | (set(document) & _OPTIONAL_FIELDS), "environment")
     environment = Environment(
         account_id=_string(document, "account_id"),
         region=_string(document, "region"),
@@ -175,6 +178,7 @@ def load_environment(path: Path, target: str, stage: str) -> Environment:
         ),
         target=target,
         stage=stage,
+        task_role_local_principal_arns=_local_task_principals(document, stage),
     )
     _validate(environment)
     return environment
@@ -246,6 +250,7 @@ def canonical_digest(environment: SelectedEnvironment) -> str:
                 "programmatic_api_key_secret_name": (
                     environment.programmatic_api_key_secret_name
                 ),
+                "task_role_local_principal_arns": list(environment.task_role_local_principal_arns),
             }
         )
     else:
@@ -273,6 +278,14 @@ def _validate(environment: Environment) -> None:
     if not _BUCKET.fullmatch(environment.state_bucket_name):
         raise EnvironmentError("state_bucket_name is invalid")
     _validate_foundation_names(environment)
+    for principal in environment.task_role_local_principal_arns:
+        if not re.fullmatch(
+            rf"arn:{environment.partition}:iam::{environment.account_id}:(?:user|role)/[\w+=,.@/-]+",
+            principal,
+        ):
+            raise EnvironmentError(
+                "task_role_local_principal_arns must contain exact same-account IAM user or role ARNs"
+            )
     suffix = f".{environment.hosted_zone_name}"
     if not environment.hosted_zone_name or not environment.domain_name.endswith(suffix):
         raise EnvironmentError("domain_name must be inside hosted_zone_name")
@@ -354,6 +367,15 @@ def _string(document: dict[str, object], key: str) -> str:
     if not isinstance(value, str) or not value:
         raise EnvironmentError(f"{key} must be a non-empty string")
     return value
+
+
+def _local_task_principals(document: dict[str, object], stage: str) -> tuple[str, ...]:
+    value = document.get("task_role_local_principal_arns", [])
+    if not isinstance(value, list) or not all(isinstance(arn, str) and arn for arn in value):
+        raise EnvironmentError("task_role_local_principal_arns must be a list of non-empty ARN strings")
+    if value and stage != "staging":
+        raise EnvironmentError("task_role_local_principal_arns is only supported in staging")
+    return tuple(sorted(set(value)))
 
 
 def _field(environment: SelectedEnvironment, key: str) -> str:

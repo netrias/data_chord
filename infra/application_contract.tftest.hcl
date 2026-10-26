@@ -97,6 +97,83 @@ variables {
   programmatic_api_key_secret_name = "data-chord/qa/programmatic-api-key"
 }
 
+run "task_role_defaults_to_ecs_only" {
+  # Given no local development principals are configured.
+  # When the application deployment is planned.
+  command = plan
+
+  # Then the task role trusts ECS only, with no human access statement.
+  assert {
+    condition = jsondecode(aws_iam_role.application_task.assume_role_policy) == {
+      Version = "2012-10-17"
+      Statement = [{
+        Effect    = "Allow"
+        Principal = { Service = "ecs-tasks.amazonaws.com" }
+        Action    = "sts:AssumeRole"
+      }]
+    }
+    error_message = "The default task role must trust ECS tasks only."
+  }
+}
+
+run "staging_task_role_preserves_local_access" {
+  # Given BDF staging explicitly trusts Rohith for local app use.
+  variables {
+    environment                    = "staging"
+    task_role_local_principal_arns = ["arn:aws:iam::084828580051:user/rchalla_strides"]
+  }
+
+  # When the application deployment is planned.
+  command = plan
+
+  # Then the complete task trust includes ECS and Rohith while execution trust stays ECS-only.
+  assert {
+    condition = jsondecode(aws_iam_role.application_task.assume_role_policy) == {
+      Version = "2012-10-17"
+      Statement = [
+        {
+          Effect    = "Allow"
+          Principal = { Service = "ecs-tasks.amazonaws.com" }
+          Action    = "sts:AssumeRole"
+        },
+        {
+          Sid       = "AllowLocalStagingApp"
+          Effect    = "Allow"
+          Action    = "sts:AssumeRole"
+          Principal = { AWS = ["arn:aws:iam::084828580051:user/rchalla_strides"] }
+        }
+      ]
+    }
+    error_message = "A deployment must preserve both ECS and approved local staging access."
+  }
+
+  assert {
+    condition = jsondecode(aws_iam_role.application_task_execution.assume_role_policy) == {
+      Version = "2012-10-17"
+      Statement = [{
+        Effect    = "Allow"
+        Principal = { Service = "ecs-tasks.amazonaws.com" }
+        Action    = "sts:AssumeRole"
+      }]
+    }
+    error_message = "Local access must not grant the ECS execution role to humans."
+  }
+}
+
+run "production_rejects_local_task_access" {
+  # Given a direct OpenTofu caller attempts to enable local access in production.
+  variables {
+    environment                    = "prod"
+    task_role_local_principal_arns = ["arn:aws:iam::084828580051:user/rchalla_strides"]
+  }
+
+  # When the deployment is planned.
+  command = plan
+
+  # Then validation stops the plan at the local-access input.
+  expect_failures = [var.task_role_local_principal_arns]
+}
+
 run "application_roles_follow_foundation_guardrails" {
   command = plan
 
