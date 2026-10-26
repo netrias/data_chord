@@ -280,7 +280,7 @@ def _validate(environment: Environment) -> None:
     _validate_foundation_names(environment)
     for principal in environment.task_role_local_principal_arns:
         if not re.fullmatch(
-            rf"arn:{environment.partition}:iam::{environment.account_id}:(?:user|role)/[\w+=,.@/-]+",
+            rf"arn:{environment.partition}:iam::{environment.account_id}:(?:user|role)/[A-Za-z0-9_+=,.@/-]+",
             principal,
         ):
             raise EnvironmentError(

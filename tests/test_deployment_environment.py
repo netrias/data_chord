@@ -93,6 +93,7 @@ def test_staging_local_access_reaches_deployment_inputs_and_receipt(tmp_path: Pa
         ("staging", ["arn:aws:iam::945365518758:user/rchalla"]),
         ("staging", ["arn:aws:iam::084828580051:root"]),
         ("staging", ["arn:aws:iam::084828580051:user/*"]),
+        ("staging", ["arn:aws:iam::084828580051:user/rohith\u00e9"]),
         ("staging", "arn:aws:iam::084828580051:user/rchalla_strides"),
         ("staging", [42]),
     ],
