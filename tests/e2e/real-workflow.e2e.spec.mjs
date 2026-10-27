@@ -130,7 +130,7 @@ test('real workflow: zero-term success keeps file context and downloads missing 
   // Then: Stage 3 shows successful neutral completion, not an approved-value claim.
   await expect(page.getByRole('heading', { name: 'Harmonization complete' })).toBeVisible();
   await expect(page.locator('#stageThreeResultMessage')).toHaveText(
-    'None of the mapped columns has an approved list, so no unique values were checked.',
+    'No unique values were checked against an approved list.',
   );
   await expect(page.locator('#stageThreeDial')).toHaveText('0 unique values checked');
   await expect(page.locator('#stageThreeContext')).toHaveText(/^missing-only\.csv · 3 rows/);

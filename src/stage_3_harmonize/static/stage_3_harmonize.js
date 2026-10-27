@@ -120,8 +120,9 @@ const _renderSummary = ({ exactGroupsAvailable, checked, harmonized, matched, un
     _renderGroups([]);
     stageThreeDialValue.textContent = '0';
     stageThreeDialCaption.textContent = 'unique values checked';
-    stageThreeDial.setAttribute('aria-label', 'No unique values were checked against an approved list.');
-    _showResultMessage('None of the mapped columns has an approved list, so no unique values were checked.');
+    /* why: the message below gives the reason; the dial label repeats only its visible text. */
+    stageThreeDial.setAttribute('aria-label', '0 unique values checked');
+    _showResultMessage('No unique values were checked against an approved list.');
     return;
   }
 

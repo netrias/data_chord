@@ -807,13 +807,10 @@ test('happy path flow: upload → analyze → harmonize → review → summary �
   const stageThreeOutcome = stageThreeTable.locator('tbody tr').filter({ hasText: 'col_a' });
   await expect(stageThreeOutcome).toContainText('0 of 2');
   await expect(stageThreeOutcome).toContainText('2 of 3');
-  await expect(page.locator('#stageThreeDial')).toHaveAttribute(
-    'aria-label',
-    'No unique values were checked against an approved list.',
-  );
+  await expect(page.getByRole('img', { name: '0 unique values checked' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Harmonization complete' })).toBeVisible();
   await expect(page.getByText(
-    'None of the mapped columns has an approved list, so no unique values were checked.',
+    'No unique values were checked against an approved list.',
   )).toBeVisible();
   await expect(page.getByRole('list', { name: 'Unique value results' })).toBeHidden();
   await expect(page.getByText('Confidence', { exact: true })).toHaveCount(0);
@@ -1081,12 +1078,11 @@ test('Stage 3 summary shows a gray dial when no values were checked', async ({ p
   await page.goto(`/stage-3?file_id=${STAGE_THREE_FILE_ID}&job_id=${jobId}`);
 
   // Then: the dial shows zero checked values, the groups are hidden, and the reason is stated
-  await expect(page.getByRole('img', {
-    name: 'No unique values were checked against an approved list.',
-  })).toHaveText('0 unique values checked');
+  await expect(page.getByRole('img', { name: '0 unique values checked' }))
+    .toHaveText('0 unique values checked');
   await expect(page.getByRole('list', { name: 'Unique value results' })).toBeHidden();
   await expect(page.locator('#stageThreeResultMessage')).toHaveText(
-    'None of the mapped columns has an approved list, so no unique values were checked.',
+    'No unique values were checked against an approved list.',
   );
 });
 
