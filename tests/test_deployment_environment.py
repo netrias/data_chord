@@ -4,6 +4,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "infra" / "scripts" / "environment.py"
 
@@ -40,6 +42,7 @@ def test_environment_derives_the_deployment_boundary(tmp_path: Path) -> None:
         "expected_account_id": "945365518758",
         "github_app_secret_name": "data-chord/build/github-app",
         "hosted_zone_name": "apps.netrias.com",
+        "local_developer_role_arn": None,
         "programmatic_api_key_secret_name": "data-chord/staging/programmatic-api-key",
     }
 
@@ -60,6 +63,75 @@ def test_environment_accepts_the_parallel_bdf_foundation(tmp_path: Path) -> None
     assert state_key.stdout.strip() == "datachord/bdf/staging/tofu.tfstate"
     assert role_name.stdout.strip() == "bdf-datachord-deployer"
     assert boundary.stdout.strip() == ("arn:aws:iam::084828580051:policy/bdf-datachord-deployer-boundary")
+
+
+def test_checked_in_bdf_staging_passes_its_developer_role_to_deployment(tmp_path: Path) -> None:
+    # Given the checked-in BDF staging file and the same file without the developer role.
+    checked_in = ROOT / "environments" / "bdf" / "staging.json"
+    document = json.loads(checked_in.read_text(encoding="utf-8"))
+    developer_role = "arn:aws:iam::084828580051:role/foundation/bdf-datachord-staging-developer"
+    assert document["local_developer_role_arn"] == developer_role
+    without_role = tmp_path / "staging.json"
+    without_role.write_text(
+        json.dumps({key: value for key, value in document.items() if key != "local_developer_role_arn"}),
+        encoding="utf-8",
+    )
+    original_digest = _run("digest", without_role, "bdf", "staging")
+
+    # When the deployment reads the checked-in file.
+    variables = _run("tofu-vars", checked_in, "bdf", "staging")
+    changed_digest = _run("digest", checked_in, "bdf", "staging")
+
+    # Then OpenTofu receives the role and the receipt digest changes with it.
+    assert variables.returncode == 0, variables.stderr
+    assert json.loads(variables.stdout)["local_developer_role_arn"] == developer_role
+    assert original_digest.returncode == 0, original_digest.stderr
+    assert changed_digest.returncode == 0, changed_digest.stderr
+    assert changed_digest.stdout != original_digest.stdout
+
+
+@pytest.mark.parametrize(
+    ("stage", "role_arn", "message"),
+    [
+        (
+            "prod",
+            "arn:aws:iam::084828580051:role/foundation/bdf-datachord-staging-developer",
+            "local_developer_role_arn is only supported in staging",
+        ),
+        (
+            "staging",
+            "arn:aws:iam::084828580051:user/example",
+            "local_developer_role_arn must be an IAM role ARN in account_id",
+        ),
+        (
+            "staging",
+            "arn:aws:iam::945365518758:role/foundation/bdf-datachord-staging-developer",
+            "local_developer_role_arn must be an IAM role ARN in account_id",
+        ),
+        (
+            "staging",
+            "arn:aws:iam::084828580051:role/*",
+            "local_developer_role_arn must be an IAM role ARN in account_id",
+        ),
+        (
+            "staging",
+            ["arn:aws:iam::084828580051:role/foundation/bdf-datachord-staging-developer"],
+            "local_developer_role_arn must be a non-empty string",
+        ),
+        ("staging", None, "local_developer_role_arn must be a non-empty string"),
+    ],
+)
+def test_local_developer_role_rejects_unsafe_inputs(tmp_path: Path, stage: str, role_arn: object, message: str) -> None:
+    # Given the developer role targets production, a user, another account, or a malformed value.
+    environment = tmp_path / "environment.json"
+    environment.write_text(json.dumps({**_bdf_document(), "local_developer_role_arn": role_arn}), encoding="utf-8")
+
+    # When the deployment validates the environment.
+    result = _run("validate", environment, "bdf", stage)
+
+    # Then it stops before AWS with the violated rule.
+    assert result.returncode == 2
+    assert message in result.stderr
 
 
 def test_environment_rejects_unknown_fields_and_mismatched_foundation_names(
