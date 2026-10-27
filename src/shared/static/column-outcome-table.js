@@ -17,7 +17,7 @@ const _statusContent = (column) => {
   const nonConformantValues = _safeCount(column.nonConformantValues);
   switch (column.reviewStatus) {
     case 'clear':
-      return { className: 'column-outcome-status--approved', text: 'All values are harmonized' };
+      return { className: 'column-outcome-status--approved', text: 'All unique values are harmonized' };
     case 'needs_attention':
       return {
         className: 'column-outcome-status--attention',

@@ -99,7 +99,6 @@
   display: flex;
   align-items: center;
   gap: var(--space-8) var(--space-12);
-  padding-bottom: var(--space-8);
 }
 
 .stage-three-verdict {
@@ -300,7 +299,7 @@
 }
 
 .column-outcome-table td:nth-child(3) .column-outcome-mini-ring {
-  background: conic-gradient(var(--azure-300) 0 var(--metric-percent), var(--gray-200) var(--metric-percent) 100%);
+  background: conic-gradient(var(--gray-400) 0 var(--metric-percent), var(--gray-200) var(--metric-percent) 100%);
 }
 
 .remaining-columns {

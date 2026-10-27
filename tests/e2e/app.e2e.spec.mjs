@@ -985,7 +985,7 @@ test('completed Stage 3 shows the durable dial, action table, and remaining colu
   await expect(table.locator('tbody tr td:nth-child(4)')).toHaveText([
     '1 unique value not harmonized',
     '1 unique value not harmonized',
-    'All values are harmonized',
+    'All unique values are harmonized',
   ]);
   await expect(table).not.toContainText('already_matched');
   await expect(table).not.toContainText('not_checked');
@@ -994,7 +994,7 @@ test('completed Stage 3 shows the durable dial, action table, and remaining colu
   await expect(remaining).toContainText('2 columns passed through unchanged');
   await remaining.locator('summary').click();
   await expect(remaining.getByRole('heading', {
-    name: '1 value already matched the approved list',
+    name: '1 unique value already matched the approved list',
   })).toBeVisible();
   await expect(remaining.getByRole('heading', {
     name: '1 column has no approved list to check against',
@@ -1077,13 +1077,15 @@ test('Stage 3 summary shows a gray dial when no values were checked', async ({ p
   // When: Stage 3 loads the completed result
   await page.goto(`/stage-3?file_id=${STAGE_THREE_FILE_ID}&job_id=${jobId}`);
 
-  // Then: the dial shows zero checked values, the groups are hidden, and the reason is stated
+  // Then: the dial shows zero checked values, the groups are hidden, and the reason is stated once
   await expect(page.getByRole('img', { name: '0 unique values checked' }))
     .toHaveText('0 unique values checked');
   await expect(page.getByRole('list', { name: 'Unique value results' })).toBeHidden();
   await expect(page.locator('#stageThreeResultMessage')).toHaveText(
     'No unique values were checked against an approved list.',
   );
+  await expect(page.getByText('No reviewed columns are available for this dataset.')).toBeHidden();
+  await expect(page.locator('[data-remaining-columns]')).toContainText('1 column passed through unchanged');
 });
 
 test('Stage 3 summary does not draw groups whose counts exceed the checked values', async ({ page }) => {
@@ -1100,7 +1102,7 @@ test('Stage 3 summary does not draw groups whose counts exceed the checked value
   await expect(page.locator('#stageThreeDial')).toBeHidden();
   await expect(page.getByRole('list', { name: 'Unique value results' })).toBeHidden();
   await expect(page.locator('#stageThreeResultMessage')).toHaveText(
-    'Detailed value groups are not available for this earlier result. Continue to Verify to review the changes.',
+    'Detailed value groups are not available for this result. Continue to Verify to review the changes.',
   );
 });
 
@@ -1154,7 +1156,7 @@ test('an earlier completed Stage 3 job does not invent detailed value groups', a
   await expect(page.locator('#stageThreeDial')).toBeHidden();
   await expect(page.getByRole('list', { name: 'Unique value results' })).toBeHidden();
   await expect(page.getByText(
-    'Detailed value groups are not available for this earlier result. Continue to Verify to review the changes.',
+    'Detailed value groups are not available for this result. Continue to Verify to review the changes.',
   )).toBeVisible();
   await expect(page.locator('[data-column-outcome-table]')).toContainText('Not recorded');
   await expect(page.locator('#reviewButton')).toBeEnabled();

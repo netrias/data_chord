@@ -22,6 +22,7 @@ const harmonizeAnimation = document.querySelector('#loadingState .harmonize-anim
 const harmonizeProgressMessage = document.getElementById('harmonizeProgressMessage');
 const columnOutcomePanel = document.querySelector('[data-column-outcome-panel]');
 const columnOutcomeContainer = document.querySelector('[data-column-outcome-table]');
+const stageThreeTableSection = document.getElementById('stageThreeTableSection');
 const stageThreeDial = document.getElementById('stageThreeDial');
 const stageThreeDialValue = document.getElementById('stageThreeDialValue');
 const stageThreeDialCaption = document.getElementById('stageThreeDialCaption');
@@ -113,7 +114,7 @@ const _renderSummary = ({ exactGroupsAvailable, checked, harmonized, matched, un
 
   if (!exactGroupsAvailable) {
     _renderGroups([]);
-    _showResultMessage('Detailed value groups are not available for this earlier result. Continue to Verify to review the changes.');
+    _showResultMessage('Detailed value groups are not available for this result. Continue to Verify to review the changes.');
     return;
   }
   if (checked === 0) {
@@ -200,7 +201,7 @@ const _renderRemainingColumns = (columns) => {
   remainingTitle.textContent = `${_formatCount(columns.length)} ${_plural(columns.length, 'column')} passed through unchanged`;
   remainingSummary.textContent = 'Nothing in them needed rewriting.';
   _remainingGroup(
-    `${_formatCount(matchedValues)} ${_plural(matchedValues, 'value')} already matched the approved list`,
+    `${_formatCount(matchedValues)} unique ${_plural(matchedValues, 'value')} already matched the approved list`,
     matched,
     'remaining-columns__item--matched',
   );
@@ -251,9 +252,12 @@ const _renderMetricsDashboard = (job) => {
 
   _renderSummary({ exactGroupsAvailable, checked, harmonized, matched, unresolved });
   _setDisplayContext(job.manifest_summary, columns);
+  /* why: the nothing-checked message already explains an empty result, so an empty-table note would repeat it. */
+  const tableRepeatsSummary = exactGroupsAvailable && checked === 0 && actionColumns.length === 0;
+  stageThreeTableSection?.classList.toggle('hidden', tableRepeatsSummary);
   renderColumnOutcomeTable({
     container: columnOutcomeContainer,
-    columns: actionColumns,
+    columns: tableRepeatsSummary ? [] : actionColumns,
   });
   _renderRemainingColumns(remaining);
   stageThreeHeader?.classList.add('hidden');
