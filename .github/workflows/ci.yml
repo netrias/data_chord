@@ -11,22 +11,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  # Temporary BDF-725 hold. Use the later official GitHub publication time,
-  # not the Node distribution index date. No action or installer runs here.
-  release-age:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Wait for Node 24.22.1 to satisfy the seven-day rule
-        run: |
-          python3 - <<'PYTHON'
-          from datetime import datetime, timezone
-          eligible = datetime.fromisoformat("2026-10-28T10:38:25+00:00")
-          if datetime.now(timezone.utc) < eligible:
-              raise SystemExit("BDF-725 release hold: Node is eligible at " + eligible.isoformat())
-          print("BDF-725 Node release-age hold has cleared")
-          PYTHON
   infrastructure:
-    needs: release-age
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -69,7 +54,6 @@ jobs:
         run: bash scripts/check-shell-syntax.sh
 
   js-check:
-    needs: release-age
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -87,7 +71,6 @@ jobs:
         run: bash scripts/check-js-syntax.sh
 
   test-js:
-    needs: release-age
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -111,7 +94,6 @@ jobs:
         run: npm test
 
   test:
-    needs: release-age
     # Fork pull requests cannot receive the private agentic source credential.
     if: >-
       github.event_name != 'pull_request' ||
@@ -158,7 +140,6 @@ jobs:
         run: uv run pytest --tb=short
 
   type-check:
-    needs: release-age
     if: >-
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
@@ -210,7 +191,6 @@ jobs:
         run: npm run typecheck:py -- --level error src/
 
   lint:
-    needs: release-age
     if: >-
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
@@ -266,7 +246,6 @@ jobs:
         run: uv run vulture
 
   security:
-    needs: release-age
     if: >-
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
@@ -311,7 +290,6 @@ jobs:
 
   # E2E tests using Playwright with Chromium for browser automation.
   e2e:
-    needs: release-age
     if: >-
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
