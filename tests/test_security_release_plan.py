@@ -324,3 +324,68 @@ def test_nondefault_task_modes_are_not_normalized_away(tmp_path: Path, release_p
     assert result.returncode == 1
     assert "Task configuration changed outside the image identity" in result.stderr
     assert result.stdout == ""
+
+
+def test_build_only_saved_apply_needs_no_qualification_argument(tmp_path: Path) -> None:
+    # Given exact reviewed build-only bytes, clean source, and the existing stable deployment.
+    saved = tmp_path / "reviewed.tfplan"
+    saved.write_bytes(b"reviewed build configuration")
+    Path(str(saved) + ".receipt.json").write_text(json.dumps({
+        "source_commit": NEW_TAG, "plan_sha256": hashlib.sha256(saved.read_bytes()).hexdigest()}))
+    plan_json = tmp_path / "native-plan.json"
+    plan_json.write_text(json.dumps({"resource_changes": [_build_change()]}))
+    service = tmp_path / "service.json"
+    service.write_text(json.dumps({"taskDefinition": "old-task", "deployments": [{
+        "status": "PRIMARY", "rolloutState": "COMPLETED", "desiredCount": 1,
+        "runningCount": 1, "pendingCount": 0, "taskDefinition": "old-task"}]}))
+    task = tmp_path / "task.json"
+    task.write_text(json.dumps({"taskDefinitionArn": "old-task",
+                               "containerDefinitions": json.loads(_containers(OLD_TAG))}))
+    log = tmp_path / "commands.log"
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    programs = {
+        "git": (
+            '#!/bin/bash\ncase "$*" in\n'
+            '*"branch --show-current"*) echo security/bdf725-production ;;\n'
+            f'*"rev-parse HEAD"*) echo {NEW_TAG} ;;\n'
+            '*"status --porcelain"*) true ;;\n'
+            f'*"ls-remote origin"*) printf "{NEW_TAG}\\trefs/heads/security/bdf725-production\\n" ;;\n'
+            '*) exit 2 ;;\nesac\n'
+        ),
+        "aws": (
+            '#!/bin/bash\ncase "$*" in\n'
+            '*"get-caller-identity"*) echo 084828580051 ;;\n'
+            '*"describe-services"*"--output json"*) cat "$TEST_SERVICE_JSON" ;;\n'
+            '*"describe-task-definition"*) cat "$TEST_TASK_JSON" ;;\n'
+            '*"describe-services"*"rolloutState"*) printf "COMPLETED\\t1\\t1\\t0\\n" ;;\n'
+            '*"describe-services"*"events[0].message"*) echo None ;;\n'
+            '*) true ;;\nesac\n'
+        ),
+        "tofu": (
+            '#!/bin/bash\nprintf "tofu %s\\n" "$*" >> "$TEST_COMMAND_LOG"\n'
+            'case "$*" in\n'
+            '*"show -json"*) cat "$TEST_PLAN_JSON" ;;\n'
+            '*"output -json"*) printf \'"data-chord-prod"\\n\' ;;\n'
+            '*) true ;;\nesac\n'
+        ),
+    }
+    for name, content in programs.items():
+        executable = binaries / name
+        executable.write_text(content)
+        executable.chmod(0o755)
+    env = os.environ.copy()
+    env.pop("DATA_CHORD_RELEASE_QUALIFICATION", None)
+    env.update({"PATH": f"{binaries}:{env['PATH']}", "DATA_CHORD_SAVED_PLAN": str(saved),
+                "TEST_COMMAND_LOG": str(log), "TEST_PLAN_JSON": str(plan_json),
+                "TEST_SERVICE_JSON": str(service), "TEST_TASK_JSON": str(task)})
+    assert not log.exists()
+
+    # When the real apply route runs with no image-qualification file selected.
+    result = subprocess.run(["/bin/bash", str(CHECK.parent / "deploy.sh"), "prod", "apply"],
+                            env=env, capture_output=True, text=True, check=False)
+
+    # Then it checks the live boundary and applies exactly the reviewed build plan once.
+    assert result.returncode == 0, result.stderr
+    apply_calls = [line for line in log.read_text().splitlines() if " apply " in line]
+    assert apply_calls == [f"tofu -chdir={CHECK.parent.parent} apply -input=false {saved}"]

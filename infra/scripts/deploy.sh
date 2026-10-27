@@ -92,9 +92,9 @@ init_tofu() {
 
 check_release_plan() {
   local plan_json="$1" tag expected_digest actual_digest
-  local qualification_args=()
+  local checker_args=("$plan_json")
   if [[ -n "${DATA_CHORD_RELEASE_QUALIFICATION:-}" ]]; then
-    qualification_args=(--qualification "$DATA_CHORD_RELEASE_QUALIFICATION")
+    checker_args+=(--qualification "$DATA_CHORD_RELEASE_QUALIFICATION")
   fi
   aws ecs describe-services --cluster data-chord-prod --services data-chord-prod \
     --query 'services[0]' --output json > "$plan_json.running-service.json"
@@ -103,7 +103,7 @@ check_release_plan() {
   aws ecs describe-task-definition --task-definition "$running_task" \
     --query 'taskDefinition.{taskDefinitionArn:taskDefinitionArn,containerDefinitions:containerDefinitions[].{name:name,image:image}}' \
     --output json > "$plan_json.running-task.json"
-  python3 -I "$SCRIPT_DIR/check-security-release-plan.py" "$plan_json" "${qualification_args[@]}" \
+  python3 -I "$SCRIPT_DIR/check-security-release-plan.py" "${checker_args[@]}" \
     --running-service "$plan_json.running-service.json" --running-task "$plan_json.running-task.json" > "$plan_json.images"
   while IFS=$'\t' read -r tag expected_digest; do
     [[ -n "$tag" ]] || continue
