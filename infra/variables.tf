@@ -24,7 +24,7 @@ variable "local_developer_role_arn" {
   default     = null
 
   validation {
-    condition     = var.local_developer_role_arn == null || can(regex("^arn:(aws|aws-us-gov):iam::${var.expected_account_id}:role/[A-Za-z0-9_+=,.@/-]+$", var.local_developer_role_arn))
+    condition     = var.local_developer_role_arn == null || can(regex("^arn:(aws|aws-us-gov):iam::${var.expected_account_id}:role/([A-Za-z0-9_+=,.@-]+/)*[A-Za-z0-9_+=,.@-]{1,64}$", var.local_developer_role_arn))
     error_message = "local_developer_role_arn must be an IAM role in expected_account_id."
   }
 

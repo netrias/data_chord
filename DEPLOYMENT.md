@@ -361,7 +361,8 @@ hour.
 Do not edit the task role trust in AWS by hand. The next deployment replaces
 it. To revoke local access for everyone, remove the field and deploy the new
 plan. To change who has access, change the developer role in the private
-repository.
+repository. IAM binds the trust to the role's internal ID. If the private
+repository deletes and recreates the developer role, deploy Data Chord again.
 
 ## 2. Install the deployment tools
 

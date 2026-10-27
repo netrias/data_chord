@@ -69,8 +69,7 @@ def test_checked_in_bdf_staging_passes_its_developer_role_to_deployment(tmp_path
     # Given the checked-in BDF staging file and the same file without the developer role.
     checked_in = ROOT / "environments" / "bdf" / "staging.json"
     document = json.loads(checked_in.read_text(encoding="utf-8"))
-    developer_role = "arn:aws:iam::084828580051:role/foundation/bdf-datachord-staging-developer"
-    assert document["local_developer_role_arn"] == developer_role
+    developer_role = document["local_developer_role_arn"]
     without_role = tmp_path / "staging.json"
     without_role.write_text(
         json.dumps({key: value for key, value in document.items() if key != "local_developer_role_arn"}),
@@ -111,6 +110,16 @@ def test_checked_in_bdf_staging_passes_its_developer_role_to_deployment(tmp_path
         (
             "staging",
             "arn:aws:iam::084828580051:role/*",
+            "local_developer_role_arn must be an IAM role ARN in account_id",
+        ),
+        (
+            "staging",
+            "arn:aws:iam::084828580051:role/foundation/",
+            "local_developer_role_arn must be an IAM role ARN in account_id",
+        ),
+        (
+            "staging",
+            "arn:aws:iam::084828580051:role/foundation/developer\u00e9",
             "local_developer_role_arn must be an IAM role ARN in account_id",
         ),
         (

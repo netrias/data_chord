@@ -337,7 +337,10 @@ def _validate_local_developer_role(environment: Environment) -> None:
         return
     if environment.stage != "staging":
         raise EnvironmentError("local_developer_role_arn is only supported in staging")
-    role_pattern = rf"arn:{environment.partition}:iam::{environment.account_id}:role/[A-Za-z0-9_+=,.@/-]+"
+    role_pattern = (
+        rf"arn:{environment.partition}:iam::{environment.account_id}:"
+        r"role/(?:[A-Za-z0-9_+=,.@-]+/)*[A-Za-z0-9_+=,.@-]{1,64}"
+    )
     if not re.fullmatch(role_pattern, role_arn):
         raise EnvironmentError("local_developer_role_arn must be an IAM role ARN in account_id")
 
