@@ -30,8 +30,8 @@ test('real workflow: missing cells stay in the download but not in review or che
   // Then: only present terms were checked; the dataset still has seven rows.
   expect(job.manifest_summary.total_terms).toBe(3);
   expect(job.manifest_summary.source_row_count).toBe(7);
-  await expect(page.locator('#stageThreeCheckedCount')).toHaveText('3');
-  await expect(page.locator('#stageThreeRowCount')).toContainText('7 rows');
+  await expect(page.locator('#stageThreeDialCaption')).toHaveText('of 3 unique values now match');
+  await expect(page.locator('#stageThreeContext')).toContainText('7 rows');
   const rowsResponse = page.waitForResponse(
     (response) => response.url().endsWith('/stage-4/rows') && response.ok(),
   );
@@ -128,14 +128,13 @@ test('real workflow: zero-term success keeps file context and downloads missing 
   await clickHarmonize(page);
   await expect(page.locator('#reviewButton')).toBeEnabled({ timeout: 15_000 });
   // Then: Stage 3 shows successful neutral completion, not an approved-value claim.
-  await expect(page.locator('#stageThreeHeadline')).toHaveText('Harmonization complete');
+  await expect(page.getByRole('heading', { name: 'Harmonization complete' })).toBeVisible();
   await expect(page.locator('#stageThreeResultMessage')).toHaveText(
-    'No unique values were checked against an approved list.',
+    'None of the mapped columns has an approved list, so no unique values were checked.',
   );
-  await expect(page.locator('#stageThreeCheckedCount')).toHaveText('0');
-  await expect(page.locator('#stageThreeRowCount')).toContainText('3 rows');
-  await expect(page.locator('#stageThreeSourceFile')).toHaveText('missing-only.csv');
-  await expect(page.locator('#stageThreeLegend li')).toHaveCount(0);
+  await expect(page.locator('#stageThreeDial')).toHaveText('0 unique values checked');
+  await expect(page.locator('#stageThreeContext')).toHaveText(/^missing-only\.csv · 3 rows/);
+  await expect(page.getByRole('list', { name: 'Harmonization result groups' })).toBeHidden();
 
   // When: the reviewer opens the real review and summary screens.
   const reviewResponse = page.waitForResponse((response) => (
@@ -342,8 +341,8 @@ test('classic dataset: confirmed mappings, full text, restore, and exact export'
   await clickHarmonize(page);
   await expect(page.locator('#reviewButton')).toBeEnabled({ timeout: 15_000 });
   // Then: missing sources and repeated terms do not inflate unique checked counts.
-  await expect(page.locator('#stageThreeCheckedCount')).toHaveText('13');
-  await expect(page.locator('#stageThreeRowCount')).toContainText('20 rows');
+  await expect(page.locator('#stageThreeDialCaption')).toHaveText('of 13 unique values now match');
+  await expect(page.locator('#stageThreeContext')).toContainText('20 rows');
   const reviewReady = page.waitForResponse((response) => response.url().endsWith('/stage-4/rows') && response.ok());
   await page.click('#reviewButton');
   const review = await (await reviewReady).json();

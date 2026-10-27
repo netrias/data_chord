@@ -808,8 +808,11 @@ test('happy path flow: upload → analyze → harmonize → review → summary �
     'aria-label',
     'No unique values were checked against an approved list.',
   );
-  await expect(page.locator('#stageThreeHeadline')).toHaveText('Harmonization complete');
-  await expect(page.getByText('No unique values were checked against an approved list.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Harmonization complete' })).toBeVisible();
+  await expect(page.getByText(
+    'None of the mapped columns has an approved list, so no unique values were checked.',
+  )).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Harmonization result groups' })).toBeHidden();
   await expect(page.getByText('Confidence', { exact: true })).toHaveCount(0);
 
   await page.click('#reviewButton');
@@ -953,15 +956,20 @@ test('completed Stage 3 shows the durable dial, action table, and remaining colu
   await page.goto(`/stage-3?file_id=${fileId}&job_id=${jobId}`);
 
   // Then: the result uses the durable display context and exact value partition.
-  await expect(page.locator('#stageThreeHeadline')).toContainText('successfully harmonized 1 value');
-  await expect(page.getByText('partner_submission.csv', { exact: true })).toBeVisible();
-  await expect(page.getByText('Checked against GDC 3.0', { exact: true })).toBeVisible();
-  await expect(page.locator('#stageThreeDial')).toHaveAttribute(
-    'aria-label',
-    'Of 6 unique values checked: 1 was successfully harmonized; 3 already matched; 2 could not be harmonized.',
+  await expect(page.getByRole('heading', { name: 'Harmonization complete' })).toBeVisible();
+  await expect(page.locator('#stageThreeContext')).toHaveText(
+    'partner_submission.csv · 20 rows · Checked against GDC 3.0',
   );
-  await expect(page.locator('#stageThreeCheckedCount')).toHaveText('6');
-  await expect(page.locator('.stage-three-dial__content span')).toHaveText('unique values checked');
+  const dial = page.getByRole('img', {
+    name: 'Of 6 unique values checked: 1 unique value harmonized to an approved value; '
+      + '3 unique values already matched the approved list; 2 unique values not harmonized.',
+  });
+  await expect(dial).toHaveText('66% of 6 unique values now match');
+  await expect(page.getByRole('list', { name: 'Harmonization result groups' }).getByRole('listitem')).toHaveText([
+    '1 unique value harmonized to an approved value',
+    '3 unique values already matched the approved list',
+    '2 unique values not harmonized',
+  ]);
 
   const table = page.locator('[data-column-outcome-table] .column-outcome-table');
   await expect(table).toBeVisible();
@@ -976,6 +984,11 @@ test('completed Stage 3 shows the durable dial, action table, and remaining colu
     '0 of 2',
     '0 of 1',
     '1 of 2',
+  ]);
+  await expect(table.locator('tbody tr td:nth-child(4)')).toHaveText([
+    '1 unique value not harmonized',
+    '1 unique value not harmonized',
+    'All values are harmonized',
   ]);
   await expect(table).not.toContainText('already_matched');
   await expect(table).not.toContainText('not_checked');
@@ -999,6 +1012,176 @@ test('completed Stage 3 shows the durable dial, action table, and remaining colu
 
   // Then: the existing Stage 4 navigation contract remains unchanged.
   await page.waitForURL(/\/stage-4/);
+});
+
+const STAGE_THREE_FILE_ID = '0123456789abcdef0123456789abcdef';
+
+/* why: one checked column carries the whole partition, so each case controls the three group counts exactly. */
+const routeCompletedStageThreeJob = async (page, jobId, columnBreakdowns) => {
+  await page.route('**/stage-3/jobs/*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        job_id: jobId,
+        status: 'succeeded',
+        detail: 'Harmonization completed.',
+        next_stage_url: `/stage-4?file_id=${STAGE_THREE_FILE_ID}&job_id=${jobId}&status=succeeded`,
+        job_id_available: true,
+        manifest_summary: {
+          total_terms: columnBreakdowns.reduce((total, column) => total + column.unique_terms, 0),
+          changed_terms: 0,
+          non_conformant_terms: columnBreakdowns.reduce((total, column) => total + column.non_conformant_terms, 0),
+          source_file_name: 'clinical_samples.csv',
+          source_row_count: 1204,
+          reference_model_label: 'CCDI',
+          reference_model_version: 'v2.1',
+          match_fidelity_counts: [],
+          column_breakdowns: columnBreakdowns,
+        },
+      }),
+    });
+  });
+};
+
+const stageThreeColumn = ({ harmonized, matched, unresolved, reviewStatus }) => ({
+  column_name: 'diagnosis',
+  label: 'diagnosis',
+  column_key: 'col_0000',
+  source_column_index: 0,
+  review_status: reviewStatus ?? (unresolved > 0 ? 'needs_attention' : 'clear'),
+  total_rows: 1204,
+  changed_rows: harmonized,
+  unchanged_rows: 1204 - harmonized,
+  unique_terms: harmonized + matched + unresolved,
+  unique_terms_changed: harmonized,
+  successfully_harmonized_terms: harmonized,
+  unique_terms_unchanged: matched + unresolved,
+  non_conformant_terms: unresolved,
+  match_fidelity_counts_changed: [],
+});
+
+const STAGE_THREE_SUMMARY_CASES = [
+  {
+    name: 'mixed counts',
+    counts: { harmonized: 37, matched: 9, unresolved: 6 },
+    dial: '88% of 52 unique values now match',
+    groups: [
+      ['37 unique values harmonized to an approved value', 'normal'],
+      ['9 unique values already matched the approved list', 'normal'],
+      ['6 unique values not harmonized', 'attention'],
+    ],
+    tableStatus: '6 unique values not harmonized',
+  },
+  {
+    name: 'everything harmonized',
+    counts: { harmonized: 52, matched: 0, unresolved: 0 },
+    dial: '100% of 52 unique values now match',
+    groups: [
+      ['52 unique values harmonized to an approved value', 'normal'],
+      ['0 unique values already matched the approved list', 'zero'],
+      ['0 unique values not harmonized', 'zero'],
+    ],
+    tableStatus: 'All values are harmonized',
+  },
+  {
+    name: 'everything already matched',
+    counts: { harmonized: 0, matched: 52, unresolved: 0 },
+    dial: '100% of 52 unique values now match',
+    groups: [
+      ['0 unique values harmonized to an approved value', 'zero'],
+      ['52 unique values already matched the approved list', 'normal'],
+      ['0 unique values not harmonized', 'zero'],
+    ],
+    tableStatus: null,
+  },
+  {
+    name: 'nothing harmonized',
+    counts: { harmonized: 0, matched: 0, unresolved: 52 },
+    dial: '0% of 52 unique values now match',
+    groups: [
+      ['0 unique values harmonized to an approved value', 'zero'],
+      ['0 unique values already matched the approved list', 'zero'],
+      ['52 unique values not harmonized', 'attention'],
+    ],
+    tableStatus: '52 unique values not harmonized',
+  },
+  {
+    name: 'harmonized and already matched',
+    counts: { harmonized: 43, matched: 9, unresolved: 0 },
+    dial: '100% of 52 unique values now match',
+    groups: [
+      ['43 unique values harmonized to an approved value', 'normal'],
+      ['9 unique values already matched the approved list', 'normal'],
+      ['0 unique values not harmonized', 'zero'],
+    ],
+    tableStatus: 'All values are harmonized',
+  },
+  {
+    name: 'a very small match share',
+    counts: { harmonized: 1, matched: 0, unresolved: 299 },
+    dial: '<1% of 300 unique values now match',
+    groups: [
+      ['1 unique value harmonized to an approved value', 'normal'],
+      ['0 unique values already matched the approved list', 'zero'],
+      ['299 unique values not harmonized', 'attention'],
+    ],
+    tableStatus: '299 unique values not harmonized',
+  },
+];
+
+for (const scenario of STAGE_THREE_SUMMARY_CASES) {
+  test(`Stage 3 summary shows ${scenario.name}`, async ({ page }) => {
+    const jobId = `stage-three-summary-${scenario.name.replaceAll(' ', '-')}`;
+    // Given: a completed job whose checked unique values split into the scenario's three groups
+    await routeCompletedStageThreeJob(page, jobId, [stageThreeColumn(scenario.counts)]);
+    await page.goto('/stage-1');
+    await expect(page.locator('#stageThreeComplete')).toHaveCount(0);
+
+    // When: Stage 3 loads the completed result
+    await page.goto(`/stage-3?file_id=${STAGE_THREE_FILE_ID}&job_id=${jobId}`);
+
+    // Then: the dial shows the rounded-down match share and all three groups render with their states
+    await expect(page.getByRole('heading', { name: 'Harmonization complete' })).toBeVisible();
+    await expect(page.locator('#stageThreeContext')).toHaveText(
+      'clinical_samples.csv · 1,204 rows · Checked against CCDI v2.1',
+    );
+    await expect(page.locator('#stageThreeDial')).toHaveText(scenario.dial);
+    const groups = page.getByRole('list', { name: 'Harmonization result groups' }).getByRole('listitem');
+    await expect(groups).toHaveText(scenario.groups.map(([text]) => text));
+    for (const [index, [, groupState]] of scenario.groups.entries()) {
+      await expect(groups.nth(index)).toHaveAttribute('data-state', groupState);
+    }
+    await expect(page.locator('#stageThreeResultMessage')).toBeHidden();
+    const tableRows = page.locator('[data-column-outcome-table] tbody tr');
+    if (scenario.tableStatus === null) {
+      await expect(tableRows).toHaveCount(0);
+    } else {
+      await expect(tableRows.locator('td:nth-child(4)')).toHaveText([scenario.tableStatus]);
+    }
+  });
+}
+
+test('Stage 3 summary shows a gray dial when no values were checked', async ({ page }) => {
+  const jobId = 'stage-three-summary-none-checked';
+  // Given: a completed job whose only column has no approved list
+  await routeCompletedStageThreeJob(page, jobId, [
+    stageThreeColumn({ harmonized: 0, matched: 4, unresolved: 0, reviewStatus: 'not_checked' }),
+  ]);
+  await page.goto('/stage-1');
+  await expect(page.locator('#stageThreeComplete')).toHaveCount(0);
+
+  // When: Stage 3 loads the completed result
+  await page.goto(`/stage-3?file_id=${STAGE_THREE_FILE_ID}&job_id=${jobId}`);
+
+  // Then: the dial shows zero checked values, the groups are hidden, and the reason is stated
+  await expect(page.getByRole('img', {
+    name: 'No unique values were checked against an approved list.',
+  })).toHaveText('0 unique values checked');
+  await expect(page.getByRole('list', { name: 'Harmonization result groups' })).toBeHidden();
+  await expect(page.locator('#stageThreeResultMessage')).toHaveText(
+    'None of the mapped columns has an approved list, so no unique values were checked.',
+  );
 });
 
 test('an earlier completed Stage 3 job does not invent detailed value groups', async ({ page }) => {
@@ -1047,9 +1230,12 @@ test('an earlier completed Stage 3 job does not invent detailed value groups', a
   await page.goto(`/stage-3?file_id=${fileId}&job_id=${jobId}`);
 
   // Then: the page preserves useful results without inventing a dial partition.
-  await expect(page.locator('#stageThreeHeadline')).toHaveText('Harmonization complete');
-  await expect(page.locator('#stageThreeDial')).not.toBeVisible();
-  await expect(page.getByText('Detailed value groups are not available for this earlier result.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Harmonization complete' })).toBeVisible();
+  await expect(page.locator('#stageThreeDial')).toBeHidden();
+  await expect(page.getByRole('list', { name: 'Harmonization result groups' })).toBeHidden();
+  await expect(page.getByText(
+    'Detailed value groups are not available for this earlier result. Continue to Verify to review the changes.',
+  )).toBeVisible();
   await expect(page.locator('[data-column-outcome-table]')).toContainText('Not recorded');
   await expect(page.locator('#reviewButton')).toBeEnabled();
 });
