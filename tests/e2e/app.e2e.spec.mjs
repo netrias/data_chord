@@ -815,7 +815,7 @@ test('happy path flow: upload → analyze → harmonize → review → summary �
   await expect(page.getByText(
     'None of the mapped columns has an approved list, so no unique values were checked.',
   )).toBeVisible();
-  await expect(page.getByRole('list', { name: 'Harmonization result groups' })).toBeHidden();
+  await expect(page.getByRole('list', { name: 'Unique value results' })).toBeHidden();
   await expect(page.getByText('Confidence', { exact: true })).toHaveCount(0);
 
   await page.click('#reviewButton');
@@ -965,10 +965,10 @@ test('completed Stage 3 shows the durable dial, action table, and remaining colu
   );
   await expect(page.getByRole('img', { name: '66% of 6 unique values now match' }))
     .toHaveText('66% of 6 unique values now match');
-  await expect(page.getByRole('list', { name: 'Harmonization result groups' }).getByRole('listitem')).toHaveText([
-    '1 unique value harmonized to an approved value',
-    '3 unique values already matched the approved list',
-    '2 unique values not harmonized',
+  await expect(page.getByRole('list', { name: 'Unique value results' }).getByRole('listitem')).toHaveText([
+    '1 harmonized',
+    '3 already matched',
+    '2 not harmonized',
   ]);
 
   const table = page.locator('[data-column-outcome-table] .column-outcome-table');
@@ -1020,9 +1020,9 @@ const STAGE_THREE_SUMMARY_CASES = [
     counts: { harmonized: 37, matched: 9, unresolved: 6 },
     dial: '88% of 52 unique values now match',
     groups: [
-      ['37 unique values harmonized to an approved value', 'normal'],
-      ['9 unique values already matched the approved list', 'normal'],
-      ['6 unique values not harmonized', 'attention'],
+      ['37 harmonized', 'normal'],
+      ['9 already matched', 'normal'],
+      ['6 not harmonized', 'attention'],
     ],
     tableStatus: '6 unique values not harmonized',
   },
@@ -1031,9 +1031,9 @@ const STAGE_THREE_SUMMARY_CASES = [
     counts: { harmonized: 0, matched: 0, unresolved: 52 },
     dial: '0% of 52 unique values now match',
     groups: [
-      ['0 unique values harmonized to an approved value', 'zero'],
-      ['0 unique values already matched the approved list', 'zero'],
-      ['52 unique values not harmonized', 'attention'],
+      ['0 harmonized', 'zero'],
+      ['0 already matched', 'zero'],
+      ['52 not harmonized', 'attention'],
     ],
     tableStatus: '52 unique values not harmonized',
   },
@@ -1056,7 +1056,7 @@ for (const scenario of STAGE_THREE_SUMMARY_CASES) {
       'clinical_samples.csv · 1,204 rows · Checked against CCDI v2.1',
     );
     await expect(page.getByRole('img', { name: scenario.dial })).toHaveText(scenario.dial);
-    const groups = page.getByRole('list', { name: 'Harmonization result groups' }).getByRole('listitem');
+    const groups = page.getByRole('list', { name: 'Unique value results' }).getByRole('listitem');
     await expect(groups).toHaveText(scenario.groups.map(([text]) => text));
     for (const [index, [, groupState]] of scenario.groups.entries()) {
       await expect(groups.nth(index)).toHaveAttribute('data-state', groupState);
@@ -1084,7 +1084,7 @@ test('Stage 3 summary shows a gray dial when no values were checked', async ({ p
   await expect(page.getByRole('img', {
     name: 'No unique values were checked against an approved list.',
   })).toHaveText('0 unique values checked');
-  await expect(page.getByRole('list', { name: 'Harmonization result groups' })).toBeHidden();
+  await expect(page.getByRole('list', { name: 'Unique value results' })).toBeHidden();
   await expect(page.locator('#stageThreeResultMessage')).toHaveText(
     'None of the mapped columns has an approved list, so no unique values were checked.',
   );
@@ -1102,7 +1102,7 @@ test('Stage 3 summary does not draw groups whose counts exceed the checked value
 
   // Then: the page treats the result like an earlier job instead of drawing a false partition
   await expect(page.locator('#stageThreeDial')).toBeHidden();
-  await expect(page.getByRole('list', { name: 'Harmonization result groups' })).toBeHidden();
+  await expect(page.getByRole('list', { name: 'Unique value results' })).toBeHidden();
   await expect(page.locator('#stageThreeResultMessage')).toHaveText(
     'Detailed value groups are not available for this earlier result. Continue to Verify to review the changes.',
   );
@@ -1156,7 +1156,7 @@ test('an earlier completed Stage 3 job does not invent detailed value groups', a
   // Then: the page preserves useful results without inventing a dial partition.
   await expect(page.getByRole('heading', { name: 'Harmonization complete' })).toBeVisible();
   await expect(page.locator('#stageThreeDial')).toBeHidden();
-  await expect(page.getByRole('list', { name: 'Harmonization result groups' })).toBeHidden();
+  await expect(page.getByRole('list', { name: 'Unique value results' })).toBeHidden();
   await expect(page.getByText(
     'Detailed value groups are not available for this earlier result. Continue to Verify to review the changes.',
   )).toBeVisible();

@@ -19,7 +19,7 @@
  * @typedef {Object} ResultGroup
  * @property {'harmonized' | 'matched' | 'unresolved'} key
  * @property {number} count
- * @property {string} label - Text after the count, singular when count is 1
+ * @property {string} label - Text after the count; the list name says the counts are unique values
  * @property {ResultGroupState} state - Only a non-zero unresolved group needs attention
  */
 
@@ -31,9 +31,7 @@
  * @property {ResultGroup[]} groups - Always three groups, in dial order
  */
 
-const _uniqueValues = (count) => `unique ${count === 1 ? 'value' : 'values'}`;
-
-const _formatUniqueValueCount = (count) => `${count.toLocaleString()} ${_uniqueValues(count)}`;
+const _formatUniqueValueCount = (count) => `${count.toLocaleString()} unique ${count === 1 ? 'value' : 'values'}`;
 
 /* why: round down so 100% appears only when nothing is unresolved; multiply first so 29/100 is exactly 29. */
 const _percentLabel = (matching, checked) => {
@@ -45,14 +43,14 @@ const _percentLabel = (matching, checked) => {
 /**
  * @param {ResultGroup['key']} key
  * @param {number} count
- * @param {string} labelText
+ * @param {string} label
  * @param {boolean} needsAttentionWhenPresent
  * @returns {ResultGroup}
  */
-const _group = (key, count, labelText, needsAttentionWhenPresent) => ({
+const _group = (key, count, label, needsAttentionWhenPresent) => ({
   key,
   count,
-  label: `${_uniqueValues(count)} ${labelText}`,
+  label,
   state: count === 0 ? 'zero' : needsAttentionWhenPresent ? 'attention' : 'normal',
 });
 
@@ -62,8 +60,8 @@ const _group = (key, count, labelText, needsAttentionWhenPresent) => ({
  */
 export const summarizeResult = ({ checked, harmonized, matched, unresolved }) => {
   const groups = [
-    _group('harmonized', harmonized, 'harmonized to an approved value', false),
-    _group('matched', matched, 'already matched the approved list', false),
+    _group('harmonized', harmonized, 'harmonized', false),
+    _group('matched', matched, 'already matched', false),
     _group('unresolved', unresolved, 'not harmonized', true),
   ];
   const percentLabel = _percentLabel(harmonized + matched, checked);

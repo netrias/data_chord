@@ -134,7 +134,7 @@ test('real workflow: zero-term success keeps file context and downloads missing 
   );
   await expect(page.locator('#stageThreeDial')).toHaveText('0 unique values checked');
   await expect(page.locator('#stageThreeContext')).toHaveText(/^missing-only\.csv · 3 rows/);
-  await expect(page.getByRole('list', { name: 'Harmonization result groups' })).toBeHidden();
+  await expect(page.getByRole('list', { name: 'Unique value results' })).toBeHidden();
 
   // When: the reviewer opens the real review and summary screens.
   const reviewResponse = page.waitForResponse((response) => (

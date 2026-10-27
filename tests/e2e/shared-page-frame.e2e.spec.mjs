@@ -78,7 +78,7 @@ for (const width of [1440, 1024]) {
 
     // When: the completion summary is laid out
     await page.goto(`/stage-3?file_id=${STAGE_THREE_FILE_ID}&job_id=${jobId}`);
-    const groups = page.getByRole('list', { name: 'Harmonization result groups' }).getByRole('listitem');
+    const groups = page.getByRole('list', { name: 'Unique value results' }).getByRole('listitem');
     await expect(groups).toHaveCount(3);
     const dial = await page.locator('#stageThreeDial').boundingBox();
     const headline = await page.getByRole('heading', { name: 'Harmonization complete' }).boundingBox();
@@ -104,7 +104,7 @@ test('Stage 3 result summary stacks inside a phone viewport', async ({ page }) =
 
   // When: the completion summary is laid out
   await page.goto(`/stage-3?file_id=${STAGE_THREE_FILE_ID}&job_id=${jobId}`);
-  const groups = page.getByRole('list', { name: 'Harmonization result groups' }).getByRole('listitem');
+  const groups = page.getByRole('list', { name: 'Unique value results' }).getByRole('listitem');
   await expect(groups).toHaveCount(3);
 
   // Then: the dial sits above the text, groups stack, and the summary stays inside the viewport

@@ -41,29 +41,22 @@ describe('Stage 3 result summary', () => {
 
     // Then all three groups exist, the zero group is muted, and only unresolved needs attention
     assert.deepEqual(groupView(summary), [
-      { key: 'harmonized', count: 0, label: 'unique values harmonized to an approved value', state: 'zero' },
-      { key: 'matched', count: 46, label: 'unique values already matched the approved list', state: 'normal' },
-      { key: 'unresolved', count: 6, label: 'unique values not harmonized', state: 'attention' },
+      { key: 'harmonized', count: 0, label: 'harmonized', state: 'zero' },
+      { key: 'matched', count: 46, label: 'already matched', state: 'normal' },
+      { key: 'unresolved', count: 6, label: 'not harmonized', state: 'attention' },
     ]);
     assert.equal(summary.caption, 'of 52 unique values now match');
     assert.equal(summary.ariaLabel, '88% of 52 unique values now match');
   });
 
-  it('uses singular wording for a count of 1', () => {
-    // Given one run with one value per group and one run with a single checked value
-    const oneEach = { checked: 3, harmonized: 1, matched: 1, unresolved: 1 };
+  it('uses singular wording for one checked value', () => {
+    // Given a run with a single checked value
     const oneChecked = { checked: 1, harmonized: 1, matched: 0, unresolved: 0 };
 
-    // When both summaries are derived
-    const each = summarizeResult(oneEach);
+    // When the summary is derived
     const single = summarizeResult(oneChecked);
 
-    // Then every count of 1 uses "unique value"
-    assert.deepEqual(each.groups.map((group) => group.label), [
-      'unique value harmonized to an approved value',
-      'unique value already matched the approved list',
-      'unique value not harmonized',
-    ]);
+    // Then the caption and dial label say "unique value"
     assert.equal(single.caption, 'of 1 unique value now match');
     assert.equal(single.ariaLabel, '100% of 1 unique value now match');
   });

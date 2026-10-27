@@ -100,7 +100,6 @@
   align-items: center;
   gap: var(--space-8) var(--space-12);
   padding-bottom: var(--space-8);
-  border-bottom: 1px solid var(--gray-200);
 }
 
 .stage-three-verdict {
@@ -164,6 +163,7 @@
   color: var(--gray-500);
   font-size: 0.92rem;
   line-height: 1.35;
+  text-wrap: balance;
 }
 
 .stage-three-verdict h1 {
@@ -288,7 +288,7 @@
   width: 1.25rem;
   height: 1.25rem;
   border-radius: 50%;
-  background: conic-gradient(var(--azure-500) 0 var(--metric-percent), var(--gray-200) var(--metric-percent) 100%);
+  background: conic-gradient(var(--netrias-500) 0 var(--metric-percent), var(--gray-200) var(--metric-percent) 100%);
 }
 
 .column-outcome-mini-ring::after {

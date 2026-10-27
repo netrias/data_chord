@@ -89,7 +89,7 @@ const _renderGroups = (groups) => {
     count.textContent = _formatCount(group.count);
     const label = document.createElement('span');
     label.className = 'stage-three-group__label';
-    /* why: the leading space keeps the list item's accessible text as "37 unique values ...". */
+    /* why: the leading space keeps the list item's accessible text as "37 harmonized", not "37harmonized". */
     label.textContent = ` ${group.label}`;
     item.append(marker, count, label);
     return item;
