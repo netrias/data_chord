@@ -47,12 +47,14 @@ jobs:
           tofu -chdir=infra init -backend=false -input=false
           tofu -chdir=infra/customer-platform init -backend=false -input=false
           tofu -chdir=infra/modules/data-plane init -backend=false -input=false
+          tofu -chdir=infra/verification/build-trust init -backend=false -input=false
 
       - name: Validate OpenTofu
         run: |
           tofu -chdir=infra validate
           tofu -chdir=infra/customer-platform validate
           tofu -chdir=infra/modules/data-plane validate
+          tofu -chdir=infra/verification/build-trust validate
 
       - name: Test OpenTofu behavior
         run: |
