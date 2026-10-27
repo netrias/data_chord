@@ -10,6 +10,7 @@ dependencies = [
     "python-multipart>=0.0.31",  # CVE remediation
     "uvicorn[standard]>=0.30.0",
     "boto3>=1.40.69",
+    "certifi>=2026.10.19",  # certificate-trust repair; shared with main
     "cryptography>=48.0.1",
     "netrias_client @ git+https://github.com/netrias/netrias_client.git@8d98df0d17f476a722dfa71fccf698c70003e5e6",
     "openpyxl>=3.1.5",
@@ -88,6 +89,8 @@ min_confidence = 100
 # Security: require Python packages to be at least 7 days old before resolution.
 # This is an important supply-chain protection against newly published compromised packages.
 exclude-newer = "7 days"
+# Existing narrow emergency cutoff; remove on/after 2026-10-28 UTC.
+exclude-newer-package = { certifi = "2026-10-21T00:00:00Z" }
 
 [dependency-groups]
 dev = [
