@@ -887,7 +887,7 @@ resource "aws_ecs_service" "app" {
 
   deployment_circuit_breaker {
     enable   = true
-    rollback = true
+    rollback = var.enable_automatic_rollback
   }
 
   network_configuration {
@@ -1091,13 +1091,6 @@ resource "aws_codebuild_project" "app_image" {
     type = "NO_ARTIFACTS"
   }
 
-  cache {
-    type = "LOCAL"
-    # Docker and source caches keep app-only deploys fast enough to use as the
-    # normal deployment path instead of pushing images from a developer laptop.
-    modes = ["LOCAL_DOCKER_LAYER_CACHE", "LOCAL_SOURCE_CACHE"]
-  }
-
   environment {
     compute_type                = "BUILD_GENERAL1_MEDIUM"
     image                       = "aws/codebuild/standard:7.0"
@@ -1121,6 +1114,11 @@ resource "aws_codebuild_project" "app_image" {
     }
 
     environment_variable {
+      name  = "APPLICATION_REPOSITORY_URL"
+      value = var.codebuild_source_location
+    }
+
+    environment_variable {
       name  = "IMAGE_REPO_NAME"
       value = aws_ecr_repository.app.name
     }
@@ -1134,10 +1132,24 @@ resource "aws_codebuild_project" "app_image" {
   }
 
   source {
-    type      = var.codebuild_source_type
-    location  = var.codebuild_source_location
-    buildspec = "infra/buildspec.yml"
+    type = "NO_SOURCE"
+    buildspec = yamlencode(merge(local.image_buildspec, {
+      phases = merge(local.image_buildspec.phases, {
+        install = merge(local.image_buildspec.phases.install, {
+          commands = concat([local.source_bootstrap], local.image_buildspec.phases.install.commands)
+        })
+      })
+    }))
   }
 
   tags = local.common_tags
+}
+
+locals {
+  image_buildspec = yamldecode(file("${path.module}/buildspec.yml"))
+  source_bootstrap = templatefile("${path.module}/templates/source-bootstrap.sh.tftpl", {
+    checker  = filebase64("${path.module}/../scripts/check-build-host-trust.py")
+    preparer = filebase64("${path.module}/../scripts/prepare-build-trust.py")
+    pin      = filebase64("${path.module}/../config/build-trust.json")
+  })
 }

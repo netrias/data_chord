@@ -3,11 +3,18 @@ version: 0.2
 env:
   shell: bash
   variables:
-    UV_VERSION: "0.10.0"
+    UV_VERSION: "0.13.4"
 
 phases:
   install:
+    on-failure: ABORT
     commands:
+      - python3 -I scripts/check-build-host-trust.py --bundle "$SSL_CERT_FILE" --directory "$SSL_CERT_DIR"
+      - NODE_RUNTIME_DIRECTORY="$(bash scripts/install-node-runtime.sh)"
+      - export PATH="$NODE_RUNTIME_DIRECTORY/bin:$PATH"
+      - node --version
+      - npm install -g npm@11.11.1
+      - npm ci
       - curl -LsSf "https://astral.sh/uv/$UV_VERSION/install.sh" | sh
       - export PATH="$HOME/.local/bin:$PATH"
   pre_build:
@@ -15,18 +22,18 @@ phases:
       - export PATH="$HOME/.local/bin:$PATH"
       - uv sync --frozen --extra dev
       - uv run ruff check .
-      - uv run basedpyright
+      - npm run typecheck:py
       - uv run pytest
       - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
-      - export SOURCE_TAG="${CODEBUILD_RESOLVED_SOURCE_VERSION:-}"
-      - if [ -z "$SOURCE_TAG" ]; then echo "CODEBUILD_RESOLVED_SOURCE_VERSION is required for immutable image tags"; exit 1; fi
+      - export SOURCE_TAG="${APP_SOURCE_COMMIT:-}"
+      - 'if ! [[ "$SOURCE_TAG" =~ ^[0-9a-f]{40}$ ]]; then echo "APP_SOURCE_COMMIT must be a full Git commit"; exit 1; fi'
       # Use the GitHub commit as the image tag so ECS deploys can be traced back
       # to an exact source revision.
-      - export IMAGE_TAG="$(echo "$SOURCE_TAG" | cut -c1-12)"
+      - export IMAGE_TAG="$SOURCE_TAG"
       - 'if aws ecr describe-images --repository-name "$IMAGE_REPO_NAME" --image-ids imageTag="$IMAGE_TAG" >/dev/null 2>&1; then echo "Image tag already exists and ECR tags are immutable: $IMAGE_TAG"; exit 1; fi'
   build:
     commands:
-      - docker build -t "$IMAGE_REPO_URI:$IMAGE_TAG" .
+      - docker build --pull --no-cache -t "$IMAGE_REPO_URI:$IMAGE_TAG" .
   post_build:
     commands:
       - if [ "$CODEBUILD_BUILD_SUCCEEDING" != "1" ]; then echo "Build failed; skipping image push"; exit 1; fi

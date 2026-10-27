@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+umask 077
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
@@ -40,9 +41,6 @@ git_commit() {
   git -C "$REPO_DIR" rev-parse HEAD
 }
 
-git_image_tag() {
-  git -C "$REPO_DIR" rev-parse --short=12 HEAD
-}
 
 require_immutable_image_tag() {
   local image_tag="$1"
@@ -71,8 +69,8 @@ ensure_deployable_git_state() {
 
   [[ -n "$branch" ]] || fail "Cannot deploy from a detached HEAD."
 
-  if [[ -n "$dirty_status" && "${DATA_CHORD_DEPLOY_ALLOW_DIRTY:-}" != "1" ]]; then
-    fail "Working tree has uncommitted changes. Commit them, or rerun with DATA_CHORD_DEPLOY_ALLOW_DIRTY=1 to deploy the current HEAD anyway."
+  if [[ -n "$dirty_status" ]]; then
+    fail "Working tree has uncommitted changes. Commit the reviewed security release first."
   fi
 
   # CodeBuild pulls from GitHub, so local-only commits would build a different
@@ -92,26 +90,66 @@ init_tofu() {
     -reconfigure
 }
 
+check_release_plan() {
+  local plan_json="$1" tag expected_digest actual_digest
+  local qualification_args=()
+  if [[ -n "${DATA_CHORD_RELEASE_QUALIFICATION:-}" ]]; then
+    qualification_args=(--qualification "$DATA_CHORD_RELEASE_QUALIFICATION")
+  fi
+  aws ecs describe-services --cluster data-chord-prod --services data-chord-prod \
+    --query 'services[0]' --output json > "$plan_json.running-service.json"
+  local running_task
+  running_task="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["taskDefinition"])' "$plan_json.running-service.json")"
+  aws ecs describe-task-definition --task-definition "$running_task" \
+    --query 'taskDefinition.{taskDefinitionArn:taskDefinitionArn,containerDefinitions:containerDefinitions[].{name:name,image:image}}' \
+    --output json > "$plan_json.running-task.json"
+  python3 -I "$SCRIPT_DIR/check-security-release-plan.py" "$plan_json" "${qualification_args[@]}" \
+    --running-service "$plan_json.running-service.json" --running-task "$plan_json.running-task.json" > "$plan_json.images"
+  while IFS=$'\t' read -r tag expected_digest; do
+    [[ -n "$tag" ]] || continue
+    actual_digest="$(aws ecr describe-images --repository-name "data-chord-$ENV_NAME" \
+      --image-ids "imageTag=$tag" --query 'imageDetails[0].imageDigest' --output text)"
+    [[ "$actual_digest" == "$expected_digest" ]] || fail "Qualified image digest changed: $tag"
+  done < "$plan_json.images"
+}
+
 apply_stack() {
-  local image_tag="$1"
-  require_immutable_image_tag "$image_tag"
-  log "Applying OpenTofu stack for $ENV_NAME with image tag $image_tag"
-  tofu -chdir="$INFRA_DIR" apply -input=false -auto-approve "${tofu_args[@]}" "-var=image_tag=$image_tag"
+  local saved_plan="${DATA_CHORD_SAVED_PLAN:?Set DATA_CHORD_SAVED_PLAN to the reviewed plan file}"
+  [[ "$saved_plan" == /* ]] || fail "Use the absolute saved-plan path printed by plan"
+  ensure_deployable_git_state
+  python3 - "$saved_plan" "$(git_commit)" <<'PYRECEIPT'
+import hashlib, json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+record = json.loads(Path(str(path) + '.receipt.json').read_text())
+if record != {'source_commit': sys.argv[2], 'plan_sha256': hashlib.sha256(path.read_bytes()).hexdigest()}:
+    raise SystemExit('Saved plan or source changed')
+PYRECEIPT
+  tofu -chdir="$INFRA_DIR" show -json "$saved_plan" > "$saved_plan.json"
+  check_release_plan "$saved_plan.json"
+  log "Applying the reviewed saved plan: $saved_plan"
+  tofu -chdir="$INFRA_DIR" apply -input=false "$saved_plan"
 }
 
 plan_stack() {
-  local image_tag="$1"
+  local image_tag="$1" saved_plan
   require_immutable_image_tag "$image_tag"
-  log "Planning OpenTofu stack for $ENV_NAME with image tag $image_tag"
-  tofu -chdir="$INFRA_DIR" plan -input=false "${tofu_args[@]}" "-var=image_tag=$image_tag"
-}
-
-bootstrap_state() {
-  "$SCRIPT_DIR/bootstrap-state.sh" "$ENV_NAME"
-}
-
-ensure_secret() {
-  "$SCRIPT_DIR/bootstrap-secrets.sh" "$ENV_NAME" ensure
+  ensure_deployable_git_state
+  mkdir -p "$REPO_DIR/.plans"
+  saved_plan="$(mktemp -d "$REPO_DIR/.plans/$ENV_NAME-$(git_commit).XXXXXX")/release.tfplan"
+  log "Saving the security plan for $ENV_NAME with image tag $image_tag"
+  # Leave the unrelated unconfirmed email-subscription drift untouched.
+  tofu -chdir="$INFRA_DIR" plan -input=false "${tofu_args[@]}" \
+    -exclude=aws_sns_topic_subscription.alert_email "-var=image_tag=$image_tag" "-out=$saved_plan"
+  tofu -chdir="$INFRA_DIR" show -json "$saved_plan" > "$saved_plan.json"
+  check_release_plan "$saved_plan.json"
+  python3 - "$saved_plan" "$(git_commit)" <<'PYRECEIPT'
+import hashlib, json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+Path(str(path) + '.receipt.json').write_text(json.dumps({'source_commit': sys.argv[2], 'plan_sha256': hashlib.sha256(path.read_bytes()).hexdigest()}))
+PYRECEIPT
+  log "Review this plan, then set DATA_CHORD_SAVED_PLAN=$saved_plan and run the apply mode."
 }
 
 check_secret() {
@@ -168,7 +206,7 @@ start_build() {
   log "Starting CodeBuild project: $project_name at ${commit:0:12}"
   aws codebuild start-build \
     --project-name "$project_name" \
-    --source-version "$commit" \
+    --environment-variables-override "name=APP_SOURCE_COMMIT,value=$commit,type=PLAINTEXT" \
     --query "build.id" \
     --output text
 }
@@ -372,57 +410,11 @@ tail_logs() {
   }
 }
 
-run_app_deploy() {
-  local build_id image_tag app_url
-
-  log "Using AWS profile: $AWS_PROFILE"
-  ensure_deployable_git_state
-  image_tag="$(git_image_tag)"
-  bootstrap_state
-  ensure_secret
-  load_auth_bypass_cidrs
-  init_tofu
-
-  build_id="$(start_build)"
-  watch_build "$build_id"
-  apply_stack "$image_tag"
-  watch_ecs_rollout
-
-  app_url="$(tofu_output app_url)"
-  log "Deploy complete: $app_url"
-}
-
-run_infra_deploy() {
-  local before_task_definition after_task_definition image_tag app_url
-
-  log "Using AWS profile: $AWS_PROFILE"
-  bootstrap_state
-  ensure_secret
-  load_auth_bypass_cidrs
-  init_tofu
-
-  image_tag="$(infra_image_tag)"
-  before_task_definition="$(current_task_definition_arn)"
-  apply_stack "$image_tag"
-  after_task_definition="$(current_task_definition_arn)"
-
-  # Pure infrastructure edits do not always create a new task definition, so
-  # only wait for an ECS rollout when there is actually a new task to watch.
-  if [[ -n "$after_task_definition" && "$after_task_definition" != "$before_task_definition" ]]; then
-    watch_ecs_rollout
-  else
-    log "No ECS task definition change detected; skipping rollout watch"
-  fi
-
-  app_url="$(tofu_output app_url)"
-  log "Infra deploy complete: $app_url"
-}
-
 run_plan() {
   local image_tag
-
   log "Using AWS profile: $AWS_PROFILE"
-  bootstrap_state
+  [[ "$(aws sts get-caller-identity --query Account --output text)" == 084828580051 ]] || fail "Wrong AWS account"
+  [[ "$AWS_REGION_VALUE" == us-east-2 && "$ENV_NAME" == prod ]] || fail "This security release uses the existing BDF production only"
   check_secret
   load_auth_bypass_cidrs
   init_tofu
@@ -432,27 +424,34 @@ run_plan() {
 
 case "$MODE" in
   deploy | deploy-app | app)
-    run_app_deploy
+    fail "Security release: run plan, review the saved plan, then use apply."
     ;;
   deploy-infra | infra)
-    run_infra_deploy
+    fail "Security release: run plan, review the saved plan, then use apply."
     ;;
   plan)
     run_plan
     ;;
+  apply)
+    [[ "$(aws sts get-caller-identity --query Account --output text)" == 084828580051 ]] || fail "Wrong AWS account"
+    [[ "$AWS_REGION_VALUE" == us-east-2 && "$ENV_NAME" == prod ]] || fail "Wrong security release environment"
+    init_tofu
+    apply_stack
+    watch_ecs_rollout
+    print_status
+    ;;
   status)
-    bootstrap_state
     init_tofu
     print_status
     ;;
   logs)
-    bootstrap_state
     init_tofu
     tail_logs
     ;;
   build)
+    [[ "$(aws sts get-caller-identity --query Account --output text)" == 084828580051 ]] || fail "Wrong AWS account"
+    [[ "$AWS_REGION_VALUE" == us-east-2 && "$ENV_NAME" == prod ]] || fail "Wrong security release environment"
     ensure_deployable_git_state
-    bootstrap_state
     init_tofu
     build_id="$(start_build)"
     watch_build "$build_id"
