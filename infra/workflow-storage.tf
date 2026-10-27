@@ -14,13 +14,19 @@ resource "aws_iam_role" "application_task" {
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
+    Statement = concat([{
       Effect = "Allow"
       Principal = {
         Service = "ecs-tasks.amazonaws.com"
       }
       Action = "sts:AssumeRole"
-    }]
+      }], var.local_developer_role_arn == null ? [] : [{
+      # Keep local access in deployment state so a deployment does not erase it.
+      Sid       = "AllowLocalDeveloperRole"
+      Effect    = "Allow"
+      Principal = { AWS = var.local_developer_role_arn }
+      Action    = "sts:AssumeRole"
+    }])
   })
 
   tags = local.common_tags
