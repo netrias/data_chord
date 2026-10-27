@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
 
+import { STAGE_THREE_FILE_ID, mockCompletedStageThreeJob, stageThreeColumn } from './utils.mjs';
+
 test('late help text does not move the workflow steps', async ({ page }) => {
   // Given the Stage 1 frame after its help text is populated
   await page.goto('/stage-1');
@@ -65,73 +67,43 @@ test('workflow actions stay inside narrow desktop and phone viewports', async ({
   }
 });
 
-const _routeCompletedStageThreeJob = async (page, jobId, fileId) => {
-  await page.route('**/stage-3/jobs/*', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        job_id: jobId,
-        status: 'succeeded',
-        next_stage_url: `/stage-4?file_id=${fileId}&job_id=${jobId}&status=succeeded`,
-        manifest_summary: {
-          source_file_name: 'clinical_samples.csv',
-          column_breakdowns: [{
-            column_name: 'diagnosis',
-            label: 'diagnosis',
-            column_key: 'col_0000',
-            source_column_index: 0,
-            review_status: 'needs_attention',
-            total_rows: 1204,
-            changed_rows: 300,
-            unique_terms: 52,
-            unique_terms_changed: 37,
-            successfully_harmonized_terms: 37,
-            non_conformant_terms: 6,
-          }],
-        },
-      }),
-    });
+const _mixedStageThreeColumn = () => stageThreeColumn({ harmonized: 37, matched: 9, unresolved: 6 });
+
+for (const width of [1440, 1024]) {
+  test(`Stage 3 puts the result dial left of three equal result groups at ${width}px`, async ({ page }) => {
+    const jobId = `stage-three-layout-${width}`;
+    // Given: a completed Stage 3 result at desktop width
+    await page.setViewportSize({ width, height: 1000 });
+    await mockCompletedStageThreeJob(page, jobId, [_mixedStageThreeColumn()]);
+
+    // When: the completion summary is laid out
+    await page.goto(`/stage-3?file_id=${STAGE_THREE_FILE_ID}&job_id=${jobId}`);
+    const groups = page.getByRole('list', { name: 'Harmonization result groups' }).getByRole('listitem');
+    await expect(groups).toHaveCount(3);
+    const dial = await page.locator('#stageThreeDial').boundingBox();
+    const headline = await page.getByRole('heading', { name: 'Harmonization complete' }).boundingBox();
+    const groupBoxes = await Promise.all([0, 1, 2].map((index) => groups.nth(index).boundingBox()));
+
+    // Then: the dial is left of the text, and the groups share one row with equal widths
+    expect(dial.x + dial.width).toBeLessThan(headline.x);
+    expect(headline.x).toBeLessThanOrEqual(groupBoxes[0].x + 1);
+    for (const box of groupBoxes) {
+      expect(Math.abs(box.y - groupBoxes[0].y)).toBeLessThanOrEqual(1);
+      expect(Math.abs(box.width - groupBoxes[0].width)).toBeLessThanOrEqual(1);
+    }
+    expect(groupBoxes[0].x + groupBoxes[0].width).toBeLessThanOrEqual(groupBoxes[1].x);
+    expect(groupBoxes[1].x + groupBoxes[1].width).toBeLessThanOrEqual(groupBoxes[2].x);
   });
-};
-
-test('Stage 3 puts the result dial left of three equal result groups', async ({ page }) => {
-  const fileId = '0123456789abcdef0123456789abcdef';
-  const jobId = 'stage-three-layout';
-  // Given: a completed Stage 3 result at desktop width
-  await page.setViewportSize({ width: 1440, height: 1000 });
-  await _routeCompletedStageThreeJob(page, jobId, fileId);
-
-  // When: the completion summary is laid out
-  await page.goto(`/stage-3?file_id=${fileId}&job_id=${jobId}`);
-  const groups = page.getByRole('list', { name: 'Harmonization result groups' }).getByRole('listitem');
-  await expect(groups).toHaveCount(3);
-  const dial = await page.locator('#stageThreeDial').boundingBox();
-  const headline = await page.getByRole('heading', { name: 'Harmonization complete' }).boundingBox();
-  const groupBoxes = await Promise.all([0, 1, 2].map((index) => groups.nth(index).boundingBox()));
-
-  // Then: the dial is left of the text, and the groups share one row with equal widths
-  expect(dial).not.toBeNull();
-  expect(headline).not.toBeNull();
-  expect(dial.x + dial.width).toBeLessThan(headline.x);
-  expect(headline.x).toBeLessThanOrEqual(groupBoxes[0].x + 1);
-  for (const box of groupBoxes) {
-    expect(Math.abs(box.y - groupBoxes[0].y)).toBeLessThanOrEqual(1);
-    expect(Math.abs(box.width - groupBoxes[0].width)).toBeLessThanOrEqual(1);
-  }
-  expect(groupBoxes[0].x + groupBoxes[0].width).toBeLessThanOrEqual(groupBoxes[1].x);
-  expect(groupBoxes[1].x + groupBoxes[1].width).toBeLessThanOrEqual(groupBoxes[2].x);
-});
+}
 
 test('Stage 3 result summary stacks inside a phone viewport', async ({ page }) => {
-  const fileId = '0123456789abcdef0123456789abcdef';
   const jobId = 'stage-three-phone-layout';
   // Given: a completed Stage 3 result at phone width
   await page.setViewportSize({ width: 390, height: 921 });
-  await _routeCompletedStageThreeJob(page, jobId, fileId);
+  await mockCompletedStageThreeJob(page, jobId, [_mixedStageThreeColumn()]);
 
   // When: the completion summary is laid out
-  await page.goto(`/stage-3?file_id=${fileId}&job_id=${jobId}`);
+  await page.goto(`/stage-3?file_id=${STAGE_THREE_FILE_ID}&job_id=${jobId}`);
   const groups = page.getByRole('list', { name: 'Harmonization result groups' }).getByRole('listitem');
   await expect(groups).toHaveCount(3);
 

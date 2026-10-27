@@ -89,6 +89,7 @@ const _renderGroups = (groups) => {
     count.textContent = _formatCount(group.count);
     const label = document.createElement('span');
     label.className = 'stage-three-group__label';
+    /* why: the leading space keeps the list item's accessible text as "37 unique values ...". */
     label.textContent = ` ${group.label}`;
     item.append(marker, count, label);
     return item;
@@ -221,7 +222,7 @@ const _renderMetricsDashboard = (job) => {
   }
   const columns = breakdowns.map(_columnOutcome);
   const checkedColumns = columns.filter((column) => column.reviewStatus !== 'not_checked');
-  const exactGroupsAvailable = checkedColumns.every(
+  const hasGroupCounts = checkedColumns.every(
     (column) => column.successfullyHarmonizedValues !== null,
   );
   const checked = checkedColumns.reduce((total, column) => total + column.totalDistinctValues, 0);
@@ -233,7 +234,9 @@ const _renderMetricsDashboard = (job) => {
     (total, column) => total + column.nonConformantValues,
     0,
   );
-  const matched = Math.max(checked - harmonized - unresolved, 0);
+  const matched = checked - harmonized - unresolved;
+  /* why: counts that do not add up cannot be drawn as a partition, so show them like an earlier result. */
+  const exactGroupsAvailable = hasGroupCounts && matched >= 0;
   const actionColumns = columns
     .filter((column) => column.changedDistinctValues > 0 || column.nonConformantValues > 0)
     .sort((left, right) => (

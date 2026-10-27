@@ -14,6 +14,8 @@ describe('Stage 3 result summary', () => {
     { name: 'does not round 99.9% up to 100%', counts: { harmonized: 999, matched: 0, unresolved: 1 }, percent: '99%' },
     { name: 'shows <1% for a tiny non-zero share', counts: { harmonized: 1, matched: 0, unresolved: 299 }, percent: '<1%' },
     { name: 'shows 0% when nothing matches', counts: { harmonized: 0, matched: 0, unresolved: 52 }, percent: '0%' },
+    { name: 'keeps 29 of 100 at 29% despite float error', counts: { harmonized: 29, matched: 0, unresolved: 71 }, percent: '29%' },
+    { name: 'keeps 57 of 100 at 57% despite float error', counts: { harmonized: 50, matched: 7, unresolved: 43 }, percent: '57%' },
   ];
 
   for (const { name, counts, percent } of percentScenarios) {
@@ -44,6 +46,7 @@ describe('Stage 3 result summary', () => {
       { key: 'unresolved', count: 6, label: 'unique values not harmonized', state: 'attention' },
     ]);
     assert.equal(summary.caption, 'of 52 unique values now match');
+    assert.equal(summary.ariaLabel, '88% of 52 unique values now match');
   });
 
   it('uses singular wording for a count of 1', () => {
@@ -62,10 +65,6 @@ describe('Stage 3 result summary', () => {
       'unique value not harmonized',
     ]);
     assert.equal(single.caption, 'of 1 unique value now match');
-    assert.equal(
-      single.ariaLabel,
-      'Of 1 unique value checked: 1 unique value harmonized to an approved value; '
-        + '0 unique values already matched the approved list; 0 unique values not harmonized.',
-    );
+    assert.equal(single.ariaLabel, '100% of 1 unique value now match');
   });
 });

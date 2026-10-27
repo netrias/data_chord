@@ -281,6 +281,54 @@ export const mockHarmonizeFailure = async (page) => {
   });
 };
 
+export const STAGE_THREE_FILE_ID = '0123456789abcdef0123456789abcdef';
+
+/** One Stage 3 column breakdown whose unique values split into the three result groups. */
+export const stageThreeColumn = ({ harmonized, matched, unresolved, reviewStatus = null }) => ({
+  column_name: 'diagnosis',
+  label: 'diagnosis',
+  column_key: 'col_0000',
+  source_column_index: 0,
+  review_status: reviewStatus ?? (unresolved > 0 ? 'needs_attention' : 'clear'),
+  total_rows: 1204,
+  changed_rows: harmonized,
+  unchanged_rows: 1204 - harmonized,
+  unique_terms: harmonized + matched + unresolved,
+  unique_terms_changed: harmonized,
+  successfully_harmonized_terms: harmonized,
+  unique_terms_unchanged: matched + unresolved,
+  non_conformant_terms: unresolved,
+  match_fidelity_counts_changed: [],
+});
+
+/** Answers every Stage 3 job poll with a completed job, so tests control the summary exactly. */
+export const mockCompletedStageThreeJob = async (page, jobId, columnBreakdowns) => {
+  await page.route('**/stage-3/jobs/*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        job_id: jobId,
+        status: 'succeeded',
+        detail: 'Harmonization completed.',
+        next_stage_url: `/stage-4?file_id=${STAGE_THREE_FILE_ID}&job_id=${jobId}&status=succeeded`,
+        job_id_available: true,
+        manifest_summary: {
+          total_terms: columnBreakdowns.reduce((total, column) => total + column.unique_terms, 0),
+          changed_terms: 0,
+          non_conformant_terms: columnBreakdowns.reduce((total, column) => total + column.non_conformant_terms, 0),
+          source_file_name: 'clinical_samples.csv',
+          source_row_count: 1204,
+          reference_model_label: 'CCDI',
+          reference_model_version: 'v2.1',
+          match_fidelity_counts: [],
+          column_breakdowns: columnBreakdowns,
+        },
+      }),
+    });
+  });
+};
+
 export const seedHarmonization = (fileId, changes = {}) => {
   const args = [
     'run',

@@ -98,7 +98,7 @@
 .stage-three-summary {
   display: flex;
   align-items: center;
-  gap: var(--space-8) 4rem;
+  gap: var(--space-8) var(--space-12);
   padding-bottom: var(--space-8);
   border-bottom: 1px solid var(--gray-200);
 }
@@ -176,6 +176,7 @@
 
 .stage-three-context {
   margin: 0;
+  overflow-wrap: anywhere;
   color: var(--gray-500);
   font-size: 0.9rem;
 }

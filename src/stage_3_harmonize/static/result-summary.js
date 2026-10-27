@@ -27,17 +27,17 @@
  * @typedef {Object} ResultSummary
  * @property {string} percentLabel - Matching share, rounded down; "<1%" for a tiny non-zero share
  * @property {string} caption - Text under the percent
- * @property {string} ariaLabel - Dial description with all three counts
+ * @property {string} ariaLabel - Dial text for assistive technology; the groups list gives the counts
  * @property {ResultGroup[]} groups - Always three groups, in dial order
  */
 
 const _uniqueValues = (count) => `unique ${count === 1 ? 'value' : 'values'}`;
 
-export const formatUniqueValueCount = (count) => `${count.toLocaleString()} ${_uniqueValues(count)}`;
+const _formatUniqueValueCount = (count) => `${count.toLocaleString()} ${_uniqueValues(count)}`;
 
-/** Rounds down so that 100% appears only when no value is left unresolved. */
+/* why: round down so 100% appears only when nothing is unresolved; multiply first so 29/100 is exactly 29. */
 const _percentLabel = (matching, checked) => {
-  const exact = (matching / checked) * 100;
+  const exact = (matching * 100) / checked;
   if (exact > 0 && exact < 1) return '<1%';
   return `${Math.floor(exact)}%`;
 };
@@ -66,12 +66,12 @@ export const summarizeResult = ({ checked, harmonized, matched, unresolved }) =>
     _group('matched', matched, 'already matched the approved list', false),
     _group('unresolved', unresolved, 'not harmonized', true),
   ];
+  const percentLabel = _percentLabel(harmonized + matched, checked);
+  const caption = `of ${_formatUniqueValueCount(checked)} now match`;
   return {
-    percentLabel: _percentLabel(harmonized + matched, checked),
-    caption: `of ${formatUniqueValueCount(checked)} now match`,
-    ariaLabel: `Of ${formatUniqueValueCount(checked)} checked: `
-      + groups.map((group) => `${group.count.toLocaleString()} ${group.label}`).join('; ')
-      + '.',
+    percentLabel,
+    caption,
+    ariaLabel: `${percentLabel} ${caption}`,
     groups,
   };
 };
