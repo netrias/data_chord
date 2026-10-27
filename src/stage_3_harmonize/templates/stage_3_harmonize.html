@@ -87,23 +87,20 @@
 
         <section id="stageThreeComplete" class="stage-three-complete hidden" data-column-outcome-panel aria-live="polite">
           <header class="stage-three-summary">
-            <div class="stage-three-dial-column">
-              <div id="stageThreeDial" class="stage-three-dial" role="img">
-                <div class="stage-three-dial__content">
-                  <strong id="stageThreeCheckedCount">0</strong>
-                  <span>unique values checked</span>
-                </div>
+            <div id="stageThreeDial" class="stage-three-dial" role="img">
+              <div class="stage-three-dial__content">
+                <strong id="stageThreeDialValue">0</strong>
+                <span id="stageThreeDialCaption">unique values checked</span>
               </div>
-              <ul id="stageThreeLegend" class="stage-three-legend" aria-label="Harmonization result groups"></ul>
             </div>
 
             <div class="stage-three-verdict">
-              <h1 id="stageThreeHeadline">Harmonization complete</h1>
-              <p id="stageThreeResultMessage" class="stage-three-result-message"></p>
-              <p id="stageThreeDatasetContext" class="stage-three-context hidden">
-                <strong id="stageThreeSourceFile"></strong><span id="stageThreeRowCount"></span>
-              </p>
-              <p id="stageThreeModelContext" class="stage-three-context hidden"></p>
+              <div>
+                <h1 id="stageThreeHeadline">Harmonization complete</h1>
+                <p id="stageThreeContext" class="stage-three-context hidden"></p>
+              </div>
+              <p id="stageThreeResultMessage" class="stage-three-result-message hidden"></p>
+              <ul id="stageThreeGroups" class="stage-three-groups" aria-label="Harmonization result groups"></ul>
             </div>
           </header>
 

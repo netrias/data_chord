@@ -21,7 +21,7 @@ const _statusContent = (column) => {
     case 'needs_attention':
       return {
         className: 'column-outcome-status--attention',
-        text: `${nonConformantValues.toLocaleString()} ${nonConformantValues === 1 ? 'value could' : 'values could'} not be harmonized`,
+        text: `${nonConformantValues.toLocaleString()} unique ${nonConformantValues === 1 ? 'value' : 'values'} not harmonized`,
       };
     case 'not_checked':
       return { className: 'column-outcome-status--unchecked', text: 'No approved list' };
@@ -29,7 +29,7 @@ const _statusContent = (column) => {
       return nonConformantValues > 0
         ? {
             className: 'column-outcome-status--attention',
-            text: `${nonConformantValues.toLocaleString()} ${nonConformantValues === 1 ? 'value could' : 'values could'} not be harmonized`,
+            text: `${nonConformantValues.toLocaleString()} unique ${nonConformantValues === 1 ? 'value' : 'values'} not harmonized`,
           }
         : { className: 'column-outcome-status--unchecked', text: 'No approved list' };
   }

@@ -94,30 +94,20 @@
   gap: var(--space-8);
 }
 
+/* Dial left; headline, meta line, and three equal groups fill the rest of the card. */
 .stage-three-summary {
-  display: grid;
-  grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
-  justify-items: center;
-  text-align: center;
-  row-gap: var(--space-6);
+  display: flex;
   align-items: center;
-  column-gap: clamp(var(--space-12), 6vw, 5rem);
+  gap: var(--space-8) 4rem;
   padding-bottom: var(--space-8);
   border-bottom: 1px solid var(--gray-200);
 }
 
-.stage-three-summary--legacy {
-  grid-template-columns: 1fr;
-}
-
-.stage-three-dial-column {
-  display: grid;
-  justify-items: center;
-  gap: var(--space-5);
-}
-
 .stage-three-verdict {
-  width: 100%;
+  display: grid;
+  flex: 1;
+  gap: var(--space-6);
+  min-width: 0;
 }
 
 .stage-three-dial {
@@ -125,20 +115,21 @@
   --matched-end: 100%;
   position: relative;
   display: grid;
-  width: clamp(10.5rem, 20vw, 13rem);
+  flex: none;
+  width: 16rem;
   aspect-ratio: 1;
   place-items: center;
   border-radius: 50%;
   background: conic-gradient(
-    var(--azure-500) 0 var(--harmonized-end),
-    var(--netrias-500) var(--harmonized-end) var(--matched-end),
+    var(--netrias-500) 0 var(--harmonized-end),
+    var(--azure-500) var(--harmonized-end) var(--matched-end),
     var(--warning-500) var(--matched-end) 100%
   );
 }
 
 .stage-three-dial::before {
   position: absolute;
-  inset: 15%;
+  inset: 9%;
   border-radius: inherit;
   background: var(--white);
   content: "";
@@ -150,99 +141,132 @@
 
 .stage-three-dial__content {
   position: relative;
-  z-index: 1;
   display: grid;
-  max-width: 6.5rem;
   justify-items: center;
-  gap: var(--space-1);
-  color: var(--gray-500);
-  font-size: 0.76rem;
-  line-height: 1.35;
+  line-height: 1.1;
   text-align: center;
 }
 
 .stage-three-dial__content strong {
   color: var(--gray-900);
-  font-size: clamp(2rem, 5vw, 2.7rem);
+  font-size: 3.4rem;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.04em;
-  line-height: 1;
 }
 
-.stage-three-legend {
-  display: grid;
-  gap: var(--space-2);
-  width: 100%;
-  margin: 0;
-  padding: 0;
-  color: var(--gray-600);
-  font-size: 0.8rem;
+.stage-three-dial--empty .stage-three-dial__content strong {
+  color: var(--gray-400);
+}
+
+.stage-three-dial__content span {
+  max-width: 10rem;
+  margin-top: var(--space-2);
+  color: var(--gray-500);
+  font-size: 0.92rem;
   line-height: 1.35;
-  list-style: none;
-}
-
-.stage-three-legend li {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
-}
-
-.stage-three-legend strong {
-  color: var(--gray-900);
-  font-variant-numeric: tabular-nums;
-}
-
-.stage-three-legend__marker {
-  flex: none;
-  width: 0.58rem;
-  height: 0.58rem;
-  margin-top: 0.2rem;
-  border-radius: 2px;
-}
-
-.stage-three-legend__marker--harmonized {
-  background: var(--azure-500);
-}
-
-.stage-three-legend__marker--matched {
-  background: var(--netrias-500);
-}
-
-.stage-three-legend__marker--unresolved {
-  background: var(--warning-500);
 }
 
 .stage-three-verdict h1 {
-  max-width: 30ch;
-  margin: 0 auto;
+  margin: 0 0 var(--space-1);
   color: var(--gray-900);
-  font-size: clamp(1.8rem, 4vw, 2.6rem);
-  letter-spacing: -0.035em;
-  line-height: 1.12;
+  font-size: 1.75rem;
+  letter-spacing: -0.02em;
   text-wrap: balance;
 }
 
-.stage-three-result-message {
-  max-width: 46ch;
-  margin: var(--space-4) auto 0;
-  color: var(--gray-700);
-  font-size: 1rem;
-  line-height: 1.55;
-}
-
 .stage-three-context {
-  margin: var(--space-3) 0 0;
+  margin: 0;
   color: var(--gray-500);
-  font-size: 0.86rem;
-  line-height: 1.45;
-}
-
-.stage-three-context + .stage-three-context {
-  margin-top: var(--space-1);
+  font-size: 0.9rem;
 }
 
 .stage-three-context strong {
   color: var(--gray-700);
+  font-weight: 600;
+}
+
+.stage-three-result-message {
+  max-width: 70ch;
+  margin: 0;
+  color: var(--gray-600);
+}
+
+.stage-three-groups {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stage-three-group {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  align-content: start;
+  column-gap: 10px;
+  padding: 14px 18px;
+  border-radius: var(--radius-md);
+  background: var(--gray-50);
+}
+
+.stage-three-group__marker {
+  width: 10px;
+  height: 10px;
+  margin-top: var(--space-3);
+  border-radius: 3px;
+}
+
+.stage-three-group--harmonized .stage-three-group__marker {
+  background: var(--netrias-500);
+}
+
+.stage-three-group--matched .stage-three-group__marker {
+  background: var(--azure-500);
+}
+
+.stage-three-group--unresolved .stage-three-group__marker {
+  background: var(--warning-500);
+}
+
+.stage-three-group strong {
+  color: var(--gray-900);
+  font-size: 2rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+
+.stage-three-group__label {
+  grid-column: 2;
+  color: var(--gray-600);
+  font-size: 0.92rem;
+}
+
+.stage-three-group[data-state="attention"] {
+  background: var(--warning-50);
+  box-shadow: inset 0 0 0 1px var(--warning-100);
+}
+
+.stage-three-group[data-state="attention"] strong {
+  color: var(--warning-700);
+}
+
+.stage-three-group[data-state="zero"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--gray-100);
+}
+
+.stage-three-group[data-state="zero"] .stage-three-group__marker {
+  opacity: 0.35;
+}
+
+.stage-three-group[data-state="zero"] strong {
+  color: var(--gray-400);
+}
+
+.stage-three-group[data-state="zero"] .stage-three-group__label {
+  color: var(--gray-500);
 }
 
 .column-outcome-panel {
@@ -368,22 +392,31 @@
   color: var(--gray-900);
 }
 
+@media (max-width: 1100px) {
+  .stage-three-summary {
+    gap: var(--space-8) var(--space-10);
+  }
+
+  .stage-three-dial {
+    width: 13rem;
+  }
+}
+
+@media (max-width: 900px) {
+  .stage-three-groups {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-2);
+  }
+}
+
 @media (max-width: 720px) {
   .stage-three-summary {
-    grid-template-columns: 1fr;
-    gap: var(--space-8);
+    flex-direction: column;
+    align-items: stretch;
   }
 
-  .stage-three-dial-column {
-    justify-self: stretch;
-  }
-
-  .stage-three-legend {
-    max-width: 20rem;
-  }
-
-  .stage-three-verdict {
-    grid-row: 1;
+  .stage-three-dial {
+    align-self: center;
   }
 }
 
