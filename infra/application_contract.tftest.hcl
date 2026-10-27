@@ -97,6 +97,98 @@ variables {
   programmatic_api_key_secret_name = "data-chord/qa/programmatic-api-key"
 }
 
+run "task_role_defaults_to_ecs_only" {
+  # Given no local developer role is configured.
+  # When the application deployment is planned.
+  command = plan
+
+  # Then the task role trusts ECS tasks only.
+  assert {
+    condition = jsondecode(aws_iam_role.application_task.assume_role_policy) == {
+      Version = "2012-10-17"
+      Statement = [{
+        Effect    = "Allow"
+        Principal = { Service = "ecs-tasks.amazonaws.com" }
+        Action    = "sts:AssumeRole"
+      }]
+    }
+    error_message = "The default task role must trust ECS tasks only."
+  }
+}
+
+run "staging_task_role_trusts_the_local_developer_role" {
+  # Given staging names the private-infrastructure developer role.
+  variables {
+    environment              = "staging"
+    local_developer_role_arn = "arn:aws:iam::084828580051:role/foundation/bdf-datachord-staging-developer"
+  }
+
+  # When the application deployment is planned.
+  command = plan
+
+  # Then the task role trusts ECS and exactly that role.
+  assert {
+    condition = jsondecode(aws_iam_role.application_task.assume_role_policy) == {
+      Version = "2012-10-17"
+      Statement = [
+        {
+          Effect    = "Allow"
+          Principal = { Service = "ecs-tasks.amazonaws.com" }
+          Action    = "sts:AssumeRole"
+        },
+        {
+          Sid       = "AllowLocalDeveloperRole"
+          Effect    = "Allow"
+          Principal = { AWS = "arn:aws:iam::084828580051:role/foundation/bdf-datachord-staging-developer" }
+          Action    = "sts:AssumeRole"
+        }
+      ]
+    }
+    error_message = "Staging task trust must contain ECS and the local developer role only."
+  }
+
+  # Then the execution role still trusts ECS tasks only.
+  assert {
+    condition = jsondecode(aws_iam_role.application_task_execution.assume_role_policy) == {
+      Version = "2012-10-17"
+      Statement = [{
+        Effect    = "Allow"
+        Principal = { Service = "ecs-tasks.amazonaws.com" }
+        Action    = "sts:AssumeRole"
+      }]
+    }
+    error_message = "The local developer role must not reach the execution role."
+  }
+}
+
+run "production_rejects_the_local_developer_role" {
+  # Given a direct OpenTofu caller sets the developer role in production.
+  variables {
+    environment              = "prod"
+    local_developer_role_arn = "arn:aws:iam::084828580051:role/foundation/bdf-datachord-staging-developer"
+  }
+
+  # When the deployment is planned.
+  command = plan
+
+  # Then validation stops the plan at the developer role input.
+  expect_failures = [var.local_developer_role_arn]
+}
+
+run "local_developer_role_rejects_a_user" {
+  # Given staging names an IAM user instead of a role.
+  variables {
+    environment              = "staging"
+    local_developer_role_arn = "arn:aws:iam::084828580051:user/example"
+  }
+
+  # When the deployment is planned.
+  command = plan
+
+  # Then validation stops the plan at the developer role input.
+  expect_failures = [var.local_developer_role_arn]
+}
+
 run "application_roles_follow_foundation_guardrails" {
   command = plan
 

@@ -338,6 +338,32 @@ secret lets the image build install the private dependency. ECS reads the API
 key secret when it starts the application. Do not put a credential or secret
 value in an environment file.
 
+### Local access to staging AWS services
+
+A local `just app` against staging uses the staging application task role.
+People reach it through a role chain:
+
+```text
+person -> developer role (private infrastructure repo) -> staging task role
+```
+
+The optional `local_developer_role_arn` field in a staging environment file
+names the developer role. The deployment adds one trust statement that lets
+that role assume the task role. Without the field, the task role trusts ECS
+tasks only. Only staging accepts the field. The task execution role always
+trusts ECS tasks only.
+
+The private infrastructure repository owns the developer role and the list of
+people who can assume it. Deploy that role first. IAM rejects a trust policy
+that names a role that does not exist. A role chain session lasts at most one
+hour.
+
+Do not edit the task role trust in AWS by hand. The next deployment replaces
+it. To revoke local access for everyone, remove the field and deploy the new
+plan. To change who has access, change the developer role in the private
+repository. IAM binds the trust to the role's internal ID. If the private
+repository deletes and recreates the developer role, deploy Data Chord again.
+
 ## 2. Install the deployment tools
 
 Install Git, the GitHub CLI, Python 3.13 or later,

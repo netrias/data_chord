@@ -26,6 +26,7 @@ _FIELDS = {
     "region",
     "state_bucket_name",
 }
+_OPTIONAL_FIELDS = {"local_developer_role_arn"}
 _HANDOFF_FIELDS = {
     "account_id",
     "application_role_boundary_arn",
@@ -73,6 +74,8 @@ class Environment:
     programmatic_api_key_secret_name: str
     target: str
     stage: str
+    # A private-infrastructure role that may assume the task role for local staging use.
+    local_developer_role_arn: str | None = None
 
     @property
     def partition(self) -> str:
@@ -110,6 +113,7 @@ class Environment:
             "expected_account_id": self.account_id,
             "github_app_secret_name": self.github_app_secret_name,
             "hosted_zone_name": self.hosted_zone_name,
+            "local_developer_role_arn": self.local_developer_role_arn,
             "programmatic_api_key_secret_name": self.programmatic_api_key_secret_name,
         }
 
@@ -157,7 +161,7 @@ def load_environment(path: Path, target: str, stage: str) -> Environment:
     if not isinstance(raw, dict):
         raise EnvironmentError("environment must contain one JSON object")
     document = {str(key): value for key, value in raw.items()}
-    _require_exact_fields(document, _FIELDS, "environment")
+    _require_exact_fields(document, _FIELDS | (set(document) & _OPTIONAL_FIELDS), "environment")
     environment = Environment(
         account_id=_string(document, "account_id"),
         region=_string(document, "region"),
@@ -175,6 +179,9 @@ def load_environment(path: Path, target: str, stage: str) -> Environment:
         ),
         target=target,
         stage=stage,
+        local_developer_role_arn=(
+            _string(document, "local_developer_role_arn") if "local_developer_role_arn" in document else None
+        ),
     )
     _validate(environment)
     return environment
@@ -243,6 +250,7 @@ def canonical_digest(environment: SelectedEnvironment) -> str:
                 "domain_name": environment.domain_name,
                 "github_app_secret_name": environment.github_app_secret_name,
                 "hosted_zone_name": environment.hosted_zone_name,
+                "local_developer_role_arn": environment.local_developer_role_arn,
                 "programmatic_api_key_secret_name": (
                     environment.programmatic_api_key_secret_name
                 ),
@@ -273,6 +281,7 @@ def _validate(environment: Environment) -> None:
     if not _BUCKET.fullmatch(environment.state_bucket_name):
         raise EnvironmentError("state_bucket_name is invalid")
     _validate_foundation_names(environment)
+    _validate_local_developer_role(environment)
     suffix = f".{environment.hosted_zone_name}"
     if not environment.hosted_zone_name or not environment.domain_name.endswith(suffix):
         raise EnvironmentError("domain_name must be inside hosted_zone_name")
@@ -320,6 +329,20 @@ def _validate_foundation_names(environment: Environment) -> None:
         raise EnvironmentError(f"application_role_boundary_arn must be {expected_boundary}")
     if environment.application_role_path != "/application/":
         raise EnvironmentError("application_role_path must be /application/")
+
+
+def _validate_local_developer_role(environment: Environment) -> None:
+    role_arn = environment.local_developer_role_arn
+    if role_arn is None:
+        return
+    if environment.stage != "staging":
+        raise EnvironmentError("local_developer_role_arn is only supported in staging")
+    role_pattern = (
+        rf"arn:{environment.partition}:iam::{environment.account_id}:"
+        r"role/(?:[A-Za-z0-9_+=,.@-]+/)*[A-Za-z0-9_+=,.@-]{1,64}"
+    )
+    if not re.fullmatch(role_pattern, role_arn):
+        raise EnvironmentError("local_developer_role_arn must be an IAM role ARN in account_id")
 
 
 def _validate_repository_url(value: str) -> None:
