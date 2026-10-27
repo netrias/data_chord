@@ -12,7 +12,7 @@ dependencies = [
     "uvicorn[standard]>=0.30.0",
     "boto3>=1.40.69",
     "certifi>=2026.10.19",  # emSign CA compromise (GHSA-6q48-6c7w-9gw2)
-    "cryptography>=50.0.0",
+    "cryptography>=50.0.2",
     "httpx>=0.27",
     "netrias_client @ git+https://github.com/netrias/netrias_client.git@f0bc8291630e428fe04f1ebef454bda956570923",
     "openpyxl>=3.1.5",
