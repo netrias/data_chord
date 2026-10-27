@@ -17,7 +17,9 @@ PYTHON
 python3 -I "$DATA_CHORD_BOOTSTRAP_ROOT/prepare.py" --pin "$DATA_CHORD_BOOTSTRAP_ROOT/pin.json" --checker "$DATA_CHORD_BOOTSTRAP_ROOT/check.py" --store "$DATA_CHORD_BOOTSTRAP_ROOT/certs"
 export SSL_CERT_DIR="$DATA_CHORD_BOOTSTRAP_ROOT/certs"
 export SSL_CERT_FILE="$SSL_CERT_DIR/ca-certificates.crt"
-unset CURL_CA_BUNDLE
+export CURL_HOME="$DATA_CHORD_BOOTSTRAP_ROOT"
+printf 'cacert = "%s"\ncapath = "%s"\n' "$SSL_CERT_FILE" "$SSL_CERT_DIR" > "$CURL_HOME/.curlrc"
+export CURL_CA_BUNDLE="$SSL_CERT_FILE"
 export AWS_CA_BUNDLE="$SSL_CERT_FILE" GIT_SSL_CAINFO="$SSL_CERT_FILE" GIT_SSL_CAPATH="$SSL_CERT_DIR"
 export UV_SYSTEM_CERTS=true
 

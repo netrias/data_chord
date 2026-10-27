@@ -103,7 +103,9 @@ resource "aws_codebuild_project" "proof" {
                 repaired-worker)
                   python3 -I "$root/prepare.py" --pin "$root/pin.json" --checker "$root/check.py" --store "$root/approved-certs"
                   export SSL_CERT_DIR="$root/approved-certs" SSL_CERT_FILE="$root/approved-certs/ca-certificates.crt"
-                  unset CURL_CA_BUNDLE
+                  export CURL_HOME="$root"
+                  printf 'cacert = "%s"\ncapath = "%s"\n' "$SSL_CERT_FILE" "$SSL_CERT_DIR" > "$CURL_HOME/.curlrc"
+                  export CURL_CA_BUNDLE="$SSL_CERT_FILE"
                   export AWS_CA_BUNDLE="$SSL_CERT_FILE" GIT_SSL_CAINFO="$SSL_CERT_FILE" GIT_SSL_CAPATH="$SSL_CERT_DIR"
                   python3 -I "$root/check.py" --bundle "$SSL_CERT_FILE" --directory "$SSL_CERT_DIR"
                   python3 -I -c 'import urllib.request; print("PUBLIC_TLS_STATUS", urllib.request.urlopen("https://api.github.com", timeout=30).status)'
