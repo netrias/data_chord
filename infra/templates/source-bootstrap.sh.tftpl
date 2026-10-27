@@ -1,0 +1,58 @@
+set -euo pipefail
+if ! [[ "$${APP_SOURCE_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]]; then
+  echo 'APP_SOURCE_COMMIT must be one full reviewed Git commit.' >&2
+  exit 1
+fi
+export DATA_CHORD_BOOTSTRAP_ROOT="$(mktemp -d /tmp/data-chord-bootstrap.XXXXXX)"
+python3 -I - <<'PYTHON'
+import base64
+import os
+from pathlib import Path
+root = Path(os.environ['DATA_CHORD_BOOTSTRAP_ROOT'])
+(root / 'check.py').write_bytes(base64.b64decode('${checker}'))
+(root / 'prepare.py').write_bytes(base64.b64decode('${preparer}'))
+(root / 'pin.json').write_bytes(base64.b64decode('${pin}'))
+(root / 'token.sh').write_bytes(base64.b64decode('${token_helper}'))
+PYTHON
+python3 -I "$DATA_CHORD_BOOTSTRAP_ROOT/prepare.py" --pin "$DATA_CHORD_BOOTSTRAP_ROOT/pin.json" --checker "$DATA_CHORD_BOOTSTRAP_ROOT/check.py" --store "$DATA_CHORD_BOOTSTRAP_ROOT/certs"
+export SSL_CERT_DIR="$DATA_CHORD_BOOTSTRAP_ROOT/certs"
+export SSL_CERT_FILE="$SSL_CERT_DIR/ca-certificates.crt"
+unset CURL_CA_BUNDLE
+export AWS_CA_BUNDLE="$SSL_CERT_FILE" GIT_SSL_CAINFO="$SSL_CERT_FILE" GIT_SSL_CAPATH="$SSL_CERT_DIR"
+export UV_SYSTEM_CERTS=true
+
+# Restart the dedicated build daemon so no cached pre-repair CA pool remains.
+old_docker_pid="$(pgrep -x dockerd || true)"
+if [[ -n "$old_docker_pid" ]]; then
+  [[ "$old_docker_pid" =~ ^[0-9]+$ ]] || { echo 'Expected one build Docker daemon' >&2; exit 1; }
+  kill -TERM "$old_docker_pid"
+  for attempt in {1..30}; do
+    kill -0 "$old_docker_pid" 2>/dev/null || break
+    sleep 1
+  done
+  if kill -0 "$old_docker_pid" 2>/dev/null; then echo 'Old build daemon did not stop' >&2; exit 1; fi
+fi
+nohup dockerd --host=unix:///var/run/docker.sock --storage-driver=overlay2 >/tmp/data-chord-dockerd.log 2>&1 &
+new_docker_pid=$!
+docker_ready=0
+for attempt in {1..30}; do
+  kill -0 "$new_docker_pid" 2>/dev/null || { cat /tmp/data-chord-dockerd.log; exit 1; }
+  if docker info >/dev/null 2>&1; then docker_ready=1; break; fi
+  sleep 1
+done
+[[ "$docker_ready" == 1 ]] || { echo 'Repaired build daemon did not become ready' >&2; exit 1; }
+
+# Application credentials and source are used only after the effective stores
+# are checked. The same token is reused for the private dependency build.
+export GITHUB_TOKEN_FILE=/tmp/data-chord-github-token
+bash "$DATA_CHORD_BOOTSTRAP_ROOT/token.sh" "$GITHUB_APP_SECRET_ARN" "$GITHUB_TOKEN_FILE"
+export GITHUB_INSTALLATION_TOKEN="$(<"$GITHUB_TOKEN_FILE")"
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_INSTALLATION_TOKEN" | openssl base64 -A)"
+cd "$CODEBUILD_SRC_DIR"
+git init
+git remote add origin "$APPLICATION_REPOSITORY_URL"
+GIT_TERMINAL_PROMPT=0 git fetch --depth=1 origin "$APP_SOURCE_COMMIT"
+git checkout --detach FETCH_HEAD
+[[ "$(git rev-parse HEAD)" == "$APP_SOURCE_COMMIT" ]] || { echo 'Source commit mismatch' >&2; exit 1; }

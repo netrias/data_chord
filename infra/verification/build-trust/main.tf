@@ -87,6 +87,8 @@ resource "aws_codebuild_project" "proof" {
               root = Path('/tmp/data-chord-trust-proof')
               root.mkdir()
               (root / 'check.py').write_bytes(base64.b64decode('${filebase64("${path.module}/../../../scripts/check-build-host-trust.py")}'))
+              (root / 'prepare.py').write_bytes(base64.b64decode('${filebase64("${path.module}/../../../scripts/prepare-build-trust.py")}'))
+              (root / 'pin.json').write_bytes(base64.b64decode('${filebase64("${path.module}/../../../config/build-trust.json")}'))
               (root / 'emsign.pem').write_bytes(base64.b64decode('${filebase64("${path.module}/../../../tests/fixtures/build-trust/emsign-g3.pem")}'))
               (root / 'aaa.pem').write_bytes(base64.b64decode('${filebase64("${path.module}/../../../tests/fixtures/build-trust/aaa-services.pem")}'))
               (root / 'certs').mkdir()
@@ -98,6 +100,17 @@ resource "aws_codebuild_project" "proof" {
               root=/tmp/data-chord-trust-proof
               case "$TRUST_PROOF_CASE" in
                 worker) python3 -I "$root/check.py" ;;
+                repaired-worker)
+                  python3 -I "$root/prepare.py" --pin "$root/pin.json" --checker "$root/check.py" --store "$root/approved-certs"
+                  export SSL_CERT_DIR="$root/approved-certs" SSL_CERT_FILE="$root/approved-certs/ca-certificates.crt"
+                  unset CURL_CA_BUNDLE
+                  export AWS_CA_BUNDLE="$SSL_CERT_FILE" GIT_SSL_CAINFO="$SSL_CERT_FILE" GIT_SSL_CAPATH="$SSL_CERT_DIR"
+                  python3 -I "$root/check.py" --bundle "$SSL_CERT_FILE" --directory "$SSL_CERT_DIR"
+                  python3 -I -c 'import urllib.request; print("PUBLIC_TLS_STATUS", urllib.request.urlopen("https://api.github.com", timeout=30).status)'
+                  curl --verbose --fail --silent --show-error https://api.github.com -o /dev/null
+                  git ls-remote https://github.com/netrias/data_chord.git HEAD
+                  aws sts get-caller-identity --query Account --output text
+                  ;;
                 safe)
                   openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 1 -subj /CN=build-proof -keyout "$root/key.pem" -out "$root/bundle.pem" 2>/dev/null
                   python3 -I "$root/check.py" --bundle "$root/bundle.pem" --directory "$root/certs"
