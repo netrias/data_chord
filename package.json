@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test:e2e": "playwright test",
     "perf:e2e": "RUN_PERF=true playwright test tests/e2e/performance.e2e.spec.mjs --reporter=line",
-    "perf:staging": "RUN_REMOTE_PERF=true PLAYWRIGHT_NO_WEBSERVER=true playwright test tests/e2e/performance.remote.e2e.spec.mjs --reporter=line"
+    "perf:staging": "RUN_REMOTE_PERF=true PLAYWRIGHT_NO_WEBSERVER=true playwright test tests/e2e/performance.remote.e2e.spec.mjs --reporter=line",
+    "typecheck:py": "node scripts/typecheck-python.mjs"
   },
   "keywords": [],
   "author": "",
@@ -18,13 +19,14 @@
   "type": "module",
   "packageManager": "npm@11.11.1",
   "engines": {
-    "node": ">=24.5.0",
+    "node": ">=24.22.1 <25",
     "npm": ">=11.10.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.50.0",
-    "adm-zip": "^0.5.16",
+    "adm-zip": "0.6.1",
     "jsdom": "^26.0.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "basedpyright": "1.33.0"
   }
 }

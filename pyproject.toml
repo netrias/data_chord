@@ -5,13 +5,14 @@ description = "Data harmonization workflow — upload tabular data, review AI-su
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "anyio>=4.14.2",  # PYSEC-2026-4024 and PYSEC-2026-4025
     "fastapi>=0.135.4,<0.136.0",  # allows Starlette security fix line
     "jinja2>=3.1.4",
     "python-multipart>=0.0.31",  # CVE remediation
     "uvicorn[standard]>=0.30.0",
     "boto3>=1.40.69",
     "certifi>=2026.10.19",  # certificate-trust repair; shared with main
-    "cryptography>=48.0.1",
+    "cryptography>=50.0.0",
     "netrias_client @ git+https://github.com/netrias/netrias_client.git@8d98df0d17f476a722dfa71fccf698c70003e5e6",
     "openpyxl>=3.1.5",
     "python-dotenv>=1.2.2",
@@ -20,14 +21,13 @@ dependencies = [
     "starlette>=1.3.1,<1.4.0",  # Starlette security fixes via FastAPI
     "pygments>=2.20.0",   # CVE-2026-4539 (via rich/pytest)
     "requests>=2.33.0",   # CVE-2026-25645 (via boto3)
-    "urllib3>=2.6.0",     # CVE-2025-66418, CVE-2025-66471 (via requests/boto3)
+    "urllib3>=2.8.0",     # CVE-2025-66418, CVE-2025-66471 (via requests/boto3)
     "idna>=3.15",         # CVE-2026-45409 (via requests/httpx)
-    "msgpack>=1.2.1",     # GHSA-6v7p-g79w-8964
+    "msgpack>=1.2.3",     # CVE-2026-114613 and GHSA-6v7p-g79w-8964
 ]
 
 [project.optional-dependencies]
 dev = [
-    "basedpyright>=1.17.0",
     "ruff>=0.6.5",
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
@@ -35,11 +35,12 @@ dev = [
     "httpx>=0.27",
     "bandit>=1.7",
     "pip-audit>=2.7",
-    "pip>=26.1.2",  # CVE remediation for the audited virtualenv pip package
+    "pip>=26.2.2",  # patched development CA bundle
     "pre-commit>=3.8",
     "pytest-playwright>=0.6.2",
     # transitive dep pin for security (CVE remediation)
     "filelock>=3.20.1",  # CVE-2025-68146 (via virtualenv/pre-commit)
+    "virtualenv>=21.14.12",  # patched pip seed and virtualenv security fixes
     "vulture>=2.16",
 ]
 
@@ -90,7 +91,7 @@ min_confidence = 100
 # This is an important supply-chain protection against newly published compromised packages.
 exclude-newer = "7 days"
 # Existing narrow emergency cutoff; remove on/after 2026-10-28 UTC.
-exclude-newer-package = { certifi = "2026-10-21T00:00:00Z" }
+exclude-newer-package = { certifi = "2026-10-21T00:00:00Z", pip = "2026-10-21T00:00:00Z", virtualenv = "2026-10-22T12:00:00Z" }
 
 [dependency-groups]
 dev = [
