@@ -985,7 +985,7 @@ test('completed Stage 3 shows the durable dial, action table, and remaining colu
   await expect(table.locator('tbody tr td:nth-child(4)')).toHaveText([
     '1 unique value not harmonized',
     '1 unique value not harmonized',
-    'All unique values are harmonized',
+    'All unique values now match',
   ]);
   await expect(table).not.toContainText('already_matched');
   await expect(table).not.toContainText('not_checked');
