@@ -265,3 +265,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "enable_automatic_rollback" {
+  type        = bool
+  default     = true
+  description = "Disable only while establishing the first qualified security baseline. Saved-plan validation checks the rollback floor."
+}

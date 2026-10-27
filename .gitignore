@@ -46,3 +46,6 @@ outputs/
 # Playwright / test artifacts
 .artifacts/
 test-results/
+
+# Saved production plans contain private configuration.
+.plans/
