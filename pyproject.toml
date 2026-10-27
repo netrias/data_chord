@@ -90,8 +90,8 @@ min_confidence = 100
 # Security: require Python packages to be at least 7 days old before resolution.
 # This is an important supply-chain protection against newly published compromised packages.
 exclude-newer = "7 days"
-# Existing narrow emergency cutoff; remove on/after 2026-10-28 UTC.
-exclude-newer-package = { certifi = "2026-10-21T00:00:00Z", pip = "2026-10-21T00:00:00Z", virtualenv = "2026-10-22T12:00:00Z" }
+# Remove certifi/pip cutoffs on/after 2026-10-28 UTC and virtualenv on/after 2026-10-29 UTC.
+exclude-newer-package = { certifi = "2026-10-21T00:00:00Z", pip = "2026-10-21T00:00:00Z", virtualenv = "2026-10-22T00:00:00Z" }
 
 [dependency-groups]
 dev = [

@@ -6,6 +6,7 @@ default:
 sync:
 	# Security: use the committed lockfile for normal dependency installs.
 	uv sync --frozen --extra dev
+	npm ci
 
 lint:
 	uv run ruff check .
@@ -14,7 +15,7 @@ dead-code:
 	uv run vulture
 
 typecheck:
-	uv run basedpyright
+	npm run typecheck:py
 
 test:
 	uv run pytest
