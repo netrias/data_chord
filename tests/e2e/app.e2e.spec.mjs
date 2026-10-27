@@ -1065,6 +1065,29 @@ for (const scenario of STAGE_THREE_SUMMARY_CASES) {
   });
 }
 
+test('Stage 3 summary hides the empty table note when every value already matched', async ({ page }) => {
+  const jobId = 'stage-three-summary-all-matched';
+  // Given: a completed job whose checked values all matched the approved list before harmonization
+  await mockCompletedStageThreeJob(page, jobId, [
+    stageThreeColumn({ harmonized: 0, matched: 52, unresolved: 0 }),
+  ]);
+  await page.goto('/stage-1');
+  await expect(page.locator('#stageThreeComplete')).toHaveCount(0);
+
+  // When: Stage 3 loads the completed result
+  await page.goto(`/stage-3?file_id=${STAGE_THREE_FILE_ID}&job_id=${jobId}`);
+
+  // Then: the dial shows 100%, the empty-table note is hidden, and the column is listed as unchanged
+  await expect(page.getByRole('img', { name: '100% of 52 unique values now match' })).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Unique value results' }).getByRole('listitem')).toHaveText([
+    '0 harmonized',
+    '52 already matched',
+    '0 not harmonized',
+  ]);
+  await expect(page.getByText('No reviewed columns are available for this dataset.')).toBeHidden();
+  await expect(page.locator('[data-remaining-columns]')).toContainText('1 column passed through unchanged');
+});
+
 test('Stage 3 summary shows a gray dial when no values were checked', async ({ page }) => {
   const jobId = 'stage-three-summary-none-checked';
   // Given: a completed job whose only column has no approved list

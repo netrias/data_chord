@@ -237,7 +237,7 @@ const _renderMetricsDashboard = (job) => {
     0,
   );
   const matched = checked - harmonized - unresolved;
-  /* why: counts that do not add up cannot be drawn as a partition, so show them like an earlier result. */
+  /* why: counts that do not add up cannot be drawn as a partition, so show them without groups. */
   const exactGroupsAvailable = hasGroupCounts && matched >= 0;
   const actionColumns = columns
     .filter((column) => column.changedDistinctValues > 0 || column.nonConformantValues > 0)
@@ -252,12 +252,12 @@ const _renderMetricsDashboard = (job) => {
 
   _renderSummary({ exactGroupsAvailable, checked, harmonized, matched, unresolved });
   _setDisplayContext(job.manifest_summary, columns);
-  /* why: the nothing-checked message already explains an empty result, so an empty-table note would repeat it. */
-  const tableRepeatsSummary = exactGroupsAvailable && checked === 0 && actionColumns.length === 0;
+  /* why: with exact groups the summary already explains an empty table, so the generic empty-table note would repeat or contradict it. */
+  const tableRepeatsSummary = exactGroupsAvailable && actionColumns.length === 0;
   stageThreeTableSection?.classList.toggle('hidden', tableRepeatsSummary);
   renderColumnOutcomeTable({
     container: columnOutcomeContainer,
-    columns: tableRepeatsSummary ? [] : actionColumns,
+    columns: actionColumns,
   });
   _renderRemainingColumns(remaining);
   stageThreeHeader?.classList.add('hidden');
