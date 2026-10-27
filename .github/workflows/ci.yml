@@ -145,7 +145,7 @@ jobs:
           npm install -g npm@11.11.1
           npm ci
       - name: Run basedpyright
-        run: npm run typecheck:py -- --level error src/
+        run: npm run typecheck:py
 
   lint:
     runs-on: ubuntu-latest

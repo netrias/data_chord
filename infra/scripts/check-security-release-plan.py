@@ -136,13 +136,11 @@ def _service_uses_planned_task(plan: dict, change: dict, task: dict) -> None:
         raise ValueError("Service does not select the planned task definition")
 
 
-def _check_service(change: dict, task: dict | None, running: _RunningDeployment | None) -> set[str]:
+def _check_service(change: dict, task: dict, running: _RunningDeployment) -> set[str]:
     before, after = change["before"], change["after"]
     allowed = {"task_definition", "deployment_circuit_breaker"}
     if change["actions"] != ["update"] or _changed_fields(before, after) - allowed:
         raise ValueError("Only the service task revision and rollback switch may change")
-    if task is None or running is None:
-        raise ValueError("Service changes require a planned task and live stable deployment evidence")
     if before["task_definition"] != running.task_arn or task["change"]["before"]["arn"] != running.task_arn:
         raise ValueError("Live production differs from the planned previous task; reconcile first")
     if after["deployment_circuit_breaker"][0]["enable"] is not True:
@@ -164,6 +162,8 @@ def _check_plan(plan: dict, images: dict[str, str], running: _RunningDeployment 
         elif address == "aws_ecs_task_definition.app":
             tags.add(_check_task(change))
         elif address == "aws_ecs_service.app":
+            if task is None or running is None:
+                raise ValueError("Service changes require a planned task and live stable deployment evidence")
             tags.update(_check_service(change, task, running))
             _service_uses_planned_task(plan, change, task)
         else:
