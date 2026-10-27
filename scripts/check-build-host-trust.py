@@ -17,7 +17,7 @@ BLOCKED_ROOTS = {
 CERTIFICATE = re.compile(r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----", re.DOTALL)
 
 
-def check_bundle(path: Path) -> dict[str, object]:
+def _check_bundle(path: Path) -> dict[str, object]:
     content = path.read_bytes()
     text = content.decode("ascii")
     certificates = CERTIFICATE.findall(text)
@@ -32,8 +32,8 @@ def check_bundle(path: Path) -> dict[str, object]:
     return {"bundle": str(path), "sha256": hashlib.sha256(content).hexdigest(), "certificates": len(certificates)}
 
 
-def check_trust(bundle: Path, directory: Path) -> dict[str, object]:
-    result = check_bundle(bundle)
+def _check_trust(bundle: Path, directory: Path) -> dict[str, object]:
+    result = _check_bundle(bundle)
     if not directory.is_dir():
         raise ValueError(f"Missing CA directory: {directory}")
     # curl/OpenSSL can also trust hashed-directory entries even with an explicit CA file.
@@ -43,7 +43,7 @@ def check_trust(bundle: Path, directory: Path) -> dict[str, object]:
         if path.suffix == ".pem" or re.fullmatch(r"[0-9a-fA-F]{8}\.\d+", path.name)
     }
     for path in sorted(paths):
-        check_bundle(path)
+        _check_bundle(path)
     return {**result, "directory": str(directory), "directory_certificates_checked": len(paths)}
 
 
@@ -53,7 +53,7 @@ def main() -> None:
     parser.add_argument("--directory", type=Path, default=Path("/etc/ssl/certs"))
     args = parser.parse_args()
     try:
-        result = check_trust(args.bundle, args.directory)
+        result = _check_trust(args.bundle, args.directory)
     except (OSError, UnicodeError, ValueError, ssl.SSLError) as exc:
         raise SystemExit(f"Build-worker trust check failed: {exc}") from exc
     print(json.dumps(result, sort_keys=True))
