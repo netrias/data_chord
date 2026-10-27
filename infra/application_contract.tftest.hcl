@@ -386,41 +386,36 @@ run "ecs_service_output_uses_the_managed_service_identity" {
   }
 }
 
-run "codebuild_uses_account_source_credential_and_read_only_dependency_credential" {
+run "codebuild_prepares_trust_before_source_and_uses_only_its_app_credential" {
   command = plan
 
-  # Given the target account owns its GitHub source credential,
-  # when the CodeBuild project is planned,
-  # then the project does not pin one account-specific connection ARN.
+  # Given source must not be downloaded before the worker trust audit,
+  # When the CodeBuild project is planned,
+  # Then AWS performs no managed source fetch and its inline recipe starts the bootstrap.
   assert {
     condition = (
-      aws_codebuild_project.app_image.source[0].type == "GITHUB" &&
-      aws_codebuild_project.app_image.source[0].location == "https://github.com/netrias/data_chord.git" &&
-      length(aws_codebuild_project.app_image.source[0].auth) == 0
+      aws_codebuild_project.app_image.source[0].type == "NO_SOURCE" &&
+      aws_codebuild_project.app_image.source[0].location == null &&
+      length(aws_codebuild_project.app_image.source[0].auth) == 0 &&
+      yamldecode(aws_codebuild_project.app_image.source[0].buildspec).phases.install.commands[0] == local.source_bootstrap
     )
-    error_message = "CodeBuild must use the target account's configured GitHub source credential."
+    error_message = "CodeBuild must bootstrap worker trust before fetching application source."
   }
 
-  # Given CodeBuild must use that account-owned connection,
-  # when the build-role policy is planned,
-  # then it can inspect, get a token for, and use only this account's connections.
+  # Given the source bootstrap uses the configured read-only GitHub App,
+  # When the build-role policy is planned,
+  # Then it has no CodeConnections token or connection access.
   assert {
-    condition = anytrue([
+    condition = !anytrue([
       for statement in jsondecode(aws_iam_role_policy.application_build.policy).Statement :
-      toset(statement.Action) == toset([
-        "codeconnections:GetConnection",
-        "codeconnections:GetConnectionToken",
-        "codeconnections:UseConnection",
-      ]) &&
-      statement.Effect == "Allow" &&
-      statement.Resource == "arn:${data.aws_partition.current.partition}:codeconnections:${var.aws_region}:${data.aws_caller_identity.current.account_id}:connection/*"
+      anytrue([for action in flatten([statement.Action]) : startswith(action, "codeconnections:")])
     ])
-    error_message = "The CodeBuild role must be able to use target-account GitHub connections."
+    error_message = "The build role must not retain unused managed source credentials."
   }
 
-  # Given the image build reads one GitHub App secret after source download,
-  # when the build-role policy is planned,
-  # then secret access stays limited to that configured credential.
+  # Given the image build reads one GitHub App secret after the trust audit,
+  # When the build-role policy is planned,
+  # Then secret access stays limited to that configured credential.
   assert {
     condition = (
       data.aws_secretsmanager_secret.github_app.name == "data-chord/build/github-app" &&

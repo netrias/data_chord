@@ -313,13 +313,9 @@ Prepare these account resources before the first application plan:
 
 - A public Route 53 hosted zone with working DNS delegation. The example uses
   `apps.example.org`.
-- A CodeConnections GitHub connection in `us-east-2`. Give the connection read
-  access to `netrias/data_chord`, then register it as the default GitHub source
-  credential for CodeBuild. Follow the AWS
-  [GitHub App connection procedure](https://docs.aws.amazon.com/codebuild/latest/userguide/connections-github-app.html).
 - A Secrets Manager secret named `data-chord/build/github-app`. Its JSON value
   must contain `app_id`, `installation_id`, and `private_key`. The GitHub App
-  must have read access to the private `netrias/agentic_harmonization`
+  must have read access to `netrias/data_chord` and the private `netrias/agentic_harmonization`
   repository. The build also downloads the public `netrias/netrias_client`
   repository. Follow the AWS
   [secret creation procedure](https://docs.aws.amazon.com/secretsmanager/latest/userguide/create_secret.html)
@@ -333,8 +329,8 @@ Prepare these account resources before the first application plan:
 - An AWS profile that can assume the `deployer_role_arn` in the foundation
   handoff.
 
-The CodeConnections credential gets the Data Chord source. The GitHub App
-secret lets the image build install the private dependency. ECS reads the API
+The GitHub App secret lets the checked worker fetch the exact Data Chord source
+and install the private dependency. ECS reads the API
 key secret when it starts the application. Do not put a credential or secret
 value in an environment file.
 
@@ -365,6 +361,21 @@ repository. IAM binds the trust to the role's internal ID. If the private
 repository deletes and recreates the developer role, deploy Data Chord again.
 
 ## 2. Install the deployment tools
+
+The CodeBuild project uses `NO_SOURCE`. Its inline bootstrap downloads public
+CA data and verifies its reviewed SHA-256 before using it. The separate
+read-only checker rejects both distrusted roots from DLA-4845-1 and malformed
+trust data. Preparation writes a new store and checks it
+again. The bootstrap selects it through explicit tool environment variables and
+restarts Docker with the same store. The image-owned store remains unchanged.
+A failed audit stops before the new store is selected.
+
+Only after these checks does the worker retrieve the GitHub App token and fetch
+the exact full commit from `APP_SOURCE_COMMIT`. Custom installers, private
+dependencies, and the image build follow. curl, Git, AWS CLI, Python, and Docker
+use the checked trust. The canonical checker runs again from the checked-out
+source. This protects application source and build credentials; it does not
+attest AWS-managed provisioning or service-role credentials.
 
 Install Git, the GitHub CLI, Python 3.13 or later,
 [uv](https://docs.astral.sh/uv/) 0.13.4 or later, [just](https://github.com/casey/just), the AWS

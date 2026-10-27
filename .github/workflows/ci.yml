@@ -6,11 +6,50 @@ on:
   push:
     branches: [main]
 
+# Select the vendor-supported Node 24 action runtime, independently of setup-node.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   infrastructure:
     runs-on: ubuntu-latest
     steps:
+      - &prepare-action-node
+        name: Prepare patched runner-owned Node before JavaScript actions
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$FORCE_JAVASCRIPT_ACTIONS_TO_NODE24" == true ]]
+          case "${ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION:-}" in
+            ''|false|0|'$false') ;;
+            *) echo 'Insecure action-runtime opt-out is forbidden' >&2; exit 1 ;;
+          esac
+          runner_executable="$(readlink -f "/proc/$PPID/exe")"
+          [[ "${runner_executable##*/}" == Runner.Worker ]]
+          [[ "$(uname -sm)" == 'Linux x86_64' ]]
+          runtime="$(dirname "$runner_executable")/../externals/node24/bin/node"
+          test -x "$runtime"
+          test -w "$(dirname "$runtime")"
+          echo "Previous runner-owned Node: $("$runtime" --version)"
+          preparation="$(mktemp -d "$RUNNER_TEMP/action-node.XXXXXX")"
+          # This reviewed hash also appears in config/node-runtime-sha256.txt.
+          # The user approved the Node 24.22.1 release-age exception for BDF-725.
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+            https://nodejs.org/dist/v24.22.1/node-v24.22.1-linux-x64.tar.gz -o "$preparation/node.tar.gz"
+          echo "eb6728e77c576a35162c122c45ccadf224d89ff00abc8dae46cc2897c6002d7c  $preparation/node.tar.gz" | sha256sum --check
+          tar -xzf "$preparation/node.tar.gz" -C "$preparation" node-v24.22.1-linux-x64/bin/node
+          replacement="$(mktemp "$(dirname "$runtime")/.node-patched.XXXXXX")"
+          install -m 755 "$preparation/node-v24.22.1-linux-x64/bin/node" "$replacement"
+          [[ "$("$replacement" --version)" == v24.22.1 ]]
+          cp "$runtime" "$preparation/previous-node"
+          mv "$replacement" "$runtime"
+          echo "Prepared runner-owned Node: $("$runtime" --version)"
+          sha256sum "$runtime"
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Check runner-owned JavaScript runtime
+        run: exec bash scripts/check-action-runtime.sh
 
       - name: Set up OpenTofu
         uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
@@ -25,12 +64,14 @@ jobs:
           tofu -chdir=infra init -backend=false -input=false
           tofu -chdir=infra/customer-platform init -backend=false -input=false
           tofu -chdir=infra/modules/data-plane init -backend=false -input=false
+          tofu -chdir=infra/verification/build-trust init -backend=false -input=false
 
       - name: Validate OpenTofu
         run: |
           tofu -chdir=infra validate
           tofu -chdir=infra/customer-platform validate
           tofu -chdir=infra/modules/data-plane validate
+          tofu -chdir=infra/verification/build-trust validate
 
       - name: Test OpenTofu behavior
         run: |
@@ -47,7 +88,12 @@ jobs:
   js-check:
     runs-on: ubuntu-latest
     steps:
+      - *prepare-action-node
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Check runner-owned JavaScript runtime
+        run: exec bash scripts/check-action-runtime.sh
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -61,7 +107,12 @@ jobs:
   test-js:
     runs-on: ubuntu-latest
     steps:
+      - *prepare-action-node
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Check runner-owned JavaScript runtime
+        run: exec bash scripts/check-action-runtime.sh
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -85,7 +136,12 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
+      - *prepare-action-node
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Check runner-owned JavaScript runtime
+        run: exec bash scripts/check-action-runtime.sh
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -127,7 +183,12 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
+      - *prepare-action-node
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Check runner-owned JavaScript runtime
+        run: exec bash scripts/check-action-runtime.sh
 
       - name: Create agentic dependency token
         id: agentic-token
@@ -175,7 +236,12 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
+      - *prepare-action-node
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Check runner-owned JavaScript runtime
+        run: exec bash scripts/check-action-runtime.sh
 
       - name: Create agentic dependency token
         id: agentic-token
@@ -227,7 +293,12 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
+      - *prepare-action-node
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Check runner-owned JavaScript runtime
+        run: exec bash scripts/check-action-runtime.sh
 
       - name: Create agentic dependency token
         id: agentic-token
@@ -268,7 +339,12 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
+      - *prepare-action-node
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Check runner-owned JavaScript runtime
+        run: exec bash scripts/check-action-runtime.sh
 
       - name: Create agentic dependency token
         id: agentic-token

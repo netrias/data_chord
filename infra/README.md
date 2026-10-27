@@ -109,5 +109,22 @@ user-invitation commands.
 - A CI job that starts with the deployer role must set
   `AWS_CREDENTIAL_EXPIRATION` to the ISO 8601 STS expiration time.
 - The environment owner controls the AWS profile, DNS delegation, GitHub App,
-  programmatic API key, CodeConnections source credential, Bedrock access, and
+  programmatic API key, Bedrock access, and
   any controlled CI runner.
+
+## Build trust and source
+
+CodeBuild uses `NO_SOURCE`. Its inline bootstrap prepares a separate worker CA store
+from hash-pinned public CA data, then runs the canonical read-only audit. The
+bootstrap restarts Docker so its cached trust also uses the checked store.
+Only then does it request the GitHub App token and fetch `APP_SOURCE_COMMIT`.
+The GitHub App needs read access to this repository and its private dependency
+repositories. The checked-out commit must exactly match the requested full
+commit; that same commit is the immutable image tag.
+
+The public trust artifact is data only. It is neither installed nor imported.
+Its SHA-256 is reviewed in `config/build-trust.json`. A separate audit rejects
+distrusted or malformed certificates even when the artifact hash matches.
+Preparation never changes the image-owned store. The bootstrap selects the
+new store only after both audits pass. Failed trust preparation or audit stops before application credentials. Any
+later bootstrap failure stops custom installers, image build, and push.

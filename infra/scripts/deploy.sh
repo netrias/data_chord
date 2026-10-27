@@ -256,7 +256,7 @@ ensure_image() {
   start_error="$PLAN_DIR/codebuild-start.err"
   if ! build_id="$(aws codebuild start-build \
     --project-name "$project" \
-    --source-version "$COMMIT" \
+    --environment-variables-override "name=APP_SOURCE_COMMIT,value=$COMMIT,type=PLAINTEXT" \
     --query 'build.id' \
     --output text 2>"$start_error")"; then
     error_detail="$(<"$start_error")"

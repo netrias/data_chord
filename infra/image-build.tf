@@ -65,20 +65,21 @@ resource "aws_iam_role_policy" "application_build" {
         Resource = "*"
       },
       {
-        Effect = "Allow"
-        Action = [
-          "codeconnections:GetConnection",
-          "codeconnections:GetConnectionToken",
-          "codeconnections:UseConnection"
-        ]
-        Resource = "arn:${data.aws_partition.current.partition}:codeconnections:${var.aws_region}:${data.aws_caller_identity.current.account_id}:connection/*"
-      },
-      {
         Effect   = "Allow"
         Action   = ["secretsmanager:GetSecretValue"]
         Resource = data.aws_secretsmanager_secret.github_app.arn
       },
     ]
+  })
+}
+
+locals {
+  image_buildspec = yamldecode(file("${path.module}/buildspec.yml"))
+  source_bootstrap = templatefile("${path.module}/templates/source-bootstrap.sh.tftpl", {
+    checker      = filebase64("${path.module}/../scripts/check-build-host-trust.py")
+    preparer     = filebase64("${path.module}/../scripts/prepare-build-trust.py")
+    pin          = filebase64("${path.module}/../config/build-trust.json")
+    token_helper = filebase64("${path.module}/scripts/github-app-installation-token.sh")
   })
 }
 
@@ -92,13 +93,6 @@ resource "aws_codebuild_project" "app_image" {
 
   artifacts {
     type = "NO_ARTIFACTS"
-  }
-
-  cache {
-    type = "LOCAL"
-    # Docker and source caches keep app-only deploys fast enough to use as the
-    # normal deployment path instead of pushing images from a developer laptop.
-    modes = ["LOCAL_DOCKER_LAYER_CACHE", "LOCAL_SOURCE_CACHE"]
   }
 
   environment {
@@ -132,6 +126,11 @@ resource "aws_codebuild_project" "app_image" {
       name  = "GITHUB_APP_SECRET_ARN"
       value = data.aws_secretsmanager_secret.github_app.arn
     }
+
+    environment_variable {
+      name  = "APPLICATION_REPOSITORY_URL"
+      value = var.application_repository_url
+    }
   }
 
   logs_config {
@@ -142,9 +141,14 @@ resource "aws_codebuild_project" "app_image" {
   }
 
   source {
-    type      = "GITHUB"
-    location  = var.application_repository_url
-    buildspec = "infra/buildspec.yml"
+    type = "NO_SOURCE"
+    buildspec = yamlencode(merge(local.image_buildspec, {
+      phases = merge(local.image_buildspec.phases, {
+        install = merge(local.image_buildspec.phases.install, {
+          commands = concat([local.source_bootstrap], local.image_buildspec.phases.install.commands)
+        })
+      })
+    }))
   }
 
   tags = local.common_tags
