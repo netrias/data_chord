@@ -1169,6 +1169,12 @@ for (const scenario of INCONSISTENT_COUNT_STANDARDS) {
     );
     // And: with the headline hidden, only the meta line can name the standard
     await expect(page.locator('#stageThreeContext')).toHaveText(scenario.context);
+    // And: the label, message, and meta line read top to bottom
+    const label = await page.getByRole('heading', { level: 1, name: 'Harmonization complete' }).boundingBox();
+    const message = await page.locator('#stageThreeResultMessage').boundingBox();
+    const context = await page.locator('#stageThreeContext').boundingBox();
+    expect(label.y + label.height).toBeLessThanOrEqual(message.y);
+    expect(message.y + message.height).toBeLessThanOrEqual(context.y);
   });
 }
 

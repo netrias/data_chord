@@ -94,33 +94,29 @@
   gap: var(--space-8);
 }
 
-/* Title above; below it the dial starts a sentence that the headline beside it finishes. */
-.stage-three-summary {
-  display: grid;
-  gap: var(--space-6);
-}
-
-.stage-three-summary h1 {
-  margin: 0;
-  color: var(--gray-900);
-  font-size: 1.75rem;
-  letter-spacing: -0.02em;
-  text-wrap: balance;
-}
-
-/* why: baseline alignment puts the headline's first line on the dial value's baseline, whatever the name length.
-   The headline must stay the first line of text in .stage-three-verdict; anything placed above it becomes the line that aligns. */
+/* The dial and one text block sit side by side; the block is centered on the dial. */
 .stage-three-result {
   display: flex;
-  align-items: baseline;
-  gap: var(--space-8) var(--space-12);
+  align-items: center;
+  gap: var(--space-8);
 }
 
 .stage-three-verdict {
   display: grid;
   flex: 1;
-  gap: var(--space-6);
+  gap: var(--space-5);
   min-width: 0;
+}
+
+/* The page title, styled as a small label above the sentence. */
+.stage-three-verdict h1 {
+  /* why: pulls the label close to the sentence; the grid gap stays for the groups. */
+  margin: 0 0 calc(var(--space-2) - var(--space-5));
+  color: var(--gray-500);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .stage-three-dial {
@@ -129,7 +125,7 @@
   position: relative;
   display: grid;
   flex: none;
-  width: 16rem;
+  width: 14rem;
   aspect-ratio: 1;
   place-items: center;
   border-radius: 50%;
@@ -155,7 +151,7 @@
 .stage-three-dial strong {
   position: relative;
   color: var(--gray-900);
-  font-size: 3.8rem;
+  font-size: 3.4rem;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.045em;
   line-height: 1;
@@ -200,8 +196,9 @@
 
 .stage-three-result-message {
   max-width: 70ch;
-  margin: 0;
-  color: var(--gray-600);
+  margin: 0 0 var(--space-1);
+  color: var(--gray-700);
+  font-size: 1.1rem;
 }
 
 .stage-three-groups {
@@ -406,16 +403,12 @@
 }
 
 @media (max-width: 1100px) {
-  .stage-three-result {
-    gap: var(--space-8) var(--space-10);
-  }
-
   .stage-three-dial {
-    width: 13rem;
+    width: 12rem;
   }
 
   .stage-three-dial strong {
-    font-size: 3.2rem;
+    font-size: 2.9rem;
   }
 }
 
@@ -433,14 +426,26 @@
     gap: var(--space-4);
   }
 
+  /* why: display: contents lets the label move above the dial, so the dial and sentence stay next to each other.
+     The verdict is a plain div, so the h1 keeps its heading role; the dial is aria-hidden, so reading order is unchanged. */
+  .stage-three-verdict {
+    display: contents;
+  }
+
+  .stage-three-verdict h1 {
+    order: -1;
+    margin: 0;
+  }
+
   .stage-three-dial {
     align-self: center;
   }
 
   /* why: centered under the dial, the headline still reads as the rest of the dial's sentence. */
-  .stage-three-summary h1,
+  .stage-three-verdict h1,
   .stage-three-headline,
-  .stage-three-context {
+  .stage-three-context,
+  .stage-three-result-message {
     text-align: center;
   }
 
