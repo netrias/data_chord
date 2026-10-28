@@ -164,7 +164,7 @@
 }
 
 .stage-three-dial--empty strong {
-  color: var(--gray-400);
+  color: var(--gray-500);
 }
 
 .stage-three-headline {
@@ -278,7 +278,7 @@
 }
 
 .stage-three-group[data-state="zero"] strong {
-  color: var(--gray-400);
+  color: var(--gray-500);
 }
 
 .stage-three-group[data-state="zero"] .stage-three-group__label {
