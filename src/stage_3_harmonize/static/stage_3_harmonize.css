@@ -88,30 +88,35 @@
   margin-bottom: var(--space-4);
 }
 
+/* why: Stage 3 only; the summary, table, and unchanged columns need more room than the shared card padding gives. */
+#stageThreeMetrics {
+  padding: var(--space-12);
+}
+
 /* Completed harmonization summary */
 .stage-three-complete {
   display: grid;
-  gap: var(--space-8);
+  gap: var(--space-12);
 }
 
 /* The dial and one text block sit side by side; the block is centered on the dial. */
 .stage-three-result {
   display: flex;
   align-items: center;
-  gap: var(--space-8);
+  gap: var(--space-12);
 }
 
 .stage-three-verdict {
   display: grid;
   flex: 1;
-  gap: var(--space-5);
+  gap: var(--space-8);
   min-width: 0;
 }
 
 /* The page title, styled as a small label above the sentence. */
 .stage-three-verdict h1 {
   /* why: pulls the label close to the sentence; the grid gap stays for the groups. */
-  margin: 0 0 calc(var(--space-2) - var(--space-5));
+  margin: 0 0 calc(var(--space-3) - var(--space-8));
   color: var(--gray-500);
   font-size: 0.78rem;
   font-weight: 600;
@@ -162,7 +167,7 @@
 }
 
 .stage-three-headline {
-  margin: 0 0 var(--space-1);
+  margin: 0 0 var(--space-2);
   overflow-wrap: anywhere;
   color: var(--gray-700);
   font-size: 1.75rem;
@@ -196,7 +201,7 @@
 
 .stage-three-result-message {
   max-width: 70ch;
-  margin: 0 0 var(--space-1);
+  margin: 0 0 var(--space-2);
   color: var(--gray-700);
   font-size: 1.1rem;
 }
@@ -204,7 +209,7 @@
 .stage-three-groups {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-4);
+  gap: var(--space-5);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -215,7 +220,7 @@
   grid-template-columns: 10px minmax(0, 1fr);
   align-content: start;
   column-gap: 10px;
-  padding: 14px 18px;
+  padding: var(--space-5) var(--space-6);
   border-radius: var(--radius-md);
   background: var(--gray-50);
 }
@@ -415,15 +420,19 @@
 @media (max-width: 900px) {
   .stage-three-groups {
     grid-template-columns: minmax(0, 1fr);
-    gap: var(--space-2);
+    gap: var(--space-3);
   }
 }
 
 @media (max-width: 720px) {
+  .stage-three-complete {
+    gap: var(--space-10);
+  }
+
   .stage-three-result {
     flex-direction: column;
     align-items: stretch;
-    gap: var(--space-4);
+    gap: var(--space-5);
   }
 
   /* why: display: contents lets the label move above the dial, so the dial and sentence stay next to each other.
@@ -452,10 +461,21 @@
   .stage-three-headline {
     font-size: 1.4rem;
   }
+
+  .stage-three-group {
+    padding: var(--space-4) var(--space-5);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .remaining-columns__chevron {
     transition: none;
+  }
+}
+
+/* why: keep the shared phone card padding; the desktop override above would otherwise apply. */
+@media (max-width: 640px) {
+  #stageThreeMetrics {
+    padding: var(--space-6);
   }
 }

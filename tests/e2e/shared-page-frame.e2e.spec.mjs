@@ -103,11 +103,12 @@ for (const width of [1440, 1024]) {
     const headline = await page.locator('#stageThreeHeadline').boundingBox();
     const groupBoxes = await Promise.all([0, 1, 2].map((index) => groups.nth(index).boundingBox()));
 
-    // Then: a round dial sits left of a shorter text block whose vertical center matches the dial's
+    // Then: a round dial sits left of the text block, and their vertical centers match
     expect(Math.abs(dial.width - dial.height)).toBeLessThanOrEqual(1);
     expect(dial.x + dial.width).toBeLessThan(verdict.x);
-    expect(textSpan.height).toBeLessThan(dial.height);
-    expect(Math.abs(_centerY(textSpan) - _centerY(dial))).toBeLessThanOrEqual(2);
+    /* why: centering is only observable when the heights differ; equal heights would hide a top-aligned block. */
+    expect(Math.abs(textSpan.height - dial.height)).toBeGreaterThan(4);
+    expect(Math.abs(_centerY(textSpan) - _centerY(dial))).toBeLessThanOrEqual(1);
     // And: the label is directly above the sentence, in the same column
     expect(Math.abs(label.x - headline.x)).toBeLessThanOrEqual(1);
     expect(label.y + label.height).toBeLessThanOrEqual(headline.y);
@@ -149,7 +150,7 @@ test('Stage 3 wraps a long standard name beside the dial and keeps it centered',
   expect(dial.x + dial.width).toBeLessThan(headlineBox.x);
   expect(headlineBox.x + headlineBox.width).toBeLessThanOrEqual(verdict.x + verdict.width + 1);
   expect(textSpan.height).toBeGreaterThan(dial.height);
-  expect(Math.abs(_centerY(textSpan) - _centerY(dial))).toBeLessThanOrEqual(2);
+  expect(Math.abs(_centerY(textSpan) - _centerY(dial))).toBeLessThanOrEqual(1);
 });
 
 for (const width of [1440, 1024, 390]) {
