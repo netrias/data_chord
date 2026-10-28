@@ -583,9 +583,14 @@ AWS_PROFILE=strides just deploy bdf prod
 The initial migration must preserve the existing Cognito pool and user subjects.
 Back up the versioned legacy infrastructure state within AWS, then transfer
 its ownership to `datachord/bdf/prod/tofu.tfstate` in the foundation state bucket.
-Retire the legacy deployment entry point. Keep historical logs and workflow
-bucket versioning and encryption; do not destroy them when their old state
-addresses are retired. Remove obsolete ALB bypass rules before exposing the
+Retire the legacy deployment entry point. Adopt the existing ALB log bucket,
+delivery policy, public-access block, and 30-day expiration at the addresses
+defined in `infra/access-logs.tf`. Run `tofu import` once for the existing bucket
+and each of its three configurations before reviewing the full plan. Routine
+deployments need no import commands. Require no replacement or log-policy change.
+Workflow versioning is suspended to stop future history; S3's default SSE-S3
+encryption remains active. The foundation state bucket keeps versioning.
+Remove obsolete ALB bypass rules before exposing the
 new application. Keep unrelated clients on shared endpoint security groups.
 Review all resource moves and require no VPC, ALB, Cognito, certificate, bucket,
 registry, or security-group replacement before the normal deploy.
@@ -596,7 +601,8 @@ table using section 6. The two caches begin empty. Before cutover, stop new
 writes, let active jobs finish, and copy the existing workflow objects within
 S3 from `prod/` to `datachord/bdf/prod/`. Preserve every workflow ID, owner
 subject, metadata file, edit, job, and export. Check source and destination
-object identities before resuming writes. Keep the original prefix intact.
+object identities before resuming writes. Retire the original prefix only
+after the migrated workflows pass the current app's readers and live checks.
 
 Verify the exact running image, login, CSV and XLSX workflows, edits, downloads,
 old-workflow reopening, and cross-user access denial. A successful ECS health

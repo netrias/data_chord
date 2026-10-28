@@ -67,15 +67,17 @@ resource "aws_lb" "app" {
   subnets            = local.public_subnet_ids
 
   dynamic "access_logs" {
-    for_each = var.existing_network == null ? [] : [var.existing_network.load_balancer_logs_bucket]
+    for_each = aws_s3_bucket.alb_logs
     content {
-      bucket  = access_logs.value
+      bucket  = access_logs.value.bucket
       prefix  = "alb/${var.environment}"
       enabled = true
     }
   }
 
   tags = local.common_tags
+
+  depends_on = [aws_s3_bucket_policy.alb_logs]
 }
 
 resource "aws_lb_target_group" "app" {
