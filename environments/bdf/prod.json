@@ -1,0 +1,25 @@
+{
+  "account_id": "084828580051",
+  "region": "us-east-2",
+  "state_bucket_name": "bdf-datachord-state-084828580051-us-east-2",
+  "deployer_role_arn": "arn:aws:iam::084828580051:role/foundation/bdf-datachord-deployer",
+  "application_role_boundary_arn": "arn:aws:iam::084828580051:policy/bdf-datachord-application-role-boundary",
+  "application_role_path": "/application/",
+  "domain_name": "netrias-data-chord.netriasbdf.cloud",
+  "hosted_zone_name": "netriasbdf.cloud",
+  "application_repository_url": "https://github.com/netrias/data_chord.git",
+  "github_app_secret_name": "data-chord/build/github-app",
+  "programmatic_api_key_secret_name": "data-chord/prod/programmatic-api-key",
+  "existing_network": {
+    "vpc_id": "vpc-0fce4109b9575d124",
+    "public_subnet_ids": [
+      "subnet-0115982c04fa2e62a",
+      "subnet-046ea5c040e6fd135",
+      "subnet-06a392e3c0aed038e"
+    ],
+    "load_balancer_name": "data-chord-prod-alb",
+    "load_balancer_logs_bucket": "data-chord-prod-alb-logs-084828580051-us-east-2",
+    "secretsmanager_endpoint_id": "vpce-09e34dd0835d4c005",
+    "additional_secretsmanager_client_security_group_ids": ["sg-0a9e0f356c22abf67"]
+  }
+}

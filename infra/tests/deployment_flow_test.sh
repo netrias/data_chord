@@ -302,14 +302,29 @@ run_command() {
     "$DEPLOY_SCRIPT" "$@" </dev/null
 }
 
-# Given BDF production has no new-system environment file.
+# Given BDF development has no environment file.
 bdf_calls="$TEST_ROOT/bdf-calls"
 : >"$bdf_calls"
-# When the new plan command selects BDF production, then it stops before AWS and OpenTofu.
-if PATH="$MOCK_BIN:/usr/bin:/bin" MOCK_CALLS="$bdf_calls" "$DEPLOY_SCRIPT" bdf prod plan >/dev/null 2>&1; then
-  fail_test "BDF production plan succeeded"
+# When the plan command selects the missing BDF development environment.
+if PATH="$MOCK_BIN:/usr/bin:/bin" MOCK_CALLS="$bdf_calls" "$DEPLOY_SCRIPT" bdf dev plan >/dev/null 2>&1; then
+  fail_test "Missing BDF development plan succeeded"
 fi
-[[ ! -s "$bdf_calls" ]] || fail_test "BDF production reached an external command"
+# Then it stops before AWS and OpenTofu.
+[[ ! -s "$bdf_calls" ]] || fail_test "Missing BDF development reached an external command"
+
+# Given BDF production retains its network and uses the current foundation.
+bdf_prod_calls="$TEST_ROOT/bdf-prod-calls"
+# When the normal plan command selects production.
+MOCK_ACCOUNT=084828580051 \
+  MOCK_ROLE_NAME=bdf-datachord-deployer \
+  MOCK_DEPLOYER_BOUNDARY_ARN=arn:aws:iam::084828580051:policy/bdf-datachord-deployer-boundary \
+  MOCK_APPLICATION_BOUNDARY_ARN=arn:aws:iam::084828580051:policy/bdf-datachord-application-role-boundary \
+  MOCK_EMPTY_STATE=1 \
+  run_command "$bdf_prod_calls" bdf prod plan >/dev/null
+# Then it selects the canonical production state and never applies infrastructure.
+assert_contains "$bdf_prod_calls" "key=datachord/bdf/prod/tofu.tfstate"
+assert_contains "$bdf_prod_calls" "--role-arn arn:aws:iam::084828580051:role/foundation/bdf-datachord-deployer"
+assert_absent "$bdf_prod_calls" " apply "
 
 # Given BDF staging has a new isolated foundation configuration.
 bdf_staging_calls="$TEST_ROOT/bdf-staging-calls"

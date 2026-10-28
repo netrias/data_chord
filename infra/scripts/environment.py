@@ -10,7 +10,7 @@ import sys
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Union
+from typing import Union, cast
 from urllib.parse import urlsplit
 
 _FIELDS = {
@@ -26,7 +26,7 @@ _FIELDS = {
     "region",
     "state_bucket_name",
 }
-_OPTIONAL_FIELDS = {"local_developer_role_arn"}
+_OPTIONAL_FIELDS = {"local_developer_role_arn", "existing_network"}
 _HANDOFF_FIELDS = {
     "account_id",
     "application_role_boundary_arn",
@@ -60,6 +60,30 @@ class DeploymentRoot(str, Enum):
 
 
 @dataclass(frozen=True)
+class ExistingNetwork:
+    """Existing network resources retained when adopting a hosted deployment."""
+
+    vpc_id: str
+    public_subnet_ids: tuple[str, ...]
+    load_balancer_name: str
+    load_balancer_logs_bucket: str
+    secretsmanager_endpoint_id: str
+    additional_secretsmanager_client_security_group_ids: tuple[str, ...]
+
+    def document(self) -> dict[str, object]:
+        return {
+            "vpc_id": self.vpc_id,
+            "public_subnet_ids": list(self.public_subnet_ids),
+            "load_balancer_name": self.load_balancer_name,
+            "load_balancer_logs_bucket": self.load_balancer_logs_bucket,
+            "secretsmanager_endpoint_id": self.secretsmanager_endpoint_id,
+            "additional_secretsmanager_client_security_group_ids": list(
+                self.additional_secretsmanager_client_security_group_ids
+            ),
+        }
+
+
+@dataclass(frozen=True)
 class Environment:
     account_id: str
     region: str
@@ -76,6 +100,7 @@ class Environment:
     stage: str
     # A private-infrastructure role that may assume the task role for local staging use.
     local_developer_role_arn: str | None = None
+    existing_network: ExistingNetwork | None = None
 
     @property
     def partition(self) -> str:
@@ -102,7 +127,7 @@ class Environment:
         return f"arn:{self.partition}:iam::{self.account_id}:policy/{self.foundation_name_prefix}-deployer-boundary"
 
     def tofu_variables(self) -> dict[str, object]:
-        return {
+        variables: dict[str, object] = {
             "application_repository_url": self.application_repository_url,
             "application_role_boundary_arn": self.application_role_boundary_arn,
             "application_role_path": self.application_role_path,
@@ -116,6 +141,9 @@ class Environment:
             "local_developer_role_arn": self.local_developer_role_arn,
             "programmatic_api_key_secret_name": self.programmatic_api_key_secret_name,
         }
+        if self.existing_network is not None:
+            variables["existing_network"] = self.existing_network.document()
+        return variables
 
 
 @dataclass(frozen=True)
@@ -182,6 +210,7 @@ def load_environment(path: Path, target: str, stage: str) -> Environment:
         local_developer_role_arn=(
             _string(document, "local_developer_role_arn") if "local_developer_role_arn" in document else None
         ),
+        existing_network=_existing_network(document),
     )
     _validate(environment)
     return environment
@@ -251,15 +280,68 @@ def canonical_digest(environment: SelectedEnvironment) -> str:
                 "github_app_secret_name": environment.github_app_secret_name,
                 "hosted_zone_name": environment.hosted_zone_name,
                 "local_developer_role_arn": environment.local_developer_role_arn,
-                "programmatic_api_key_secret_name": (
-                    environment.programmatic_api_key_secret_name
-                ),
+                "programmatic_api_key_secret_name": (environment.programmatic_api_key_secret_name),
             }
         )
+        if environment.existing_network is not None:
+            document["existing_network"] = environment.existing_network.document()
     else:
         document["deployer_boundary_arn"] = environment.deployer_boundary_arn
     encoded = json.dumps(document, separators=(",", ":"), sort_keys=True).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _network_ids(document: dict[str, object], key: str, prefix: str) -> tuple[str, ...]:
+    values = document.get(key)
+    if not isinstance(values, list) or not all(
+        isinstance(value, str) and re.fullmatch(rf"{prefix}-[0-9a-f]{{8,17}}", value) for value in values
+    ):
+        raise EnvironmentError(f"existing_network.{key} must contain valid AWS resource IDs")
+    if len(set(values)) != len(values):
+        raise EnvironmentError(f"existing_network.{key} contains duplicate IDs")
+    return tuple(sorted(cast(str, value) for value in values))
+
+
+def _existing_network(document: dict[str, object]) -> ExistingNetwork | None:
+    if "existing_network" not in document:
+        return None
+    raw = document["existing_network"]
+    if not isinstance(raw, dict):
+        raise EnvironmentError("existing_network must be an object")
+    fields = {
+        "vpc_id",
+        "public_subnet_ids",
+        "load_balancer_name",
+        "load_balancer_logs_bucket",
+        "secretsmanager_endpoint_id",
+        "additional_secretsmanager_client_security_group_ids",
+    }
+    _require_exact_fields(raw, fields, "existing_network")
+    vpc_id = _string(raw, "vpc_id")
+    endpoint_id = _string(raw, "secretsmanager_endpoint_id")
+    if not re.fullmatch(r"vpc-[0-9a-f]{8,17}", vpc_id):
+        raise EnvironmentError("existing_network.vpc_id is invalid")
+    if not re.fullmatch(r"vpce-[0-9a-f]{8,17}", endpoint_id):
+        raise EnvironmentError("existing_network.secretsmanager_endpoint_id is invalid")
+    subnets = _network_ids(raw, "public_subnet_ids", "subnet")
+    if len(subnets) < 2:
+        raise EnvironmentError("existing_network needs at least two public subnets")
+    name = _string(raw, "load_balancer_name")
+    bucket = _string(raw, "load_balancer_logs_bucket")
+    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9-]{0,31}", name):
+        raise EnvironmentError("existing_network.load_balancer_name is invalid")
+    if not _BUCKET.fullmatch(bucket):
+        raise EnvironmentError("existing_network.load_balancer_logs_bucket is invalid")
+    return ExistingNetwork(
+        vpc_id=vpc_id,
+        public_subnet_ids=subnets,
+        load_balancer_name=name,
+        load_balancer_logs_bucket=bucket,
+        secretsmanager_endpoint_id=endpoint_id,
+        additional_secretsmanager_client_security_group_ids=_network_ids(
+            raw, "additional_secretsmanager_client_security_group_ids", "sg"
+        ),
+    )
 
 
 def _validate_selection(target: str, stage: str) -> None:
@@ -402,9 +484,7 @@ def _field(environment: SelectedEnvironment, key: str) -> str:
                 "domain_name": environment.domain_name,
                 "github_app_secret_name": environment.github_app_secret_name,
                 "hosted_zone_name": environment.hosted_zone_name,
-                "programmatic_api_key_secret_name": (
-                    environment.programmatic_api_key_secret_name
-                ),
+                "programmatic_api_key_secret_name": (environment.programmatic_api_key_secret_name),
             }
         )
     else:

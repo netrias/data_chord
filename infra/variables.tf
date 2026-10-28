@@ -1,3 +1,21 @@
+variable "existing_network" {
+  description = "Existing hosted network to retain during an application migration; null creates a dedicated VPC."
+  type = object({
+    vpc_id                                              = string
+    public_subnet_ids                                   = set(string)
+    load_balancer_name                                  = string
+    load_balancer_logs_bucket                           = string
+    secretsmanager_endpoint_id                          = string
+    additional_secretsmanager_client_security_group_ids = set(string)
+  })
+  default = null
+
+  validation {
+    condition     = var.existing_network == null ? true : length(var.existing_network.public_subnet_ids) >= 2
+    error_message = "An existing network requires at least two public subnets."
+  }
+}
+
 variable "expected_account_id" {
   description = "AWS account that owns this application deployment."
   type        = string
