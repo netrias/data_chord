@@ -88,7 +88,8 @@
   margin-bottom: var(--space-4);
 }
 
-/* why: Stage 3 only; the summary, table, and unchanged columns need more room than the shared card padding gives. */
+/* why: Stage 3 only; the summary, table, and unchanged columns need more room than the shared card padding gives.
+   This card also holds the harmonizing, empty, and error states, so they get the same padding. */
 #stageThreeMetrics {
   padding: var(--space-12);
 }
