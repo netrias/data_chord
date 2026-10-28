@@ -94,10 +94,24 @@
   gap: var(--space-8);
 }
 
-/* Dial left; headline, meta line, and three equal groups fill the rest of the card. */
+/* Title above; below it the dial starts a sentence that the headline beside it finishes. */
 .stage-three-summary {
+  display: grid;
+  gap: var(--space-6);
+}
+
+.stage-three-summary h1 {
+  margin: 0;
+  color: var(--gray-900);
+  font-size: 1.75rem;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+/* why: baseline alignment puts the headline's first line on the dial value's baseline, whatever the name length. */
+.stage-three-result {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: var(--space-8) var(--space-12);
 }
 
@@ -137,40 +151,38 @@
   background: var(--gray-200);
 }
 
-.stage-three-dial__content {
+.stage-three-dial strong {
   position: relative;
-  display: grid;
-  justify-items: center;
-  line-height: 1.1;
-  text-align: center;
-}
-
-.stage-three-dial__content strong {
   color: var(--gray-900);
-  font-size: 3.4rem;
+  font-size: 3.8rem;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.045em;
+  line-height: 1;
 }
 
-.stage-three-dial--empty .stage-three-dial__content strong {
+.stage-three-dial--empty strong {
   color: var(--gray-400);
 }
 
-.stage-three-dial__content span {
-  max-width: 10rem;
-  margin-top: var(--space-2);
-  color: var(--gray-500);
-  font-size: 0.92rem;
-  line-height: 1.35;
-  text-wrap: balance;
+.stage-three-headline {
+  margin: 0 0 var(--space-1);
+  overflow-wrap: anywhere;
+  color: var(--gray-700);
+  font-size: 1.75rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  text-wrap: pretty;
 }
 
-.stage-three-verdict h1 {
-  margin: 0 0 var(--space-1);
+.stage-three-headline strong {
   color: var(--gray-900);
-  font-size: 1.75rem;
-  letter-spacing: -0.02em;
-  text-wrap: balance;
+  font-weight: 700;
+}
+
+.stage-three-headline--empty {
+  color: var(--gray-600);
+  font-weight: 500;
 }
 
 .stage-three-context {
@@ -393,12 +405,16 @@
 }
 
 @media (max-width: 1100px) {
-  .stage-three-summary {
+  .stage-three-result {
     gap: var(--space-8) var(--space-10);
   }
 
   .stage-three-dial {
     width: 13rem;
+  }
+
+  .stage-three-dial strong {
+    font-size: 3.2rem;
   }
 }
 
@@ -410,13 +426,25 @@
 }
 
 @media (max-width: 720px) {
-  .stage-three-summary {
+  .stage-three-result {
     flex-direction: column;
     align-items: stretch;
+    gap: var(--space-4);
   }
 
   .stage-three-dial {
     align-self: center;
+  }
+
+  /* why: centered under the dial, the headline still reads as the rest of the dial's sentence. */
+  .stage-three-summary h1,
+  .stage-three-headline,
+  .stage-three-context {
+    text-align: center;
+  }
+
+  .stage-three-headline {
+    font-size: 1.4rem;
   }
 }
 

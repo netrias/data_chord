@@ -5,10 +5,16 @@
 
 /**
  * @typedef {Object} ResultCounts
- * @property {number} checked - Unique values checked against an approved list (> 0)
+ * @property {number} checked - Unique values checked against an approved list (>= 0)
  * @property {number} harmonized - Unique values rewritten to an approved value
  * @property {number} matched - Unique values that already matched the approved list
  * @property {number} unresolved - Unique values that still do not match
+ */
+
+/**
+ * @typedef {Object} ReferenceStandard
+ * @property {string | null | undefined} label - Standard name the job recorded, if any
+ * @property {string | null | undefined} version - Standard version the job recorded, if any
  */
 
 /**
@@ -24,11 +30,16 @@
  */
 
 /**
+ * @typedef {Object} ResultHeadline
+ * @property {string} lead - Text that continues the sentence after the dial value
+ * @property {string | null} standardName - Emphasized name that ends the sentence; null when the lead is complete
+ */
+
+/**
  * @typedef {Object} ResultSummary
- * @property {string} percentLabel - Matching share, rounded down; "<1%" for a tiny non-zero share
- * @property {string} caption - Text under the percent
- * @property {string} ariaLabel - Dial text for assistive technology; the groups list gives the counts
- * @property {ResultGroup[]} groups - Always three groups, in dial order
+ * @property {string} dialValue - The only text in the dial; a fixed-size dial cannot fit a name of any length
+ * @property {ResultHeadline} headline - Read after dialValue as one sentence
+ * @property {ResultGroup[]} groups - Three groups in dial order; none when nothing was checked
  */
 
 const _formatUniqueValueCount = (count) => `${count.toLocaleString()} unique ${count === 1 ? 'value' : 'values'}`;
@@ -38,6 +49,17 @@ const _percentLabel = (matching, checked) => {
   const exact = (matching * 100) / checked;
   if (exact > 0 && exact < 1) return '<1%';
   return `${Math.floor(exact)}%`;
+};
+
+/**
+ * @param {ReferenceStandard} standard
+ * @returns {string | null}
+ */
+const _standardName = ({ label, version }) => {
+  const name = label?.trim();
+  if (!name) return null;
+  const versionText = version?.trim();
+  return versionText ? `${name} ${versionText}` : name;
 };
 
 /**
@@ -56,20 +78,27 @@ const _group = (key, count, label, needsAttentionWhenPresent) => ({
 
 /**
  * @param {ResultCounts} counts
+ * @param {ReferenceStandard} standard
  * @returns {ResultSummary}
  */
-export const summarizeResult = ({ checked, harmonized, matched, unresolved }) => {
-  const groups = [
-    _group('harmonized', harmonized, 'harmonized', false),
-    _group('matched', matched, 'already matched', false),
-    _group('unresolved', unresolved, 'not harmonized', true),
-  ];
-  const percentLabel = _percentLabel(harmonized + matched, checked);
-  const caption = `of ${_formatUniqueValueCount(checked)} now match`;
+export const summarizeResult = ({ checked, harmonized, matched, unresolved }, standard) => {
+  if (checked === 0) {
+    /* why: no list name here; with nothing checked, no standard was applied to any value. */
+    return {
+      dialValue: '0',
+      headline: { lead: 'unique values were checked against an approved list', standardName: null },
+      groups: [],
+    };
+  }
+  const standardName = _standardName(standard);
+  const lead = `of ${_formatUniqueValueCount(checked)} now match`;
   return {
-    percentLabel,
-    caption,
-    ariaLabel: `${percentLabel} ${caption}`,
-    groups,
+    dialValue: _percentLabel(harmonized + matched, checked),
+    headline: standardName ? { lead, standardName } : { lead: `${lead} the approved list`, standardName: null },
+    groups: [
+      _group('harmonized', harmonized, 'harmonized', false),
+      _group('matched', matched, 'already matched', false),
+      _group('unresolved', unresolved, 'not harmonized', true),
+    ],
   };
 };

@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { summarizeResult } from '../../src/stage_3_harmonize/static/result-summary.js';
 
 const groupView = (summary) => summary.groups.map(({ key, count, label, state }) => ({ key, count, label, state }));
+const GDC = { label: 'GDC', version: null };
 
 describe('Stage 3 result summary', () => {
   const percentScenarios = [
@@ -25,10 +26,10 @@ describe('Stage 3 result summary', () => {
       assert.ok(checked > 0);
 
       // When the summary is derived
-      const summary = summarizeResult({ checked, ...counts });
+      const summary = summarizeResult({ checked, ...counts }, GDC);
 
       // Then the dial shows the matching share, rounded down
-      assert.equal(summary.percentLabel, percent);
+      assert.equal(summary.dialValue, percent);
     });
   }
 
@@ -37,7 +38,7 @@ describe('Stage 3 result summary', () => {
     const counts = { checked: 52, harmonized: 0, matched: 46, unresolved: 6 };
 
     // When the summary is derived
-    const summary = summarizeResult(counts);
+    const summary = summarizeResult(counts, GDC);
 
     // Then all three groups exist, the zero group is muted, and only unresolved needs attention
     assert.deepEqual(groupView(summary), [
@@ -45,19 +46,74 @@ describe('Stage 3 result summary', () => {
       { key: 'matched', count: 46, label: 'already matched', state: 'normal' },
       { key: 'unresolved', count: 6, label: 'not harmonized', state: 'attention' },
     ]);
-    assert.equal(summary.caption, 'of 52 unique values now match');
-    assert.equal(summary.ariaLabel, '88% of 52 unique values now match');
   });
+
+  const headlineScenarios = [
+    {
+      name: 'names a short standard',
+      standard: { label: 'GDC', version: null },
+      headline: { lead: 'of 52 unique values now match', standardName: 'GDC' },
+    },
+    {
+      name: 'adds the version after the standard name',
+      standard: { label: 'CCDI', version: 'v2.1' },
+      headline: { lead: 'of 52 unique values now match', standardName: 'CCDI v2.1' },
+    },
+    {
+      name: 'falls back to the approved list when no name was recorded',
+      standard: { label: null, version: 'v2.1' },
+      headline: { lead: 'of 52 unique values now match the approved list', standardName: null },
+    },
+    {
+      name: 'treats a blank name as no name',
+      standard: { label: '  ', version: undefined },
+      headline: { lead: 'of 52 unique values now match the approved list', standardName: null },
+    },
+    {
+      name: 'ignores a blank version',
+      standard: { label: ' GDC ', version: ' ' },
+      headline: { lead: 'of 52 unique values now match', standardName: 'GDC' },
+    },
+  ];
+
+  for (const { name, standard, headline } of headlineScenarios) {
+    it(`headline ${name}`, () => {
+      // Given a mixed run and the standard the job recorded
+      const counts = { checked: 52, harmonized: 37, matched: 9, unresolved: 6 };
+
+      // When the summary is derived
+      const summary = summarizeResult(counts, standard);
+
+      // Then the dial holds only the percent and the headline finishes the sentence with the standard
+      assert.equal(summary.dialValue, '88%');
+      assert.deepEqual(summary.headline, headline);
+    });
+  }
 
   it('uses singular wording for one checked value', () => {
     // Given a run with a single checked value
     const oneChecked = { checked: 1, harmonized: 1, matched: 0, unresolved: 0 };
 
     // When the summary is derived
-    const single = summarizeResult(oneChecked);
+    const single = summarizeResult(oneChecked, GDC);
 
-    // Then the caption and dial label say "unique value"
-    assert.equal(single.caption, 'of 1 unique value now match');
-    assert.equal(single.ariaLabel, '100% of 1 unique value now match');
+    // Then the headline says "unique value"
+    assert.equal(single.dialValue, '100%');
+    assert.deepEqual(single.headline, { lead: 'of 1 unique value now match', standardName: 'GDC' });
+  });
+
+  it('continues a zero dial with a neutral sentence and no groups when nothing was checked', () => {
+    // Given a run where no unique value had an approved list
+    const noneChecked = { checked: 0, harmonized: 0, matched: 0, unresolved: 0 };
+
+    // When the summary is derived, even though a standard name was recorded
+    const summary = summarizeResult(noneChecked, { label: 'CCDI', version: 'v2.1' });
+
+    // Then the dial shows 0, the headline reads on from it without naming the standard, and no groups exist
+    assert.deepEqual(summary, {
+      dialValue: '0',
+      headline: { lead: 'unique values were checked against an approved list', standardName: null },
+      groups: [],
+    });
   });
 });

@@ -302,7 +302,12 @@ export const stageThreeColumn = ({ harmonized, matched, unresolved, reviewStatus
 });
 
 /** Answers every Stage 3 job poll with a completed job, so tests control the summary exactly. */
-export const mockCompletedStageThreeJob = async (page, jobId, columnBreakdowns) => {
+export const mockCompletedStageThreeJob = async (
+  page,
+  jobId,
+  columnBreakdowns,
+  referenceModel = { label: 'CCDI', version: 'v2.1' },
+) => {
   await page.route('**/stage-3/jobs/*', async (route) => {
     await route.fulfill({
       status: 200,
@@ -319,8 +324,8 @@ export const mockCompletedStageThreeJob = async (page, jobId, columnBreakdowns) 
           non_conformant_terms: columnBreakdowns.reduce((total, column) => total + column.non_conformant_terms, 0),
           source_file_name: 'clinical_samples.csv',
           source_row_count: 1204,
-          reference_model_label: 'CCDI',
-          reference_model_version: 'v2.1',
+          reference_model_label: referenceModel.label,
+          reference_model_version: referenceModel.version,
           match_fidelity_counts: [],
           column_breakdowns: columnBreakdowns,
         },

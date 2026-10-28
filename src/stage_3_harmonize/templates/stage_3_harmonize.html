@@ -87,20 +87,21 @@
 
         <section id="stageThreeComplete" class="stage-three-complete hidden" data-column-outcome-panel aria-live="polite">
           <header class="stage-three-summary">
-            <div id="stageThreeDial" class="stage-three-dial" role="img">
-              <div class="stage-three-dial__content">
+            <h1>Harmonization complete</h1>
+            <div class="stage-three-result">
+              {# why: the headline repeats the dial value for screen readers, so the dial is read once, as part of that sentence. #}
+              <div id="stageThreeDial" class="stage-three-dial" aria-hidden="true">
                 <strong id="stageThreeDialValue">0</strong>
-                <span id="stageThreeDialCaption">unique values checked</span>
               </div>
-            </div>
 
-            <div class="stage-three-verdict">
-              <div>
-                <h1>Harmonization complete</h1>
-                <p id="stageThreeContext" class="stage-three-context hidden"></p>
+              <div class="stage-three-verdict">
+                <div>
+                  <p id="stageThreeHeadline" class="stage-three-headline"></p>
+                  <p id="stageThreeContext" class="stage-three-context hidden"></p>
+                </div>
+                <p id="stageThreeResultMessage" class="stage-three-result-message hidden"></p>
+                <ul id="stageThreeGroups" class="stage-three-groups" aria-label="Unique value results"></ul>
               </div>
-              <p id="stageThreeResultMessage" class="stage-three-result-message hidden"></p>
-              <ul id="stageThreeGroups" class="stage-three-groups" aria-label="Unique value results"></ul>
             </div>
           </header>
 

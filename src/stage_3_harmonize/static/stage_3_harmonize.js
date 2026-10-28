@@ -25,7 +25,7 @@ const columnOutcomeContainer = document.querySelector('[data-column-outcome-tabl
 const stageThreeTableSection = document.getElementById('stageThreeTableSection');
 const stageThreeDial = document.getElementById('stageThreeDial');
 const stageThreeDialValue = document.getElementById('stageThreeDialValue');
-const stageThreeDialCaption = document.getElementById('stageThreeDialCaption');
+const stageThreeHeadline = document.getElementById('stageThreeHeadline');
 const stageThreeGroups = document.getElementById('stageThreeGroups');
 const stageThreeResultMessage = document.getElementById('stageThreeResultMessage');
 const stageThreeContext = document.getElementById('stageThreeContext');
@@ -103,12 +103,29 @@ const _showResultMessage = (message) => {
   stageThreeResultMessage.classList.toggle('hidden', !message);
 };
 
+/* why: the sentence starts with the visible dial value; the hidden copy lets screen readers hear the whole sentence in order. */
+const _renderHeadline = (dialValue, { lead, standardName }) => {
+  if (!stageThreeHeadline) return;
+  const spokenValue = document.createElement('span');
+  spokenValue.className = 'sr-only';
+  spokenValue.textContent = `${dialValue} `;
+  const parts = [spokenValue, lead];
+  if (standardName) {
+    const name = document.createElement('strong');
+    name.textContent = standardName;
+    parts.push(' ', name);
+  }
+  stageThreeHeadline.replaceChildren(...parts);
+};
+
 /* why: the dial and groups claim an exact partition, so they render only when every checked column has group counts. */
-const _renderSummary = ({ exactGroupsAvailable, checked, harmonized, matched, unresolved }) => {
-  if (!stageThreeDial || !stageThreeDialValue || !stageThreeDialCaption) return;
+const _renderSummary = ({ exactGroupsAvailable, checked, harmonized, matched, unresolved }, standard) => {
+  if (!stageThreeDial || !stageThreeDialValue || !stageThreeHeadline) return;
   stageThreeDial.classList.toggle('hidden', !exactGroupsAvailable);
+  stageThreeHeadline.classList.toggle('hidden', !exactGroupsAvailable);
   stageThreeGroups?.classList.toggle('hidden', !exactGroupsAvailable || checked === 0);
   stageThreeDial.classList.toggle('stage-three-dial--empty', checked === 0);
+  stageThreeHeadline.classList.toggle('stage-three-headline--empty', checked === 0);
   stageThreeDial.style.removeProperty('--harmonized-end');
   stageThreeDial.style.removeProperty('--matched-end');
 
@@ -117,22 +134,14 @@ const _renderSummary = ({ exactGroupsAvailable, checked, harmonized, matched, un
     _showResultMessage('Detailed value groups are not available for this result. Continue to Verify to review the changes.');
     return;
   }
-  if (checked === 0) {
-    _renderGroups([]);
-    stageThreeDialValue.textContent = '0';
-    stageThreeDialCaption.textContent = 'unique values checked';
-    /* why: the message below gives the reason; the dial label repeats only its visible text. */
-    stageThreeDial.setAttribute('aria-label', '0 unique values checked');
-    _showResultMessage('No unique values were checked against an approved list.');
-    return;
-  }
 
-  const summary = summarizeResult({ checked, harmonized, matched, unresolved });
-  stageThreeDial.style.setProperty('--harmonized-end', `${(harmonized / checked) * 100}%`);
-  stageThreeDial.style.setProperty('--matched-end', `${((harmonized + matched) / checked) * 100}%`);
-  stageThreeDial.setAttribute('aria-label', summary.ariaLabel);
-  stageThreeDialValue.textContent = summary.percentLabel;
-  stageThreeDialCaption.textContent = summary.caption;
+  const summary = summarizeResult({ checked, harmonized, matched, unresolved }, standard);
+  if (checked > 0) {
+    stageThreeDial.style.setProperty('--harmonized-end', `${(harmonized / checked) * 100}%`);
+    stageThreeDial.style.setProperty('--matched-end', `${((harmonized + matched) / checked) * 100}%`);
+  }
+  stageThreeDialValue.textContent = summary.dialValue;
+  _renderHeadline(summary.dialValue, summary.headline);
   _renderGroups(summary.groups);
   _showResultMessage(null);
 };
@@ -143,8 +152,6 @@ const _setDisplayContext = (summary, columns) => {
   const sourceFileName = summary.source_file_name?.trim();
   const totalRows = summary.source_row_count
     ?? columns.reduce((largest, column) => Math.max(largest, column.totalRows), 0);
-  const modelLabel = summary.reference_model_label?.trim();
-  const modelVersion = summary.reference_model_version?.trim();
 
   const parts = [];
   if (sourceFileName) {
@@ -153,7 +160,6 @@ const _setDisplayContext = (summary, columns) => {
     parts.push(fileName);
   }
   if (totalRows > 0) parts.push(`${_formatCount(totalRows)} ${_plural(totalRows, 'row')}`);
-  if (modelLabel) parts.push(`Checked against ${modelLabel}${modelVersion ? ` ${modelVersion}` : ''}`);
 
   stageThreeContext.replaceChildren(
     ...parts.flatMap((part, index) => (index === 0 ? [part] : [' · ', part])),
@@ -250,7 +256,10 @@ const _renderMetricsDashboard = (job) => {
     (column) => column.changedDistinctValues === 0 && column.nonConformantValues === 0,
   );
 
-  _renderSummary({ exactGroupsAvailable, checked, harmonized, matched, unresolved });
+  _renderSummary(
+    { exactGroupsAvailable, checked, harmonized, matched, unresolved },
+    { label: job.manifest_summary.reference_model_label, version: job.manifest_summary.reference_model_version },
+  );
   _setDisplayContext(job.manifest_summary, columns);
   /* why: with exact groups the summary already explains an empty table, so the generic empty-table note would repeat or contradict it. */
   const tableRepeatsSummary = exactGroupsAvailable && actionColumns.length === 0;

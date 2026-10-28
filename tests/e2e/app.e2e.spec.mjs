@@ -807,11 +807,11 @@ test('happy path flow: upload → analyze → harmonize → review → summary �
   const stageThreeOutcome = stageThreeTable.locator('tbody tr').filter({ hasText: 'col_a' });
   await expect(stageThreeOutcome).toContainText('0 of 2');
   await expect(stageThreeOutcome).toContainText('2 of 3');
-  await expect(page.getByRole('img', { name: '0 unique values checked' })).toBeVisible();
+  await expect(page.locator('#stageThreeDial')).toHaveText('0');
   await expect(page.getByRole('heading', { name: 'Harmonization complete' })).toBeVisible();
-  await expect(page.getByText(
-    'No unique values were checked against an approved list.',
-  )).toBeVisible();
+  await expect(page.locator('#stageThreeHeadline')).toHaveText(
+    '0 unique values were checked against an approved list',
+  );
   await expect(page.getByRole('list', { name: 'Unique value results' })).toBeHidden();
   await expect(page.getByText('Confidence', { exact: true })).toHaveCount(0);
 
@@ -957,11 +957,10 @@ test('completed Stage 3 shows the durable dial, action table, and remaining colu
 
   // Then: the result uses the durable display context and exact value partition.
   await expect(page.getByRole('heading', { name: 'Harmonization complete' })).toBeVisible();
-  await expect(page.locator('#stageThreeContext')).toHaveText(
-    'partner_submission.csv · 20 rows · Checked against GDC 3.0',
-  );
-  await expect(page.getByRole('img', { name: '66% of 6 unique values now match' }))
-    .toHaveText('66% of 6 unique values now match');
+  await expect(page.locator('#stageThreeContext')).toHaveText('partner_submission.csv · 20 rows');
+  await expect(page.locator('#stageThreeDial')).toHaveText('66%');
+  await expect(page.locator('#stageThreeHeadline')).toHaveText('66% of 6 unique values now match GDC 3.0');
+  await expect(page.locator('#stageThreeHeadline strong')).toHaveText('GDC 3.0');
   await expect(page.getByRole('list', { name: 'Unique value results' }).getByRole('listitem')).toHaveText([
     '1 harmonized',
     '3 already matched',
@@ -1015,7 +1014,8 @@ const STAGE_THREE_SUMMARY_CASES = [
   {
     name: 'mixed counts',
     counts: { harmonized: 37, matched: 9, unresolved: 6 },
-    dial: '88% of 52 unique values now match',
+    dial: '88%',
+    headline: '88% of 52 unique values now match CCDI v2.1',
     groups: [
       ['37 harmonized', 'normal'],
       ['9 already matched', 'normal'],
@@ -1026,7 +1026,8 @@ const STAGE_THREE_SUMMARY_CASES = [
   {
     name: 'nothing harmonized',
     counts: { harmonized: 0, matched: 0, unresolved: 52 },
-    dial: '0% of 52 unique values now match',
+    dial: '0%',
+    headline: '0% of 52 unique values now match CCDI v2.1',
     groups: [
       ['0 harmonized', 'zero'],
       ['0 already matched', 'zero'],
@@ -1047,12 +1048,12 @@ for (const scenario of STAGE_THREE_SUMMARY_CASES) {
     // When: Stage 3 loads the completed result
     await page.goto(`/stage-3?file_id=${STAGE_THREE_FILE_ID}&job_id=${jobId}`);
 
-    // Then: the dial shows the rounded-down match share and all three groups render with their states
+    // Then: the dial shows only the rounded-down share, the headline names the standard, and all groups render
     await expect(page.getByRole('heading', { name: 'Harmonization complete' })).toBeVisible();
-    await expect(page.locator('#stageThreeContext')).toHaveText(
-      'clinical_samples.csv · 1,204 rows · Checked against CCDI v2.1',
-    );
-    await expect(page.getByRole('img', { name: scenario.dial })).toHaveText(scenario.dial);
+    await expect(page.locator('#stageThreeContext')).toHaveText('clinical_samples.csv · 1,204 rows');
+    await expect(page.locator('#stageThreeDial')).toHaveText(scenario.dial);
+    await expect(page.locator('#stageThreeDial')).toHaveAttribute('aria-hidden', 'true');
+    await expect(page.locator('#stageThreeHeadline')).toHaveText(scenario.headline);
     const groups = page.getByRole('list', { name: 'Unique value results' }).getByRole('listitem');
     await expect(groups).toHaveText(scenario.groups.map(([text]) => text));
     for (const [index, [, groupState]] of scenario.groups.entries()) {
@@ -1064,6 +1065,27 @@ for (const scenario of STAGE_THREE_SUMMARY_CASES) {
     ]);
   });
 }
+
+test('Stage 3 summary says "the approved list" when the job recorded no standard name', async ({ page }) => {
+  const jobId = 'stage-three-summary-no-standard-name';
+  // Given: a completed mixed job that recorded no reference model label or version
+  await mockCompletedStageThreeJob(
+    page,
+    jobId,
+    [stageThreeColumn({ harmonized: 37, matched: 9, unresolved: 6 })],
+    { label: null, version: null },
+  );
+  await page.goto('/stage-1');
+  await expect(page.locator('#stageThreeComplete')).toHaveCount(0);
+
+  // When: Stage 3 loads the completed result
+  await page.goto(`/stage-3?file_id=${STAGE_THREE_FILE_ID}&job_id=${jobId}`);
+
+  // Then: the headline ends with the generic list name and nothing is shown as a standard name
+  await expect(page.locator('#stageThreeHeadline')).toHaveText('88% of 52 unique values now match the approved list');
+  await expect(page.locator('#stageThreeHeadline strong')).toHaveCount(0);
+  await expect(page.locator('#stageThreeContext')).toHaveText('clinical_samples.csv · 1,204 rows');
+});
 
 test('Stage 3 summary hides the empty table note when every value already matched', async ({ page }) => {
   const jobId = 'stage-three-summary-all-matched';
@@ -1078,7 +1100,8 @@ test('Stage 3 summary hides the empty table note when every value already matche
   await page.goto(`/stage-3?file_id=${STAGE_THREE_FILE_ID}&job_id=${jobId}`);
 
   // Then: the dial shows 100%, the empty-table note is hidden, and the column is listed as unchanged
-  await expect(page.getByRole('img', { name: '100% of 52 unique values now match' })).toBeVisible();
+  await expect(page.locator('#stageThreeDial')).toHaveText('100%');
+  await expect(page.locator('#stageThreeHeadline')).toHaveText('100% of 52 unique values now match CCDI v2.1');
   await expect(page.getByRole('list', { name: 'Unique value results' }).getByRole('listitem')).toHaveText([
     '0 harmonized',
     '52 already matched',
@@ -1100,13 +1123,15 @@ test('Stage 3 summary shows a gray dial when no values were checked', async ({ p
   // When: Stage 3 loads the completed result
   await page.goto(`/stage-3?file_id=${STAGE_THREE_FILE_ID}&job_id=${jobId}`);
 
-  // Then: the dial shows zero checked values, the groups are hidden, and the reason is stated once
-  await expect(page.getByRole('img', { name: '0 unique values checked' }))
-    .toHaveText('0 unique values checked');
-  await expect(page.getByRole('list', { name: 'Unique value results' })).toBeHidden();
-  await expect(page.locator('#stageThreeResultMessage')).toHaveText(
-    'No unique values were checked against an approved list.',
+  // Then: the gray dial shows 0, the text beside it finishes that sentence once, and the groups are hidden
+  await expect(page.locator('#stageThreeDial')).toHaveText('0');
+  await expect(page.locator('#stageThreeDial')).toHaveClass(/stage-three-dial--empty/);
+  await expect(page.locator('#stageThreeHeadline')).toHaveText(
+    '0 unique values were checked against an approved list',
   );
+  await expect(page.locator('#stageThreeHeadline')).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Unique value results' })).toBeHidden();
+  await expect(page.locator('#stageThreeResultMessage')).toBeHidden();
   await expect(page.getByText('No reviewed columns are available for this dataset.')).toBeHidden();
   await expect(page.locator('[data-remaining-columns]')).toContainText('1 column passed through unchanged');
 });
@@ -1123,6 +1148,7 @@ test('Stage 3 summary does not draw groups whose counts exceed the checked value
 
   // Then: the page treats the result like an earlier job instead of drawing a false partition
   await expect(page.locator('#stageThreeDial')).toBeHidden();
+  await expect(page.locator('#stageThreeHeadline')).toBeHidden();
   await expect(page.getByRole('list', { name: 'Unique value results' })).toBeHidden();
   await expect(page.locator('#stageThreeResultMessage')).toHaveText(
     'Detailed value groups are not available for this result. Continue to Verify to review the changes.',
@@ -1177,6 +1203,7 @@ test('an earlier completed Stage 3 job does not invent detailed value groups', a
   // Then: the page preserves useful results without inventing a dial partition.
   await expect(page.getByRole('heading', { name: 'Harmonization complete' })).toBeVisible();
   await expect(page.locator('#stageThreeDial')).toBeHidden();
+  await expect(page.locator('#stageThreeHeadline')).toBeHidden();
   await expect(page.getByRole('list', { name: 'Unique value results' })).toBeHidden();
   await expect(page.getByText(
     'Detailed value groups are not available for this result. Continue to Verify to review the changes.',

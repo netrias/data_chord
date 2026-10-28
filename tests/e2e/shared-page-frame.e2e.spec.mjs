@@ -68,25 +68,52 @@ test('workflow actions stay inside narrow desktop and phone viewports', async ({
 });
 
 const _mixedStageThreeColumn = () => stageThreeColumn({ harmonized: 37, matched: 9, unresolved: 6 });
+const LONG_STANDARD = { label: 'Childhood Cancer Data Initiative Submission Data Model', version: 'v2.1.0' };
+
+/** Baseline of an element's first line: an empty inline-block's bottom edge sits on the baseline of its line. */
+const _firstBaseline = (locator) => locator.evaluate((element) => {
+  const probe = document.createElement('span');
+  probe.style.display = 'inline-block';
+  element.prepend(probe);
+  const baseline = probe.getBoundingClientRect().bottom;
+  probe.remove();
+  return baseline;
+});
 
 for (const width of [1440, 1024]) {
-  test(`Stage 3 puts the result dial left of three equal result groups at ${width}px`, async ({ page }) => {
+  test(`Stage 3 puts the dial left of a wrapping headline on the dial baseline at ${width}px`, async ({ page }) => {
     const jobId = `stage-three-layout-${width}`;
-    // Given: a completed Stage 3 result at desktop width
+    // Given: a completed Stage 3 result with a long standard name at desktop width
     await page.setViewportSize({ width, height: 1000 });
-    await mockCompletedStageThreeJob(page, jobId, [_mixedStageThreeColumn()]);
+    await mockCompletedStageThreeJob(page, jobId, [_mixedStageThreeColumn()], LONG_STANDARD);
 
     // When: the completion summary is laid out
     await page.goto(`/stage-3?file_id=${STAGE_THREE_FILE_ID}&job_id=${jobId}`);
     const groups = page.getByRole('list', { name: 'Unique value results' }).getByRole('listitem');
     await expect(groups).toHaveCount(3);
+    const headline = page.locator('#stageThreeHeadline');
+    await expect(headline).toHaveText(
+      '88% of 52 unique values now match Childhood Cancer Data Initiative Submission Data Model v2.1.0',
+    );
+    const title = await page.getByRole('heading', { name: 'Harmonization complete' }).boundingBox();
     const dial = await page.locator('#stageThreeDial').boundingBox();
-    const headline = await page.getByRole('heading', { name: 'Harmonization complete' }).boundingBox();
+    const headlineBox = await headline.boundingBox();
+    const verdict = await page.locator('.stage-three-verdict').boundingBox();
+    const headlineLineHeight = await headline.evaluate((element) => parseFloat(getComputedStyle(element).lineHeight));
+    const dialBaseline = await _firstBaseline(page.locator('#stageThreeDialValue'));
+    const headlineBaseline = await _firstBaseline(headline);
     const groupBoxes = await Promise.all([0, 1, 2].map((index) => groups.nth(index).boundingBox()));
 
-    // Then: the dial is left of the text, and the groups share one row with equal widths
-    expect(dial.x + dial.width).toBeLessThan(headline.x);
-    expect(headline.x).toBeLessThanOrEqual(groupBoxes[0].x + 1);
+    // Then: the title is above a round dial, the long name wraps beside the dial, and its first line sits on the dial baseline
+    expect(title.y + title.height).toBeLessThanOrEqual(dial.y);
+    expect(Math.abs(dial.width - dial.height)).toBeLessThanOrEqual(1);
+    expect(dial.x + dial.width).toBeLessThan(headlineBox.x);
+    expect(headlineBox.height).toBeGreaterThan(headlineLineHeight * 1.5);
+    expect(headlineBox.x + headlineBox.width).toBeLessThanOrEqual(verdict.x + verdict.width + 1);
+    expect(Math.abs(headlineBaseline - dialBaseline)).toBeLessThanOrEqual(1);
+    // And: the three groups share one row below the headline with equal widths
+    expect(headlineBox.x).toBeLessThanOrEqual(groupBoxes[0].x + 1);
+    expect(headlineBox.y + headlineBox.height).toBeLessThan(groupBoxes[0].y);
     for (const box of groupBoxes) {
       expect(Math.abs(box.y - groupBoxes[0].y)).toBeLessThanOrEqual(1);
       expect(Math.abs(box.width - groupBoxes[0].width)).toBeLessThanOrEqual(1);
@@ -98,25 +125,31 @@ for (const width of [1440, 1024]) {
 
 test('Stage 3 result summary stacks inside a phone viewport', async ({ page }) => {
   const jobId = 'stage-three-phone-layout';
-  // Given: a completed Stage 3 result at phone width
+  // Given: a completed Stage 3 result with a long standard name at phone width
   await page.setViewportSize({ width: 390, height: 921 });
-  await mockCompletedStageThreeJob(page, jobId, [_mixedStageThreeColumn()]);
+  await mockCompletedStageThreeJob(page, jobId, [_mixedStageThreeColumn()], LONG_STANDARD);
 
   // When: the completion summary is laid out
   await page.goto(`/stage-3?file_id=${STAGE_THREE_FILE_ID}&job_id=${jobId}`);
   const groups = page.getByRole('list', { name: 'Unique value results' }).getByRole('listitem');
   await expect(groups).toHaveCount(3);
 
-  // Then: the dial sits above the text, groups stack, and the summary stays inside the viewport
+  // Then: the title, dial, and headline stack in reading order, groups stack, and nothing leaves the viewport
+  const title = await page.getByRole('heading', { name: 'Harmonization complete' }).boundingBox();
   const dial = await page.locator('#stageThreeDial').boundingBox();
-  const headline = await page.getByRole('heading', { name: 'Harmonization complete' }).boundingBox();
+  const headline = await page.locator('#stageThreeHeadline').boundingBox();
+  expect(title.y + title.height).toBeLessThanOrEqual(dial.y);
   expect(dial.y + dial.height).toBeLessThanOrEqual(headline.y);
+  await expect(page.locator('#stageThreeHeadline')).toHaveCSS('text-align', 'center');
   const first = await groups.nth(0).boundingBox();
   const second = await groups.nth(1).boundingBox();
+  expect(headline.y + headline.height).toBeLessThanOrEqual(first.y);
   expect(first.y + first.height).toBeLessThanOrEqual(second.y);
   const summary = await page.locator('.stage-three-summary').boundingBox();
   expect(summary.x).toBeGreaterThanOrEqual(0);
   expect(summary.x + summary.width).toBeLessThanOrEqual(390);
+  expect(headline.x).toBeGreaterThanOrEqual(summary.x);
+  expect(headline.x + headline.width).toBeLessThanOrEqual(summary.x + summary.width);
 });
 
 test('workflow links identify the current step and support keyboard navigation', async ({ page }) => {
