@@ -1,6 +1,7 @@
 import { initStepInstruction, updateStepInstruction, setActiveStage, initNavigationEvents, isSafeRelativeUrl, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
 import { STAGE_3_JOB_KEY, readFromSession, writeToSession, removeFromSession } from '/assets/shared/storage-keys.js';
 import { renderColumnOutcomeTable } from '/assets/shared/column-outcome-table.js';
+import { formatStandardName, summarizeResult } from './result-summary.js';
 
 const config = window.stageThreeConfig ?? {};
 const harmonizeEndpoint = config.harmonizeEndpoint ?? '/stage-3/harmonize';
@@ -21,15 +22,13 @@ const harmonizeAnimation = document.querySelector('#loadingState .harmonize-anim
 const harmonizeProgressMessage = document.getElementById('harmonizeProgressMessage');
 const columnOutcomePanel = document.querySelector('[data-column-outcome-panel]');
 const columnOutcomeContainer = document.querySelector('[data-column-outcome-table]');
+const stageThreeTableSection = document.getElementById('stageThreeTableSection');
 const stageThreeDial = document.getElementById('stageThreeDial');
-const stageThreeCheckedCount = document.getElementById('stageThreeCheckedCount');
-const stageThreeLegend = document.getElementById('stageThreeLegend');
+const stageThreeDialValue = document.getElementById('stageThreeDialValue');
 const stageThreeHeadline = document.getElementById('stageThreeHeadline');
+const stageThreeGroups = document.getElementById('stageThreeGroups');
 const stageThreeResultMessage = document.getElementById('stageThreeResultMessage');
-const stageThreeDatasetContext = document.getElementById('stageThreeDatasetContext');
-const stageThreeSourceFile = document.getElementById('stageThreeSourceFile');
-const stageThreeRowCount = document.getElementById('stageThreeRowCount');
-const stageThreeModelContext = document.getElementById('stageThreeModelContext');
+const stageThreeContext = document.getElementById('stageThreeContext');
 const remainingColumns = document.querySelector('[data-remaining-columns]');
 const remainingTitle = document.querySelector('[data-remaining-title]');
 const remainingSummary = document.querySelector('[data-remaining-summary]');
@@ -78,83 +77,96 @@ const _plural = (count, singular, plural = `${singular}s`) => (
 
 const _formatCount = (count) => count.toLocaleString();
 
-const _appendLegendItem = (colorClass, count, text) => {
-  if (!stageThreeLegend || count === 0) return;
-  const item = document.createElement('li');
-  const marker = document.createElement('span');
-  marker.className = `stage-three-legend__marker ${colorClass}`;
-  marker.setAttribute('aria-hidden', 'true');
-  const copy = document.createElement('span');
-  const strong = document.createElement('strong');
-  strong.textContent = _formatCount(count);
-  copy.append(strong, ` ${text}`);
-  item.append(marker, copy);
-  stageThreeLegend.appendChild(item);
+const _renderGroups = (groups) => {
+  if (!stageThreeGroups) return;
+  stageThreeGroups.replaceChildren(...groups.map((group) => {
+    const item = document.createElement('li');
+    item.className = `stage-three-group stage-three-group--${group.key}`;
+    item.dataset.state = group.state;
+    const marker = document.createElement('span');
+    marker.className = 'stage-three-group__marker';
+    marker.setAttribute('aria-hidden', 'true');
+    const count = document.createElement('strong');
+    count.textContent = _formatCount(group.count);
+    const label = document.createElement('span');
+    label.className = 'stage-three-group__label';
+    /* why: the leading space keeps the list item's accessible text as "37 harmonized", not "37harmonized". */
+    label.textContent = ` ${group.label}`;
+    item.append(marker, count, label);
+    return item;
+  }));
 };
 
-const _renderDial = ({ checked, harmonized, matched, unresolved }) => {
-  if (!stageThreeDial || !stageThreeCheckedCount || !stageThreeLegend) return;
-  stageThreeCheckedCount.textContent = _formatCount(checked);
-  stageThreeLegend.replaceChildren();
+const _showResultMessage = (message) => {
+  if (!stageThreeResultMessage) return;
+  stageThreeResultMessage.textContent = message ?? '';
+  stageThreeResultMessage.classList.toggle('hidden', !message);
+};
 
-  if (checked === 0) {
-    stageThreeDial.classList.add('stage-three-dial--empty');
-    stageThreeDial.style.removeProperty('--harmonized-end');
-    stageThreeDial.style.removeProperty('--matched-end');
-    stageThreeDial.setAttribute('aria-label', 'No unique values were checked against an approved list.');
+/* why: the sentence starts with the visible dial value; the hidden copy lets screen readers hear the whole sentence in order. */
+const _renderHeadline = (dialValue, { lead, standardName }) => {
+  if (!stageThreeHeadline) return;
+  const spokenValue = document.createElement('span');
+  spokenValue.className = 'sr-only';
+  spokenValue.textContent = `${dialValue} `;
+  const parts = [spokenValue, lead];
+  if (standardName) {
+    const name = document.createElement('strong');
+    name.textContent = standardName;
+    parts.push(' ', name);
+  }
+  stageThreeHeadline.replaceChildren(...parts);
+};
+
+/* why: the dial and groups claim an exact partition, so they render only when every checked column has group counts. */
+const _renderSummary = ({ exactGroupsAvailable, checked, harmonized, matched, unresolved }, standard) => {
+  if (!stageThreeDial || !stageThreeDialValue || !stageThreeHeadline) return;
+  stageThreeDial.classList.toggle('hidden', !exactGroupsAvailable);
+  stageThreeHeadline.classList.toggle('hidden', !exactGroupsAvailable);
+  stageThreeGroups?.classList.toggle('hidden', !exactGroupsAvailable || checked === 0);
+  stageThreeDial.classList.toggle('stage-three-dial--empty', checked === 0);
+  stageThreeHeadline.classList.toggle('stage-three-headline--empty', checked === 0);
+  stageThreeDial.style.removeProperty('--harmonized-end');
+  stageThreeDial.style.removeProperty('--matched-end');
+
+  if (!exactGroupsAvailable) {
+    _renderGroups([]);
+    _showResultMessage('Detailed value groups are not available for this result. Continue to Verify to review the changes.');
     return;
   }
 
-  stageThreeDial.classList.remove('stage-three-dial--empty');
-  const harmonizedEnd = (harmonized / checked) * 100;
-  const matchedEnd = ((harmonized + matched) / checked) * 100;
-  stageThreeDial.style.setProperty('--harmonized-end', `${harmonizedEnd}%`);
-  stageThreeDial.style.setProperty('--matched-end', `${matchedEnd}%`);
-  stageThreeDial.setAttribute(
-    'aria-label',
-    `Of ${_formatCount(checked)} unique ${_plural(checked, 'value')} checked: `
-      + `${_formatCount(harmonized)} ${harmonized === 1 ? 'was' : 'were'} successfully harmonized; `
-      + `${_formatCount(matched)} already matched; `
-      + `${_formatCount(unresolved)} could not be harmonized.`,
-  );
-
-  _appendLegendItem(
-    'stage-three-legend__marker--harmonized',
-    harmonized,
-    `Data Chord successfully harmonized ${harmonized === 1 ? 'value' : 'values'}`,
-  );
-  _appendLegendItem(
-    'stage-three-legend__marker--matched',
-    matched,
-    `${matched === 1 ? 'value already matched' : 'values already matched'} the approved list`,
-  );
-  _appendLegendItem(
-    'stage-three-legend__marker--unresolved',
-    unresolved,
-    `${unresolved === 1 ? 'value could' : 'values could'} not be harmonized`,
-  );
+  const summary = summarizeResult({ checked, harmonized, matched, unresolved }, standard);
+  if (checked > 0) {
+    stageThreeDial.style.setProperty('--harmonized-end', `${(harmonized / checked) * 100}%`);
+    stageThreeDial.style.setProperty('--matched-end', `${((harmonized + matched) / checked) * 100}%`);
+  }
+  stageThreeDialValue.textContent = summary.dialValue;
+  _renderHeadline(summary.dialValue, summary.headline);
+  _renderGroups(summary.groups);
+  _showResultMessage(null);
 };
 
-const _setDisplayContext = (summary, columns) => {
+/* why: one meta line; each part appears only when the job recorded it. The headline names the standard when it shows, so the meta line names it only when the headline is hidden. */
+const _setDisplayContext = (summary, columns, standard, headlineShown) => {
+  if (!stageThreeContext) return;
   const sourceFileName = summary.source_file_name?.trim();
   const totalRows = summary.source_row_count
     ?? columns.reduce((largest, column) => Math.max(largest, column.totalRows), 0);
-  if (sourceFileName && stageThreeDatasetContext && stageThreeSourceFile && stageThreeRowCount) {
-    stageThreeSourceFile.textContent = sourceFileName;
-    stageThreeRowCount.textContent = totalRows > 0 ? ` · ${_formatCount(totalRows)} rows` : '';
-    stageThreeDatasetContext.classList.remove('hidden');
-  } else {
-    stageThreeDatasetContext?.classList.add('hidden');
-  }
 
-  const modelLabel = summary.reference_model_label?.trim();
-  const modelVersion = summary.reference_model_version?.trim();
-  if (modelLabel && stageThreeModelContext) {
-    stageThreeModelContext.textContent = `Checked against ${modelLabel}${modelVersion ? ` ${modelVersion}` : ''}`;
-    stageThreeModelContext.classList.remove('hidden');
-  } else {
-    stageThreeModelContext?.classList.add('hidden');
+  const parts = [];
+  if (sourceFileName) {
+    const fileName = document.createElement('strong');
+    fileName.textContent = sourceFileName;
+    parts.push(fileName);
   }
+  if (totalRows > 0) parts.push(`${_formatCount(totalRows)} ${_plural(totalRows, 'row')}`);
+  const standardName = headlineShown ? null : formatStandardName(standard);
+  if (standardName) parts.push(`Checked against ${standardName}`);
+
+  stageThreeContext.replaceChildren(
+    ...parts.flatMap((part, index) => (index === 0 ? [part] : [' · ', part])),
+  );
+  stageThreeContext.classList.toggle('hidden', parts.length === 0);
 };
 
 const _remainingGroup = (heading, columns, className) => {
@@ -197,7 +209,7 @@ const _renderRemainingColumns = (columns) => {
   remainingTitle.textContent = `${_formatCount(columns.length)} ${_plural(columns.length, 'column')} passed through unchanged`;
   remainingSummary.textContent = 'Nothing in them needed rewriting.';
   _remainingGroup(
-    `${_formatCount(matchedValues)} ${_plural(matchedValues, 'value')} already matched the approved list`,
+    `${_formatCount(matchedValues)} unique ${_plural(matchedValues, 'value')} already matched the approved list`,
     matched,
     'remaining-columns__item--matched',
   );
@@ -220,7 +232,7 @@ const _renderMetricsDashboard = (job) => {
   }
   const columns = breakdowns.map(_columnOutcome);
   const checkedColumns = columns.filter((column) => column.reviewStatus !== 'not_checked');
-  const exactGroupsAvailable = checkedColumns.every(
+  const hasGroupCounts = checkedColumns.every(
     (column) => column.successfullyHarmonizedValues !== null,
   );
   const checked = checkedColumns.reduce((total, column) => total + column.totalDistinctValues, 0);
@@ -232,7 +244,9 @@ const _renderMetricsDashboard = (job) => {
     (total, column) => total + column.nonConformantValues,
     0,
   );
-  const matched = Math.max(checked - harmonized - unresolved, 0);
+  const matched = checked - harmonized - unresolved;
+  /* why: counts that do not add up cannot be drawn as a partition, so show them without groups. */
+  const exactGroupsAvailable = hasGroupCounts && matched >= 0;
   const actionColumns = columns
     .filter((column) => column.changedDistinctValues > 0 || column.nonConformantValues > 0)
     .sort((left, right) => (
@@ -244,29 +258,15 @@ const _renderMetricsDashboard = (job) => {
     (column) => column.changedDistinctValues === 0 && column.nonConformantValues === 0,
   );
 
-  stageThreeDial?.parentElement?.classList.toggle('hidden', !exactGroupsAvailable);
-  document.querySelector('.stage-three-summary')?.classList.toggle(
-    'stage-three-summary--legacy',
-    !exactGroupsAvailable,
-  );
-  if (exactGroupsAvailable) {
-    _renderDial({ checked, harmonized, matched, unresolved });
-  }
-  if (stageThreeHeadline) {
-    stageThreeHeadline.textContent = !exactGroupsAvailable || checked === 0
-      ? 'Harmonization complete'
-      : `Data Chord successfully harmonized ${_formatCount(harmonized)} ${_plural(harmonized, 'value')}!`;
-  }
-  if (stageThreeResultMessage) {
-    stageThreeResultMessage.textContent = !exactGroupsAvailable
-      ? 'Detailed value groups are not available for this earlier result. Continue to Verify to review the changes.'
-      : checked === 0
-      ? 'No unique values were checked against an approved list.'
-      : unresolved === 0
-        ? 'Every checked value now matches the approved list.'
-        : `${_formatCount(unresolved)} ${_plural(unresolved, 'value')} could not be harmonized. Continue to Verify to review ${unresolved === 1 ? 'it' : 'them'}.`;
-  }
-  _setDisplayContext(job.manifest_summary, columns);
+  const standard = {
+    label: job.manifest_summary.reference_model_label,
+    version: job.manifest_summary.reference_model_version,
+  };
+  _renderSummary({ exactGroupsAvailable, checked, harmonized, matched, unresolved }, standard);
+  _setDisplayContext(job.manifest_summary, columns, standard, exactGroupsAvailable);
+  /* why: with exact groups the summary already explains an empty table, so the generic empty-table note would repeat or contradict it. */
+  const tableRepeatsSummary = exactGroupsAvailable && actionColumns.length === 0;
+  stageThreeTableSection?.classList.toggle('hidden', tableRepeatsSummary);
   renderColumnOutcomeTable({
     container: columnOutcomeContainer,
     columns: actionColumns,

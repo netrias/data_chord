@@ -21,8 +21,8 @@ export const STEP_INSTRUCTIONS = {
     long: "The harmonization engine processes each row of your data and converts values to match the selected common data elements. This step can take a few minutes. Keep this tab open while processing completes."
   },
   harmonize_complete: {
-    short: "Your data has been transformed to match the selected standards.",
-    long: "The harmonization engine has processed your data. The source-column table shows exact distinct-value changes, affected rows, and which final values still need review. Continue to Verify to inspect individual values."
+    short: "Harmonization complete.",
+    long: "The summary shows how many unique values were harmonized, already matched the approved list, or were not harmonized. Continue to Verify to review individual values."
   },
   verify: {
     short: "Inspect harmonized values and override any AI suggestions as needed.",

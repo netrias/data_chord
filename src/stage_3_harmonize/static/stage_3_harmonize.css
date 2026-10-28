@@ -88,36 +88,41 @@
   margin-bottom: var(--space-4);
 }
 
+/* why: Stage 3 only; the summary, table, and unchanged columns need more room than the shared card padding gives.
+   This card also holds the harmonizing, empty, and error states, so they get the same padding. */
+#stageThreeMetrics {
+  padding: var(--space-12);
+}
+
 /* Completed harmonization summary */
 .stage-three-complete {
   display: grid;
-  gap: var(--space-8);
+  gap: var(--space-12);
 }
 
-.stage-three-summary {
-  display: grid;
-  grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
-  justify-items: center;
-  text-align: center;
-  row-gap: var(--space-6);
+/* The dial and one text block sit side by side; the block is centered on the dial. */
+.stage-three-result {
+  display: flex;
   align-items: center;
-  column-gap: clamp(var(--space-12), 6vw, 5rem);
-  padding-bottom: var(--space-8);
-  border-bottom: 1px solid var(--gray-200);
-}
-
-.stage-three-summary--legacy {
-  grid-template-columns: 1fr;
-}
-
-.stage-three-dial-column {
-  display: grid;
-  justify-items: center;
-  gap: var(--space-5);
+  gap: var(--space-12);
 }
 
 .stage-three-verdict {
-  width: 100%;
+  display: grid;
+  flex: 1;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+/* The page title, styled as a small label above the sentence. */
+.stage-three-verdict h1 {
+  /* why: pulls the label close to the sentence; the grid gap stays for the groups. */
+  margin: 0 0 calc(var(--space-3) - var(--space-8));
+  color: var(--gray-500);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .stage-three-dial {
@@ -125,20 +130,21 @@
   --matched-end: 100%;
   position: relative;
   display: grid;
-  width: clamp(10.5rem, 20vw, 13rem);
+  flex: none;
+  width: 14rem;
   aspect-ratio: 1;
   place-items: center;
   border-radius: 50%;
   background: conic-gradient(
-    var(--azure-500) 0 var(--harmonized-end),
-    var(--netrias-500) var(--harmonized-end) var(--matched-end),
+    var(--netrias-500) 0 var(--harmonized-end),
+    var(--azure-500) var(--harmonized-end) var(--matched-end),
     var(--warning-500) var(--matched-end) 100%
   );
 }
 
 .stage-three-dial::before {
   position: absolute;
-  inset: 15%;
+  inset: 9%;
   border-radius: inherit;
   background: var(--white);
   content: "";
@@ -148,101 +154,135 @@
   background: var(--gray-200);
 }
 
-.stage-three-dial__content {
+.stage-three-dial strong {
   position: relative;
-  z-index: 1;
-  display: grid;
-  max-width: 6.5rem;
-  justify-items: center;
-  gap: var(--space-1);
-  color: var(--gray-500);
-  font-size: 0.76rem;
-  line-height: 1.35;
-  text-align: center;
-}
-
-.stage-three-dial__content strong {
   color: var(--gray-900);
-  font-size: clamp(2rem, 5vw, 2.7rem);
+  font-size: 3.4rem;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.045em;
   line-height: 1;
 }
 
-.stage-three-legend {
-  display: grid;
-  gap: var(--space-2);
-  width: 100%;
-  margin: 0;
-  padding: 0;
-  color: var(--gray-600);
-  font-size: 0.8rem;
-  line-height: 1.35;
-  list-style: none;
+.stage-three-dial--empty strong {
+  color: var(--gray-500);
 }
 
-.stage-three-legend li {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
-}
-
-.stage-three-legend strong {
-  color: var(--gray-900);
-  font-variant-numeric: tabular-nums;
-}
-
-.stage-three-legend__marker {
-  flex: none;
-  width: 0.58rem;
-  height: 0.58rem;
-  margin-top: 0.2rem;
-  border-radius: 2px;
-}
-
-.stage-three-legend__marker--harmonized {
-  background: var(--azure-500);
-}
-
-.stage-three-legend__marker--matched {
-  background: var(--netrias-500);
-}
-
-.stage-three-legend__marker--unresolved {
-  background: var(--warning-500);
-}
-
-.stage-three-verdict h1 {
-  max-width: 30ch;
-  margin: 0 auto;
-  color: var(--gray-900);
-  font-size: clamp(1.8rem, 4vw, 2.6rem);
-  letter-spacing: -0.035em;
-  line-height: 1.12;
-  text-wrap: balance;
-}
-
-.stage-three-result-message {
-  max-width: 46ch;
-  margin: var(--space-4) auto 0;
+.stage-three-headline {
+  margin: 0 0 var(--space-2);
+  overflow-wrap: anywhere;
   color: var(--gray-700);
-  font-size: 1rem;
-  line-height: 1.55;
+  font-size: 1.75rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  text-wrap: pretty;
+}
+
+.stage-three-headline strong {
+  color: var(--gray-900);
+  font-weight: 700;
+}
+
+.stage-three-headline--empty {
+  color: var(--gray-600);
+  font-weight: 500;
 }
 
 .stage-three-context {
-  margin: var(--space-3) 0 0;
+  margin: 0;
+  overflow-wrap: anywhere;
   color: var(--gray-500);
-  font-size: 0.86rem;
-  line-height: 1.45;
-}
-
-.stage-three-context + .stage-three-context {
-  margin-top: var(--space-1);
+  font-size: 0.9rem;
 }
 
 .stage-three-context strong {
   color: var(--gray-700);
+  font-weight: 600;
+}
+
+.stage-three-result-message {
+  max-width: 70ch;
+  margin: 0 0 var(--space-2);
+  color: var(--gray-700);
+  font-size: 1.1rem;
+}
+
+.stage-three-groups {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stage-three-group {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  align-content: start;
+  column-gap: 10px;
+  padding: var(--space-5) var(--space-6);
+  border-radius: var(--radius-md);
+  background: var(--gray-50);
+}
+
+.stage-three-group__marker {
+  width: 10px;
+  height: 10px;
+  margin-top: var(--space-3);
+  border-radius: 3px;
+}
+
+.stage-three-group--harmonized .stage-three-group__marker {
+  background: var(--netrias-500);
+}
+
+.stage-three-group--matched .stage-three-group__marker {
+  background: var(--azure-500);
+}
+
+.stage-three-group--unresolved .stage-three-group__marker {
+  background: var(--warning-500);
+}
+
+.stage-three-group strong {
+  color: var(--gray-900);
+  font-size: 2rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+
+.stage-three-group__label {
+  grid-column: 2;
+  color: var(--gray-600);
+  font-size: 0.92rem;
+}
+
+.stage-three-group[data-state="attention"] {
+  background: var(--warning-50);
+  box-shadow: inset 0 0 0 1px var(--warning-100);
+}
+
+.stage-three-group[data-state="attention"] strong {
+  color: var(--warning-700);
+}
+
+.stage-three-group[data-state="zero"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--gray-100);
+}
+
+.stage-three-group[data-state="zero"] .stage-three-group__marker {
+  opacity: 0.35;
+}
+
+.stage-three-group[data-state="zero"] strong {
+  color: var(--gray-500);
+}
+
+.stage-three-group[data-state="zero"] .stage-three-group__label {
+  color: var(--gray-500);
 }
 
 .column-outcome-panel {
@@ -263,7 +303,7 @@
   width: 1.25rem;
   height: 1.25rem;
   border-radius: 50%;
-  background: conic-gradient(var(--azure-500) 0 var(--metric-percent), var(--gray-200) var(--metric-percent) 100%);
+  background: conic-gradient(var(--netrias-500) 0 var(--metric-percent), var(--gray-200) var(--metric-percent) 100%);
 }
 
 .column-outcome-mini-ring::after {
@@ -275,7 +315,7 @@
 }
 
 .column-outcome-table td:nth-child(3) .column-outcome-mini-ring {
-  background: conic-gradient(var(--azure-300) 0 var(--metric-percent), var(--gray-200) var(--metric-percent) 100%);
+  background: conic-gradient(var(--gray-400) 0 var(--metric-percent), var(--gray-200) var(--metric-percent) 100%);
 }
 
 .remaining-columns {
@@ -368,27 +408,75 @@
   color: var(--gray-900);
 }
 
+@media (max-width: 1100px) {
+  .stage-three-dial {
+    width: 12rem;
+  }
+
+  .stage-three-dial strong {
+    font-size: 2.9rem;
+  }
+}
+
+@media (max-width: 900px) {
+  .stage-three-groups {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-3);
+  }
+}
+
 @media (max-width: 720px) {
-  .stage-three-summary {
-    grid-template-columns: 1fr;
-    gap: var(--space-8);
+  .stage-three-complete {
+    gap: var(--space-10);
   }
 
-  .stage-three-dial-column {
-    justify-self: stretch;
+  .stage-three-result {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-5);
   }
 
-  .stage-three-legend {
-    max-width: 20rem;
-  }
-
+  /* why: display: contents lets the label move above the dial, so the dial and sentence stay next to each other.
+     The verdict is a plain div, so the h1 keeps its heading role; the dial is aria-hidden, so reading order is unchanged. */
   .stage-three-verdict {
-    grid-row: 1;
+    display: contents;
+  }
+
+  .stage-three-verdict h1 {
+    order: -1;
+    margin: 0;
+  }
+
+  .stage-three-dial {
+    align-self: center;
+  }
+
+  /* why: centered under the dial, the headline still reads as the rest of the dial's sentence. */
+  .stage-three-verdict h1,
+  .stage-three-headline,
+  .stage-three-context,
+  .stage-three-result-message {
+    text-align: center;
+  }
+
+  .stage-three-headline {
+    font-size: 1.4rem;
+  }
+
+  .stage-three-group {
+    padding: var(--space-4) var(--space-5);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .remaining-columns__chevron {
     transition: none;
+  }
+}
+
+/* why: keep the shared phone card padding; the desktop override above would otherwise apply. */
+@media (max-width: 640px) {
+  #stageThreeMetrics {
+    padding: var(--space-6);
   }
 }

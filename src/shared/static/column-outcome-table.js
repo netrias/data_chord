@@ -17,11 +17,11 @@ const _statusContent = (column) => {
   const nonConformantValues = _safeCount(column.nonConformantValues);
   switch (column.reviewStatus) {
     case 'clear':
-      return { className: 'column-outcome-status--approved', text: 'All values are harmonized' };
+      return { className: 'column-outcome-status--approved', text: 'All unique values now match' };
     case 'needs_attention':
       return {
         className: 'column-outcome-status--attention',
-        text: `${nonConformantValues.toLocaleString()} ${nonConformantValues === 1 ? 'value could' : 'values could'} not be harmonized`,
+        text: `${nonConformantValues.toLocaleString()} unique ${nonConformantValues === 1 ? 'value' : 'values'} not harmonized`,
       };
     case 'not_checked':
       return { className: 'column-outcome-status--unchecked', text: 'No approved list' };
@@ -29,7 +29,7 @@ const _statusContent = (column) => {
       return nonConformantValues > 0
         ? {
             className: 'column-outcome-status--attention',
-            text: `${nonConformantValues.toLocaleString()} ${nonConformantValues === 1 ? 'value could' : 'values could'} not be harmonized`,
+            text: `${nonConformantValues.toLocaleString()} unique ${nonConformantValues === 1 ? 'value' : 'values'} not harmonized`,
           }
         : { className: 'column-outcome-status--unchecked', text: 'No approved list' };
   }
