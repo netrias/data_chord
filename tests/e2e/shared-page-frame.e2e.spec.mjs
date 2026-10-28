@@ -72,6 +72,13 @@ const LONG_STANDARD = { label: 'Childhood Cancer Data Initiative Submission Data
 
 const _centerY = (box) => box.y + box.height / 2;
 
+/* why: the verdict box stretches to the dial's height without align-items: center, so measure the visible text instead. */
+const _textSpan = async (page) => {
+  const label = await page.getByRole('heading', { level: 1, name: 'Harmonization complete' }).boundingBox();
+  const groups = await page.getByRole('list', { name: 'Unique value results' }).boundingBox();
+  return { y: label.y, height: groups.y + groups.height - label.y };
+};
+
 const _openCompletedStageThree = async (page, width, jobId, columns, standard) => {
   await page.setViewportSize({ width, height: 1000 });
   await mockCompletedStageThreeJob(page, jobId, columns, standard);
@@ -91,14 +98,16 @@ for (const width of [1440, 1024]) {
     await expect(groups).toHaveCount(3);
     const dial = await page.locator('#stageThreeDial').boundingBox();
     const verdict = await page.locator('.stage-three-verdict').boundingBox();
+    const textSpan = await _textSpan(page);
     const label = await page.getByRole('heading', { level: 1, name: 'Harmonization complete' }).boundingBox();
     const headline = await page.locator('#stageThreeHeadline').boundingBox();
     const groupBoxes = await Promise.all([0, 1, 2].map((index) => groups.nth(index).boundingBox()));
 
-    // Then: a round dial sits left of one text block whose vertical center matches the dial's
+    // Then: a round dial sits left of a shorter text block whose vertical center matches the dial's
     expect(Math.abs(dial.width - dial.height)).toBeLessThanOrEqual(1);
     expect(dial.x + dial.width).toBeLessThan(verdict.x);
-    expect(Math.abs(_centerY(verdict) - _centerY(dial))).toBeLessThanOrEqual(2);
+    expect(textSpan.height).toBeLessThan(dial.height);
+    expect(Math.abs(_centerY(textSpan) - _centerY(dial))).toBeLessThanOrEqual(2);
     // And: the label is directly above the sentence, in the same column
     expect(Math.abs(label.x - headline.x)).toBeLessThanOrEqual(1);
     expect(label.y + label.height).toBeLessThanOrEqual(headline.y);
@@ -123,22 +132,24 @@ test('Stage 3 wraps a long standard name beside the dial and keeps it centered',
   await page.goto('/stage-1');
   await expect(page.locator('#stageThreeComplete')).toHaveCount(0);
 
-  // When: the completion summary is laid out at full width
-  await _openCompletedStageThree(page, 1440, 'stage-three-layout-long-name', [_mixedStageThreeColumn()], LONG_STANDARD);
+  // When: the completion summary is laid out at 1024px, where the wrapped text is taller than the dial
+  await _openCompletedStageThree(page, 1024, 'stage-three-layout-long-name', [_mixedStageThreeColumn()], LONG_STANDARD);
   const headline = page.locator('#stageThreeHeadline');
   await expect(headline).toHaveText(
     '88% of 52 unique values now match Childhood Cancer Data Initiative Submission Data Model v2.1.0',
   );
   const dial = await page.locator('#stageThreeDial').boundingBox();
   const verdict = await page.locator('.stage-three-verdict').boundingBox();
+  const textSpan = await _textSpan(page);
   const headlineBox = await headline.boundingBox();
   const lineHeight = await headline.evaluate((element) => parseFloat(getComputedStyle(element).lineHeight));
 
-  // Then: the name wraps inside the text column, and the dial and text stay centered on each other
+  // Then: the name wraps inside the text column, and the dial is centered on the taller text
   expect(headlineBox.height).toBeGreaterThan(lineHeight * 1.5);
   expect(dial.x + dial.width).toBeLessThan(headlineBox.x);
   expect(headlineBox.x + headlineBox.width).toBeLessThanOrEqual(verdict.x + verdict.width + 1);
-  expect(Math.abs(_centerY(verdict) - _centerY(dial))).toBeLessThanOrEqual(2);
+  expect(textSpan.height).toBeGreaterThan(dial.height);
+  expect(Math.abs(_centerY(textSpan) - _centerY(dial))).toBeLessThanOrEqual(2);
 });
 
 for (const width of [1440, 1024, 390]) {
@@ -195,7 +206,7 @@ test('Stage 3 result summary stacks inside a phone viewport', async ({ page }) =
   }
   // And: nothing leaves the completion panel, which keeps the card width
   const panel = await page.locator('#stageThreeComplete').boundingBox();
-  const summary = await page.locator('.stage-three-summary').boundingBox();
+  const summary = await page.locator('.stage-three-result').boundingBox();
   expect(panel.x).toBeGreaterThanOrEqual(0);
   expect(panel.x + panel.width).toBeLessThanOrEqual(390);
   expect(summary.x + summary.width).toBeLessThanOrEqual(panel.x + panel.width + 1);
