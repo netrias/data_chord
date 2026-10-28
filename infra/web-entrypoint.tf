@@ -26,7 +26,18 @@ moved {
 resource "aws_security_group" "alb" {
   name        = "${local.name_prefix}-alb"
   description = "Public access to the Data Chord load balancer"
-  vpc_id      = aws_vpc.app.id
+  vpc_id      = local.vpc_id
+
+  dynamic "ingress" {
+    for_each = var.existing_network == null ? [] : [80]
+    content {
+      description = "HTTP redirect"
+      from_port   = 80
+      to_port     = 80
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
+  }
 
   ingress {
     description = "HTTPS app access"
@@ -48,17 +59,20 @@ resource "aws_security_group" "alb" {
 }
 
 resource "aws_lb" "app" {
-  # The new name forces the one-time move from the shared VPC to this app VPC.
-  name               = substr("${local.name_prefix}-web", 0, 32)
+  # Existing deployments keep their ALB; new deployments use the app VPC.
+  name               = var.existing_network == null ? substr("${local.name_prefix}-web", 0, 32) : var.existing_network.load_balancer_name
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
   subnets            = local.public_subnet_ids
 
-  lifecycle {
-    # AWS cannot move an existing load balancer between VPCs. The provider
-    # otherwise plans the subnet change in place and the AWS API rejects it.
-    replace_triggered_by = [aws_vpc.app.id]
+  dynamic "access_logs" {
+    for_each = var.existing_network == null ? [] : [var.existing_network.load_balancer_logs_bucket]
+    content {
+      bucket  = access_logs.value
+      prefix  = var.environment
+      enabled = true
+    }
   }
 
   tags = local.common_tags
@@ -69,7 +83,7 @@ resource "aws_lb_target_group" "app" {
   port                 = 8000
   protocol             = "HTTP"
   target_type          = "ip"
-  vpc_id               = aws_vpc.app.id
+  vpc_id               = local.vpc_id
   deregistration_delay = var.target_group_deregistration_delay_seconds
 
   health_check {
@@ -151,6 +165,22 @@ resource "aws_cognito_user_pool_client" "alb" {
   }
 }
 
+resource "aws_lb_listener" "http" {
+  count             = var.existing_network == null ? 0 : 1
+  load_balancer_arn = aws_lb.app.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type = "redirect"
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
+    }
+  }
+}
+
 resource "aws_lb_listener" "https" {
   load_balancer_arn = aws_lb.app.arn
   port              = 443
@@ -207,4 +237,9 @@ resource "aws_route53_record" "app" {
     zone_id                = aws_lb.app.zone_id
     evaluate_target_health = true
   }
+}
+
+moved {
+  from = aws_lb_listener.http
+  to   = aws_lb_listener.http[0]
 }

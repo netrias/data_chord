@@ -1,7 +1,7 @@
 resource "aws_security_group" "task" {
   name        = "${local.name_prefix}-task"
   description = "Only the ALB can reach the app task"
-  vpc_id      = aws_vpc.app.id
+  vpc_id      = local.vpc_id
 
   ingress {
     description     = "App traffic from ALB"

@@ -171,6 +171,28 @@ def test_internal_plans_stay_inside_the_forecast_and_phase(tmp_path: Path) -> No
     assert "unexpected resource: aws_vpc.app" in rejected.stderr
 
 
+def test_first_deployment_allows_the_forecasted_data_plane(tmp_path: Path) -> None:
+    # Given the first full deployment has forecast its bucket controls and three tables.
+    environment = _environment(tmp_path)
+    receipt = tmp_path / "receipt.json"
+    state = _state(tmp_path, serial=1)
+    resources = {
+        "module.data_plane.aws_s3_bucket_public_access_block.workflow": ["create"],
+        "module.data_plane.aws_dynamodb_table.reference_data": ["create"],
+        "module.data_plane.aws_dynamodb_table.harmonization_cache": ["create"],
+        "module.data_plane.aws_dynamodb_table.cde_recommendation_cache": ["create"],
+    }
+    plan = _plan(tmp_path, resources)
+    _create(receipt, environment, state, plan)
+    _run("status", "--receipt", receipt, "--from-status", "planned", "--to-status", "in_progress")
+
+    # When the prerequisite phase checks the saved data-plane plan.
+    result = _check(receipt, plan, "prerequisite")
+
+    # Then every forecasted data resource is accepted before image build.
+    assert result.returncode == 0, result.stderr
+
+
 def test_receipt_rejects_destructive_preview_and_reuse(tmp_path: Path) -> None:
     # Given one preview deletes durable application state and one safe receipt completes.
     environment = _environment(tmp_path)

@@ -24,6 +24,10 @@ mock_provider "aws" {
     }
   }
 
+  mock_data "aws_subnet" {
+    defaults = { vpc_id = "vpc-0123456789abcdef0" }
+  }
+
   mock_data "aws_route_table" {
     defaults = {
       id     = "rtb-0123456789abcdef0"
@@ -467,13 +471,13 @@ run "application_owns_a_minimal_public_network" {
 
   assert {
     condition = (
-      aws_vpc.app.cidr_block == "10.0.0.0/16" &&
-      aws_vpc.app.enable_dns_support &&
-      aws_vpc.app.enable_dns_hostnames &&
+      aws_vpc.app[0].cidr_block == "10.0.0.0/16" &&
+      aws_vpc.app[0].enable_dns_support &&
+      aws_vpc.app[0].enable_dns_hostnames &&
       length(aws_subnet.public) == 2 &&
       alltrue([
         for subnet in aws_subnet.public :
-        subnet.vpc_id == aws_vpc.app.id && subnet.map_public_ip_on_launch
+        subnet.vpc_id == aws_vpc.app[0].id && subnet.map_public_ip_on_launch
       ]) &&
       length(distinct([for subnet in aws_subnet.public : subnet.availability_zone])) == 2
     )
@@ -482,10 +486,10 @@ run "application_owns_a_minimal_public_network" {
 
   assert {
     condition = (
-      aws_internet_gateway.app.vpc_id == aws_vpc.app.id &&
-      data.aws_route_table.main.vpc_id == aws_vpc.app.id &&
-      aws_route.public_internet.destination_cidr_block == "0.0.0.0/0" &&
-      aws_route.public_internet.gateway_id == aws_internet_gateway.app.id
+      aws_internet_gateway.app[0].vpc_id == aws_vpc.app[0].id &&
+      data.aws_route_table.main[0].vpc_id == aws_vpc.app[0].id &&
+      aws_route.public_internet[0].destination_cidr_block == "0.0.0.0/0" &&
+      aws_route.public_internet[0].gateway_id == aws_internet_gateway.app[0].id
     )
     error_message = "The VPC main route table must use the application internet gateway."
   }
@@ -515,13 +519,45 @@ run "runtime_and_entrypoint_use_the_application_network" {
 
   assert {
     condition = (
-      aws_security_group.alb.vpc_id == aws_vpc.app.id &&
-      aws_security_group.task.vpc_id == aws_vpc.app.id &&
-      aws_lb_target_group.app.vpc_id == aws_vpc.app.id &&
+      aws_security_group.alb.vpc_id == aws_vpc.app[0].id &&
+      aws_security_group.task.vpc_id == aws_vpc.app[0].id &&
+      aws_lb_target_group.app.vpc_id == aws_vpc.app[0].id &&
       toset(aws_lb.app.subnets) == toset(local.public_subnet_ids) &&
       toset(aws_ecs_service.app.network_configuration[0].subnets) == toset(local.public_subnet_ids) &&
       aws_ecs_service.app.network_configuration[0].assign_public_ip
     )
     error_message = "The ALB and Fargate task must use the application-owned public network."
+  }
+}
+
+
+run "existing_production_network_is_retained" {
+  command = plan
+  variables {
+    environment = "prod"
+    existing_network = {
+      vpc_id                                              = "vpc-0123456789abcdef0"
+      public_subnet_ids                                   = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
+      load_balancer_name                                  = "data-chord-prod-alb"
+      load_balancer_logs_bucket                           = "data-chord-prod-alb-logs-084828580051-us-east-2"
+      secretsmanager_endpoint_id                          = "vpce-0123456789abcdef0"
+      additional_secretsmanager_client_security_group_ids = []
+    }
+  }
+
+  # Given production borrows a shared VPC and has an existing load balancer,
+  # When the normal full infrastructure root plans the current application,
+  # Then it retains that network and keeps Secrets Manager reachable.
+  assert {
+    condition = (
+      length(aws_vpc.app) == 0 && length(aws_subnet.public) == 0 &&
+      length(aws_internet_gateway.app) == 0 && length(aws_route.public_internet) == 0 &&
+      local.vpc_id == "vpc-0123456789abcdef0" &&
+      aws_lb.app.name == "data-chord-prod-alb" &&
+      toset(aws_lb.app.subnets) == toset(var.existing_network.public_subnet_ids) &&
+      aws_security_group.task.vpc_id == local.vpc_id &&
+      aws_vpc_endpoint_security_group_association.secretsmanager_tasks[0].vpc_endpoint_id == var.existing_network.secretsmanager_endpoint_id
+    )
+    error_message = "Adopting production must preserve the shared network and endpoint access."
   }
 }

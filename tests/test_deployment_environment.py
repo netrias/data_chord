@@ -10,6 +10,23 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "infra" / "scripts" / "environment.py"
 
 
+def test_production_retains_its_existing_network() -> None:
+    # Given production already has a shared VPC and a public load balancer.
+    environment = ROOT / "environments" / "bdf" / "prod.json"
+
+    # When the normal deployment reads its committed production environment.
+    result = _run("tofu-vars", environment, "bdf", "prod")
+
+    # Then production uses the existing network without granting local developer access.
+    assert result.returncode == 0, result.stderr
+    variables = json.loads(result.stdout)
+    assert variables["existing_network"]["vpc_id"] == "vpc-0fce4109b9575d124"
+    assert variables["existing_network"]["load_balancer_name"] == "data-chord-prod-alb"
+    assert len(variables["existing_network"]["public_subnet_ids"]) == 3
+    assert variables["local_developer_role_arn"] is None
+    assert variables["environment"] == "prod"
+
+
 def test_environment_derives_the_deployment_boundary(tmp_path: Path) -> None:
     # Given a checked-in environment that copies the foundation names.
     environment = tmp_path / "staging.json"

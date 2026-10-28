@@ -47,6 +47,10 @@ _PREREQUISITE_ADDRESSES = {
     "aws_iam_role.application_build",
     "aws_iam_role_policy.application_build",
     "module.data_plane.aws_s3_bucket.workflow",
+    "module.data_plane.aws_s3_bucket_public_access_block.workflow",
+    "module.data_plane.aws_dynamodb_table.reference_data",
+    "module.data_plane.aws_dynamodb_table.harmonization_cache",
+    "module.data_plane.aws_dynamodb_table.cde_recommendation_cache",
 }
 _SAFE_REPLACEMENTS = {
     "aws_ecs_task_definition.application": ["delete", "create"],
