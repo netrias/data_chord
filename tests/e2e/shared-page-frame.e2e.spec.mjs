@@ -145,12 +145,37 @@ test('Stage 3 result summary stacks inside a phone viewport', async ({ page }) =
   const second = await groups.nth(1).boundingBox();
   expect(headline.y + headline.height).toBeLessThanOrEqual(first.y);
   expect(first.y + first.height).toBeLessThanOrEqual(second.y);
+  const panel = await page.locator('#stageThreeComplete').boundingBox();
   const summary = await page.locator('.stage-three-summary').boundingBox();
-  expect(summary.x).toBeGreaterThanOrEqual(0);
-  expect(summary.x + summary.width).toBeLessThanOrEqual(390);
-  expect(headline.x).toBeGreaterThanOrEqual(summary.x);
-  expect(headline.x + headline.width).toBeLessThanOrEqual(summary.x + summary.width);
+  expect(panel.x).toBeGreaterThanOrEqual(0);
+  expect(panel.x + panel.width).toBeLessThanOrEqual(390);
+  expect(summary.x + summary.width).toBeLessThanOrEqual(panel.x + panel.width + 1);
+  expect(headline.x).toBeGreaterThanOrEqual(panel.x);
+  expect(headline.x + headline.width).toBeLessThanOrEqual(panel.x + panel.width + 1);
 });
+
+const UNBROKEN_STANDARD = { label: 'CCDI_Submission_Data_Model_v2.1.0_final_release_candidate', version: null };
+
+for (const width of [1024, 390]) {
+  test(`Stage 3 wraps a standard name with no spaces inside the card at ${width}px`, async ({ page }) => {
+    const jobId = `stage-three-unbroken-name-${width}`;
+    // Given: a completed Stage 3 result whose standard name has no spaces to break at
+    await page.setViewportSize({ width, height: 1000 });
+    await mockCompletedStageThreeJob(page, jobId, [_mixedStageThreeColumn()], UNBROKEN_STANDARD);
+
+    // When: the completion summary is laid out
+    await page.goto(`/stage-3?file_id=${STAGE_THREE_FILE_ID}&job_id=${jobId}`);
+    const headline = page.locator('#stageThreeHeadline');
+    await expect(headline).toHaveText(`88% of 52 unique values now match ${UNBROKEN_STANDARD.label}`);
+    const headlineBox = await headline.boundingBox();
+    /* why: the summary and verdict grow with an unbreakable name; the completion panel keeps the card width. */
+    const panel = await page.locator('#stageThreeComplete').boundingBox();
+
+    // Then: the name breaks inside the card instead of widening the summary past it
+    expect(headlineBox.x).toBeGreaterThanOrEqual(panel.x);
+    expect(headlineBox.x + headlineBox.width).toBeLessThanOrEqual(panel.x + panel.width + 1);
+  });
+}
 
 test('workflow links identify the current step and support keyboard navigation', async ({ page }) => {
   // Given Stage 2 identifies Map as the current step

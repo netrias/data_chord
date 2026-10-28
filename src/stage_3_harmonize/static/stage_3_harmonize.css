@@ -108,7 +108,8 @@
   text-wrap: balance;
 }
 
-/* why: baseline alignment puts the headline's first line on the dial value's baseline, whatever the name length. */
+/* why: baseline alignment puts the headline's first line on the dial value's baseline, whatever the name length.
+   The headline must stay the first line of text in .stage-three-verdict; anything placed above it becomes the line that aligns. */
 .stage-three-result {
   display: flex;
   align-items: baseline;
