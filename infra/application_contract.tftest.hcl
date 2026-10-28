@@ -554,6 +554,7 @@ run "existing_production_network_is_retained" {
       length(aws_internet_gateway.app) == 0 && length(aws_route.public_internet) == 0 &&
       local.vpc_id == "vpc-0123456789abcdef0" &&
       aws_lb.app.name == "data-chord-prod-alb" &&
+      one(aws_lb.app.access_logs).prefix == "alb/prod" &&
       toset(aws_lb.app.subnets) == toset(var.existing_network.public_subnet_ids) &&
       aws_security_group.task.vpc_id == local.vpc_id &&
       aws_vpc_endpoint_security_group_association.secretsmanager_tasks[0].vpc_endpoint_id == var.existing_network.secretsmanager_endpoint_id

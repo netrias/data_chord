@@ -70,7 +70,7 @@ resource "aws_lb" "app" {
     for_each = var.existing_network == null ? [] : [var.existing_network.load_balancer_logs_bucket]
     content {
       bucket  = access_logs.value
-      prefix  = var.environment
+      prefix  = "alb/${var.environment}"
       enabled = true
     }
   }
@@ -179,6 +179,8 @@ resource "aws_lb_listener" "http" {
       status_code = "HTTP_301"
     }
   }
+
+  tags = local.common_tags
 }
 
 resource "aws_lb_listener" "https" {
