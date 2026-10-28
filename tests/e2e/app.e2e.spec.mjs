@@ -1136,24 +1136,41 @@ test('Stage 3 summary shows a gray dial when no values were checked', async ({ p
   await expect(page.locator('[data-remaining-columns]')).toContainText('1 column passed through unchanged');
 });
 
-test('Stage 3 summary does not draw groups whose counts exceed the checked values', async ({ page }) => {
-  const jobId = 'stage-three-summary-inconsistent';
-  // Given: a completed job that reports more harmonized and unresolved values than it checked
-  const column = { ...stageThreeColumn({ harmonized: 4, matched: 0, unresolved: 3 }), unique_terms: 5 };
-  expect(column.successfully_harmonized_terms + column.non_conformant_terms).toBeGreaterThan(column.unique_terms);
-  await mockCompletedStageThreeJob(page, jobId, [column]);
+const INCONSISTENT_COUNT_STANDARDS = [
+  {
+    name: 'names the recorded standard in the meta line',
+    standard: { label: 'CCDI', version: 'v2.1' },
+    context: 'clinical_samples.csv · 1,204 rows · Checked against CCDI v2.1',
+  },
+  {
+    name: 'omits the standard from the meta line when no name was recorded',
+    standard: { label: null, version: 'v2.1' },
+    context: 'clinical_samples.csv · 1,204 rows',
+  },
+];
 
-  // When: Stage 3 loads the completed result
-  await page.goto(`/stage-3?file_id=${STAGE_THREE_FILE_ID}&job_id=${jobId}`);
+for (const scenario of INCONSISTENT_COUNT_STANDARDS) {
+  test(`Stage 3 summary without exact groups ${scenario.name}`, async ({ page }) => {
+    const jobId = `stage-three-summary-inconsistent-${scenario.standard.label ?? 'unnamed'}`;
+    // Given: a completed job that reports more harmonized and unresolved values than it checked
+    const column = { ...stageThreeColumn({ harmonized: 4, matched: 0, unresolved: 3 }), unique_terms: 5 };
+    expect(column.successfully_harmonized_terms + column.non_conformant_terms).toBeGreaterThan(column.unique_terms);
+    await mockCompletedStageThreeJob(page, jobId, [column], scenario.standard);
 
-  // Then: the page treats the result like an earlier job instead of drawing a false partition
-  await expect(page.locator('#stageThreeDial')).toBeHidden();
-  await expect(page.locator('#stageThreeHeadline')).toBeHidden();
-  await expect(page.getByRole('list', { name: 'Unique value results' })).toBeHidden();
-  await expect(page.locator('#stageThreeResultMessage')).toHaveText(
-    'Detailed value groups are not available for this result. Continue to Verify to review the changes.',
-  );
-});
+    // When: Stage 3 loads the completed result
+    await page.goto(`/stage-3?file_id=${STAGE_THREE_FILE_ID}&job_id=${jobId}`);
+
+    // Then: the page treats the result like an earlier job instead of drawing a false partition
+    await expect(page.locator('#stageThreeDial')).toBeHidden();
+    await expect(page.locator('#stageThreeHeadline')).toBeHidden();
+    await expect(page.getByRole('list', { name: 'Unique value results' })).toBeHidden();
+    await expect(page.locator('#stageThreeResultMessage')).toHaveText(
+      'Detailed value groups are not available for this result. Continue to Verify to review the changes.',
+    );
+    // And: with the headline hidden, only the meta line can name the standard
+    await expect(page.locator('#stageThreeContext')).toHaveText(scenario.context);
+  });
+}
 
 test('an earlier completed Stage 3 job does not invent detailed value groups', async ({ page }) => {
   const fileId = '0123456789abcdef0123456789abcdef';
@@ -1172,6 +1189,8 @@ test('an earlier completed Stage 3 job does not invent detailed value groups', a
           total_terms: 2,
           changed_terms: 1,
           non_conformant_terms: 0,
+          reference_model_label: 'GDC',
+          reference_model_version: '3.0',
           match_fidelity_counts: [],
           column_breakdowns: [{
             column_name: 'legacy_column',
@@ -1204,6 +1223,7 @@ test('an earlier completed Stage 3 job does not invent detailed value groups', a
   await expect(page.getByRole('heading', { name: 'Harmonization complete' })).toBeVisible();
   await expect(page.locator('#stageThreeDial')).toBeHidden();
   await expect(page.locator('#stageThreeHeadline')).toBeHidden();
+  await expect(page.locator('#stageThreeContext')).toHaveText('2 rows · Checked against GDC 3.0');
   await expect(page.getByRole('list', { name: 'Unique value results' })).toBeHidden();
   await expect(page.getByText(
     'Detailed value groups are not available for this result. Continue to Verify to review the changes.',

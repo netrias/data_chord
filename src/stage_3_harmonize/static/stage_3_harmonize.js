@@ -1,7 +1,7 @@
 import { initStepInstruction, updateStepInstruction, setActiveStage, initNavigationEvents, isSafeRelativeUrl, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
 import { STAGE_3_JOB_KEY, readFromSession, writeToSession, removeFromSession } from '/assets/shared/storage-keys.js';
 import { renderColumnOutcomeTable } from '/assets/shared/column-outcome-table.js';
-import { summarizeResult } from './result-summary.js';
+import { formatStandardName, summarizeResult } from './result-summary.js';
 
 const config = window.stageThreeConfig ?? {};
 const harmonizeEndpoint = config.harmonizeEndpoint ?? '/stage-3/harmonize';
@@ -146,8 +146,8 @@ const _renderSummary = ({ exactGroupsAvailable, checked, harmonized, matched, un
   _showResultMessage(null);
 };
 
-/* why: one meta line; each part appears only when the job recorded it. */
-const _setDisplayContext = (summary, columns) => {
+/* why: one meta line; each part appears only when the job recorded it. The headline names the standard when it shows, so the meta line names it only when the headline is hidden. */
+const _setDisplayContext = (summary, columns, standard, headlineShown) => {
   if (!stageThreeContext) return;
   const sourceFileName = summary.source_file_name?.trim();
   const totalRows = summary.source_row_count
@@ -160,6 +160,8 @@ const _setDisplayContext = (summary, columns) => {
     parts.push(fileName);
   }
   if (totalRows > 0) parts.push(`${_formatCount(totalRows)} ${_plural(totalRows, 'row')}`);
+  const standardName = headlineShown ? null : formatStandardName(standard);
+  if (standardName) parts.push(`Checked against ${standardName}`);
 
   stageThreeContext.replaceChildren(
     ...parts.flatMap((part, index) => (index === 0 ? [part] : [' · ', part])),
@@ -256,11 +258,12 @@ const _renderMetricsDashboard = (job) => {
     (column) => column.changedDistinctValues === 0 && column.nonConformantValues === 0,
   );
 
-  _renderSummary(
-    { exactGroupsAvailable, checked, harmonized, matched, unresolved },
-    { label: job.manifest_summary.reference_model_label, version: job.manifest_summary.reference_model_version },
-  );
-  _setDisplayContext(job.manifest_summary, columns);
+  const standard = {
+    label: job.manifest_summary.reference_model_label,
+    version: job.manifest_summary.reference_model_version,
+  };
+  _renderSummary({ exactGroupsAvailable, checked, harmonized, matched, unresolved }, standard);
+  _setDisplayContext(job.manifest_summary, columns, standard, exactGroupsAvailable);
   /* why: with exact groups the summary already explains an empty table, so the generic empty-table note would repeat or contradict it. */
   const tableRepeatsSummary = exactGroupsAvailable && actionColumns.length === 0;
   stageThreeTableSection?.classList.toggle('hidden', tableRepeatsSummary);

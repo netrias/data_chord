@@ -97,9 +97,9 @@ describe('Stage 3 result summary', () => {
     // When the summary is derived
     const single = summarizeResult(oneChecked, GDC);
 
-    // Then the headline says "unique value"
+    // Then the headline says "unique value" with a singular verb
     assert.equal(single.dialValue, '100%');
-    assert.deepEqual(single.headline, { lead: 'of 1 unique value now match', standardName: 'GDC' });
+    assert.deepEqual(single.headline, { lead: 'of 1 unique value now matches', standardName: 'GDC' });
   });
 
   it('continues a zero dial with a neutral sentence and no groups when nothing was checked', () => {

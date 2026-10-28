@@ -52,10 +52,11 @@ const _percentLabel = (matching, checked) => {
 };
 
 /**
+ * One naming rule for every place the page names the standard.
  * @param {ReferenceStandard} standard
- * @returns {string | null}
+ * @returns {string | null} Null when no label was recorded; a version alone does not name a standard
  */
-const _standardName = ({ label, version }) => {
+export const formatStandardName = ({ label, version }) => {
   const name = label?.trim();
   if (!name) return null;
   const versionText = version?.trim();
@@ -90,8 +91,8 @@ export const summarizeResult = ({ checked, harmonized, matched, unresolved }, st
       groups: [],
     };
   }
-  const standardName = _standardName(standard);
-  const lead = `of ${_formatUniqueValueCount(checked)} now match`;
+  const standardName = formatStandardName(standard);
+  const lead = `of ${_formatUniqueValueCount(checked)} now ${checked === 1 ? 'matches' : 'match'}`;
   return {
     dialValue: _percentLabel(harmonized + matched, checked),
     headline: standardName ? { lead, standardName } : { lead: `${lead} the approved list`, standardName: null },
