@@ -2,7 +2,8 @@ removed {
   from = aws_s3_bucket_versioning.workflow
 
   lifecycle {
-    # Existing deployments can keep versioning. New deployments do not enable it.
+    # Retire the legacy address without deleting data. The shared data plane
+    # explicitly suspends future workflow versions at its new address.
     destroy = false
   }
 }

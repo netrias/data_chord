@@ -531,8 +531,25 @@ run "runtime_and_entrypoint_use_the_application_network" {
 }
 
 
-run "existing_production_network_is_retained" {
+run "fresh_network_uses_only_standard_log_groups" {
+  # Given a deployment creates its own network without a legacy access-log bucket.
+  # When its application infrastructure is planned.
   command = plan
+
+  # Then it keeps 14-day app/build logs and creates no access-log bucket.
+  assert {
+    condition = (
+      length(aws_s3_bucket.alb_logs) == 0 &&
+      length(aws_lb.app.access_logs) == 0 &&
+      aws_cloudwatch_log_group.app.retention_in_days == 14 &&
+      aws_cloudwatch_log_group.codebuild.retention_in_days == 14
+    )
+    error_message = "Fresh deployments must retain standard logs without adding a legacy log bucket."
+  }
+}
+
+run "existing_production_network_is_retained" {
+  # Given production keeps its shared network and existing access-log bucket.
   variables {
     environment = "prod"
     existing_network = {
@@ -545,9 +562,10 @@ run "existing_production_network_is_retained" {
     }
   }
 
-  # Given production borrows a shared VPC and has an existing load balancer,
-  # When the normal full infrastructure root plans the current application,
-  # Then it retains that network and keeps Secrets Manager reachable.
+  # When the normal full infrastructure root is planned.
+  command = plan
+
+  # Then it retains the network and keeps Secrets Manager reachable.
   assert {
     condition = (
       length(aws_vpc.app) == 0 && length(aws_subnet.public) == 0 &&
@@ -560,5 +578,35 @@ run "existing_production_network_is_retained" {
       aws_vpc_endpoint_security_group_association.secretsmanager_tasks[0].vpc_endpoint_id == var.existing_network.secretsmanager_endpoint_id
     )
     error_message = "Adopting production must preserve the shared network and endpoint access."
+  }
+
+  # Then the application owns the existing private log bucket and its 30-day retention.
+  assert {
+    condition = (
+      length(aws_s3_bucket.alb_logs) == 1 &&
+      aws_s3_bucket.alb_logs[0].bucket == var.existing_network.load_balancer_logs_bucket &&
+      one(aws_lb.app.access_logs).bucket == aws_s3_bucket.alb_logs[0].bucket &&
+      aws_s3_bucket_public_access_block.alb_logs[0].block_public_acls &&
+      aws_s3_bucket_public_access_block.alb_logs[0].block_public_policy &&
+      aws_s3_bucket_public_access_block.alb_logs[0].ignore_public_acls &&
+      aws_s3_bucket_public_access_block.alb_logs[0].restrict_public_buckets &&
+      one(aws_s3_bucket_lifecycle_configuration.alb_logs[0].rule).expiration[0].days == 30
+    )
+    error_message = "Production access logs must remain private, managed, and bounded to 30 days."
+  }
+
+  # Then only the ALB delivery service can write the existing account-specific log path.
+  assert {
+    condition = jsondecode(aws_s3_bucket_policy.alb_logs[0].policy) == {
+      Version = "2012-10-17"
+      Statement = [{
+        Sid       = "AllowLoadBalancerLogDeliveryWrite"
+        Effect    = "Allow"
+        Principal = { Service = "logdelivery.elasticloadbalancing.amazonaws.com" }
+        Action    = "s3:PutObject"
+        Resource  = "${aws_s3_bucket.alb_logs[0].arn}/alb/prod/AWSLogs/084828580051/*"
+      }]
+    }
+    error_message = "Adoption must preserve the exact ALB delivery permission and log prefix."
   }
 }

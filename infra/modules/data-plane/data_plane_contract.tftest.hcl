@@ -9,9 +9,12 @@ variables {
   partition         = "aws"
 }
 
-run "data_plane_is_five_managed_resources" {
+run "data_plane_keeps_private_storage_and_three_tables" {
+  # Given one deployment owns its workflow files and three data tables.
+  # When the data-plane infrastructure is planned.
   command = plan
 
+  # Then storage stays private and the tables keep their durability and expiry settings.
   assert {
     condition = (
       aws_s3_bucket.workflow.bucket == "data-chord-staging-workflow-945365518758-us-east-2" &&
@@ -37,6 +40,7 @@ run "data_plane_is_five_managed_resources" {
     error_message = "The data plane must remain one private S3 bucket boundary and three DynamoDB tables."
   }
 
+  # Then runtime policies stay inside the deployment's data boundary.
   assert {
     condition = (
       jsondecode(output.runtime_data_policy_json).Statement[0].Resource == "${aws_s3_bucket.workflow.arn}/datachord/netrias/staging/*" &&
@@ -46,5 +50,17 @@ run "data_plane_is_five_managed_resources" {
       ])
     )
     error_message = "Runtime access must stay inside the deployment S3 prefix and keep reference data read-only."
+  }
+}
+
+run "workflow_writes_do_not_retain_object_history" {
+  # Given workflow objects need only their current value.
+  # When the shared data plane is planned.
+  command = plan
+
+  # Then workflow versioning is explicitly suspended without touching state storage.
+  assert {
+    condition     = aws_s3_bucket_versioning.workflow.versioning_configuration[0].status == "Suspended"
+    error_message = "Workflow storage must stop retaining future object versions."
   }
 }

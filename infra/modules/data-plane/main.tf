@@ -15,6 +15,14 @@ resource "aws_s3_bucket_public_access_block" "workflow" {
   restrict_public_buckets = true
 }
 
+resource "aws_s3_bucket_versioning" "workflow" {
+  bucket = aws_s3_bucket.workflow.id
+
+  versioning_configuration {
+    status = "Suspended"
+  }
+}
+
 resource "aws_dynamodb_table" "reference_data" {
   name         = "${var.name_prefix}-reference-data"
   billing_mode = "PAY_PER_REQUEST"
