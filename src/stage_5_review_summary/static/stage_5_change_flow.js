@@ -12,8 +12,13 @@ const _BAND_BUDGET = 280;
 const _NODE_WIDTH = 10;
 // The left node column sits at a share of the width, kept between a minimum and maximum x.
 const _LEFT_X_SHARE = 0.3;
-const _LEFT_X_MIN = 210;
-const _LEFT_X_MAX = 270;
+const _LEFT_X_MIN = 240;
+const _LEFT_X_MAX = 300;
+// The "UNIQUE" numbers end this far left of the node; the "CHANGED" numbers end one column further left.
+// The column is wide enough that the 11 px letter-spaced "CHANGED" and "UNIQUE" headers never touch.
+const _NUMBER_INSET = 14;
+const _UNIQUE_COLUMN_WIDTH = 64;
+const _NAME_GAP = 12;
 // The outcome labels take a share of the width on the right, kept between a minimum and maximum.
 const _RIGHT_LABEL_SHARE = 0.18;
 const _RIGHT_LABEL_MIN = 140;
@@ -437,7 +442,10 @@ export const mountChangeFlow = (rootEl, columns) => {
     const revealRect = _svg('rect', { x: 0, y: 0, width, height: layout.height }, _svg('clipPath', { id: 'changeFlowReveal' }, defs));
 
     _svg('text', { x: 0, y: 11, class: 'change-flow__head' }, svg, 'COLUMN');
-    _svg('text', { x: layout.leftX - 14, y: 11, 'text-anchor': 'end', class: 'change-flow__head' }, svg, 'CHANGED / UNIQUE');
+    const uniqueX = layout.leftX - _NUMBER_INSET;
+    const changedX = uniqueX - _UNIQUE_COLUMN_WIDTH;
+    _svg('text', { x: changedX, y: 11, 'text-anchor': 'end', class: 'change-flow__head' }, svg, 'CHANGED');
+    _svg('text', { x: uniqueX, y: 11, 'text-anchor': 'end', class: 'change-flow__head' }, svg, 'UNIQUE');
     _svg('text', { x: layout.rightX + _NODE_WIDTH + 12, y: 11, class: 'change-flow__head' }, svg, 'OUTCOME');
 
     // Every band runs between the same two x positions, so one gradient per outcome serves them all.
@@ -488,11 +496,14 @@ export const mountChangeFlow = (rootEl, columns) => {
         segment.style.fill = `var(${band.target.outcome.color})`;
       }
       const label = _svg('g', { class: 'change-flow__label' }, group);
-      const name = _svg('text', { x: 4, y: centerY, 'dominant-baseline': 'central', class: 'change-flow__name' }, label, column.name);
-      const counts = _svg('text', { x: node.x - 14, y: centerY, 'dominant-baseline': 'central', 'text-anchor': 'end' }, label);
-      _svg('tspan', { class: 'change-flow__count' }, counts, _format(column.changed));
-      _svg('tspan', { class: 'change-flow__of' }, counts, ` / ${_format(column.total)}`);
-      _fitText(name, node.x - 14 - counts.getComputedTextLength() - 12);
+      const name = _svg('text', { x: 0, y: centerY, 'dominant-baseline': 'central', class: 'change-flow__name' }, label, column.name);
+      const changed = _svg('text', {
+        x: changedX, y: centerY, 'dominant-baseline': 'central', 'text-anchor': 'end', class: 'change-flow__count',
+      }, label, _format(column.changed));
+      _svg('text', {
+        x: uniqueX, y: centerY, 'dominant-baseline': 'central', 'text-anchor': 'end', class: 'change-flow__of',
+      }, label, _format(column.total));
+      _fitText(name, changedX - changed.getComputedTextLength() - _NAME_GAP);
       node.el = group;
       wireNode(group, () => _columnCard(column), node.bands, [node, ...node.bands.map((band) => band.target)]);
     }
