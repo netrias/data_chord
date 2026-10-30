@@ -2753,15 +2753,38 @@ test('Stage 5 change details keep keyboard focus and its card when a resize redr
   await expect(card).toHaveClass(/is-shown/);
   const chartWidth = () => page.locator('.change-flow__svg').evaluate((svg) => svg.viewBox.baseVal.width);
   const wideWidth = await chartWidth();
+  const scrollBefore = await page.evaluate(() => window.scrollY);
 
   // When: the window narrows and the chart redraws at the new width
   await page.setViewportSize({ width: 1100, height: 900 });
   await expect.poll(chartWidth).toBeLessThan(wideWidth);
 
-  // Then: the same row still has focus and its card is shown again
+  // Then: the same row still has focus, the refocus did not scroll the page, and its card is shown again
   await expect(firstRow).toBeFocused();
+  expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);
   await expect(card).toHaveClass(/is-shown/);
   await expect(card.locator('h3')).toHaveText('primary_diagnosis');
+});
+
+test('Stage 5 change details hide the card after a mouse click on a row once the pointer leaves', async ({ page }) => {
+  await _mockFlowSummary(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  // Given: the chart is open and a mouse click on the first row has focused it without a focus ring
+  await page.goto(`/stage-5?file_id=${_FLOW_FILE_ID}`);
+  await _openChangeDetails(page);
+  const firstRow = page.locator('[data-flow-column="0"]');
+  await firstRow.click();
+  await expect(firstRow).toBeFocused();
+  expect(await firstRow.evaluate((row) => row.matches(':focus-visible'))).toBe(false);
+  const card = page.locator('.change-flow-card');
+  await expect(card).toHaveClass(/is-shown/);
+
+  // When: the mouse moves off the chart
+  await page.mouse.move(0, 0);
+
+  // Then: no card stays behind for the mouse-focused row
+  await expect(card).not.toHaveClass(/is-shown/);
 });
 
 test('Stage 5 change details continue the draw-in when a resize redraws mid-reveal', async ({ page }) => {
@@ -2775,7 +2798,8 @@ test('Stage 5 change details continue the draw-in when a resize redraws mid-reve
     width: document.querySelector('.change-flow__svg').viewBox.baseVal.width,
   }));
 
-  // Given: the chart was opened and is about a third of the way through its draw-in
+  // Given: the chart was opened and 270 ms have passed: 150 ms of the 850 ms draw-in after its
+  // 120 ms delay, which is about 18% of the time and, with the ease-out, about 44% of the distance
   await page.goto(`/stage-5?file_id=${_FLOW_FILE_ID}`);
   const toggle = page.getByRole('button', { name: /Change details/ });
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
@@ -2786,6 +2810,8 @@ test('Stage 5 change details continue the draw-in when a resize redraws mid-reve
 
   // When: the window narrows and the debounced redraw runs
   await page.setViewportSize({ width: 1100, height: 900 });
+  // Each poll advances the fake clock 100 ms. The resize observer debounces 80 ms, so the first
+  // poll normally redraws; the poll's 5 s real-time limit would allow ~50 polls before failing.
   await expect.poll(async () => {
     await page.clock.runFor(100);
     return (await reveal()).width;

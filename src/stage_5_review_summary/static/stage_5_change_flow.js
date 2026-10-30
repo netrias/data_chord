@@ -329,6 +329,12 @@ export const mountChangeFlow = (rootEl, columns) => {
   let layout = null;
   // A keyboard-focused node the card is pinned to; null while the card follows the pointer.
   let cardAnchor = null;
+  // A mouse click also focuses a tabindex node in Chromium, but shows no focus ring; only
+  // focus that is visibly indicated (:focus-visible) may own a card, or the card has no visible owner.
+  const keyboardFocus = () => {
+    const focused = document.activeElement;
+    return focused instanceof SVGElement && svg.contains(focused) && focused.matches(':focus-visible') ? focused : null;
+  };
   // The draw-in is timed from the open, so a redraw mid-reveal resumes it instead of snapping.
   let revealStart = -Infinity;
   let revealFrame = 0;
@@ -363,20 +369,20 @@ export const mountChangeFlow = (rootEl, columns) => {
     for (const node of nodes) node.el.classList.add('is-on');
     card.replaceChildren(...cardContent);
     card.classList.add('is-shown');
-    cardAnchor = anchor === document.activeElement ? anchor : null;
+    cardAnchor = anchor && anchor === keyboardFocus() ? anchor : null;
     if (event) followPointer(event);
     else placeAtAnchor(anchor);
   };
 
   // Scrolling moves the chart under a resting pointer, so a pointer card hides; a focus card follows its node.
   const handleScroll = () => {
-    if (cardAnchor && cardAnchor === document.activeElement) placeAtAnchor(cardAnchor);
+    if (cardAnchor && cardAnchor === keyboardFocus()) placeAtAnchor(cardAnchor);
     else clearFocus();
   };
 
   // A pointer leaving the chart hands the card back to the keyboard-focused node, if any.
   const leavePointer = () => {
-    const showFocusCard = focusCards.get(document.activeElement);
+    const showFocusCard = focusCards.get(keyboardFocus());
     if (showFocusCard) showFocusCard();
     else clearFocus();
   };
@@ -391,14 +397,16 @@ export const mountChangeFlow = (rootEl, columns) => {
     wirePointer(element, cardContent, bands, nodes);
     const showFocusCard = () => focusOn(cardContent(), bands, nodes, null, element);
     focusCards.set(element, showFocusCard);
-    element.addEventListener('focus', showFocusCard);
+    element.addEventListener('focus', () => {
+      if (keyboardFocus() === element) showFocusCard();
+    });
     element.addEventListener('blur', clearFocus);
   };
 
-  // Rebuilding the SVG removes the focused node, so its key is kept and focus is moved to the new node.
+  // Rebuilding the SVG removes the keyboard-focused node, so its key is kept and focus moves to the new node.
   const focusedNodeSelector = () => {
-    const focused = document.activeElement;
-    if (!(focused instanceof SVGElement) || !svg.contains(focused)) return null;
+    const focused = keyboardFocus();
+    if (!focused) return null;
     if (focused.dataset.flowColumn != null) return `[data-flow-column="${focused.dataset.flowColumn}"]`;
     if (focused.dataset.flowOutcome != null) return `[data-flow-outcome="${focused.dataset.flowOutcome}"]`;
     return null;
@@ -523,7 +531,7 @@ export const mountChangeFlow = (rootEl, columns) => {
     };
     stepReveal();
 
-    if (refocusSelector) svg.querySelector(refocusSelector)?.focus({ preventScroll: true });
+    if (refocusSelector) svg.querySelector(refocusSelector)?.focus({ preventScroll: true, focusVisible: true });
   };
 
   for (const key of legend.querySelectorAll('[data-outcome]')) {
