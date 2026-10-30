@@ -2737,6 +2737,70 @@ test('Stage 5 change details keep a focus card on a row that Tab scrolls into vi
   expect(Math.abs(cardBox.y - expectedTop)).toBeLessThanOrEqual(1);
 });
 
+test('Stage 5 change details keep keyboard focus and its card when a resize redraws the chart', async ({ page }) => {
+  await _mockFlowSummary(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  // Given: the first chart row has keyboard focus and shows its card
+  await page.goto(`/stage-5?file_id=${_FLOW_FILE_ID}`);
+  const toggle = await _openChangeDetails(page);
+  await page.mouse.move(0, 0);
+  await toggle.focus();
+  await page.keyboard.press('Tab');
+  const firstRow = page.locator('[data-flow-column="0"]');
+  await expect(firstRow).toBeFocused();
+  const card = page.locator('.change-flow-card');
+  await expect(card).toHaveClass(/is-shown/);
+  const chartWidth = () => page.locator('.change-flow__svg').evaluate((svg) => svg.viewBox.baseVal.width);
+  const wideWidth = await chartWidth();
+
+  // When: the window narrows and the chart redraws at the new width
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await expect.poll(chartWidth).toBeLessThan(wideWidth);
+
+  // Then: the same row still has focus and its card is shown again
+  await expect(firstRow).toBeFocused();
+  await expect(card).toHaveClass(/is-shown/);
+  await expect(card.locator('h3')).toHaveText('primary_diagnosis');
+});
+
+test('Stage 5 change details continue the draw-in when a resize redraws mid-reveal', async ({ page }) => {
+  await _mockFlowSummary(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  // A fake clock makes the reveal progress depend only on the time this test advances.
+  await page.clock.install();
+  const reveal = () => page.evaluate(() => ({
+    clip: Number(document.querySelector('#changeFlowReveal rect').getAttribute('width')),
+    leftX: Number(document.querySelector('#changeFlowNode0 rect').getAttribute('x')),
+    width: document.querySelector('.change-flow__svg').viewBox.baseVal.width,
+  }));
+
+  // Given: the chart was opened and is about a third of the way through its draw-in
+  await page.goto(`/stage-5?file_id=${_FLOW_FILE_ID}`);
+  const toggle = page.getByRole('button', { name: /Change details/ });
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await toggle.click();
+  const atOpen = await reveal();
+  expect(atOpen.clip).toBe(atOpen.leftX);
+  await page.clock.runFor(270);
+
+  // When: the window narrows and the debounced redraw runs
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await expect.poll(async () => {
+    await page.clock.runFor(100);
+    return (await reveal()).width;
+  }).toBeLessThan(atOpen.width);
+
+  // Then: the redrawn clip sits between the left nodes and the full width, not snapped to either
+  const afterRedraw = await reveal();
+  expect(afterRedraw.clip).toBeGreaterThan(afterRedraw.leftX);
+  expect(afterRedraw.clip).toBeLessThan(afterRedraw.width);
+  // Then: it keeps growing and ends at exactly the full width
+  await page.clock.runFor(1000);
+  const finished = await reveal();
+  expect(finished.clip).toBe(finished.width);
+});
+
 test('Stage 5 change details show column names as text, never as markup', async ({ page }) => {
   const hostileName = '<img src=x onerror=window.__x=1>';
   await _mockFlowSummary(page, [_flowColumn(0, hostileName, 2, 1, 3)]);

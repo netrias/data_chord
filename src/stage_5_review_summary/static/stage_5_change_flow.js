@@ -333,6 +333,8 @@ export const mountChangeFlow = (rootEl, columns) => {
   let revealStart = -Infinity;
   let revealFrame = 0;
   let lastWidth = -1;
+  // Each focusable node's card, so a pointer leaving a focused row can bring its card back.
+  const focusCards = new Map();
   const isOpen = () => toggle.getAttribute('aria-expanded') === 'true';
 
   const placeCard = (x, y) => {
@@ -361,7 +363,7 @@ export const mountChangeFlow = (rootEl, columns) => {
     for (const node of nodes) node.el.classList.add('is-on');
     card.replaceChildren(...cardContent);
     card.classList.add('is-shown');
-    cardAnchor = event ? null : anchor;
+    cardAnchor = anchor === document.activeElement ? anchor : null;
     if (event) followPointer(event);
     else placeAtAnchor(anchor);
   };
@@ -372,20 +374,40 @@ export const mountChangeFlow = (rootEl, columns) => {
     else clearFocus();
   };
 
+  // A pointer leaving the chart hands the card back to the keyboard-focused node, if any.
+  const leavePointer = () => {
+    const showFocusCard = focusCards.get(document.activeElement);
+    if (showFocusCard) showFocusCard();
+    else clearFocus();
+  };
+
   const wirePointer = (element, cardContent, bands, nodes) => {
     element.addEventListener('pointerenter', (event) => focusOn(cardContent(), bands, nodes, event));
     element.addEventListener('pointermove', followPointer);
-    element.addEventListener('pointerleave', clearFocus);
+    element.addEventListener('pointerleave', leavePointer);
   };
   // Separate from pointer wiring: Chromium makes any SVG element with focus listeners a Tab stop.
   const wireNode = (element, cardContent, bands, nodes) => {
     wirePointer(element, cardContent, bands, nodes);
-    element.addEventListener('focus', () => focusOn(cardContent(), bands, nodes, null, element));
+    const showFocusCard = () => focusOn(cardContent(), bands, nodes, null, element);
+    focusCards.set(element, showFocusCard);
+    element.addEventListener('focus', showFocusCard);
     element.addEventListener('blur', clearFocus);
   };
 
+  // Rebuilding the SVG removes the focused node, so its key is kept and focus is moved to the new node.
+  const focusedNodeSelector = () => {
+    const focused = document.activeElement;
+    if (!(focused instanceof SVGElement) || !svg.contains(focused)) return null;
+    if (focused.dataset.flowColumn != null) return `[data-flow-column="${focused.dataset.flowColumn}"]`;
+    if (focused.dataset.flowOutcome != null) return `[data-flow-outcome="${focused.dataset.flowOutcome}"]`;
+    return null;
+  };
+
   const draw = () => {
+    const refocusSelector = focusedNodeSelector();
     clearFocus();
+    focusCards.clear();
     cancelAnimationFrame(revealFrame);
     lastWidth = wrap.clientWidth;
     const minWidth = parseFloat(getComputedStyle(svg).minWidth) || 0;
@@ -494,10 +516,14 @@ export const mountChangeFlow = (rootEl, columns) => {
     const revealFrom = layout.leftX;
     const stepReveal = () => {
       const progress = _clamp((performance.now() - revealStart) / _DRAW_DURATION_MS, 0, 1);
-      revealRect.setAttribute('width', String(revealFrom + (width - revealFrom) * (1 - (1 - progress) ** 3)));
+      // The finished reveal is exactly the chart width, with no float drift from the easing.
+      const revealWidth = progress < 1 ? revealFrom + (width - revealFrom) * (1 - (1 - progress) ** 3) : width;
+      revealRect.setAttribute('width', String(revealWidth));
       if (progress < 1) revealFrame = requestAnimationFrame(stepReveal);
     };
     stepReveal();
+
+    if (refocusSelector) svg.querySelector(refocusSelector)?.focus({ preventScroll: true });
   };
 
   for (const key of legend.querySelectorAll('[data-outcome]')) {
@@ -506,7 +532,7 @@ export const mountChangeFlow = (rootEl, columns) => {
       if (!node?.el) return;
       focusOn(_outcomeCard(node, layout), node.bands, [node, ...node.bands.map((band) => band.source)], null, node.el);
     });
-    key.addEventListener('pointerleave', clearFocus);
+    key.addEventListener('pointerleave', leavePointer);
   }
 
   toggle.addEventListener('click', () => {

@@ -87,7 +87,7 @@ describe('Stage 5 change details', () => {
     assert.deepEqual(layout.bands.map((band) => band.t), [2 * MAX_SCALE, 1 * MAX_SCALE, 4 * MAX_SCALE]);
   });
 
-  it('stacks bands inside each node without gaps or overlap', () => {
+  it("stacks each node's bands from its top to its bottom without gaps or overlap", () => {
     // Given several columns that share all three outcomes
     const columns = [
       column('diagnosis', 40, 3, 70),
