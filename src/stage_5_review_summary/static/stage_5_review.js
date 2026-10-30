@@ -17,6 +17,7 @@ import {
   isValidFileId,
   isSafeFilename,
 } from '/assets/shared/storage-keys.js';
+import { mountChangeFlow } from './stage_5_change_flow.js';
 
 const _DEFAULT_SUMMARY_ENDPOINT = '/stage-5/summary';
 const _DEFAULT_DOWNLOAD_ENDPOINT = '/stage-5/download';
@@ -35,8 +36,7 @@ const _downloadBtn = document.getElementById('downloadResults');
 const _downloadError = document.getElementById('downloadError');
 const _certificateTitle = document.getElementById('certificateTitle');
 const _datasetMetadata = document.getElementById('datasetMetadata');
-const _certificateStatus = document.getElementById('certificateStatus');
-const _summaryGrid = document.getElementById('summaryGrid');
+const _changeFlow = document.getElementById('changeFlow');
 const _startOverAction = document.getElementById('uploadNavAction');
 const _startOverButton = document.getElementById('startOverButton');
 const _startOverDialog = document.getElementById('startOverDialog');
@@ -57,7 +57,6 @@ const _state = {
   termMappings: [],
   sortColumn: null,
   sortDirection: 'asc',
-  nonConformantCount: 0,
   filter: 'changed',
 };
 
@@ -272,71 +271,25 @@ const _datasetDetails = (dataset) => {
   return parts.join(' · ');
 };
 
-const _renderCertificate = (dataset, nonConformantCount) => {
+const _renderCertificate = (dataset) => {
   if (_certificateTitle) {
     _certificateTitle.textContent = dataset?.filename || 'Harmonized data';
   }
   if (_datasetMetadata) {
     _datasetMetadata.textContent = _datasetDetails(dataset) || 'Ready to download';
   }
-  if (!_certificateStatus) return;
-  if (nonConformantCount > 0) {
-    _certificateStatus.className = 'certificate-status certificate-status--attention';
-    _certificateStatus.textContent = `${nonConformantCount.toLocaleString()} ${nonConformantCount === 1 ? 'value needs' : 'values need'} review`;
-  } else {
-    _certificateStatus.className = 'certificate-status certificate-status--ready';
-    _certificateStatus.textContent = 'Ready to download';
-  }
-};
-
-const _appendImpactMetric = (ledger, key, value, label) => {
-  const metric = document.createElement('div');
-  metric.className = 'change-impact__metric';
-  metric.dataset.impactMetric = key;
-
-  const term = document.createElement('dt');
-  term.className = 'change-impact__label';
-  term.textContent = label;
-  metric.appendChild(term);
-
-  const count = document.createElement('dd');
-  count.className = 'change-impact__value';
-  count.textContent = value.toLocaleString();
-  metric.appendChild(count);
-  ledger.appendChild(metric);
-};
-
-const _renderSummary = (columnSummaries) => {
-  if (!_summaryGrid) return;
-  const totals = columnSummaries.reduce(
-    (aggregate, column) => ({
-      totalValues: aggregate.totalValues + _safeCount(column.changed_rows),
-      uniqueValues: aggregate.uniqueValues + _safeCount(column.changed_distinct_values),
-      manualValues: aggregate.manualValues + _safeCount(column.reviewer_edited_rows),
-    }),
-    { totalValues: 0, uniqueValues: 0, manualValues: 0 },
-  );
-
-  const ledger = document.createElement('dl');
-  ledger.className = 'change-impact';
-  ledger.setAttribute('aria-label', 'Changes');
-  _appendImpactMetric(ledger, 'unique_values', totals.uniqueValues, 'Unique values changed');
-  _appendImpactMetric(ledger, 'total_values', totals.totalValues, 'Total values changed');
-  _appendImpactMetric(ledger, 'manual_values', totals.manualValues, 'Values manually changed');
-  _summaryGrid.replaceChildren(ledger);
 };
 
 const _showSummaryError = (message, includeRecoveryLink = false) => {
-  if (!_summaryGrid) return;
-  _summaryGrid.replaceChildren();
+  if (!_changeFlow) return;
   const error = document.createElement('p');
-  error.className = 'summary-empty';
+  error.className = 'change-flow__message';
   if (includeRecoveryLink) {
     renderRecoveryError(error, message, _state.fileId);
   } else {
     error.textContent = message;
   }
-  _summaryGrid.appendChild(error);
+  _changeFlow.replaceChildren(error);
 };
 
 const _sourceLabel = (source) => {
@@ -674,10 +627,9 @@ const _fetchSummary = async () => {
     markTiming('stage5.summary.render.start');
 
     const conformanceItems = _validConformanceItems(data.non_conformant_items);
-    _state.nonConformantCount = conformanceItems.length;
-    _state.filter = _state.nonConformantCount > 0 ? 'needs_attention' : 'changed';
-    _renderCertificate(data.dataset, _state.nonConformantCount);
-    _renderSummary(data.column_summaries ?? []);
+    _state.filter = conformanceItems.length > 0 ? 'needs_attention' : 'changed';
+    _renderCertificate(data.dataset);
+    mountChangeFlow(_changeFlow, data.column_summaries ?? []);
     _renderMappings(data.term_mappings ?? []);
     _showConformanceWarning(conformanceItems);
 

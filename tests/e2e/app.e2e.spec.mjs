@@ -822,9 +822,9 @@ test('happy path flow: upload → analyze → harmonize → review → summary �
   await page.click('#stageFiveButton');
   await page.waitForURL(/\/stage-5/);
   await expect(page.locator('.quality-certificate')).toBeVisible();
-  await expect(page.locator('[data-impact-metric="total_values"]')).toContainText('2');
-  await expect(page.locator('[data-impact-metric="unique_values"]')).toContainText('1');
-  await expect(page.locator('[data-impact-metric="manual_values"]')).toContainText('0');
+  await expect(page.locator('[data-change-total="ai"]')).toHaveText('1 by AI');
+  await expect(page.locator('[data-change-total="you"]')).toHaveText('0 by you');
+  await expect(page.locator('[data-change-total="rows"]')).toHaveText('· 2 rows changed');
   await expect(page.locator('.provenance-line')).toHaveCount(0);
 
   const rows = await downloadCsvRows(page, fileId);
@@ -1273,7 +1273,7 @@ test('Stage 5 confirms start-over after successful download and clears browser w
   await waitForReviewRows(page);
   await page.click('#stageFiveButton');
   await page.waitForURL(/\/stage-5/);
-  await page.locator('#summaryGrid').waitFor({ state: 'visible' });
+  await page.getByRole('button', { name: /Change details/ }).waitFor({ state: 'visible' });
 
   // Given: workflow state exists, while an unrelated session key should be preserved.
   await page.evaluate(() => {
@@ -1364,9 +1364,10 @@ test('Stage 5 shows recovery detail for summary and download failures', async ({
   // When: the reviewer opens Stage 5.
   await page.goto(`/stage-5?file_id=${fileId}`);
 
-  // Then: summary recovery detail and a Stage 3 link are shown.
-  const summaryError = page.locator('#summaryGrid .summary-empty');
+  // Then: summary recovery detail and a Stage 3 link are shown in the header card without opening anything.
+  const summaryError = page.locator('.quality-certificate #changeFlow .change-flow__message');
   await expect(summaryError).toBeVisible();
+  await expect(page.getByRole('button', { name: /Change details/ })).toHaveCount(0);
   await expect(summaryError).toContainText(recoveryDetail);
   const summaryRecoveryLink = summaryError.getByRole('link', { name: 'Return to Stage 3' });
   await expect(summaryRecoveryLink).toHaveAttribute('href', `/stage-3?file_id=${fileId}`);
@@ -2364,9 +2365,9 @@ test('no-change flow shows empty review state and zero outcome metrics', async (
   // Then: the final certificate reports an explicit zero-change aggregate
   await page.goto(`/stage-5?file_id=${fileId}`);
   await expect(page.locator('.quality-certificate')).toBeVisible();
-  await expect(page.locator('[data-impact-metric="total_values"]')).toContainText('0');
-  await expect(page.locator('[data-impact-metric="unique_values"]')).toContainText('0');
-  await expect(page.locator('[data-impact-metric="manual_values"]')).toContainText('0');
+  await expect(page.locator('[data-change-total="ai"]')).toHaveText('0 by AI');
+  await expect(page.locator('[data-change-total="you"]')).toHaveText('0 by you');
+  await expect(page.locator('[data-change-total="rows"]')).toHaveText('· 0 rows changed');
 });
 
 test('Stage 5 aggregates change impact and keeps filters keyboard accessible', async ({ page }) => {
@@ -2468,13 +2469,13 @@ test('Stage 5 aggregates change impact and keeps filters keyboard accessible', a
   await expect(page.getByRole('heading', { level: 1, name: 'attention.csv' })).toBeVisible();
   await expect(page.locator('#datasetMetadata')).toHaveText('gc 11.0.4 · CSV');
   await expect(page.getByRole('button', { name: 'Download data' })).toBeVisible();
-  await expect(page.getByRole('heading', { level: 2, name: 'Changes' })).toBeVisible();
-  await expect(page.locator('[data-impact-metric="unique_values"]')).toContainText('3');
-  await expect(page.locator('[data-impact-metric="unique_values"]')).toContainText('Unique values changed');
-  await expect(page.locator('[data-impact-metric="total_values"]')).toContainText('5');
-  await expect(page.locator('[data-impact-metric="total_values"]')).toContainText('Total values changed');
-  await expect(page.locator('[data-impact-metric="manual_values"]')).toContainText('1');
-  await expect(page.locator('[data-impact-metric="manual_values"]')).toContainText('Values manually changed');
+  await expect(page.getByRole('heading', { level: 2, name: 'Changes' })).toHaveCount(0);
+  const changeDetails = page.getByRole('button', { name: /Change details/ });
+  await expect(changeDetails).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('[data-change-total="ai"]')).toHaveText('2 by AI');
+  await expect(page.locator('[data-change-total="you"]')).toHaveText('1 by you');
+  await expect(page.locator('[data-change-total="same"]')).toHaveText('1 unchanged');
+  await expect(page.locator('[data-change-total="rows"]')).toHaveText('· 5 rows changed');
   await expect(page.locator('#mappingTitle')).toHaveText('Value details · Select a row to view history');
   const attention = page.getByRole('button', { name: 'Needs attention' });
   await expect(attention).toHaveAttribute('aria-pressed', 'true');
@@ -2510,6 +2511,394 @@ test('Stage 5 aggregates change impact and keeps filters keyboard accessible', a
   expect(Math.max(returnBox.x + returnBox.width, proceedBox.x + proceedBox.width)).toBeLessThanOrEqual(320);
   await warning.getByRole('button', { name: 'Return to Review' }).click();
   await expect(page).toHaveURL(new RegExp(`/stage-4\\?file_id=${fileId}`));
+});
+
+const _flowColumn = (index, column, ai, you, same) => ({
+  column,
+  column_key: `col_${String(index).padStart(4, '0')}`,
+  source_column_index: index,
+  distinct_terms: ai + you + same,
+  changed_distinct_values: ai + you,
+  total_rows: (ai + you + same) * 3,
+  changed_rows: (ai + you) * 3,
+  reviewer_edited_rows: you * 3,
+  non_conformant_values: 0,
+  review_status: 'clear',
+  ai_changes: ai,
+  manual_changes: you,
+  unchanged: same,
+});
+
+const _FLOW_COLUMNS = [
+  _flowColumn(0, 'primary_diagnosis', 45, 3, 72),
+  _flowColumn(1, 'anatomic_site', 38, 1, 101),
+  _flowColumn(2, 'tissue_type', 15, 7, 73),
+  _flowColumn(3, 'morphology', 18, 1, 156),
+  _flowColumn(4, 'specimen_type', 6, 1, 21),
+  _flowColumn(5, 'treatment_type', 5, 0, 55),
+  _flowColumn(6, 'race', 4, 0, 8),
+  _flowColumn(7, 'ethnicity', 3, 0, 2),
+  _flowColumn(8, 'age_at_diagnosis_unit', 1, 0, 2),
+  _flowColumn(9, 'empty_column', 0, 0, 0),
+];
+const _FLOW_FILE_ID = '0123456789abcdef0123456789abcdef';
+
+const _mockFlowSummary = async (page, columns = _FLOW_COLUMNS) => {
+  await page.route('**/stage-5/summary', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        dataset: { filename: 'flow.csv', tabular_format: 'csv', data_model_key: 'gc', external_version_number: '11.0.4' },
+        column_summaries: columns,
+        term_mappings: [],
+        non_conformant_items: [],
+      }),
+    });
+  });
+};
+
+const _openChangeDetails = async (page) => {
+  const toggle = page.getByRole('button', { name: /Change details/ });
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  return toggle;
+};
+
+const _pageBox = (page, selector) => page.evaluate((target) => {
+  const { x, y, width, height } = document.querySelector(target).getBoundingClientRect();
+  return { x: x + window.scrollX, y: y + window.scrollY, width, height };
+}, selector);
+
+/** Page-relative boxes, so a scroll alone never looks like a layout change. */
+const _layoutSnapshot = (page) => page.evaluate(() => {
+  const box = (selector) => {
+    const { x, y, width, height } = document.querySelector(selector).getBoundingClientRect();
+    return { x: x + window.scrollX, y: y + window.scrollY, width, height };
+  };
+  return {
+    header: box('.quality-certificate'),
+    bottomRow: box('[data-flow-column="8"]'),
+    pageWidth: document.documentElement.scrollWidth,
+    pageHeight: document.documentElement.scrollHeight,
+  };
+});
+
+test('Stage 5 change details stay closed until opened and keep the chart out of Tab order when closed', async ({ page }) => {
+  await _mockFlowSummary(page);
+
+  // Given: Stage 5 loads a summary with nine columns that have values and one that has none
+  await page.goto(`/stage-5?file_id=${_FLOW_FILE_ID}`);
+  const toggle = page.getByRole('button', { name: /Change details/ });
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('[data-change-total="ai"]')).toHaveText('135 by AI');
+  await expect(page.locator('[data-change-total="you"]')).toHaveText('13 by you');
+  await expect(page.locator('[data-change-total="same"]')).toHaveText('490 unchanged');
+  await expect(page.locator('[data-change-total="rows"]')).toHaveText('· 444 rows changed');
+  await expect(page.locator('#changeFlowBody')).toHaveJSProperty('offsetHeight', 0);
+
+  // When: the reviewer opens the change details from the keyboard
+  await toggle.focus();
+  await page.keyboard.press('Enter');
+
+  // Then: the chart lists every column with values, sorted by changed count
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  const rows = page.locator('[data-flow-column]');
+  await expect(rows).toHaveCount(9);
+  const rowLabels = await rows.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label').split(':')[0]));
+  expect(rowLabels).toEqual([
+    'primary_diagnosis', 'anatomic_site', 'tissue_type', 'morphology', 'specimen_type',
+    'treatment_type', 'race', 'ethnicity', 'age_at_diagnosis_unit',
+  ]);
+  // Then: the legend takes no focus, so Tab goes straight to the first chart row
+  await page.keyboard.press('Tab');
+  await expect(rows.first()).toBeFocused();
+
+  // When: the reviewer closes the change details and tabs on from the toggle
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await toggle.focus();
+  await page.keyboard.press('Tab');
+
+  // Then: focus skips the hidden chart and lands on the first Value details filter
+  await expect(page.getByRole('button', { name: 'Needs attention' })).toBeFocused();
+});
+
+test('Stage 5 change details hover card shows column counts without moving the page', async ({ page }) => {
+  await _mockFlowSummary(page);
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  // Given: the change details are open, fully drawn, and the bottom row is in view
+  await page.goto(`/stage-5?file_id=${_FLOW_FILE_ID}`);
+  await expect(page.getByRole('button', { name: /Change details/ })).toHaveAttribute('aria-expanded', 'false');
+  const closedHeader = await _pageBox(page, '.quality-certificate');
+  await _openChangeDetails(page);
+  const bottomRow = page.locator('[data-flow-column="8"]');
+  // The card hides on scroll, so the bottom row is scrolled into view before the hover,
+  // with the pointer parked off the chart so the scroll cannot slide a row under it.
+  await page.mouse.move(0, 0);
+  await bottomRow.scrollIntoViewIfNeeded();
+  await expect(page.locator('#changeFlowReveal rect')).toHaveAttribute('width', /^\d+(\.\d+)?$/);
+  await expect.poll(() => page.evaluate(() => {
+    const reveal = document.querySelector('#changeFlowReveal rect');
+    return reveal.getAttribute('width') === document.querySelector('.change-flow__svg').viewBox.baseVal.width.toString();
+  })).toBe(true);
+  const card = page.locator('.change-flow-card');
+  await expect(card).not.toHaveClass(/is-shown/);
+  const beforeHover = await _layoutSnapshot(page);
+
+  // When: the reviewer hovers the bottom chart row
+  await bottomRow.hover();
+
+  // Then: the hover card names that column and lists its counts
+  await expect(card).toHaveClass(/is-shown/);
+  await expect(card.locator('h3')).toHaveText('age_at_diagnosis_unit');
+  await expect(card.locator('dt')).toHaveText(['Changed by AI', 'Changed by you', 'Unchanged']);
+  await expect(card.locator('dd')).toHaveText(['1', '0', '2']);
+  await expect(card.locator('p')).toHaveText('33% of 3 unique values changed');
+  // Then: nothing in the card or the chart box scrolls, and the card stays inside the viewport
+  const overflowing = await page.evaluate(() => [
+    ...document.querySelectorAll('.change-flow-card, .change-flow-card *, .change-flow__chart'),
+  ].filter((element) => element.scrollWidth > element.clientWidth || element.scrollHeight > element.clientHeight)
+    .map((element) => element.className.baseVal ?? element.className));
+  expect(overflowing).toEqual([]);
+  const cardBox = await card.boundingBox();
+  expect(cardBox.y + cardBox.height).toBeLessThanOrEqual(720);
+  expect(cardBox.x + cardBox.width).toBeLessThanOrEqual(1280);
+  // Then: the header card, the hovered row, and the page size are unchanged by the hover
+  expect(await _layoutSnapshot(page)).toEqual(beforeHover);
+
+  // When: the reviewer moves away and closes the change details
+  await page.mouse.move(0, 0);
+  await page.getByRole('button', { name: /Change details/ }).click();
+
+  // Then: the header card returns to its closed box and the page width never changed
+  await expect.poll(() => _pageBox(page, '.quality-certificate')).toEqual(closedHeader);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(beforeHover.pageWidth);
+});
+
+test('Stage 5 change details draw every band at once under reduced motion', async ({ page }) => {
+  await _mockFlowSummary(page);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+
+  // Given: Stage 5 is loaded with reduced motion and the change details are closed
+  await page.goto(`/stage-5?file_id=${_FLOW_FILE_ID}`);
+  const toggle = page.getByRole('button', { name: /Change details/ });
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+  // When: the reviewer opens the change details, and the reveal is read in the same task
+  const reveal = await toggle.evaluate((button) => {
+    button.click();
+    return {
+      clipWidth: document.querySelector('#changeFlowReveal rect').getAttribute('width'),
+      chartWidth: String(document.querySelector('.change-flow__svg').viewBox.baseVal.width),
+    };
+  });
+
+  // Then: the bands are not clipped, so nothing waits on an animation that never runs
+  expect(reveal.clipWidth).toBe(reveal.chartWidth);
+  const band = page.locator('.change-flow__band').first();
+  const point = await band.evaluate((path) => {
+    const middle = path.getPointAtLength(path.getTotalLength() * 0.25);
+    const screen = new DOMPoint(middle.x, middle.y + 1).matrixTransform(path.getScreenCTM());
+    return { x: screen.x, y: screen.y };
+  });
+  expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.classList.contains('change-flow__band'), point)).toBe(true);
+});
+
+test('Stage 5 change details keep a focus card on a row that Tab scrolls into view', async ({ page }) => {
+  await _mockFlowSummary(page);
+  await page.setViewportSize({ width: 1280, height: 600 });
+
+  // Given: the change details are open and the bottom row is below the fold
+  await page.goto(`/stage-5?file_id=${_FLOW_FILE_ID}`);
+  const toggle = await _openChangeDetails(page);
+  const bottomRow = page.locator('[data-flow-column="8"]');
+  const rowTop = await bottomRow.evaluate((row) => row.getBoundingClientRect().top);
+  expect(rowTop).toBeGreaterThan(600);
+
+  // When: the reviewer tabs from the toggle through every row to the bottom one, pointer parked off the chart
+  await page.mouse.move(0, 0);
+  await toggle.focus();
+  for (let press = 0; press < 9; press += 1) await page.keyboard.press('Tab');
+  await expect(bottomRow).toBeFocused();
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+
+  // Then: the page scrolled, and the card stays shown beside the focused row
+  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  const card = page.locator('.change-flow-card');
+  await expect(card).toHaveClass(/is-shown/);
+  await expect(card.locator('h3')).toHaveText('age_at_diagnosis_unit');
+  await expect(card).toHaveCSS('transform', 'none');
+  const rowBox = await bottomRow.boundingBox();
+  const cardBox = await card.boundingBox();
+  // The card sits at the row's top unless that would push it past the viewport bottom.
+  const expectedTop = Math.max(8, Math.min(rowBox.y, 600 - cardBox.height - 8));
+  expect(Math.abs(cardBox.y - expectedTop)).toBeLessThanOrEqual(1);
+});
+
+test('Stage 5 change details keep keyboard focus and its card when a resize redraws the chart', async ({ page }) => {
+  await _mockFlowSummary(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  // Given: the first chart row has keyboard focus and shows its card
+  await page.goto(`/stage-5?file_id=${_FLOW_FILE_ID}`);
+  const toggle = await _openChangeDetails(page);
+  await page.mouse.move(0, 0);
+  await toggle.focus();
+  await page.keyboard.press('Tab');
+  const firstRow = page.locator('[data-flow-column="0"]');
+  await expect(firstRow).toBeFocused();
+  const card = page.locator('.change-flow-card');
+  await expect(card).toHaveClass(/is-shown/);
+  const chartWidth = () => page.locator('.change-flow__svg').evaluate((svg) => svg.viewBox.baseVal.width);
+  const wideWidth = await chartWidth();
+  const scrollBefore = await page.evaluate(() => window.scrollY);
+
+  // When: the window narrows and the chart redraws at the new width
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await expect.poll(chartWidth).toBeLessThan(wideWidth);
+
+  // Then: the same row still has focus, the refocus did not scroll the page, and its card is shown again
+  await expect(firstRow).toBeFocused();
+  expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);
+  await expect(card).toHaveClass(/is-shown/);
+  await expect(card.locator('h3')).toHaveText('primary_diagnosis');
+});
+
+test('Stage 5 change details hide the card after a mouse click on a row once the pointer leaves', async ({ page }) => {
+  await _mockFlowSummary(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  // Given: the chart is open and a mouse click on the first row has focused it without a focus ring
+  await page.goto(`/stage-5?file_id=${_FLOW_FILE_ID}`);
+  await _openChangeDetails(page);
+  const firstRow = page.locator('[data-flow-column="0"]');
+  await firstRow.click();
+  await expect(firstRow).toBeFocused();
+  expect(await firstRow.evaluate((row) => row.matches(':focus-visible'))).toBe(false);
+  const card = page.locator('.change-flow-card');
+  await expect(card).toHaveClass(/is-shown/);
+
+  // When: the mouse moves off the chart
+  await page.mouse.move(0, 0);
+
+  // Then: no card stays behind for the mouse-focused row
+  await expect(card).not.toHaveClass(/is-shown/);
+});
+
+test('Stage 5 change details keep the hover card when a click moves focus to another row', async ({ page }) => {
+  await _mockFlowSummary(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  // Given: the chart is open and a mouse click has focused the first row
+  await page.goto(`/stage-5?file_id=${_FLOW_FILE_ID}`);
+  await _openChangeDetails(page);
+  await page.locator('[data-flow-column="0"]').click();
+  await expect(page.locator('[data-flow-column="0"]')).toBeFocused();
+
+  // When: the reviewer clicks the second row, which blurs the first
+  const secondRow = page.locator('[data-flow-column="1"]');
+  await secondRow.click();
+  await expect(secondRow).toBeFocused();
+
+  // Then: the hover card stays shown for the second row under the pointer
+  const card = page.locator('.change-flow-card');
+  await expect(card).toHaveClass(/is-shown/);
+  await expect(card.locator('h3')).toHaveText('anatomic_site');
+});
+
+test('Stage 5 change details continue the draw-in when a resize redraws mid-reveal', async ({ page }) => {
+  await _mockFlowSummary(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  // A fake clock makes the reveal progress depend only on the time this test advances.
+  await page.clock.install();
+  const reveal = () => page.evaluate(() => ({
+    clip: Number(document.querySelector('#changeFlowReveal rect').getAttribute('width')),
+    leftX: Number(document.querySelector('#changeFlowNode0 rect').getAttribute('x')),
+    width: document.querySelector('.change-flow__svg').viewBox.baseVal.width,
+  }));
+
+  // Given: the chart was opened and 270 ms have passed: 150 ms of the 850 ms draw-in after its
+  // 120 ms delay, which is about 18% of the time and, with the ease-out, about 44% of the distance
+  await page.goto(`/stage-5?file_id=${_FLOW_FILE_ID}`);
+  const toggle = page.getByRole('button', { name: /Change details/ });
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await toggle.click();
+  const atOpen = await reveal();
+  expect(atOpen.clip).toBe(atOpen.leftX);
+  await page.clock.runFor(270);
+
+  // When: the window narrows and the debounced redraw runs
+  await page.setViewportSize({ width: 1100, height: 900 });
+  // Each poll advances the fake clock 100 ms, and the resize observer debounces 80 ms, so the first
+  // poll normally redraws. expect.poll backs off (100/250/500/1000 ms), giving about 8 tries in 5 s,
+  // but the real limit is tighter: the redraw must land within about 7 polls, before fake time
+  // reaches about 970 ms, or the reveal has already finished and the mid-reveal check is meaningless.
+  await expect.poll(async () => {
+    await page.clock.runFor(100);
+    return (await reveal()).width;
+  }).toBeLessThan(atOpen.width);
+
+  // Then: the redrawn clip sits between the left nodes and the full width, not snapped to either
+  const afterRedraw = await reveal();
+  expect(afterRedraw.clip).toBeGreaterThan(afterRedraw.leftX);
+  expect(afterRedraw.clip).toBeLessThan(afterRedraw.width);
+  // Then: it keeps growing and ends at exactly the full width
+  await page.clock.runFor(1000);
+  const finished = await reveal();
+  expect(finished.clip).toBe(finished.width);
+});
+
+test('Stage 5 change details show column names as text, never as markup', async ({ page }) => {
+  const hostileName = '<img src=x onerror=window.__x=1>';
+  await _mockFlowSummary(page, [_flowColumn(0, hostileName, 2, 1, 3)]);
+
+  // Given: a summary whose only column name is an HTML payload
+  await page.goto(`/stage-5?file_id=${_FLOW_FILE_ID}`);
+  await expect(page.locator('[data-change-total="ai"]')).toHaveText('2 by AI');
+
+  // When: the reviewer opens the chart and hovers that column
+  await _openChangeDetails(page);
+  const row = page.locator('[data-flow-column="0"]');
+  await row.hover();
+
+  // Then: the name appears literally in the row label and card, and no image or script ran
+  await expect(row).toHaveAttribute('aria-label', `${hostileName}: 3 of 6 unique values changed, 2 by AI, 1 by you`);
+  const card = page.locator('.change-flow-card');
+  await expect(card.locator('h3')).toHaveText(hostileName);
+  await expect(card.locator('img')).toHaveCount(0);
+  await expect(page.locator('#changeFlow img')).toHaveCount(0);
+  expect(await page.evaluate(() => window.__x)).toBeUndefined();
+});
+
+test('Stage 5 change details scroll sideways only inside the chart on a phone', async ({ page }) => {
+  await _mockFlowSummary(page);
+  await page.setViewportSize({ width: 400, height: 800 });
+
+  // Given: the header card fits the phone viewport with the change details closed
+  await page.goto(`/stage-5?file_id=${_FLOW_FILE_ID}`);
+  const toggle = page.getByRole('button', { name: /Change details/ });
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  const header = page.locator('.quality-certificate');
+  const headerWidth = await header.evaluate((element) => element.getBoundingClientRect().width);
+  // The shared step-instruction tooltip already overhangs a 400px page (html hides it), so the
+  // proof is that opening adds nothing to the page width, not that the width equals the viewport.
+  const closedPageWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+
+  // When: the reviewer opens the change details
+  await toggle.click();
+  await expect(page.locator('[data-flow-column]')).toHaveCount(9);
+
+  // Then: the header card keeps its width, the page does not widen, and only the chart box scrolls, sideways
+  expect(await header.evaluate((element) => element.getBoundingClientRect().width)).toBe(headerWidth);
+  expect(await header.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(closedPageWidth);
+  const chart = await page.locator('.change-flow__chart').evaluate((element) => ({
+    scrollsSideways: element.scrollWidth > element.clientWidth,
+    scrollsDown: element.scrollHeight > element.clientHeight,
+  }));
+  expect(chart).toEqual({ scrollsSideways: true, scrollsDown: false });
 });
 
 test('autosave persists overrides and review settings across reloads', async ({ page }) => {
@@ -2990,7 +3379,7 @@ test('Stage 4 keeps the workflow id when Review is clicked before rows load', as
   expect(stageFiveUrl.searchParams.get('file_id')).toBe(fileId);
   expect(summaryRequest.postDataJSON()).toEqual({ file_id: fileId });
   await expect(page.locator('#certificateTitle')).toHaveText('basic.csv');
-  await expect(page.locator('#summaryGrid .change-impact')).toBeVisible();
+  await expect(page.locator('.change-flow__summary')).toBeVisible();
 });
 
 test('Stage 2 locks and Stage 5 is reachable after Stage 3 completes', async ({ page }) => {
@@ -3030,11 +3419,11 @@ test('Stage 2 locks and Stage 5 is reachable after Stage 3 completes', async ({ 
   await page.waitForURL(/\/stage-5/);
   const stageFiveUrl = new URL(page.url());
   expect(stageFiveUrl.searchParams.get('file_id')).toBe(fileId);
-  await page.locator('#summaryGrid').waitFor({ state: 'visible' });
+  await page.locator('.change-flow__summary').waitFor({ state: 'visible' });
 
   // And: Stage 5 can load from the durable workflow id in the URL alone
   await page.reload();
-  await expect(page.locator('#summaryGrid')).not.toContainText('Unable to locate harmonization context.');
+  await expect(page.locator('.change-flow__summary')).toBeVisible();
 
   // When: the user goes back to Stage 2
   await page.click('.progress-track .step[data-stage="mapping"]');
