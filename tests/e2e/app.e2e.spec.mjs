@@ -2640,6 +2640,32 @@ test('Stage 5 change details hover card shows column counts without scrollbars o
   expect(await card.boundingBox()).toEqual(firstBox);
 });
 
+test('Stage 5 change details scroll sideways only inside the chart on a phone', async ({ page }) => {
+  const fileId = '0123456789abcdef0123456789abcdef';
+  await _mockFlowSummary(page);
+  await page.setViewportSize({ width: 400, height: 800 });
+
+  // Given: the header card fits the phone viewport with the change details closed
+  await page.goto(`/stage-5?file_id=${fileId}`);
+  const toggle = page.getByRole('button', { name: /Change details/ });
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  const header = page.locator('.quality-certificate');
+  const headerWidth = await header.evaluate((element) => element.getBoundingClientRect().width);
+
+  // When: the reviewer opens the change details
+  await toggle.click();
+  await expect(page.locator('[data-flow-column]')).toHaveCount(9);
+
+  // Then: the header card keeps its width and only the chart box scrolls, sideways
+  expect(await header.evaluate((element) => element.getBoundingClientRect().width)).toBe(headerWidth);
+  expect(await header.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  const chart = await page.locator('.change-flow__chart').evaluate((element) => ({
+    scrollsSideways: element.scrollWidth > element.clientWidth,
+    scrollsDown: element.scrollHeight > element.clientHeight,
+  }));
+  expect(chart).toEqual({ scrollsSideways: true, scrollsDown: false });
+});
+
 test('autosave persists overrides and review settings across reloads', async ({ page }) => {
   await mockHarmonizeSuccess(page);
 
