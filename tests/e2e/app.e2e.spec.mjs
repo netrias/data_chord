@@ -2787,6 +2787,27 @@ test('Stage 5 change details hide the card after a mouse click on a row once the
   await expect(card).not.toHaveClass(/is-shown/);
 });
 
+test('Stage 5 change details keep the hover card when a click moves focus to another row', async ({ page }) => {
+  await _mockFlowSummary(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  // Given: the chart is open and a mouse click has focused the first row
+  await page.goto(`/stage-5?file_id=${_FLOW_FILE_ID}`);
+  await _openChangeDetails(page);
+  await page.locator('[data-flow-column="0"]').click();
+  await expect(page.locator('[data-flow-column="0"]')).toBeFocused();
+
+  // When: the reviewer clicks the second row, which blurs the first
+  const secondRow = page.locator('[data-flow-column="1"]');
+  await secondRow.click();
+  await expect(secondRow).toBeFocused();
+
+  // Then: the hover card stays shown for the second row under the pointer
+  const card = page.locator('.change-flow-card');
+  await expect(card).toHaveClass(/is-shown/);
+  await expect(card.locator('h3')).toHaveText('anatomic_site');
+});
+
 test('Stage 5 change details continue the draw-in when a resize redraws mid-reveal', async ({ page }) => {
   await _mockFlowSummary(page);
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -2810,8 +2831,10 @@ test('Stage 5 change details continue the draw-in when a resize redraws mid-reve
 
   // When: the window narrows and the debounced redraw runs
   await page.setViewportSize({ width: 1100, height: 900 });
-  // Each poll advances the fake clock 100 ms. The resize observer debounces 80 ms, so the first
-  // poll normally redraws; the poll's 5 s real-time limit would allow ~50 polls before failing.
+  // Each poll advances the fake clock 100 ms, and the resize observer debounces 80 ms, so the first
+  // poll normally redraws. expect.poll backs off (100/250/500/1000 ms), giving about 8 tries in 5 s,
+  // but the real limit is tighter: the redraw must land within about 7 polls, before fake time
+  // reaches about 970 ms, or the reveal has already finished and the mid-reveal check is meaningless.
   await expect.poll(async () => {
     await page.clock.runFor(100);
     return (await reveal()).width;

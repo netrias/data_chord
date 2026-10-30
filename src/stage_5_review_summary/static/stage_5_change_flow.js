@@ -400,7 +400,10 @@ export const mountChangeFlow = (rootEl, columns) => {
     element.addEventListener('focus', () => {
       if (keyboardFocus() === element) showFocusCard();
     });
-    element.addEventListener('blur', clearFocus);
+    // Only a keyboard card leaves with its node; a mouse click moving focus must not hide the hover card.
+    element.addEventListener('blur', () => {
+      if (cardAnchor === element) clearFocus();
+    });
   };
 
   // Rebuilding the SVG removes the keyboard-focused node, so its key is kept and focus moves to the new node.
