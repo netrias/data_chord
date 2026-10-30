@@ -43,8 +43,9 @@
 
 .quality-certificate__actions {
   display: flex;
-  align-items: center;
-  gap: var(--space-4);
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-3);
   flex-shrink: 0;
 }
 
@@ -73,12 +74,362 @@
   color: var(--warning-700);
 }
 
-.summary-card,
+/* Change details: a collapsed summary line that opens into a by-column flow chart. */
+.change-flow {
+  --flow-ai: var(--netrias-500);
+  --flow-you: var(--magenta-500);
+  --flow-same: var(--gray-300);
+  --flow-source: var(--gray-400);
+
+  margin-top: var(--space-5);
+  border-top: 1px solid var(--gray-100);
+}
+
+.change-flow__message {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-2);
+  color: var(--gray-600);
+  font-size: 0.9rem;
+}
+
+.change-flow__toggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  margin-top: var(--space-2);
+  padding: 10px var(--space-2);
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  transition: background var(--transition-fast);
+}
+
+.change-flow__toggle:hover {
+  background: var(--gray-50);
+}
+
+.change-flow__toggle:focus-visible {
+  outline: 2px solid var(--azure-300);
+  outline-offset: 0;
+}
+
+.change-flow__chevron {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  color: var(--gray-500);
+  transition: transform 220ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.change-flow.is-open .change-flow__chevron {
+  transform: rotate(90deg);
+}
+
+.change-flow__title {
+  color: var(--gray-600);
+  font-size: 0.74rem;
+  font-weight: 750;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.change-flow__summary {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) 14px;
+  color: var(--gray-600);
+  font-size: 0.86rem;
+}
+
+.change-flow__summary b {
+  color: var(--gray-900);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.change-flow__summary .change-flow__swatch {
+  display: inline-block;
+  margin-right: 6px;
+}
+
+.change-flow__rows {
+  color: var(--gray-500);
+}
+
+.change-flow__swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.change-flow__body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 320ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.change-flow.is-open .change-flow__body {
+  grid-template-rows: 1fr;
+}
+
+/* clip, not hidden: a hidden box can be scrolled by focus or scrollIntoView mid-slide, shifting the rows. */
+.change-flow__inner {
+  min-height: 0;
+  overflow: clip;
+}
+
+.change-flow__content {
+  padding: 6px var(--space-2) var(--space-1);
+}
+
+.change-flow__legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  margin-bottom: var(--space-1);
+}
+
+.change-flow__legend button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  background: none;
+  color: var(--gray-600);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.change-flow__legend button:hover,
+.change-flow__legend button:focus-visible {
+  border-color: var(--gray-200);
+  background: var(--gray-50);
+  outline: none;
+}
+
+.change-flow__legend .change-flow__swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+}
+
+.change-flow__chart svg {
+  display: block;
+  width: 100%;
+}
+
+.change-flow__empty,
+.change-flow__foot {
+  margin: 10px 0 0;
+  color: var(--gray-500);
+  font-size: 0.82rem;
+}
+
+.change-flow__band {
+  stroke: var(--white);
+  stroke-width: 0.6;
+}
+
+.change-flow__band,
+.change-flow__label,
+.change-flow__stack {
+  transition: opacity 180ms ease;
+}
+
+.change-flow__svg.is-focused .change-flow__band {
+  opacity: 0.14;
+}
+
+.change-flow__svg.is-focused .change-flow__band.is-on {
+  opacity: 1;
+}
+
+.change-flow__svg.is-focused .change-flow__node:not(.is-on) .change-flow__stack,
+.change-flow__svg.is-focused .change-flow__node:not(.is-on) .change-flow__label {
+  opacity: 0.35;
+}
+
+.change-flow__node {
+  outline: none;
+}
+
+.change-flow__ring {
+  fill: transparent;
+  transition: fill 140ms ease;
+}
+
+.change-flow__node:hover .change-flow__ring,
+.change-flow__node.is-on .change-flow__ring {
+  fill: var(--gray-50);
+}
+
+.change-flow__node:focus-visible .change-flow__ring {
+  stroke: var(--azure-500);
+  stroke-width: 2;
+}
+
+.change-flow__svg text {
+  font-family: var(--font-family);
+  font-variant-numeric: tabular-nums;
+}
+
+.change-flow__head {
+  fill: var(--gray-400);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.change-flow__name {
+  fill: var(--gray-800);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.change-flow__count {
+  fill: var(--gray-900);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.change-flow__of {
+  fill: var(--gray-400);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.change-flow__big {
+  fill: var(--gray-900);
+  font-size: 20px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.change-flow__big.is-muted {
+  fill: var(--gray-500);
+}
+
+.change-flow__caption {
+  fill: var(--gray-500);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Fixed to the viewport and clamped by script, so it never changes any box's scroll size. */
+.change-flow-card {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 50;
+  min-width: 200px;
+  max-width: 260px;
+  padding: var(--space-3) 14px;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-md);
+  background: var(--white);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14), 0 2px 6px rgba(15, 23, 42, 0.06);
+  color: var(--gray-900);
+  font-size: 0.82rem;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.change-flow-card.is-shown {
+  opacity: 1;
+  transform: none;
+}
+
+.change-flow-card h3 {
+  margin: 0 0 var(--space-2);
+  font-size: 0.86rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.change-flow-card dl {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  margin: 0;
+}
+
+.change-flow-card dd {
+  margin: 0;
+  color: var(--gray-600);
+  overflow-wrap: anywhere;
+}
+
+.change-flow-card .change-flow-card__count {
+  color: var(--gray-900);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.change-flow-card__bar {
+  display: flex;
+  height: 6px;
+  margin-top: 10px;
+  border-radius: 3px;
+  background: var(--gray-100);
+  overflow: hidden;
+}
+
+.change-flow-card__bar span {
+  display: block;
+  height: 100%;
+}
+
+.change-flow-card p {
+  margin: var(--space-2) 0 0;
+  color: var(--gray-500);
+  font-size: 0.78rem;
+}
+
+/* Only phones scroll the chart sideways, inside its own box. */
+@media (max-width: 640px) {
+  .change-flow__chart {
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .change-flow__chart svg {
+    min-width: 560px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .change-flow__toggle,
+  .change-flow__chevron,
+  .change-flow__body,
+  .change-flow__legend button,
+  .change-flow__band,
+  .change-flow__label,
+  .change-flow__stack,
+  .change-flow__ring,
+  .change-flow-card {
+    transition: none;
+  }
+}
+
 .changes-table-card {
   margin-top: var(--space-6);
 }
 
-.summary-header,
 .mapping-header {
   display: flex;
   justify-content: space-between;
@@ -93,51 +444,6 @@
   font-size: 1.55rem;
   line-height: 1.2;
   letter-spacing: -0.015em;
-}
-
-.summary-loading,
-.summary-empty {
-  margin: 0;
-  padding: var(--space-8);
-  color: var(--gray-600);
-  text-align: center;
-}
-
-.change-impact {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin: 0;
-}
-
-.change-impact__metric {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  padding: var(--space-3) var(--space-6);
-  border-left: 1px solid var(--gray-200);
-}
-
-.change-impact__metric:first-child {
-  border-left: 0;
-}
-
-.change-impact__value {
-  order: -1;
-  margin: 0 0 var(--space-2);
-  color: var(--gray-900);
-  font-size: clamp(1.85rem, 3.5vw, 2.65rem);
-  font-weight: 780;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-  letter-spacing: -0.035em;
-}
-
-.change-impact__label {
-  max-width: 15rem;
-  color: var(--gray-600);
-  font-size: 0.88rem;
-  font-weight: 650;
-  line-height: 1.35;
 }
 
 .mapping-guidance {
@@ -598,7 +904,6 @@
   }
 
   .quality-certificate__main,
-  .summary-header,
   .mapping-header {
     display: block;
   }
@@ -618,7 +923,6 @@
 
 @media (max-width: 560px) {
   .quality-certificate,
-  .summary-card,
   .changes-table-card {
     padding: var(--space-5);
   }
@@ -641,28 +945,6 @@
 
   .conformance-warning-actions > button {
     width: 100%;
-  }
-
-  .change-impact {
-    grid-template-columns: 1fr;
-  }
-
-  .change-impact__metric {
-    flex-direction: row;
-    align-items: baseline;
-    gap: var(--space-4);
-    padding: var(--space-4) 0;
-    border-top: 1px solid var(--gray-200);
-    border-left: 0;
-  }
-
-  .change-impact__metric:first-child {
-    border-top: 0;
-  }
-
-  .change-impact__value {
-    min-width: 3.5rem;
-    margin: 0;
   }
 
   .history-current__values {
