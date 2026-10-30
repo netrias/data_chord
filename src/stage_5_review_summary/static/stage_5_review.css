@@ -42,36 +42,7 @@
 }
 
 .quality-certificate__actions {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-3);
   flex-shrink: 0;
-}
-
-.certificate-status {
-  display: inline-flex;
-  align-items: center;
-  min-height: 1.8rem;
-  padding: 0.28rem 0.72rem;
-  border: 1px solid var(--gray-200);
-  border-radius: var(--radius-full);
-  background: rgba(255, 255, 255, 0.82);
-  color: var(--gray-600);
-  font-size: 0.82rem;
-  font-weight: 700;
-}
-
-.certificate-status--ready {
-  border-color: var(--success-200);
-  background: var(--success-50);
-  color: var(--success-700);
-}
-
-.certificate-status--attention {
-  border-color: var(--warning-300);
-  background: var(--warning-50);
-  color: var(--warning-700);
 }
 
 /* Change details: a collapsed summary line that opens into a by-column flow chart. */
@@ -906,7 +877,6 @@
   }
 
   .quality-certificate__actions {
-    align-items: flex-start;
     margin-top: var(--space-6);
   }
 
@@ -928,11 +898,6 @@
   .quality-certificate__actions .btn-3d,
   .quality-certificate__actions .btn-3d-front {
     width: 100%;
-  }
-
-  .quality-certificate__actions {
-    align-items: stretch;
-    flex-direction: column;
   }
 
   .conformance-warning-actions {

@@ -36,7 +36,6 @@ const _downloadBtn = document.getElementById('downloadResults');
 const _downloadError = document.getElementById('downloadError');
 const _certificateTitle = document.getElementById('certificateTitle');
 const _datasetMetadata = document.getElementById('datasetMetadata');
-const _certificateStatus = document.getElementById('certificateStatus');
 const _changeFlow = document.getElementById('changeFlow');
 const _startOverAction = document.getElementById('uploadNavAction');
 const _startOverButton = document.getElementById('startOverButton');
@@ -58,7 +57,6 @@ const _state = {
   termMappings: [],
   sortColumn: null,
   sortDirection: 'asc',
-  nonConformantCount: 0,
   filter: 'changed',
 };
 
@@ -273,20 +271,12 @@ const _datasetDetails = (dataset) => {
   return parts.join(' · ');
 };
 
-const _renderCertificate = (dataset, nonConformantCount) => {
+const _renderCertificate = (dataset) => {
   if (_certificateTitle) {
     _certificateTitle.textContent = dataset?.filename || 'Harmonized data';
   }
   if (_datasetMetadata) {
     _datasetMetadata.textContent = _datasetDetails(dataset) || 'Ready to download';
-  }
-  if (!_certificateStatus) return;
-  if (nonConformantCount > 0) {
-    _certificateStatus.className = 'certificate-status certificate-status--attention';
-    _certificateStatus.textContent = `${nonConformantCount.toLocaleString()} ${nonConformantCount === 1 ? 'value needs' : 'values need'} review`;
-  } else {
-    _certificateStatus.className = 'certificate-status certificate-status--ready';
-    _certificateStatus.textContent = 'Ready to download';
   }
 };
 
@@ -637,9 +627,8 @@ const _fetchSummary = async () => {
     markTiming('stage5.summary.render.start');
 
     const conformanceItems = _validConformanceItems(data.non_conformant_items);
-    _state.nonConformantCount = conformanceItems.length;
-    _state.filter = _state.nonConformantCount > 0 ? 'needs_attention' : 'changed';
-    _renderCertificate(data.dataset, _state.nonConformantCount);
+    _state.filter = conformanceItems.length > 0 ? 'needs_attention' : 'changed';
+    _renderCertificate(data.dataset);
     mountChangeFlow(_changeFlow, data.column_summaries ?? []);
     _renderMappings(data.term_mappings ?? []);
     _showConformanceWarning(conformanceItems);
