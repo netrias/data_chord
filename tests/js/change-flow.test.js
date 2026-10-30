@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  MAX_SCALE,
   MIN_BAND,
   layoutFlow,
   summarizeChanges,
@@ -51,15 +52,66 @@ describe('Stage 5 change details', () => {
 
     // Then rows run by changed count descending, ties broken by total unique values
     assert.deepEqual(layout.left.map((node) => node.column.name), ['site', 'morphology', 'race', 'stage']);
-    // Then each column's bands fill its node exactly and none is thinner than the minimum
+    // Then one-value bands, which scale below the floor, are still drawn at the minimum
     const oneValueBands = layout.bands.filter((band) => band.value === 1);
     assert.ok(oneValueBands.length > 0);
-    for (const node of layout.left) {
-      const bandTotal = node.bands.reduce((sum, band) => sum + band.t, 0);
-      assert.equal(bandTotal, node.h, `${node.column.name} bands should sum to its node height`);
-      for (const band of node.bands) {
-        assert.ok(band.t >= MIN_BAND, `${node.column.name} ${band.target.outcome.id} band is ${band.t}px`);
+    assert.ok(layout.scale < MIN_BAND);
+    for (const band of layout.bands) {
+      assert.ok(band.t >= MIN_BAND, `${band.source.column.name} ${band.target.outcome.id} band is ${band.t}px`);
+    }
+  });
+
+  it('draws bands above the floor in proportion to their unique values', () => {
+    // Given a column whose outcomes all scale above the minimum band
+    const columns = [column('diagnosis', 40, 20, 80), column('site', 10, 0, 30)];
+
+    // When the flow is laid out
+    const layout = layoutFlow(columns, 900);
+
+    // Then every band is its value times the shared scale, and the scale fills the band budget
+    assert.equal(layout.scale, 280 / 180);
+    const thicknesses = layout.bands.map((band) => ({ value: band.value, t: band.t }));
+    assert.deepEqual(thicknesses, thicknesses.map(({ value }) => ({ value, t: value * layout.scale })));
+    assert.ok(thicknesses.every(({ t }) => t > MIN_BAND));
+  });
+
+  it('caps the per-value scale for tiny datasets', () => {
+    // Given a dataset so small that filling the band budget would draw 40 px per value
+    const columns = [column('sex', 2, 1, 4)];
+
+    // When the flow is laid out
+    const layout = layoutFlow(columns, 900);
+
+    // Then each value is drawn at the capped scale
+    assert.equal(layout.scale, MAX_SCALE);
+    assert.deepEqual(layout.bands.map((band) => band.t), [2 * MAX_SCALE, 1 * MAX_SCALE, 4 * MAX_SCALE]);
+  });
+
+  it('stacks bands inside each node without gaps or overlap', () => {
+    // Given several columns that share all three outcomes
+    const columns = [
+      column('diagnosis', 40, 3, 70),
+      column('site', 12, 1, 40),
+      column('race', 1, 0, 3),
+      column('stage', 0, 2, 9),
+    ];
+
+    // When the flow is laid out
+    const layout = layoutFlow(columns, 900);
+
+    // Then each node's bands start at its top, touch end to start, and end at its bottom
+    const nodeEdges = [
+      ...layout.left.map((node) => ({ node, starts: node.bands.map((band) => band.y0) })),
+      ...layout.right.map((node) => ({ node, starts: node.bands.map((band) => band.y1) })),
+    ];
+    for (const { node, starts } of nodeEdges) {
+      let expected = node.y;
+      for (const [index, band] of node.bands.entries()) {
+        assert.equal(starts[index], expected);
+        expected += band.t;
       }
+      // Summing in a different order can differ in the last float bit, far below a pixel.
+      assert.ok(Math.abs(expected - (node.y + node.h)) < 1e-9, `bands end at ${expected}, node ends at ${node.y + node.h}`);
     }
   });
 

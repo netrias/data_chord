@@ -197,26 +197,19 @@
   margin-bottom: var(--space-1);
 }
 
-.change-flow__legend button {
+.change-flow__legend span {
   display: inline-flex;
   align-items: center;
   gap: 7px;
   padding: 3px 10px;
-  border: 1px solid transparent;
   border-radius: var(--radius-full);
-  background: none;
   color: var(--gray-600);
-  font: inherit;
   font-size: 0.8rem;
   font-weight: 600;
-  transition: background var(--transition-fast), border-color var(--transition-fast);
 }
 
-.change-flow__legend button:hover,
-.change-flow__legend button:focus-visible {
-  border-color: var(--gray-200);
+.change-flow__legend span:hover {
   background: var(--gray-50);
-  outline: none;
 }
 
 .change-flow__legend .change-flow__swatch {
@@ -362,19 +355,27 @@
 
 .change-flow-card dl {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: 1fr auto;
   align-items: center;
   gap: var(--space-1) var(--space-2);
   margin: 0;
 }
 
-.change-flow-card dd {
-  margin: 0;
+.change-flow-card dt {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
   color: var(--gray-600);
   overflow-wrap: anywhere;
 }
 
-.change-flow-card .change-flow-card__count {
+.change-flow-card dt .change-flow__swatch {
+  flex-shrink: 0;
+}
+
+.change-flow-card dd {
+  margin: 0;
   color: var(--gray-900);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -413,15 +414,10 @@
   }
 }
 
+/* Reduced motion skips the slide, the chevron turn, and the card lift; colour fades stay. */
 @media (prefers-reduced-motion: reduce) {
-  .change-flow__toggle,
   .change-flow__chevron,
   .change-flow__body,
-  .change-flow__legend button,
-  .change-flow__band,
-  .change-flow__label,
-  .change-flow__stack,
-  .change-flow__ring,
   .change-flow-card {
     transition: none;
   }

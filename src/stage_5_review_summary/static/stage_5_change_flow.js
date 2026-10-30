@@ -6,10 +6,18 @@
 const _SVG_NS = 'http://www.w3.org/2000/svg';
 
 export const MIN_BAND = 3;
-const _NODE_WIDTH = 10;
-// Total band height for the whole chart; tiny datasets stop growing at the per-value cap.
+export const MAX_SCALE = 4;
+// Total band height for the whole chart; tiny datasets stop growing at MAX_SCALE px per value.
 const _BAND_BUDGET = 280;
-const _MAX_SCALE = 4;
+const _NODE_WIDTH = 10;
+// The left node column sits at a share of the width, kept between a minimum and maximum x.
+const _LEFT_X_SHARE = 0.3;
+const _LEFT_X_MIN = 210;
+const _LEFT_X_MAX = 270;
+// The outcome labels take a share of the width on the right, kept between a minimum and maximum.
+const _RIGHT_LABEL_SHARE = 0.18;
+const _RIGHT_LABEL_MIN = 140;
+const _RIGHT_LABEL_MAX = 170;
 const _ROW_MIN_LEFT = 22;
 const _ROW_MIN_RIGHT = 50;
 const _GAP_LEFT = 8;
@@ -21,9 +29,9 @@ const _RESIZE_DELAY_MS = 80;
 const _TOP_COLUMNS_IN_CARD = 4;
 
 const _OUTCOMES = [
-  { id: 'ai', field: 'ai_changes', label: 'changed by AI', short: 'by AI', color: '--flow-ai' },
-  { id: 'you', field: 'manual_changes', label: 'changed by you', short: 'by you', color: '--flow-you' },
-  { id: 'same', field: 'unchanged', label: 'unchanged', short: 'unchanged', color: '--flow-same' },
+  { id: 'ai', field: 'ai_changes', title: 'Changed by AI', label: 'changed by AI', short: 'by AI', color: '--flow-ai' },
+  { id: 'you', field: 'manual_changes', title: 'Changed by you', label: 'changed by you', short: 'by you', color: '--flow-you' },
+  { id: 'same', field: 'unchanged', title: 'Unchanged', label: 'unchanged', short: 'unchanged', color: '--flow-same' },
 ];
 
 const _safeCount = (value) => {
@@ -33,6 +41,7 @@ const _safeCount = (value) => {
 
 const _format = (count) => count.toLocaleString();
 const _percent = (part, whole) => `${whole ? Math.round((part / whole) * 100) : 0}%`;
+const _clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 /** Totals for the closed summary line; rows changed come from row counts, the rest from unique values. */
 export const summarizeChanges = (columns) => {
@@ -44,20 +53,18 @@ export const summarizeChanges = (columns) => {
   return totals;
 };
 
-/** Columns without unique values have nothing to draw, so they are left out. */
+/** The three outcomes partition a column's unique values; columns with none are left out. */
 const _chartColumns = (columns) => (Array.isArray(columns) ? columns : [])
   .map((column) => {
     const ai = _safeCount(column?.ai_changes);
     const you = _safeCount(column?.manual_changes);
     const same = _safeCount(column?.unchanged);
-    // The three outcomes partition distinct_terms; their sum is what the chart draws.
-    const total = _safeCount(column?.distinct_terms) > 0 ? ai + you + same : 0;
     return {
       name: String(column?.column ?? 'Unnamed column'),
       ai,
       you,
       same,
-      total,
+      total: ai + you + same,
       changed: ai + you,
     };
   })
@@ -79,14 +86,15 @@ const _placeNodes = (nodes, x, gap, rowMin, top) => {
 /**
  * Pure geometry for a two-column flow: columns on the left, outcomes on the right.
  * Band thickness is unique values times one shared scale, never below MIN_BAND.
- * Bands stack inside each node in the order of the node at the other end, to keep crossings low.
+ * Bands are created in row order and outcome order, which is already the top-to-bottom
+ * order of the node at the other end, so stacking in creation order keeps crossings low.
  */
 export const layoutFlow = (columns, width) => {
   const chartColumns = _chartColumns(columns);
   const total = chartColumns.reduce((sum, column) => sum + column.total, 0);
-  const scale = total ? Math.min(_MAX_SCALE, _BAND_BUDGET / total) : 0;
-  const leftX = Math.min(270, Math.max(210, width * 0.3));
-  const rightX = width - Math.min(170, Math.max(140, width * 0.18)) - _NODE_WIDTH;
+  const scale = total ? Math.min(MAX_SCALE, _BAND_BUDGET / total) : 0;
+  const leftX = _clamp(width * _LEFT_X_SHARE, _LEFT_X_MIN, _LEFT_X_MAX);
+  const rightX = width - _clamp(width * _RIGHT_LABEL_SHARE, _RIGHT_LABEL_MIN, _RIGHT_LABEL_MAX) - _NODE_WIDTH;
 
   // Geometry fields are filled by _placeNodes; el is set when the chart is drawn.
   const left = chartColumns.map((column) => ({ column, bands: [], x: 0, y: 0, h: 0, slot: 0, el: null }));
@@ -122,14 +130,14 @@ export const layoutFlow = (columns, width) => {
 
   for (const node of left) {
     let y = node.y;
-    for (const band of [...node.bands].sort((a, b) => a.target.y - b.target.y)) {
+    for (const band of node.bands) {
       band.y0 = y;
       y += band.t;
     }
   }
   for (const node of right) {
     let y = node.y;
-    for (const band of [...node.bands].sort((a, b) => a.source.y - b.source.y)) {
+    for (const band of node.bands) {
       band.y1 = y;
       y += band.t;
     }
@@ -138,6 +146,7 @@ export const layoutFlow = (columns, width) => {
   return {
     width,
     height: Math.ceil(Math.max(leftEnd, rightEnd) + 6),
+    scale,
     leftX,
     rightX,
     total,
@@ -164,36 +173,39 @@ const _svg = (tag, attributes, parent, text) => {
   return element;
 };
 
-const _swatch = (color, tag = 'i') => {
-  const swatch = document.createElement(tag);
+const _swatch = (color) => {
+  const swatch = document.createElement('i');
   swatch.className = 'change-flow__swatch';
   swatch.style.background = `var(${color})`;
   return swatch;
 };
 
-/** Shortens an SVG label until it fits; the full name stays in the hover card and accessible label. */
+/** Shortens an SVG label to the longest prefix that fits; the full name stays in the card and aria-label. */
 const _fitText = (text, maxWidth) => {
   const full = text.textContent ?? '';
-  if (maxWidth <= 0 || text.getComputedTextLength() <= maxWidth) return;
-  let length = full.length;
-  while (length > 1 && text.getComputedTextLength() > maxWidth) {
-    length -= 1;
-    text.textContent = `${full.slice(0, length)}…`;
+  if (text.getComputedTextLength() <= maxWidth) return;
+  let low = 0;
+  let high = full.length - 1;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    text.textContent = `${full.slice(0, middle)}…`;
+    if (text.getComputedTextLength() <= maxWidth) low = middle;
+    else high = middle - 1;
   }
+  text.textContent = `${full.slice(0, Math.max(low, 1))}…`;
 };
 
 /* ---------- Hover card content ---------- */
 
 const _cardRow = (list, color, label, count) => {
-  list.append(_swatch(color, 'dt'), _html('dd', '', label), _html('dd', 'change-flow-card__count', _format(count)));
+  const term = _html('dt');
+  term.append(_swatch(color), label);
+  list.append(term, _html('dd', '', _format(count)));
 };
 
 const _columnCard = (column) => {
   const list = _html('dl');
-  for (const outcome of _OUTCOMES) {
-    const label = outcome.label[0].toUpperCase() + outcome.label.slice(1);
-    _cardRow(list, outcome.color, label, column[outcome.id]);
-  }
+  for (const outcome of _OUTCOMES) _cardRow(list, outcome.color, outcome.title, column[outcome.id]);
   const bar = _html('div', 'change-flow-card__bar');
   for (const outcome of _OUTCOMES.slice(0, 2)) {
     const part = _html('span');
@@ -228,7 +240,7 @@ const _bandCard = (band) => {
   const { column } = band.source;
   const { outcome } = band.target;
   const list = _html('dl');
-  _cardRow(list, outcome.color, outcome.label[0].toUpperCase() + outcome.label.slice(1), band.value);
+  _cardRow(list, outcome.color, outcome.title, band.value);
   return [
     _html('h3', '', column.name),
     list,
@@ -270,16 +282,23 @@ const _buildDisclosure = (columns) => {
   return toggle;
 };
 
+/** Plain text keys; pointer hover highlights an outcome, but they take no focus because they have no action. */
 const _buildLegend = () => {
   const legend = _html('div', 'change-flow__legend');
   for (const outcome of _OUTCOMES) {
-    const button = _html('button');
-    button.type = 'button';
-    button.dataset.outcome = outcome.id;
-    button.append(_swatch(outcome.color), outcome.label[0].toUpperCase() + outcome.label.slice(1));
-    legend.appendChild(button);
+    const key = _html('span');
+    key.dataset.outcome = outcome.id;
+    key.append(_swatch(outcome.color), outcome.title);
+    legend.appendChild(key);
   }
   return legend;
+};
+
+const _bandPath = (band, x0, x1) => {
+  const c1 = x0 + (x1 - x0) * 0.45;
+  const c2 = x1 - (x1 - x0) * 0.45;
+  return `M${x0},${band.y0} C${c1},${band.y0} ${c2},${band.y1} ${x1},${band.y1}`
+    + ` L${x1},${band.y1 + band.t} C${c2},${band.y1 + band.t} ${c1},${band.y0 + band.t} ${x0},${band.y0 + band.t} Z`;
 };
 
 /** Renders the disclosure into rootEl. Closed on every load; the chart draws in each time it opens. */
@@ -308,6 +327,13 @@ export const mountChangeFlow = (rootEl, columns) => {
   rootEl.replaceChildren(toggle, body, card);
 
   let layout = null;
+  // A keyboard-focused node the card is pinned to; null while the card follows the pointer.
+  let cardAnchor = null;
+  // The draw-in is timed from the open, so a redraw mid-reveal resumes it instead of snapping.
+  let revealStart = -Infinity;
+  let revealFrame = 0;
+  let lastWidth = -1;
+  const isOpen = () => toggle.getAttribute('aria-expanded') === 'true';
 
   const placeCard = (x, y) => {
     const maxX = window.innerWidth - card.offsetWidth - 8;
@@ -316,8 +342,13 @@ export const mountChangeFlow = (rootEl, columns) => {
     card.style.top = `${Math.max(8, Math.min(y, maxY))}px`;
   };
   const followPointer = (event) => placeCard(event.clientX + 16, event.clientY + 14);
+  const placeAtAnchor = (anchor) => {
+    const box = anchor.getBoundingClientRect();
+    placeCard(box.right + 8, box.top);
+  };
 
   const clearFocus = () => {
+    cardAnchor = null;
     svg.classList.remove('is-focused');
     for (const element of svg.querySelectorAll('.is-on')) element.classList.remove('is-on');
     card.classList.remove('is-shown');
@@ -330,24 +361,33 @@ export const mountChangeFlow = (rootEl, columns) => {
     for (const node of nodes) node.el.classList.add('is-on');
     card.replaceChildren(...cardContent);
     card.classList.add('is-shown');
-    if (event) {
-      followPointer(event);
-    } else if (anchor) {
-      const box = anchor.getBoundingClientRect();
-      placeCard(box.right + 8, box.top);
-    }
+    cardAnchor = event ? null : anchor;
+    if (event) followPointer(event);
+    else placeAtAnchor(anchor);
   };
 
-  const wire = (element, cardContent, bands, nodes) => {
+  // Scrolling moves the chart under a resting pointer, so a pointer card hides; a focus card follows its node.
+  const handleScroll = () => {
+    if (cardAnchor && cardAnchor === document.activeElement) placeAtAnchor(cardAnchor);
+    else clearFocus();
+  };
+
+  const wirePointer = (element, cardContent, bands, nodes) => {
     element.addEventListener('pointerenter', (event) => focusOn(cardContent(), bands, nodes, event));
     element.addEventListener('pointermove', followPointer);
     element.addEventListener('pointerleave', clearFocus);
+  };
+  // Separate from pointer wiring: Chromium makes any SVG element with focus listeners a Tab stop.
+  const wireNode = (element, cardContent, bands, nodes) => {
+    wirePointer(element, cardContent, bands, nodes);
     element.addEventListener('focus', () => focusOn(cardContent(), bands, nodes, null, element));
     element.addEventListener('blur', clearFocus);
   };
 
-  const draw = (animate) => {
+  const draw = () => {
     clearFocus();
+    cancelAnimationFrame(revealFrame);
+    lastWidth = wrap.clientWidth;
     const minWidth = parseFloat(getComputedStyle(svg).minWidth) || 0;
     const width = Math.max(minWidth, Math.round(wrap.clientWidth));
     layout = layoutFlow(columns, width);
@@ -361,36 +401,37 @@ export const mountChangeFlow = (rootEl, columns) => {
     svg.setAttribute('viewBox', `0 0 ${width} ${layout.height}`);
     svg.setAttribute('height', String(layout.height));
     const defs = _svg('defs', {}, svg);
-    const clipRect = _svg('rect', { x: 0, y: 0, width: animate ? layout.leftX : width, height: layout.height }, _svg('clipPath', { id: 'changeFlowReveal' }, defs));
+    const revealRect = _svg('rect', { x: 0, y: 0, width, height: layout.height }, _svg('clipPath', { id: 'changeFlowReveal' }, defs));
 
     _svg('text', { x: 0, y: 11, class: 'change-flow__head' }, svg, 'COLUMN');
     _svg('text', { x: layout.leftX - 14, y: 11, 'text-anchor': 'end', class: 'change-flow__head' }, svg, 'CHANGED / UNIQUE');
     _svg('text', { x: layout.rightX + _NODE_WIDTH + 12, y: 11, class: 'change-flow__head' }, svg, 'OUTCOME');
 
-    const bandGroup = _svg('g', { 'clip-path': 'url(#changeFlowReveal)' }, svg);
-    const nodeGroup = _svg('g', {}, svg);
-
-    // Bands fade from a neutral source tone into the outcome color.
-    for (const [index, band] of layout.bands.entries()) {
-      const x0 = band.source.x + _NODE_WIDTH;
-      const x1 = band.target.x;
-      const muted = band.target.outcome.id === 'same';
+    // Every band runs between the same two x positions, so one gradient per outcome serves them all.
+    const x0 = layout.leftX + _NODE_WIDTH;
+    const x1 = layout.rightX;
+    for (const outcome of _OUTCOMES) {
+      const muted = outcome.id === 'same';
       const gradient = _svg('linearGradient', {
-        id: `changeFlowBand${index}`, gradientUnits: 'userSpaceOnUse', x1: x0, x2: x1, y1: 0, y2: 0,
+        id: `changeFlowBand-${outcome.id}`, gradientUnits: 'userSpaceOnUse', x1: x0, x2: x1, y1: 0, y2: 0,
       }, defs);
+      // Bands fade from a neutral source tone into the outcome color.
       const from = _svg('stop', { offset: '0%', 'stop-opacity': muted ? 0.9 : 0.35 }, gradient);
       from.style.stopColor = muted ? 'var(--gray-200)' : 'var(--flow-source)';
       const to = _svg('stop', { offset: '100%', 'stop-opacity': muted ? 0.75 : 0.88 }, gradient);
-      to.style.stopColor = `var(${band.target.outcome.color})`;
-      const c1 = x0 + (x1 - x0) * 0.45;
-      const c2 = x1 - (x1 - x0) * 0.45;
-      const d = `M${x0},${band.y0} C${c1},${band.y0} ${c2},${band.y1} ${x1},${band.y1}`
-        + ` L${x1},${band.y1 + band.t} C${c2},${band.y1 + band.t} ${c1},${band.y0 + band.t} ${x0},${band.y0 + band.t} Z`;
-      band.el = _svg('path', { d, class: 'change-flow__band', fill: `url(#changeFlowBand${index})` }, bandGroup);
-      band.el.dataset.outcome = band.target.outcome.id;
-      band.el.addEventListener('pointerenter', (event) => focusOn(_bandCard(band), [band], [band.source, band.target], event));
-      band.el.addEventListener('pointermove', followPointer);
-      band.el.addEventListener('pointerleave', clearFocus);
+      to.style.stopColor = `var(${outcome.color})`;
+    }
+
+    const bandGroup = _svg('g', { 'clip-path': 'url(#changeFlowReveal)' }, svg);
+    const nodeGroup = _svg('g', {}, svg);
+
+    for (const band of layout.bands) {
+      const outcomeId = band.target.outcome.id;
+      band.el = _svg('path', {
+        d: _bandPath(band, x0, x1), class: 'change-flow__band', fill: `url(#changeFlowBand-${outcomeId})`,
+      }, bandGroup);
+      band.el.dataset.outcome = outcomeId;
+      wirePointer(band.el, () => _bandCard(band), [band], [band.source, band.target]);
     }
 
     // Left rows: name, then "changed / unique" right-aligned against a small stacked node.
@@ -420,7 +461,7 @@ export const mountChangeFlow = (rootEl, columns) => {
       _svg('tspan', { class: 'change-flow__of' }, counts, ` / ${_format(column.total)}`);
       _fitText(name, node.x - 14 - counts.getComputedTextLength() - 12);
       node.el = group;
-      wire(group, () => _columnCard(column), node.bands, [node, ...node.bands.map((band) => band.target)]);
+      wireNode(group, () => _columnCard(column), node.bands, [node, ...node.bands.map((band) => band.target)]);
     }
 
     // Right nodes: big number with a caption under it.
@@ -436,7 +477,7 @@ export const mountChangeFlow = (rootEl, columns) => {
       const centerY = node.y + node.h / 2;
       const textX = node.x + _NODE_WIDTH + 12;
       _svg('rect', {
-        x: node.x - 4, y: centerY - node.slot / 2 - 3, width: Math.min(170, width - node.x + 4), height: node.slot + 6, rx: 6, class: 'change-flow__ring',
+        x: node.x - 4, y: centerY - node.slot / 2 - 3, width: Math.min(_RIGHT_LABEL_MAX, width - node.x + 4), height: node.slot + 6, rx: 6, class: 'change-flow__ring',
       }, group);
       const bar = _svg('rect', { x: node.x, y: node.y, width: _NODE_WIDTH, height: node.h, rx: 3, class: 'change-flow__stack' }, group);
       bar.style.fill = `var(${outcome.color})`;
@@ -446,51 +487,48 @@ export const mountChangeFlow = (rootEl, columns) => {
       }, label, _format(value));
       _svg('text', { x: textX, y: centerY + 12, 'dominant-baseline': 'central', class: 'change-flow__caption' }, label, `${outcome.label} · ${_percent(value, layout.total)}`);
       node.el = group;
-      wire(group, () => _outcomeCard(node, layout), node.bands, [node, ...node.bands.map((band) => band.source)]);
+      wireNode(group, () => _outcomeCard(node, layout), node.bands, [node, ...node.bands.map((band) => band.source)]);
     }
 
-    if (animate && !reducedMotion.matches) {
-      const start = performance.now() + _DRAW_DELAY_MS;
-      const from = layout.leftX;
-      const step = (now) => {
-        const progress = Math.max(0, Math.min(1, (now - start) / _DRAW_DURATION_MS));
-        clipRect.setAttribute('width', String(from + (width - from) * (1 - (1 - progress) ** 3)));
-        if (progress < 1) requestAnimationFrame(step);
-      };
-      requestAnimationFrame(step);
-    }
+    // Grows the band clip from the left nodes to the full width; skipped once the reveal has finished.
+    const revealFrom = layout.leftX;
+    const stepReveal = () => {
+      const progress = _clamp((performance.now() - revealStart) / _DRAW_DURATION_MS, 0, 1);
+      revealRect.setAttribute('width', String(revealFrom + (width - revealFrom) * (1 - (1 - progress) ** 3)));
+      if (progress < 1) revealFrame = requestAnimationFrame(stepReveal);
+    };
+    stepReveal();
   };
 
-  for (const button of legend.querySelectorAll('button')) {
-    const show = () => {
-      const node = layout?.right.find((outcome) => outcome.outcome.id === button.dataset.outcome);
+  for (const key of legend.querySelectorAll('[data-outcome]')) {
+    key.addEventListener('pointerenter', () => {
+      const node = layout?.right.find((outcome) => outcome.outcome.id === key.dataset.outcome);
       if (!node?.el) return;
       focusOn(_outcomeCard(node, layout), node.bands, [node, ...node.bands.map((band) => band.source)], null, node.el);
-    };
-    button.addEventListener('pointerenter', show);
-    button.addEventListener('focus', show);
-    button.addEventListener('pointerleave', clearFocus);
-    button.addEventListener('blur', clearFocus);
+    });
+    key.addEventListener('pointerleave', clearFocus);
   }
 
   toggle.addEventListener('click', () => {
-    const open = toggle.getAttribute('aria-expanded') !== 'true';
+    const open = !isOpen();
     rootEl.classList.toggle('is-open', open);
     toggle.setAttribute('aria-expanded', String(open));
     inner.inert = !open;
-    if (open) draw(true);
-    else clearFocus();
+    if (!open) {
+      clearFocus();
+      return;
+    }
+    revealStart = reducedMotion.matches ? -Infinity : performance.now() + _DRAW_DELAY_MS;
+    draw();
   });
-  window.addEventListener('scroll', clearFocus, { passive: true });
+  window.addEventListener('scroll', handleScroll, { passive: true });
+  wrap.addEventListener('scroll', handleScroll, { passive: true });
 
-  draw(false);
-  // Redraw only when the width changes, so height changes never cause a redraw loop.
-  let lastWidth = wrap.clientWidth;
+  // Redraw only when an open chart's width changes, so height changes never cause a redraw loop.
   let timer = null;
   new ResizeObserver(() => {
-    if (wrap.clientWidth === lastWidth) return;
-    lastWidth = wrap.clientWidth;
+    if (!isOpen() || wrap.clientWidth === lastWidth) return;
     clearTimeout(timer);
-    timer = setTimeout(() => draw(false), _RESIZE_DELAY_MS);
+    timer = setTimeout(draw, _RESIZE_DELAY_MS);
   }).observe(wrap);
 };
