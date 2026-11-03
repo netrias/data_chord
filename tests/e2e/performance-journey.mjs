@@ -83,7 +83,7 @@ export const runNavigationSample = async ({
   await _waitForMeasure(page, 'stage5.init_to_usable', timeout);
   const stageFiveButtonToUsableMs = _duration(stageFiveStartedAt);
   const stageFiveReport = await _readTimingReport(page);
-  await page.locator('#summaryGrid .change-impact').waitFor({ state: 'visible', timeout });
+  await page.locator('.change-flow__summary').waitFor({ state: 'visible', timeout });
   const proceedButton = page.locator('#conformanceProceedButton');
   const warningShown = await proceedButton.isVisible();
   if (warningShown) await proceedButton.click();

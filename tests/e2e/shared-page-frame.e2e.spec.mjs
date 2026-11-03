@@ -301,7 +301,7 @@ test('later stages do not replace an invalid URL workflow from session state', a
 
   // Then: navigation does not select either the invalid or unrelated workflow
   await expect(page).toHaveURL('/stage-5');
-  await expect(page.locator('#summaryGrid')).toContainText('Unable to locate this harmonization workflow.');
+  await expect(page.locator('#changeFlow')).toContainText('Unable to locate this harmonization workflow.');
 });
 
 test('later stages reject duplicate workflow ids', async ({ page }) => {
@@ -318,5 +318,5 @@ test('later stages reject duplicate workflow ids', async ({ page }) => {
 
   // Then: navigation does not select either ambiguous workflow
   await expect(page).toHaveURL('/stage-5');
-  await expect(page.locator('#summaryGrid')).toContainText('Unable to locate this harmonization workflow.');
+  await expect(page.locator('#changeFlow')).toContainText('Unable to locate this harmonization workflow.');
 });

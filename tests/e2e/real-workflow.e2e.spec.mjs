@@ -197,7 +197,7 @@ test('real workflow: upload, map, harmonize, review, summarize, and download', a
   await page.click('#stageFiveButton');
   await page.waitForURL(/\/stage-5/);
   await expect(page.locator('.quality-certificate')).toBeVisible();
-  await expect(page.locator('[data-impact-metric="manual_values"]')).toContainText('1');
+  await expect(page.locator('[data-change-total="you"]')).toHaveText('1 by you');
 
   const downloadResponse = await page.request.post('/stage-5/download', {
     data: { file_id: fileId },
@@ -286,7 +286,7 @@ test('real workflow: restoring an original value keeps its warning and clears th
   await expect(page.locator('#conformanceWarningDialog')).toBeVisible();
   await expect(page.locator('#conformanceWarningDialog')).toContainText('adamantinoma');
   await page.click('#conformanceProceedButton');
-  await expect(page.locator('[data-impact-metric="manual_values"]')).toContainText('0');
+  await expect(page.locator('[data-change-total="you"]')).toHaveText('0 by you');
   const downloadResponse = await page.request.post('/stage-5/download', {
     data: { file_id: fileId },
   });
@@ -408,7 +408,7 @@ test('classic dataset: confirmed mappings, full text, restore, and exact export'
   await page.waitForURL(/\/stage-5/);
   await expect(page.locator('#conformanceWarningDialog')).toContainText('11 values');
   await page.click('#conformanceProceedButton');
-  await expect(page.locator('[data-impact-metric="manual_values"]')).toContainText('0');
+  await expect(page.locator('[data-change-total="you"]')).toHaveText('0 by you');
   const response = await page.request.post('/stage-5/download', { data: { file_id: fileId } });
   expect(response.ok()).toBe(true);
   // Then: the whole export has the expected columns and cells, including exact line breaks and whitespace.
