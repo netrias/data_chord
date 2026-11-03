@@ -194,8 +194,7 @@
   width: 100%;
 }
 
-.change-flow__empty,
-.change-flow__foot {
+.change-flow__empty {
   margin: 10px 0 0;
   color: var(--gray-500);
   font-size: 0.82rem;
