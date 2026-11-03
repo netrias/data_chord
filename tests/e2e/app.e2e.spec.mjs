@@ -824,7 +824,7 @@ test('happy path flow: upload → analyze → harmonize → review → summary �
   await expect(page.locator('.quality-certificate')).toBeVisible();
   await expect(page.locator('[data-change-total="ai"]')).toHaveText('1 by AI');
   await expect(page.locator('[data-change-total="you"]')).toHaveText('0 by you');
-  await expect(page.locator('[data-change-total="rows"]')).toHaveText('· 2 rows changed');
+  await expect(page.locator('[data-change-total="cells"]')).toHaveText('· 2 cells changed');
   await expect(page.locator('.provenance-line')).toHaveCount(0);
 
   const rows = await downloadCsvRows(page, fileId);
@@ -2367,7 +2367,7 @@ test('no-change flow shows empty review state and zero outcome metrics', async (
   await expect(page.locator('.quality-certificate')).toBeVisible();
   await expect(page.locator('[data-change-total="ai"]')).toHaveText('0 by AI');
   await expect(page.locator('[data-change-total="you"]')).toHaveText('0 by you');
-  await expect(page.locator('[data-change-total="rows"]')).toHaveText('· 0 rows changed');
+  await expect(page.locator('[data-change-total="cells"]')).toHaveText('· 0 cells changed');
 });
 
 test('Stage 5 aggregates change impact and keeps filters keyboard accessible', async ({ page }) => {
@@ -2475,7 +2475,7 @@ test('Stage 5 aggregates change impact and keeps filters keyboard accessible', a
   await expect(page.locator('[data-change-total="ai"]')).toHaveText('2 by AI');
   await expect(page.locator('[data-change-total="you"]')).toHaveText('1 by you');
   await expect(page.locator('[data-change-total="same"]')).toHaveText('1 unchanged');
-  await expect(page.locator('[data-change-total="rows"]')).toHaveText('· 5 rows changed');
+  await expect(page.locator('[data-change-total="cells"]')).toHaveText('· 5 cells changed');
   await expect(page.locator('#mappingTitle')).toHaveText('Value details · Select a row to view history');
   const attention = page.getByRole('button', { name: 'Needs attention' });
   await expect(attention).toHaveAttribute('aria-pressed', 'true');
@@ -2594,7 +2594,7 @@ test('Stage 5 change details stay closed until opened and keep the chart out of 
   await expect(page.locator('[data-change-total="ai"]')).toHaveText('135 by AI');
   await expect(page.locator('[data-change-total="you"]')).toHaveText('13 by you');
   await expect(page.locator('[data-change-total="same"]')).toHaveText('490 unchanged');
-  await expect(page.locator('[data-change-total="rows"]')).toHaveText('· 444 rows changed');
+  await expect(page.locator('[data-change-total="cells"]')).toHaveText('· 444 cells changed');
   await expect(page.locator('#changeFlowBody')).toHaveJSProperty('offsetHeight', 0);
 
   // When: the reviewer opens the change details from the keyboard

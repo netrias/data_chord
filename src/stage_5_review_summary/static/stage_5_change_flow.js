@@ -48,12 +48,12 @@ const _format = (count) => count.toLocaleString();
 const _percent = (part, whole) => `${whole ? Math.round((part / whole) * 100) : 0}%`;
 const _clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
-/** Totals for the closed summary line; rows changed come from row counts, the rest from unique values. */
+/** Totals for the closed summary line; summing per-column changed rows counts changed cells. */
 export const summarizeChanges = (columns) => {
-  const totals = { ai: 0, you: 0, same: 0, rowsChanged: 0 };
+  const totals = { ai: 0, you: 0, same: 0, cellsChanged: 0 };
   for (const column of Array.isArray(columns) ? columns : []) {
     for (const outcome of _OUTCOMES) totals[outcome.id] += _safeCount(column?.[outcome.field]);
-    totals.rowsChanged += _safeCount(column?.changed_rows);
+    totals.cellsChanged += _safeCount(column?.changed_rows);
   }
   return totals;
 };
@@ -279,9 +279,9 @@ const _buildDisclosure = (columns) => {
     item.append(_swatch(outcome.color), _html('b', '', _format(totals[outcome.id])), ` ${outcome.short}`);
     line.appendChild(item);
   }
-  const rows = _html('span', 'change-flow__rows', `· ${_format(totals.rowsChanged)} rows changed`);
-  rows.dataset.changeTotal = 'rows';
-  line.appendChild(rows);
+  const cells = _html('span', 'change-flow__rows', `· ${_format(totals.cellsChanged)} cells changed`);
+  cells.dataset.changeTotal = 'cells';
+  line.appendChild(cells);
 
   toggle.append(chevron, _html('span', 'change-flow__title', 'Change details'), line);
   return toggle;

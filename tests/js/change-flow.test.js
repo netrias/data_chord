@@ -25,15 +25,26 @@ const bandsByColumn = (layout) => Object.fromEntries(layout.left.map((node) => [
 ]));
 
 describe('Stage 5 change details', () => {
-  it('summarizes unique-value outcomes and changed rows across columns', () => {
-    // Given two columns with different outcome counts and changed rows
+  it('summarizes unique-value outcomes and changed cells across columns', () => {
+    // Given two columns with different outcome counts and per-column changed-row counts
     const columns = [column('diagnosis', 4, 2, 9, 31), column('sex', 1, 0, 2, 7)];
 
     // When the summary line totals are computed
     const totals = summarizeChanges(columns);
 
     // Then each total is the sum of the matching column field
-    assert.deepEqual(totals, { ai: 5, you: 2, same: 11, rowsChanged: 38 });
+    assert.deepEqual(totals, { ai: 5, you: 2, same: 11, cellsChanged: 38 });
+  });
+
+  it('counts two corrected columns in one source row as two changed cells', () => {
+    // Given one source row with a corrected diagnosis and sex
+    const columns = [column('diagnosis', 1, 0, 0, 1), column('sex', 0, 1, 0, 1)];
+
+    // When the summary totals the changes across columns
+    const totals = summarizeChanges(columns);
+
+    // Then it reports two changed cells, without claiming there are two changed source rows
+    assert.deepEqual(totals, { ai: 1, you: 1, same: 0, cellsChanged: 2 });
   });
 
   it('sorts rows by changed count, then total, and keeps bands thick enough to see', () => {
