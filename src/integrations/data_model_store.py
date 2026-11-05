@@ -17,6 +17,7 @@ from netrias_client import DataModelStoreError, NetriasAPIUnavailable, NetriasCl
 from src.domain.cde import CDEInfo, DataModelSummary, DataModelVersionInfo
 from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.cde_type_classification import classify_cde
+from src.domain.reference_placements import CdePlacement
 
 
 @dataclass(frozen=True)
@@ -103,6 +104,87 @@ async def fetch_all_pvs_async(
 
     body = _response_json(response)
     return _pv_map_from_all_pvs_response(body)
+
+
+async def fetch_nodes_and_placements_async(
+    client: NetriasClient | None,
+    data_model_key: str,
+    external_version_number: str,
+) -> tuple[tuple[str, ...], tuple[CdePlacement, ...]]:
+    """Read the source's full node/CDE shape, including shared CDE keys."""
+    if client is None:
+        raise NetriasAPIUnavailable("data model store client is unavailable")
+    config = _data_model_store_config(client)
+    if config is None:
+        raise DataModelStoreError("data model store client configuration is incomplete")
+    base_path = (
+        f"/data-models/{quote(data_model_key, safe='')}"
+        f"/versions/{quote(external_version_number, safe='')}"
+    )
+    async with httpx.AsyncClient(timeout=httpx.Timeout(config.timeout)) as http_client:
+        node_items = await _fetch_catalog_items(http_client, config, f"{base_path}/nodes")
+        cde_items = await _fetch_catalog_items(
+            http_client, config, f"{base_path}/cdes?include_description=true"
+        )
+
+    nodes: list[str] = []
+    node_counts: dict[str, int] = {}
+    for item in node_items:
+        node = item.get("node")
+        count = item.get("cde_count")
+        if not isinstance(node, str) or not node or node in node_counts or type(count) is not int or count < 0:
+            raise DataModelStoreError("unexpected node response item")
+        nodes.append(node)
+        node_counts[node] = count
+    placements: list[CdePlacement] = []
+    for item in cde_items:
+        node = item.get("node")
+        key = item.get("cde_key")
+        cde_id = item.get("cde_id")
+        description = item.get("cde_description")
+        data_type = item.get("data_type")
+        is_required = item.get("is_required")
+        is_key = item.get("is_key")
+        if (
+            not isinstance(node, str) or node not in node_counts
+            or not isinstance(key, str) or not key
+            or (cde_id is not None and (type(cde_id) is not int or cde_id < 0))
+            or (description is not None and not isinstance(description, str))
+            or (data_type is not None and not isinstance(data_type, str))
+            or (is_required is not None and not isinstance(is_required, bool))
+            or (is_key is not None and not isinstance(is_key, bool))
+        ):
+            raise DataModelStoreError("unexpected CDE response item")
+        placements.append(CdePlacement(
+            node=node, cde_key=key, cde_id=cast(int | None, cde_id),
+            description=cast(str | None, description), data_type=cast(str | None, data_type),
+            is_required=cast(bool | None, is_required), is_key=cast(bool | None, is_key),
+        ))
+    for node, count in node_counts.items():
+        if sum(placement.node == node for placement in placements) != count:
+            raise DataModelStoreError(f"CDE count does not match node: {node}")
+    return tuple(nodes), tuple(placements)
+
+
+async def _fetch_catalog_items(
+    http_client: httpx.AsyncClient, config: _DataModelStoreConfig, path: str
+) -> list[Mapping[str, object]]:
+    try:
+        response = await http_client.get(
+            f"{config.base_url.rstrip('/')}{path}", headers={"x-api-key": config.api_key}
+        )
+    except httpx.TimeoutException as exc:
+        raise NetriasAPIUnavailable("data model store request timed out") from exc
+    except httpx.HTTPError as exc:
+        raise NetriasAPIUnavailable(f"data model store request failed: {exc}") from exc
+    body = _response_json(response)
+    items = body.get("items")
+    total = body.get("total")
+    if not isinstance(items, list) or type(total) is not int or total != len(items) or any(
+        not isinstance(item, Mapping) for item in items
+    ):
+        raise DataModelStoreError("unexpected node or CDE response format")
+    return cast(list[Mapping[str, object]], items)
 
 
 def _pv_map_from_all_pvs_response(body: Mapping[str, object]) -> CdePvCatalog:

@@ -17,8 +17,10 @@ from src.domain.reference_data import (
     ReferenceModel,
     ReferenceModelNotFoundError,
 )
+from src.domain.reference_placements import CdePlacement, PlacedReferenceModel
 
 FILE_SCHEMA_VERSION = 1
+PLACED_FILE_SCHEMA_VERSION = 2
 
 
 class FileReferenceDataRepository:
@@ -57,23 +59,139 @@ def save_reference_models(path: Path, models: Sequence[ReferenceModel]) -> None:
     )
 
 
+def save_placed_reference_models(path: Path, models: Sequence[PlacedReferenceModel]) -> None:
+    """Write the full node and placement shape needed by DynamoDB imports."""
+    model_payloads = [_placed_model_to_payload(model) for model in sorted(models, key=_model_order)]
+    payload = {
+        "schema_version": PLACED_FILE_SCHEMA_VERSION,
+        "model_count": len(model_payloads),
+        "digest": _digest(model_payloads),
+        "models": model_payloads,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def load_reference_models(path: Path) -> tuple[ReferenceModel, ...]:
+    payload = _read_payload(path)
+    if payload["schema_version"] == PLACED_FILE_SCHEMA_VERSION:
+        return tuple(model.collapse() for model in _placed_models_from_payload(payload))
+    return _flat_models_from_payload(payload)
+
+
+def load_placed_reference_models(path: Path) -> tuple[PlacedReferenceModel, ...]:
+    payload = _read_payload(path)
+    if payload["schema_version"] != PLACED_FILE_SCHEMA_VERSION:
+        raise ReferenceDataCorruptError("Reference export has no node placements")
+    return _placed_models_from_payload(payload)
+
+
+def _read_payload(path: Path) -> Mapping[str, object]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ReferenceDataCorruptError("Reference export file is unreadable") from exc
-    if not isinstance(payload, Mapping) or payload.get("schema_version") != FILE_SCHEMA_VERSION:
+    if not isinstance(payload, Mapping) or payload.get("schema_version") not in (
+        FILE_SCHEMA_VERSION, PLACED_FILE_SCHEMA_VERSION
+    ):
         raise ReferenceDataCorruptError("Reference export schema is unsupported")
     raw_models = payload.get("models")
     if not isinstance(raw_models, list):
         raise ReferenceDataCorruptError("Reference export models must be a list")
     if payload.get("model_count") != len(raw_models) or payload.get("digest") != _digest(raw_models):
         raise ReferenceDataCorruptError("Reference export integrity check failed")
+    return payload
+
+
+def _flat_models_from_payload(payload: Mapping[str, object]) -> tuple[ReferenceModel, ...]:
+    raw_models = cast(list[object], payload["models"])
     models = tuple(_model_from_payload(raw) for raw in raw_models)
+    _check_unique_versions(models)
+    return models
+
+
+def _placed_models_from_payload(payload: Mapping[str, object]) -> tuple[PlacedReferenceModel, ...]:
+    raw_models = cast(list[object], payload["models"])
+    models = tuple(_placed_model_from_payload(raw) for raw in raw_models)
+    _check_unique_versions(models)
+    return models
+
+
+def _check_unique_versions(models: Sequence[ReferenceModel | PlacedReferenceModel]) -> None:
     identities = {(model.version.data_model_key, model.version.external_version_number) for model in models}
     if len(identities) != len(models):
         raise ReferenceDataCorruptError("Reference export contains duplicate model versions")
-    return models
+
+
+def _placed_model_to_payload(model: PlacedReferenceModel) -> Mapping[str, object]:
+    return {
+        "data_model_key": model.version.data_model_key,
+        "external_version_number": model.version.external_version_number,
+        "label": model.label,
+        "nodes": list(model.nodes),
+        "placements": [
+            ({
+                "node": placement.node,
+                "cde_key": placement.cde_key,
+                "cde_id": placement.cde_id,
+                "description": placement.description,
+                "data_type": placement.data_type,
+                "is_required": placement.is_required,
+            } | ({"is_key": placement.is_key} if placement.is_key is not None else {}))
+            for placement in model.placements
+        ],
+        "values": {key: sorted(values) for key, values in sorted(model.values.items())},
+    }
+
+
+def _placed_model_from_payload(raw: object) -> PlacedReferenceModel:
+    if not isinstance(raw, Mapping):
+        raise ReferenceDataCorruptError("Reference export model must be an object")
+    nodes = raw.get("nodes")
+    placements = raw.get("placements")
+    values = raw.get("values")
+    if not isinstance(nodes, list) or any(not isinstance(node, str) for node in nodes):
+        raise ReferenceDataCorruptError("Reference export nodes are invalid")
+    if not isinstance(placements, list) or not isinstance(values, Mapping):
+        raise ReferenceDataCorruptError("Reference export placements or values are invalid")
+    parsed_placements: list[CdePlacement] = []
+    for item in placements:
+        if not isinstance(item, Mapping):
+            raise ReferenceDataCorruptError("Reference export placement is invalid")
+        cde_id = item.get("cde_id")
+        description = item.get("description")
+        data_type = item.get("data_type")
+        is_required = item.get("is_required")
+        is_key = item.get("is_key")
+        if (cde_id is not None and (type(cde_id) is not int or cde_id < 0)) or (
+            description is not None and not isinstance(description, str)
+        ) or (data_type is not None and not isinstance(data_type, str)) or (
+            is_required is not None and not isinstance(is_required, bool)
+        ) or (
+            is_key is not None and not isinstance(is_key, bool)
+        ):
+            raise ReferenceDataCorruptError("Reference export placement metadata is invalid")
+        parsed_placements.append(CdePlacement(
+            node=_string(item, "node"), cde_key=_string(item, "cde_key"),
+            cde_id=cast(int | None, cde_id), description=cast(str | None, description),
+            data_type=cast(str | None, data_type), is_required=cast(bool | None, is_required),
+            is_key=cast(bool | None, is_key),
+        ))
+    parsed_values: dict[str, frozenset[str]] = {}
+    for key, raw_values in values.items():
+        if not isinstance(key, str) or not key or not isinstance(raw_values, list) or any(
+            not isinstance(value, str) for value in raw_values
+        ) or len(raw_values) != len(set(raw_values)):
+            raise ReferenceDataCorruptError("Reference export values are invalid")
+        parsed_values[key] = frozenset(raw_values)
+    try:
+        return PlacedReferenceModel(
+            version=DataModelVersionReference(_string(raw, "data_model_key"), _string(raw, "external_version_number")),
+            label=_string(raw, "label"), nodes=tuple(nodes),
+            placements=tuple(parsed_placements), values=parsed_values,
+        )
+    except ValueError as exc:
+        raise ReferenceDataCorruptError("Reference export placement model is invalid") from exc
 
 
 def _model_to_payload(model: ReferenceModel) -> Mapping[str, object]:
@@ -186,7 +304,10 @@ def _digest(value: object) -> str:
 
 __all__ = [
     "FILE_SCHEMA_VERSION",
+    "PLACED_FILE_SCHEMA_VERSION",
     "FileReferenceDataRepository",
+    "load_placed_reference_models",
     "load_reference_models",
+    "save_placed_reference_models",
     "save_reference_models",
 ]

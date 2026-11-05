@@ -9,9 +9,12 @@ from src.domain.cde_catalog import CdeCatalog
 from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.reference_data import ReferenceDataCorruptError, ReferenceModel
+from src.domain.reference_placements import CdePlacement, PlacedReferenceModel
 from src.integrations.reference_data_file import (
     FileReferenceDataRepository,
+    load_placed_reference_models,
     load_reference_models,
+    save_placed_reference_models,
     save_reference_models,
 )
 
@@ -42,6 +45,48 @@ def test_canonical_export_round_trips_exact_reference_data(tmp_path: Path) -> No
     first_bytes = path.read_bytes()
     save_reference_models(path, [_model()])
     assert path.read_bytes() == first_bytes
+
+
+def test_placed_export_preserves_shared_cdes_and_empty_nodes(tmp_path: Path) -> None:
+    model = PlacedReferenceModel(
+        version=DataModelVersionReference("model", "2"), label="Model",
+        nodes=("diagnosis", "sample", "unused"),
+        placements=(
+            CdePlacement("diagnosis", "stage", 2, "Stage", "string", True, True),
+            CdePlacement("sample", "stage", 7, "Stage", "enum", False, False),
+        ),
+        values={"stage": frozenset({"I", "II"})},
+    )
+    path = tmp_path / "placed.json"
+    save_placed_reference_models(path, [model])
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert [placement["is_key"] for placement in payload["models"][0]["placements"]] == [True, False]
+    assert load_placed_reference_models(path) == (model,)
+    assert load_reference_models(path) == (model.collapse(),)
+    first_bytes = path.read_bytes()
+    save_placed_reference_models(path, [model])
+    assert path.read_bytes() == first_bytes
+
+
+def test_placed_export_without_is_key_remains_readable(tmp_path: Path) -> None:
+    model = PlacedReferenceModel(
+        version=DataModelVersionReference("model", "2"), label="Model",
+        nodes=("diagnosis",), placements=(CdePlacement("diagnosis", "stage"),),
+        values={"stage": frozenset()},
+    )
+    path = tmp_path / "old-placed.json"
+    save_placed_reference_models(path, [model])
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert "is_key" not in payload["models"][0]["placements"][0]
+    assert load_placed_reference_models(path) == (model,)
+
+
+def test_flat_export_cannot_be_imported_as_placed_data(tmp_path: Path) -> None:
+    path = tmp_path / "flat.json"
+    save_reference_models(path, [_model()])
+    with pytest.raises(ReferenceDataCorruptError, match="no node placements"):
+        load_placed_reference_models(path)
 
 
 def test_file_repository_lists_and_loads_canonical_models(tmp_path: Path) -> None:
