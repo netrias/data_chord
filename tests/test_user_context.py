@@ -22,7 +22,7 @@ from src.auth.user_context import (
     _user_context_from_headers,
     current_user_context,
 )
-from tests.conftest import TEST_CSV_CONTENT_TYPE, TEST_TARGET_SCHEMA
+from tests.conftest import TEST_CSV_CONTENT_TYPE, TEST_TARGET_SCHEMA, upload_integrity_fields
 
 pytestmark = pytest.mark.asyncio
 
@@ -35,6 +35,7 @@ async def test_trusted_proxy_identity_controls_workflow_ownership(
     upload_response = await app_client.post(
         "/stage-1/upload",
         headers={TRUSTED_PROXY_USER_HEADER: "alice"},
+        data=upload_integrity_fields(sample_csv_path.read_bytes()),
         files={"file": (sample_csv_path.name, sample_csv_path.read_bytes(), TEST_CSV_CONTENT_TYPE)},
     )
     assert upload_response.status_code == 201
@@ -76,6 +77,7 @@ async def test_portable_profile_shares_workflows_across_proxy_identities(
     upload_response = await app_client.post(
         "/stage-1/upload",
         headers={ALB_IDENTITY_HEADER: "alice"},
+        data=upload_integrity_fields(sample_csv_path.read_bytes()),
         files={
             "file": (
                 sample_csv_path.name,

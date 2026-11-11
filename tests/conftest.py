@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import shutil
 import tempfile
 from collections.abc import AsyncGenerator, Generator, Mapping
@@ -266,10 +267,19 @@ def create_xlsx_content(sheets: dict[str, list[list[object]]]) -> bytes:
     return output.getvalue()
 
 
+def upload_integrity_fields(content: bytes) -> dict[str, str]:
+    """Independent sender-side fingerprint used by HTTP upload callers."""
+    return {
+        "expected_sha256": hashlib.sha256(content).hexdigest(),
+        "expected_size_bytes": str(len(content)),
+    }
+
+
 async def upload_file(client: AsyncClient, csv_path: Path) -> str:
     """why: upload a file and return its file_id for use in subsequent test steps."""
     response = await client.post(
         "/stage-1/upload",
+        data=upload_integrity_fields(csv_path.read_bytes()),
         files={"file": (csv_path.name, csv_path.read_bytes(), TEST_CSV_CONTENT_TYPE)},
     )
     assert response.status_code == 201, f"Upload failed: {response.status_code} {response.text}"
@@ -285,6 +295,7 @@ async def upload_content(
     """why: upload raw content and return its file_id for dynamic test scenarios."""
     response = await client.post(
         "/stage-1/upload",
+        data=upload_integrity_fields(content),
         files={"file": (filename, content, content_type)},
     )
     assert response.status_code == 201, f"Upload failed: {response.status_code} {response.text}"

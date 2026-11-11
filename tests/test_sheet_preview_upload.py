@@ -13,6 +13,7 @@ from tests.conftest import (
     TEST_XLSX_CONTENT_TYPE,
     create_csv_content,
     create_xlsx_content,
+    upload_integrity_fields,
 )
 
 
@@ -121,6 +122,7 @@ async def test_stage1_upload_response_includes_xlsx_sheet_previews(app_client: A
     # When: the workbook is uploaded
     response = await app_client.post(
         "/stage-1/upload",
+        data=upload_integrity_fields(content),
         files={"file": ("workbook.xlsx", content, TEST_XLSX_CONTENT_TYPE)},
     )
 
@@ -146,6 +148,7 @@ async def test_stage1_upload_response_omits_previews_for_csv(app_client: AsyncCl
     # When: the CSV is uploaded
     response = await app_client.post(
         "/stage-1/upload",
+        data=upload_integrity_fields(content),
         files={"file": ("data.csv", content, TEST_CSV_CONTENT_TYPE)},
     )
 

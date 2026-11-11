@@ -9,7 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 
@@ -26,6 +26,7 @@ from src.domain.dataset_workflow_ids import new_dataset_workflow_id
 from src.domain.manifest import ColumnMappingManifest
 from src.domain.match_counts import column_value_overlap_ratio
 from src.domain.reference_data import ReferenceDataError
+from src.domain.upload_integrity import UploadFingerprint
 from src.domain.workflow_state import WorkflowState
 from src.observability.events import (
     WorkflowEvent,
@@ -112,6 +113,8 @@ async def list_data_models() -> list[DataModelSummary]:
 async def upload_dataset(
     background_tasks: BackgroundTasks,
     file: Annotated[UploadFile, File(...)],
+    expected_sha256: Annotated[str, Form(min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]{64}$")],
+    expected_size_bytes: Annotated[int, Form(ge=0)],
 ) -> UploadResponse:
     if get_application_mode() is ApplicationMode.DEMO:
         raise HTTPException(
@@ -137,7 +140,7 @@ async def upload_dataset(
         if cleanup is not None:
             release_upload_lease = await run_in_threadpool(cleanup.acquire_upload_lease)
             await run_in_threadpool(cleanup.require_upload_space)
-        meta = await storage.store(file, dataset_workflow_id)
+        meta = await storage.store(file, dataset_workflow_id, UploadFingerprint(expected_sha256, expected_size_bytes))
         dependencies.get_workflow_storage().create_workflow(user, meta.dataset_workflow_id)
         save_upload_artifacts(
             dependencies.get_workflow_storage(),
@@ -176,6 +179,7 @@ async def upload_dataset(
                 "content_type": meta.content_type,
                 "tabular_format": meta.tabular_format.value,
                 "sheet_count": len(meta.sheet_names),
+                "integrity_verified": meta.verification is not None,
             },
         ),
         user,
@@ -196,6 +200,7 @@ async def _upload_response(meta: UploadedFileMeta) -> UploadResponse:
         tabular_format=meta.tabular_format.value,
         sheet_names=meta.sheet_names,
         selected_sheet=meta.selected_sheet,
+        verification=meta.verification,
         sheet_previews=await run_in_threadpool(_load_sheet_previews_safe, meta),
     )
 

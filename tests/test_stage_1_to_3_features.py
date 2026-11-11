@@ -43,6 +43,7 @@ from tests.conftest import (
     create_xlsx_content,
     review_state_payload,
     upload_content,
+    upload_integrity_fields,
 )
 
 GENERIC_API_ERROR_DETAIL = "We couldn't process this request. Please try again."
@@ -175,6 +176,7 @@ async def test_stage1_upload_rejects_mismatched_content_type(
     # When: the file is uploaded with a mismatched content type
     response = await app_client.post(
         "/stage-1/upload",
+        data=upload_integrity_fields(content),
         files={"file": ("bad.json", content, "application/json")},
     )
 
