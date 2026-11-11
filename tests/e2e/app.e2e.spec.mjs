@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 import {
   AGENT_FILE_INPUT,
@@ -3244,6 +3245,10 @@ test('Stage 1 shows upload progress and keeps the Map button disabled until uplo
       body: JSON.stringify({
         file_id: 'abcdef0123456789abcdef0123456789',
         file_name: 'basic.csv',
+        verification: {
+          sha256: createHash('sha256').update(fs.readFileSync(fileFixture('basic.csv'))).digest('hex'),
+          size_bytes: fs.readFileSync(fileFixture('basic.csv')).length,
+        },
         human_size: '24 B',
         content_type: 'text/csv',
         uploaded_at: '2026-05-20T18:00:00Z',

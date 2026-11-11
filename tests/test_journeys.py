@@ -22,6 +22,7 @@ from tests.conftest import (
     create_manifest_with_manual_override,
     review_state_payload,
     store_test_completed_harmonization,
+    upload_integrity_fields,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -39,6 +40,7 @@ async def test_upload_to_analyze_journey(
     # When: User uploads the file
     upload_response = await app_client.post(
         "/stage-1/upload",
+        data=upload_integrity_fields(csv_content),
         files={"file": (sample_csv_path.name, csv_content, TEST_CSV_CONTENT_TYPE)},
     )
 
@@ -70,6 +72,7 @@ async def test_analyze_to_harmonize_journey(
     # Given: An uploaded and analyzed file
     upload_response = await app_client.post(
         "/stage-1/upload",
+        data=upload_integrity_fields(sample_csv_path.read_bytes()),
         files={"file": (sample_csv_path.name, sample_csv_path.read_bytes(), TEST_CSV_CONTENT_TYPE)},
     )
     file_id = upload_response.json()["file_id"]
@@ -105,6 +108,7 @@ async def test_harmonize_to_review_journey(
     # Given: An uploaded file with harmonized output available for review
     upload_response = await app_client.post(
         "/stage-1/upload",
+        data=upload_integrity_fields(sample_csv_path.read_bytes()),
         files={"file": (sample_csv_path.name, sample_csv_path.read_bytes(), TEST_CSV_CONTENT_TYPE)},
     )
     file_id = upload_response.json()["file_id"]
@@ -142,6 +146,7 @@ async def test_review_to_summary_journey(
     # Given: An uploaded file with harmonized output containing multiple changes
     upload_response = await app_client.post(
         "/stage-1/upload",
+        data=upload_integrity_fields(sample_csv_path.read_bytes()),
         files={"file": (sample_csv_path.name, sample_csv_path.read_bytes(), TEST_CSV_CONTENT_TYPE)},
     )
     file_id = upload_response.json()["file_id"]
@@ -205,6 +210,7 @@ async def test_full_pipeline_journey(
         # When: A user completes every API stage and changes one review value.
         upload = await app_client.post(
             "/stage-1/upload",
+            data=upload_integrity_fields(DEMO_SAMPLE_PATH.read_bytes()),
             files={"file": (DEMO_SAMPLE_PATH.name, DEMO_SAMPLE_PATH.read_bytes(), TEST_CSV_CONTENT_TYPE)},
         )
         assert upload.status_code == 201, upload.text
@@ -304,6 +310,7 @@ async def test_manual_overrides_counted_in_summary(
     # Given: An uploaded file with audit history and the corresponding active override
     upload_response = await app_client.post(
         "/stage-1/upload",
+        data=upload_integrity_fields(sample_csv_path.read_bytes()),
         files={"file": (sample_csv_path.name, sample_csv_path.read_bytes(), TEST_CSV_CONTENT_TYPE)},
     )
     file_id = upload_response.json()["file_id"]
@@ -355,6 +362,7 @@ async def test_download_returns_zip_with_csv(
     # Given: An uploaded file with harmonized output available
     upload_response = await app_client.post(
         "/stage-1/upload",
+        data=upload_integrity_fields(sample_csv_path.read_bytes()),
         files={"file": (sample_csv_path.name, sample_csv_path.read_bytes(), TEST_CSV_CONTENT_TYPE)},
     )
     file_id = upload_response.json()["file_id"]

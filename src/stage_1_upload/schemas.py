@@ -10,6 +10,7 @@ from src.api.schemas import DatasetWorkflowIdField
 from src.domain.cde import ModelSuggestion
 from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.manifest import ConfidenceBucket
+from src.domain.upload_integrity import UploadFingerprint
 
 
 class SheetPreview(BaseModel):
@@ -29,6 +30,7 @@ class UploadResponse(BaseModel):
     sheet_names: list[str] = Field(default_factory=list)
     selected_sheet: str | None = None
     sheet_previews: dict[str, SheetPreview] = Field(default_factory=dict)
+    verification: UploadFingerprint | None = None
 
 
 class AnalyzeRequest(BaseModel):

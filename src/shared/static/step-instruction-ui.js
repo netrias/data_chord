@@ -114,7 +114,7 @@ export function initNavigationEvents() {
   document.querySelectorAll('.progress-tracker .step-link').forEach((link) => {
     link.addEventListener('click', (event) => {
       const step = link.closest('.step');
-      if (!step || step.classList.contains('unreachable')) {
+      if (!step || step.classList.contains('unreachable') || link.getAttribute('aria-disabled') === 'true') {
         event.preventDefault();
         return;
       }

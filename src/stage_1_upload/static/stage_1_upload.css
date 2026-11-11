@@ -1,5 +1,24 @@
 /* Stage 1 Upload - stage-specific styles */
 
+/* A disabled Map action must not retain the green, raised CTA treatment. */
+#analyzeButton:disabled {
+  opacity: 1;
+}
+
+#analyzeButton:disabled .btn-3d-front {
+  color: var(--gray-500);
+  background: var(--gray-100);
+  border: 1px solid var(--gray-300);
+  box-shadow: none;
+  text-shadow: none;
+  transform: none;
+}
+
+#analyzeButton:disabled .btn-3d-edge,
+#analyzeButton:disabled .btn-3d-shadow {
+  display: none;
+}
+
 /* Stage 1 container override - minimal chrome, focus on dropzone */
 #uploadScreen.stage-card {
   background: transparent;
@@ -283,7 +302,7 @@
   }
 }
 
-.dropzone-success-icon {
+.dropzone-result-icon {
   width: 48px;
   height: 48px;
   border-radius: 50%;
@@ -294,6 +313,21 @@
   justify-content: center;
   margin-bottom: 0.5rem;
   box-shadow: 0 4px 12px var(--netrias-glow-medium);
+}
+
+.upload-error-mark,
+.dropzone-file.is-error .upload-success-mark {
+  display: none;
+}
+
+.dropzone-file.is-error .upload-error-mark {
+  display: block;
+}
+
+.dropzone-file.is-error .dropzone-result-icon {
+  color: var(--error-700);
+  background: var(--error-50);
+  box-shadow: none;
 }
 
 .dropzone-file .file-name {
@@ -323,6 +357,16 @@
   font-size: 0.85rem;
   color: var(--netrias-600);
   font-weight: 500;
+}
+
+.dropzone-file.is-error .file-status {
+  color: var(--error-700);
+}
+
+.dropzone-file.is-error .linklike {
+  color: var(--gray-700);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .demo-file-lock {

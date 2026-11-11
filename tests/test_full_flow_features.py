@@ -23,6 +23,7 @@ from tests.conftest import (
     save_test_pvs_by_column,
     store_test_harmonization_manifest,
     upload_content,
+    upload_integrity_fields,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -284,6 +285,7 @@ async def test_reharmonize_cannot_clear_another_users_overrides(
     upload_response = await app_client.post(
         "/stage-1/upload",
         headers=alice_headers,
+        data=upload_integrity_fields(create_csv_content(rows)),
         files={"file": ("alice.csv", create_csv_content(rows), "text/csv")},
     )
     assert upload_response.status_code == 201

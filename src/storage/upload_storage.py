@@ -6,6 +6,8 @@ Orchestrates file I/O, metadata tracking, and directory organization.
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 import logging
 import shutil
@@ -25,6 +27,7 @@ from netrias_client import (
 )
 
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_value
+from src.domain.upload_integrity import UploadFingerprint
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +57,7 @@ class StoredMeta(TypedDict):
     tabular_format: NotRequired[str]
     sheet_names: NotRequired[list[str]]
     selected_sheet: NotRequired[str | None]
+    verification: NotRequired[dict[str, str | int]]
 
 
 class UploadStream(Protocol):
@@ -88,6 +92,7 @@ class UploadedFileMeta:
     tabular_format: TabularFormat
     sheet_names: list[str]
     selected_sheet: str | None = None
+    verification: UploadFingerprint | None = None
 
     @property
     def file_id(self) -> DatasetWorkflowId:
@@ -166,28 +171,40 @@ class UploadStorage:
         self._manifest_dir.mkdir(parents=True, exist_ok=True)
         self._harmonized_dir.mkdir(parents=True, exist_ok=True)
 
-    async def store(self, upload: UploadStream, dataset_workflow_id: DatasetWorkflowId) -> UploadedFileMeta:
+    async def store(
+        self, upload: UploadStream, dataset_workflow_id: DatasetWorkflowId,
+        expected: UploadFingerprint | None = None,
+    ) -> UploadedFileMeta:
+        """Save an upload, verifying client expectations before publishing metadata.
+
+        Server-generated files may omit expectations. Browser HTTP uploads must
+        supply them at their request boundary. A failed or cancelled write leaves
+        no completed scratch file or upload metadata.
+        """
         filename, suffix, content_type = self._extract_upload_info(upload)
-        self._validate_upload(suffix, content_type)
-
         destination = self._data_dir / f"{dataset_workflow_id}{suffix}"
-
+        completed_write = False
         try:
-            total_bytes = await self._write_upload_chunks(upload, destination)
-        finally:
-            await upload.close()
-
-        try:
+            try:
+                self._validate_upload(suffix, content_type)
+                if expected is not None and expected.size_bytes > self._constraints.max_bytes:
+                    raise UploadTooLargeError("Declared file size exceeds the upload limit")
+                total_bytes = await self._write_upload_chunks(upload, destination)
+                completed_write = True
+            finally:
+                await upload.close()
+            verification = None
+            if expected is not None:
+                verification = await asyncio.to_thread(_fingerprint_file, destination)
+                expected.verify(verification)
+                total_bytes = verification.size_bytes
             return self._create_and_save_metadata(
-                dataset_workflow_id,
-                filename,
-                content_type,
-                total_bytes,
-                destination,
+                dataset_workflow_id, filename, content_type, total_bytes, destination, verification,
             )
-        except (UnsupportedUploadError, OSError):
-            destination.unlink(missing_ok=True)
-            (self._meta_dir / f"{dataset_workflow_id}.json").unlink(missing_ok=True)
+        except BaseException:
+            if completed_write:
+                destination.unlink(missing_ok=True)
+                (self._meta_dir / f"{dataset_workflow_id}.json").unlink(missing_ok=True)
             raise
 
     def _extract_upload_info(self, upload: UploadStream) -> tuple[str, str, str]:
@@ -199,20 +216,18 @@ class UploadStorage:
     async def _write_upload_chunks(self, upload: UploadStream, destination: Path) -> int:
         """Stream in chunks to avoid loading entire file into memory."""
         total_bytes = 0
+        created = False
         try:
             with destination.open("wb") as target:
+                created = True
                 while chunk := await upload.read(self._constraints.chunk_size):
                     total_bytes += len(chunk)
                     if total_bytes > self._constraints.max_bytes:
                         raise UploadTooLargeError(f"File exceeds {self._constraints.max_bytes} bytes limit")
                     target.write(chunk)
-        except UploadTooLargeError:
-            destination.unlink(missing_ok=True)
-            logger.warning("Upload aborted because it was too large", extra={"destination": str(destination)})
-            raise
-        except OSError:
-            destination.unlink(missing_ok=True)
-            logger.exception("Upload write failed", extra={"destination": str(destination)})
+        except BaseException:
+            if created:
+                destination.unlink(missing_ok=True)
             raise
         return total_bytes
 
@@ -223,6 +238,7 @@ class UploadStorage:
         content_type: str,
         total_bytes: int,
         destination: Path,
+        verification: UploadFingerprint | None = None,
     ) -> UploadedFileMeta:
         file_format = get_tabular_format(destination, content_type)
         sheet_names = _sheet_names_for(destination)
@@ -237,6 +253,7 @@ class UploadStorage:
             tabular_format=file_format,
             sheet_names=sheet_names,
             selected_sheet=selected_sheet,
+            verification=verification,
         )
         self._write_metadata(meta)
         logger.info("Stored upload", extra={"file_id": dataset_workflow_id, "size_bytes": total_bytes})
@@ -255,7 +272,7 @@ class UploadStorage:
         meta_path.write_text(json.dumps(meta_payload, indent=2))
 
     def metadata_payload(self, meta: UploadedFileMeta) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             _META_FILE_ID: meta.dataset_workflow_id,
             _META_ORIGINAL_NAME: meta.original_name,
             _META_CONTENT_TYPE: meta.content_type,
@@ -266,6 +283,12 @@ class UploadStorage:
             _META_SHEET_NAMES: meta.sheet_names,
             _META_SELECTED_SHEET: meta.selected_sheet,
         }
+        if meta.verification is not None:
+            payload["verification"] = {
+                "sha256": meta.verification.sha256,
+                "size_bytes": meta.verification.size_bytes,
+            }
+        return payload
 
     def restore_upload(self, payload: Mapping[str, object], source_path: Path) -> UploadedFileMeta:
         meta = self._metadata_from_payload(cast(StoredMeta, payload))
@@ -356,6 +379,7 @@ class UploadStorage:
             tabular_format=_tabular_format_from_metadata(payload),
             sheet_names=payload.get(_META_SHEET_NAMES, []),
             selected_sheet=payload.get(_META_SELECTED_SHEET),
+            verification=_verification_from_metadata(payload),
         )
 
 
@@ -411,7 +435,29 @@ def _with_selected_sheet(meta: UploadedFileMeta, selected_sheet: str) -> Uploade
         tabular_format=meta.tabular_format,
         sheet_names=meta.sheet_names,
         selected_sheet=selected_sheet,
+        verification=meta.verification,
     )
+
+
+def _fingerprint_file(path: Path) -> UploadFingerprint:
+    digest = hashlib.sha256()
+    size_bytes = 0
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+            size_bytes += len(chunk)
+    return UploadFingerprint(digest.hexdigest(), size_bytes)
+
+
+def _verification_from_metadata(payload: StoredMeta) -> UploadFingerprint | None:
+    raw = payload.get("verification")
+    if raw is None:
+        return None
+    sha256 = raw.get("sha256")
+    size_bytes = raw.get("size_bytes")
+    if not isinstance(sha256, str) or not isinstance(size_bytes, int) or size_bytes != payload[_META_SIZE_BYTES]:
+        raise ValueError("Upload verification metadata is invalid")
+    return UploadFingerprint(sha256, size_bytes)
 
 
 __all__ = [

@@ -13,6 +13,7 @@ from starlette.responses import Response
 
 from src.app.harmonization_readiness import HarmonizationNotReadyError
 from src.auth.user_context import current_user_context
+from src.domain.upload_integrity import UploadIntegrityError
 from src.observability.events import (
     CLIENT_EVENTS_ENDPOINT,
     REQUEST_ID_HEADER,
@@ -28,6 +29,7 @@ from src.storage import WorkflowConflictError, WorkflowJsonUnreadableError
 
 GENERIC_API_ERROR_DETAIL = "We couldn't process this request. Please try again."
 WORKFLOW_RECORD_RECOVERY_DETAIL = "Saved workflow data cannot be read. Restart this workflow."
+UPLOAD_INTEGRITY_DETAIL = "The uploaded file did not match the selected file. Please try again."
 
 _WORKFLOW_RECORD_ERRORS = (
     CdeMappingUnreadableError,
@@ -43,12 +45,25 @@ _WORKFLOW_RECORD_ERRORS = (
 def register_api_error_handlers(app: FastAPI) -> None:
     """Keep API error response policy in one place instead of scattering it through routes."""
     app.add_exception_handler(WorkflowConflictError, _workflow_conflict)
+    app.add_exception_handler(UploadIntegrityError, _upload_integrity_failed)
     for error_type in _WORKFLOW_RECORD_ERRORS:
         app.add_exception_handler(error_type, _workflow_record_unreadable)
     app.add_exception_handler(HarmonizationNotReadyError, _harmonization_not_ready)
     app.add_exception_handler(RequestValidationError, _request_validation_failed)
     app.add_exception_handler(StarletteHTTPException, _http_request_failed)
     app.add_exception_handler(Exception, _unexpected_api_request_failed)
+
+
+async def _upload_integrity_failed(request: Request, exc: Exception) -> Response:
+    """Expose only the fixed recovery message for a failed file comparison."""
+    if not isinstance(exc, UploadIntegrityError):
+        raise exc
+    log_api_request_failed(
+        method=request.method, path=request.url.path, status_code=400,
+        error_type=type(exc).__name__, error_detail=exc.reason.value,
+        request_id=_request_id_for_log(request), user=current_user_context(),
+    )
+    return JSONResponse({"detail": UPLOAD_INTEGRITY_DETAIL}, status_code=400)
 
 
 async def _workflow_conflict(request: Request, exc: Exception) -> Response:

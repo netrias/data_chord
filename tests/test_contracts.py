@@ -26,6 +26,7 @@ from tests.conftest import (
     store_test_harmonization_manifest,
     upload_content,
     upload_file,
+    upload_integrity_fields,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -45,6 +46,7 @@ class TestUploadContract:
         # When: The file is uploaded via POST
         response = await app_client.post(
             "/stage-1/upload",
+            data=upload_integrity_fields(sample_csv_path.read_bytes()),
             files={"file": (sample_csv_path.name, sample_csv_path.read_bytes(), TEST_CSV_CONTENT_TYPE)},
         )
 
@@ -69,6 +71,7 @@ class TestUploadContract:
         # When: The file is uploaded via POST
         response = await app_client.post(
             "/stage-1/upload",
+            data=upload_integrity_fields(sample_csv_path.read_bytes()),
             files={"file": (sample_csv_path.name, sample_csv_path.read_bytes(), TEST_CSV_CONTENT_TYPE)},
         )
 
@@ -101,6 +104,7 @@ class TestUploadContract:
         # When: The file is uploaded via POST
         response = await app_client.post(
             "/stage-1/upload",
+            data=upload_integrity_fields(b"col1,col2\na,b"),
             files={"file": (filename, b"col1,col2\na,b", content_type)},
         )
 
@@ -122,6 +126,7 @@ class TestUploadContract:
         # When: the workbook is uploaded
         response = await app_client.post(
             "/stage-1/upload",
+            data=upload_integrity_fields(content),
             files={"file": ("workbook.xlsx", content, TEST_XLSX_CONTENT_TYPE)},
         )
 
@@ -462,6 +467,7 @@ class TestRowsContract:
         # diagnosis is a true value-mapping CDE with no AI recommendation.
         upload_response = await app_client.post(
             "/stage-1/upload",
+            data=upload_integrity_fields(b"race,ethnicity,diagnosis\nAsian,Hispanic,Lung\n"),
             files={
                 "file": (
                     "demographics.csv",
