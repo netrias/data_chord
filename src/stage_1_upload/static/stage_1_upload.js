@@ -104,13 +104,16 @@ const _showDropzoneUploading = (file) => {
   }
 };
 
-const _showDropzoneSummary = (file, statusText) => {
+const _showDropzoneSummary = (file, statusText, tone = 'success') => {
   if (dropzoneCopy) dropzoneCopy.classList.add('hidden');
   if (dropzoneUploading) {
     dropzoneUploading.classList.add('hidden');
     dropzoneUploading.setAttribute('aria-hidden', 'true');
   }
-  if (dropzoneFile) dropzoneFile.classList.remove('hidden');
+  if (dropzoneFile) {
+    dropzoneFile.classList.remove('hidden');
+    dropzoneFile.classList.toggle('is-error', tone === 'error');
+  }
   if (dropzoneFileName) {
     dropzoneFileName.textContent = file.name;
     dropzoneFileName.title = file.name;
@@ -261,7 +264,7 @@ const _uploadDataset = async () => {
     console.error(error);
     state.uploaded = null;
     removeFromSession(CURRENT_FILE_SESSION_KEY);
-    _showDropzoneSummary(file, 'Upload failed');
+    _showDropzoneSummary(file, 'Upload failed', 'error');
     _setStatus(error instanceof UploadVerificationError ? error.message : UPLOAD_API_ERROR_MESSAGE, 'error');
   } finally {
     state.isUploading = false;

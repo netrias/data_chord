@@ -33,7 +33,7 @@ for (const format of ['csv', 'tsv', 'xlsx']) {
   });
 }
 
-for (const alteration of ['changed byte', 'truncated file']) {
+for (const alteration of ['changed byte', 'truncated file', 'wrong size']) {
   test(`browser rejects a ${alteration} during transfer`, async ({ page }) => {
     // Given a source file and a transfer that changes its bytes after browser hashing.
     const bytes = fs.readFileSync(fileFixture('basic.csv'));
@@ -46,14 +46,15 @@ for (const alteration of ['changed byte', 'truncated file']) {
       let modified = Buffer.from(bytes);
       if (alteration === 'changed byte') {
         modified[0] ^= 1;
-      } else {
+      } else if (alteration === 'truncated file') {
         modified = bytes.subarray(0, 3);
       }
       // Chromium's interception API omits file-part bytes. Rebuild that part
       // while preserving the fingerprint submitted by the real browser.
       const response = await page.request.post(route.request().url(), { multipart: {
         file: { name: 'basic.csv', mimeType: 'text/csv', buffer: modified },
-        expected_sha256: sha256, expected_size_bytes: String(bytes.length),
+        expected_sha256: sha256,
+        expected_size_bytes: String(bytes.length + (alteration === 'wrong size' ? 1 : 0)),
       } });
       rejectedStatus = response.status();
       await route.fulfill({ response });
@@ -66,7 +67,13 @@ for (const alteration of ['changed byte', 'truncated file']) {
     // Then verification fails and no workflow is activated in the browser.
     await expect(page.locator('#statusMessage')).toHaveText(mismatchMessage);
     expect(rejectedStatus).toBe(400);
+    await expect(page.locator('#dropzoneFile .upload-error-mark')).toBeVisible();
+    await expect(page.locator('#dropzoneFile .upload-success-mark')).toBeHidden();
+    await expect(page.locator('#dropzoneFileStatus')).toHaveCSS('color', 'rgb(185, 28, 28)');
     await expect(page.locator('#analyzeButton')).toBeDisabled();
+    await expect(page.locator('#analyzeButton .btn-3d-front')).toHaveCSS('background-image', 'none');
+    await expect(page.locator('#analyzeButton .btn-3d-front')).toHaveCSS('background-color', 'rgb(241, 245, 249)');
+    await expect(page.locator('#analyzeButton .btn-3d-shadow')).toBeHidden();
     expect(await page.evaluate(() => sessionStorage.getItem('currentFileSession'))).toBeNull();
   });
 }
@@ -117,6 +124,7 @@ test('hash failure permits retry without submitting an unverified file', async (
   // When hashing fails and the user retries the same file.
   await page.setInputFiles(AGENT_FILE_INPUT, fileFixture('basic.csv'));
   await expect(page.locator('#statusMessage')).toHaveText('We could not prepare this file for upload. Please select it again.');
+  await expect(page.locator('#dropzoneFile .upload-error-mark')).toBeVisible();
   expect(uploads).toHaveLength(0);
   await expect(page.locator('#analyzeButton')).toBeDisabled();
   await expect(page.locator('.progress-tracker [data-stage="mapping"] .step-link')).toHaveAttribute('aria-disabled', 'false');
@@ -124,6 +132,8 @@ test('hash failure permits retry without submitting an unverified file', async (
   await page.setInputFiles(AGENT_FILE_INPUT, fileFixture('basic.csv'));
   // Then only the verified retry is uploaded and Map becomes available.
   await expect(page.locator('#dropzoneFileStatus')).toHaveText('Uploaded');
+  await expect(page.locator('#dropzoneFile .upload-success-mark')).toBeVisible();
+  await expect(page.locator('#dropzoneFile .upload-error-mark')).toBeHidden();
   expect(uploads).toHaveLength(1);
   await expect(page.locator('#analyzeButton')).toBeEnabled();
 });
