@@ -109,6 +109,7 @@ test('hash failure permits retry without submitting an unverified file', async (
       if (fail) { fail = false; return Promise.reject(new Error('private diagnostic')); }
       return digest(...args);
     };
+    sessionStorage.setItem('maxReachedStage', 'review');
   });
   const uploads = [];
   page.on('request', (request) => { if (request.url().endsWith('/stage-1/upload')) uploads.push(request); });
@@ -118,6 +119,7 @@ test('hash failure permits retry without submitting an unverified file', async (
   await expect(page.locator('#statusMessage')).toHaveText('We could not prepare this file for upload. Please select it again.');
   expect(uploads).toHaveLength(0);
   await expect(page.locator('#analyzeButton')).toBeDisabled();
+  await expect(page.locator('.progress-tracker [data-stage="mapping"] .step-link')).toHaveAttribute('aria-disabled', 'false');
   await page.setInputFiles(AGENT_FILE_INPUT, []);
   await page.setInputFiles(AGENT_FILE_INPUT, fileFixture('basic.csv'));
   // Then only the verified retry is uploaded and Map becomes available.
@@ -132,16 +134,24 @@ test('selection stays locked until the original file finishes hashing', async ({
     const digest = crypto.subtle.digest.bind(crypto.subtle);
     const pending = new Promise((resolve) => { window.mockReleaseDigest = resolve; });
     crypto.subtle.digest = async (...args) => { await pending; return digest(...args); };
+    sessionStorage.setItem('maxReachedStage', 'review');
   });
   const uploads = [];
   page.on('request', (request) => { if (request.url().endsWith('/stage-1/upload')) uploads.push(request); });
-  await page.goto('/stage-1');
+  const previousFileId = 'a'.repeat(32);
+  await page.goto(`/stage-1?file_id=${previousFileId}`);
+  const mappingLink = page.locator('.progress-tracker [data-stage="mapping"] .step-link');
+  await expect(mappingLink).toHaveAttribute('aria-disabled', 'false');
   await page.setInputFiles(AGENT_FILE_INPUT, fileFixture('basic.csv'));
   await expect(page.locator('#uploadingTitle')).toHaveText('Preparing upload…');
   await expect(page.locator('#fileInput')).toBeDisabled();
   await expect(page.locator('#analyzeButton')).toBeDisabled();
+  await expect(mappingLink).toHaveAttribute('aria-disabled', 'true');
+  await expect(mappingLink).not.toHaveAttribute('href');
   expect(uploads).toHaveLength(0);
-  // When another file is dropped before hashing is released.
+  // When an old workflow link is clicked and another file is dropped before hashing is released.
+  await mappingLink.click();
+  await expect(page).toHaveURL(new RegExp(`/stage-1\\?file_id=${previousFileId}$`));
   await page.evaluate(() => {
     const transfer = new DataTransfer();
     transfer.items.add(new File(['value\nwrong\n'], 'replacement.csv', { type: 'text/csv' }));
@@ -152,6 +162,7 @@ test('selection stays locked until the original file finishes hashing', async ({
   await expect(page.locator('#dropzoneFileStatus')).toHaveText('Uploaded');
   await expect(page.locator('#dropzoneFileName')).toHaveText('basic.csv');
   expect(uploads).toHaveLength(1);
+  await expect(mappingLink).toHaveAttribute('aria-disabled', 'false');
   expect(await page.evaluate(async () => {
     const { readFromSession, CURRENT_FILE_SESSION_KEY } = await import('/assets/shared/storage-keys.js');
     return readFromSession(CURRENT_FILE_SESSION_KEY).original_name;

@@ -197,6 +197,11 @@ const _uploadDataset = async () => {
   const file = state.file;
   _setFileInputDisabled(true);
   _setAnalyzeButtonEnabled(false);
+  document.querySelectorAll('.progress-tracker .step-link').forEach((link) => {
+    link.setAttribute('aria-disabled', 'true');
+    link.setAttribute('tabindex', '-1');
+    link.removeAttribute('href');
+  });
   if (dropzone) {
     dropzone.classList.add('is-uploading');
     dropzone.setAttribute('aria-busy', 'true');
@@ -260,6 +265,7 @@ const _uploadDataset = async () => {
     _setStatus(error instanceof UploadVerificationError ? error.message : UPLOAD_API_ERROR_MESSAGE, 'error');
   } finally {
     state.isUploading = false;
+    setActiveStage('upload');
     _setFileInputDisabled(false);
     if (dropzone) {
       dropzone.classList.remove('is-uploading');
