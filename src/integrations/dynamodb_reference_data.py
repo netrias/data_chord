@@ -307,7 +307,6 @@ def _items_for_model(model: PlacedReferenceModel, value_chunk_bytes: int) -> lis
             "external_version_number": model.version.external_version_number,
             "label": model.label,
             # Count CDEs per node: a key placed under two nodes counts twice.
-            "placement_count": len(model.placements),
             "node_count": len(model.nodes),
             "cde_count": sum(_cde_count_for_node(model, node) for node in model.nodes),
             "value_count": sum(len(values) for values in model.values.values()),
@@ -580,7 +579,6 @@ def _check_node_rows(model: PlacedReferenceModel, node_rows: Mapping[str, Mappin
 def _check_model_counts(model: PlacedReferenceModel, meta: Mapping[str, object]) -> None:
     """Each count is stored and checked separately so one cannot mask another."""
     expected = {
-        "placement_count": len(model.placements),
         "node_count": len(model.nodes),
         "cde_count": sum(_cde_count_for_node(model, node) for node in model.nodes),
         "value_count": sum(len(values) for values in model.values.values()),

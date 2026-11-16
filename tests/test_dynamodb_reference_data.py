@@ -289,6 +289,7 @@ def test_load_rejects_a_node_row_whose_cde_count_was_changed() -> None:
 
 
 def test_stored_cde_count_includes_each_node_cde_pair() -> None:
+    """Given a shared CDE, when imported and read back, then cde_count counts both node pairs."""
     # Given a CDE key placed under two nodes.
     table = FakeTable()
     model = _shared_key_model()
@@ -296,15 +297,16 @@ def test_stored_cde_count_includes_each_node_cde_pair() -> None:
 
     # Then the model CDE count agrees with the total of the node CDE counts.
     meta = next(item for (_pk, sk), item in table.items.items() if sk == "META" and "label" in item)
-    assert meta["placement_count"] == 2
+    assert "placement_count" not in meta
     assert meta["node_count"] == 2
     assert meta["cde_count"] == 2
     assert meta["cde_count"] == sum(_node_rows(table).values())
     # Two nodes hold the key, but its values are published and stored once.
     assert meta["value_count"] == 2
+    assert DynamoDbReferenceDataRepository(table).load_placements(model.version) == model
 
 
-@pytest.mark.parametrize("field", ["placement_count", "node_count", "cde_count", "value_count"])
+@pytest.mark.parametrize("field", ["node_count", "cde_count", "value_count"])
 def test_load_rejects_a_count_that_disagrees_with_the_stored_rows(field: str) -> None:
     # Given a published model whose stored count was changed in place.
     table = FakeTable()
