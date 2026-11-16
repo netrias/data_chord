@@ -44,7 +44,7 @@ export function setActiveStage(stage) {
         link.removeAttribute('href');
         link.setAttribute('tabindex', '-1');
       } else {
-        link.setAttribute('href', link.dataset.url);
+        link.setAttribute('href', _buildNavUrl(link.dataset.url));
         link.removeAttribute('tabindex');
       }
     }
@@ -81,6 +81,7 @@ function _getFileIdForNavigation() {
 function _buildNavUrl(baseUrl) {
   const fileId = _getFileIdForNavigation();
   const url = new URL(baseUrl, window.location.origin);
+  url.searchParams.delete('file_id');
   if (fileId) url.searchParams.set('file_id', fileId);
   _addMappingContext(url);
   return url.pathname + url.search;
