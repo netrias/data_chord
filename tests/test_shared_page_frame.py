@@ -76,7 +76,7 @@ async def test_each_stage_renders_the_same_workflow_frame(
             "/stage-3",
             (
                 "/assets/stage-3/stage_3_harmonize.css",
-                "/assets/stage-3/harmonize-animation.css",
+                "/assets/stage-3/harmonize-animation.js",
                 "/assets/stage-3/stage_3_harmonize.js",
             ),
             ("/stage-3/harmonize", "/stage-4", "/stage-2"),
