@@ -94,6 +94,17 @@ const STEP = 8;
 const MID = H / 2;
 const LOCK_X = 0.62 * W;
 const lock = (x) => smooth(0.3 * W, LOCK_X, x);
+/** Largest stroke-width change, in drawing units, before a string starts a new stroke. */
+const WIDTH_BAND = 0.3;
+
+/* A string's color runs from its own color to brand green across the lock zone. */
+const stringGradient = (ctx, from, to) => {
+  const gradient = ctx.createLinearGradient(0, 0, W, 0);
+  for (const k of [0, 0.25, 0.5, 0.75, 1]) {
+    gradient.addColorStop(0.36 + 0.24 * k, css(mix(from, to, smooth(0, 1, k))));
+  }
+  return gradient;
+};
 
 /**
  * Draw the Chord frame for time t (seconds) in W x H drawing units.
@@ -128,22 +139,37 @@ const drawChordFrame = (ctx, t, colors) => {
     return MID + (1 - h) * messy + h * ((i - 2) * 2 * STEP + vib);
   };
 
+  /* why: a GPU canvas pays per stroke call, so each string is a few long strokes (one per width band), not one per segment. */
   ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
   for (let i = 0; i < 5; i++) {
+    ctx.strokeStyle = stringGradient(ctx, DISPARATE[i], green);
+    let bandWidth = WIDTH[i];
+    let penDown = false;
     let py = yAt(i, 0);
+    ctx.lineWidth = bandWidth;
+    ctx.beginPath();
     for (let x = 4; x <= W; x += 4) {
       const y = yAt(i, x);
+      const width = lerp(WIDTH[i], 1.5, lock(x));
+      if (Math.abs(width - bandWidth) > WIDTH_BAND) {
+        ctx.stroke();
+        ctx.beginPath();
+        bandWidth = width;
+        ctx.lineWidth = width;
+        penDown = false;
+      }
       const solid = lerp(0.55, 1.01, smooth(0.16 * W, 0.5 * W, x));
       if (!DASH[i] || frac((x - 55 * t) / DASH[i]) < solid) {
-        ctx.strokeStyle = css(mix(DISPARATE[i], green, smooth(0.36 * W, 0.6 * W, x)));
-        ctx.lineWidth = lerp(WIDTH[i], 1.5, lock(x));
-        ctx.beginPath();
-        ctx.moveTo(x - 4, py);
+        if (!penDown) ctx.moveTo(x - 4, py);
         ctx.lineTo(x, y);
-        ctx.stroke();
+        penDown = true;
+      } else {
+        penDown = false;
       }
       py = y;
     }
+    ctx.stroke();
   }
 
   for (const grp of groups) {
