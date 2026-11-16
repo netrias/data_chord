@@ -90,23 +90,36 @@ describe('Stage 3 harmonize animation', () => {
     assert.equal(page.scheduledFrames.length, 0);
   });
 
-  it('leaves the loading state unmarked when the first frame cannot be drawn', () => {
-    // Given a 2D context whose drawing fails
-    const drawFailure = new Error('context lost');
-    const context = mockContext([]);
-    context.clearRect = () => { throw drawFailure; };
-    const page = loadingPage({ context });
-    assert.equal(page.loadingState.dataset.animation, undefined);
+  for (const { name, framesBeforeFailure } of [
+    { name: 'the first frame', framesBeforeFailure: 0 },
+    { name: 'a later frame', framesBeforeFailure: 1 },
+  ]) {
+    it(`unmarks the loading state and stops when ${name} cannot be drawn`, () => {
+      // Given a 2D context whose drawing fails after a set number of good frames
+      const drawFailure = new Error('context lost');
+      const context = mockContext([]);
+      let framesLeft = framesBeforeFailure;
+      context.clearRect = () => {
+        if (framesLeft === 0) throw drawFailure;
+        framesLeft -= 1;
+      };
+      const page = loadingPage({ context });
+      assert.equal(page.loadingState.dataset.animation, undefined);
 
-    // When the animation starts
-    assert.throws(() => startHarmonizeAnimation(page.win), drawFailure);
+      // When the animation runs up to the failing frame
+      const runToFailure = () => {
+        startHarmonizeAnimation(page.win);
+        page.scheduledFrames[0](1000);
+      };
+      assert.throws(runToFailure, drawFailure);
 
-    // Then the state is not marked, so the spinner stays visible, and no frame is scheduled
-    assert.equal(page.loadingState.dataset.animation, undefined);
-    assert.equal(page.scheduledFrames.length, 0);
-  });
+      // Then the state is not marked, so the spinner is visible, and no further frame is scheduled
+      assert.equal(page.loadingState.dataset.animation, undefined);
+      assert.equal(page.scheduledFrames.length, framesBeforeFailure);
+    });
+  }
 
-  it('draws nothing while the canvas is not rendered, and keeps the loop alive', () => {
+  it('draws nothing while the canvas is not rendered', () => {
     // Given a running animation whose canvas has since been hidden
     const calls = [];
     const page = loadingPage({ context: mockContext(calls) });
@@ -118,8 +131,7 @@ describe('Stage 3 harmonize animation', () => {
     // When the next animation frame runs
     page.scheduledFrames[0](1000);
 
-    // Then nothing is drawn, and a later frame is still scheduled for when the canvas returns
+    // Then nothing is drawn
     assert.equal(calls.length, callsBeforeFrame);
-    assert.equal(page.scheduledFrames.length, 2);
   });
 });

@@ -19,7 +19,7 @@ const TAU = Math.PI * 2;
 const STILL_FRAME_SECONDS = 6.3;
 
 /** Value of data-animation on #loadingState that the CSS keys on. */
-export const RUNNING = 'running';
+const RUNNING = 'running';
 
 /**
  * @typedef {[number, number, number]} Rgb
@@ -101,7 +101,7 @@ const lock = (x) => smooth(0.3 * W, LOCK_X, x);
  * @param {number} t
  * @param {ChordColors} colors
  */
-export const drawChordFrame = (ctx, t, colors) => {
+const drawChordFrame = (ctx, t, colors) => {
   const { green, surface } = colors;
 
   /* One chord of three notes per group. Each chord rings the staff as it locks. */
@@ -194,12 +194,12 @@ const readColors = (win) => {
 /**
  * Start the animation on the canvas inside #loadingState and mark the loading
  * state as running. Leaves the state unmarked (spinner visible) when there is
- * no 2D context or the first frame cannot be drawn.
+ * no 2D context, and unmarks it again if any frame cannot be drawn.
  * @param {Window} win
  */
 export const startHarmonizeAnimation = (win) => {
   const loadingState = win.document.getElementById('loadingState');
-  const canvas = loadingState?.querySelector('canvas');
+  const canvas = /** @type {HTMLCanvasElement | null} */ (loadingState?.querySelector('.harmonize-animation'));
   const ctx = canvas?.getContext('2d');
   if (!ctx) return;
 
@@ -207,29 +207,28 @@ export const startHarmonizeAnimation = (win) => {
   const paint = (seconds) => {
     /* why: no layout box means the loading panel or the canvas is hidden, so there is nothing to draw on. */
     if (canvas.clientWidth === 0) return;
-    const dpr = Math.min(win.devicePixelRatio || 1, 2);
-    const width = Math.round(canvas.clientWidth * dpr);
-    if (canvas.width !== width) {
-      canvas.width = width;
-      canvas.height = Math.round(width * H / W);
+    try {
+      const dpr = Math.min(win.devicePixelRatio || 1, 2);
+      const width = Math.round(canvas.clientWidth * dpr);
+      if (canvas.width !== width) {
+        canvas.width = width;
+        canvas.height = Math.round(width * H / W);
+      }
+      const scale = canvas.width / W;
+      ctx.setTransform(scale, 0, 0, scale, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      drawChordFrame(ctx, seconds, colors);
+    } catch (error) {
+      /* why: a failed frame brings the spinner back; rethrowing also stops the loop before it schedules again. */
+      delete loadingState.dataset.animation;
+      throw error;
     }
-    const scale = canvas.width / W;
-    ctx.setTransform(scale, 0, 0, scale, 0, 0);
-    ctx.clearRect(0, 0, W, H);
-    drawChordFrame(ctx, seconds, colors);
   };
 
-  const reducedMotion = win.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  /* why: the CSS shows the canvas only once marked, so mark first to give it a layout box, and unmark if the first frame fails. */
+  /* why: the CSS shows the canvas only once marked, so mark first to give it a layout box. */
   loadingState.dataset.animation = RUNNING;
-  try {
-    paint(reducedMotion ? STILL_FRAME_SECONDS : win.performance.now() / 1000);
-  } catch (error) {
-    delete loadingState.dataset.animation;
-    throw error;
-  }
-
-  if (reducedMotion) {
+  if (win.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    paint(STILL_FRAME_SECONDS);
     win.addEventListener('resize', () => paint(STILL_FRAME_SECONDS));
     return;
   }
@@ -237,7 +236,7 @@ export const startHarmonizeAnimation = (win) => {
     paint(ms / 1000);
     win.requestAnimationFrame(loop);
   };
-  win.requestAnimationFrame(loop);
+  loop(win.performance.now());
 };
 
 if (typeof window !== 'undefined') {
