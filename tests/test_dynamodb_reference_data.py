@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import threading
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -16,8 +17,15 @@ from src.domain.reference_placements import CdePlacement, PlacedReferenceModel
 from src.integrations.dynamodb_reference_data import (
     DynamoDbReferenceDataRepository,
     ReferenceDataImporter,
+    _canonical_json,
+    _canonical_placed_payload,
+    _catalog_payload,
+    _catalog_sort_key,
+    _digest,
     _model_partition,
     _node_sort_key,
+    _placement_prefix,
+    _values_prefix,
 )
 
 SOURCE_DIGEST = "a" * 64
@@ -59,17 +67,6 @@ class FakeTable:
         if start + self.page_size < len(rows):
             response["LastEvaluatedKey"] = {"pk": pk, "sk": page[-1]["sk"]}
         return response
-
-
-@dataclass
-class FailingTable(FakeTable):
-    writes_before_failure: int = 1
-
-    def put_item(self, *, Item: Mapping[str, object], ConditionExpression: str | None = None) -> dict[str, object]:
-        if self.writes_before_failure == 0:
-            raise RuntimeError("interrupted import")
-        self.writes_before_failure -= 1
-        return super().put_item(Item=Item, ConditionExpression=ConditionExpression)
 
 
 class BlockingQueryTable(FakeTable):
@@ -126,9 +123,16 @@ def _is_node_row(sk: str) -> bool:
     return sk.startswith("NODE#") and "#CDE#" not in sk
 
 
-def _node_rows(table: FakeTable) -> dict[object, object]:
+def _node_rows(table: FakeTable) -> dict[str, int]:
     """Each node's stored CDE count, keyed by node name."""
-    return {item["node"]: item["cde_count"] for (_pk, sk), item in table.items.items() if _is_node_row(sk)}
+    rows: dict[str, int] = {}
+    for (_pk, sk), item in table.items.items():
+        if _is_node_row(sk):
+            node, count = item["node"], item["cde_count"]
+            assert isinstance(node, str)
+            assert isinstance(count, int)
+            rows[node] = count
+    return rows
 
 
 def _shared_key_model() -> PlacedReferenceModel:
@@ -145,13 +149,103 @@ def _shared_key_model() -> PlacedReferenceModel:
     )
 
 
-def test_import_and_load_preserve_multi_page_multi_chunk_model() -> None:
+def _seed_rows(
+    table: FakeTable,
+    models: list[PlacedReferenceModel],
+    *,
+    value_chunk_bytes: int = 192 * 1024,
+) -> None:
+    """Given placed models, populate a fake table with schema-version-2 rows."""
+    catalog = [
+        {
+            "pk": "CATALOG",
+            "sk": _catalog_sort_key(model.version.data_model_key, model.version.external_version_number),
+            "schema_version": 2, "data_model_key": model.version.data_model_key,
+            "external_version_number": model.version.external_version_number, "label": model.label,
+        }
+        for model in models
+    ]
+    catalog_digest = _digest(_catalog_payload(catalog))
+    rows: list[dict[str, object]] = [{
+        "pk": "CATALOG", "sk": "IMPORT", "schema_version": 2,
+        "model_count": len(catalog), "digest": catalog_digest, "source_digest": SOURCE_DIGEST,
+    }]
+    for model in models:
+        pk = _model_partition(model.version)
+        model_digest = _digest(_canonical_placed_payload(model))
+        rows.append({
+            "pk": pk, "sk": "IMPORT", "schema_version": 2,
+            "data_model_key": model.version.data_model_key,
+            "external_version_number": model.version.external_version_number,
+            "digest": model_digest,
+        })
+        for node in model.nodes:
+            rows.append({
+                "pk": pk, "sk": _node_sort_key(node), "schema_version": 2,
+                "node": node, "cde_count": sum(placement.node == node for placement in model.placements),
+            })
+        for placement in model.placements:
+            row: dict[str, object] = {
+                "pk": pk, "sk": f"{_placement_prefix(placement.key)}#META", "schema_version": 2,
+                "node": placement.node, "cde_key": placement.cde_key,
+                "description": placement.description, "data_type": placement.data_type,
+                "is_required": placement.is_required,
+            }
+            if placement.cde_id is not None:
+                row["cde_id"] = placement.cde_id
+            if placement.is_key is not None:
+                row["is_key"] = placement.is_key
+            rows.append(row)
+        for cde_key in model.cde_keys:
+            rows.extend(_fixture_value_rows(pk, cde_key, sorted(model.values[cde_key]), value_chunk_bytes))
+        rows.append({
+            "pk": pk, "sk": "META", "schema_version": 2,
+            "data_model_key": model.version.data_model_key,
+            "external_version_number": model.version.external_version_number,
+            "label": model.label, "node_count": len(model.nodes),
+            "cde_count": len(model.placements),
+            "value_count": sum(len(values) for values in model.values.values()),
+            "digest": model_digest,
+        })
+    rows.extend(catalog)
+    rows.append({
+        "pk": "CATALOG", "sk": "META", "schema_version": 2,
+        "model_count": len(catalog), "digest": catalog_digest, "source_digest": SOURCE_DIGEST,
+    })
+    for row in rows:
+        table.items[(str(row["pk"]), str(row["sk"]))] = dict(row)
+
+
+def _fixture_value_rows(pk: str, cde_key: str, values: list[str], chunk_bytes: int) -> list[dict[str, object]]:
+    """Given one value set, make metadata and compressed chunk fixtures."""
+    chunks: list[list[str]] = []
+    for value in values:
+        if not chunks or len(_canonical_json([*chunks[-1], value])) > chunk_bytes:
+            chunks.append([value])
+        else:
+            chunks[-1].append(value)
+    prefix = _values_prefix(cde_key)
+    rows: list[dict[str, object]] = [{
+        "pk": pk, "sk": f"{prefix}#META", "schema_version": 2,
+        "cde_key": cde_key, "value_count": len(values),
+        "chunk_count": len(chunks), "digest": _digest(values),
+    }]
+    for index, chunk in enumerate(chunks):
+        rows.append({
+            "pk": pk, "sk": f"{prefix}#VALUES#{index:06d}", "schema_version": 2,
+            "cde_key": cde_key, "chunk_index": index,
+            "uncompressed_size": len(_canonical_json(chunk)),
+            "payload": gzip.compress(_canonical_json(chunk), mtime=0),
+        })
+    return rows
+
+
+def test_load_preserves_multi_page_multi_chunk_model() -> None:
     # Given a model that needs several DynamoDB query pages and value chunks.
     table = FakeTable(page_size=2)
-    importer = ReferenceDataImporter(table, value_chunk_bytes=180)
+    _seed_rows(table, [_model()], value_chunk_bytes=180)
 
-    # When it is imported and loaded through the repository.
-    importer.import_models([_model()], source_digest=SOURCE_DIGEST)
+    # When it is loaded through the repository.
     loaded = DynamoDbReferenceDataRepository(table).load_model(
         DataModelVersionReference("model#one", "1/2")
     )
@@ -161,11 +255,24 @@ def test_import_and_load_preserve_multi_page_multi_chunk_model() -> None:
     assert loaded.pvs.get("empty") == frozenset()
 
 
+def test_legacy_sync_rows_remain_readable() -> None:
+    """Given a pre-f30b3dc flat model, when sync writes it, then the runtime reader loads it."""
+    table = FakeTable()
+    model = _model(2).collapse()
+
+    ReferenceDataImporter(table).import_models([model], source_digest=SOURCE_DIGEST)
+    repository = DynamoDbReferenceDataRepository(table)
+
+    assert repository.load_model(model.version) == model
+    assert len(repository.list_models()) == 1
+    assert {item["schema_version"] for item in table.items.values()} == {1}
+
+
 def test_one_cde_key_under_two_nodes_is_stored_separately_and_collapsed_on_read() -> None:
     # Given one CDE key placed under two nodes, which disagree on their metadata.
     table = FakeTable()
     model = _shared_key_model()
-    ReferenceDataImporter(table).import_models([model], source_digest=SOURCE_DIGEST)
+    _seed_rows(table, [model])
     repository = DynamoDbReferenceDataRepository(table)
 
     # Then storage keeps both placements, with each node's own metadata intact.
@@ -175,7 +282,7 @@ def test_one_cde_key_under_two_nodes_is_stored_separately_and_collapsed_on_read(
         ("diagnosis", True),
         ("sample", False),
     ]
-    assert [item["is_key"] for item in table.items.values() if "#CDE#" in item["sk"]] == [True, False]
+    assert [item["is_key"] for item in table.items.values() if "#CDE#" in str(item["sk"])] == [True, False]
     assert [(placement.node, placement.data_type) for placement in stored.placements] == [
         ("diagnosis", "string"),
         ("sample", "enum"),
@@ -194,7 +301,7 @@ def test_a_shared_cde_keys_values_are_stored_once_for_all_its_nodes() -> None:
     # Given one CDE key placed under two nodes.
     table = FakeTable()
     model = _shared_key_model()
-    ReferenceDataImporter(table).import_models([model], source_digest=SOURCE_DIGEST)
+    _seed_rows(table, [model])
 
     # Then its values are written outside the node prefix, so neither node
     # carries its own copy of a list the source publishes only once.
@@ -209,7 +316,7 @@ def test_each_node_gets_a_row_holding_how_many_cdes_it_carries() -> None:
     model = _shared_key_model()
 
     # When the model is imported.
-    ReferenceDataImporter(table).import_models([model], source_digest=SOURCE_DIGEST)
+    _seed_rows(table, [model])
 
     # Then each node has its own row, sorting above that node's placements.
     assert _node_rows(table) == {"diagnosis": 1, "sample": 1}
@@ -227,7 +334,7 @@ def test_a_node_that_holds_no_cdes_is_still_published_and_loaded() -> None:
     )
 
     # When the model is imported and loaded back.
-    ReferenceDataImporter(table).import_models([model], source_digest=SOURCE_DIGEST)
+    _seed_rows(table, [model])
     stored = DynamoDbReferenceDataRepository(table).load_placements(model.version)
 
     # Then the empty node survives the round trip, carrying a count of zero.
@@ -240,7 +347,7 @@ def test_load_rejects_placements_whose_node_row_was_deleted() -> None:
     # Given a published model whose node row was deleted, leaving its placements behind.
     table = FakeTable()
     model = _shared_key_model()
-    ReferenceDataImporter(table).import_models([model], source_digest=SOURCE_DIGEST)
+    _seed_rows(table, [model])
     del table.items[(_model_partition(model.version), _node_sort_key("diagnosis"))]
 
     # When the model is loaded.
@@ -259,7 +366,7 @@ def test_the_model_digest_catches_a_renamed_node_that_holds_no_cdes() -> None:
         placements=(CdePlacement("diagnosis", "stage"),),
         values={"stage": frozenset({"I"})},
     )
-    ReferenceDataImporter(table).import_models([model], source_digest=SOURCE_DIGEST)
+    _seed_rows(table, [model])
     partition = _model_partition(model.version)
     stored = table.items.pop((partition, _node_sort_key("unused")))
     table.items[(partition, _node_sort_key("renamed"))] = {
@@ -278,7 +385,7 @@ def test_load_rejects_a_node_row_whose_cde_count_was_changed() -> None:
     # Given a published model whose stored node count was edited in place.
     table = FakeTable()
     model = _shared_key_model()
-    ReferenceDataImporter(table).import_models([model], source_digest=SOURCE_DIGEST)
+    _seed_rows(table, [model])
     key = (_model_partition(model.version), _node_sort_key("diagnosis"))
     table.items[key] = {**table.items[key], "cde_count": 9}
 
@@ -293,7 +400,7 @@ def test_stored_cde_count_includes_each_node_cde_pair() -> None:
     # Given a CDE key placed under two nodes.
     table = FakeTable()
     model = _shared_key_model()
-    ReferenceDataImporter(table).import_models([model], source_digest=SOURCE_DIGEST)
+    _seed_rows(table, [model])
 
     # Then the model CDE count agrees with the total of the node CDE counts.
     meta = next(item for (_pk, sk), item in table.items.items() if sk == "META" and "label" in item)
@@ -311,7 +418,7 @@ def test_load_rejects_a_count_that_disagrees_with_the_stored_rows(field: str) ->
     # Given a published model whose stored count was changed in place.
     table = FakeTable()
     model = _shared_key_model()
-    ReferenceDataImporter(table).import_models([model], source_digest=SOURCE_DIGEST)
+    _seed_rows(table, [model])
     meta_key = next(key for key in table.items if key[1] == "META" and "label" in table.items[key])
     table.items[meta_key][field] = 99
 
@@ -324,7 +431,7 @@ def test_model_cache_hits_recent_versions_and_reloads_evicted_versions() -> None
     # Given five published versions and a four-version in-process cache.
     table = FakeTable()
     models = [_versioned_model(str(version)) for version in range(1, 6)]
-    ReferenceDataImporter(table).import_models(models, source_digest=SOURCE_DIGEST)
+    _seed_rows(table, models)
     repository = DynamoDbReferenceDataRepository(table)
     for model in models[:4]:
         assert repository.load_model(model.version) == model.collapse()
@@ -350,7 +457,7 @@ def test_model_cache_serializes_full_model_loads() -> None:
     table = BlockingQueryTable()
     models = [_versioned_model("1"), _versioned_model("2")]
     table.release_queries.set()
-    ReferenceDataImporter(table).import_models(models, source_digest=SOURCE_DIGEST)
+    _seed_rows(table, models)
     table.release_queries.clear()
     table.first_query_started.clear()
     table.concurrent_query_started.clear()
@@ -373,8 +480,7 @@ def test_model_cache_serializes_full_model_loads() -> None:
 def test_catalog_query_pages_and_groups_versions() -> None:
     # Given two complete model versions and a catalog page size of one.
     table = FakeTable(page_size=1)
-    importer = ReferenceDataImporter(table)
-    importer.import_models([_model(2), _versioned_model("2")], source_digest=SOURCE_DIGEST)
+    _seed_rows(table, [_model(2), _versioned_model("2")])
 
     # When catalog entries are listed.
     summaries = DynamoDbReferenceDataRepository(table).list_models()
@@ -387,7 +493,7 @@ def test_catalog_query_pages_and_groups_versions() -> None:
 def test_catalog_rejects_an_identity_that_does_not_match_its_key() -> None:
     # Given one catalog row whose stored identity was changed in place.
     table = FakeTable()
-    ReferenceDataImporter(table).import_models([_model(2)], source_digest=SOURCE_DIGEST)
+    _seed_rows(table, [_model(2)])
     catalog_key = next(key for key in table.items if key[0] == "CATALOG" and key[1].startswith("MODEL#"))
     table.items[catalog_key]["external_version_number"] = "different"
 
@@ -396,10 +502,31 @@ def test_catalog_rejects_an_identity_that_does_not_match_its_key() -> None:
         DynamoDbReferenceDataRepository(table).list_models()
 
 
+def test_model_reader_rejects_rows_without_complete_marker() -> None:
+    """Given model rows without META, when loaded, then the reader rejects them."""
+    table = FakeTable()
+    model = _model(2)
+    _seed_rows(table, [model])
+    del table.items[(_model_partition(model.version), "META")]
+
+    with pytest.raises(ReferenceDataCorruptError, match="no complete marker"):
+        DynamoDbReferenceDataRepository(table).load_placements(model.version)
+
+
+def test_catalog_reader_rejects_rows_without_complete_marker() -> None:
+    """Given catalog entries without META, when listed, then the reader rejects them."""
+    table = FakeTable()
+    _seed_rows(table, [_model(2)])
+    del table.items[("CATALOG", "META")]
+
+    with pytest.raises(ReferenceDataCorruptError, match="not completely published"):
+        DynamoDbReferenceDataRepository(table).list_models()
+
+
 def test_load_accepts_the_binary_type_returned_by_boto3() -> None:
     # Given DynamoDB returns its Binary wrapper for stored chunk payloads.
     table = FakeTable()
-    ReferenceDataImporter(table, value_chunk_bytes=180).import_models([_model()], source_digest=SOURCE_DIGEST)
+    _seed_rows(table, [_model()], value_chunk_bytes=180)
     for item in table.items.values():
         if "payload" in item:
             item["payload"] = Binary(item["payload"])
@@ -412,7 +539,7 @@ def test_load_accepts_the_binary_type_returned_by_boto3() -> None:
 def test_load_accepts_the_number_and_binary_types_returned_by_boto3() -> None:
     # Given stored rows pass through boto3's real DynamoDB value conversion.
     table = FakeTable()
-    ReferenceDataImporter(table, value_chunk_bytes=180).import_models([_model()], source_digest=SOURCE_DIGEST)
+    _seed_rows(table, [_model()], value_chunk_bytes=180)
     serializer = TypeSerializer()
     deserializer = TypeDeserializer()
     for key, item in list(table.items.items()):
@@ -427,152 +554,11 @@ def test_load_accepts_the_number_and_binary_types_returned_by_boto3() -> None:
     assert loaded == _model().collapse()
 
 
-def test_same_import_is_idempotent_and_changed_content_stops() -> None:
-    # Given one complete imported model.
-    table = FakeTable()
-    importer = ReferenceDataImporter(table)
-    importer.import_models([_model(2)], source_digest=SOURCE_DIGEST)
-
-    # When the same model is imported again, then it succeeds without changing rows.
-    before = dict(table.items)
-    importer.import_models([_model(2)], source_digest=SOURCE_DIGEST)
-    assert table.items == before
-
-    # When content at the same model identity changes, then the import stops.
-    with pytest.raises(RuntimeError, match="conditional"):
-        importer.import_models([_model(3)], source_digest=SOURCE_DIGEST)
-    assert DynamoDbReferenceDataRepository(table).load_model(_model(2).version) == _model(2).collapse()
-
-
-def test_catalog_rejects_a_different_approved_source() -> None:
-    # Given a complete catalog published from one approved source file.
-    table = FakeTable()
-    importer = ReferenceDataImporter(table)
-    importer.import_models([_model(2)], source_digest=SOURCE_DIGEST)
-    before = dict(table.items)
-
-    # When a different source digest tries to add another model.
-    with pytest.raises(RuntimeError, match="conditional"):
-        importer.import_models([_model(2), _versioned_model("2")], source_digest="b" * 64)
-
-    # Then the original source marker and all table rows remain unchanged.
-    assert table.items == before
-    assert table.items[("CATALOG", "META")]["source_digest"] == SOURCE_DIGEST
-    assert len(DynamoDbReferenceDataRepository(table).list_models()) == 1
-
-
-def test_changed_reimport_cannot_add_rows_to_a_published_model() -> None:
-    # Given one published model and a changed copy with an extra CDE.
-    table = FakeTable()
-    importer = ReferenceDataImporter(table)
-    original = _model(2)
-    importer.import_models([original], source_digest=SOURCE_DIGEST)
-    changed = PlacedReferenceModel(
-        version=original.version,
-        label=original.label,
-        nodes=original.nodes,
-        placements=(*original.placements, CdePlacement("node#one", "new")),
-        values={**original.values, "new": frozenset({"new-value"})},
-    )
-
-    # When the changed copy is imported, then its seal conflicts before new rows are written.
-    before = dict(table.items)
-    with pytest.raises(RuntimeError, match="conditional"):
-        importer.import_models([changed], source_digest=SOURCE_DIGEST)
-    assert table.items == before
-    assert DynamoDbReferenceDataRepository(table).load_model(original.version) == original.collapse()
-
-
-def test_interrupted_import_is_not_listed_and_can_resume() -> None:
-    # Given an import stops before the complete marker and catalog row.
-    table = FailingTable(writes_before_failure=2)
-    with pytest.raises(RuntimeError, match="conditional write failed"):
-        ReferenceDataImporter(table, value_chunk_bytes=180).import_models(
-            [_model()], source_digest=SOURCE_DIGEST
-        )
-
-    # Then the incomplete model is not listed.
-    assert DynamoDbReferenceDataRepository(table).list_models() == ()
-
-    # When the same import resumes, then matching partial rows are accepted and the model is published.
-    table.writes_before_failure = 1_000
-    ReferenceDataImporter(table, value_chunk_bytes=180).import_models(
-        [_model()], source_digest=SOURCE_DIGEST
-    )
-    assert len(DynamoDbReferenceDataRepository(table).list_models()) == 1
-
-
-def test_interrupted_multi_model_import_does_not_publish_a_partial_catalog() -> None:
-    # Given an import stops after the first model is complete but before the batch is complete.
-    table = FailingTable(writes_before_failure=6)
-    first = _model(2)
-    second = _versioned_model("2")
-
-    # When the batch import is interrupted, then only its hidden source seal exists.
-    with pytest.raises(RuntimeError, match="conditional write failed"):
-        ReferenceDataImporter(table).import_models([first, second], source_digest=SOURCE_DIGEST)
-    assert {key for key in table.items if key[0] == "CATALOG"} == {("CATALOG", "IMPORT")}
-    assert DynamoDbReferenceDataRepository(table).list_models() == ()
-
-
-def test_catalog_rows_are_not_trusted_before_the_batch_marker() -> None:
-    # Given both model partitions verify but catalog publication stops before its final marker.
-    # The catalog seal, both eight-row model partitions, then one catalog row.
-    table = FailingTable(writes_before_failure=18)
-    first = _model(2)
-    second = _versioned_model("2")
-    with pytest.raises(RuntimeError, match="conditional write failed"):
-        ReferenceDataImporter(table).import_models([first, second], source_digest=SOURCE_DIGEST)
-
-    # When catalog data is read, then the partial publication fails closed.
-    assert any(pk == "CATALOG" for pk, _sk in table.items)
-    with pytest.raises(ReferenceDataCorruptError, match="not completely published"):
-        DynamoDbReferenceDataRepository(table).list_models()
-
-
-def test_one_oversize_value_is_rejected_before_any_write() -> None:
-    # Given one value that cannot fit inside the configured item boundary.
-    table = FakeTable()
-    model = PlacedReferenceModel(
-        version=DataModelVersionReference("model", "large"),
-        label="Large",
-        nodes=("node",),
-        placements=(CdePlacement("node", "large"),),
-        values={"large": frozenset({"x" * 500})},
-    )
-
-    # When import starts, then the model is rejected before DynamoDB is changed.
-    with pytest.raises(ValueError, match="too large"):
-        ReferenceDataImporter(table, value_chunk_bytes=100).import_models(
-            [model], source_digest=SOURCE_DIGEST
-        )
-    assert table.items == {}
-
-
-def test_oversize_metadata_is_rejected_before_any_write() -> None:
-    # Given metadata that cannot fit within the conservative item boundary.
-    table = FakeTable()
-    model = PlacedReferenceModel(
-        version=DataModelVersionReference("model", "large-metadata"),
-        label="Large",
-        nodes=("node",),
-        placements=(CdePlacement("node", "field", description="x" * 400_000),),
-        values={"field": frozenset()},
-    )
-
-    # When import starts, then all rows are validated before DynamoDB is changed.
-    with pytest.raises(ValueError, match="item is too large"):
-        ReferenceDataImporter(table).import_models([model], source_digest=SOURCE_DIGEST)
-    assert table.items == {}
-
-
 @pytest.mark.parametrize("damage", ["missing", "corrupt", "wrong-size", "extra"])
 def test_load_rejects_incomplete_or_corrupt_chunks(damage: str) -> None:
     # Given a complete model whose stored value chunks are then damaged.
     table = FakeTable()
-    ReferenceDataImporter(table, value_chunk_bytes=180).import_models(
-        [_model()], source_digest=SOURCE_DIGEST
-    )
+    _seed_rows(table, [_model()], value_chunk_bytes=180)
     chunk_keys = [key for key in table.items if "#VALUES#" in key[1]]
     assert chunk_keys
     if damage == "missing":

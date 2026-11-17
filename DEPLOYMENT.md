@@ -492,9 +492,10 @@ the deployment.
 ## 6. Load reference data
 
 The deployment creates an empty reference-data table. Data Chord cannot run a
-workflow until you load an approved canonical reference-data file.
-The DynamoDB sync requires a schema-version-2 export with nodes and node-CDE
-placements. Re-export and approve the file if you have an older flat export.
+workflow until reference data is published. Auto-Model publishes schema-version-2
+rows for the new standards data. The original Data Chord `sync` command below
+remains available for schema-version-1 files and tables; it does not import
+Auto-Model's schema-version-2 JSON. Do not mix the two schemas in one table.
 
 Calculate the file's SHA-256 digest.
 
@@ -523,34 +524,13 @@ AWS_PROFILE=example-data-loader uv run python -m scripts.reference_data sync \
 The command checks the digest, loads the data, reads it back, and checks the
 published model count.
 
-To clear an existing Data Chord reference-data table before a schema reload,
-stop writes to that table and preview the number of items first:
-Replace the example profile and account ID with the target account's values.
-
-```bash
-AWS_PROFILE=example-data-admin uv run python -m scripts.clear_reference_data \
-  --table data-chord-staging-reference-data \
-  --region us-east-2 \
-  --expected-account-id 123456789012
-```
-
-When the target and count are correct, repeat the command with `--execute`
-and `--confirm-table data-chord-staging-reference-data`. The script deletes
-items only from that table, leaves the table itself in place, and checks that
-it is empty afterward. It cannot target the separate Data Model Store or Data
-Chord cache tables. Use an authorized role with `sts:GetCallerIdentity` and
-`dynamodb:DescribeTable`, `dynamodb:Scan`, and `dynamodb:BatchWriteItem` on
-the target table; the standard reference-data loader policy does not grant
-the last three DynamoDB actions.
-
-To create the canonical file from the intended Data Model Store, set
-`DATA_CHORD_DMS_URL` and `DATA_CHORD_DMS_API_KEY` in `data_chord/.env`, or pass
-them through the process environment or `--dms-url` and `--api-key`.
-The exporter reads `data_chord/.env` by default and requires both values;
-it does not fall back to the SDK's legacy `/default` URL. Then run:
+If an authorized operator must create the canonical file from the legacy
+service, load `NETRIAS_API_KEY` from the approved secret source. Do not type its
+value in the command. Then run:
 
 ```bash
 uv run python -m scripts.reference_data export \
+  --environment staging \
   --output approved-reference-data.json
 ```
 

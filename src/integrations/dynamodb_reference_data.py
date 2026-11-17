@@ -31,10 +31,9 @@ from src.domain.reference_data import (
     ReferenceModelNotFoundError,
 )
 from src.domain.reference_placements import CdePlacement, PlacedReferenceModel, PlacementKey
+from src.integrations import _dynamodb_reference_data_v1 as legacy
 
 SCHEMA_VERSION = 2
-DEFAULT_VALUE_CHUNK_BYTES = 192 * 1024
-MAX_ITEM_BYTES = 300 * 1024
 MAX_UNCOMPRESSED_CHUNK_BYTES = 300 * 1024
 _CATALOG_PK = "CATALOG"
 _META_SK = "META"
@@ -73,47 +72,9 @@ class DynamoDbReferenceDataRepository:
         items = self._query_partition(_CATALOG_PK)
         if not items:
             return ()
-        by_sk = {_required_string(item, "sk"): item for item in items}
-        if len(by_sk) != len(items):
-            raise ReferenceDataCorruptError("Reference catalog contains duplicate rows")
-        markers = _catalog_markers(by_sk)
-        if markers is None:
-            return ()
-        meta, import_seal = markers
-        labels: dict[str, str] = {}
-        versions_by_model: dict[str, set[str]] = {}
-        catalog_items: list[Mapping[str, object]] = []
-        for item in by_sk.values():
-            _validate_schema(item)
-            key = _required_string(item, "data_model_key")
-            label = _required_string(item, "label")
-            version = _required_string(item, "external_version_number")
-            if _required_string(item, "sk") != _catalog_sort_key(key, version):
-                raise ReferenceDataCorruptError("Reference catalog identity does not match its key")
-            existing_label = labels.setdefault(key, label)
-            if existing_label != label:
-                raise ReferenceDataCorruptError(f"Reference catalog labels disagree: {key}")
-            versions_by_model.setdefault(key, set()).add(version)
-            catalog_items.append(item)
-        if _required_int(meta, "model_count") != len(catalog_items):
-            raise ReferenceDataCorruptError("Reference catalog model count is invalid")
-        if _required_string(meta, "digest") != _digest(_catalog_payload(catalog_items)):
-            raise ReferenceDataCorruptError("Reference catalog digest is invalid")
-        source_digest = _required_sha256(meta, "source_digest")
-        if (
-            _required_sha256(import_seal, "source_digest") != source_digest
-            or _required_string(import_seal, "digest") != _required_string(meta, "digest")
-            or _required_int(import_seal, "model_count") != _required_int(meta, "model_count")
-        ):
-            raise ReferenceDataCorruptError("Reference catalog import seal does not match its catalog")
-        return tuple(
-            DataModelSummary(
-                data_model_key=key,
-                label=labels[key],
-                versions=[DataModelVersionInfo(version) for version in sorted(versions)],
-            )
-            for key, versions in sorted(versions_by_model.items())
-        )
+        if _required_int(items[0], "schema_version") == legacy.SCHEMA_VERSION:
+            return legacy.DynamoDbReferenceDataRepository(self._table).list_models()
+        return _summaries_from_catalog(items)
 
     def load_model(self, version: DataModelVersionReference) -> ReferenceModel:
         with self._models_lock:
@@ -130,7 +91,20 @@ class DynamoDbReferenceDataRepository:
                 if cached is not None:
                     self._models.move_to_end(version)
                     return cached
-            model = self.load_placements(version).collapse()
+            items = self._query_partition(_model_partition(version))
+            if not items:
+                raise ReferenceModelNotFoundError(
+                    f"Reference model is not published: {version.data_model_key}/{version.external_version_number}"
+                )
+            try:
+                if _required_int(items[0], "schema_version") == legacy.SCHEMA_VERSION:
+                    model = legacy.DynamoDbReferenceDataRepository(self._table).load_model(version)
+                else:
+                    model = _placed_from_items(version, items).collapse()
+            except ReferenceDataCorruptError:
+                raise
+            except Exception as exc:
+                raise ReferenceDataCorruptError("Reference model is malformed") from exc
             with self._models_lock:
                 self._models[version] = model
                 self._models.move_to_end(version)
@@ -179,154 +153,49 @@ class DynamoDbReferenceDataRepository:
             raise ReferenceDataUnavailableError("Reference data is unavailable") from exc
 
 
-class ReferenceDataImporter:
-    """Restartable writer used by the one-time migration command."""
-
-    def __init__(
-        self,
-        table: DynamoTable,
-        *,
-        value_chunk_bytes: int = DEFAULT_VALUE_CHUNK_BYTES,
-    ) -> None:
-        if value_chunk_bytes < 16 or value_chunk_bytes > MAX_UNCOMPRESSED_CHUNK_BYTES:
-            raise ValueError(f"value_chunk_bytes must be between 16 and {MAX_UNCOMPRESSED_CHUNK_BYTES}")
-        self._table = table
-        self._value_chunk_bytes = value_chunk_bytes
-
-    def import_models(self, models: Sequence[PlacedReferenceModel], *, source_digest: str) -> None:
-        _validate_import_source_digest(source_digest)
-        ordered = _validated_import_models(models)
-        catalog_items = [_catalog_item(model) for model in ordered]
-        catalog_meta = _catalog_meta_item(catalog_items, source_digest)
-        catalog_import = _catalog_import_item(catalog_items, source_digest)
-        model_rows = [
-            (model, _items_for_model(model, self._value_chunk_bytes))
-            for model in ordered
-        ]
-        for item in [catalog_import, *catalog_items, catalog_meta]:
-            _validate_item_for_write(item)
-        self._put_immutable(catalog_import)
-        repository = DynamoDbReferenceDataRepository(self._table)
-        for model, items in model_rows:
-            for item in items:
-                self._put_immutable(item)
-            if repository.load_placements(model.version) != model:
-                raise RuntimeError("Imported reference model did not verify")
-        for item in catalog_items:
-            self._put_immutable(item)
-        self._put_immutable(catalog_meta)
-        if repository.list_models() != _summaries_for_models(ordered):
-            raise RuntimeError("Imported reference catalog did not verify")
-
-    def _put_immutable(self, item: Mapping[str, object]) -> None:
-        key = {"pk": item["pk"], "sk": item["sk"]}
-        existing = self._table.get_item(Key=key, ConsistentRead=True).get("Item")
-        if existing is not None:
-            if existing != item:
-                raise RuntimeError(f"conditional write failed for {item['pk']}/{item['sk']}")
-            return
-        try:
-            self._table.put_item(Item=item, ConditionExpression="attribute_not_exists(pk) AND attribute_not_exists(sk)")
-        except Exception as exc:
-            raced = self._table.get_item(Key=key, ConsistentRead=True).get("Item")
-            if raced != item:
-                raise RuntimeError(f"conditional write failed for {item['pk']}/{item['sk']}") from exc
-
-
-def _items_for_model(model: PlacedReferenceModel, value_chunk_bytes: int) -> list[Mapping[str, object]]:
-    pk = _model_partition(model.version)
-    model_digest = _digest(_canonical_placed_payload(model))
-    items: list[Mapping[str, object]] = [
-        {
-            "pk": pk,
-            "sk": _IMPORT_SK,
-            "schema_version": SCHEMA_VERSION,
-            "data_model_key": model.version.data_model_key,
-            "external_version_number": model.version.external_version_number,
-            "digest": model_digest,
-        }
-    ]
-    for node in model.nodes:
-        items.append(
-            {
-                "pk": pk,
-                "sk": _node_sort_key(node),
-                "schema_version": SCHEMA_VERSION,
-                "node": node,
-                "cde_count": _cde_count_for_node(model, node),
-            }
+def _summaries_from_catalog(items: list[Mapping[str, object]]) -> tuple[DataModelSummary, ...]:
+    """Validate the schema-version-2 catalog and return its model summaries."""
+    by_sk = {_required_string(item, "sk"): item for item in items}
+    if len(by_sk) != len(items):
+        raise ReferenceDataCorruptError("Reference catalog contains duplicate rows")
+    markers = _catalog_markers(by_sk)
+    if markers is None:
+        return ()
+    meta, import_seal = markers
+    labels: dict[str, str] = {}
+    versions_by_model: dict[str, set[str]] = {}
+    catalog_items: list[Mapping[str, object]] = []
+    for item in by_sk.values():
+        _validate_schema(item)
+        key = _required_string(item, "data_model_key")
+        label = _required_string(item, "label")
+        version = _required_string(item, "external_version_number")
+        if _required_string(item, "sk") != _catalog_sort_key(key, version):
+            raise ReferenceDataCorruptError("Reference catalog identity does not match its key")
+        existing_label = labels.setdefault(key, label)
+        if existing_label != label:
+            raise ReferenceDataCorruptError(f"Reference catalog labels disagree: {key}")
+        versions_by_model.setdefault(key, set()).add(version)
+        catalog_items.append(item)
+    if _required_int(meta, "model_count") != len(catalog_items):
+        raise ReferenceDataCorruptError("Reference catalog model count is invalid")
+    if _required_string(meta, "digest") != _digest(_catalog_payload(catalog_items)):
+        raise ReferenceDataCorruptError("Reference catalog digest is invalid")
+    source_digest = _required_sha256(meta, "source_digest")
+    if (
+        _required_sha256(import_seal, "source_digest") != source_digest
+        or _required_string(import_seal, "digest") != _required_string(meta, "digest")
+        or _required_int(import_seal, "model_count") != _required_int(meta, "model_count")
+    ):
+        raise ReferenceDataCorruptError("Reference catalog import seal does not match its catalog")
+    return tuple(
+        DataModelSummary(
+            data_model_key=key,
+            label=labels[key],
+            versions=[DataModelVersionInfo(version) for version in sorted(versions)],
         )
-    for placement in model.placements:
-        placement_item: dict[str, object] = {
-            "pk": pk,
-            "sk": f"{_placement_prefix(placement.key)}#META",
-            "schema_version": SCHEMA_VERSION,
-            "node": placement.node,
-            "cde_key": placement.cde_key,
-            "description": placement.description,
-            "data_type": placement.data_type,
-            "is_required": placement.is_required,
-        }
-        if placement.cde_id is not None:
-            placement_item["cde_id"] = placement.cde_id
-        if placement.is_key is not None:
-            placement_item["is_key"] = placement.is_key
-        items.append(placement_item)
-    for cde_key in model.cde_keys:
-        values = sorted(model.values[cde_key])
-        prefix = _values_prefix(cde_key)
-        chunks = _split_values(values, value_chunk_bytes)
-        items.append(
-            {
-                "pk": pk,
-                "sk": f"{prefix}#META",
-                "schema_version": SCHEMA_VERSION,
-                "cde_key": cde_key,
-                "value_count": len(values),
-                "chunk_count": len(chunks),
-                "digest": _digest(values),
-            }
-        )
-        for index, values_chunk in enumerate(chunks):
-            chunk_item: dict[str, object] = {
-                "pk": pk,
-                "sk": f"{prefix}#VALUES#{index:06d}",
-                "schema_version": SCHEMA_VERSION,
-                "cde_key": cde_key,
-                "chunk_index": index,
-                "uncompressed_size": len(_canonical_json(values_chunk)),
-                "payload": _gzip_json(values_chunk),
-            }
-            items.append(chunk_item)
-    items.append(
-        {
-            "pk": pk,
-            "sk": _META_SK,
-            "schema_version": SCHEMA_VERSION,
-            "data_model_key": model.version.data_model_key,
-            "external_version_number": model.version.external_version_number,
-            "label": model.label,
-            # Count CDEs per node: a key placed under two nodes counts twice.
-            "node_count": len(model.nodes),
-            "cde_count": sum(_cde_count_for_node(model, node) for node in model.nodes),
-            "value_count": sum(len(values) for values in model.values.values()),
-            "digest": model_digest,
-        }
+        for key, versions in sorted(versions_by_model.items())
     )
-    for item in items:
-        _validate_item_for_write(item)
-    return items
-
-
-def _catalog_item(model: PlacedReferenceModel) -> Mapping[str, object]:
-    return {
-        "pk": _CATALOG_PK,
-        "sk": _catalog_sort_key(model.version.data_model_key, model.version.external_version_number),
-        "schema_version": SCHEMA_VERSION,
-        "data_model_key": model.version.data_model_key,
-        "external_version_number": model.version.external_version_number,
-        "label": model.label,
-    }
 
 
 def _catalog_markers(
@@ -349,55 +218,6 @@ def _catalog_markers(
     return meta, import_seal
 
 
-def _validate_import_source_digest(source_digest: str) -> None:
-    if len(source_digest) != 64 or any(character not in "0123456789abcdef" for character in source_digest):
-        raise ValueError("source_digest must be 64 lowercase hexadecimal characters")
-
-
-def _validated_import_models(models: Sequence[PlacedReferenceModel]) -> list[PlacedReferenceModel]:
-    ordered = sorted(
-        models,
-        key=lambda model: (model.version.data_model_key, model.version.external_version_number),
-    )
-    identities = {(model.version.data_model_key, model.version.external_version_number) for model in ordered}
-    if len(identities) != len(ordered):
-        raise ValueError("Reference import contains duplicate model versions")
-    labels: dict[str, str] = {}
-    for model in ordered:
-        existing_label = labels.setdefault(model.version.data_model_key, model.label)
-        if existing_label != model.label:
-            raise ValueError(f"Reference import has conflicting labels: {model.version.data_model_key}")
-    return ordered
-
-
-def _catalog_meta_item(
-    items: Sequence[Mapping[str, object]],
-    source_digest: str,
-) -> Mapping[str, object]:
-    return {
-        "pk": _CATALOG_PK,
-        "sk": _META_SK,
-        "schema_version": SCHEMA_VERSION,
-        "model_count": len(items),
-        "digest": _digest(_catalog_payload(items)),
-        "source_digest": source_digest,
-    }
-
-
-def _catalog_import_item(
-    items: Sequence[Mapping[str, object]],
-    source_digest: str,
-) -> Mapping[str, object]:
-    return {
-        "pk": _CATALOG_PK,
-        "sk": _IMPORT_SK,
-        "schema_version": SCHEMA_VERSION,
-        "model_count": len(items),
-        "digest": _digest(_catalog_payload(items)),
-        "source_digest": source_digest,
-    }
-
-
 def _catalog_payload(items: Sequence[Mapping[str, object]]) -> list[Mapping[str, str]]:
     return sorted(
         [
@@ -409,20 +229,6 @@ def _catalog_payload(items: Sequence[Mapping[str, object]]) -> list[Mapping[str,
             for item in items
         ],
         key=lambda item: (item["data_model_key"], item["external_version_number"]),
-    )
-
-
-def _summaries_for_models(models: Sequence[PlacedReferenceModel]) -> tuple[DataModelSummary, ...]:
-    labels: dict[str, str] = {}
-    versions: dict[str, list[DataModelVersionInfo]] = {}
-    for model in models:
-        labels[model.version.data_model_key] = model.label
-        versions.setdefault(model.version.data_model_key, []).append(
-            DataModelVersionInfo(model.version.external_version_number)
-        )
-    return tuple(
-        DataModelSummary(key, labels[key], sorted(model_versions, key=lambda item: item.external_version_number))
-        for key, model_versions in sorted(versions.items())
     )
 
 
@@ -610,29 +416,6 @@ def _canonical_placed_payload(model: PlacedReferenceModel) -> Mapping[str, objec
     }
 
 
-def _split_values(values: list[str], target_bytes: int) -> list[list[str]]:
-    chunks: list[list[str]] = []
-    current: list[str] = []
-    for value in values:
-        candidate = [*current, value]
-        if len(_canonical_json(candidate)) <= target_bytes:
-            current = candidate
-            continue
-        if not current:
-            raise ValueError("One permissible value is too large for a DynamoDB item")
-        chunks.append(current)
-        current = [value]
-        if len(_canonical_json(current)) > target_bytes:
-            raise ValueError("One permissible value is too large for a DynamoDB item")
-    if current:
-        chunks.append(current)
-    return chunks
-
-
-def _gzip_json(value: object) -> bytes:
-    return gzip.compress(_canonical_json(value), mtime=0)
-
-
 def _gunzip_values(payload: object, expected_size: int) -> list[str]:
     if isinstance(payload, bytes):
         encoded = payload
@@ -739,34 +522,13 @@ def _required_int(item: Mapping[str, object], field: str) -> int:
     raise ReferenceDataCorruptError(f"Reference field is invalid: {field}")
 
 
-def _item_size(item: Mapping[str, object]) -> int:
-    size = 0
-    for key, value in item.items():
-        size += len(key.encode())
-        if isinstance(value, bytes):
-            size += len(value)
-        elif isinstance(value, str):
-            size += len(value.encode())
-        else:
-            size += len(str(value).encode())
-    return size
-
-
-def _validate_item_for_write(item: Mapping[str, object]) -> None:
-    pk = _required_string(item, "pk")
-    sk = _required_string(item, "sk")
-    if len(pk.encode()) > 2048 or len(sk.encode()) > 1024:
-        raise ValueError("A reference-data key is too large for DynamoDB")
-    if _item_size(item) > MAX_ITEM_BYTES:
-        raise ValueError(f"One reference-data item is too large: {pk}/{sk}")
+ReferenceDataImporter = legacy.ReferenceDataImporter
 
 
 __all__ = [
-    "DEFAULT_VALUE_CHUNK_BYTES",
     "DynamoDbReferenceDataRepository",
     "DynamoResource",
     "DynamoTable",
-    "MAX_ITEM_BYTES",
     "MAX_UNCOMPRESSED_CHUNK_BYTES",
     "ReferenceDataImporter",
     "SCHEMA_VERSION",
