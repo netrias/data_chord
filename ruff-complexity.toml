@@ -1,0 +1,12 @@
+extend = "pyproject.toml"
+
+[lint]
+select = ["C901", "PLR0912", "PLR0915"]
+ignore = []
+
+[lint.mccabe]
+max-complexity = 8
+
+[lint.pylint]
+max-branches = 8
+max-statements = 20

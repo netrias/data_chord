@@ -96,66 +96,54 @@ def summarize_column_outcomes(outcomes: list[FinalizedValueOutcome]) -> list[Col
 
 
 def _summarize_column(outcomes: list[FinalizedValueOutcome]) -> ColumnOutcome:
-    first = outcomes[0]
-    original_values: set[str] = set()
-    changed_originals: set[str] = set()
-    conformant_changed_originals: set[str] = set()
-    reviewer_changed_originals: set[str] = set()
-    non_conformant_originals: set[str] = set()
-    total_rows = 0
-    changed_rows = 0
-    reviewer_edited_rows = 0
-    all_pv_sets_available = True
-
-    for outcome in outcomes:
-        if (
-            outcome.source_column_index != first.source_column_index
-            or outcome.column_label != first.column_label
-        ):
-            raise ValueError(f"Inconsistent identity for source column {first.column_key}")
-
-        original_values.add(outcome.original_value)
-        total_rows += outcome.occurrence_count
-        all_pv_sets_available = all_pv_sets_available and outcome.pv_set_available
-
-        if outcome.final_value_source is FinalValueSource.REVIEWER:
-            reviewer_edited_rows += outcome.occurrence_count
-        if outcome.review_status is FinalValueReviewStatus.NEEDS_ATTENTION:
-            non_conformant_originals.add(outcome.original_value)
-        if not outcome.is_changed:
-            continue
-
-        changed_originals.add(outcome.original_value)
-        changed_rows += outcome.occurrence_count
-        if outcome.pv_set_available and outcome.is_pv_conformant:
-            conformant_changed_originals.add(outcome.original_value)
-        if outcome.final_value_source is FinalValueSource.REVIEWER:
-            reviewer_changed_originals.add(outcome.original_value)
-
-    if non_conformant_originals:
-        review_status = FinalValueReviewStatus.NEEDS_ATTENTION
-    elif all_pv_sets_available:
-        review_status = FinalValueReviewStatus.CLEAR
-    else:
-        review_status = FinalValueReviewStatus.NOT_CHECKED
-
+    first = _column_identity(outcomes)
+    changed = [outcome for outcome in outcomes if outcome.is_changed]
+    originals = {outcome.original_value for outcome in outcomes}
+    changed_originals = {outcome.original_value for outcome in changed}
+    reviewer_changed = {
+        outcome.original_value for outcome in changed if outcome.final_value_source is FinalValueSource.REVIEWER
+    }
+    non_conformant = {
+        outcome.original_value
+        for outcome in outcomes
+        if outcome.review_status is FinalValueReviewStatus.NEEDS_ATTENTION
+    }
+    conformant_changed = {
+        outcome.original_value for outcome in changed if outcome.pv_set_available and outcome.is_pv_conformant
+    }
     return ColumnOutcome(
         column_key=first.column_key,
         source_column_index=first.source_column_index,
         column_label=first.column_label,
-        total_distinct_values=len(original_values),
+        total_distinct_values=len(originals),
         changed_distinct_values=len(changed_originals),
-        total_rows=total_rows,
-        changed_rows=changed_rows,
-        reviewer_edited_rows=reviewer_edited_rows,
-        data_chord_changed_distinct_values=len(changed_originals - reviewer_changed_originals),
-        reviewer_changed_distinct_values=len(reviewer_changed_originals),
-        successfully_harmonized_distinct_values=len(
-            conformant_changed_originals - non_conformant_originals
+        total_rows=sum(outcome.occurrence_count for outcome in outcomes),
+        changed_rows=sum(outcome.occurrence_count for outcome in changed),
+        reviewer_edited_rows=sum(
+            outcome.occurrence_count for outcome in outcomes if outcome.final_value_source is FinalValueSource.REVIEWER
         ),
-        non_conformant_distinct_values=len(non_conformant_originals),
-        review_status=review_status,
+        data_chord_changed_distinct_values=len(changed_originals - reviewer_changed),
+        reviewer_changed_distinct_values=len(reviewer_changed),
+        successfully_harmonized_distinct_values=len(conformant_changed - non_conformant),
+        non_conformant_distinct_values=len(non_conformant),
+        review_status=_column_review_status(outcomes, non_conformant),
     )
+
+
+def _column_identity(outcomes: list[FinalizedValueOutcome]) -> FinalizedValueOutcome:
+    first = outcomes[0]
+    for outcome in outcomes:
+        if outcome.source_column_index != first.source_column_index or outcome.column_label != first.column_label:
+            raise ValueError(f"Inconsistent identity for source column {first.column_key}")
+    return first
+
+
+def _column_review_status(outcomes: list[FinalizedValueOutcome], non_conformant: set[str]) -> FinalValueReviewStatus:
+    if non_conformant:
+        return FinalValueReviewStatus.NEEDS_ATTENTION
+    if all(outcome.pv_set_available for outcome in outcomes):
+        return FinalValueReviewStatus.CLEAR
+    return FinalValueReviewStatus.NOT_CHECKED
 
 
 __all__ = [

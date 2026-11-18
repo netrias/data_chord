@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import AsyncGenerator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
+from contextlib import asynccontextmanager, contextmanager
+from dataclasses import dataclass
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -150,6 +151,12 @@ def create_app() -> FastAPI:
     app.add_exception_handler(WorkflowAccessDeniedError, _workflow_access_denied)
     app.add_exception_handler(WorkflowNotFoundError, _workflow_not_found)
 
+    _register_routes(app)
+
+    return app
+
+
+def _register_routes(app: FastAPI) -> None:
     app.include_router(observability_router)
     app.include_router(programmatic_api_router)
     app.include_router(stage_one_router)
@@ -171,8 +178,6 @@ def create_app() -> FastAPI:
     app.add_api_route("/healthz", _healthz, include_in_schema=False)
     app.add_api_route("/", _redirect_to_stage_one, include_in_schema=False)
 
-    return app
-
 
 async def _serve_favicon() -> FileResponse:
     return FileResponse(SHARED_STATIC_DIR / "favicon.ico", media_type="image/x-icon")
@@ -183,64 +188,69 @@ async def _healthz() -> dict[str, str]:
 
 
 async def _bind_user_context(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    with _observe_request(request) as observation:
+        response = await _authenticated_response(request, call_next, observation)
+        observation.status_code = response.status_code
+        response.headers[REQUEST_ID_HEADER] = observation.request_id
+        return response
+
+
+@dataclass
+class _RequestObservation:
+    request_id: str
+    started_at: float
+    status_code: int = 500
+    user_id: str | None = None
+
+
+@contextmanager
+def _observe_request(request: Request) -> Iterator[_RequestObservation]:
     request_id = request_id_from_header(request.headers.get(REQUEST_ID_HEADER))
     request.state.request_id = request_id
-    request_token = bind_request_id(request_id)
-    started_at = time.perf_counter()
-    status_code = 500
-    user_id: str | None = None
-    user_token = None
+    token = bind_request_id(request_id)
+    observation = _RequestObservation(request_id, time.perf_counter())
     try:
-        if request.url.path == "/healthz":
-            response = await call_next(request)
-            status_code = response.status_code
-        else:
-            try:
-                user_token = _bind_authenticated_user_context(request)
-                user_id = current_user_context().user_id
-            except ProgrammaticApiNotConfiguredError:
-                status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-                response = JSONResponse(
-                    {"detail": "Programmatic API is not configured."},
-                    status_code=status_code,
-                )
-            except InvalidProgrammaticApiKeyError:
-                status_code = status.HTTP_401_UNAUTHORIZED
-                response = JSONResponse(
-                    {
-                        "detail": (
-                            "Invalid artifact URL."
-                            if is_programmatic_artifact_path(request.url.path)
-                            else "Invalid API key."
-                        )
-                    },
-                    status_code=status_code,
-                )
-            except InvalidUserContextError:
-                status_code = 401
-                response = Response("Invalid identity headers", status_code=status_code)
-            else:
-                # ContextVar keeps route signatures clean while still scoping storage
-                # authorization to the current request.
-                response = await call_next(request)
-                status_code = response.status_code
-        response.headers[REQUEST_ID_HEADER] = request_id
-        return response
+        yield observation
     finally:
-        if user_token is not None:
-            reset_user_context(user_token)
         if _should_log_request(request.url.path):
             log_request(
                 RequestTrace(
                     method=request.method,
                     path=request.url.path,
-                    status_code=status_code,
-                    duration_ms=elapsed_ms(started_at),
+                    status_code=observation.status_code,
+                    duration_ms=elapsed_ms(observation.started_at),
                     request_id=request_id,
-                    user_id=user_id,
+                    user_id=observation.user_id,
                 )
             )
-        reset_request_id(request_token)
+        reset_request_id(token)
+
+
+async def _authenticated_response(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[Response]],
+    observation: _RequestObservation,
+) -> Response:
+    if request.url.path == "/healthz":
+        return await call_next(request)
+    try:
+        token = _bind_authenticated_user_context(request)
+    except (ProgrammaticApiNotConfiguredError, InvalidProgrammaticApiKeyError, InvalidUserContextError) as exc:
+        return _identity_error_response(request, exc)
+    try:
+        observation.user_id = current_user_context().user_id
+        return await call_next(request)
+    finally:
+        reset_user_context(token)
+
+
+def _identity_error_response(request: Request, error: Exception) -> Response:
+    if isinstance(error, ProgrammaticApiNotConfiguredError):
+        return JSONResponse({"detail": "Programmatic API is not configured."}, status_code=503)
+    if isinstance(error, InvalidProgrammaticApiKeyError):
+        detail = "Invalid artifact URL." if is_programmatic_artifact_path(request.url.path) else "Invalid API key."
+        return JSONResponse({"detail": detail}, status_code=401)
+    return Response("Invalid identity headers", status_code=401)
 
 
 def _bind_authenticated_user_context(request: Request):
@@ -261,39 +271,21 @@ class _ProgrammaticRequestBodyLimitMiddleware:
         self._app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if (
-            scope["type"] != "http"
-            or not _is_programmatic_api(scope["path"])
-            or scope["method"] not in {"POST", "PUT", "PATCH"}
-        ):
+        if not _requires_body_limit(scope):
             await self._app(scope, receive, send)
             return
-
         body_limit = (
             _PROGRAMMATIC_HARMONIZATION_MAX_BODY_BYTES
             if scope["path"] == "/api/v1/jobs/harmonize"
             else _PROGRAMMATIC_API_MAX_BODY_BYTES
         )
-        messages: list[Message] = []
-        body_size = 0
-        while True:
-            message = await receive()
-            messages.append(message)
-            if message["type"] == "http.disconnect":
-                break
-            if message["type"] != "http.request":
-                continue
-            body_size += len(message.get("body", b""))
-            if body_size > body_limit:
-                response = JSONResponse(
-                    {"detail": "Request body is too large."},
-                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                )
-                await response(scope, receive, send)
-                return
-            if not message.get("more_body", False):
-                break
-
+        messages = await _read_bounded_body(receive, body_limit)
+        if messages is None:
+            response = JSONResponse(
+                {"detail": "Request body is too large."}, status_code=status.HTTP_413_CONTENT_TOO_LARGE
+            )
+            await response(scope, receive, send)
+            return
         message_index = 0
 
         async def replay_body() -> Message:
@@ -325,6 +317,30 @@ async def _workflow_not_found(_request: Request, _exc: Exception) -> Response:
 
 async def _redirect_to_stage_one() -> RedirectResponse:
     return RedirectResponse(url="/stage-1", status_code=307)
+
+
+def _requires_body_limit(scope: Scope) -> bool:
+    return (
+        scope["type"] == "http" and _is_programmatic_api(scope["path"]) and scope["method"] in {"POST", "PUT", "PATCH"}
+    )
+
+
+async def _read_bounded_body(receive: Receive, limit: int) -> list[Message] | None:
+    messages: list[Message] = []
+    body_size = 0
+    while True:
+        message = await receive()
+        messages.append(message)
+        if message["type"] == "http.disconnect":
+            break
+        if message["type"] != "http.request":
+            continue
+        body_size += len(message.get("body", b""))
+        if body_size > limit:
+            return None
+        if not message.get("more_body", False):
+            break
+    return messages
 
 
 app = create_app()

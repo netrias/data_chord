@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from src.domain.dataset_workflow_ids import DatasetWorkflowId
 
 from .upload_storage import UploadStorage
-from .workflow_storage import LocalWorkflowStorage, StoredWorkflowUsage
+from .workflow_storage import LocalWorkflowStorage, StoredWorkflowUsage, WorkflowInventory
 
 _HIGH_WATER_PERCENT = 80
 _TARGET_PERCENT = 70
@@ -108,37 +108,7 @@ class WorkflowCleanup:
                     deleted_workflow_ids=(),
                 )
 
-            usage_bytes = inventory.usage_bytes
-            deleted_ids: list[DatasetWorkflowId] = []
-            for candidate in self._eligible_workflows(inventory.workflows, cleanup_time):
-                if emergency:
-                    if self._available_write_bytes() >= self._required_free_bytes:
-                        break
-                elif usage_bytes <= target_bytes:
-                    break
-                try:
-                    deleted = self._workflow_storage.delete_workflow_if_last_accessed(
-                        candidate.metadata.dataset_workflow_id,
-                        candidate.metadata.last_accessed_at,
-                        self._upload_storage.delete_workflow_files,
-                    )
-                except OSError:
-                    logger.exception(
-                        "Could not delete workflow files",
-                        extra={"file_id": candidate.metadata.dataset_workflow_id},
-                    )
-                    continue
-                if not deleted:
-                    continue
-                usage_bytes -= candidate.size_bytes
-                deleted_ids.append(candidate.metadata.dataset_workflow_id)
-
-            result = WorkflowCleanupResult(
-                usage_bytes_before=inventory.usage_bytes,
-                usage_bytes_after=max(usage_bytes, 0),
-                target_bytes=target_bytes,
-                deleted_workflow_ids=tuple(deleted_ids),
-            )
+            result = self._delete_until_target(inventory, cleanup_time, target_bytes, emergency)
             logger.info(
                 "Portable workflow cleanup completed",
                 extra={
@@ -148,6 +118,45 @@ class WorkflowCleanup:
                 },
             )
             return result
+
+    def _delete_until_target(
+        self,
+        inventory: WorkflowInventory,
+        cleanup_time: datetime,
+        target_bytes: int,
+        emergency: bool,
+    ) -> WorkflowCleanupResult:
+        usage_bytes = inventory.usage_bytes
+        deleted_ids: list[DatasetWorkflowId] = []
+        for candidate in self._eligible_workflows(inventory.workflows, cleanup_time):
+            if emergency:
+                if self._available_write_bytes() >= self._required_free_bytes:
+                    break
+            elif usage_bytes <= target_bytes:
+                break
+            try:
+                deleted = self._workflow_storage.delete_workflow_if_last_accessed(
+                    candidate.metadata.dataset_workflow_id,
+                    candidate.metadata.last_accessed_at,
+                    self._upload_storage.delete_workflow_files,
+                )
+            except OSError:
+                logger.exception(
+                    "Could not delete workflow files",
+                    extra={"file_id": candidate.metadata.dataset_workflow_id},
+                )
+                continue
+            if not deleted:
+                continue
+            usage_bytes -= candidate.size_bytes
+            deleted_ids.append(candidate.metadata.dataset_workflow_id)
+
+        return WorkflowCleanupResult(
+            usage_bytes_before=inventory.usage_bytes,
+            usage_bytes_after=max(usage_bytes, 0),
+            target_bytes=target_bytes,
+            deleted_workflow_ids=tuple(deleted_ids),
+        )
 
     def _threshold_bytes(self, percent: int) -> int:
         return self._capacity_bytes * percent // 100
@@ -162,8 +171,7 @@ class WorkflowCleanup:
             (
                 workflow
                 for workflow in workflows
-                if workflow.metadata.last_accessed_at <= cutoff
-                and workflow.metadata.last_accessed_at <= now
+                if workflow.metadata.last_accessed_at <= cutoff and workflow.metadata.last_accessed_at <= now
             ),
             key=lambda workflow: workflow.metadata.last_accessed_at,
         )

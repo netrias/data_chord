@@ -172,7 +172,9 @@ class UploadStorage:
         self._harmonized_dir.mkdir(parents=True, exist_ok=True)
 
     async def store(
-        self, upload: UploadStream, dataset_workflow_id: DatasetWorkflowId,
+        self,
+        upload: UploadStream,
+        dataset_workflow_id: DatasetWorkflowId,
         expected: UploadFingerprint | None = None,
     ) -> UploadedFileMeta:
         """Save an upload, verifying client expectations before publishing metadata.
@@ -186,26 +188,36 @@ class UploadStorage:
         completed_write = False
         try:
             try:
-                self._validate_upload(suffix, content_type)
-                if expected is not None and expected.size_bytes > self._constraints.max_bytes:
-                    raise UploadTooLargeError("Declared file size exceeds the upload limit")
+                self._validate_expected_upload(suffix, content_type, expected)
                 total_bytes = await self._write_upload_chunks(upload, destination)
                 completed_write = True
             finally:
                 await upload.close()
-            verification = None
-            if expected is not None:
-                verification = await asyncio.to_thread(_fingerprint_file, destination)
-                expected.verify(verification)
-                total_bytes = verification.size_bytes
+            verification = await _verify_stored_upload(destination, expected)
+            total_bytes = verification.size_bytes if verification is not None else total_bytes
             return self._create_and_save_metadata(
-                dataset_workflow_id, filename, content_type, total_bytes, destination, verification,
+                dataset_workflow_id,
+                filename,
+                content_type,
+                total_bytes,
+                destination,
+                verification,
             )
         except BaseException:
             if completed_write:
                 destination.unlink(missing_ok=True)
                 (self._meta_dir / f"{dataset_workflow_id}.json").unlink(missing_ok=True)
             raise
+
+    def _validate_expected_upload(
+        self,
+        suffix: str,
+        content_type: str,
+        expected: UploadFingerprint | None,
+    ) -> None:
+        self._validate_upload(suffix, content_type)
+        if expected is not None and expected.size_bytes > self._constraints.max_bytes:
+            raise UploadTooLargeError("Declared file size exceeds the upload limit")
 
     def _extract_upload_info(self, upload: UploadStream) -> tuple[str, str, str]:
         filename = upload.filename or DEFAULT_UPLOAD_FILENAME
@@ -458,6 +470,14 @@ def _verification_from_metadata(payload: StoredMeta) -> UploadFingerprint | None
     if not isinstance(sha256, str) or not isinstance(size_bytes, int) or size_bytes != payload[_META_SIZE_BYTES]:
         raise ValueError("Upload verification metadata is invalid")
     return UploadFingerprint(sha256, size_bytes)
+
+
+async def _verify_stored_upload(path: Path, expected: UploadFingerprint | None) -> UploadFingerprint | None:
+    if expected is None:
+        return None
+    actual = await asyncio.to_thread(_fingerprint_file, path)
+    expected.verify(actual)
+    return actual
 
 
 __all__ = [
