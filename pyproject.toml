@@ -56,6 +56,8 @@ line-length = 120
 extend-exclude = ["mocks"]
 
 [tool.ruff.lint]
+preview = true
+explicit-preview-rules = true  # Opt in to PLR1702 without enabling other preview rules.
 select = [
     "E",      # pycodestyle errors
     "W",      # pycodestyle warnings
@@ -64,10 +66,14 @@ select = [
     "B",      # flake8-bugbear
     "UP",     # pyupgrade
     "C901",   # mccabe complexity
+    "PLR1702", # nested blocks, including resource lifetimes
 ]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-nested-blocks = 4
 
 [tool.basedpyright]
 pythonVersion = "3.13"
