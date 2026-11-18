@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterator
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -83,41 +83,8 @@ async def submit_harmonization(request: Request) -> HarmonizationSubmitResponse:
             workflow_storage=dependencies.get_workflow_storage(),
             job_service=dependencies.get_harmonization_job_service(),
         )
-    except HarmonizationPayloadTooLargeError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail="Harmonization request is too large.",
-        ) from exc
-    except InvalidHarmonizationPayloadError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Harmonization request is invalid.",
-        ) from exc
-    except UploadTooLargeError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail="Harmonization document is too large.",
-        ) from exc
-    except UnsupportedUploadError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Harmonization document is invalid.",
-        ) from exc
-    except HarmonizationCapacityError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Harmonization capacity is full.",
-        ) from exc
-    except HarmonizationWorkflowNotFoundError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Harmonization workflow was not created.",
-        ) from exc
-    except (HarmonizationStartConflictError, HarmonizationWorkflowUnreadableError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Harmonization workflow state changed.",
-        ) from exc
+    except tuple(_SUBMISSION_ERRORS) as exc:
+        raise _submission_http_error(exc) from exc
     return HarmonizationSubmitResponse(job_id=str(loaded.job.polling_job_id))
 
 
@@ -168,11 +135,7 @@ async def download_harmonization_artifact(
     if loaded is None or loaded.job.status is not HarmonizeStatus.SUCCEEDED:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found.")
     storage = dependencies.get_workflow_storage()
-    artifact_kind = (
-        WorkflowFile.HARMONIZED_OUTPUT
-        if kind == "harmonized"
-        else WorkflowFile.HARMONIZATION_MANIFEST_BASE
-    )
+    artifact_kind = WorkflowFile.HARMONIZED_OUTPUT if kind == "harmonized" else WorkflowFile.HARMONIZATION_MANIFEST_BASE
     if storage.artifact_version(user, workflow_id, artifact_kind) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found.")
     filename = "harmonized.csv" if kind == "harmonized" else "manifest.parquet"
@@ -286,6 +249,31 @@ def _file_chunks(path: Path) -> Iterator[bytes]:
     with path.open("rb") as handle:
         while chunk := handle.read(1024 * 1024):
             yield chunk
+
+
+@dataclass(frozen=True)
+class _SubmissionHttpError:
+    status_code: int
+    detail: str
+
+
+_SUBMISSION_ERRORS: dict[type[Exception], _SubmissionHttpError] = {
+    HarmonizationPayloadTooLargeError: _SubmissionHttpError(413, "Harmonization request is too large."),
+    InvalidHarmonizationPayloadError: _SubmissionHttpError(400, "Harmonization request is invalid."),
+    UploadTooLargeError: _SubmissionHttpError(413, "Harmonization document is too large."),
+    UnsupportedUploadError: _SubmissionHttpError(400, "Harmonization document is invalid."),
+    HarmonizationCapacityError: _SubmissionHttpError(429, "Harmonization capacity is full."),
+    HarmonizationWorkflowNotFoundError: _SubmissionHttpError(404, "Harmonization workflow was not created."),
+    HarmonizationStartConflictError: _SubmissionHttpError(409, "Harmonization workflow state changed."),
+    HarmonizationWorkflowUnreadableError: _SubmissionHttpError(409, "Harmonization workflow state changed."),
+}
+
+
+def _submission_http_error(error: Exception) -> HTTPException:
+    for error_type, response in _SUBMISSION_ERRORS.items():
+        if isinstance(error, error_type):
+            return HTTPException(status_code=response.status_code, detail=response.detail)
+    raise TypeError(f"Unexpected submission failure: {type(error).__name__}")
 
 
 __all__ = ["harmonization_router"]

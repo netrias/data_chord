@@ -68,81 +68,47 @@ class DynamoDbReferenceDataRepository:
         items = self._query_partition(_CATALOG_PK)
         if not items:
             return ()
-        by_sk = {_required_string(item, "sk"): item for item in items}
-        if len(by_sk) != len(items):
-            raise ReferenceDataCorruptError("Reference catalog contains duplicate rows")
-        markers = _catalog_markers(by_sk)
-        if markers is None:
-            return ()
-        meta, import_seal = markers
-        labels: dict[str, str] = {}
-        versions_by_model: dict[str, set[str]] = {}
-        catalog_items: list[Mapping[str, object]] = []
-        for item in by_sk.values():
-            _validate_schema(item)
-            key = _required_string(item, "data_model_key")
-            label = _required_string(item, "label")
-            version = _required_string(item, "external_version_number")
-            if _required_string(item, "sk") != _catalog_sort_key(key, version):
-                raise ReferenceDataCorruptError("Reference catalog identity does not match its key")
-            existing_label = labels.setdefault(key, label)
-            if existing_label != label:
-                raise ReferenceDataCorruptError(f"Reference catalog labels disagree: {key}")
-            versions_by_model.setdefault(key, set()).add(version)
-            catalog_items.append(item)
-        if _required_int(meta, "model_count") != len(catalog_items):
-            raise ReferenceDataCorruptError("Reference catalog model count is invalid")
-        if _required_string(meta, "digest") != _digest(_catalog_payload(catalog_items)):
-            raise ReferenceDataCorruptError("Reference catalog digest is invalid")
-        source_digest = _required_sha256(meta, "source_digest")
-        if (
-            _required_sha256(import_seal, "source_digest") != source_digest
-            or _required_string(import_seal, "digest") != _required_string(meta, "digest")
-            or _required_int(import_seal, "model_count") != _required_int(meta, "model_count")
-        ):
-            raise ReferenceDataCorruptError("Reference catalog import seal does not match its catalog")
-        return tuple(
-            DataModelSummary(
-                data_model_key=key,
-                label=labels[key],
-                versions=[DataModelVersionInfo(version) for version in sorted(versions)],
-            )
-            for key, versions in sorted(versions_by_model.items())
-        )
+        return _catalog_summaries(items)
 
     def load_model(self, version: DataModelVersionReference) -> ReferenceModel:
+        cached = self._cached_model(version)
+        if cached is not None:
+            return cached
+        # Serialize misses so large models are not decoded concurrently.
+        with self._model_load_lock:
+            cached = self._cached_model(version)
+            if cached is not None:
+                return cached
+            model = self._load_uncached_model(version)
+            self._cache_model(version, model)
+            return model
+
+    def _cached_model(self, version: DataModelVersionReference) -> ReferenceModel | None:
         with self._models_lock:
             cached = self._models.get(version)
             if cached is not None:
                 self._models.move_to_end(version)
-                return cached
+            return cached
 
-        # A model and its DynamoDB rows can both be large. Serialize cache
-        # misses so concurrent requests cannot build several full models.
-        with self._model_load_lock:
-            with self._models_lock:
-                cached = self._models.get(version)
-                if cached is not None:
-                    self._models.move_to_end(version)
-                    return cached
-            partition = _model_partition(version)
-            items = self._query_partition(partition)
-            if not items:
-                raise ReferenceModelNotFoundError(
-                    f"Reference model is not published: {version.data_model_key}/{version.external_version_number}"
-                )
-            try:
-                model = _model_from_items(version, items)
-                with self._models_lock:
-                    self._models[version] = model
-                    self._models.move_to_end(version)
-                    if len(self._models) > _MAX_CACHED_MODELS:
-                        self._models.popitem(last=False)
-                    return model
-            except ReferenceDataCorruptError:
-                raise
-            except Exception as exc:
-                raise ReferenceDataCorruptError("Reference model is malformed") from exc
+    def _cache_model(self, version: DataModelVersionReference, model: ReferenceModel) -> None:
+        with self._models_lock:
+            self._models[version] = model
+            self._models.move_to_end(version)
+            if len(self._models) > _MAX_CACHED_MODELS:
+                self._models.popitem(last=False)
+
+    def _load_uncached_model(self, version: DataModelVersionReference) -> ReferenceModel:
+        items = self._query_partition(_model_partition(version))
+        if not items:
+            raise ReferenceModelNotFoundError(
+                f"Reference model is not published: {version.data_model_key}/{version.external_version_number}"
+            )
+        try:
+            return _model_from_items(version, items)
+        except ReferenceDataCorruptError:
+            raise
+        except Exception as exc:
+            raise ReferenceDataCorruptError("Reference model is malformed") from exc
 
     def _query_partition(self, pk: str) -> list[Mapping[str, object]]:
         items: list[Mapping[str, object]] = []
@@ -190,10 +156,7 @@ class ReferenceDataImporter:
         catalog_items = [_catalog_item(model) for model in ordered]
         catalog_meta = _catalog_meta_item(catalog_items, source_digest)
         catalog_import = _catalog_import_item(catalog_items, source_digest)
-        model_rows = [
-            (model, _items_for_model(model, self._value_chunk_bytes))
-            for model in ordered
-        ]
+        model_rows = [(model, _items_for_model(model, self._value_chunk_bytes)) for model in ordered]
         for item in [catalog_import, *catalog_items, catalog_meta]:
             _validate_item_for_write(item)
         self._put_immutable(catalog_import)
@@ -298,9 +261,62 @@ def _catalog_item(model: ReferenceModel) -> Mapping[str, object]:
     }
 
 
+@dataclass(frozen=True)
+class _CatalogPublication:
+    metadata: Mapping[str, object]
+    seal: Mapping[str, object]
+
+
+def _catalog_summaries(items: list[Mapping[str, object]]) -> tuple[DataModelSummary, ...]:
+    rows = {_required_string(item, "sk"): item for item in items}
+    if len(rows) != len(items):
+        raise ReferenceDataCorruptError("Reference catalog contains duplicate rows")
+    publication = _catalog_markers(rows)
+    if publication is None:
+        return ()
+    entries = list(rows.values())
+    summaries = _summaries_from_entries(entries)
+    _validate_catalog_integrity(entries, publication)
+    return summaries
+
+
+def _summaries_from_entries(entries: list[Mapping[str, object]]) -> tuple[DataModelSummary, ...]:
+    labels: dict[str, str] = {}
+    versions: dict[str, set[str]] = {}
+    for item in entries:
+        _validate_schema(item)
+        key = _required_string(item, "data_model_key")
+        label = _required_string(item, "label")
+        version = _required_string(item, "external_version_number")
+        if _required_string(item, "sk") != _catalog_sort_key(key, version):
+            raise ReferenceDataCorruptError("Reference catalog identity does not match its key")
+        if labels.setdefault(key, label) != label:
+            raise ReferenceDataCorruptError(f"Reference catalog labels disagree: {key}")
+        versions.setdefault(key, set()).add(version)
+    return tuple(
+        DataModelSummary(key, labels[key], [DataModelVersionInfo(v) for v in sorted(available)])
+        for key, available in sorted(versions.items())
+    )
+
+
+def _validate_catalog_integrity(entries: list[Mapping[str, object]], publication: _CatalogPublication) -> None:
+    meta, seal = publication.metadata, publication.seal
+    if _required_int(meta, "model_count") != len(entries):
+        raise ReferenceDataCorruptError("Reference catalog model count is invalid")
+    if _required_string(meta, "digest") != _digest(_catalog_payload(entries)):
+        raise ReferenceDataCorruptError("Reference catalog digest is invalid")
+    source_digest = _required_sha256(meta, "source_digest")
+    if (
+        _required_sha256(seal, "source_digest") != source_digest
+        or _required_string(seal, "digest") != _required_string(meta, "digest")
+        or _required_int(seal, "model_count") != _required_int(meta, "model_count")
+    ):
+        raise ReferenceDataCorruptError("Reference catalog import seal does not match its catalog")
+
+
 def _catalog_markers(
     by_sk: dict[str, Mapping[str, object]],
-) -> tuple[Mapping[str, object], Mapping[str, object]] | None:
+) -> _CatalogPublication | None:
     meta = by_sk.pop(_META_SK, None)
     import_seal = by_sk.pop(_IMPORT_SK, None)
     if meta is None:
@@ -315,7 +331,7 @@ def _catalog_markers(
         raise ReferenceDataCorruptError("Reference catalog has no immutable import seal")
     _validate_schema(meta)
     _validate_schema(import_seal)
-    return meta, import_seal
+    return _CatalogPublication(meta, import_seal)
 
 
 def _validate_import_source_digest(source_digest: str) -> None:
@@ -395,96 +411,125 @@ def _summaries_for_models(models: Sequence[ReferenceModel]) -> tuple[DataModelSu
     )
 
 
-def _model_from_items(  # noqa: C901 - one strict trust boundary keeps every integrity rule visible
+def _model_from_items(
     requested: DataModelVersionReference,
     items: list[Mapping[str, object]],
 ) -> ReferenceModel:
-    by_sk: dict[str, Mapping[str, object]] = {}
-    for item in items:
-        sk = _required_string(item, "sk")
-        if sk in by_sk:
-            raise ReferenceDataCorruptError(f"Duplicate reference row: {sk}")
-        by_sk[sk] = item
-    meta = by_sk.pop(_META_SK, None)
-    if meta is None:
-        raise ReferenceDataCorruptError("Reference model has no complete marker")
-    import_seal = by_sk.pop(_IMPORT_SK, None)
-    if import_seal is None:
-        raise ReferenceDataCorruptError("Reference model has no immutable import seal")
-    _validate_schema(meta)
-    _validate_schema(import_seal)
-    if (
-        _required_string(meta, "data_model_key") != requested.data_model_key
-        or _required_string(meta, "external_version_number") != requested.external_version_number
-    ):
-        raise ReferenceDataCorruptError("Reference model identity does not match its key")
-    if (
-        _required_string(import_seal, "data_model_key") != requested.data_model_key
-        or _required_string(import_seal, "external_version_number") != requested.external_version_number
-        or _required_string(import_seal, "digest") != _required_string(meta, "digest")
-    ):
-        raise ReferenceDataCorruptError("Reference import seal does not match its model")
-
-    cde_rows: dict[str, _CdeRows] = {}
-    chunk_rows: dict[str, list[Mapping[str, object]]] = {}
-    for sk, item in by_sk.items():
-        _validate_schema(item)
-        cde_key = _required_string(item, "cde_key")
-        encoded_key = _encode(cde_key)
-        if sk == f"CDE#{encoded_key}#META":
-            if cde_key in cde_rows:
-                raise ReferenceDataCorruptError(f"Duplicate CDE metadata: {cde_key}")
-            cde_rows[cde_key] = _CdeRows(metadata=item, chunks=())
-        elif sk.startswith(f"CDE#{encoded_key}#VALUES#"):
-            chunk_rows.setdefault(cde_key, []).append(item)
-        else:
-            raise ReferenceDataCorruptError(f"Unknown reference row: {sk}")
-    if set(chunk_rows) - set(cde_rows):
-        raise ReferenceDataCorruptError("Reference values exist for an unknown CDE")
-
-    cdes: list[CDEInfo] = []
-    values_by_cde: dict[str, frozenset[str]] = {}
-    for cde_key, rows in sorted(cde_rows.items()):
-        metadata = rows.metadata
-        expected_chunks = _required_int(metadata, "chunk_count")
-        chunks = sorted(chunk_rows.get(cde_key, []), key=lambda item: _required_int(item, "chunk_index"))
-        indexes = [_required_int(item, "chunk_index") for item in chunks]
-        if indexes != list(range(expected_chunks)):
-            raise ReferenceDataCorruptError(f"Reference value chunks are incomplete: {cde_key}")
-        values: list[str] = []
-        for chunk in chunks:
-            chunk_index = _required_int(chunk, "chunk_index")
-            if _required_string(chunk, "sk") != f"CDE#{_encode(cde_key)}#VALUES#{chunk_index:06d}":
-                raise ReferenceDataCorruptError(f"Reference value chunk identity is invalid: {cde_key}")
-            values.extend(_gunzip_values(chunk.get("payload"), _required_int(chunk, "uncompressed_size")))
-        if len(values) != _required_int(metadata, "value_count") or len(values) != len(set(values)):
-            raise ReferenceDataCorruptError(f"Reference value count is invalid: {cde_key}")
-        if _digest(values) != _required_string(metadata, "digest"):
-            raise ReferenceDataCorruptError(f"Reference value digest is invalid: {cde_key}")
-        try:
-            cde_type = CdeType(_required_string(metadata, "cde_type"))
-        except ValueError as exc:
-            raise ReferenceDataCorruptError(f"Reference CDE type is invalid: {cde_key}") from exc
-        description = metadata.get("description")
-        if description is not None and not isinstance(description, str):
-            raise ReferenceDataCorruptError(f"Reference CDE description is invalid: {cde_key}")
-        raw_cde_id = metadata.get("cde_id")
-        cde_id = None if raw_cde_id is None else _required_int(metadata, "cde_id")
-        cdes.append(CDEInfo(cde_id, cde_key, cast(str | None, description), cde_type))
-        values_by_cde[cde_key] = frozenset(values)
+    rows = _index_model_rows(items)
+    metadata = _model_metadata(rows, requested)
+    cde_rows = _group_cde_rows(rows)
+    values = {key: _values_for_cde(key, row) for key, row in sorted(cde_rows.items())}
     model = ReferenceModel(
         version=requested,
-        label=_required_string(meta, "label"),
-        catalog=CdeCatalog.from_cdes(cdes),
-        pvs=CdePvCatalog.from_mapping(values_by_cde),
+        label=_required_string(metadata, "label"),
+        catalog=CdeCatalog.from_cdes([_cde_from_metadata(key, row.metadata) for key, row in sorted(cde_rows.items())]),
+        pvs=CdePvCatalog.from_mapping(values),
     )
-    if len(cdes) != _required_int(meta, "cde_count"):
-        raise ReferenceDataCorruptError("Reference CDE count is invalid")
-    if sum(len(values) for values in values_by_cde.values()) != _required_int(meta, "value_count"):
-        raise ReferenceDataCorruptError("Reference model value count is invalid")
-    if _digest(_canonical_model_payload(model)) != _required_string(meta, "digest"):
-        raise ReferenceDataCorruptError("Reference model digest is invalid")
+    _validate_model_integrity(model, metadata)
     return model
+
+
+def _index_model_rows(items: list[Mapping[str, object]]) -> dict[str, Mapping[str, object]]:
+    rows: dict[str, Mapping[str, object]] = {}
+    for item in items:
+        key = _required_string(item, "sk")
+        if key in rows:
+            raise ReferenceDataCorruptError(f"Duplicate reference row: {key}")
+        rows[key] = item
+    return rows
+
+
+def _model_metadata(
+    rows: dict[str, Mapping[str, object]],
+    requested: DataModelVersionReference,
+) -> Mapping[str, object]:
+    metadata = rows.pop(_META_SK, None)
+    if metadata is None:
+        raise ReferenceDataCorruptError("Reference model has no complete marker")
+    seal = rows.pop(_IMPORT_SK, None)
+    if seal is None:
+        raise ReferenceDataCorruptError("Reference model has no immutable import seal")
+    _validate_schema(metadata)
+    _validate_schema(seal)
+    _validate_model_identity(metadata, requested, "Reference model identity does not match its key")
+    _validate_model_identity(seal, requested, "Reference import seal does not match its model")
+    if _required_string(seal, "digest") != _required_string(metadata, "digest"):
+        raise ReferenceDataCorruptError("Reference import seal does not match its model")
+    return metadata
+
+
+def _validate_model_identity(
+    item: Mapping[str, object],
+    requested: DataModelVersionReference,
+    message: str,
+) -> None:
+    if (
+        _required_string(item, "data_model_key") != requested.data_model_key
+        or _required_string(item, "external_version_number") != requested.external_version_number
+    ):
+        raise ReferenceDataCorruptError(message)
+
+
+def _group_cde_rows(rows: Mapping[str, Mapping[str, object]]) -> dict[str, _CdeRows]:
+    metadata: dict[str, Mapping[str, object]] = {}
+    chunks: dict[str, list[Mapping[str, object]]] = {}
+    for key, item in rows.items():
+        _validate_schema(item)
+        cde_key = _required_string(item, "cde_key")
+        prefix = f"CDE#{_encode(cde_key)}"
+        if key == f"{prefix}#META":
+            metadata[cde_key] = item
+        elif key.startswith(f"{prefix}#VALUES#"):
+            chunks.setdefault(cde_key, []).append(item)
+        else:
+            raise ReferenceDataCorruptError(f"Unknown reference row: {key}")
+    if set(chunks) - set(metadata):
+        raise ReferenceDataCorruptError("Reference values exist for an unknown CDE")
+    return {key: _CdeRows(item, tuple(chunks.get(key, ()))) for key, item in metadata.items()}
+
+
+def _values_for_cde(cde_key: str, rows: _CdeRows) -> frozenset[str]:
+    chunks = sorted(rows.chunks, key=lambda item: _required_int(item, "chunk_index"))
+    indexes = [_required_int(item, "chunk_index") for item in chunks]
+    if indexes != list(range(_required_int(rows.metadata, "chunk_count"))):
+        raise ReferenceDataCorruptError(f"Reference value chunks are incomplete: {cde_key}")
+    values: list[str] = []
+    for chunk in chunks:
+        index = _required_int(chunk, "chunk_index")
+        if _required_string(chunk, "sk") != f"CDE#{_encode(cde_key)}#VALUES#{index:06d}":
+            raise ReferenceDataCorruptError(f"Reference value chunk identity is invalid: {cde_key}")
+        values.extend(_gunzip_values(chunk.get("payload"), _required_int(chunk, "uncompressed_size")))
+    if len(values) != _required_int(rows.metadata, "value_count") or len(values) != len(set(values)):
+        raise ReferenceDataCorruptError(f"Reference value count is invalid: {cde_key}")
+    if _digest(values) != _required_string(rows.metadata, "digest"):
+        raise ReferenceDataCorruptError(f"Reference value digest is invalid: {cde_key}")
+    return frozenset(values)
+
+
+def _cde_from_metadata(cde_key: str, metadata: Mapping[str, object]) -> CDEInfo:
+    try:
+        cde_type = CdeType(_required_string(metadata, "cde_type"))
+    except ValueError as exc:
+        raise ReferenceDataCorruptError(f"Reference CDE type is invalid: {cde_key}") from exc
+    description = metadata.get("description")
+    if description is not None and not isinstance(description, str):
+        raise ReferenceDataCorruptError(f"Reference CDE description is invalid: {cde_key}")
+    raw_id = metadata.get("cde_id")
+    return CDEInfo(
+        None if raw_id is None else _required_int(metadata, "cde_id"),
+        cde_key,
+        cast(str | None, description),
+        cde_type,
+    )
+
+
+def _validate_model_integrity(model: ReferenceModel, metadata: Mapping[str, object]) -> None:
+    if len(model.catalog) != _required_int(metadata, "cde_count"):
+        raise ReferenceDataCorruptError("Reference CDE count is invalid")
+    if sum(len(values) for values in model.pvs.values.values()) != _required_int(metadata, "value_count"):
+        raise ReferenceDataCorruptError("Reference model value count is invalid")
+    if _digest(_canonical_model_payload(model)) != _required_string(metadata, "digest"):
+        raise ReferenceDataCorruptError("Reference model digest is invalid")
 
 
 def _canonical_model_payload(model: ReferenceModel) -> Mapping[str, object]:

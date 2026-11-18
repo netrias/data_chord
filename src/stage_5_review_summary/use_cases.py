@@ -125,15 +125,7 @@ def build_download_package(
             "The harmonized dataset cannot be read. Return to Stage 3 and run harmonization again."
         )
 
-    review_record = load_readable_review_overrides_record(workflow_storage, user, file_id)
-    overrides = review_record.value if review_record is not None else None
-    if overrides is not None:
-        manifest = read_manifest_parquet(manifest_path) if manifest_path is not None else None
-        if manifest is None:
-            raise HarmonizationNotReadyError(
-                "Harmonization results cannot be read. Return to Stage 3 and run harmonization again."
-            )
-        require_review_state_matches_manifest(overrides, manifest)
+    overrides = _download_review_overrides(workflow_storage, user, file_id, manifest_path)
     final_dataset = _apply_review_overrides(harmonized_dataset, original_dataset, overrides)
     base_name = _download_base_name(meta, file_id)
     mapping_content = load_cde_mapping_json(file_id, workflow_storage, user)
@@ -165,21 +157,25 @@ def _build_history(
     upload_ts_str = upload_timestamp.isoformat() if upload_timestamp else None
     steps: list[TransformationStep] = []
 
-    steps.append(TransformationStep(
-        value=row.to_harmonize,
-        source="original",
-        timestamp=upload_ts_str,
-        review_status=_value_review_status(row.to_harmonize, pv_set),
-    ))
+    steps.append(
+        TransformationStep(
+            value=row.to_harmonize,
+            source="original",
+            timestamp=upload_ts_str,
+            review_status=_value_review_status(row.to_harmonize, pv_set),
+        )
+    )
 
     effective_ai_value = row.baseline_value
     if effective_ai_value != row.to_harmonize:
-        steps.append(TransformationStep(
-            value=effective_ai_value,
-            source="ai",
-            timestamp=upload_ts_str,
-            review_status=_value_review_status(effective_ai_value, pv_set),
-        ))
+        steps.append(
+            TransformationStep(
+                value=effective_ai_value,
+                source="ai",
+                timestamp=upload_ts_str,
+                review_status=_value_review_status(effective_ai_value, pv_set),
+            )
+        )
 
     for event in _events_for_row(review_overrides, row, row_index):
         selected_value = _event_selected_value(event, effective_ai_value)
@@ -339,9 +335,7 @@ def _assemble_summary_response(
             filename=meta.original_name if meta else None,
             tabular_format=meta.tabular_format.value if meta else None,
             data_model_key=loaded_state.state.data_model_version.data_model_key,
-            external_version_number=(
-                loaded_state.state.data_model_version.external_version_number
-            ),
+            external_version_number=(loaded_state.state.data_model_version.external_version_number),
         ),
         column_summaries=[
             ColumnSummary(
@@ -467,10 +461,7 @@ def _track_current_mappings(
     if not row.to_harmonize:
         return
     pv_set = column_pv_map.get(row.column_key)
-    outcome_by_value = {
-        (outcome.final_value, outcome.final_value_source): outcome
-        for outcome in row_outcomes
-    }
+    outcome_by_value = {(outcome.final_value, outcome.final_value_source): outcome for outcome in row_outcomes}
     row_indices = list(row.row_indices) if row.row_indices else [None]
     for row_index in row_indices:
         current_value, current_source = _resolve_current_value(
@@ -489,9 +480,7 @@ def _track_current_mappings(
             final_value=outcome.final_value,
             final_value_source=outcome.final_value_source,
             review_status=outcome.review_status,
-            history_signature=tuple(
-                (step.value, step.source, step.action, step.timestamp) for step in history
-            ),
+            history_signature=tuple((step.value, step.source, step.action, step.timestamp) for step in history),
         )
         existing = mappings.get(key)
         if existing is None:
@@ -515,9 +504,7 @@ def _load_harmonized_path(
 ) -> Path:
     path = load_harmonized_output_path(storage, workflow_storage, user, file_id, meta)
     if path is None:
-        raise HarmonizationNotReadyError(
-            "Harmonized output is missing. Return to Stage 3 and run harmonization again."
-        )
+        raise HarmonizationNotReadyError("Harmonized output is missing. Return to Stage 3 and run harmonization again.")
     return path
 
 
@@ -529,9 +516,7 @@ def _apply_review_overrides(
     # Stage 4 overrides apply only to export rows. The stored harmonized file
     # remains the AI/PV-adjusted artifact for audit and comparison.
     final_rows = (
-        overrides.apply_to_rows(harmonized_dataset.rows, original_dataset)
-        if overrides
-        else harmonized_dataset.rows
+        overrides.apply_to_rows(harmonized_dataset.rows, original_dataset) if overrides else harmonized_dataset.rows
     )
     return dataset_from_rows(
         columns=harmonized_dataset.columns,
@@ -587,10 +572,7 @@ def _manifest_row_projection(
         "error": row.error,
         "row_indices": row.row_indices,
         "active_values": active_values,
-        "review_events": [
-            _event_to_payload(event)
-            for event in _events_for_manifest_row(review_overrides, row)
-        ],
+        "review_events": [_event_to_payload(event) for event in _events_for_manifest_row(review_overrides, row)],
     }
 
 
@@ -602,9 +584,7 @@ def _events_for_manifest_row(
     return [
         event
         for event in _review_events(review_overrides)
-        if event.row_key in row_keys
-        and event.column_key == row.column_key
-        and event.original_value == row.to_harmonize
+        if event.row_key in row_keys and event.column_key == row.column_key and event.original_value == row.to_harmonize
     ]
 
 
@@ -619,9 +599,7 @@ def _events_for_row(
     return [
         event
         for event in _review_events(review_overrides)
-        if event.row_key == row_key
-        and event.column_key == row.column_key
-        and event.original_value == row.to_harmonize
+        if event.row_key == row_key and event.column_key == row.column_key and event.original_value == row.to_harmonize
     ]
 
 
@@ -687,6 +665,24 @@ def _tabular_bytes(dataset: TabularDataset, template_path: Path | None) -> bytes
     writer.writerow(dataset.headers)
     writer.writerows(dataset.rows)
     return output.getvalue()
+
+
+def _download_review_overrides(
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+    file_id: str,
+    manifest_path: Path | None,
+) -> ReviewOverrides | None:
+    record = load_readable_review_overrides_record(workflow_storage, user, file_id)
+    overrides = record.value if record is not None else None
+    if overrides is not None:
+        manifest = read_manifest_parquet(manifest_path) if manifest_path is not None else None
+        if manifest is None:
+            raise HarmonizationNotReadyError(
+                "Harmonization results cannot be read. Return to Stage 3 and run harmonization again."
+            )
+        require_review_state_matches_manifest(overrides, manifest)
+    return overrides
 
 
 __all__ = [

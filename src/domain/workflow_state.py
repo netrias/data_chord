@@ -54,26 +54,12 @@ class ConfirmedMappingChoices:
             return None
         if not overrides_present or not renames_present:
             raise WorkflowStateSchemaError("workflow state has invalid mapping choices")
-
         raw_overrides = payload.get(_FIELD_MANUAL_OVERRIDES)
         raw_renames = payload.get(_FIELD_COLUMN_RENAMES)
         if not isinstance(raw_overrides, Mapping) or not isinstance(raw_renames, Mapping):
             raise WorkflowStateSchemaError("workflow state has invalid mapping choices")
-
-        manual_overrides: dict[str, str | None] = {}
-        for column_key, cde_key in raw_overrides.items():
-            if not isinstance(column_key, str):
-                raise WorkflowStateSchemaError("workflow state has invalid mapping choices")
-            if cde_key is not None and not isinstance(cde_key, str):
-                raise WorkflowStateSchemaError("workflow state has invalid mapping choices")
-            manual_overrides[column_key] = cde_key
-
-        column_renames: dict[str, str] = {}
-        for column_key, output_name in raw_renames.items():
-            if not isinstance(column_key, str) or not isinstance(output_name, str):
-                raise WorkflowStateSchemaError("workflow state has invalid mapping choices")
-            column_renames[column_key] = output_name
-
+        manual_overrides = _manual_overrides_from_store(raw_overrides)
+        column_renames = _column_renames_from_store(raw_renames)
         try:
             return cls.from_raw(manual_overrides, column_renames)
         except ValueError as exc:
@@ -148,33 +134,12 @@ class WorkflowState:
         if not isinstance(payload, Mapping):
             raise WorkflowStateSchemaError("workflow state must be an object")
         dataset_workflow_id = dataset_workflow_id_from_value(file_id)
-
-        schema_version = payload.get(_FIELD_SCHEMA_VERSION)
-        if isinstance(schema_version, bool) or not isinstance(schema_version, int):
-            raise WorkflowStateSchemaError("workflow state has an invalid schema version")
-        if schema_version != _CURRENT_SCHEMA_VERSION:
-            raise WorkflowStateSchemaError(f"workflow state schema {schema_version} is not supported")
-
-        stored_file_id = payload.get(_FIELD_FILE_ID)
-        data_model_key = payload.get(_FIELD_DATA_MODEL_KEY)
-        if stored_file_id != dataset_workflow_id:
-            raise WorkflowStateSchemaError("workflow state file identity does not match")
-        if not isinstance(data_model_key, str):
-            raise WorkflowStateSchemaError("workflow state is missing its data model key")
-        data_model_version = _data_model_version_from_store(data_model_key, payload)
-        if data_model_version is None:
-            raise WorkflowStateSchemaError("workflow state has an invalid data model version")
-        if _FIELD_SELECTED_SHEET not in payload:
-            raise WorkflowStateSchemaError("workflow state is missing selected_sheet")
-        selected_sheet = payload[_FIELD_SELECTED_SHEET]
-        if selected_sheet is not None and not isinstance(selected_sheet, str):
-            raise WorkflowStateSchemaError("workflow state has an invalid selected_sheet")
-
-        mapping_manifest = _mapping_manifest_from_store(payload)
+        data_model_version = _state_model_version(payload, dataset_workflow_id)
+        selected_sheet = _selected_sheet_from_store(payload)
         return cls(
             file_id=dataset_workflow_id,
             data_model_version=data_model_version,
-            mapping_manifest=mapping_manifest,
+            mapping_manifest=_mapping_manifest_from_store(payload),
             selected_sheet=selected_sheet,
             mapping_choices=ConfirmedMappingChoices.from_store(payload),
         )
@@ -207,6 +172,50 @@ def _data_model_version_from_store(
             return None
 
     return None
+
+
+def _manual_overrides_from_store(raw: Mapping[object, object]) -> dict[str, str | None]:
+    overrides: dict[str, str | None] = {}
+    for column_key, cde_key in raw.items():
+        if not isinstance(column_key, str) or (cde_key is not None and not isinstance(cde_key, str)):
+            raise WorkflowStateSchemaError("workflow state has invalid mapping choices")
+        overrides[column_key] = cde_key
+    return overrides
+
+
+def _column_renames_from_store(raw: Mapping[object, object]) -> dict[str, str]:
+    renames: dict[str, str] = {}
+    for key, name in raw.items():
+        if not isinstance(key, str) or not isinstance(name, str):
+            raise WorkflowStateSchemaError("workflow state has invalid mapping choices")
+        renames[key] = name
+    return renames
+
+
+def _state_model_version(payload: Mapping[str, object], file_id: DatasetWorkflowId) -> DataModelVersionReference:
+    schema = payload.get(_FIELD_SCHEMA_VERSION)
+    if isinstance(schema, bool) or not isinstance(schema, int):
+        raise WorkflowStateSchemaError("workflow state has an invalid schema version")
+    if schema != _CURRENT_SCHEMA_VERSION:
+        raise WorkflowStateSchemaError(f"workflow state schema {schema} is not supported")
+    if payload.get(_FIELD_FILE_ID) != file_id:
+        raise WorkflowStateSchemaError("workflow state file identity does not match")
+    key = payload.get(_FIELD_DATA_MODEL_KEY)
+    if not isinstance(key, str):
+        raise WorkflowStateSchemaError("workflow state is missing its data model key")
+    version = _data_model_version_from_store(key, payload)
+    if version is None:
+        raise WorkflowStateSchemaError("workflow state has an invalid data model version")
+    return version
+
+
+def _selected_sheet_from_store(payload: Mapping[str, object]) -> str | None:
+    if _FIELD_SELECTED_SHEET not in payload:
+        raise WorkflowStateSchemaError("workflow state is missing selected_sheet")
+    sheet = payload[_FIELD_SELECTED_SHEET]
+    if sheet is not None and not isinstance(sheet, str):
+        raise WorkflowStateSchemaError("workflow state has an invalid selected_sheet")
+    return sheet
 
 
 __all__ = ["ConfirmedMappingChoices", "WorkflowState", "WorkflowStateSchemaError"]

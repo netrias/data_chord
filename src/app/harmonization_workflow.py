@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 from netrias_client import read_tabular, write_tabular
 
 from src.app.harmonization_job_state import (
+    HarmonizationArtifactVersions,
     RunAuthority,
     StaleHarmonizationWorkerError,
     capture_harmonization_artifact_versions,
@@ -25,7 +27,7 @@ from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.harmonization import HarmonizationManifestSummary, HarmonizeStatus
 from src.domain.manifest import ColumnMappingManifest, ManifestPvAdjustment, ManifestRow
 from src.domain.pv_validation import compute_pv_adjustment
-from src.domain.reference_data import ReferenceDataRepository
+from src.domain.reference_data import ReferenceDataRepository, ReferenceModel
 from src.domain.tabular_column_renames import (
     ResolvedTabularColumn,
     apply_column_renames_to_dataset,
@@ -39,9 +41,35 @@ from src.persistence.pv_manifest_store import ColumnPvSets, save_pv_snapshot_if_
 from src.persistence.review_override_store import delete_review_overrides_state
 from src.persistence.workflow_artifacts import load_upload_artifact, save_harmonized_artifacts
 from src.persistence.workflow_state_store import LoadedWorkflowState
-from src.storage import UploadStorage, UserContext, VersionToken, WorkflowConflictError, WorkflowFile, WorkflowStorage
+from src.storage import (
+    UploadedFileMeta,
+    UploadStorage,
+    UserContext,
+    VersionToken,
+    WorkflowConflictError,
+    WorkflowFile,
+    WorkflowStorage,
+)
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _SourceStructure:
+    columns: tuple[ResolvedTabularColumn, ...]
+    row_count: int
+
+
+@dataclass(frozen=True)
+class _PreparedRun:
+    upload: UploadedFileMeta
+    workflow: LoadedWorkflowState
+    versions: HarmonizationArtifactVersions
+    source: _SourceStructure
+    reference: ReferenceModel
+    manifest: ColumnMappingManifest
+    pv_catalog: CdePvCatalog
+    column_pvs: ColumnPvSets
 
 
 class HarmonizationWorkflow:
@@ -69,123 +97,136 @@ class HarmonizationWorkflow:
         user: UserContext,
         use_cache: bool = True,
     ) -> HarmonizationWorkflowResult:
+        prepared = await self._prepare_run(file_id, loaded_state, user)
+        managed_path = self._upload_storage.harmonized_path_for(file_id, prepared.upload.saved_path)
+        worker_path = _worker_scratch_path(managed_path, authority.worker_id)
+        result = await self._run_harmonizer(
+            file_path=prepared.upload.saved_path,
+            data_model_version=loaded_state.state.data_model_version,
+            prepared_manifest=prepared.manifest,
+            column_pv_sets=prepared.column_pvs,
+            output_path=worker_path,
+            sheet_name=loaded_state.state.selected_sheet,
+            use_cache=use_cache,
+        )
+        return await self._finish_run(file_id, prepared, result, worker_path, authority, user)
+
+    async def _prepare_run(self, file_id: str, loaded: LoadedWorkflowState, user: UserContext) -> _PreparedRun:
         meta = load_upload_artifact(self._upload_storage, self._workflow_storage, user, file_id)
         if meta is None:
             raise FileNotFoundError(file_id)
-        artifact_versions = capture_harmonization_artifact_versions(self._workflow_storage, user, file_id)
-        workflow_state = loaded_state.state
-        manifest = workflow_state.mapping_manifest
-        mapping_choices = workflow_state.mapping_choices
-        if mapping_choices is None:
+        versions = capture_harmonization_artifact_versions(self._workflow_storage, user, file_id)
+        state = loaded.state
+        choices = state.mapping_choices
+        if choices is None:
             raise ValueError("Workflow mapping choices are incomplete")
-        column_overrides = mapping_choices.column_overrides
-        column_renames = mapping_choices.column_renames
-        data_model_version = workflow_state.data_model_version
-        resolved_columns, source_row_count = await _read_source_structure(
-            meta.saved_path,
-            column_renames,
-            workflow_state.selected_sheet,
+        source = await _read_source_structure(meta.saved_path, choices.column_renames, state.selected_sheet)
+        reference = await asyncio.to_thread(self._reference_data_repository.load_model, state.data_model_version)
+        manifest = state.mapping_manifest.apply_choices(
+            choices.column_overrides, choices.column_renames, reference.catalog
         )
-        reference_model = await asyncio.to_thread(
-            self._reference_data_repository.load_model,
-            data_model_version,
-        )
+        mappings = manifest.column_cde_map()
+        pvs = CdePvCatalog.from_mapping({key: reference.pvs.values[key] for key in mappings.cde_keys()})
+        column_pvs = ColumnPvSets({column: pvs.get(key) for column, key in mappings.mappings.items()})
+        return _PreparedRun(meta, loaded, versions, source, reference, manifest, pvs, column_pvs)
 
-        prepared_manifest = manifest.apply_choices(column_overrides, column_renames, reference_model.catalog)
-        column_cde_map = prepared_manifest.column_cde_map()
-        managed_output_path = self._upload_storage.harmonized_path_for(file_id, meta.saved_path)
-        worker_output_path = _worker_scratch_path(managed_output_path, authority.worker_id)
-        selected_cde_keys = column_cde_map.cde_keys()
-        pv_catalog = CdePvCatalog.from_mapping({
-            cde_key: reference_model.pvs.values[cde_key] for cde_key in selected_cde_keys
-        })
-        column_pv_sets = ColumnPvSets({
-            column_key: pv_catalog.get(cde_key) for column_key, cde_key in column_cde_map.mappings.items()
-        })
-        result = await self._run_harmonizer(
-            file_path=meta.saved_path,
-            data_model_version=data_model_version,
-            prepared_manifest=prepared_manifest,
-            column_pv_sets=column_pv_sets,
-            output_path=worker_output_path,
-            sheet_name=workflow_state.selected_sheet,
-            use_cache=use_cache,
-        )
+    async def _finish_run(
+        self,
+        file_id: str,
+        prepared: _PreparedRun,
+        result: HarmonizeResult,
+        worker_path: Path,
+        authority: RunAuthority,
+        user: UserContext,
+    ) -> HarmonizationWorkflowResult:
+        state = prepared.workflow.state
+        assert state.mapping_choices is not None
+        renames = state.mapping_choices.column_renames
+        output_path = result.output_path or worker_path
         if result.status == HarmonizeStatus.SUCCEEDED:
-            authority.require_current()
-            authority.require_plan_current()
-        harmonized_output_path = result.output_path or worker_output_path
-        if result.status == HarmonizeStatus.SUCCEEDED:
-            await _apply_column_renames_to_output(harmonized_output_path, column_renames, workflow_state.selected_sheet)
-        logger.info(
-            "Harmonization job dispatched",
-            extra={
-                "file_id": file_id,
-                "job_id": result.job_id,
-                "status": result.status,
-                "manifest_path": str(result.manifest_path),
-                "manifest_path_exists": result.manifest_path.exists() if result.manifest_path else False,
-            },
-        )
-        manifest_summary = await _read_and_adjust_manifest(
+            authority.require_publication_authority()
+            await _apply_column_renames_to_output(output_path, renames, state.selected_sheet)
+        _log_harmonizer_result(file_id, result)
+        summary = await _read_and_adjust_manifest(
             result.manifest_path,
-            column_renames,
-            column_pv_sets,
-            source_row_count=source_row_count,
-            source_file_name=meta.original_name,
-            reference_model_label=reference_model.label,
-            reference_model_version=data_model_version.external_version_number,
+            renames,
+            prepared.column_pvs,
+            source_row_count=prepared.source.row_count,
+            source_file_name=prepared.upload.original_name,
+            reference_model_label=prepared.reference.label,
+            reference_model_version=state.data_model_version.external_version_number,
         )
         if result.status == HarmonizeStatus.SUCCEEDED:
-            if not harmonized_output_path.exists() or result.manifest_path is None or manifest_summary is None:
-                raise RuntimeError("Harmonization completed without required output artifacts")
-            authority.require_current()
-            authority.require_plan_current()
-            await asyncio.to_thread(
-                save_pv_snapshot_if_unchanged,
-                self._workflow_storage, user, loaded_state, pv_catalog,
-                expected_version=artifact_versions.pv_manifest,
-            )
-            authority.require_current()
-            authority.require_plan_current()
-            await asyncio.to_thread(
-                save_cde_mapping_document,
-                self._workflow_storage, user, file_id, manifest, column_overrides, column_renames,
-                resolved_columns, reference_model.catalog, data_model_version,
-                expected_version=artifact_versions.cde_mapping,
-            )
-            authority.require_current()
-            authority.require_plan_current()
-            await asyncio.to_thread(
-                save_harmonized_artifacts,
-                self._workflow_storage, user, file_id, harmonized_output_path, result.manifest_path,
-                expected_harmonized_output_version=artifact_versions.harmonized_output,
-                expected_manifest_version=artifact_versions.manifest,
-            )
-            await asyncio.to_thread(
-                self._upload_storage.save_harmonization_manifest,
-                file_id,
-                result.manifest_path,
-            )
-            await asyncio.to_thread(
-                self._upload_storage.restore_harmonized_output,
-                file_id,
-                meta.saved_path,
-                harmonized_output_path,
-            )
-            authority.require_current()
-            authority.require_plan_current()
-            await asyncio.to_thread(
-                _invalidate_previous_stage_three_review,
-                self._workflow_storage, user, file_id, artifact_versions.review_overrides,
-            )
-        logger.info("Manifest summary result", extra={"file_id": file_id, "has_summary": manifest_summary is not None})
+            await self._publish_outputs(file_id, prepared, result, output_path, summary, authority, user)
+        logger.info("Manifest summary result", extra={"file_id": file_id, "has_summary": summary is not None})
         return HarmonizationWorkflowResult(
             job_id=result.job_id,
             status=result.status,
             detail=result.detail,
             job_id_available=result.job_id_available,
-            manifest_summary=manifest_summary,
+            manifest_summary=summary,
+        )
+
+    async def _publish_outputs(
+        self,
+        file_id: str,
+        prepared: _PreparedRun,
+        result: HarmonizeResult,
+        output_path: Path,
+        summary: HarmonizationManifestSummary | None,
+        authority: RunAuthority,
+        user: UserContext,
+    ) -> None:
+        if not output_path.exists() or result.manifest_path is None or summary is None:
+            raise RuntimeError("Harmonization completed without required output artifacts")
+        state = prepared.workflow.state
+        assert state.mapping_choices is not None
+        choices = state.mapping_choices
+        authority.require_publication_authority()
+        await asyncio.to_thread(
+            save_pv_snapshot_if_unchanged,
+            self._workflow_storage,
+            user,
+            prepared.workflow,
+            prepared.pv_catalog,
+            expected_version=prepared.versions.pv_manifest,
+        )
+        authority.require_publication_authority()
+        await asyncio.to_thread(
+            save_cde_mapping_document,
+            self._workflow_storage,
+            user,
+            file_id,
+            state.mapping_manifest,
+            choices.column_overrides,
+            choices.column_renames,
+            prepared.source.columns,
+            prepared.reference.catalog,
+            state.data_model_version,
+            expected_version=prepared.versions.cde_mapping,
+        )
+        authority.require_publication_authority()
+        await asyncio.to_thread(
+            save_harmonized_artifacts,
+            self._workflow_storage,
+            user,
+            file_id,
+            output_path,
+            result.manifest_path,
+            expected_harmonized_output_version=prepared.versions.harmonized_output,
+            expected_manifest_version=prepared.versions.manifest,
+        )
+        await asyncio.to_thread(self._upload_storage.save_harmonization_manifest, file_id, result.manifest_path)
+        await asyncio.to_thread(
+            self._upload_storage.restore_harmonized_output, file_id, prepared.upload.saved_path, output_path
+        )
+        authority.require_publication_authority()
+        await asyncio.to_thread(
+            _invalidate_previous_stage_three_review,
+            self._workflow_storage,
+            user,
+            file_id,
+            prepared.versions.review_overrides,
         )
 
     async def _run_harmonizer(
@@ -238,7 +279,8 @@ async def _read_and_adjust_manifest(
     if adjustment_count > 0:
         manifest_data = read_manifest_parquet(manifest_path) or manifest_data
     return build_harmonization_manifest_summary(
-        manifest_data, column_pv_map,
+        manifest_data,
+        column_pv_map,
         source_row_count=source_row_count,
         source_file_name=source_file_name,
         reference_model_label=reference_model_label,
@@ -262,11 +304,11 @@ async def _read_source_structure(
     source_path: Path,
     column_renames: ColumnRenameSet,
     sheet_name: str | None,
-) -> tuple[tuple[ResolvedTabularColumn, ...], int]:
+) -> _SourceStructure:
     if not source_path.exists():
-        return (), 0
+        return _SourceStructure((), 0)
     dataset = await asyncio.to_thread(read_tabular, source_path, sheet_name)
-    return resolve_tabular_columns(dataset, column_renames), len(dataset.rows)
+    return _SourceStructure(resolve_tabular_columns(dataset, column_renames), len(dataset.rows))
 
 
 def _worker_scratch_path(managed_path: Path, worker_id: str) -> Path:
@@ -289,8 +331,7 @@ def _apply_adjustments(rows: list[ManifestRow], column_pv_map: ColumnPvSets) -> 
     adjustments = [
         adjustment
         for row in rows
-        if (pv_set := column_pv_map.get(row.column_key))
-        and (adjustment := _compute_row_adjustment(row, pv_set))
+        if (pv_set := column_pv_map.get(row.column_key)) and (adjustment := _compute_row_adjustment(row, pv_set))
     ]
     _log_non_conformant_samples(rows, column_pv_map)
     return adjustments
@@ -301,8 +342,7 @@ def _log_non_conformant_samples(rows: list[ManifestRow], column_pv_map: ColumnPv
     samples = [
         row
         for row in rows[:50]
-        if (pv_set := column_pv_map.get(row.column_key)) is not None
-        and row.top_harmonization not in pv_set
+        if (pv_set := column_pv_map.get(row.column_key)) is not None and row.top_harmonization not in pv_set
     ][:5]
     if samples:
         logger.warning(
@@ -343,6 +383,19 @@ def _invalidate_previous_stage_three_review(
             raise StaleHarmonizationWorkerError(file_id)
     elif workflow_storage.read_json(user, file_id, WorkflowFile.REVIEW_OVERRIDES) is not None:
         raise StaleHarmonizationWorkerError(file_id)
+
+
+def _log_harmonizer_result(file_id: str, result: HarmonizeResult) -> None:
+    logger.info(
+        "Harmonization job dispatched",
+        extra={
+            "file_id": file_id,
+            "job_id": result.job_id,
+            "status": result.status,
+            "manifest_path": str(result.manifest_path),
+            "manifest_path_exists": result.manifest_path.exists() if result.manifest_path else False,
+        },
+    )
 
 
 __all__ = ["HarmonizationWorkflow"]

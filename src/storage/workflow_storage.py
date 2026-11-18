@@ -68,6 +68,7 @@ class WorkflowFile(str, Enum):
             WorkflowFile.REVIEW_OVERRIDES,
         }
 
+
 @dataclass(frozen=True)
 class UserContext:
     """Authenticated user facts needed by storage authorization."""
@@ -107,11 +108,7 @@ class WorkflowMetadata:
         schema_version = payload.get(_FIELD_STORAGE_SCHEMA_VERSION)
         if not isinstance(file_id, str) or not isinstance(owner_user_id, str):
             return None
-        if (
-            created_at is None
-            or isinstance(schema_version, bool)
-            or not isinstance(schema_version, int)
-        ):
+        if created_at is None or isinstance(schema_version, bool) or not isinstance(schema_version, int):
             return None
         if schema_version != STORAGE_SCHEMA_VERSION:
             return None
@@ -333,9 +330,7 @@ class LocalWorkflowStorage:
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-                raise WorkflowJsonUnreadableError(
-                    f"Workflow JSON is unreadable: {kind.value}"
-                ) from exc
+                raise WorkflowJsonUnreadableError(f"Workflow JSON is unreadable: {kind.value}") from exc
             return StoredJson(data=data, version=_version_for_file(path))
 
     def write_json(
@@ -405,26 +400,36 @@ class LocalWorkflowStorage:
         self._require_artifact_kind(kind)
         with self._workflow_lock(file_id):
             self._require_access_locked(user, file_id)
-            suffix = artifact_suffix(source_path)
-            existing_paths = self._existing_artifact_paths(file_id, kind)
-            if len(existing_paths) > 1:
-                raise WorkflowConflictError(f"Artifact has multiple suffix variants: {kind.value}")
-            if existing_paths:
-                existing_path = existing_paths[0]
-                if kind == WorkflowFile.ORIGINAL_UPLOAD:
-                    raise WorkflowConflictError(f"Artifact is create-once: {kind.value}")
-                if existing_path.suffix.lower() != suffix:
-                    raise WorkflowConflictError(f"Artifact suffix changed: {kind.value}")
-                path = existing_path
-                if expected_version is None or expected_version != _version_for_file(path):
-                    raise WorkflowConflictError(f"Artifact version changed: {kind.value}")
-            else:
-                if expected_version is not None:
-                    raise WorkflowConflictError(f"Artifact does not exist: {kind.value}")
-                path = self._artifact_path(file_id, kind, suffix)
+            path = self._artifact_write_path(file_id, kind, artifact_suffix(source_path), expected_version)
             path.parent.mkdir(parents=True, exist_ok=True)
             self._copy_artifact_atomic(source_path, path)
             return StoredArtifact(kind=kind, version=_version_for_file(path), suffix=path.suffix)
+
+    def _artifact_write_path(
+        self,
+        file_id: str,
+        kind: WorkflowFile,
+        suffix: str,
+        expected_version: VersionToken | None,
+    ) -> Path:
+        """Select and validate the destination while the caller holds the workflow lock."""
+        existing_paths = self._existing_artifact_paths(file_id, kind)
+        if len(existing_paths) > 1:
+            raise WorkflowConflictError(f"Artifact has multiple suffix variants: {kind.value}")
+        if existing_paths:
+            existing_path = existing_paths[0]
+            if kind == WorkflowFile.ORIGINAL_UPLOAD:
+                raise WorkflowConflictError(f"Artifact is create-once: {kind.value}")
+            if existing_path.suffix.lower() != suffix:
+                raise WorkflowConflictError(f"Artifact suffix changed: {kind.value}")
+            path = existing_path
+            if expected_version is None or expected_version != _version_for_file(path):
+                raise WorkflowConflictError(f"Artifact version changed: {kind.value}")
+        else:
+            if expected_version is not None:
+                raise WorkflowConflictError(f"Artifact does not exist: {kind.value}")
+            path = self._artifact_path(file_id, kind, suffix)
+        return path
 
     def artifact_version(
         self,
@@ -708,9 +713,7 @@ def _directory_size(path: Path) -> int:
     size_bytes = 0
     for root, directory_names, file_names in os.walk(path, followlinks=False):
         root_path = Path(root)
-        directory_names[:] = [
-            name for name in directory_names if not (root_path / name).is_symlink()
-        ]
+        directory_names[:] = [name for name in directory_names if not (root_path / name).is_symlink()]
         for name in file_names:
             file_path = root_path / name
             if file_path.is_symlink():
