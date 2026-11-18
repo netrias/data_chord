@@ -1,4 +1,7 @@
 import fs from 'node:fs/promises';
+import path from 'node:path';
+import AdmZip from 'adm-zip';
+import { e2eEnv } from './runtime-env.mjs';
 import { test, expect } from '@playwright/test';
 import { uploadAndAnalyzeReal, fileFixture, clickHarmonize, parseDownloadedCsv } from './utils.mjs';
 
@@ -28,7 +31,7 @@ async function summary(page, click) {
   return value.json();
 }
 
-async function uiDownload(page) {
+async function downloadArchive(page) {
   const download = page.waitForEvent('download');
   const response = waitPost(page, '/stage-5/download');
   await page.click('#downloadResults');
@@ -37,7 +40,12 @@ async function uiDownload(page) {
   expect(archive.suggestedFilename()).toMatch(/\.zip$/);
   const r = await response;
   expect(r.status()).toBe(200);
-  return (await parseDownloadedCsv({body: () => fs.readFile(archivePath)})).map(row => row.diagnosis);
+  return fs.readFile(archivePath);
+}
+
+async function uiDownload(page) {
+  const bytes = await downloadArchive(page);
+  return (await parseDownloadedCsv({body: async () => bytes})).map(row => row.diagnosis);
 }
 
 async function choose(page) {
@@ -120,5 +128,41 @@ for (const target of ['forward', 'failed save', 'tracker']) {
     const actual = {saved,warnings:result.non_conformant_items.map(item=>item.value),exported};
     console.log('OBSERVED 9 ' + target + ' ' + JSON.stringify({...actual,saveAttempts:attempts.length}));
     expect(actual).toEqual({saved:correction,warnings:[],exported:['Breast Cancer',correction,'Diabetes']});
+  });
+}
+
+for (const missing of [['manifest'], ['cde_mapping'], ['manifest', 'cde_mapping']]) {
+  test(`17. a reviewer can download after losing ${missing.join(' and ')}`, async ({ page }, testInfo) => {
+    // Given a saved manual correction and one or both audit inputs missing at the first visit to Review.
+    const id = await start(page);
+    const saved = waitPost(page, '/stage-4/overrides');
+    await choose(page);
+    expect((await saved).status()).toBe(200);
+    const workflow = path.join(e2eEnv.DATA_CHORD_WORKFLOW_STORAGE_DIR, 'workflows', id);
+    const auditInputs = { manifest: 'artifacts/harmonization_manifest_base.parquet', cde_mapping: 'json/cde_mapping.json' };
+    await fs.mkdir(testInfo.outputDir, { recursive: true });
+    for (const name of missing) {
+      await fs.rename(path.join(workflow, auditInputs[name]), testInfo.outputPath(name));
+    }
+
+    // When the reviewer opens and refreshes the summary, the warning remains visible before downloading.
+    await page.click('#stageFiveButton');
+    const warningText = page.locator('#auditWarning');
+    await expect(warningText).toContainText('run the workflow again');
+    await page.reload();
+    await expect(warningText).toContainText('run the workflow again');
+    const message = await warningText.innerText();
+
+    // Then the ZIP contains the corrected value, every available audit and the same warning as the page.
+    const bytes = await downloadArchive(page);
+    const archive = new AdmZip(bytes);
+    const entries = archive.getEntries().map(entry => entry.entryName);
+    expect(archive.readAsText('AUDIT-WARNING.txt').trim()).toBe(message.trim());
+    for (const name of Object.keys(auditInputs)) {
+      expect(entries.some(entry => entry.endsWith(`_${name}.json`))).toBe(!missing.includes(name));
+      if (missing.includes(name)) expect(message).toContain(`_${name}.json`);
+    }
+    expect((await parseDownloadedCsv({ body: async () => bytes })).map(row => row.diagnosis))
+      .toEqual(['Breast Cancer', correction, 'Diabetes']);
   });
 }

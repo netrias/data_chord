@@ -5,7 +5,7 @@ from itertools import chain
 from pathlib import Path
 from shutil import copyfile, copyfileobj
 from tempfile import TemporaryDirectory
-from xml.dom.minidom import Document, Element
+from xml.dom.minidom import Document, Element  # nosec B408: DOM node types only. defusedxml parses the input.
 from zipfile import ZipFile
 
 from defusedxml.minidom import parse

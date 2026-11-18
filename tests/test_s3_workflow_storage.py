@@ -558,6 +558,7 @@ def test_deleting_workflow_removes_all_pages_of_reviewed_exports(monkeypatch: py
         for number in range(3):
             storage.save_reviewed_export(user, workflow, UUID(int=number), bytes([number]))
     def first_page(Bucket: str, Prefix: str, ContinuationToken: str = "") -> dict[str, object]:
+        assert Bucket == storage.bucket
         keys = sorted(key for key in client.objects if key.startswith(Prefix) and key > ContinuationToken)
         return {"Contents": [{"Key": key} for key in keys[:1]], "IsTruncated": len(keys) > 1,
                 "NextContinuationToken": keys[0] if keys else None}
