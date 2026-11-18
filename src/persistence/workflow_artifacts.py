@@ -6,10 +6,14 @@ paths and the configured durable workflow storage backend.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Generator, Mapping
+from contextlib import AbstractContextManager, ExitStack, asynccontextmanager, contextmanager, nullcontext
 from pathlib import Path
 
+from src.domain.dataset_workflow_ids import DatasetWorkflowId
+from src.domain.upload_integrity import UploadFingerprint
 from src.storage import (
+    S3WorkflowStorage,
     StoredJson,
     UploadedFileMeta,
     UploadStorage,
@@ -21,6 +25,7 @@ from src.storage import (
     WorkflowNotFoundError,
     WorkflowStorage,
 )
+from src.storage.upload_storage import UploadStream
 
 
 class UploadMetadataUnreadableError(Exception):
@@ -58,28 +63,71 @@ def save_upload_metadata(
     )
 
 
-def load_upload_artifact(
-    upload_storage: UploadStorage,
-    workflow_storage: WorkflowStorage,
-    user: UserContext,
-    file_id: str,
-) -> UploadedFileMeta | None:
+def upload_workspace(upload_storage: UploadStorage, workflow_storage: WorkflowStorage) -> AbstractContextManager[None]:
+    """Keep staged uploads and worker outputs private while S3 is their durable store."""
+    if isinstance(workflow_storage, S3WorkflowStorage):
+        return upload_storage.private_workspace()
+    return nullcontext()
+
+
+@asynccontextmanager
+async def stage_upload(
+    uploads: UploadStorage, storage: WorkflowStorage, file: UploadStream, file_id: DatasetWorkflowId,
+    expected: UploadFingerprint | None = None,
+) -> AsyncIterator[UploadedFileMeta]:
+    """Keep the incoming file through its durable write and any preview reads."""
+    with upload_workspace(uploads, storage):
+        yield await uploads.store(file, file_id, expected)
+
+
+def upload_is_available(uploads: UploadStorage, storage: WorkflowStorage, user: UserContext, file_id: str) -> bool:
+    """Check admission without downloading the source that the worker will open."""
+    try:
+        if _read_upload_metadata(storage, user, file_id) is None:
+            return False
+        if storage.artifact_version(user, file_id, WorkflowFile.ORIGINAL_UPLOAD) is not None:
+            return True
+    except WorkflowNotFoundError:
+        return False
+    if isinstance(storage, S3WorkflowStorage):
+        return False
+    local = uploads.load(file_id)
+    return local is not None and local.saved_path.is_file()
+
+
+@contextmanager
+def open_upload_artifact(
+    upload_storage: UploadStorage, workflow_storage: WorkflowStorage, user: UserContext, file_id: str,
+) -> Generator[UploadedFileMeta | None]:
     try:
         stored = _read_upload_metadata(workflow_storage, user, file_id)
     except WorkflowNotFoundError:
-        return None
-    local_meta = upload_storage.load(file_id)
+        stored = None
     if stored is None or not isinstance(stored.data, Mapping):
-        return None
-    if local_meta is not None and local_meta.saved_path.exists():
-        # Prefer the existing local file when present to avoid copying large
-        # artifacts back out of durable storage on every stage transition.
-        return upload_storage.restore_upload(stored.data, local_meta.saved_path)
-    try:
-        with workflow_storage.materialize_artifact(user, file_id, WorkflowFile.ORIGINAL_UPLOAD) as source_path:
-            return upload_storage.restore_upload(stored.data, source_path)
-    except WorkflowArtifactNotFoundError:
-        return local_meta
+        yield None
+        return
+    if isinstance(workflow_storage, S3WorkflowStorage):
+        with _open_artifact(workflow_storage, user, file_id, WorkflowFile.ORIGINAL_UPLOAD) as source:
+            yield upload_storage.metadata_for_path(stored.data, source) if source else None
+        return
+    local_meta = upload_storage.load(file_id)
+    if local_meta and local_meta.saved_path.exists():
+        yield upload_storage.restore_upload(stored.data, local_meta.saved_path)
+        return
+    with _open_artifact(workflow_storage, user, file_id, WorkflowFile.ORIGINAL_UPLOAD) as source:
+        yield upload_storage.restore_upload(stored.data, source) if source else local_meta
+
+
+@contextmanager
+def _open_artifact(
+    storage: WorkflowStorage, user: UserContext, file_id: str, kind: WorkflowFile,
+) -> Generator[Path | None]:
+    with ExitStack() as files:
+        try:
+            path = files.enter_context(storage.materialize_artifact(user, file_id, kind))
+        except WorkflowArtifactNotFoundError:
+            path = None
+        yield path
 
 
 def save_harmonized_artifacts(
@@ -109,39 +157,12 @@ def save_harmonized_artifacts(
         )
 
 
-def load_harmonized_output_path(
-    upload_storage: UploadStorage,
-    workflow_storage: WorkflowStorage,
-    user: UserContext,
-    file_id: str,
-    meta: UploadedFileMeta,
-) -> Path | None:
-    # Authorize against durable workflow metadata before consulting scratch.
-    _read_upload_metadata(workflow_storage, user, file_id)
-    try:
-        with workflow_storage.materialize_artifact(user, file_id, WorkflowFile.HARMONIZED_OUTPUT) as source_path:
-            return upload_storage.restore_harmonized_output(file_id, meta.saved_path, source_path)
-    except (WorkflowArtifactNotFoundError, WorkflowNotFoundError):
-        return None
-
-
-def load_harmonization_manifest_path(
-    upload_storage: UploadStorage,
-    workflow_storage: WorkflowStorage,
-    user: UserContext,
-    file_id: str,
-) -> Path | None:
-    # Authorize against durable workflow metadata before consulting scratch.
-    _read_upload_metadata(workflow_storage, user, file_id)
-    try:
-        with workflow_storage.materialize_artifact(
-            user,
-            file_id,
-            WorkflowFile.HARMONIZATION_MANIFEST_BASE,
-        ) as source_path:
-            return upload_storage.restore_harmonization_manifest(file_id, source_path)
-    except (WorkflowArtifactNotFoundError, WorkflowNotFoundError):
-        return None
+def open_generated_artifact(
+    storage: WorkflowStorage, user: UserContext, file_id: str, kind: WorkflowFile,
+) -> AbstractContextManager[Path | None]:
+    """Read the published artifact directly. Its storage backend owns the file lifetime."""
+    _read_upload_metadata(storage, user, file_id)
+    return _open_artifact(storage, user, file_id, kind)
 
 
 def _upsert_json(
@@ -167,16 +188,19 @@ def _read_upload_metadata(
     file_id: str,
 ) -> StoredJson | None:
     try:
-        return workflow_storage.read_json(user, file_id, WorkflowFile.UPLOAD_METADATA)
+        stored = workflow_storage.read_json(user, file_id, WorkflowFile.UPLOAD_METADATA)
     except WorkflowJsonUnreadableError as exc:
         raise UploadMetadataUnreadableError(file_id) from exc
+    if stored is not None and (not isinstance(stored.data, Mapping) or stored.data.get("file_id") != file_id):
+        raise UploadMetadataUnreadableError(file_id)
+    return stored
 
 
 __all__ = [
     "UploadMetadataUnreadableError",
-    "load_harmonization_manifest_path",
-    "load_harmonized_output_path",
-    "load_upload_artifact",
+    "open_generated_artifact",
+    "open_upload_artifact",
+    "upload_workspace",
     "save_harmonized_artifacts",
     "save_upload_artifacts",
     "save_upload_metadata",

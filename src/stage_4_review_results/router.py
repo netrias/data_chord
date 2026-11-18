@@ -72,13 +72,11 @@ async def save_overrides(
     if_match: Annotated[str | None, Header(alias="If-Match")] = None,
     if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
 ) -> SaveOverridesResponse:
-    storage = dependencies.get_upload_storage()
     expected_version = _review_state_precondition(if_match, if_none_match)
     try:
         result = save_review_overrides(
             workflow_storage=dependencies.get_workflow_storage(),
             user=dependencies.get_user_context(),
-            upload_storage=storage,
             file_id=payload.file_id,
             overrides=payload.overrides,
             review_state=payload.review_state,

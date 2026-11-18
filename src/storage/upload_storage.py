@@ -6,7 +6,6 @@ Orchestrates file I/O, metadata tracking, and directory organization.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import logging
@@ -30,6 +29,7 @@ from netrias_client import (
 
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_value
 from src.domain.upload_integrity import UploadFingerprint
+from src.storage.file_operation import run_file_operation
 
 logger = logging.getLogger(__name__)
 
@@ -225,7 +225,7 @@ class UploadStorage:
                 await upload.close()
             verification = None
             if expected is not None:
-                verification = await asyncio.to_thread(_fingerprint_file, destination)
+                verification = await run_file_operation(_fingerprint_file, destination)
                 expected.verify(verification)
                 total_bytes = verification.size_bytes
             return self._create_and_save_metadata(
@@ -320,6 +320,10 @@ class UploadStorage:
             }
         return payload
 
+    def metadata_for_path(self, payload: Mapping[str, object], source: Path) -> UploadedFileMeta:
+        """Read durable metadata for the file supplied by its storage backend."""
+        return self._metadata_from_payload(cast(StoredMeta, payload), source)
+
     def restore_upload(self, payload: Mapping[str, object], source_path: Path) -> UploadedFileMeta:
         meta = self._metadata_from_payload(cast(StoredMeta, payload))
         meta.saved_path.parent.mkdir(parents=True, exist_ok=True)
@@ -398,13 +402,13 @@ class UploadStorage:
         if not is_supported_tabular_content_type(content_type, file_format):
             raise UnsupportedUploadError(f"Unsupported content type for {suffix}: {content_type}")
 
-    def _metadata_from_payload(self, payload: StoredMeta) -> UploadedFileMeta:
+    def _metadata_from_payload(self, payload: StoredMeta, source: Path | None = None) -> UploadedFileMeta:
         return UploadedFileMeta(
             dataset_workflow_id=dataset_workflow_id_from_value(payload[_META_FILE_ID]),
             original_name=payload[_META_ORIGINAL_NAME],
             content_type=payload[_META_CONTENT_TYPE],
             size_bytes=payload[_META_SIZE_BYTES],
-            saved_path=self._data_dir / payload[_META_SAVED_NAME],
+            saved_path=source if source is not None else self._data_dir / payload[_META_SAVED_NAME],
             uploaded_at=datetime.fromisoformat(payload[_META_UPLOADED_AT]),
             tabular_format=_tabular_format_from_metadata(payload),
             sheet_names=payload.get(_META_SHEET_NAMES, []),

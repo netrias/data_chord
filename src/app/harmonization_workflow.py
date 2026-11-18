@@ -6,7 +6,6 @@ HTTP or API-schema dependencies, so another interface can call the same run.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
@@ -39,9 +38,18 @@ from src.persistence.manifest_reader import read_manifest_parquet
 from src.persistence.manifest_writer import apply_column_renames_batch, apply_pv_adjustments_batch
 from src.persistence.pv_manifest_store import ColumnPvSets, save_pv_snapshot_if_unchanged
 from src.persistence.tabular_output import write_tabular_changes
-from src.persistence.workflow_artifacts import load_upload_artifact, save_harmonized_artifacts
+from src.persistence.workflow_artifacts import open_upload_artifact, save_harmonized_artifacts, upload_workspace
 from src.persistence.workflow_state_store import LoadedWorkflowState
-from src.storage import UploadStorage, UserContext, VersionToken, WorkflowConflictError, WorkflowFile, WorkflowStorage
+from src.storage import (
+    UploadedFileMeta,
+    UploadStorage,
+    UserContext,
+    VersionToken,
+    WorkflowConflictError,
+    WorkflowFile,
+    WorkflowStorage,
+)
+from src.storage.file_operation import run_file_operation
 
 logger = logging.getLogger(__name__)
 
@@ -71,9 +79,18 @@ class HarmonizationWorkflow:
         user: UserContext,
         use_cache: bool = True,
     ) -> HarmonizationWorkflowResult:
-        meta = load_upload_artifact(self._upload_storage, self._workflow_storage, user, file_id)
-        if meta is None:
-            raise FileNotFoundError(file_id)
+        with (
+            upload_workspace(self._upload_storage, self._workflow_storage),
+            open_upload_artifact(self._upload_storage, self._workflow_storage, user, file_id) as meta,
+        ):
+            if meta is None:
+                raise FileNotFoundError(file_id)
+            return await self._run_with_source(file_id, meta, loaded_state, authority, user, use_cache)
+
+    async def _run_with_source(
+        self, file_id: str, meta: UploadedFileMeta, loaded_state: LoadedWorkflowState, authority: RunAuthority,
+        user: UserContext, use_cache: bool,
+    ) -> HarmonizationWorkflowResult:
         artifact_versions = capture_harmonization_artifact_versions(self._workflow_storage, user, file_id)
         workflow_state = loaded_state.state
         manifest = workflow_state.mapping_manifest
@@ -88,7 +105,7 @@ class HarmonizationWorkflow:
             column_renames,
             workflow_state.selected_sheet,
         )
-        reference_model = await asyncio.to_thread(
+        reference_model = await run_file_operation(
             self._reference_data_repository.load_model,
             data_model_version,
         )
@@ -143,14 +160,14 @@ class HarmonizationWorkflow:
                 raise RuntimeError("Harmonization completed without required output artifacts")
             authority.require_current()
             authority.require_plan_current()
-            await asyncio.to_thread(
+            await run_file_operation(
                 save_pv_snapshot_if_unchanged,
                 self._workflow_storage, user, loaded_state, pv_catalog,
                 expected_version=artifact_versions.pv_manifest,
             )
             authority.require_current()
             authority.require_plan_current()
-            await asyncio.to_thread(
+            await run_file_operation(
                 save_cde_mapping_document,
                 self._workflow_storage, user, file_id, manifest, column_overrides, column_renames,
                 resolved_columns, reference_model.catalog, data_model_version,
@@ -158,18 +175,18 @@ class HarmonizationWorkflow:
             )
             authority.require_current()
             authority.require_plan_current()
-            await asyncio.to_thread(
+            await run_file_operation(
                 save_harmonized_artifacts,
                 self._workflow_storage, user, file_id, harmonized_output_path, result.manifest_path,
                 expected_harmonized_output_version=artifact_versions.harmonized_output,
                 expected_manifest_version=artifact_versions.manifest,
             )
-            await asyncio.to_thread(
+            await run_file_operation(
                 self._upload_storage.save_harmonization_manifest,
                 file_id,
                 result.manifest_path,
             )
-            await asyncio.to_thread(
+            await run_file_operation(
                 self._upload_storage.restore_harmonized_output,
                 file_id,
                 meta.saved_path,
@@ -177,7 +194,7 @@ class HarmonizationWorkflow:
             )
             authority.require_current()
             authority.require_plan_current()
-            await asyncio.to_thread(
+            await run_file_operation(
                 _start_new_review, self._workflow_storage, user, file_id,
                 artifact_versions.review_overrides, authority.worker_id,
             )
@@ -202,7 +219,7 @@ class HarmonizationWorkflow:
         use_cache: bool,
     ) -> HarmonizeResult:
         """The provider is synchronous; keep its work off the event loop."""
-        return await asyncio.to_thread(
+        return await run_file_operation(
             self._harmonizer.run,
             file_path=file_path,
             data_model_version=data_model_version,
@@ -229,7 +246,7 @@ async def _read_and_adjust_manifest(
     manifest_data = read_manifest_parquet(manifest_path)
     if manifest_data is None:
         return None
-    renamed_count = await asyncio.to_thread(
+    renamed_count = await run_file_operation(
         apply_column_renames_batch,
         manifest_path,
         column_renames,
@@ -255,9 +272,9 @@ async def _apply_column_renames_to_output(
 ) -> None:
     if not column_renames.renames or not output_path.exists():
         return
-    dataset = await asyncio.to_thread(read_tabular, output_path, sheet_name)
+    dataset = await run_file_operation(read_tabular, output_path, sheet_name)
     renamed = apply_column_renames_to_dataset(dataset, column_renames)
-    await asyncio.to_thread(write_tabular_changes, output_path, output_path, dataset, renamed)
+    await run_file_operation(write_tabular_changes, output_path, output_path, dataset, renamed)
 
 
 async def _read_source_structure(
@@ -267,7 +284,7 @@ async def _read_source_structure(
 ) -> tuple[tuple[ResolvedTabularColumn, ...], int]:
     if not source_path.exists():
         return (), 0
-    dataset = await asyncio.to_thread(read_tabular, source_path, sheet_name)
+    dataset = await run_file_operation(read_tabular, source_path, sheet_name)
     return resolve_tabular_columns(dataset, column_renames), len(dataset.rows)
 
 
@@ -326,7 +343,7 @@ async def _apply_pv_adjustments(manifest_path: Path, column_pv_map: ColumnPvSets
     adjustments = _apply_adjustments(summary.rows, column_pv_map)
     if not adjustments:
         return 0
-    return await asyncio.to_thread(apply_pv_adjustments_batch, manifest_path, adjustments)
+    return await run_file_operation(apply_pv_adjustments_batch, manifest_path, adjustments)
 
 
 def _start_new_review(

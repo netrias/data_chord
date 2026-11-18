@@ -571,3 +571,59 @@ def test_deleting_workflow_removes_all_pages_of_reviewed_exports(monkeypatch: py
     assert not any(first in key for key in client.objects)
     for number in range(3):
         assert storage.load_reviewed_export(user, second, UUID(int=number)) == bytes([number])
+
+
+def test_overlapping_artifact_readers_clean_up_independently(tmp_path: Path) -> None:
+    # Given a published CSV and a reader that still needs its local copy.
+    storage = S3WorkflowStorage("bucket", FakeS3Client())
+    user = UserContext("reader")
+    workflow = dataset_workflow_id()
+    storage.create_workflow(user, workflow)
+    source = tmp_path / "sample.csv"
+    source.write_bytes(b"value\none\n")
+    storage.create_artifact(user, workflow, WorkflowFile.ORIGINAL_UPLOAD, source)
+    with storage.materialize_artifact(user, workflow, WorkflowFile.ORIGINAL_UPLOAD) as first:
+        # When another reader finishes using the same artifact.
+        with storage.materialize_artifact(user, workflow, WorkflowFile.ORIGINAL_UPLOAD) as second:
+            assert second.read_bytes() == source.read_bytes()
+        # Then only the second reader's file is gone until the first reader finishes.
+        assert not second.exists()
+        assert first.read_bytes() == source.read_bytes()
+    assert not first.exists()
+
+
+def test_failed_artifact_read_reclaims_its_partial_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import tempfile
+
+    # Given a published object whose response body fails while being read into a local temporary file.
+    client = FakeS3Client()
+    storage = S3WorkflowStorage("bucket", client)
+    user = UserContext("reader")
+    workflow = dataset_workflow_id()
+    storage.create_workflow(user, workflow)
+    source = tmp_path / "sample.csv"
+    source.write_bytes(b"value\none\n")
+    storage.create_artifact(user, workflow, WorkflowFile.ORIGINAL_UPLOAD, source)
+    directory = tmp_path / "materializations"
+    directory.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(directory))
+    original_get = client.get_object
+
+    class BrokenBody:
+        def read(self):
+            raise OSError("interrupted artifact read")
+
+    def get_object(**request):
+        if request["Key"].endswith("original_upload.csv"):
+            return {"Body": BrokenBody()}
+        return original_get(**request)
+
+    monkeypatch.setattr(client, "get_object", get_object)
+    # When the storage operation attempts to open the file.
+    with pytest.raises(OSError, match="interrupted artifact read"), storage.materialize_artifact(
+        user, workflow, WorkflowFile.ORIGINAL_UPLOAD,
+    ):
+        pytest.fail("a partial file was exposed")
+
+    # Then even the temporary file created before the failure has been removed.
+    assert list(directory.iterdir()) == []

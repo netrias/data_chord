@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -27,7 +26,6 @@ from src.domain.dataset_workflow_ids import DatasetWorkflowId
 from src.persistence.harmonization_job_store import LoadedHarmonizationJob
 from src.persistence.workflow_state_store import LoadedWorkflowState
 from src.storage import UploadStorage, UserContext, WorkflowStorage
-from src.storage.s3_workflow_storage import S3WorkflowStorage
 
 logger = logging.getLogger(__name__)
 
@@ -182,17 +180,13 @@ class HarmonizationJobService:
             name=f"harmonization-heartbeat-{accepted_job.polling_job_id}",
         )
         try:
-            workspace = self._upload_storage.private_workspace() if isinstance(
-                self._workflow_storage, S3WorkflowStorage,
-            ) else nullcontext()
-            with workspace:
-                response = await runner(
-                    file_id=request.file_id,
-                    loaded_state=start.loaded_state,
-                    authority=RunAuthority(self._workflow_storage, user, accepted_job),
-                    user=user,
-                    use_cache=request.use_cache,
-                )
+            response = await runner(
+                file_id=request.file_id,
+                loaded_state=start.loaded_state,
+                authority=RunAuthority(self._workflow_storage, user, accepted_job),
+                user=user,
+                use_cache=request.use_cache,
+            )
             complete_harmonization_job(
                 workflow_storage=self._workflow_storage,
                 user=user,

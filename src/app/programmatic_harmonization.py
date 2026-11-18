@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,9 +20,10 @@ from src.domain.dataset_workflow_ids import DatasetWorkflowId, new_dataset_workf
 from src.domain.manifest import ColumnMappingManifest
 from src.domain.workflow_state import ConfirmedMappingChoices, WorkflowState
 from src.persistence.harmonization_job_store import LoadedHarmonizationJob
-from src.persistence.workflow_artifacts import save_upload_artifacts
+from src.persistence.workflow_artifacts import save_upload_artifacts, stage_upload
 from src.persistence.workflow_state_store import save_initial_workflow_state
 from src.storage import UploadStorage, UserContext, WorkflowStorage
+from src.storage.file_operation import run_file_operation
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +47,10 @@ class ProgrammaticHarmonizationRequest:
 class _PathUpload:
     """Expose one generated tabular file through the upload storage contract."""
 
-    def __init__(self, path: Path, filename: str, content_type: str) -> None:
+    def __init__(self, handle: BinaryIO, filename: str, content_type: str) -> None:
         self.filename: str | None = filename
         self.content_type: str | None = content_type
-        self._handle: BinaryIO = path.open("rb")
+        self._handle = handle
 
     async def read(self, size: int = -1) -> bytes:
         return self._handle.read(size)
@@ -76,23 +76,17 @@ async def submit_programmatic_harmonization(
         source_format=source_format,
         sheet_name=submission.document.sheet_name,
     )
-    with TemporaryDirectory(prefix="data-chord-programmatic-") as temp_dir:
-        source_path = Path(temp_dir) / submission.document.name
-        await asyncio.to_thread(write_tabular, source_path, dataset)
-        meta = await upload_storage.store(
-            _PathUpload(
-                source_path,
-                submission.document.name,
-                source_format.content_type,
-            ),
-            file_id,
-        )
-
     workflow_created = False
     try:
-        workflow_storage.create_workflow(user, file_id)
-        workflow_created = True
-        save_upload_artifacts(workflow_storage, user, upload_storage, meta)
+        with TemporaryDirectory(prefix="data-chord-programmatic-") as temp_dir:
+            source_path = Path(temp_dir) / submission.document.name
+            await run_file_operation(write_tabular, source_path, dataset)
+            with source_path.open("rb") as handle:
+                upload = _PathUpload(handle, submission.document.name, source_format.content_type)
+                async with stage_upload(upload_storage, workflow_storage, upload, file_id) as meta:
+                    workflow_storage.create_workflow(user, file_id)
+                    workflow_created = True
+                    save_upload_artifacts(workflow_storage, user, upload_storage, meta)
         state = WorkflowState.from_data_model_version(
             file_id,
             submission.data_model_version,

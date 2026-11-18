@@ -7,6 +7,8 @@ import io
 import json
 import tempfile
 import zipfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -49,9 +51,8 @@ from src.persistence.pv_manifest_store import ColumnPvSets, column_pv_sets
 from src.persistence.review_override_store import ReviewOverridesRecord
 from src.persistence.tabular_output import write_tabular_changes
 from src.persistence.workflow_artifacts import (
-    load_harmonization_manifest_path,
-    load_harmonized_output_path,
-    load_upload_artifact,
+    open_generated_artifact,
+    open_upload_artifact,
 )
 from src.persistence.workflow_state_store import LoadedWorkflowState
 from src.stage_5_review_summary.schemas import (
@@ -62,7 +63,7 @@ from src.stage_5_review_summary.schemas import (
     TermMapping,
     TransformationStep,
 )
-from src.storage import UploadedFileMeta, UploadStorage, UserContext, VersionToken, WorkflowStorage
+from src.storage import UploadedFileMeta, UploadStorage, UserContext, VersionToken, WorkflowFile, WorkflowStorage
 
 
 @dataclass(frozen=True)
@@ -105,15 +106,17 @@ class ReviewedInputs:
 def _load_inputs(file_id: str, uploads: UploadStorage, storage: WorkflowStorage, user: UserContext) -> ReviewedInputs:
     with performance_span("stage5.summary.ready_capture"):
         ready = capture_ready_harmonization(storage, user, file_id)
-    with performance_span("stage5.summary.upload_metadata"):
-        meta = load_upload_artifact(uploads, storage, user, file_id)
-    if meta is None:
-        raise HarmonizationNotReadyError("Upload not found. Return to Stage 1 and upload it again.")
-    with performance_span("stage5.summary.source_row_count"):
-        original = read_tabular(meta.saved_path, sheet_name=ready.workflow.state.selected_sheet)
+    with (
+        performance_span("stage5.summary.upload_metadata"),
+        open_upload_artifact(uploads, storage, user, file_id) as meta,
+    ):
+        if meta is None:
+            raise HarmonizationNotReadyError("Upload not found. Return to Stage 1 and upload it again.")
+        with performance_span("stage5.summary.source_row_count"):
+            original = read_tabular(meta.saved_path, sheet_name=ready.workflow.state.selected_sheet)
     with performance_span("stage5.summary.manifest_read"):
-        path = load_harmonization_manifest_path(uploads, storage, user, file_id)
-        manifest = read_manifest_parquet(path) if path else None
+        with open_generated_artifact(storage, user, file_id, WorkflowFile.HARMONIZATION_MANIFEST_BASE) as path:
+            manifest = read_manifest_parquet(path) if path else None
     with performance_span("stage5.summary.review_state"):
         review = load_readable_review_overrides_record(storage, user, file_id)
         if review and review.value.run_id and review.value.run_id != ready.job.job.worker_id:
@@ -154,7 +157,7 @@ def _summary_for_current_inputs(
                 inputs.overrides, len(inputs.original.rows),
             )
         elif prepare_download:
-            response = _partial_summary(inputs, pvs, upload_storage, workflow_storage, user)
+            response = _partial_summary(inputs, pvs, workflow_storage, user)
         else:
             raise HarmonizationNotReadyError(
                 "Harmonization results are incomplete. Return to Stage 3 and run harmonization again."
@@ -163,7 +166,7 @@ def _summary_for_current_inputs(
         reference = inputs.reference
         cached = workflow_storage.load_reviewed_export(user, file_id, reference)
         if cached is None:
-            package = _package_inputs(inputs, upload_storage, workflow_storage, user)
+            package = _package_inputs(inputs, workflow_storage, user)
             inputs.check_current(workflow_storage, user)
             workflow_storage.save_reviewed_export(user, file_id, reference, package.content.getvalue())
             response.audit_warning = package.audit_warning
@@ -177,10 +180,10 @@ def _summary_for_current_inputs(
 
 
 def _partial_summary(
-    inputs: ReviewedInputs, pvs: ColumnPvSets, uploads: UploadStorage, storage: WorkflowStorage, user: UserContext,
+    inputs: ReviewedInputs, pvs: ColumnPvSets, storage: WorkflowStorage, user: UserContext,
 ) -> StageFiveSummaryResponse:
-    path = _load_harmonized_path(uploads, storage, user, inputs.meta.file_id, inputs.meta)
-    harmonized = read_tabular(path, sheet_name=inputs.original.sheet_name)
+    with _open_harmonized_path(storage, user, inputs.meta.file_id) as path:
+        harmonized = read_tabular(path, sheet_name=inputs.original.sheet_name)
     final = _apply_review_overrides(harmonized, inputs.original, inputs.overrides)
     warnings: dict[tuple[int, str, str], NonConformantItem] = {}
     for column in final.columns:
@@ -208,27 +211,27 @@ def build_download_package(
     *, file_id: str, upload_storage: UploadStorage, workflow_storage: WorkflowStorage, user: UserContext,
 ) -> DownloadPackage:
     inputs = _load_inputs(file_id, upload_storage, workflow_storage, user)
-    package = _package_inputs(inputs, upload_storage, workflow_storage, user)
+    package = _package_inputs(inputs, workflow_storage, user)
     inputs.check_current(workflow_storage, user)
     return package
 
 
 def _package_inputs(
-    inputs: ReviewedInputs, uploads: UploadStorage, storage: WorkflowStorage, user: UserContext,
+    inputs: ReviewedInputs, storage: WorkflowStorage, user: UserContext,
 ) -> DownloadPackage:
     file_id = inputs.meta.file_id
-    path = _load_harmonized_path(uploads, storage, user, file_id, inputs.meta)
-    harmonized = read_tabular(path, sheet_name=inputs.original.sheet_name)
-    if not inputs.original.columns or not harmonized.columns:
-        raise HarmonizationNotReadyError("The reviewed dataset could not be recovered.")
-    final = _apply_review_overrides(harmonized, inputs.original, inputs.overrides)
-    try:
-        mapping_content = load_cde_mapping_json(file_id, storage, user)
-    except CdeMappingUnreadableError:
-        mapping_content = None
-    return _create_zip_buffer(
-        _download_base_name(inputs.meta, file_id), final, inputs.manifest, path, mapping_content, inputs.overrides,
-    )
+    with _open_harmonized_path(storage, user, file_id) as path:
+        harmonized = read_tabular(path, sheet_name=inputs.original.sheet_name)
+        if not inputs.original.columns or not harmonized.columns:
+            raise HarmonizationNotReadyError("The reviewed dataset could not be recovered.")
+        final = _apply_review_overrides(harmonized, inputs.original, inputs.overrides)
+        try:
+            mapping_content = load_cde_mapping_json(file_id, storage, user)
+        except CdeMappingUnreadableError:
+            mapping_content = None
+        return _create_zip_buffer(
+            _download_base_name(inputs.meta, file_id), final, inputs.manifest, path, mapping_content, inputs.overrides,
+        )
 
 
 def _build_history(
@@ -547,19 +550,14 @@ def _track_current_mappings(
                 existing.row_indices.append(row_index + 1)
 
 
-def _load_harmonized_path(
-    storage: UploadStorage,
-    workflow_storage: WorkflowStorage,
-    user: UserContext,
-    file_id: str,
-    meta: UploadedFileMeta,
-) -> Path:
-    path = load_harmonized_output_path(storage, workflow_storage, user, file_id, meta)
-    if path is None:
-        raise HarmonizationNotReadyError(
-            "Harmonized output is missing. Return to Stage 3 and run harmonization again."
-        )
-    return path
+@contextmanager
+def _open_harmonized_path(storage: WorkflowStorage, user: UserContext, file_id: str) -> Iterator[Path]:
+    with open_generated_artifact(storage, user, file_id, WorkflowFile.HARMONIZED_OUTPUT) as path:
+        if path is None:
+            raise HarmonizationNotReadyError(
+                "Harmonized output is missing. Return to Stage 3 and run harmonization again."
+            )
+        yield path
 
 
 def _apply_review_overrides(

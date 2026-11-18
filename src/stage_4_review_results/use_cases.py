@@ -36,8 +36,8 @@ from src.persistence.review_override_store import (
     save_review_overrides_state,
 )
 from src.persistence.workflow_artifacts import (
-    load_harmonization_manifest_path,
-    load_upload_artifact,
+    open_generated_artifact,
+    open_upload_artifact,
 )
 from src.stage_4_review_results.schemas import (
     CellOverrideSchema,
@@ -49,7 +49,7 @@ from src.stage_4_review_results.schemas import (
     SuggestionInfo,
     Transformation,
 )
-from src.storage import UploadStorage, UserContext, VersionToken, WorkflowStorage
+from src.storage import UploadStorage, UserContext, VersionToken, WorkflowFile, WorkflowStorage
 
 logger = logging.getLogger(__name__)
 
@@ -87,16 +87,16 @@ def build_stage_four_rows(
     with performance_span("stage4.rows.ready_capture"):
         ready = capture_ready_harmonization(workflow_storage, user, file_id)
     loaded_state = ready.workflow
-    with performance_span("stage4.rows.upload_artifact"):
-        meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
-    if not meta:
-        raise HarmonizationNotReadyError("Upload not found. Return to Stage 1 and upload it again.")
-
-    with performance_span("stage4.rows.source_dataset_read"):
-        original_dataset = read_tabular(meta.saved_path, sheet_name=loaded_state.state.selected_sheet)
+    with performance_span("stage4.rows.upload_artifact"), open_upload_artifact(
+        upload_storage, workflow_storage, user, file_id,
+    ) as meta:
+        if not meta:
+            raise HarmonizationNotReadyError("Upload not found. Return to Stage 1 and upload it again.")
+        with performance_span("stage4.rows.source_dataset_read"):
+            original_dataset = read_tabular(meta.saved_path, sheet_name=loaded_state.state.selected_sheet)
 
     with performance_span("stage4.rows.manifest_read"):
-        manifest = _load_manifest(upload_storage, workflow_storage, user, file_id)
+        manifest = _load_manifest(workflow_storage, user, file_id)
     if manifest is None:
         raise HarmonizationNotReadyError(
             "Harmonization results are incomplete. Return to Stage 3 and run harmonization again."
@@ -159,11 +159,11 @@ def build_row_context(
     """Load original spreadsheet rows for the on-demand review context popup."""
     ready = capture_ready_harmonization(workflow_storage, user, file_id)
     loaded_state = ready.workflow
-    meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
-    if meta is None:
-        raise HarmonizationNotReadyError("Upload not found. Return to Stage 1 and upload it again.")
+    with open_upload_artifact(upload_storage, workflow_storage, user, file_id) as meta:
+        if meta is None:
+            raise HarmonizationNotReadyError("Upload not found. Return to Stage 1 and upload it again.")
 
-    dataset = read_tabular(meta.saved_path, sheet_name=loaded_state.state.selected_sheet)
+        dataset = read_tabular(meta.saved_path, sheet_name=loaded_state.state.selected_sheet)
     selected_rows = [
         dataset.rows[index]
         for index in row_indices
@@ -178,7 +178,6 @@ def save_review_overrides(
     *,
     workflow_storage: WorkflowStorage,
     user: UserContext,
-    upload_storage: UploadStorage,
     file_id: DatasetWorkflowId,
     overrides: ReviewOverridePayload,
     review_state: ReviewStateSchema,
@@ -186,7 +185,7 @@ def save_review_overrides(
 ) -> SaveReviewOverridesResult:
     """Persist one complete active snapshot as append-only review decisions."""
     ready = capture_ready_harmonization(workflow_storage, user, file_id)
-    manifest = _load_manifest(upload_storage, workflow_storage, user, file_id)
+    manifest = _load_manifest(workflow_storage, user, file_id)
     if manifest is None:
         raise HarmonizationNotReadyError(
             "Harmonization results are incomplete. Return to Stage 3 and run harmonization again."
@@ -222,15 +221,12 @@ def save_review_overrides(
 
 
 def _load_manifest(
-    storage: UploadStorage,
     workflow_storage: WorkflowStorage,
     user: UserContext,
     file_id: str,
 ) -> ManifestSummary | None:
-    manifest_path = load_harmonization_manifest_path(storage, workflow_storage, user, file_id)
-    if manifest_path is None:
-        return None
-    return read_manifest_parquet(manifest_path)
+    with open_generated_artifact(workflow_storage, user, file_id, WorkflowFile.HARMONIZATION_MANIFEST_BASE) as path:
+        return read_manifest_parquet(path) if path else None
 
 
 def _extract_columns_from_manifest(manifest: ManifestSummary) -> list[ColumnIdentity]:

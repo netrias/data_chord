@@ -302,13 +302,10 @@ class S3WorkflowStorage:
         suffix = Path(key).suffix
         # Downstream tabular readers operate on Paths, so S3 objects are exposed
         # through a short-lived local file at the storage boundary.
-        with NamedTemporaryFile("wb", suffix=suffix, delete=False) as temp_file:
-            temp_path = Path(temp_file.name)
+        with NamedTemporaryFile("wb", suffix=suffix, delete_on_close=False) as temp_file:
             temp_file.write(_body_bytes(response))
-        try:
-            yield temp_path
-        finally:
-            temp_path.unlink(missing_ok=True)
+            temp_file.close()
+            yield Path(temp_file.name)
 
     def _require_access(self, user: UserContext, file_id: str) -> WorkflowMetadata:
         try:

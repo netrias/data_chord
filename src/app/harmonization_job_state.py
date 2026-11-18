@@ -19,7 +19,7 @@ from src.persistence.harmonization_job_store import (
     load_harmonization_job,
     save_harmonization_job,
 )
-from src.persistence.workflow_artifacts import load_upload_artifact
+from src.persistence.workflow_artifacts import upload_is_available
 from src.persistence.workflow_state_store import (
     LoadedWorkflowState,
     WorkflowStateUnreadableError,
@@ -111,7 +111,7 @@ def start_harmonization(
     release_capacity: Callable[[], None] | None = None,
 ) -> HarmonizationStart:
     """Persist an accepted run before the endpoint returns success."""
-    if load_upload_artifact(upload_storage, workflow_storage, user, file_id) is None:
+    if not upload_is_available(upload_storage, workflow_storage, user, file_id):
         raise HarmonizationWorkflowNotFoundError(file_id)
 
     loaded_state = _load_current_workflow_state(

@@ -125,6 +125,7 @@ async def test_hosted_scratch(app_client, temp_storage, scratch_patch, tmp_path)
         ),
     )
     assert response.status_code == 201, response.text
+    assert samples == [0, 0, 0]
 
 
 async def test_summary_work(app_client, temp_storage, monkeypatch):
@@ -229,3 +230,49 @@ async def test_failed_worker_scratch_releases_the_job_slot(app_client, temp_stor
     assert result.json()["status"] == "failed"
     next_file = await upload_content(app_client, b"primary_diagnosis\nDiabetes\n")
     await _finish(app_client, next_file)
+
+
+async def test_worker_shutdown_keeps_files_until_the_provider_finishes(app_client, temp_storage, scratch_patch):
+    # Given an S3 workflow whose provider is still reading the local source and writing its output.
+    s3 = S3WorkflowStorage("offline", FakeS3Client())
+    scratch_patch.setattr(dependencies, "get_workflow_storage", lambda: s3)
+    content = b"primary_diagnosis\nDiabetes\n"
+    file_id = await upload_content(app_client, content)
+    analysis = await app_client.post("/stage-1/analyze", json={
+        "file_id": file_id, "data_model_key": "test-data-model", "external_version_number": "11.0.4",
+    })
+    assert analysis.status_code == 200
+    await confirm_mapping_choices(app_client, file_id)
+    started = threading.Event()
+    release = threading.Event()
+    source_paths = []
+    observed = []
+
+    class Provider:
+        def run(self, *, file_path, output_path, **kwargs):
+            source_paths.append(file_path)
+            started.set()
+            if not release.wait(5):
+                raise TimeoutError("provider was never released")
+            output_path.write_bytes(file_path.read_bytes())
+            observed.append(output_path.read_bytes())
+            raise RuntimeError("test provider stopped")
+
+    scratch_patch.setattr(dependencies, "get_harmonize_service", Provider)
+    job = await app_client.post("/stage-3/harmonize", json={"file_id": file_id})
+    assert job.json()["status"] == "queued"
+    assert started.is_set()
+
+    # When shutdown cancels the worker while the provider holds both files.
+    shutdown = asyncio.create_task(dependencies.get_harmonization_job_service().shutdown())
+    try:
+        await asyncio.sleep(0.02)
+        assert not shutdown.done()
+    finally:
+        release.set()
+        await asyncio.wait_for(shutdown, timeout=5)
+
+    # Then the provider finished its file I/O before cleanup reclaimed the workspace and the source.
+    assert observed == [content]
+    assert not source_paths[0].exists()
+    assert _bytes_used(temp_storage._base_dir) == 0

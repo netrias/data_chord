@@ -20,7 +20,7 @@ from src.domain.columns import ColumnKey, column_key_from_string
 from src.domain.match_counts import compute_column_overlap_by_cde, compute_match_counts
 from src.domain.reference_data import ReferenceDataRepository
 from src.domain.workflow_state import ConfirmedMappingChoices
-from src.persistence.workflow_artifacts import load_upload_artifact
+from src.persistence.workflow_artifacts import open_upload_artifact
 from src.persistence.workflow_state_store import (
     WorkflowStateConflictError,
     WorkflowStateNotFoundError,
@@ -76,7 +76,8 @@ async def compute_column_detail(
     if loaded_state is None:
         raise ColumnDetailNotFound(f"No workflow found for {file_id}")
     source_column_key = column_key_from_string(column_key)
-    profile = await _build_column_profile_from_upload(
+    profile = await run_in_threadpool(
+        _build_column_profile_from_upload,
         upload_storage,
         workflow_storage,
         user,
@@ -121,7 +122,7 @@ def save_confirmed_mapping_choices(
     return SaveMappingChoicesResponse(file_id=payload.file_id, plan_version=saved.version.value)
 
 
-async def _build_column_profile_from_upload(
+def _build_column_profile_from_upload(
     upload_storage: UploadStorage,
     workflow_storage: WorkflowStorage,
     user: UserContext,
@@ -129,16 +130,15 @@ async def _build_column_profile_from_upload(
     column_key: ColumnKey,
     selected_sheet: str | None,
 ) -> ColumnProfile:
-    meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
-    if meta is None:
-        raise ColumnDetailNotFound(f"No upload found for {file_id}")
+    with open_upload_artifact(upload_storage, workflow_storage, user, file_id) as meta:
+        if meta is None:
+            raise ColumnDetailNotFound(f"No upload found for {file_id}")
 
-    profile = await run_in_threadpool(
-        _build_column_profile_from_tabular,
-        meta.saved_path,
-        column_key,
-        selected_sheet,
-    )
+        profile = _build_column_profile_from_tabular(
+            meta.saved_path,
+            column_key,
+            selected_sheet,
+        )
     if profile is None:
         raise ColumnDetailNotFound(f"No profile available for {file_id}/{column_key}")
     return profile
