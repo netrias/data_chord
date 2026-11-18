@@ -29,7 +29,7 @@ policy, public-access block, and 30-day expiration. One-time state imports adopt
 the existing objects without replacing them. App and build logs stay in
 CloudWatch for 14 days. The application creates no SNS notification stack.
 
-Workflow object versioning is explicitly suspended. Writes retain the current
+The full deployment explicitly suspends workflow object versioning. Writes retain the current
 object, without keeping future history. Existing versions are not deleted by
 this setting. Both workflow and access-log buckets use S3's default SSE-S3
 encryption. Foundation state-bucket versioning remains enabled.
@@ -40,9 +40,10 @@ deployment does not create or change the foundation.
 The `infra/customer-platform/` root creates only the shared data-plane module:
 
 - one workflow S3 bucket;
-- one S3 public-access block;
-- one workflow versioning setting that suspends future history; and
+- one S3 public-access block; and
 - three DynamoDB tables.
+
+The customer controls bucket versioning. Upgrades drop the former versioning resource from state without changing S3.
 
 It creates no IAM role, network, compute, registry, TLS, authentication, or
 logging resource. It reads the foundation schema-v2 handoff directly and uses

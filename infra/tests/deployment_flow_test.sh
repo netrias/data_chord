@@ -153,7 +153,23 @@ case "${1:-} ${2:-}" in
       printf '%s\n' '{"builds":[{"id":"build-1","buildStatus":"SUCCEEDED","currentPhase":"COMPLETED","phases":[]}],"buildsNotFound":[]}'
     fi
     ;;
-  "ecs describe-services") printf 'COMPLETED\t1\t1\t0\n' ;;
+  "ecs describe-services")
+    state=COMPLETED
+    revision=42
+    if [[ "${MOCK_ROLLBACK:-0}" == 1 ]]; then
+      if [[ -f "$MOCK_CALLS.ecs" ]]; then
+        revision=41
+      else
+        state=IN_PROGRESS
+        touch "$MOCK_CALLS.ecs"
+      fi
+    fi
+    printf '%s\t1\t1\t0' "$state"
+    if [[ "$*" == *taskDefinition* ]]; then
+      printf '\tarn:aws:ecs:us-east-2:123456789012:task-definition/data-chord:%s' "$revision"
+    fi
+    printf '\n'
+    ;;
   "elbv2 describe-target-health") printf '%s\n' "$MOCK_TARGET_STATES" ;;
   *) printf 'Unexpected AWS call: %s\n' "$*" >&2; exit 2 ;;
 esac
@@ -229,6 +245,7 @@ case "$arguments" in
         reference_data_table) printf 'data-chord-staging-reference-data\n' ;;
         ecr_repository_url) printf '945365518758.dkr.ecr.us-east-2.amazonaws.com/data-chord-staging\n' ;;
         codebuild_project_name) printf 'data-chord-staging-image\n' ;;
+        application_task_definition_arn) printf 'arn:aws:ecs:us-east-2:123456789012:task-definition/data-chord:42\n' ;;
         ecs_cluster_name | ecs_service_name) printf 'data-chord-staging\n' ;;
         target_group_arn) printf 'arn:aws:elasticloadbalancing:us-east-2:945365518758:targetgroup/app/1\n' ;;
         app_url) printf 'https://data-chord-staging.apps.netrias.com\n' ;;
@@ -416,6 +433,17 @@ if MOCK_TARGET_STATES=draining \
   fail_test "Deploy accepted a target group with no healthy target"
 fi
 assert_contains "$draining_output" "The load balancer has no healthy targets."
+
+# Given a planned deployment requests task revision 42.
+run_command "$plan_calls" netrias staging plan >/dev/null
+# When ECS starts revision 42 and rolls back to healthy revision 41.
+if MOCK_ROLLBACK=1 run_command "$TEST_ROOT/rollback" netrias staging deploy >"$TEST_ROOT/rollback.log" 2>&1; then
+  fail_test "A rolled-back release reported success"
+fi
+# Then deployment stops with an incomplete receipt before checking target health.
+assert_contains "$TEST_ROOT/rollback.log" "rolled back"
+assert_absent "$TEST_ROOT/rollback" "aws elbv2 describe-target-health"
+python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["status"] == "in_progress"' "$TEST_ROOT/receipts/netrias-staging.json"
 
 # Given an existing deployment manages workflow bucket versioning and runs an older app revision.
 versioning_handoff='{"resource_changes":[{"address":"aws_ecs_service.app","change":{"actions":["update"]}},{"address":"aws_ecs_task_definition.application","change":{"actions":["delete","create"]}},{"address":"aws_s3_bucket_versioning.workflow","change":{"actions":["forget"]}}]}'
