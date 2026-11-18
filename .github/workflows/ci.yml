@@ -239,6 +239,8 @@ jobs:
       - *prepare-action-node
 
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0  # The review report compares the PR head with its merge base.
 
       - name: Check runner-owned JavaScript runtime
         run: exec bash scripts/check-action-runtime.sh
@@ -280,6 +282,21 @@ jobs:
 
       - name: Install npm dependencies
         run: npm ci
+
+      - name: Report changed strings, domain types, and loops
+        if: github.event_name == 'pull_request'
+        env:
+          REVIEW_BASE: ${{ github.event.pull_request.base.sha }}
+          REVIEW_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          report="$RUNNER_TEMP/design-review.md"
+          uv run --frozen python scripts/design_review.py "$REVIEW_BASE" "$REVIEW_HEAD" > "$report"
+          if [ "$(wc -c < "$report")" -lt 1000000 ]; then
+            cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'The design review exceeds the summary size limit. See the lint job log.' >> "$GITHUB_STEP_SUMMARY"
+            cat "$report"
+          fi
 
       - name: Run repository pre-commit hooks
         run: uv run pre-commit run --all-files --show-diff-on-failure

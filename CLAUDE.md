@@ -15,6 +15,16 @@ Keep each function responsible for one operation. Separate file lifetime, format
 
 Use domain types for identities, positions that can be confused, and closed sets of states. Keep wire-format names in the reader or writer that owns the format. Free text, including spreadsheet values, stays text.
 
+## Pull request design checks
+
+The lint job publishes one advisory report for same-repository pull requests. Read the domain and loop questions first. Expand **Changed strings by scope** to review one-off values alongside repeated ones.
+
+- For each string, ask who owns its meaning. Reuse the domain type for an identity or state. Name a file-format token in its reader or writer. Keep ordinary text and intentional wire-format assertions local.
+- The Python pilot flags plain `str` parameters named `file_id`, `dataset_workflow_id`, or `column_key` under `src/`, except on HTTP route handlers. It also flags direct comparisons between a `HarmonizeStatus` parameter and a string, including misspellings. Review each match before promoting a rule to required lint.
+- When an added line contains an iteration and the function has at least two, check whether the operations belong together. Each Python comprehension clause counts. JavaScript and TypeScript count explicit loops.
+
+Run `uv run python scripts/design_review.py origin/main HEAD` from the repo root after `npm ci`. The report reads committed Python, JavaScript, and TypeScript files at the PR head. It includes literals on added or edited lines, including tests and named constant definitions. Comments and Python docstrings are excluded. Review questions do not fail CI.
+
 ## Running the App
 
 ```bash
