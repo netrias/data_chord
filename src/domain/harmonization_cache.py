@@ -29,6 +29,8 @@ class HarmonizationCacheKey:
     data_model_version: DataModelVersionReference
     cde_key: str
     source_value: str
+    context: str = ""
+    permissible_values: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.cde_key.strip():

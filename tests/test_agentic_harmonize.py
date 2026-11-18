@@ -410,6 +410,8 @@ def test_stale_cached_match_is_replaced_by_current_provider_result(tmp_path: Pat
         data_model_version=MODEL_VERSION,
         cde_key="diagnosis",
         source_value="unknown",
+        context="Source column: diagnosis\nTarget CDE: diagnosis",
+        permissible_values=("New Match",),
     )
     cache = _MemoryCache()
     cache.entries[key] = HarmonizationCacheEntry(
