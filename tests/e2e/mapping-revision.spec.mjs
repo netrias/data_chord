@@ -92,3 +92,19 @@ test('10 completed file reanalysis selects a new editable worksheet',async({page
   expect(button).toMatch(/Harmonize/);
   expect(destination).toBe('/stage-3');
 });
+
+test('the same reviewer can retry Start after a temporary capacity failure', async ({ page }) => {
+  // Given a successful confirmation with the first Start temporarily rejected.
+  await uploadAndAnalyzeReal(page, csv('diagnosis'));
+  await page.route('**/stage-3/harmonize', (route) => route.fulfill({
+    status: 429, json: { detail: 'All workers are busy. Try again.' },
+  }), { times: 1 });
+  await page.locator('#harmonizeButton').click();
+  await expect(page.locator('#harmonizeError')).toContainText('All workers are busy');
+
+  // When the reviewer retries the same choices, the page submits the revision it just saved.
+  await clickHarmonize(page);
+
+  // Then the accepted job completes with the confirmed plan.
+  await expect(page.locator('#reviewButton')).toBeEnabled({ timeout: 20_000 });
+});

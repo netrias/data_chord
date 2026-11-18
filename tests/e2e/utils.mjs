@@ -97,17 +97,18 @@ export const clickHarmonize = async (page) => {
 export const mockHarmonizeSuccess = async (page) => {
   await page.route('**/stage-3/harmonize', async (route) => {
     const payload = route.request().postDataJSON?.() ?? {};
-    if (Object.keys(payload).length !== 1 || typeof payload.file_id !== 'string') {
+    if (payload.plan_version !== 'confirmed' || typeof payload.file_id !== 'string') {
       await route.fulfill({
         status: 400,
         contentType: 'application/json',
-        body: JSON.stringify({ detail: 'Stage 3 accepts only the workflow id.' }),
+        body: JSON.stringify({ detail: 'Stage 3 needs the confirmed workflow and plan revision.' }),
       });
       return;
     }
     const fileId = payload.file_id ?? '';
     const response = {
       job_id: 'e2e-job-1',
+      plan_version: 'confirmed',
       status: 'succeeded',
       detail: 'Harmonization completed.',
       next_stage_url: `/stage-4?file_id=${fileId}&job_id=e2e-job-1&status=succeeded`,
@@ -124,6 +125,12 @@ export const mockHarmonizeSuccess = async (page) => {
 
 export const mockAnalyze = async (page, sourceColumnIndex = 1) => {
   const sourceColumnKey = `col_${String(sourceColumnIndex).padStart(4, '0')}`;
+  const analyses = new Map();
+  await page.route('**/stage-1/analysis/*', async (route) => {
+    const id = new URL(route.request().url()).pathname.split('/').at(-1);
+    const analysis = analyses.get(id);
+    await route.fulfill({ status: analysis ? 200 : 404, json: analysis ?? {} });
+  });
   await page.route('**/stage-1/analyze', async (route) => {
     const payload = route.request().postDataJSON?.() ?? {};
     const fileId = payload.file_id ?? '';
@@ -133,6 +140,7 @@ export const mockAnalyze = async (page, sourceColumnIndex = 1) => {
     const response = {
       file_id: fileId,
       file_name: 'test.csv',
+      plan_version: 'confirmed',
       external_version_number: E2E_TARGET_EXTERNAL_VERSION_NUMBER,
       total_rows: 3,
       columns: [
@@ -164,11 +172,8 @@ export const mockAnalyze = async (page, sourceColumnIndex = 1) => {
         },
       },
     };
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(response),
-    });
+    analyses.set(fileId, response);
+    await route.fulfill({ status: 200, json: response });
   });
 };
 
@@ -176,7 +181,7 @@ const _mockMappingChoices = async (page) => {
   await page.route('**/stage-2/choices', async (route) => {
     const payload = route.request().postDataJSON?.() ?? {};
     const fields = Object.keys(payload).sort();
-    const expectedFields = ['column_renames', 'file_id', 'manual_overrides'];
+    const expectedFields = ['column_renames', 'file_id', 'manual_overrides', 'plan_version'];
     if (JSON.stringify(fields) !== JSON.stringify(expectedFields)) {
       await route.fulfill({
         status: 400,
@@ -188,7 +193,7 @@ const _mockMappingChoices = async (page) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ file_id: payload.file_id }),
+      body: JSON.stringify({ file_id: payload.file_id, plan_version: 'confirmed' }),
     });
   });
 };

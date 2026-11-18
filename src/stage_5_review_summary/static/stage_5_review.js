@@ -54,6 +54,7 @@ const _conformanceProceedButton = document.getElementById('conformanceProceedBut
 
 const _state = {
   fileId: null,
+  exportReference: null,
   termMappings: [],
   sortColumn: null,
   sortDirection: 'asc',
@@ -222,7 +223,7 @@ const _showConformanceWarning = (items) => {
 };
 
 const _handleDownload = async () => {
-  if (!_state.fileId) {
+  if (!_state.exportReference) {
     _showError('Unable to locate this file. Restart the harmonization workflow.');
     return;
   }
@@ -234,7 +235,7 @@ const _handleDownload = async () => {
     const response = await fetch(_downloadEndpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file_id: _state.fileId }),
+      body: JSON.stringify({ file_id: _state.fileId, export_reference: _state.exportReference }),
     });
     markTiming('stage5.download.response', { status: response.status });
     measureTiming('stage5.download.request', 'stage5.download.start', 'stage5.download.response');
@@ -609,7 +610,7 @@ const _fetchSummary = async () => {
     const response = await fetch(_summaryEndpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file_id: context.fileId }),
+      body: JSON.stringify({ file_id: context.fileId, prepare_download: true }),
     });
     markTiming('stage5.summary.fetch.response', { status: response.status });
     measureTiming('stage5.summary.request', 'stage5.summary.fetch.start', 'stage5.summary.fetch.response');
@@ -626,10 +627,16 @@ const _fetchSummary = async () => {
     measureTiming('stage5.summary.parse', 'stage5.summary.fetch.response', 'stage5.summary.fetch.parsed');
     markTiming('stage5.summary.render.start');
 
+    _state.exportReference = data.export_reference;
+    _setDownloadButtonState(false);
+    const auditWarning = document.getElementById('auditWarning');
+    auditWarning.hidden = !data.audit_warning;
+    auditWarning.textContent = data.audit_warning ?? '';
     const conformanceItems = _validConformanceItems(data.non_conformant_items);
     _state.filter = conformanceItems.length > 0 ? 'needs_attention' : 'changed';
     _renderCertificate(data.dataset);
-    mountChangeFlow(_changeFlow, data.column_summaries ?? []);
+    if (data.history_available) mountChangeFlow(_changeFlow, data.column_summaries ?? []);
+    else _changeFlow.textContent = 'Transformation history and review counts are unavailable.';
     _renderMappings(data.term_mappings ?? []);
     _showConformanceWarning(conformanceItems);
 

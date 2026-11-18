@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Protocol
+from uuid import UUID
 
 from botocore.exceptions import ClientError
 
@@ -90,9 +91,39 @@ class S3WorkflowStorage:
         """Delete all objects for a workflow that the caller owns."""
         self._require_access(user, dataset_workflow_id)
         workflow_prefix = f"{self._workflow_key(dataset_workflow_id)}/"
-        response = self.client.list_objects_v2(Bucket=self.bucket, Prefix=workflow_prefix)
-        for key in _listed_keys(response):
-            self.client.delete_object(Bucket=self.bucket, Key=key)
+        anchor = self._metadata_key(dataset_workflow_id)
+        arguments = {"Bucket": self.bucket, "Prefix": workflow_prefix}
+        while True:
+            response = self.client.list_objects_v2(**arguments)
+            for key in _listed_keys(response):
+                if key != anchor:
+                    self.client.delete_object(Bucket=self.bucket, Key=key)
+            if not response.get("IsTruncated"):
+                break
+            token = response.get("NextContinuationToken")
+            if not isinstance(token, str) or not token:
+                raise ValueError("S3 returned a truncated workflow listing without a continuation token.")
+            arguments["ContinuationToken"] = token
+        self.client.delete_object(Bucket=self.bucket, Key=anchor)
+
+    def load_reviewed_export(self, user: UserContext, file_id: str, reference: UUID) -> bytes | None:
+        self._require_access(user, file_id)
+        key = self._workflow_key(file_id, "exports", reference.hex)
+        try:
+            return _body_bytes(self.client.get_object(Bucket=self.bucket, Key=key))
+        except ClientError as exc:
+            if _is_not_found(exc):
+                return None
+            raise
+
+    def save_reviewed_export(self, user: UserContext, file_id: str, reference: UUID, content: bytes) -> None:
+        self._require_access(user, file_id)
+        key = self._workflow_key(file_id, "exports", reference.hex)
+        try:
+            self.client.put_object(Bucket=self.bucket, Key=key, Body=content, IfNoneMatch="*")
+        except ClientError as exc:
+            if not _is_precondition_failed(exc):
+                raise
 
     def read_json(self, user: UserContext, file_id: str, kind: WorkflowFile) -> StoredJson | None:
         self._require_json_kind(kind)

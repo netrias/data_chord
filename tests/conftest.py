@@ -20,6 +20,7 @@ from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 from starlette.datastructures import Headers
 
+from src.domain.dataset_workflow_ids import DatasetWorkflowId
 from src.storage import UploadConstraints, UploadStorage
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -34,6 +35,16 @@ SAMPLE_CSV_ROW_COUNT = 10
 SAMPLE_CSV_COLUMN_COUNT = 6
 MAX_EXAMPLES_LIMIT = 20
 MANUAL_COLUMN_CONFIDENCE = 0.2
+
+
+async def review_precondition(
+    client: AsyncClient, file_id: DatasetWorkflowId, headers: dict[str,str] | None = None,
+) -> dict[str,str]:
+    """Use the same conditional write contract as a reviewer opening Stage 4."""
+    rows = await client.post("/stage-4/rows", json={"file_id":file_id}, headers=headers)
+    assert rows.status_code == 200, rows.text
+    condition = {"If-Match":rows.headers["etag"]} if "etag" in rows.headers else {"If-None-Match":"*"}
+    return {**(headers or {}), **condition}
 
 
 def review_state_payload() -> dict[str, object]:
@@ -582,7 +593,7 @@ def _store_test_completed_stage_three_job(file_id: str) -> None:
                 polling_job_id=job_id,
                 file_id=file_id,
                 plan_version=loaded_state.version.value,
-                worker_id="test-fixture-worker",
+                worker_id=existing_job.job.worker_id if existing_job else "test-fixture-worker",
                 now=now,
             ),
             status=HarmonizeStatus.SUCCEEDED,

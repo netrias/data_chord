@@ -3,7 +3,7 @@
  * Delegates to review mode modules (column or row) based on user selection.
  * Manages state persistence, navigation, and user interactions.
  */
-import { initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
+import { buildNavUrl, initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
 import { isValidFileId } from '/assets/shared/storage-keys.js';
 import { markAfterPaint, markTiming, measureTiming } from '/assets/shared/performance-timing.js';
 import {
@@ -922,13 +922,12 @@ const _syncReviewControls = () => {
  * Flush overrides to the server, then navigate to Stage 5.
  * Awaiting ensures the manifest parquet write completes before the page transitions.
  */
-const navigateToStage5 = async () => {
-  if (state.reviewBlocked || !(await flushPendingSaves())) return;
-  const fileId = getFileIdFromUrl();
-  if (!fileId || !isValidFileId(fileId)) return;
-  advanceMaxReachedStage('review');
-  const url = `${stageFiveUrl}?file_id=${encodeURIComponent(fileId)}`;
-  window.location.assign(url);
+const navigateToStage5 = async (destination = buildNavUrl(stageFiveUrl)) => {
+  if (new URL(destination, window.location.origin).searchParams.has('file_id')) {
+    if (state.reviewBlocked || !(await flushPendingSaves())) return;
+    advanceMaxReachedStage('review');
+  }
+  window.location.assign(destination);
 };
 
 /**
@@ -939,7 +938,7 @@ const init = async () => {
   markTiming('stage4.init.start');
   setActiveStage('verify');
   initStepInstruction('verify');
-  initNavigationEvents();
+  initNavigationEvents({ review: navigateToStage5 });
 
   if (state.reviewBlocked || !(await fetchRows())) return;
   _syncReviewControls();

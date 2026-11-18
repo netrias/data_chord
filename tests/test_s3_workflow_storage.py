@@ -544,3 +544,29 @@ def _etag(body: bytes) -> str:
 
 def _client_error(code: str) -> ClientError:
     return ClientError({"Error": {"Code": code}}, "FakeOperation")
+
+
+def test_deleting_workflow_removes_all_pages_of_reviewed_exports(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Given two isolated workflows and a storage client that returns one key per page.
+    from uuid import UUID
+    client = FakeS3Client()
+    storage = S3WorkflowStorage("test", client)
+    user = UserContext("reviewer")
+    first, second = dataset_workflow_id(), dataset_workflow_id("b" * 32)
+    for workflow in (first, second):
+        storage.create_workflow(user, workflow)
+        for number in range(3):
+            storage.save_reviewed_export(user, workflow, UUID(int=number), bytes([number]))
+    def first_page(Bucket: str, Prefix: str, ContinuationToken: str = "") -> dict[str, object]:
+        keys = sorted(key for key in client.objects if key.startswith(Prefix) and key > ContinuationToken)
+        return {"Contents": [{"Key": key} for key in keys[:1]], "IsTruncated": len(keys) > 1,
+                "NextContinuationToken": keys[0] if keys else None}
+    monkeypatch.setattr(client, "list_objects_v2", first_page)
+
+    # When the owner deletes the first workflow.
+    storage.delete_workflow(user, first)
+
+    # Then all its exports are gone and the other workflow still has all three.
+    assert not any(first in key for key in client.objects)
+    for number in range(3):
+        assert storage.load_reviewed_export(user, second, UUID(int=number)) == bytes([number])

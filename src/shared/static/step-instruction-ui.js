@@ -78,7 +78,7 @@ function _getFileIdForNavigation() {
 }
 
 /* why: append file_id to navigation URLs so stages can access the active session. */
-function _buildNavUrl(baseUrl) {
+export function buildNavUrl(baseUrl) {
   const fileId = _getFileIdForNavigation();
   const url = new URL(baseUrl, window.location.origin);
   if (fileId) url.searchParams.set('file_id', fileId);
@@ -110,7 +110,7 @@ function _getTargetContextForNavigation() {
  * The real links supply native keyboard navigation.
  * Unreachable stages are blocked from navigation.
  */
-export function initNavigationEvents() {
+export function initNavigationEvents(stageActions = {}) {
   document.querySelectorAll('.progress-tracker .step-link').forEach((link) => {
     link.addEventListener('click', (event) => {
       const step = link.closest('.step');
@@ -121,7 +121,9 @@ export function initNavigationEvents() {
       const url = link.dataset.url;
       if (isSafeRelativeUrl(url)) {
         event.preventDefault();
-        window.location.href = _buildNavUrl(url);
+        const action = stageActions[step.dataset.stage];
+        if (action) void action(buildNavUrl(url));
+        else window.location.href = buildNavUrl(url);
       } else {
         event.preventDefault();
       }

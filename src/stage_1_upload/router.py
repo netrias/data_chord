@@ -39,7 +39,11 @@ from src.persistence.workflow_artifacts import (
     load_upload_artifact,
     save_upload_artifacts,
 )
-from src.persistence.workflow_state_store import load_workflow_state, save_initial_workflow_state
+from src.persistence.workflow_state_store import (
+    WorkflowStateConflictError,
+    load_workflow_state,
+    save_workflow_state,
+)
 from src.settings import ApplicationMode, get_application_mode
 from src.shared.jinja import templates_for_stage
 from src.storage import (
@@ -236,6 +240,8 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
         _log_analyze_failed(user, payload.file_id, "upload_not_found")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please upload again.")
 
+    workflow_storage = dependencies.get_workflow_storage()
+    previous = load_workflow_state(workflow_storage, user, payload.file_id)
     selected_sheet = _resolve_sheet_safe(meta, payload.sheet_name)
     data_model_version = payload.data_model_version()
     analysis_task = asyncio.create_task(
@@ -283,16 +289,15 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     except Exception as exc:
         _log_analyze_failed(user, payload.file_id, type(exc).__name__)
         raise
-    save_initial_workflow_state(
-        dependencies.get_workflow_storage(),
-        user,
-        WorkflowState.from_data_model_version(
-            meta.dataset_workflow_id,
-            data_model_version,
-            mapping_manifest,
-            selected_sheet=selected_sheet,
-        ),
+    state = WorkflowState.from_data_model_version(
+        meta.dataset_workflow_id, data_model_version, mapping_manifest, selected_sheet=selected_sheet,
     )
+    try:
+        saved = save_workflow_state(
+            workflow_storage, user, state, expected_version=previous.version if previous else None,
+        )
+    except WorkflowStateConflictError as exc:
+        raise HTTPException(409, "Mapping choices changed during analysis. Refresh and try again.") from exc
     column_summaries = _build_column_summaries(
         profiles,
         mapping_manifest,
@@ -319,6 +324,7 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     return AnalyzeResponse(
         file_id=meta.file_id,
         file_name=meta.original_name,
+        plan_version=saved.version.value,
         external_version_number=data_model_version.external_version_number,
         total_rows=total_rows,
         columns=columns,
@@ -363,6 +369,7 @@ async def load_analysis_state(file_id: str) -> AnalyzeResponse:
     return AnalyzeResponse(
         file_id=meta.file_id,
         file_name=meta.original_name,
+        plan_version=loaded_state.version.value,
         external_version_number=state.data_model_version.external_version_number,
         total_rows=total_rows,
         columns=columns,

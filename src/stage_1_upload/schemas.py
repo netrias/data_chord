@@ -72,6 +72,7 @@ class AnalyzeResponse(BaseModel):
 
     file_id: DatasetWorkflowIdField
     file_name: str
+    plan_version: str
     external_version_number: str
     total_rows: int = Field(ge=0)
     columns: list[ColumnSummary]

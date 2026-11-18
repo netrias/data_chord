@@ -10,17 +10,19 @@ import zipfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from netrias_client import (
     TabularDataset,
     TabularFormat,
     dataset_from_rows,
     read_tabular,
-    write_tabular,
 )
 
 from src.app.harmonization_readiness import (
+    HarmonizationChangedError,
     HarmonizationNotReadyError,
+    ReadyHarmonization,
     capture_ready_harmonization,
     load_readable_review_overrides_record,
     require_review_state_matches_manifest,
@@ -41,9 +43,11 @@ from src.domain.review_overrides import (
     ReviewOverrides,
 )
 from src.observability.events import performance_span
-from src.persistence.cde_mapping_document_store import load_cde_mapping_json
+from src.persistence.cde_mapping_document_store import CdeMappingUnreadableError, load_cde_mapping_json
 from src.persistence.manifest_reader import read_manifest_parquet
 from src.persistence.pv_manifest_store import ColumnPvSets, column_pv_sets
+from src.persistence.review_override_store import ReviewOverridesRecord
+from src.persistence.tabular_output import write_tabular_changes
 from src.persistence.workflow_artifacts import (
     load_harmonization_manifest_path,
     load_harmonized_output_path,
@@ -58,97 +62,173 @@ from src.stage_5_review_summary.schemas import (
     TermMapping,
     TransformationStep,
 )
-from src.storage import UploadedFileMeta, UploadStorage, UserContext, WorkflowStorage
+from src.storage import UploadedFileMeta, UploadStorage, UserContext, VersionToken, WorkflowStorage
 
 
 @dataclass(frozen=True)
 class DownloadPackage:
     base_name: str
     content: io.BytesIO
+    audit_warning: str | None = None
+
+
+@dataclass(frozen=True)
+class ReviewedInputs:
+    ready: ReadyHarmonization
+    meta: UploadedFileMeta
+    original: TabularDataset
+    manifest: ManifestSummary | None
+    review: ReviewOverridesRecord | None
+
+    @property
+    def overrides(self) -> ReviewOverrides | None:
+        return self.review.value if self.review else None
+
+    @property
+    def reference(self) -> UUID:
+        versions = self.ready.artifacts
+        inputs = [self.meta.file_id, self.ready.job.version, self.ready.workflow.version,
+                  versions.output, versions.manifest, versions.pv_manifest, versions.cde_mapping,
+                  self.review.version if self.review else None]
+        return uuid5(NAMESPACE_URL, "data-chord/export/v1/" + json.dumps([
+            value.value if isinstance(value, VersionToken) else value for value in inputs
+        ]))
+
+    def check_current(self, storage: WorkflowStorage, user: UserContext) -> None:
+        with performance_span("stage5.summary.ready_check"):
+            self.ready.require_unchanged(storage, user)
+            latest = load_readable_review_overrides_record(storage, user, self.meta.file_id)
+            if (latest.version if latest else None) != (self.review.version if self.review else None):
+                raise HarmonizationChangedError("Review decisions changed. Refresh the summary to try again.")
+
+
+def _load_inputs(file_id: str, uploads: UploadStorage, storage: WorkflowStorage, user: UserContext) -> ReviewedInputs:
+    with performance_span("stage5.summary.ready_capture"):
+        ready = capture_ready_harmonization(storage, user, file_id)
+    with performance_span("stage5.summary.upload_metadata"):
+        meta = load_upload_artifact(uploads, storage, user, file_id)
+    if meta is None:
+        raise HarmonizationNotReadyError("Upload not found. Return to Stage 1 and upload it again.")
+    with performance_span("stage5.summary.source_row_count"):
+        original = read_tabular(meta.saved_path, sheet_name=ready.workflow.state.selected_sheet)
+    with performance_span("stage5.summary.manifest_read"):
+        path = load_harmonization_manifest_path(uploads, storage, user, file_id)
+        manifest = read_manifest_parquet(path) if path else None
+    with performance_span("stage5.summary.review_state"):
+        review = load_readable_review_overrides_record(storage, user, file_id)
+        if review and review.value.run_id and review.value.run_id != ready.job.job.worker_id:
+            raise HarmonizationNotReadyError("The saved edits belong to a different harmonization run.")
+        if manifest is not None:
+            require_review_state_matches_manifest(review.value if review else None, manifest)
+        elif review and review.value.events and review.value.run_id is None:
+            raise HarmonizationNotReadyError("The reviewed dataset could not be verified against its saved edits.")
+    return ReviewedInputs(ready, meta, original, manifest, review)
 
 
 def build_summary(
-    *,
-    file_id: str,
-    upload_storage: UploadStorage,
-    workflow_storage: WorkflowStorage,
-    user: UserContext,
+    *, file_id: str, upload_storage: UploadStorage, workflow_storage: WorkflowStorage, user: UserContext,
+    prepare_download: bool = False,
 ) -> StageFiveSummaryResponse:
-    with performance_span("stage5.summary.ready_capture"):
-        ready = capture_ready_harmonization(workflow_storage, user, file_id)
+    try:
+        return _summary_for_current_inputs(file_id, upload_storage, workflow_storage, user, prepare_download)
+    except HarmonizationChangedError:
+        if not prepare_download:
+            raise
+    # A concurrent save can complete while we prepare a download. Capture the new review once.
+    return _summary_for_current_inputs(file_id, upload_storage, workflow_storage, user, prepare_download)
 
-    with performance_span("stage5.summary.manifest_read"):
-        manifest_path = load_harmonization_manifest_path(upload_storage, workflow_storage, user, file_id)
-        if manifest_path is None:
+
+def _summary_for_current_inputs(
+    file_id: str, upload_storage: UploadStorage, workflow_storage: WorkflowStorage, user: UserContext,
+    prepare_download: bool,
+) -> StageFiveSummaryResponse:
+    inputs = _load_inputs(file_id, upload_storage, workflow_storage, user)
+    with performance_span("stage5.summary.pv_load"):
+        pvs = column_pv_sets(
+            workflow_storage, user, inputs.ready.workflow, (col.key for col in inputs.original.columns),
+        )
+    with performance_span("stage5.summary.summary_build"):
+        if inputs.manifest is not None:
+            response = _assemble_summary_response(
+                inputs.manifest, inputs.ready.workflow, inputs.meta, pvs, inputs.meta.uploaded_at,
+                inputs.overrides, len(inputs.original.rows),
+            )
+        elif prepare_download:
+            response = _partial_summary(inputs, pvs, upload_storage, workflow_storage, user)
+        else:
             raise HarmonizationNotReadyError(
                 "Harmonization results are incomplete. Return to Stage 3 and run harmonization again."
             )
-
-        manifest_summary = read_manifest_parquet(manifest_path)
-        if manifest_summary is None:
-            raise HarmonizationNotReadyError(
-                "Harmonization results cannot be read. Return to Stage 3 and run harmonization again."
-            )
-
-    response = _build_summary_from_manifest(
-        manifest_summary,
-        ready.workflow,
-        file_id,
-        upload_storage,
-        workflow_storage,
-        user,
-    )
-    with performance_span("stage5.summary.ready_check"):
-        ready.require_unchanged(workflow_storage, user)
+    if prepare_download:
+        reference = inputs.reference
+        cached = workflow_storage.load_reviewed_export(user, file_id, reference)
+        if cached is None:
+            package = _package_inputs(inputs, upload_storage, workflow_storage, user)
+            inputs.check_current(workflow_storage, user)
+            workflow_storage.save_reviewed_export(user, file_id, reference, package.content.getvalue())
+            response.audit_warning = package.audit_warning
+        else:
+            with zipfile.ZipFile(io.BytesIO(cached)) as archive:
+                if "AUDIT-WARNING.txt" in archive.namelist():
+                    response.audit_warning = archive.read("AUDIT-WARNING.txt").decode().strip()
+        response.export_reference = reference
+    inputs.check_current(workflow_storage, user)
     return response
 
 
-def build_download_package(
-    *,
-    file_id: str,
-    upload_storage: UploadStorage,
-    workflow_storage: WorkflowStorage,
-    user: UserContext,
-) -> DownloadPackage:
-    ready = capture_ready_harmonization(workflow_storage, user, file_id)
-    loaded_state = ready.workflow
-    meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
-    if meta is None:
-        raise HarmonizationNotReadyError("Upload not found. Return to Stage 1 and upload it again.")
-
-    harmonized_path = _load_harmonized_path(upload_storage, workflow_storage, user, file_id, meta)
-    manifest_path = load_harmonization_manifest_path(upload_storage, workflow_storage, user, file_id)
-    original_dataset = read_tabular(meta.saved_path, sheet_name=loaded_state.state.selected_sheet)
-    harmonized_dataset = read_tabular(harmonized_path, sheet_name=loaded_state.state.selected_sheet)
-    if not original_dataset.columns or not harmonized_dataset.columns:
-        raise HarmonizationNotReadyError(
-            "The harmonized dataset cannot be read. Return to Stage 3 and run harmonization again."
-        )
-
-    review_record = load_readable_review_overrides_record(workflow_storage, user, file_id)
-    overrides = review_record.value if review_record is not None else None
-    if overrides is not None:
-        manifest = read_manifest_parquet(manifest_path) if manifest_path is not None else None
-        if manifest is None:
-            raise HarmonizationNotReadyError(
-                "Harmonization results cannot be read. Return to Stage 3 and run harmonization again."
-            )
-        require_review_state_matches_manifest(overrides, manifest)
-    final_dataset = _apply_review_overrides(harmonized_dataset, original_dataset, overrides)
-    base_name = _download_base_name(meta, file_id)
-    mapping_content = load_cde_mapping_json(file_id, workflow_storage, user)
-    zip_buffer = _create_zip_buffer(
-        base_name,
-        final_dataset,
-        manifest_path,
-        meta.saved_path,
-        mapping_content,
-        overrides,
+def _partial_summary(
+    inputs: ReviewedInputs, pvs: ColumnPvSets, uploads: UploadStorage, storage: WorkflowStorage, user: UserContext,
+) -> StageFiveSummaryResponse:
+    path = _load_harmonized_path(uploads, storage, user, inputs.meta.file_id, inputs.meta)
+    harmonized = read_tabular(path, sheet_name=inputs.original.sheet_name)
+    final = _apply_review_overrides(harmonized, inputs.original, inputs.overrides)
+    warnings: dict[tuple[int, str, str], NonConformantItem] = {}
+    for column in final.columns:
+        allowed = pvs.get(column.key)
+        if not allowed:
+            continue
+        for row, source in zip(final.rows, inputs.original.rows, strict=True):
+            value = row[column.index]
+            if not check_value_conformance(value, allowed):
+                original = source[column.index]
+                warnings[column.index, original, value] = NonConformantItem(
+                    column=column.header, source_column_index=column.index, original=original, value=value,
+                )
+    model = inputs.ready.workflow.state.data_model_version
+    return StageFiveSummaryResponse(
+        dataset=DatasetSummary(
+            filename=inputs.meta.original_name, tabular_format=inputs.meta.tabular_format.value,
+            data_model_key=model.data_model_key, external_version_number=model.external_version_number,
+        ),
+        history_available=False, column_summaries=[], term_mappings=[], non_conformant_items=list(warnings.values()),
     )
 
-    package = DownloadPackage(base_name=base_name, content=zip_buffer)
-    ready.require_unchanged(workflow_storage, user)
+
+def build_download_package(
+    *, file_id: str, upload_storage: UploadStorage, workflow_storage: WorkflowStorage, user: UserContext,
+) -> DownloadPackage:
+    inputs = _load_inputs(file_id, upload_storage, workflow_storage, user)
+    package = _package_inputs(inputs, upload_storage, workflow_storage, user)
+    inputs.check_current(workflow_storage, user)
     return package
+
+
+def _package_inputs(
+    inputs: ReviewedInputs, uploads: UploadStorage, storage: WorkflowStorage, user: UserContext,
+) -> DownloadPackage:
+    file_id = inputs.meta.file_id
+    path = _load_harmonized_path(uploads, storage, user, file_id, inputs.meta)
+    harmonized = read_tabular(path, sheet_name=inputs.original.sheet_name)
+    if not inputs.original.columns or not harmonized.columns:
+        raise HarmonizationNotReadyError("The reviewed dataset could not be recovered.")
+    final = _apply_review_overrides(harmonized, inputs.original, inputs.overrides)
+    try:
+        mapping_content = load_cde_mapping_json(file_id, storage, user)
+    except CdeMappingUnreadableError:
+        mapping_content = None
+    return _create_zip_buffer(
+        _download_base_name(inputs.meta, file_id), final, inputs.manifest, path, mapping_content, inputs.overrides,
+    )
 
 
 def _build_history(
@@ -251,45 +331,6 @@ class _UniqueTermMapping:
     final_value_source: FinalValueSource
     review_status: FinalValueReviewStatus
     history_signature: tuple[tuple[str, str, str | None, str | None], ...]
-
-
-def _build_summary_from_manifest(
-    summary: ManifestSummary,
-    loaded_state: LoadedWorkflowState,
-    file_id: str,
-    upload_storage: UploadStorage,
-    workflow_storage: WorkflowStorage,
-    user: UserContext,
-) -> StageFiveSummaryResponse:
-    with performance_span("stage5.summary.pv_load"):
-        column_pv_map = column_pv_sets(
-            workflow_storage,
-            user,
-            loaded_state,
-            [row.column_key for row in summary.rows],
-        )
-    with performance_span("stage5.summary.upload_metadata"):
-        meta = load_upload_artifact(upload_storage, workflow_storage, user, file_id)
-    if meta is None:
-        raise HarmonizationNotReadyError("Upload not found. Return to Stage 1 and upload it again.")
-    with performance_span("stage5.summary.source_row_count"):
-        source_row_count = len(read_tabular(meta.saved_path, sheet_name=loaded_state.state.selected_sheet).rows)
-    upload_timestamp = meta.uploaded_at if meta else None
-    with performance_span("stage5.summary.review_state"):
-        review_record = load_readable_review_overrides_record(workflow_storage, user, file_id)
-        review_overrides = review_record.value if review_record is not None else None
-        require_review_state_matches_manifest(review_overrides, summary)
-
-    with performance_span("stage5.summary.summary_build"):
-        return _assemble_summary_response(
-            summary,
-            loaded_state,
-            meta,
-            column_pv_map,
-            upload_timestamp,
-            review_overrides,
-            source_row_count,
-        )
 
 
 def _assemble_summary_response(
@@ -542,19 +583,16 @@ def _apply_review_overrides(
 
 
 def _download_base_name(meta: UploadedFileMeta, file_id: str) -> str:
-    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    timestamp = meta.uploaded_at.astimezone(UTC).strftime("%Y%m%d_%H%M%S")
     original_stem = Path(meta.original_name).stem
     return f"{original_stem}_{file_id}_{timestamp}"
 
 
 def _manifest_to_json(
-    manifest_path: Path,
+    summary: ManifestSummary,
     review_overrides: ReviewOverrides | None = None,
-) -> str | None:
+) -> str:
     """Project immutable Stage 3 facts and current review decisions as JSON."""
-    summary = read_manifest_parquet(manifest_path)
-    if summary is None:
-        return None
     return json.dumps(
         [_manifest_row_projection(row, review_overrides) for row in summary.rows],
         indent=2,
@@ -598,35 +636,19 @@ def _events_for_manifest_row(
     review_overrides: ReviewOverrides | None,
     row: ManifestRow,
 ) -> list[ReviewOverrideEvent]:
-    row_keys = {str(row_index + 1) for row_index in row.row_indices}
-    return [
-        event
-        for event in _review_events(review_overrides)
-        if event.row_key in row_keys
-        and event.column_key == row.column_key
-        and event.original_value == row.to_harmonize
-    ]
+    if review_overrides is None:
+        return []
+    row_keys = {str(index + 1) for index in row.row_indices}
+    events = review_overrides.term_history.get(row.column_key, {}).get(row.to_harmonize, [])
+    return [event for event in events if event.row_key in row_keys]
 
 
 def _events_for_row(
-    review_overrides: ReviewOverrides | None,
-    row: ManifestRow,
-    row_index: int | None,
+    review_overrides: ReviewOverrides | None, row: ManifestRow, row_index: int | None,
 ) -> list[ReviewOverrideEvent]:
-    if row_index is None:
+    if review_overrides is None or row_index is None:
         return []
-    row_key = str(row_index + 1)
-    return [
-        event
-        for event in _review_events(review_overrides)
-        if event.row_key == row_key
-        and event.column_key == row.column_key
-        and event.original_value == row.to_harmonize
-    ]
-
-
-def _review_events(review_overrides: ReviewOverrides | None) -> tuple[ReviewOverrideEvent, ...]:
-    return review_overrides.events if review_overrides is not None else ()
+    return review_overrides.cell_history.get(row.column_key, {}).get(str(row_index + 1), [])
 
 
 def _event_selected_value(event: ReviewOverrideEvent, baseline_value: str) -> str:
@@ -654,32 +676,47 @@ def _event_to_payload(event: ReviewOverrideEvent) -> dict[str, object]:
 def _create_zip_buffer(
     base_name: str,
     dataset: TabularDataset,
-    manifest_path: Path | None,
+    manifest: ManifestSummary | None,
     template_path: Path | None = None,
     mapping_content: str | None = None,
     review_overrides: ReviewOverrides | None = None,
-) -> io.BytesIO:
+) -> DownloadPackage:
+    missing = []
+    warning = None
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
         temp_path = Path(f"{base_name}{dataset.source_format.suffix}")
         zf.writestr(temp_path.name, _tabular_bytes(dataset, template_path))
 
-        if manifest_path:
-            json_content = _manifest_to_json(manifest_path, review_overrides)
-            if json_content:
-                zf.writestr(f"{base_name}_manifest.json", json_content)
-        if mapping_content:
-            zf.writestr(f"{base_name}_cde_mapping.json", mapping_content)
+        history = _manifest_to_json(manifest, review_overrides) if manifest else None
+        for suffix, label, content in [
+            ("manifest", "transformation history", history),
+            ("cde_mapping", "column mapping", mapping_content),
+        ]:
+            filename = f"{base_name}_{suffix}.json"
+            if content is None:
+                missing.append(f"{label} ({filename})")
+            else:
+                zf.writestr(filename, content)
+        if missing:
+            warning = (
+                "We couldn’t recover the " + " and ".join(missing) + " for this download. "
+                "Your reviewed dataset is included. If you need a complete audit, "
+                "you may need to run the workflow again."
+            )
+            zf.writestr("AUDIT-WARNING.txt", warning + "\n")
 
     zip_buffer.seek(0)
-    return zip_buffer
+    return DownloadPackage(base_name, zip_buffer, warning)
 
 
 def _tabular_bytes(dataset: TabularDataset, template_path: Path | None) -> bytes | str:
     if dataset.source_format == TabularFormat.XLSX:
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / f"output{dataset.source_format.suffix}"
-            write_tabular(output_path, dataset, template_path=template_path)
+            assert template_path is not None
+            baseline = read_tabular(template_path, sheet_name=dataset.sheet_name)
+            write_tabular_changes(output_path, template_path, baseline, dataset)
             return output_path.read_bytes()
 
     output = io.StringIO()

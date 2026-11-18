@@ -176,6 +176,7 @@ const _openStage2SearchHarness = async (page) => {
     },
   ];
 
+  await page.route(`**/stage-1/analysis/${payload.file_id}`, (route) => route.fulfill({ json: payload }));
   await page.addInitScript((stagePayload) => {
     sessionStorage.setItem('stage2Payload', JSON.stringify(stagePayload));
     sessionStorage.setItem('maxReachedStage', 'mapping');
@@ -1380,6 +1381,8 @@ test('Stage 5 shows recovery detail for summary and download failures', async ({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
+        history_available: true,
+        export_reference: "9df354a7-6998-4465-b1da-3a951ab7f859",
         dataset: { filename: 'recovery.csv', tabular_format: 'csv', data_model_key: 'gc', external_version_number: '11.0.4' },
         column_summaries: [],
         term_mappings: [],
@@ -1565,6 +1568,7 @@ test('Stage 2 splits picker sections by mapping kind', async ({ page }) => {
     _stage2Cde('age_cde', 'passthrough'),
   ];
 
+  await page.route(`**/stage-1/analysis/${payload.file_id}`, (route) => route.fulfill({ json: payload }));
   await page.addInitScript((stagePayload) => {
     sessionStorage.setItem('stage2Payload', JSON.stringify(stagePayload));
     sessionStorage.setItem('maxReachedStage', 'mapping');
@@ -1678,6 +1682,7 @@ test('Stage 2 settings sidebar filters rows by mapping outcome', async ({ page }
     _stage2Cde('notes_cde', 'passthrough'),
   ];
 
+  await page.route(`**/stage-1/analysis/${payload.file_id}`, (route) => route.fulfill({ json: payload }));
   await page.addInitScript((stagePayload) => {
     sessionStorage.setItem('stage2Payload', JSON.stringify(stagePayload));
     sessionStorage.setItem('maxReachedStage', 'mapping');
@@ -1785,6 +1790,7 @@ test('Stage 2 empty-column filter uses full-column value presence', async ({ pag
     manifest: { column_mappings: {} },
   };
 
+  await page.route(`**/stage-1/analysis/${payload.file_id}`, (route) => route.fulfill({ json: payload }));
   await page.addInitScript((stagePayload) => {
     sessionStorage.setItem('stage2Payload', JSON.stringify(stagePayload));
     sessionStorage.setItem('maxReachedStage', 'mapping');
@@ -1843,6 +1849,7 @@ test('Stage 2 submits selected column renames for harmonization', async ({ page 
     cde_type: 'pv',
   }];
 
+  await page.route(`**/stage-1/analysis/${payload.file_id}`, (route) => route.fulfill({ json: payload }));
   await page.addInitScript((stagePayload) => {
     sessionStorage.setItem('stage2Payload', JSON.stringify(stagePayload));
     sessionStorage.setItem('maxReachedStage', 'mapping');
@@ -1929,6 +1936,7 @@ test('Stage 2 restores overridden column details one request at a time', async (
   let maximumActiveRequests = 0;
   let completedRequests = 0;
 
+  await page.route(`**/stage-1/analysis/${payload.file_id}`, (route) => route.fulfill({ json: payload }));
   await page.addInitScript((stagePayload) => {
     sessionStorage.setItem('stage2Payload', JSON.stringify(stagePayload));
     sessionStorage.setItem('maxReachedStage', 'mapping');
@@ -2018,6 +2026,7 @@ test('Stage 2 picker surfaces all AI candidates as separate rows', async ({ page
     _stage2Cde('notes_cde', 'passthrough'),
   ];
 
+  await page.route(`**/stage-1/analysis/${payload.file_id}`, (route) => route.fulfill({ json: payload }));
   await page.addInitScript((stagePayload) => {
     sessionStorage.setItem('stage2Payload', JSON.stringify(stagePayload));
     sessionStorage.setItem('maxReachedStage', 'mapping');
@@ -2385,6 +2394,8 @@ test('Stage 5 aggregates change impact and keeps filters keyboard accessible', a
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
+        history_available: true,
+        export_reference: "9df354a7-6998-4465-b1da-3a951ab7f859",
         dataset: {
           filename: 'attention.csv',
           tabular_format: 'csv',
@@ -2550,6 +2561,8 @@ const _mockFlowSummary = async (page, columns = _FLOW_COLUMNS) => {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
+        history_available: true,
+        export_reference: "9df354a7-6998-4465-b1da-3a951ab7f859",
         dataset: { filename: 'flow.csv', tabular_format: 'csv', data_model_key: 'gc', external_version_number: '11.0.4' },
         column_summaries: columns,
         term_mappings: [],
@@ -3382,7 +3395,7 @@ test('Stage 4 keeps the workflow id when Review is clicked before rows load', as
   const stageFiveUrl = new URL(page.url());
   expect(stageFiveUrl.pathname).toBe('/stage-5');
   expect(stageFiveUrl.searchParams.get('file_id')).toBe(fileId);
-  expect(summaryRequest.postDataJSON()).toEqual({ file_id: fileId });
+  expect(summaryRequest.postDataJSON()).toEqual({ file_id: fileId, prepare_download: true });
   await expect(page.locator('#certificateTitle')).toHaveText('basic.csv');
   await expect(page.locator('.change-flow__summary')).toBeVisible();
 });
@@ -3398,6 +3411,7 @@ test('Stage 2 locks and Stage 5 is reachable after Stage 3 completes', async ({ 
       contentType: 'application/json',
       body: JSON.stringify({
         job_id: 'e2e-job-locked',
+        plan_version: payload.plan_version,
         status: 'succeeded',
         detail: 'Harmonization completed.',
         next_stage_url: `/stage-4?file_id=${fileId}&job_id=e2e-job-locked&status=succeeded`,

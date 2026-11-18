@@ -48,7 +48,7 @@ async def harmonize_dataset(payload: HarmonizeRequest) -> HarmonizeResponse:
     try:
         loaded = await dependencies.get_harmonization_job_service().submit(
             user=dependencies.get_user_context(),
-            request=HarmonizationJobRequest(file_id=payload.file_id),
+            request=HarmonizationJobRequest(file_id=payload.file_id, plan_version=payload.plan_version),
         )
     except HarmonizationWorkflowNotFoundError as exc:
         raise HTTPException(
@@ -98,6 +98,7 @@ async def get_harmonize_job(job_id: str, file_id: str | None = Query(default=Non
 
 def _response_from_job(job: HarmonizationJobState) -> HarmonizeResponse:
     return HarmonizeResponse(
+        plan_version=job.plan_version,
         job_id=job.job_id,
         status=job.status,
         detail=job.detail,

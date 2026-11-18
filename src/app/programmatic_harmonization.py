@@ -11,6 +11,7 @@ from typing import BinaryIO
 
 from netrias_client import TabularFormat, dataset_from_rows, write_tabular
 
+from src.app.harmonization_job_state import HarmonizationCapacityError
 from src.app.harmonization_jobs import (
     HarmonizationJobRequest,
     HarmonizationJobService,
@@ -99,6 +100,17 @@ async def submit_programmatic_harmonization(
             selected_sheet=submission.document.sheet_name,
         ).with_mapping_choices(ConfirmedMappingChoices.from_raw({}, {}))
         save_initial_workflow_state(workflow_storage, user, state)
+    except BaseException:
+        _discard_rejected_workflow(
+            workflow_created=workflow_created,
+            workflow_storage=workflow_storage,
+            upload_storage=upload_storage,
+            user=user,
+            file_id=file_id,
+        )
+        raise
+
+    try:
         return await job_service.submit(
             user=user,
             request=HarmonizationJobRequest(
@@ -110,9 +122,9 @@ async def submit_programmatic_harmonization(
             # would let request cancellation delete a job whose worker started.
             start_grace_seconds=0,
         )
-    except BaseException:
+    except HarmonizationCapacityError:
         _discard_rejected_workflow(
-            workflow_created=workflow_created,
+            workflow_created=True,
             workflow_storage=workflow_storage,
             upload_storage=upload_storage,
             user=user,

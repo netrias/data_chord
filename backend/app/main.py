@@ -15,6 +15,7 @@ from starlette.responses import FileResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from backend.app.error_handlers import register_api_error_handlers
+from src.app import dependencies
 from src.auth.user_context import (
     InvalidProgrammaticApiKeyError,
     InvalidUserContextError,
@@ -45,6 +46,7 @@ from src.stage_3_harmonize.router import stage_three_router
 from src.stage_4_review_results.router import stage_four_router
 from src.stage_5_review_summary.router import stage_five_router
 from src.storage import WorkflowAccessDeniedError, WorkflowNotFoundError
+from src.storage.s3_workflow_storage import S3WorkflowStorage
 
 APP_TITLE = "Data Chord"
 APP_DESCRIPTION = "Data harmonization workflow bootstrap application."
@@ -144,6 +146,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(_HostedScratchMiddleware)
     app.add_middleware(_ProgrammaticRequestBodyLimitMiddleware)
     app.middleware("http")(_bind_user_context)
     register_api_error_handlers(app)
@@ -252,6 +255,21 @@ def _bind_authenticated_user_context(request: Request):
     if _is_programmatic_api(request.url.path):
         return bind_programmatic_user_context(request.headers)
     return bind_user_context(request.headers)
+
+
+class _HostedScratchMiddleware:
+    """Release request-private S3 materializations after the response finishes streaming."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope["path"].startswith(("/stage-", "/api/v1/")):
+            if isinstance(dependencies.get_workflow_storage(), S3WorkflowStorage):
+                with dependencies.get_upload_storage().private_workspace():
+                    await self.app(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 
 class _ProgrammaticRequestBodyLimitMiddleware:

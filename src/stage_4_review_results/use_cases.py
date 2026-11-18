@@ -117,6 +117,9 @@ def build_stage_four_rows(
         column_pvs = _build_column_pvs(column_info, column_pv_map, file_id)
     with performance_span("stage4.rows.cde_mapping"):
         cde_mappings_by_column = load_cde_mapping_entries_by_column(file_id, workflow_storage, user)
+    has_progress = review_overrides is not None and (
+        bool(review_overrides.events) or review_overrides.review_state != ReviewProgressState()
+    )
     with performance_span("stage4.rows.response_build"):
         columns = _build_columns_from_manifest(
             manifest,
@@ -133,7 +136,7 @@ def build_stage_four_rows(
                 ReviewOverridesSchema.model_validate(
                     review_record.value.to_snapshot_payload()
                 )
-                if review_record is not None
+                if review_record is not None and has_progress
                 else None
             ),
         )
@@ -201,6 +204,7 @@ def save_review_overrides(
             file_id=file_id,
             overrides=_override_payload_to_store(overrides),
             review_state=ReviewProgressState.from_payload(review_state.model_dump(mode="json")),
+            run_id=ready.job.job.worker_id,
             expected_version=expected_version,
         )
     except ReviewOverridesStoreConflictError as exc:

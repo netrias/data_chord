@@ -48,7 +48,9 @@ how it was produced.
 
 ## Output
 
-The ZIP download includes three files:
+Download uses the revision shown on the open summary page. Refresh the page to review newer saved decisions and their warnings.
+
+A complete ZIP includes three files:
 
 - the final CSV, TSV, or XLSX dataset;
 - a JSON representation of the harmonization manifest;
@@ -66,3 +68,5 @@ Balancer, with durable workflow artifacts in S3.
 See [ARCHITECTURE.md](ARCHITECTURE.md) for boundaries and state ownership,
 [README.md](README.md) for local setup, and [DEPLOYMENT.md](DEPLOYMENT.md) for
 hosted deployment.
+
+If an audit file cannot be recovered, the summary names it. The ZIP includes the reviewed dataset, the available audit files, and a copy of that warning. A new workflow run may be needed to produce a complete audit.

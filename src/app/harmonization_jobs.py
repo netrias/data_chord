@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -26,6 +27,7 @@ from src.domain.dataset_workflow_ids import DatasetWorkflowId
 from src.persistence.harmonization_job_store import LoadedHarmonizationJob
 from src.persistence.workflow_state_store import LoadedWorkflowState
 from src.storage import UploadStorage, UserContext, WorkflowStorage
+from src.storage.s3_workflow_storage import S3WorkflowStorage
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,7 @@ class HarmonizationJobRequest:
     file_id: DatasetWorkflowId
     polling_job_id: str | None = None
     use_cache: bool = True
+    plan_version: str | None = None
 
 
 class HarmonizationWorkflowRunner(Protocol):
@@ -93,6 +96,7 @@ class HarmonizationJobService:
                 user=user,
                 file_id=request.file_id,
                 polling_job_id=request.polling_job_id,
+                expected_plan_version=request.plan_version,
                 reserve_capacity=self._reserve_slot,
                 release_capacity=self._release_slot,
             )
@@ -118,11 +122,12 @@ class HarmonizationJobService:
                 lambda completed, job_id=accepted_job.polling_job_id: self._task_finished(job_id, completed)
             )
 
-        if start_grace_seconds > 0:
-            try:
-                await asyncio.wait_for(asyncio.shield(task), timeout=start_grace_seconds)
-            except TimeoutError:
-                pass
+        if start_grace_seconds <= 0:
+            return start.loaded_job
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=start_grace_seconds)
+        except TimeoutError:
+            pass
         return self.get(
             user=user,
             file_id=request.file_id,
@@ -162,12 +167,8 @@ class HarmonizationJobService:
         self._reserved_slots = max(0, self._reserved_slots - 1)
 
     async def _run(
-        self,
-        *,
-        start: HarmonizationStart,
-        request: HarmonizationJobRequest,
-        runner: HarmonizationWorkflowRunner,
-        user: UserContext,
+        self, start: HarmonizationStart, request: HarmonizationJobRequest,
+        runner: HarmonizationWorkflowRunner, user: UserContext,
     ) -> None:
         accepted_job = start.loaded_job.job
         stop_heartbeat = asyncio.Event()
@@ -181,13 +182,17 @@ class HarmonizationJobService:
             name=f"harmonization-heartbeat-{accepted_job.polling_job_id}",
         )
         try:
-            response = await runner(
-                file_id=request.file_id,
-                loaded_state=start.loaded_state,
-                authority=RunAuthority(self._workflow_storage, user, accepted_job),
-                user=user,
-                use_cache=request.use_cache,
-            )
+            workspace = self._upload_storage.private_workspace() if isinstance(
+                self._workflow_storage, S3WorkflowStorage,
+            ) else nullcontext()
+            with workspace:
+                response = await runner(
+                    file_id=request.file_id,
+                    loaded_state=start.loaded_state,
+                    authority=RunAuthority(self._workflow_storage, user, accepted_job),
+                    user=user,
+                    use_cache=request.use_cache,
+                )
             complete_harmonization_job(
                 workflow_storage=self._workflow_storage,
                 user=user,

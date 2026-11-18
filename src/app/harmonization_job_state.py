@@ -106,6 +106,7 @@ def start_harmonization(
     user: UserContext,
     file_id: str,
     polling_job_id: str | None = None,
+    expected_plan_version: str | None = None,
     reserve_capacity: Callable[[], bool] | None = None,
     release_capacity: Callable[[], None] | None = None,
 ) -> HarmonizationStart:
@@ -118,6 +119,8 @@ def start_harmonization(
         user=user,
         file_id=file_id,
     )
+    if expected_plan_version is not None and expected_plan_version != loaded_state.version.value:
+        raise HarmonizationStartConflictError(file_id)
     try:
         existing = load_harmonization_job(workflow_storage, user, file_id)
     except HarmonizationJobUnreadableError as exc:

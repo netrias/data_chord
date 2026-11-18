@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 
-from netrias_client import read_tabular, write_tabular
+from netrias_client import read_tabular
 
 from src.app.harmonization_job_state import (
     RunAuthority,
@@ -26,6 +27,7 @@ from src.domain.harmonization import HarmonizationManifestSummary, HarmonizeStat
 from src.domain.manifest import ColumnMappingManifest, ManifestPvAdjustment, ManifestRow
 from src.domain.pv_validation import compute_pv_adjustment
 from src.domain.reference_data import ReferenceDataRepository
+from src.domain.review_overrides import ReviewOverrides, ReviewProgressState
 from src.domain.tabular_column_renames import (
     ResolvedTabularColumn,
     apply_column_renames_to_dataset,
@@ -36,7 +38,7 @@ from src.persistence.cde_mapping_document_store import save_cde_mapping_document
 from src.persistence.manifest_reader import read_manifest_parquet
 from src.persistence.manifest_writer import apply_column_renames_batch, apply_pv_adjustments_batch
 from src.persistence.pv_manifest_store import ColumnPvSets, save_pv_snapshot_if_unchanged
-from src.persistence.review_override_store import delete_review_overrides_state
+from src.persistence.tabular_output import write_tabular_changes
 from src.persistence.workflow_artifacts import load_upload_artifact, save_harmonized_artifacts
 from src.persistence.workflow_state_store import LoadedWorkflowState
 from src.storage import UploadStorage, UserContext, VersionToken, WorkflowConflictError, WorkflowFile, WorkflowStorage
@@ -176,8 +178,8 @@ class HarmonizationWorkflow:
             authority.require_current()
             authority.require_plan_current()
             await asyncio.to_thread(
-                _invalidate_previous_stage_three_review,
-                self._workflow_storage, user, file_id, artifact_versions.review_overrides,
+                _start_new_review, self._workflow_storage, user, file_id,
+                artifact_versions.review_overrides, authority.worker_id,
             )
         logger.info("Manifest summary result", extra={"file_id": file_id, "has_summary": manifest_summary is not None})
         return HarmonizationWorkflowResult(
@@ -255,7 +257,7 @@ async def _apply_column_renames_to_output(
         return
     dataset = await asyncio.to_thread(read_tabular, output_path, sheet_name)
     renamed = apply_column_renames_to_dataset(dataset, column_renames)
-    await asyncio.to_thread(write_tabular, output_path, renamed, output_path)
+    await asyncio.to_thread(write_tabular_changes, output_path, output_path, dataset, renamed)
 
 
 async def _read_source_structure(
@@ -327,22 +329,19 @@ async def _apply_pv_adjustments(manifest_path: Path, column_pv_map: ColumnPvSets
     return await asyncio.to_thread(apply_pv_adjustments_batch, manifest_path, adjustments)
 
 
-def _invalidate_previous_stage_three_review(
-    workflow_storage: WorkflowStorage,
-    user: UserContext,
-    file_id: str,
-    expected_version: VersionToken | None,
+def _start_new_review(
+    workflow_storage: WorkflowStorage, user: UserContext, file_id: str,
+    expected_version: VersionToken | None, run_id: str,
 ) -> None:
-    if expected_version is not None:
-        try:
-            delete_review_overrides_state(workflow_storage, user, file_id, expected_version=expected_version)
-        except WorkflowConflictError:
-            logger.info("Preserving review overrides changed during harmonization", extra={"file_id": file_id})
-            raise StaleHarmonizationWorkerError(file_id) from None
-        if workflow_storage.read_json(user, file_id, WorkflowFile.REVIEW_OVERRIDES) is not None:
-            raise StaleHarmonizationWorkerError(file_id)
-    elif workflow_storage.read_json(user, file_id, WorkflowFile.REVIEW_OVERRIDES) is not None:
-        raise StaleHarmonizationWorkerError(file_id)
+    """Publish a unique empty review so an earlier first-save cannot match this run."""
+    now = datetime.now(UTC)
+    review = ReviewOverrides(file_id, now, now, (), ReviewProgressState(), run_id)
+    try:
+        workflow_storage.write_json(
+            user, file_id, WorkflowFile.REVIEW_OVERRIDES, review.to_store(), expected_version,
+        )
+    except WorkflowConflictError as exc:
+        raise StaleHarmonizationWorkerError(file_id) from exc
 
 
 __all__ = ["HarmonizationWorkflow"]

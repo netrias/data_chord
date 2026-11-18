@@ -107,17 +107,18 @@ def save_confirmed_mapping_choices(
     """Persist confirmed Stage 2 choices as durable workflow state."""
     choices = ConfirmedMappingChoices.from_raw(payload.manual_overrides, payload.column_renames)
     try:
-        save_confirmed_mapping_choices_to_state(
+        saved = save_confirmed_mapping_choices_to_state(
             workflow_storage,
             user,
             payload.file_id,
             choices,
+            payload.plan_version,
         )
     except WorkflowStateNotFoundError as exc:
         raise MappingWorkflowStateNotFoundError() from exc
     except (WorkflowStateConflictError, WorkflowStateUnreadableError) as exc:
         raise MappingWorkflowStateConflictError() from exc
-    return SaveMappingChoicesResponse(file_id=payload.file_id)
+    return SaveMappingChoicesResponse(file_id=payload.file_id, plan_version=saved.version.value)
 
 
 async def _build_column_profile_from_upload(

@@ -41,6 +41,7 @@ from tests.conftest import (
     create_csv_content,
     create_test_manifest_parquet,
     create_xlsx_content,
+    review_precondition,
     review_state_payload,
     upload_content,
     upload_integrity_fields,
@@ -889,7 +890,7 @@ async def test_stage3_rerun_removes_decisions_from_the_previous_result(
             await _wait_for_stage_three_job(app_client, first_run.json()["job_id"], file_id)
         saved = await app_client.post(
             "/stage-4/overrides",
-            headers={"If-None-Match": "*"},
+            headers=await review_precondition(app_client, file_id),
             json={
                 "file_id": file_id,
                 "overrides": {

@@ -11,11 +11,13 @@ import hashlib
 import json
 import logging
 import shutil
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from tempfile import NamedTemporaryFile
+from tempfile import NamedTemporaryFile, TemporaryDirectory
 from typing import Final, NotRequired, Protocol, TypedDict, cast
 
 from netrias_client import (
@@ -157,13 +159,41 @@ def _harmonized_suffix_for(original_path: Path) -> str:
 
 class UploadStorage:
     def __init__(self, base_dir: Path, constraints: UploadConstraints) -> None:
-        self._base_dir: Path = base_dir
-        self._data_dir: Path = base_dir / "files"
-        self._meta_dir: Path = base_dir / "meta"
-        self._constraints: UploadConstraints = constraints
-        self._manifest_dir: Path = base_dir / "manifests"
-        self._harmonized_dir: Path = base_dir / "harmonized"
+        self._shared_dir = base_dir
+        self._operation_dir: ContextVar[Path | None] = ContextVar("operation_upload_dir", default=None)
+        self._constraints = constraints
         self._ensure_workspace()
+
+    @contextmanager
+    def private_workspace(self) -> Generator[None]:
+        """Keep materialized S3 files alive until this reader or worker finishes."""
+        with TemporaryDirectory(dir=self._shared_dir, prefix="operation-") as directory:
+            token = self._operation_dir.set(Path(directory))
+            try:
+                self._ensure_workspace()
+                yield
+            finally:
+                self._operation_dir.reset(token)
+
+    @property
+    def _base_dir(self) -> Path:
+        return self._operation_dir.get() or self._shared_dir
+
+    @property
+    def _data_dir(self) -> Path:
+        return self._base_dir / "files"
+
+    @property
+    def _manifest_dir(self) -> Path:
+        return self._base_dir / "manifests"
+
+    @property
+    def _meta_dir(self) -> Path:
+        return self._base_dir / "meta"
+
+    @property
+    def _harmonized_dir(self) -> Path:
+        return self._base_dir / "harmonized"
 
     def _ensure_workspace(self) -> None:
         self._data_dir.mkdir(parents=True, exist_ok=True)

@@ -25,7 +25,13 @@ from src.persistence.harmonization_job_store import load_harmonization_job, save
 from src.persistence.workflow_artifacts import save_harmonized_artifacts
 from src.persistence.workflow_state_store import load_workflow_state
 from src.storage import WorkflowArtifactNotFoundError, WorkflowConflictError, WorkflowFile
-from tests.conftest import confirm_mapping_choices, create_csv_content, create_test_manifest_parquet, upload_content
+from tests.conftest import (
+    confirm_mapping_choices,
+    create_csv_content,
+    create_test_manifest_parquet,
+    review_precondition,
+    upload_content,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -339,7 +345,7 @@ async def test_superseded_worker_preserves_prior_review_artifacts(
 
     saved = await app_client.post(
         "/stage-4/overrides",
-        headers={"If-None-Match": "*"},
+        headers=await review_precondition(app_client, file_id),
         json={
             "file_id": file_id,
             "overrides": {
