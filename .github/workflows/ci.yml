@@ -337,7 +337,8 @@ jobs:
     if: >-
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
+    # The pinned Playwright release supports Ubuntu 24.04, not the moving latest image.
+    runs-on: ubuntu-24.04
     steps:
       - *prepare-action-node
 
