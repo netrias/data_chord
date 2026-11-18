@@ -588,8 +588,8 @@ delivery policy, public-access block, and 30-day expiration at the addresses
 defined in `infra/access-logs.tf`. Run `tofu import` once for the existing bucket
 and each of its three configurations before reviewing the full plan. Routine
 deployments need no import commands. Require no replacement or log-policy change.
-Workflow versioning is suspended to stop future history; S3's default SSE-S3
-encryption remains active. The foundation state bucket keeps versioning.
+In a full deployment, workflow versioning is suspended to stop future history; S3's default SSE-S3
+encryption remains active. The foundation state bucket keeps versioning. In a customer-platform deployment, the customer controls workflow bucket versioning. An upgrade relinquishes any previous versioning resource in state without changing the bucket setting.
 Remove obsolete ALB bypass rules before exposing the
 new application. Keep unrelated clients on shared endpoint security groups.
 Review all resource moves and require no VPC, ALB, Cognito, certificate, bucket,
