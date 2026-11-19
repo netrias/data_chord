@@ -11,6 +11,7 @@ import {
   isReviewStateRecovery,
   readResponseDetail,
   renderRecoveryError,
+  renderErrorLink,
 } from '/assets/shared/recovery-error.js';
 import {
   clearWorkflowSession,
@@ -104,8 +105,9 @@ const _hideError = () => {
 };
 
 const _loadSourceContext = () => {
-  const fileId = new URLSearchParams(window.location.search).get('file_id');
-  return isValidFileId(fileId) ? { fileId } : null;
+  const params = new URLSearchParams(window.location.search);
+  const fileId = params.get('file_id');
+  return isValidFileId(fileId) ? { fileId, jobId: params.get('job_id') } : null;
 };
 
 const _showStartOverAction = () => {
@@ -249,11 +251,13 @@ const _renderCertificate = (dataset) => {
   }
 };
 
-const _showSummaryError = (message, includeRecoveryLink = false) => {
+const _showSummaryError = (message, responseStatus = 0) => {
   if (!_changeFlow) return;
   const error = document.createElement('p');
   error.className = 'change-flow__message';
-  if (includeRecoveryLink) {
+  if (responseStatus === 410) {
+    renderErrorLink(error, message, `${_stageFourUrl}?file_id=${encodeURIComponent(_state.fileId)}`, 'Open current job');
+  } else if (isReviewStateRecovery(message)) {
     renderRecoveryError(error, message, _state.fileId);
   } else {
     error.textContent = message;
@@ -578,7 +582,7 @@ const _fetchSummary = async () => {
     const response = await fetch(_summaryEndpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file_id: context.fileId }),
+      body: JSON.stringify({ file_id: context.fileId, job_id: context.jobId ?? undefined }),
     });
     markTiming('stage5.summary.fetch.response', { status: response.status });
     measureTiming('stage5.summary.request', 'stage5.summary.fetch.start', 'stage5.summary.fetch.response');
@@ -629,7 +633,7 @@ const _fetchSummary = async () => {
     console.error('Failed to fetch summary:', error);
     _showSummaryError(
       error.message || 'Unable to load the harmonization summary. Refresh the page to try again.',
-      isReviewStateRecovery(error.message),
+      error.status,
     );
   }
 };

@@ -455,6 +455,7 @@ async def test_full_flow_bom_overrides_apply(
                     row_indices.extend(t["rowIndices"])
     row_indices = sorted(set(row_indices))
 
+    # When the reviewer saves a correction for the repeated term.
     save_response = await app_client.post(
         "/stage-4/overrides",
         json={

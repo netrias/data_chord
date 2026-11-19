@@ -322,7 +322,7 @@ async def test_workflow_write_conflicts_are_globally_reported_as_retryable(
     # Given a concurrent write conflict from workflow storage.
     file_id = await upload_file(app_client, sample_csv_path)
     monkeypatch.setattr(
-        "src.stage_1_upload.router.save_workflow_state",
+        "src.stage_1_upload.router.save_initial_workflow_state",
         MagicMock(side_effect=WorkflowConflictError(file_id)),
     )
 

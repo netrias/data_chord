@@ -177,6 +177,7 @@ async def test_worker_with_superseded_plan_cannot_publish_scratch_results(
     tmp_path: Path,
 ) -> None:
     """A mapping change during provider work fails that run and keeps Stage 4 closed."""
+    # Given a worker still preparing results for the original mapping.
     provider_started = threading.Event()
     release_provider = threading.Event()
 
@@ -224,6 +225,7 @@ async def test_worker_with_superseded_plan_cannot_publish_scratch_results(
     assert accepted.json()["status"] == "queued"
     assert provider_started.is_set()
 
+    # When the reviewer saves a different mapping before publication.
     changed = await app_client.post(
         "/stage-2/choices",
         json={
@@ -247,6 +249,7 @@ async def test_worker_with_superseded_plan_cannot_publish_scratch_results(
         assert job_response.status_code == 200
         job = job_response.json()
 
+    # Then the old worker fails and neither artifact is published.
     assert job["status"] == "failed"
     workflow_storage = dependencies.get_workflow_storage()
     user = dependencies.get_user_context()

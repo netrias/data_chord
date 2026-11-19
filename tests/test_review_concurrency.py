@@ -6,6 +6,7 @@ import io
 import json
 import threading
 import zipfile
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -71,47 +72,6 @@ async def _export(client, file_id):
     assert response.status_code == 200, response.text
     with zipfile.ZipFile(io.BytesIO(response.content)) as z:
         return list(csv.reader(io.StringIO(z.read(next(n for n in z.namelist() if n.endswith(".csv"))).decode())))
-
-
-@pytest.mark.parametrize("overlap", [False, True], ids=["control", "concurrent"])
-async def test_analysis_retains_later_confirmed_plan(app_client, monkeypatch, overlap):
-    # Given an analyzed upload, synchronize a second analysis at the real recommender boundary.
-    file_id = await _upload(app_client)
-    entered, release = asyncio.Event(), asyncio.Event()
-    recommender = deps.get_cde_recommender()
-    original_recommend = recommender.recommend
-
-    async def gate(columns, model):
-        entered.set()
-        await release.wait()
-        return await original_recommend(columns, model)
-
-    monkeypatch.setattr(recommender, "recommend", gate)
-
-    async def read_renames():
-        response = await app_client.get(f"/stage-1/analysis/{file_id}")
-        assert response.status_code == 200, response.text
-        return response.json()["column_renames"]
-
-    # When analysis runs first and confirmation is issued either after or during its provider wait.
-    analysis = asyncio.create_task(_analysis(app_client, file_id))
-    await asyncio.wait_for(entered.wait(), 5)
-    if not overlap:
-        release.set()
-        result = await analysis
-    try:
-        confirmation = await _choose(app_client, file_id, "confirmed by B")
-        assert confirmation.status_code == 200, confirmation.text
-        before = await read_renames()
-        assert before == {"col_0000": "confirmed by B"}
-    finally:
-        release.set()
-    result = await analysis
-
-    # Then a fresh request sees the durable rename that was just confirmed.
-    after = await read_renames()
-    assert after == before
-    assert result.status_code == (409 if overlap else 200)
 
 
 @pytest.mark.parametrize("competing", [False, True], ids=["control", "intervening-save"])
@@ -242,8 +202,9 @@ async def test_changed_analysis_rejects_choices_from_the_previous_page(app_clien
     assert current.json()["column_renames"] == {"col_0000": "current"}
 
 
+@pytest.mark.parametrize("legacy", [False, True], ids=["current-format", "main-format"])
 async def test_reviewed_export_survives_audit_loss_and_partial_export_keeps_manual_decisions(
-    app_client, monkeypatch, tmp_path
+    app_client, monkeypatch, tmp_path, legacy
 ):
     # Given a reviewer restores a nonconforming value, then opens a complete summary and export.
     monkeypatch.setattr(deps, "_harmonize_service", FileHarmonizationService(ClinicalProvider()))
@@ -258,12 +219,19 @@ async def test_reviewed_export_survives_audit_loss_and_partial_export_keeps_manu
     }
     saved = await app_client.post("/stage-4/overrides", headers=_review_headers(rows), json=payload)
     assert saved.status_code == 200
+    storage = deps.get_workflow_storage()
+    if legacy:
+        user = deps.get_user_context()
+        record = storage.read_json(user, file_id, WorkflowFile.REVIEW_OVERRIDES)
+        assert record is not None
+        main_format = dict(record.data)
+        main_format.pop("run_id")
+        storage.write_json(user, file_id, WorkflowFile.REVIEW_OVERRIDES, main_format, expected_version=record.version)
     request = {"file_id": file_id}
     complete = ReviewPackage.read(await app_client.post("/stage-5/review", json=request))
     assert [item["value"] for item in complete.summary["non_conformant_items"]] == ["X"]
 
     # When the durable transformation history becomes unavailable before downloading.
-    storage = deps.get_workflow_storage()
     with storage.materialize_artifact(
         deps.get_user_context(), file_id, WorkflowFile.HARMONIZATION_MANIFEST_BASE
     ) as path:
@@ -283,3 +251,16 @@ async def test_reviewed_export_survives_audit_loss_and_partial_export_keeps_manu
             if has_history:
                 (history,) = [n for n in bundle.namelist() if n.endswith("_manifest.json")]
                 assert json.loads(bundle.read(history))[0]["active_values"] == {"1": "X"}
+
+    if legacy:
+        # Given this same older-format record now predates the replacement job.
+        record = storage.read_json(deps.get_user_context(), file_id, WorkflowFile.REVIEW_OVERRIDES)
+        assert record is not None
+        stale = dict(record.data, created_at=datetime(2000, 1, 1, tzinfo=UTC).isoformat())
+        storage.write_json(deps.get_user_context(), file_id, WorkflowFile.REVIEW_OVERRIDES, stale,
+                           expected_version=record.version)
+        # When the reviewer requests the download with no history to validate it.
+        refused = await app_client.post("/stage-5/review", json=request)
+        # Then an unverified old correction cannot enter the current download.
+        assert refused.status_code == 409
+        assert "predate" in refused.json()["detail"]

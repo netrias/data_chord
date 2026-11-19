@@ -335,8 +335,6 @@ def _cache_key(
         data_model_version=data_model_version,
         cde_key=work.cde_key,
         source_value=work.input_term,
-        context=work.context,
-        permissible_values=work.permissible_values or (),
     )
 
 

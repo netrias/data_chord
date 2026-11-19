@@ -59,7 +59,7 @@ def test_cache_round_trips_one_exact_domain_identity() -> None:
     assert list(table.items.values()) == [
         {
             "cache_key": next(iter(table.items)),
-            "schema_version": 2,
+            "schema_version": 1,
             "matched_value": "Approved value",
             "match_fidelity": "strong",
         }

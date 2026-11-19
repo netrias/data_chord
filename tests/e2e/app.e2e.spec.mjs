@@ -1487,6 +1487,7 @@ test('Stage 2 rename search finds and selects a misspelled standard', async ({ p
 });
 
 test('Stage 2 splits picker sections by mapping kind', async ({ page }) => {
+  // Given columns with standard term lists, pass-through targets, and unmapped values.
   const payload = {
     file_id: 'abcdef0123456789abcdef0123456789',
     file_name: 'mixed.csv',
@@ -1577,9 +1578,11 @@ test('Stage 2 splits picker sections by mapping kind', async ({ page }) => {
   await expect(page.locator('.mapping-row', { hasText: 'notes' }).locator('.mapping-row-fit--na')).toHaveText('N/A');
   await expect(page.locator('.mapping-row', { hasText: 'age_value' }).locator('.mapping-row-fit--na')).toHaveText('N/A');
 
+  // When the reviewer opens the diagnosis column picker.
   await page.locator('.mapping-row', { hasText: 'diagnosis' }).click();
   await page.locator('#cdePicker').click();
 
+  // Then the picker separates targets with and without permissible values.
   await expect(page.locator('.dd-section-label', { hasText: 'Common data elements with permissible values' })).toBeVisible();
   await expect(page.locator('.dd-section-label', { hasText: 'Common data elements with no permissible values' })).toBeVisible();
   const passthroughRow = page.locator('.dd-section--rename-only .dd-opt', { hasText: 'notes_cde' });
@@ -1601,13 +1604,7 @@ test('Stage 2 splits picker sections by mapping kind', async ({ page }) => {
 });
 
 test('Stage 2 settings sidebar filters rows by mapping outcome', async ({ page }) => {
-  /*
-   * Given: Stage 2 with four columns covering each outcome — one PV-mapped,
-   *        two pass-through-mapped, and one unmapped.
-   * When:  the user changes visibility from the Settings sidebar.
-   * Then:  the list narrows by effective mapping outcome, and overrides update
-   *        the outcome counts.
-   */
+  // Given a mapping page with all three mapping outcomes.
   const payload = {
     file_id: 'abcdef0123456789abcdef0123456789',
     file_name: 'mixed.csv',
@@ -1691,8 +1688,9 @@ test('Stage 2 settings sidebar filters rows by mapping outcome', async ({ page }
   await expect(page.locator('.fm-check[data-outcome="passthrough"] .fm-check-count')).toHaveText('2 / 4');
   await expect(page.locator('.fm-check[data-outcome="unchanged"] .fm-check-count')).toHaveText('1 / 4');
 
-  // Hiding pass-through rows leaves only the PV-mapped and unmapped rows.
+  // When the reviewer hides the pass-through outcome.
   await page.locator('.fm-check[data-outcome="passthrough"]').click();
+  // Then only the matching rows remain visible.
   await expect(page.locator('#mappingRows .mapping-row')).toHaveCount(2);
   await expect(page.locator('#mappingRows')).toContainText('dx_col');
   await expect(page.locator('#mappingRows')).toContainText('junk_col');
@@ -1721,11 +1719,7 @@ test('Stage 2 settings sidebar filters rows by mapping outcome', async ({ page }
 });
 
 test('Stage 2 empty-column filter uses full-column value presence', async ({ page }) => {
-  /*
-   * Given: one analyzed column has values and one is blank
-   * When:  Stage 2 renders with the default empty-column filter
-   * Then:  that column remains visible, while the truly blank column is hidden.
-   */
+  // Given one empty column and one with a value after the first displayed rows.
   const payload = {
     file_id: 'abcdef0123456789abcdef0123456789',
     file_name: 'late-values.csv',
@@ -1761,8 +1755,10 @@ test('Stage 2 empty-column filter uses full-column value presence', async ({ pag
     });
   });
 
+  // When the reviewer opens the mapping page.
   await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&data_model_key=gc&external_version_number=11.0.4');
 
+  // Then only the column containing a value appears until empty columns are enabled.
   await expect(page.locator('#mappingRows .mapping-row')).toHaveCount(1);
   await expect(page.locator('#mappingRows')).toContainText('late_value');
   await expect(page.locator('#mappingRows')).not.toContainText('all_blank');
@@ -1774,12 +1770,7 @@ test('Stage 2 empty-column filter uses full-column value presence', async ({ pag
 });
 
 test('Stage 2 submits selected column renames for harmonization', async ({ page }) => {
-  /*
-   * Given: Stage 2 has a mapped column whose CDE label differs from the source header.
-   * When:  the user enables rename-to-standard and continues to harmonization.
-   * Then:  one request durably saves the choices and queues Stage 3, with
-   *        column_renames separate from CDE overrides.
-   */
+  // Given a column with a proposed output name and renaming initially disabled.
   const payload = {
     file_id: 'abcdef0123456789abcdef0123456789',
     file_name: 'rename.csv',
@@ -1852,12 +1843,13 @@ test('Stage 2 submits selected column renames for harmonization', async ({ page 
   const before = await page.evaluate(() => JSON.parse(sessionStorage.getItem('stage2Payload')).column_renames);
   expect(before).toBeUndefined();
 
-  // Enable renaming and continue.
+  // When the reviewer enables renaming and starts harmonization.
   await page.locator('#filterSidebarTrigger').click();
   await page.locator('.fs-rename-toggle').click();
   await page.locator('#harmonizeButton').click();
   await page.waitForURL(/\/stage-3/);
 
+  // Then the saved choices and job request use the reviewed column name and upload.
   expect(choicesRequests).toEqual([{
     file_id: 'abcdef0123456789abcdef0123456789',
     manual_overrides: {},
@@ -1874,6 +1866,7 @@ test('Stage 2 submits selected column renames for harmonization', async ({ page 
 });
 
 test('Stage 2 restores overridden column details one request at a time', async ({ page }) => {
+  // Given two saved overrides that need column details.
   const fileId = 'abcdef0123456789abcdef0123456789';
   const payload = {
     file_id: fileId,
@@ -1939,7 +1932,9 @@ test('Stage 2 restores overridden column details one request at a time', async (
     }
   });
 
+  // When the reviewer reopens the mapping page.
   await page.goto(`/stage-2?file_id=${fileId}&data_model_key=gc&external_version_number=11.0.4`);
+  // Then both details load in sequence and both rows appear.
   await expect.poll(() => completedRequests).toBe(2);
 
   expect(maximumActiveRequests).toBe(1);
@@ -1947,16 +1942,7 @@ test('Stage 2 restores overridden column details one request at a time', async (
 });
 
 test('Stage 2 picker surfaces all AI candidates as separate rows', async ({ page }) => {
-  /*
-   * Given: cde_targets["diagnosis"] contains two ranked AI candidates.
-   * When:  the user opens the picker for that column.
-   * Then:  both candidates render as suggestion rows in similarity order
-   *        (top first) under the "AI suggestions"
-   *        section header, and neither key appears in the lower sections
-   *        for CDEs with/without permissible values. Picking a candidate
-   *        updates the row's target CDE while preserving the rewrite
-   *        outcome for PV CDEs.
-   */
+  // Given two ranked suggestions for a diagnosis column.
   const payload = {
     file_id: 'abcdef0123456789abcdef0123456789',
     file_name: 'multi.csv',
@@ -2024,14 +2010,14 @@ test('Stage 2 picker surfaces all AI candidates as separate rows', async ({ page
     });
   });
 
+  // When the reviewer opens the mapped column and its picker.
   await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&data_model_key=gc&external_version_number=11.0.4');
 
   // Open takeover for the diagnosis column, then open the picker.
   await page.locator('.mapping-row', { hasText: 'diagnosis' }).click();
   await page.locator('#cdePicker').click();
 
-  // The suggestion section shows both candidates in overlap order. The
-  // per-row badge is absent because the section header conveys the source.
+  // Then both candidates appear under AI suggestions in their ranked order.
   await expect(
     page.locator('.dd-section-label', { hasText: 'AI suggestions' })
   ).toBeVisible();
@@ -2339,6 +2325,7 @@ test('no-change flow shows empty review state and zero outcome metrics', async (
 });
 
 test('Stage 5 aggregates change impact and keeps filters keyboard accessible', async ({ page }) => {
+  // Given a review with two warnings and both automated and manual changes.
   const fileId = '0123456789abcdef0123456789abcdef';
   const history = [{
     value: 'Bad',
@@ -2419,7 +2406,9 @@ test('Stage 5 aggregates change impact and keeps filters keyboard accessible', a
     });
   });
 
+  // When the reviewer opens the summary.
   await page.goto(`/stage-5?file_id=${fileId}`);
+  // Then the warning identifies each column and the filters expose the matching changes.
   const warning = page.locator('#conformanceWarningDialog');
   await expect(warning).toBeVisible();
   await expect(warning).toContainText('2 values do not match the permissible value set');

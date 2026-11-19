@@ -35,6 +35,13 @@ class HarmonizationNotReadyError(Exception):
         self.detail = detail
 
 
+class SupersededHarmonizationError(HarmonizationNotReadyError):
+    """The job requested in Verify has been replaced by a later run."""
+
+    def __init__(self) -> None:
+        super().__init__("This job was superseded when this upload was harmonized again.")
+
+
 class HarmonizationChangedError(HarmonizationNotReadyError):
     """A later-stage read observed two different result revisions."""
 
@@ -94,9 +101,10 @@ def capture_ready_harmonization(
     storage: WorkflowStorage,
     user: UserContext,
     file_id: DatasetWorkflowId | str,
+    expected_job_id: str | None = None,
 ) -> ReadyHarmonization:
     """Capture one ready Stage 3 generation for a consistent later-stage read."""
-    workflow, job = _require_ready_workflow_and_job(storage, user, file_id)
+    workflow, job = _require_ready_workflow_and_job(storage, user, file_id, expected_job_id)
     return ReadyHarmonization(
         workflow=workflow,
         job=job,
@@ -118,6 +126,7 @@ def _require_ready_workflow_and_job(
     storage: WorkflowStorage,
     user: UserContext,
     file_id: DatasetWorkflowId | str,
+    expected_job_id: str | None = None,
 ) -> tuple[LoadedWorkflowState, LoadedHarmonizationJob]:
     try:
         workflow = load_workflow_state(storage, user, str(file_id))
@@ -140,6 +149,8 @@ def _require_ready_workflow_and_job(
         raise HarmonizationNotReadyError(
             "Harmonization has not run. Return to Stage 3 and start harmonization."
         )
+    if expected_job_id is not None and not job.job.matches_request(expected_job_id):
+        raise SupersededHarmonizationError()
     if job.job.status is HarmonizeStatus.QUEUED:
         raise HarmonizationNotReadyError(
             "Harmonization is still running. Wait for it to finish, then retry."

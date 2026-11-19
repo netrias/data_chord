@@ -92,9 +92,12 @@ class ReviewedInputs:
                 raise HarmonizationChangedError("Review decisions changed. Refresh the summary to try again.")
 
 
-def _load_inputs(file_id: str, uploads: UploadStorage, storage: WorkflowStorage, user: UserContext) -> ReviewedInputs:
+def _load_inputs(
+    file_id: str, uploads: UploadStorage, storage: WorkflowStorage, user: UserContext,
+    expected_job_id: str | None = None,
+) -> ReviewedInputs:
     with performance_span("stage5.summary.ready_capture"):
-        ready = capture_ready_harmonization(storage, user, file_id)
+        ready = capture_ready_harmonization(storage, user, file_id, expected_job_id)
     with (
         performance_span("stage5.summary.upload_metadata"),
         open_upload_artifact(uploads, storage, user, file_id) as meta,
@@ -112,9 +115,23 @@ def _load_inputs(file_id: str, uploads: UploadStorage, storage: WorkflowStorage,
             raise HarmonizationNotReadyError("The saved edits belong to a different harmonization run.")
         if manifest is not None:
             require_review_state_matches_manifest(review.value if review else None, manifest)
-        elif review and review.value.events and review.value.run_id is None:
-            raise HarmonizationNotReadyError("The reviewed dataset could not be verified against its saved edits.")
+        elif review and review.value.run_id is None:
+            _check_legacy_review(review.value, original, ready.job.job.started_at)
     return ReviewedInputs(ready, meta, original, manifest, review)
+
+
+def _check_legacy_review(review: ReviewOverrides, source: TabularDataset, job_started: datetime) -> None:
+    """Older reviews have no run ID. Check their creation time and original cells before recovery."""
+    if not review.events:
+        return
+    if review.created_at < job_started:
+        raise HarmonizationNotReadyError("The saved edits predate this harmonization run.")
+    columns = {column.key: column.index for column in source.columns}
+    for event in review.events:
+        row = int(event.row_key) - 1
+        column = columns.get(event.column_key)
+        if column is None or row >= len(source.rows) or source.rows[row][column] != event.original_value:
+            raise HarmonizationNotReadyError("The reviewed dataset could not be verified against its saved edits.")
 
 
 def build_summary(
@@ -132,18 +149,22 @@ class PreparedReview:
     download: DownloadPackage
 
 
-def prepare_review(file_id: str, uploads: UploadStorage, storage: WorkflowStorage, user: UserContext) -> PreparedReview:
+def prepare_review(
+    file_id: str, uploads: UploadStorage, storage: WorkflowStorage, user: UserContext,
+    expected_job_id: str | None = None,
+) -> PreparedReview:
     try:
-        return _capture_review(file_id, uploads, storage, user)
+        return _capture_review(file_id, uploads, storage, user, expected_job_id)
     except HarmonizationChangedError:
         # A concurrent save can finish during export. Retry once before asking for a refresh.
-        return _capture_review(file_id, uploads, storage, user)
+        return _capture_review(file_id, uploads, storage, user, expected_job_id)
 
 
 def _capture_review(
     file_id: str, uploads: UploadStorage, storage: WorkflowStorage, user: UserContext,
+    expected_job_id: str | None = None,
 ) -> PreparedReview:
-    inputs = _load_inputs(file_id, uploads, storage, user)
+    inputs = _load_inputs(file_id, uploads, storage, user, expected_job_id)
     summary = _summary(inputs, storage, user, allow_partial=True)
     package = _package_inputs(inputs, storage, user)
     inputs.check_current(storage, user)

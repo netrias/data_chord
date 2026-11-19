@@ -102,7 +102,7 @@ def _response_from_job(job: HarmonizationJobState) -> HarmonizeResponse:
         job_id=job.job_id,
         status=job.status,
         detail=job.detail,
-        next_stage_url=_next_stage_url(file_id=str(job.file_id), job_id=job.job_id, job_status=job.status),
+        next_stage_url=_next_stage_url(file_id=str(job.file_id), job_id=job.polling_job_id, job_status=job.status),
         job_id_available=job.job_id_available,
         elapsed_seconds=job.elapsed_seconds(),
         manifest_summary=job.manifest_summary,

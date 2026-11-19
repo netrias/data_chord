@@ -83,9 +83,10 @@ def build_stage_four_rows(
     upload_storage: UploadStorage,
     workflow_storage: WorkflowStorage,
     user: UserContext,
+    expected_job_id: str | None = None,
 ) -> StageFourRowsResult:
     with performance_span("stage4.rows.ready_capture"):
-        ready = capture_ready_harmonization(workflow_storage, user, file_id)
+        ready = capture_ready_harmonization(workflow_storage, user, file_id, expected_job_id)
     loaded_state = ready.workflow
     with performance_span("stage4.rows.upload_artifact"), open_upload_artifact(
         upload_storage, workflow_storage, user, file_id,
@@ -129,6 +130,7 @@ def build_stage_four_rows(
             review_overrides,
         )
         response = StageFourResultsResponse(
+            job_id=ready.job.job.polling_job_id,
             columns=columns,
             columnPVs=column_pvs,
             totalOriginalRows=len(original_dataset.rows),
@@ -155,9 +157,10 @@ def build_row_context(
     upload_storage: UploadStorage,
     workflow_storage: WorkflowStorage,
     user: UserContext,
+    expected_job_id: str | None = None,
 ) -> RowContextResponse:
     """Load original spreadsheet rows for the on-demand review context popup."""
-    ready = capture_ready_harmonization(workflow_storage, user, file_id)
+    ready = capture_ready_harmonization(workflow_storage, user, file_id, expected_job_id)
     loaded_state = ready.workflow
     with open_upload_artifact(upload_storage, workflow_storage, user, file_id) as meta:
         if meta is None:
@@ -182,9 +185,10 @@ def save_review_overrides(
     overrides: ReviewOverridePayload,
     review_state: ReviewStateSchema,
     expected_version: VersionToken | None = None,
+    expected_job_id: str | None = None,
 ) -> SaveReviewOverridesResult:
     """Persist one complete active snapshot as append-only review decisions."""
-    ready = capture_ready_harmonization(workflow_storage, user, file_id)
+    ready = capture_ready_harmonization(workflow_storage, user, file_id, expected_job_id)
     manifest = _load_manifest(workflow_storage, user, file_id)
     if manifest is None:
         raise HarmonizationNotReadyError(

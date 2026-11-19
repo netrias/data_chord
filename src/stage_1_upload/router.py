@@ -42,9 +42,8 @@ from src.persistence.workflow_artifacts import (
     stage_upload,
 )
 from src.persistence.workflow_state_store import (
-    WorkflowStateConflictError,
     load_workflow_state,
-    save_workflow_state,
+    save_initial_workflow_state,
 )
 from src.settings import ApplicationMode, get_application_mode
 from src.shared.jinja import templates_for_stage
@@ -233,7 +232,6 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
         user,
     )
     workflow_storage = dependencies.get_workflow_storage()
-    previous = load_workflow_state(workflow_storage, user, payload.file_id)
     data_model_version = payload.data_model_version()
     analysis_task = run_in_threadpool(
         _profile_stored_upload, storage, workflow_storage, user, payload.file_id, payload.sheet_name,
@@ -278,12 +276,7 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     state = WorkflowState.from_data_model_version(
         analysis.file_id, data_model_version, mapping_manifest, selected_sheet=analysis.selected_sheet,
     )
-    try:
-        saved = save_workflow_state(
-            workflow_storage, user, state, expected_version=previous.version if previous else None,
-        )
-    except WorkflowStateConflictError as exc:
-        raise HTTPException(409, "Mapping choices changed during analysis. Refresh and try again.") from exc
+    saved = save_initial_workflow_state(workflow_storage, user, state)
     column_summaries = _build_column_summaries(
         analysis.profiles,
         mapping_manifest,

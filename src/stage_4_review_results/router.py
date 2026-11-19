@@ -56,6 +56,7 @@ async def fetch_stage_four_rows(
     storage: UploadStorage = dependencies.get_upload_storage()
     result = build_stage_four_rows(
         file_id=payload.file_id,
+        expected_job_id=payload.job_id,
         upload_storage=storage,
         workflow_storage=dependencies.get_workflow_storage(),
         user=dependencies.get_user_context(),
@@ -78,6 +79,7 @@ async def save_overrides(
             workflow_storage=dependencies.get_workflow_storage(),
             user=dependencies.get_user_context(),
             file_id=payload.file_id,
+            expected_job_id=payload.job_id,
             overrides=payload.overrides,
             review_state=payload.review_state,
             expected_version=expected_version,
@@ -103,6 +105,7 @@ async def get_row_context(payload: RowContextRequest) -> RowContextResponse:
     storage = dependencies.get_upload_storage()
     return build_row_context(
         file_id=payload.file_id,
+        expected_job_id=payload.job_id,
         row_indices=payload.row_indices,
         upload_storage=storage,
         workflow_storage=dependencies.get_workflow_storage(),

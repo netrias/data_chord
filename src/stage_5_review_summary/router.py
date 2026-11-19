@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 
 import src.app.dependencies as dependencies
 from src.shared.jinja import templates_for_stage
-from src.stage_5_review_summary.schemas import StageFiveRequest, StageFiveSummaryResponse
+from src.stage_5_review_summary.schemas import PreparedReviewRequest, StageFiveRequest, StageFiveSummaryResponse
 from src.stage_5_review_summary.use_cases import (
     build_download_package,
     build_summary,
@@ -50,10 +50,10 @@ def summarize_harmonized_results(payload: StageFiveRequest) -> StageFiveSummaryR
 
 @stage_five_router.post("/review", name="stage_five_prepared_review", response_class=StreamingResponse,
                         responses={200: {"content": {"multipart/form-data": {}}}})
-def review_with_download(payload: StageFiveRequest) -> StreamingResponse:
+def review_with_download(payload: PreparedReviewRequest) -> StreamingResponse:
     """Send both parts of one verified revision. The browser owns the ZIP until the tab closes."""
     review = prepare_review(payload.file_id, dependencies.get_upload_storage(), dependencies.get_workflow_storage(),
-                            dependencies.get_user_context())
+                            dependencies.get_user_context(), payload.job_id)
     boundary = uuid4().hex
     marker = f"--{boundary}".encode("ascii")
 

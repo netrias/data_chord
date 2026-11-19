@@ -14,6 +14,10 @@ class StageFiveRequest(BaseModel):
     file_id: DatasetWorkflowIdField
 
 
+class PreparedReviewRequest(StageFiveRequest):
+    job_id: str | None = None
+
+
 class ColumnSummary(BaseModel):
     column: str
     column_key: str

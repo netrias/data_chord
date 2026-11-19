@@ -13,8 +13,6 @@ from openpyxl import load_workbook
 
 import src.app.dependencies as deps
 from src.domain.harmonization import MatchFidelity
-from src.domain.harmonization_cache import EmptyHarmonizationCache
-from src.integrations.dynamodb_harmonization_cache import DynamoDbHarmonizationCache
 from src.integrations.harmonize import FileHarmonizationService, TermHarmonizationResponse
 from src.storage import WorkflowFile
 from tests.conftest import (
@@ -27,7 +25,6 @@ from tests.conftest import (
     create_xlsx_content,
     upload_content,
 )
-from tests.test_dynamodb_harmonization_cache import _Table
 from tests.test_stage_1_to_3_features import _wait_for_stage_three_job
 
 pytestmark = pytest.mark.asyncio
@@ -42,18 +39,12 @@ class ProviderMock:
         responses = []
         for request in requests:
             self.contexts.append(request.context)
-            if "negative" in request.context:
-                value = "No"
-            elif "positive" in request.context:
-                value = "Yes"
-            else:
-                value = "Lung Cancer"
-            responses.append(TermHarmonizationResponse(value, MatchFidelity.STRONG))
+            responses.append(TermHarmonizationResponse("Lung Cancer", MatchFidelity.STRONG))
         return tuple(responses)
 
 
-def _install(provider, monkeypatch, cache=None):
-    monkeypatch.setattr(deps, "_harmonize_service", FileHarmonizationService(provider, cache=cache))
+def _install(provider, monkeypatch):
+    monkeypatch.setattr(deps, "_harmonize_service", FileHarmonizationService(provider))
     monkeypatch.setattr(deps, "_harmonization_job_service", None)
 
 
@@ -161,37 +152,6 @@ async def test_excel_export_preserves_untouched_native_values(app_client, monkey
             book = load_workbook(io.BytesIO(workbook_bytes), data_only=True)
             assert book["Sample"]["D2"].value == 13
             book.close()
-
-
-async def _eval_header(client, header):
-    result = await _run(
-        client, create_csv_content([[header], ["1"]]), "code.csv", TEST_CSV_CONTENT_TYPE, {"col_0000": TARGET}
-    )
-    return [list(csv.reader(io.StringIO(result.data.decode())))[1][0], result.manifest[0]["active_values"]["1"]]
-
-
-@pytest.mark.parametrize(
-    "first,second", [("positive", "negative"), ("negative", "positive")], ids=["positive-first", "negative-first"]
-)
-async def test_prediction_cache_respects_source_column_context(app_client, monkeypatch, first, second):
-    # Given known distinct uncached file and audit answers for identical terms under opposite headers.
-    _allow(["Yes", "No"])
-    provider = ProviderMock()
-    _install(provider, monkeypatch, EmptyHarmonizationCache())
-    cold = {name: await _eval_header(app_client, f"1 means {name}") for name in (first, second)}
-    assert cold == {"negative": ["No", "No"], "positive": ["Yes", "Yes"]}
-    await deps.shutdown_harmonization_jobs()
-    _install(provider, monkeypatch, DynamoDbHarmonizationCache(_Table()))
-    # When one context warms the cache and two more files reuse it.
-    warm_first = await _eval_header(app_client, f"1 means {first}")
-    calls = len(provider.contexts)
-    identical = await _eval_header(app_client, f"1 means {first}")
-    assert len(provider.contexts) == calls
-    opposite = await _eval_header(app_client, f"1 means {second}")
-    # Then a same-context cache hit and an opposite-context lookup agree with uncached outputs.
-    assert warm_first == identical == cold[first]
-
-    assert opposite == cold[second]
 
 
 @pytest.mark.parametrize("value", ["Other", " Other "], ids=["unpadded-control", "padded"])

@@ -107,11 +107,11 @@ export const mockHarmonizeSuccess = async (page) => {
     }
     const fileId = payload.file_id ?? '';
     const response = {
-      job_id: 'e2e-job-1',
+      job_id: `e2e-job-${fileId}`,
       plan_version: 'confirmed',
       status: 'succeeded',
       detail: 'Harmonization completed.',
-      next_stage_url: `/stage-4?file_id=${fileId}&job_id=e2e-job-1&status=succeeded`,
+      next_stage_url: `/stage-4?file_id=${fileId}&job_id=e2e-job-${fileId}&status=succeeded`,
       job_id_available: true,
       manifest_summary: null,
     };

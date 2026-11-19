@@ -46,6 +46,8 @@ how it was produced.
 - External failures are visible and retryable without exposing provider
   exception details.
 
+Verify opens the specific harmonization job selected for an upload. Running harmonization again on that upload supersedes the previous job. An old Verify link offers to open the current job. Uploading the same file again creates an independent workflow.
+
 ## Output
 
 Download uses the revision shown on the open summary page. Refresh the page to review newer saved decisions and their warnings.

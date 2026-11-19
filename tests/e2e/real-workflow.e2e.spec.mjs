@@ -146,6 +146,7 @@ test('real workflow: zero-term success keeps file context and downloads missing 
   await waitForReviewRows(page);
   // Then: Stage 4 exposes no missing-source items, but preserves the source row count.
   expect(await (await reviewResponse).json()).toEqual({
+    job_id: new URL(page.url()).searchParams.get('job_id'),
     columns: [], columnPVs: {}, totalOriginalRows: 3, reviewState: null,
   });
   await expect(page.locator('.row-cell')).toHaveCount(0);

@@ -15,7 +15,7 @@ from src.domain.harmonization_cache import (
     HarmonizationCacheUnavailableError,
 )
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 1
 _FIELDS = {
     "cache_key",
     "schema_version",
@@ -116,9 +116,6 @@ def _digest(key: HarmonizationCacheKey) -> str:
         "external_version_number": key.data_model_version.external_version_number,
         "cde_key": key.cde_key,
         "source_value": key.source_value,
-        "context": key.context,
-        "permissible_values": key.permissible_values,
-        "schema_version": SCHEMA_VERSION,
     }
     encoded = json.dumps(
         payload,
