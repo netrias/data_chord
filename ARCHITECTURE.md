@@ -56,6 +56,19 @@ middleware. `src/app/dependencies.py` constructs concrete services.
 | `src/storage` | Authorization, artifact naming, version checks, local/S3 parity | Stage behavior |
 | `src/shared/static` | Small browser primitives used by several stages | Feature-specific UI behavior |
 
+## Optional nodes from Auto-Model
+
+The Auto-Model integration holds its optional node metadata in
+`AutoModelReference`. It pairs a flat `ReferenceModel` with relationships keyed
+by CDE key. Each relationship can carry a source relationship ID, description,
+data-type label, required flag, and key flag. A CDE can have one relationship
+per node. The integration can also retain declared nodes with no CDEs.
+
+The reader can pass `AutoModelReference.model` to the application for
+recommendations and harmonization. Each CDE has one ID, description, and
+approved value set, independent of node names and order. Wiring the reader and
+publisher to this object is separate work.
+
 ## Workflow
 
 ### 1. Upload and analyze

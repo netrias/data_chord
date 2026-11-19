@@ -1232,7 +1232,11 @@ async def test_stage3_applies_confirmed_column_renames_to_download(
             "/stage-3/harmonize",
             json={"file_id": file_id},
         )
-    assert harmonize_response.status_code == 200
+        assert harmonize_response.status_code == 200
+        completed = harmonize_response.json()
+        if completed["status"] != "succeeded":
+            completed = await _wait_for_stage_three_job(app_client, completed["job_id"], file_id)
+        assert completed["status"] == "succeeded", completed
 
     rows_response = await app_client.post("/stage-4/rows", json={"file_id": file_id})
     summary_response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
