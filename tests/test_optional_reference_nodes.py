@@ -1,142 +1,110 @@
-from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
-from pathlib import Path
+from dataclasses import replace
 
 import pytest
 
 from src.cde_recommend.result_cache import EmptyRecommendationCache
 from src.cde_recommend.types import PotentialMatchIndex
-from src.domain.cde import CDEInfo, CdeType
+from src.domain.cde import CDEInfo
 from src.domain.cde_catalog import CdeCatalog
-from src.domain.cde_node_relation import CdeNodeRelation, NodeName
 from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.cde_recommendation import ProfiledColumn
-from src.domain.cde_type_classification import refine_cde_types_from_pvs
 from src.domain.column_profile import build_column_profile
 from src.domain.columns import ColumnIdentity, column_key_for_index
 from src.domain.data_model_version_reference import DataModelVersionReference
-from src.domain.reference_data import ReferenceModel, ReferenceNodeMetadataUnsupportedError
+from src.domain.reference_data import ReferenceModel
+from src.integrations.auto_model_reference import AutoModelReference, CdeNodeRelation, NodeName
 from src.integrations.cde_recommendation import CdeRecommendationAdapter
-from src.integrations.dynamodb_reference_data import ReferenceDataImporter
-from src.integrations.reference_data_file import save_reference_models
-from src.integrations.sqlite_reference_data import SqliteReferenceDataImporter
 
 
-def _relation(node: NodeName, source_id: int = 2) -> CdeNodeRelation:
-    return CdeNodeRelation(
-        node=node,
-        source_node_cde_id=source_id,
-        description=f"Stage for {node.value}",
-        data_type="string",
-        is_required=True,
-        is_key=False,
-    )
-
-
-def _model(cde: CDEInfo, nodes: frozenset[NodeName] = frozenset()) -> ReferenceModel:
+@pytest.fixture
+def flat_model() -> ReferenceModel:
     return ReferenceModel(
         version=DataModelVersionReference("model", "1"),
         label="Model",
-        catalog=CdeCatalog.from_cdes([cde]),
-        pvs=CdePvCatalog.from_mapping({cde.cde_key: frozenset({"I", "II"})}),
-        nodes=nodes,
+        catalog=CdeCatalog.from_cdes([CDEInfo(42, "stage", "Shared stage")]),
+        pvs=CdePvCatalog.from_mapping({"stage": frozenset({"I", "II"})}),
     )
 
 
-def test_existing_reference_constructors_keep_node_free_defaults() -> None:
-    # Given the original CDE constructor with a CDE-wide ID and description.
-    cde = CDEInfo(42, "stage", "Stage")
+def test_auto_model_can_omit_node_metadata(flat_model: ReferenceModel) -> None:
+    # Given a reference model with one flat CDE and no node metadata.
+    assert flat_model.catalog.keys() == ("stage",)
 
-    # When an existing caller builds its reference model without node arguments.
-    model = _model(cde)
+    # When Auto-Model supplies the model alone.
+    reference = AutoModelReference(flat_model)
 
-    # Then the flat CDE and value set are unchanged and no node metadata is invented.
-    assert model.nodes == frozenset()
-    assert cde.node_relations == ()
-    assert model.catalog.to_list() == [CDEInfo(42, "stage", "Stage", CdeType.PV)]
-    assert model.pvs.values == {"stage": frozenset({"I", "II"})}
+    # Then there are no node relationships and the original model is available to the application.
+    assert reference.node_relations == {}
+    assert reference.nodes == frozenset()
+    assert reference.model is flat_model
 
 
-def test_shared_cde_keeps_distinct_node_metadata_and_one_value_set() -> None:
-    # Given two nodes with distinct source IDs, descriptions, types and flags.
-    diagnosis = _relation(NodeName("diagnosis"))
+def test_auto_model_keeps_distinct_relationships_and_empty_nodes(flat_model: ReferenceModel) -> None:
+    # Given two relationships for the same CDE and a declared node without any CDEs.
+    diagnosis = CdeNodeRelation(NodeName("diagnosis"), 2, "Diagnosis stage", "string", True, False)
     sample = CdeNodeRelation(NodeName("sample"), 7, "Sample stage", "enum", False, True)
-    cde = CDEInfo(42, "stage", "Shared stage", node_relations=(sample, diagnosis))
-
-    # When the flat model is constructed with both relationships.
-    model = _model(cde)
-
-    # Then one CDE owns the shared values while both complete relationships survive.
-    assert model.catalog.to_list() == [cde]
-    assert cde.node_relations == (diagnosis, sample)
-    assert model.nodes == frozenset({NodeName("diagnosis"), NodeName("sample")})
-    assert model.pvs.values == {"stage": frozenset({"I", "II"})}
-    assert cde.cde_id == 42 and cde.description == "Shared stage"
-
-
-def test_model_keeps_nodes_without_cdes() -> None:
-    # Given a CDE in diagnosis and a separately declared node with no CDEs.
-    cde = CDEInfo(42, "stage", None, node_relations=(_relation(NodeName("diagnosis")),))
     unused = NodeName("unused")
+    relations = {"stage": (sample, diagnosis)}
 
-    # When the model combines its relationships and explicitly declared nodes.
-    model = _model(cde, frozenset({unused}))
+    # When the integration retains the node metadata and the caller clears its input.
+    reference = AutoModelReference(flat_model, relations, frozenset({unused}))
+    relations.clear()
 
-    # Then both node names survive without creating a CDE for the unused node.
-    assert model.nodes == frozenset({NodeName("diagnosis"), unused})
-    assert model.catalog.keys() == ("stage",)
+    # Then it owns a snapshot of the relationships, includes the empty node and shares one value set.
+    assert reference.node_relations == {"stage": (diagnosis, sample)}
+    assert reference.nodes == frozenset({diagnosis.node, sample.node, unused})
+    assert reference.model.catalog.to_list() == [CDEInfo(42, "stage", "Shared stage")]
+    assert reference.model.pvs.values == {"stage": frozenset({"I", "II"})}
 
 
-@pytest.mark.parametrize("name", ["", " ", "\t\n"])
-def test_blank_node_names_are_rejected(name: str) -> None:
-    # Given a raw node name containing no meaningful characters.
-    raw_name = name
+def test_auto_model_rejects_relationships_for_unknown_cdes(flat_model: ReferenceModel) -> None:
+    # Given a relationship for a CDE absent from the flat catalog.
+    relations = {"absent": (CdeNodeRelation(NodeName("diagnosis")),)}
 
-    # When it is converted to the domain's node identity.
+    # When the integration receives that metadata.
+    with pytest.raises(ValueError) as error:
+        AutoModelReference(flat_model, relations)
+
+    # Then the error identifies the missing CDE.
+    assert str(error.value) == "Node relationships refer to an unknown CDE: absent"
+
+
+def test_auto_model_rejects_duplicate_relationships(flat_model: ReferenceModel) -> None:
+    # Given two source records for the same CDE and node.
+    node = NodeName("diagnosis")
+    relations = {"stage": (CdeNodeRelation(node, 2), CdeNodeRelation(node, 7))}
+
+    # When the integration receives both records.
+    with pytest.raises(ValueError) as error:
+        AutoModelReference(flat_model, relations)
+
+    # Then the error identifies the CDE with ambiguous relationships.
+    assert str(error.value) == "CDE node relationships must be unique per node: stage"
+
+
+def test_blank_node_name_is_rejected() -> None:
+    # Given a source node name consisting of whitespace.
+    raw_name = " \t "
+
+    # When the integration constructs a node name.
     with pytest.raises(ValueError) as error:
         NodeName(raw_name)
 
-    # Then the constructor reports the invalid identity.
+    # Then it reports that the node name is required.
     assert str(error.value) == "Reference node name is required"
 
 
 @pytest.mark.parametrize("source_id", [-1, True])
 def test_invalid_source_relationship_ids_are_rejected(source_id: int) -> None:
-    # Given a source ID outside the existing nonnegative integer ID contract.
+    # Given a node and a source relationship ID outside the nonnegative integer contract.
     node = NodeName("diagnosis")
 
-    # When a relationship is constructed with that ID.
+    # When the integration constructs the relationship.
     with pytest.raises(ValueError) as error:
         CdeNodeRelation(node, source_node_cde_id=source_id)
 
-    # Then it rejects the ID rather than confusing it with a CDE-wide ID.
+    # Then it reports the invalid relationship ID.
     assert str(error.value) == "Source node-CDE ID must be a nonnegative integer"
-
-
-def test_duplicate_relationships_for_the_same_cde_and_node_are_rejected() -> None:
-    # Given two relationships to the same node with different source metadata.
-    node = NodeName("diagnosis")
-    relationships = (_relation(node), _relation(node, 7))
-
-    # When the CDE is constructed with both relationships.
-    with pytest.raises(ValueError) as error:
-        CDEInfo(42, "stage", None, node_relations=relationships)
-
-    # Then ambiguity is rejected instead of selecting one relationship by order.
-    assert str(error.value) == "CDE node relationships must be unique per node: stage"
-
-
-def test_refining_cde_type_preserves_node_metadata() -> None:
-    # Given a CDE whose type needs refinement and whose relationships carry metadata.
-    cde = CDEInfo(42, "stage", "Shared stage", node_relations=(_relation(NodeName("diagnosis")),))
-    catalog = CdeCatalog.from_cdes([cde])
-
-    # When fetched values show that this CDE is pass-through.
-    refined = refine_cde_types_from_pvs(catalog, CdePvCatalog.from_mapping({"stage": frozenset()}))
-
-    # Then only the type changes; the identity and node metadata remain intact.
-    assert refined.to_list() == [replace(cde, cde_type=CdeType.PASSTHROUGH)]
-    assert cde.cde_type is CdeType.PV
 
 
 class _UnexpectedRanker:
@@ -145,97 +113,21 @@ class _UnexpectedRanker:
 
 
 @pytest.mark.asyncio
-async def test_recommendations_keep_cde_identity_when_nodes_are_reordered_or_renamed() -> None:
-    # Given a shared CDE and variants with reversed relationships or a renamed node.
-    diagnosis = _relation(NodeName("diagnosis"))
-    sample = _relation(NodeName("sample"), 7)
-    variants = [(diagnosis, sample), (sample, diagnosis), (replace(diagnosis, node=NodeName("zzz")), sample)]
+async def test_recommendations_keep_cde_identity_when_node_names_change(flat_model: ReferenceModel) -> None:
+    # Given an Auto-Model reference before and after renaming a node.
+    diagnosis = CdeNodeRelation(NodeName("diagnosis"), 2)
+    sample = CdeNodeRelation(NodeName("sample"), 7)
+    before = AutoModelReference(flat_model, {"stage": (diagnosis, sample)})
+    after = AutoModelReference(flat_model, {"stage": (sample, replace(diagnosis, node=NodeName("zzz")))})
     key = column_key_for_index(0)
     column = ProfiledColumn(ColumnIdentity(key, "stage"), build_column_profile(key, ["I", "II"]))
     recommender = CdeRecommendationAdapter(_UnexpectedRanker(), EmptyRecommendationCache())
 
-    # When the real recommendation pipeline evaluates each reference model.
-    manifests = [
-        await recommender.recommend([column], _model(CDEInfo(42, "stage", "Shared stage", node_relations=relations)))
-        for relations in variants
-    ]
+    # When the recommendation pipeline evaluates both flat models.
+    original = await recommender.recommend([column], before.model)
+    renamed = await recommender.recommend([column], after.model)
 
-    # Then all saved mappings use the same CDE-wide identity and target.
-    assert [manifest.records[key].cde_id for manifest in manifests] == [42, 42, 42]
-    assert [manifest.records[key].cde_key for manifest in manifests] == ["stage", "stage", "stage"]
-    assert all(manifest == manifests[0] for manifest in manifests)
-
-
-def _publication_models() -> list[ReferenceModel]:
-    flat = _model(CDEInfo(42, "stage", "Shared stage"))
-    related = replace(
-        _model(CDEInfo(42, "stage", None, node_relations=(_relation(NodeName("diagnosis")),))),
-        version=DataModelVersionReference("model", "2"),
-    )
-    return [flat, related]
-
-
-def test_file_publication_rejects_nodes_without_overwriting_existing_content(tmp_path: Path) -> None:
-    # Given a destination with existing content and a batch containing node metadata.
-    destination = tmp_path / "reference.json"
-    destination.write_bytes(b"existing approved export")
-    models = _publication_models()
-
-    # When the current node-free export format is asked to publish the batch.
-    with pytest.raises(ReferenceNodeMetadataUnsupportedError) as error:
-        save_reference_models(destination, models)
-
-    # Then it reports the unsupported metadata and leaves the whole file untouched.
-    assert str(error.value) == "Node metadata requires a node-aware reference publisher"
-    assert destination.read_bytes() == b"existing approved export"
-
-
-def test_sqlite_publication_rejects_an_empty_node_without_changing_the_database(tmp_path: Path) -> None:
-    # Given a populated database and a batch that also declares a node with no CDEs.
-    database = tmp_path / "reference.sqlite"
-    importer = SqliteReferenceDataImporter(database)
-    flat = _model(CDEInfo(42, "stage", "Shared stage"))
-    importer.import_models([flat])
-    before = database.read_bytes()
-    empty_node_model = replace(
-        flat, version=DataModelVersionReference("model", "2"), nodes=frozenset({NodeName("unused")})
-    )
-
-    # When the current SQLite format is asked to publish the unsupported batch.
-    with pytest.raises(ReferenceNodeMetadataUnsupportedError) as error:
-        importer.import_models([flat, empty_node_model])
-
-    # Then no partial batch or metadata loss occurs.
-    assert str(error.value) == "Node metadata requires a node-aware reference publisher"
-    assert database.read_bytes() == before
-
-
-@dataclass
-class _NoDynamoCalls:
-    calls: list[str] = field(default_factory=list)
-
-    def get_item(self, Key: Mapping[str, object], ConsistentRead: bool) -> Mapping[str, object]:
-        self.calls.append("get_item")
-        raise AssertionError("The unsupported batch must be rejected before any DynamoDB call")
-
-    def put_item(self, Item: Mapping[str, object], ConditionExpression: str | None = None) -> object:
-        self.calls.append("put_item")
-        raise AssertionError("The unsupported batch must be rejected before any DynamoDB call")
-
-    def query(self, **kwargs: object) -> Mapping[str, object]:
-        self.calls.append("query")
-        raise AssertionError("The unsupported batch must be rejected before any DynamoDB call")
-
-
-def test_dynamo_publication_rejects_nodes_before_any_table_calls() -> None:
-    # Given a batch with a flat model followed by a node-bearing model.
-    table = _NoDynamoCalls()
-    models = _publication_models()
-
-    # When the current DynamoDB publisher is asked to publish the batch.
-    with pytest.raises(ReferenceNodeMetadataUnsupportedError) as error:
-        ReferenceDataImporter(table).import_models(models, source_digest="a" * 64)
-
-    # Then the complete batch is rejected before any read or write to DynamoDB.
-    assert str(error.value) == "Node metadata requires a node-aware reference publisher"
-    assert table.calls == []
+    # Then each recommendation uses the same CDE-wide identity and target.
+    assert renamed == original
+    assert renamed.records[key].cde_key == "stage"
+    assert renamed.records[key].cde_id == 42

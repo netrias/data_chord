@@ -26,7 +26,6 @@ from src.domain.reference_data import (
     ReferenceModel,
     ReferenceModelNotFoundError,
 )
-from src.integrations.reference_publication import require_node_free_publication
 
 SCHEMA_VERSION = 1
 DEFAULT_VALUE_CHUNK_BYTES = 192 * 1024
@@ -186,7 +185,6 @@ class ReferenceDataImporter:
         self._value_chunk_bytes = value_chunk_bytes
 
     def import_models(self, models: Sequence[ReferenceModel], *, source_digest: str) -> None:
-        require_node_free_publication(models)
         _validate_import_source_digest(source_digest)
         ordered = _validated_import_models(models)
         catalog_items = [_catalog_item(model) for model in ordered]
