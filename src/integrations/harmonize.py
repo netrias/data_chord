@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Protocol
 from uuid import uuid4
 
-from netrias_client import TabularColumn, read_tabular, write_tabular
+from netrias_client import TabularColumn, read_tabular
 
 from src.domain.columns import column_key_from_string
 from src.domain.data_model_version_reference import DataModelVersionReference
@@ -25,6 +25,7 @@ from src.domain.manifest import ColumnMappingManifest, ManifestRow
 from src.domain.value_presence import is_missing_value
 from src.persistence.manifest_writer import write_manifest_parquet
 from src.persistence.pv_manifest_store import ColumnPvSets
+from src.persistence.tabular_output import write_tabular_changes
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +140,7 @@ class FileHarmonizationService:
             output_rows = _apply_outcomes(dataset.rows, outcomes)
             manifest_rows = [_manifest_row(job_id, outcome) for outcome in outcomes]
             requested_output.parent.mkdir(parents=True, exist_ok=True)
-            write_tabular(requested_output, replace(dataset, rows=output_rows), template_path=file_path)
+            write_tabular_changes(requested_output, file_path, dataset, replace(dataset, rows=output_rows))
             if not write_manifest_parquet(manifest_path, manifest_rows):
                 raise RuntimeError("Could not write harmonization manifest")
         except Exception as exc:

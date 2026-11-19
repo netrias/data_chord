@@ -9,6 +9,12 @@
 - **Code quality**: Ruff (linting), basedpyright (type checking), bandit (security)
 - **Package management**: uv (Python), npm (JS/Playwright)
 
+## Python review
+
+Keep each function responsible for one operation. Separate file lifetime, format encoding, and decisions about which values change. The pre-commit nesting check flags functions with more than four nested blocks. Prefer early returns and named operations over moving the same nesting into a helper.
+
+Use domain types for identities, positions that can be confused, and closed sets of states. Keep wire-format names in the reader or writer that owns the format. Free text, including spreadsheet values, stays text.
+
 ## Running the App
 
 ```bash

@@ -73,28 +73,22 @@ class AgenticTermHarmonizer:
         indexed_requests = iter(enumerate(requests))
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
             futures: dict[Future[TermHarmonizationResponse], int] = {}
-            for _ in range(worker_count):
-                index, request = next(indexed_requests)
-                future = executor.submit(
-                    self._harmonize_term,
-                    request,
-                    indexes[request.permissible_values],
-                )
+            def submit_next() -> None:
+                item = next(indexed_requests, None)
+                if item is None:
+                    return
+                index, request = item
+                future = executor.submit(self._harmonize_term, request, indexes[request.permissible_values])
                 futures[future] = index
+
+            for _ in range(worker_count):
+                submit_next()
             try:
                 while futures:
                     completed, _pending = wait(futures, return_when=FIRST_COMPLETED)
                     for future in completed:
                         responses[futures.pop(future)] = future.result()
-                        next_item = next(indexed_requests, None)
-                        if next_item is not None:
-                            index, request = next_item
-                            submitted = executor.submit(
-                                self._harmonize_term,
-                                request,
-                                indexes[request.permissible_values],
-                            )
-                            futures[submitted] = index
+                        submit_next()
             except Exception:
                 for future in futures:
                     future.cancel()

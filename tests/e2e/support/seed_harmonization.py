@@ -109,25 +109,22 @@ def _build_manifest_rows(
     return manifest_rows
 
 
-def _write_manifest(file_id: str, manifest_rows: list[dict[str, Any]], storage: UploadStorage) -> Path:
+def _write_manifest(manifest_path: Path, manifest_rows: list[dict[str, Any]]) -> None:
     schema = get_manifest_schema()
-    with tempfile.TemporaryDirectory() as temp_dir:
-        manifest_path = Path(temp_dir) / f"{file_id}_harmonization.parquet"
-        table = pa.table({
-            "job_id": [row.get("job_id", "e2e-job") for row in manifest_rows],
-            "column_id": [row.get("column_id", 0) for row in manifest_rows],
-            "column_name": [row.get("column_name", "") for row in manifest_rows],
-            "to_harmonize": [row.get("to_harmonize", "") for row in manifest_rows],
-            "top_harmonization": [row.get("top_harmonization", "") for row in manifest_rows],
-            "ontology_id": [row.get("ontology_id") for row in manifest_rows],
-            "top_harmonizations": [row.get("top_harmonizations", []) for row in manifest_rows],
-            "match_fidelity": [row.get("match_fidelity", "strong") for row in manifest_rows],
-            "error": [row.get("error") for row in manifest_rows],
-            "row_indices": [row.get("row_indices", []) for row in manifest_rows],
-            "manual_overrides": [row.get("manual_overrides", []) for row in manifest_rows],
-        }, schema=schema)
-        pq.write_table(table, manifest_path)
-        return storage.save_harmonization_manifest(file_id, manifest_path)
+    table = pa.table({
+        "job_id": [row.get("job_id", "e2e-job") for row in manifest_rows],
+        "column_id": [row.get("column_id", 0) for row in manifest_rows],
+        "column_name": [row.get("column_name", "") for row in manifest_rows],
+        "to_harmonize": [row.get("to_harmonize", "") for row in manifest_rows],
+        "top_harmonization": [row.get("top_harmonization", "") for row in manifest_rows],
+        "ontology_id": [row.get("ontology_id") for row in manifest_rows],
+        "top_harmonizations": [row.get("top_harmonizations", []) for row in manifest_rows],
+        "match_fidelity": [row.get("match_fidelity", "strong") for row in manifest_rows],
+        "error": [row.get("error") for row in manifest_rows],
+        "row_indices": [row.get("row_indices", []) for row in manifest_rows],
+        "manual_overrides": [row.get("manual_overrides", []) for row in manifest_rows],
+    }, schema=schema)
+    pq.write_table(table, manifest_path)
 
 
 def _parse_changes(raw: str | None) -> dict[int, dict[str, str]]:
@@ -244,14 +241,10 @@ def main() -> None:
     harmonized_path = _write_harmonized(args.file_id, meta.saved_path, harmonized_dataset, storage)
 
     manifest_rows = _build_manifest_rows(original_dataset, harmonized_dataset, changes, args.file_id)
-    manifest_path = _write_manifest(args.file_id, manifest_rows, storage)
-    _publish_completed_workflow(
-        args.file_id,
-        original_dataset,
-        harmonized_path,
-        manifest_path,
-        selected_sheet,
-    )
+    with tempfile.TemporaryDirectory() as temp_dir:
+        manifest_path = Path(temp_dir) / "manifest.parquet"
+        _write_manifest(manifest_path, manifest_rows)
+        _publish_completed_workflow(args.file_id, original_dataset, harmonized_path, manifest_path, selected_sheet)
 
 
 if __name__ == "__main__":

@@ -9,9 +9,9 @@ import pytest
 
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_string
 from src.persistence.workflow_artifacts import (
-    load_harmonization_manifest_path,
-    load_harmonized_output_path,
-    load_upload_artifact,
+    UploadMetadataUnreadableError,
+    open_generated_artifact,
+    open_upload_artifact,
     save_harmonized_artifacts,
     save_upload_artifacts,
 )
@@ -44,18 +44,19 @@ async def test_generated_artifact_requires_access_before_missing_artifact_handli
     workflow_storage.create_workflow(owner, meta.dataset_workflow_id)
     save_upload_artifacts(workflow_storage, owner, scratch, meta)
 
-    def _load_artifact() -> Path | None:
-        if load_manifest:
-            return load_harmonization_manifest_path(scratch, workflow_storage, caller, meta.file_id)
-        return load_harmonized_output_path(scratch, workflow_storage, caller, meta.file_id, meta)
-
-    # When: the caller requests the missing generated artifact.
-    # Then: the owner gets no artifact, but another user gets an authorization failure.
+    kind = WorkflowFile.HARMONIZATION_MANIFEST_BASE if load_manifest else WorkflowFile.HARMONIZED_OUTPUT
+    # When the caller requests the missing artifact.
     if authorized:
-        assert _load_artifact() is None
+        with open_generated_artifact(workflow_storage, caller, meta.file_id, kind) as result:
+            # Then the owner can observe its absence.
+            assert result is None
     else:
-        with pytest.raises(WorkflowAccessDeniedError):
-            _load_artifact()
+        with (
+            pytest.raises(WorkflowAccessDeniedError),
+            open_generated_artifact(workflow_storage, caller, meta.file_id, kind),
+        ):
+            # Then the caller must have been denied before a path is exposed.
+            pytest.fail("another user's artifact was accessible")
 
 
 @pytest.mark.parametrize("load_manifest", [False, True], ids=["output", "manifest"])
@@ -71,11 +72,9 @@ async def test_generated_artifact_raises_when_workflow_metadata_is_missing(
 
     # When: a generated artifact is requested.
     # Then: missing workflow metadata is not treated as a missing artifact.
-    with pytest.raises(WorkflowNotFoundError):
-        if load_manifest:
-            load_harmonization_manifest_path(scratch, workflow_storage, user, meta.file_id)
-        else:
-            load_harmonized_output_path(scratch, workflow_storage, user, meta.file_id, meta)
+    kind = WorkflowFile.HARMONIZATION_MANIFEST_BASE if load_manifest else WorkflowFile.HARMONIZED_OUTPUT
+    with pytest.raises(WorkflowNotFoundError), open_generated_artifact(workflow_storage, user, meta.file_id, kind):
+        pytest.fail("an unowned artifact was accessible")
 
 
 def dataset_workflow_id(raw: str = "a" * 32) -> DatasetWorkflowId:
@@ -93,7 +92,7 @@ class InMemoryUpload:
         if self._offset >= len(self._content):
             return b""
         end = len(self._content) if size < 0 else self._offset + size
-        chunk = self._content[self._offset:end]
+        chunk = self._content[self._offset : end]
         self._offset += len(chunk)
         return chunk
 
@@ -115,13 +114,12 @@ async def test_upload_artifact_restores_original_file_into_new_scratch_space(tmp
     assert second_scratch.load(meta.file_id) is None
 
     # When: a later request lands on scratch space that has no local copy
-    restored = load_upload_artifact(second_scratch, workflow_storage, user, meta.file_id)
-
-    # Then: the original file and metadata are restored locally
-    assert restored is not None
-    assert restored.file_id == meta.file_id
-    assert restored.saved_path.read_bytes() == content
-    assert second_scratch.load(meta.file_id) is not None
+    with open_upload_artifact(second_scratch, workflow_storage, user, meta.file_id) as restored:
+        # Then: the original file and metadata are restored locally
+        assert restored is not None
+        assert restored.file_id == meta.file_id
+        assert restored.saved_path.read_bytes() == content
+        assert second_scratch.load(meta.file_id) is not None
 
 
 async def test_upload_artifact_refreshes_local_metadata_from_workflow_storage(tmp_path: Path) -> None:
@@ -150,11 +148,10 @@ async def test_upload_artifact_refreshes_local_metadata_from_workflow_storage(tm
     )
 
     # When: the upload is loaded while the local file already exists
-    restored = load_upload_artifact(scratch, workflow_storage, user, meta.file_id)
-
-    # Then: local metadata is refreshed from durable storage
-    assert restored is not None
-    assert restored.original_name == "renamed.csv"
+    with open_upload_artifact(scratch, workflow_storage, user, meta.file_id) as restored:
+        # Then: local metadata is refreshed from durable storage
+        assert restored is not None
+        assert restored.original_name == "renamed.csv"
 
 
 async def test_generated_artifacts_restore_into_new_scratch_space(tmp_path: Path) -> None:
@@ -173,30 +170,23 @@ async def test_generated_artifacts_restore_into_new_scratch_space(tmp_path: Path
     manifest_path.write_bytes(b"fake parquet bytes")
     save_harmonized_artifacts(workflow_storage, user, meta.file_id, harmonized_path, manifest_path)
 
-    assert second_scratch.load_harmonized_path(meta.file_id) is None
-    assert second_scratch.load_harmonization_manifest_path(meta.file_id) is None
+    assert not any(path.is_file() for path in second_scratch._base_dir.rglob("*"))
 
-    # When: the next request restores all durable artifacts into a new scratch space
-    restored_meta = load_upload_artifact(second_scratch, workflow_storage, user, meta.file_id)
-    assert restored_meta is not None
-    restored_output = load_harmonized_output_path(
-        second_scratch,
-        workflow_storage,
-        user,
-        meta.file_id,
-        restored_meta,
-    )
-    restored_manifest = load_harmonization_manifest_path(second_scratch, workflow_storage, user, meta.file_id)
-
-    # Then: local readers can use normal paths again
-    assert restored_output is not None
-    assert restored_output.read_bytes() == b"diagnosis\nbeta\n"
-    assert restored_manifest is not None
-    assert restored_manifest.read_bytes() == b"fake parquet bytes"
+    # When another operation opens the published artifacts.
+    with (
+        open_generated_artifact(workflow_storage, user, meta.file_id, WorkflowFile.HARMONIZED_OUTPUT) as output,
+        open_generated_artifact(
+            workflow_storage, user, meta.file_id, WorkflowFile.HARMONIZATION_MANIFEST_BASE
+        ) as manifest,
+    ):
+        # Then it can read both files without populating the second scratch directory.
+        assert output and output.read_bytes() == b"diagnosis\nbeta\n"
+        assert manifest and manifest.read_bytes() == b"fake parquet bytes"
+        assert not any(path.is_file() for path in second_scratch._base_dir.rglob("*"))
 
 
 async def test_durable_stage_three_artifacts_override_unpublished_scratch(tmp_path: Path) -> None:
-    """A stale worker's local files cannot replace the last completed run."""
+    # Given an approved durable result and a stale worker's unpublished local files.
     user = UserContext(user_id="alice")
     workflow_storage = LocalWorkflowStorage(tmp_path / "workflow")
     scratch = UploadStorage(tmp_path / "scratch", UploadConstraints(max_bytes=10_000))
@@ -205,19 +195,44 @@ async def test_durable_stage_three_artifacts_override_unpublished_scratch(tmp_pa
     save_upload_artifacts(workflow_storage, user, scratch, meta)
 
     output_path = scratch.harmonized_path_for(meta.file_id, meta.saved_path)
-    generated_manifest = tmp_path / "generated.parquet"
+    manifest_path = tmp_path / "generated.parquet"
     output_path.write_bytes(b"diagnosis\napproved\n")
-    generated_manifest.write_bytes(b"approved manifest")
-    manifest_path = scratch.save_harmonization_manifest(meta.file_id, generated_manifest)
+    manifest_path.write_bytes(b"approved manifest")
     save_harmonized_artifacts(workflow_storage, user, meta.file_id, output_path, manifest_path)
 
     output_path.write_bytes(b"diagnosis\nstale worker\n")
     manifest_path.write_bytes(b"stale manifest")
 
-    restored_output = load_harmonized_output_path(scratch, workflow_storage, user, meta.file_id, meta)
-    restored_manifest = load_harmonization_manifest_path(scratch, workflow_storage, user, meta.file_id)
+    # When the reviewer opens the published versions.
+    with (
+        open_generated_artifact(workflow_storage, user, meta.file_id, WorkflowFile.HARMONIZED_OUTPUT) as output,
+        open_generated_artifact(
+            workflow_storage, user, meta.file_id, WorkflowFile.HARMONIZATION_MANIFEST_BASE
+        ) as manifest,
+    ):
+        # Then both contain the last approved values.
+        assert output and output.read_bytes() == b"diagnosis\napproved\n"
+        assert manifest and manifest.read_bytes() == b"approved manifest"
 
-    assert restored_output is not None
-    assert restored_output.read_bytes() == b"diagnosis\napproved\n"
-    assert restored_manifest is not None
-    assert restored_manifest.read_bytes() == b"approved manifest"
+
+async def test_open_upload_rejects_metadata_from_another_workflow(tmp_path: Path) -> None:
+    # Given an upload whose stored metadata mistakenly names a different workflow.
+    user = UserContext("owner")
+    workflow = dataset_workflow_id()
+    uploads = UploadStorage(tmp_path / "uploads", UploadConstraints(max_bytes=1000))
+    storage = LocalWorkflowStorage(tmp_path / "durable")
+    storage.create_workflow(user, workflow)
+    meta = await uploads.store(InMemoryUpload(b"value\none\n"), workflow)
+    metadata = uploads.metadata_payload(meta)
+    metadata["file_id"] = dataset_workflow_id("b" * 32)
+    storage.write_json(user, workflow, WorkflowFile.UPLOAD_METADATA, metadata, expected_version=None)
+
+    # When the first workflow opens its source file.
+    with (
+        pytest.raises(UploadMetadataUnreadableError) as failure,
+        open_upload_artifact(uploads, storage, user, workflow),
+    ):
+        pytest.fail("mismatched metadata exposed a source")
+
+    # Then recovery identifies the requested workflow.
+    assert failure.value.args == (workflow,)

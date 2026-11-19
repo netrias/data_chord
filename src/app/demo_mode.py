@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,7 +16,7 @@ from src.domain.dataset_workflow_ids import (
 from src.integrations.reference_data_file import load_reference_models
 from src.integrations.sqlite_reference_data import SqliteReferenceDataImporter
 from src.paths import PROJECT_ROOT
-from src.persistence.workflow_artifacts import load_upload_artifact, save_upload_artifacts
+from src.persistence.workflow_artifacts import open_upload_artifact, save_upload_artifacts, stage_upload
 from src.settings import get_reference_database_path
 from src.storage import UploadedFileMeta, UserContext
 
@@ -54,22 +56,22 @@ async def prepare_demo_runtime() -> None:
     user = UserContext(user_id=LOCAL_USER_ID)
     upload_storage = dependencies.get_upload_storage()
     workflow_storage = dependencies.get_workflow_storage()
-    meta = await upload_storage.store(_PackagedUpload(DEMO_SAMPLE_PATH), DEMO_WORKFLOW_ID)
-    workflow_storage.create_workflow(user, DEMO_WORKFLOW_ID)
-    save_upload_artifacts(workflow_storage, user, upload_storage, meta)
+    sample = _PackagedUpload(DEMO_SAMPLE_PATH)
+    async with stage_upload(upload_storage, workflow_storage, sample, DEMO_WORKFLOW_ID) as meta:
+        workflow_storage.create_workflow(user, DEMO_WORKFLOW_ID)
+        save_upload_artifacts(workflow_storage, user, upload_storage, meta)
 
 
-def get_demo_upload() -> UploadedFileMeta:
+@contextmanager
+def get_demo_upload() -> Iterator[UploadedFileMeta]:
     """Read the prepared sample through the normal upload artifact boundary."""
-    meta = load_upload_artifact(
-        dependencies.get_upload_storage(),
-        dependencies.get_workflow_storage(),
-        dependencies.get_user_context(),
-        DEMO_WORKFLOW_ID,
-    )
-    if meta is None:
-        raise RuntimeError("Demo sample is not prepared")
-    return meta
+    with open_upload_artifact(
+        dependencies.get_upload_storage(), dependencies.get_workflow_storage(),
+        dependencies.get_user_context(), DEMO_WORKFLOW_ID,
+    ) as meta:
+        if meta is None:
+            raise RuntimeError("Demo sample is not prepared")
+        yield meta
 
 
 __all__ = [

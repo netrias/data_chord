@@ -25,7 +25,13 @@ from src.persistence.harmonization_job_store import load_harmonization_job, save
 from src.persistence.workflow_artifacts import save_harmonized_artifacts
 from src.persistence.workflow_state_store import load_workflow_state
 from src.storage import WorkflowArtifactNotFoundError, WorkflowConflictError, WorkflowFile
-from tests.conftest import confirm_mapping_choices, create_csv_content, create_test_manifest_parquet, upload_content
+from tests.conftest import (
+    confirm_mapping_choices,
+    create_csv_content,
+    create_test_manifest_parquet,
+    review_precondition,
+    upload_content,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -171,6 +177,7 @@ async def test_worker_with_superseded_plan_cannot_publish_scratch_results(
     tmp_path: Path,
 ) -> None:
     """A mapping change during provider work fails that run and keeps Stage 4 closed."""
+    # Given a worker still preparing results for the original mapping.
     provider_started = threading.Event()
     release_provider = threading.Event()
 
@@ -218,6 +225,7 @@ async def test_worker_with_superseded_plan_cannot_publish_scratch_results(
     assert accepted.json()["status"] == "queued"
     assert provider_started.is_set()
 
+    # When the reviewer saves a different mapping before publication.
     changed = await app_client.post(
         "/stage-2/choices",
         json={
@@ -241,8 +249,8 @@ async def test_worker_with_superseded_plan_cannot_publish_scratch_results(
         assert job_response.status_code == 200
         job = job_response.json()
 
+    # Then the old worker fails and neither artifact is published.
     assert job["status"] == "failed"
-    assert dependencies.get_upload_storage().load_harmonized_path(file_id) is None
     workflow_storage = dependencies.get_workflow_storage()
     user = dependencies.get_user_context()
     for kind in (WorkflowFile.HARMONIZED_OUTPUT, WorkflowFile.HARMONIZATION_MANIFEST_BASE):
@@ -339,7 +347,7 @@ async def test_superseded_worker_preserves_prior_review_artifacts(
 
     saved = await app_client.post(
         "/stage-4/overrides",
-        headers={"If-None-Match": "*"},
+        headers=await review_precondition(app_client, file_id),
         json={
             "file_id": file_id,
             "overrides": {
