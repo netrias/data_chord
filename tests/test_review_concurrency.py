@@ -264,3 +264,16 @@ async def test_reviewed_export_survives_audit_loss_and_partial_export_keeps_manu
         # Then an unverified old correction cannot enter the current download.
         assert refused.status_code == 409
         assert "predate" in refused.json()["detail"]
+
+        # Given a recent legacy review that instead cites the wrong original cell value.
+        current = storage.read_json(deps.get_user_context(), file_id, WorkflowFile.REVIEW_OVERRIDES)
+        assert current is not None
+        mismatched = dict(record.data)
+        mismatched["events"] = [dict(event, original_value="different source") for event in mismatched["events"]]
+        storage.write_json(deps.get_user_context(), file_id, WorkflowFile.REVIEW_OVERRIDES, mismatched,
+                           expected_version=current.version)
+        # When the reviewer requests the partial download again.
+        refused = await app_client.post("/stage-5/review", json=request)
+        # Then the original-cell check rejects it even though its creation time is valid.
+        assert refused.status_code == 409
+        assert "verified against its saved edits" in refused.json()["detail"]

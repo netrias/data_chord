@@ -44,7 +44,7 @@ export function setActiveStage(stage) {
         link.removeAttribute('href');
         link.setAttribute('tabindex', '-1');
       } else {
-        link.setAttribute('href', link.dataset.url);
+        link.setAttribute('href', buildNavUrl(link.dataset.url));
         link.removeAttribute('tabindex');
       }
     }
@@ -81,9 +81,22 @@ function _getFileIdForNavigation() {
 export function buildNavUrl(baseUrl) {
   const fileId = _getFileIdForNavigation();
   const url = new URL(baseUrl, window.location.origin);
-  if (fileId) url.searchParams.set('file_id', fileId);
+  if (fileId) {
+    url.searchParams.set('file_id', fileId);
+    const jobId = new URLSearchParams(window.location.search).get('job_id');
+    if (jobId && ['/stage-4', '/stage-5'].includes(url.pathname)) url.searchParams.set('job_id', jobId);
+  }
   _addMappingContext(url);
   return url.pathname + url.search;
+}
+
+/** Give a file-only review link the identity of the job that supplied its data. */
+export function bindReviewedJob(jobId, stage) {
+  if (!jobId) return;
+  const url = new URL(window.location.href);
+  url.searchParams.set('job_id', jobId);
+  window.history.replaceState(window.history.state, '', url);
+  setActiveStage(stage);
 }
 
 function _addMappingContext(url) {

@@ -145,6 +145,7 @@ def build_summary(
 
 @dataclass(frozen=True)
 class PreparedReview:
+    job_id: str
     summary: StageFiveSummaryResponse
     download: DownloadPackage
 
@@ -169,7 +170,7 @@ def _capture_review(
     package = _package_inputs(inputs, storage, user)
     inputs.check_current(storage, user)
     summary.audit_warning = package.audit_warning
-    return PreparedReview(summary, package)
+    return PreparedReview(inputs.ready.job.job.polling_job_id, summary, package)
 
 
 def _summary(inputs: ReviewedInputs, workflow_storage: WorkflowStorage, user: UserContext,

@@ -1,6 +1,8 @@
 /** Stage 5 presents the current downloadable output and its separate decision history. */
 
 import {
+  bindReviewedJob,
+  buildNavUrl,
   initStepInstruction,
   setActiveStage,
   initNavigationEvents,
@@ -161,7 +163,7 @@ const _validConformanceItems = (items) => (
 
 const _returnToReview = () => {
   if (!_state.fileId || !isSafeRelativeUrl(_stageFourUrl)) return;
-  window.location.assign(`${_stageFourUrl}?file_id=${encodeURIComponent(_state.fileId)}`);
+  window.location.assign(buildNavUrl(_stageFourUrl));
 };
 
 const _showConformanceWarning = (items) => {
@@ -598,6 +600,7 @@ const _fetchSummary = async () => {
       throw new Error('The reviewed download is incomplete. Refresh the page to try again.');
     }
     const data = JSON.parse(summary);
+    bindReviewedJob(response.headers.get('X-Harmonization-Job-Id'), 'review');
     markTiming('stage5.summary.fetch.parsed', {
       column_count: data.column_summaries?.length ?? 0,
       term_mapping_count: data.term_mappings?.length ?? 0,

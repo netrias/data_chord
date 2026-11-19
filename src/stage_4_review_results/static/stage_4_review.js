@@ -3,7 +3,7 @@
  * Delegates to review mode modules (column or row) based on user selection.
  * Manages state persistence, navigation, and user interactions.
  */
-import { buildNavUrl, initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
+import { bindReviewedJob, buildNavUrl, initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
 import { isValidFileId } from '/assets/shared/storage-keys.js';
 import { markAfterPaint, markTiming, measureTiming } from '/assets/shared/performance-timing.js';
 import {
@@ -237,11 +237,7 @@ const fetchRows = async () => {
       throw Object.assign(new Error(detail), { status: response.status });
     }
     const body = await response.json();
-    if (body.job_id) {
-      const url = new URL(window.location.href);
-      url.searchParams.set('job_id', body.job_id);
-      window.history.replaceState(window.history.state, '', url);
-    }
+    bindReviewedJob(body.job_id, 'verify');
     markTiming('stage4.rows.fetch.parsed', {
       column_count: body.columns?.length ?? 0,
     });
@@ -934,14 +930,11 @@ const _syncReviewControls = () => {
  * Awaiting ensures the manifest parquet write completes before the page transitions.
  */
 const navigateToStage5 = async (destination = buildNavUrl(stageFiveUrl)) => {
-  const url = new URL(destination, window.location.origin);
-  if (url.searchParams.has('file_id')) {
+  if (new URL(destination, window.location.origin).searchParams.has('file_id')) {
     if (state.reviewBlocked || !(await flushPendingSaves())) return;
-    const { job_id: jobId } = reviewJobFromUrl();
-    if (jobId) url.searchParams.set('job_id', jobId);
     advanceMaxReachedStage('review');
   }
-  window.location.assign(url.href);
+  window.location.assign(destination);
 };
 
 /**

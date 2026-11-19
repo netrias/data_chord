@@ -74,3 +74,26 @@ test('uploading the same file twice leaves both Verify jobs independently editab
   await other.reload();
   await expect(value(other).locator('.pv-combobox-link')).toHaveText(correction);
 });
+
+for (const action of ['warning', 'tracker']) {
+  test('return to Verify from an older Review via the ' + action, async ({ page }) => {
+    // Given a prepared Review with an unapproved value and a later job on the same upload.
+    const fileId = await openUpload(page);
+    await page.goto('/stage-5?file_id=' + fileId);
+    await expect(page.locator('#conformanceWarningDialog')).toBeVisible();
+    await rerun(page, fileId);
+
+    // When the reviewer follows the warning or tracker back to Verify.
+    if (action === 'warning') await page.click('#conformanceReturnButton');
+    else {
+      await page.click('#conformanceProceedButton');
+      await page.locator('.progress-tracker [data-stage="verify"] a').click();
+    }
+
+    // Then Verify identifies the superseded job and requires a deliberate move to current data.
+    await expect(page.locator('#reviewError')).toContainText('superseded');
+    await expect(value(page)).toHaveCount(0);
+    await page.getByRole('link', { name: 'Open current job' }).click();
+    await expect(value(page).locator('.pv-combobox-link')).toHaveText('adamantinoma');
+  });
+}

@@ -68,6 +68,7 @@ def review_with_download(payload: PreparedReviewRequest) -> StreamingResponse:
 
     name = quote(review.download.base_name + ".zip", safe="")
     headers = {"Cache-Control": "no-store", "Content-Disposition": f"inline; filename*=UTF-8''{name}"}
+    headers["X-Harmonization-Job-Id"] = review.job_id
     return StreamingResponse(parts(), media_type=f"multipart/form-data; boundary={boundary}", headers=headers)
 
 

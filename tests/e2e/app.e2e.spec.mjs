@@ -796,7 +796,8 @@ test('happy path flow: upload → analyze → harmonize → review → summary �
     1: { col_0001: 'Baz' },
   });
 
-  // The completed Stage 3 view uses the durable production-shaped summary.
+  // Reopen the completed job from storage after replacing the initial mock with its saved summary.
+  await page.evaluate(() => sessionStorage.removeItem('stage3HarmonizeJob'));
   const durableJobId = `e2e-job-${fileId}`;
   await page.goto(`/stage-3?file_id=${fileId}&job_id=${durableJobId}`);
   const stageThreeTable = page.locator('[data-column-outcome-table] .column-outcome-table');
