@@ -3348,11 +3348,11 @@ test('Stage 2 locks and Stage 5 is reachable after Stage 3 completes', async ({ 
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        job_id: 'e2e-job-locked',
+        job_id: `e2e-job-${fileId}`,
         plan_version: payload.plan_version,
         status: 'succeeded',
         detail: 'Harmonization completed.',
-        next_stage_url: `/stage-4?file_id=${fileId}&job_id=e2e-job-locked&status=succeeded`,
+        next_stage_url: `/stage-4?file_id=${fileId}&job_id=e2e-job-${fileId}&status=succeeded`,
         job_id_available: true,
         manifest_summary: null,
       }),
@@ -3378,7 +3378,8 @@ test('Stage 2 locks and Stage 5 is reachable after Stage 3 completes', async ({ 
   expect(stageFiveUrl.searchParams.get('file_id')).toBe(fileId);
   await page.locator('.change-flow__summary').waitFor({ state: 'visible' });
 
-  // And: Stage 5 can load from the durable workflow id in the URL alone
+  // And the saved link reloads the same job.
+  expect(stageFiveUrl.searchParams.get('job_id')).toBe(`e2e-job-${fileId}`);
   await page.reload();
   await expect(page.locator('.change-flow__summary')).toBeVisible();
 
