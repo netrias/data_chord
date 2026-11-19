@@ -20,4 +20,7 @@ class ReviewPackage:
         message = BytesParser(policy=policy.default).parsebytes(header + response.content)
         parts = {part.get_param("name", header="Content-Disposition"): part.get_payload(decode=True)
                  for part in message.iter_parts()}
-        return cls(json.loads(parts["summary"]), parts["download"])
+        summary = parts["summary"]
+        archive = parts["download"]
+        assert isinstance(summary, bytes) and isinstance(archive, bytes)
+        return cls(json.loads(summary), archive)

@@ -15,6 +15,7 @@ import src.app.dependencies as deps
 import src.stage_4_review_results.use_cases as review
 from src.domain.harmonization import MatchFidelity
 from src.integrations.harmonize import FileHarmonizationService, TermHarmonizationResponse
+from src.persistence.review_override_store import load_review_overrides_record
 from src.storage import WorkflowFile
 from tests.conftest import create_csv_content, review_state_payload, upload_content
 from tests.review_package import ReviewPackage
@@ -101,8 +102,8 @@ async def test_start_runs_confirmed_plan(app_client, monkeypatch, competing):
 
 
 def _persisted_events(file_id):
-    saved = deps.get_workflow_storage().read_json(deps.get_user_context(), file_id, WorkflowFile.REVIEW_OVERRIDES)
-    return [] if saved is None else [e["selected_value"] for e in saved.data["events"]]
+    saved = load_review_overrides_record(deps.get_workflow_storage(), deps.get_user_context(), file_id)
+    return [] if saved is None else [event.selected_value for event in saved.value.events]
 
 
 async def _review_rows(client, file_id):
@@ -223,7 +224,7 @@ async def test_reviewed_export_survives_audit_loss_and_partial_export_keeps_manu
     if legacy:
         user = deps.get_user_context()
         record = storage.read_json(user, file_id, WorkflowFile.REVIEW_OVERRIDES)
-        assert record is not None
+        assert record is not None and isinstance(record.data, dict)
         main_format = dict(record.data)
         main_format.pop("run_id")
         storage.write_json(user, file_id, WorkflowFile.REVIEW_OVERRIDES, main_format, expected_version=record.version)
@@ -255,7 +256,7 @@ async def test_reviewed_export_survives_audit_loss_and_partial_export_keeps_manu
     if legacy:
         # Given this same older-format record now predates the replacement job.
         record = storage.read_json(deps.get_user_context(), file_id, WorkflowFile.REVIEW_OVERRIDES)
-        assert record is not None
+        assert record is not None and isinstance(record.data, dict)
         stale = dict(record.data, created_at=datetime(2000, 1, 1, tzinfo=UTC).isoformat())
         storage.write_json(deps.get_user_context(), file_id, WorkflowFile.REVIEW_OVERRIDES, stale,
                            expected_version=record.version)
@@ -269,7 +270,9 @@ async def test_reviewed_export_survives_audit_loss_and_partial_export_keeps_manu
         current = storage.read_json(deps.get_user_context(), file_id, WorkflowFile.REVIEW_OVERRIDES)
         assert current is not None
         mismatched = dict(record.data)
-        mismatched["events"] = [dict(event, original_value="different source") for event in mismatched["events"]]
+        events = mismatched["events"]
+        assert isinstance(events, list) and len(events) == 1 and isinstance(events[0], dict)
+        mismatched["events"] = [dict(events[0], original_value="different source")]
         storage.write_json(deps.get_user_context(), file_id, WorkflowFile.REVIEW_OVERRIDES, mismatched,
                            expected_version=current.version)
         # When the reviewer requests the partial download again.

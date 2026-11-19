@@ -9,7 +9,8 @@ from httpx import ASGITransport, AsyncClient
 
 from src.app import dependencies
 from src.persistence.harmonization_job_store import load_harmonization_job
-from src.storage import WorkflowFile, WorkflowNotFoundError
+from src.persistence.review_override_store import load_review_overrides_record
+from src.storage import LocalWorkflowStorage, WorkflowFile, WorkflowNotFoundError
 from tests.conftest import confirm_mapping_choices, upload_content
 from tests.review_package import ReviewPackage
 from tests.test_programmatic_harmonization_api import (
@@ -26,8 +27,10 @@ async def test_accepted_job_preserves_owner_upload_and_result(app_client, monkey
     # Given a valid local API workflow whose worker is paused after admission.
     service = dependencies.get_harmonization_job_service()
     storage = dependencies.get_workflow_storage()
+    assert isinstance(storage, LocalWorkflowStorage)
     upload = dependencies.get_upload_storage()
     run = service._workflow_runner
+    assert run is not None
     release = asyncio.Event()
     started = asyncio.Event()
     scheduled = []
@@ -60,9 +63,11 @@ async def test_accepted_job_preserves_owner_upload_and_result(app_client, monkey
             and file_id in queued_ids
             and not read_faults
         ):
+            assert result is not None and isinstance(result.data, dict)
             assert result.data["status"] == "queued"
             assert upload.load(file_id) is not None
-            assert storage._read_metadata(file_id).owner_user_id == _PROGRAMMATIC_USER.user_id
+            metadata = storage._read_metadata(file_id)
+            assert metadata is not None and metadata.owner_user_id == _PROGRAMMATIC_USER.user_id
             read_faults.append(str(file_id))
             raise OSError("synthetic transient status-read failure")
         return result
@@ -132,14 +137,18 @@ async def test_partial_audit_download(app_client, tmp_path, missing_history, mis
     started = await app_client.post("/stage-3/harmonize", json={"file_id": file_id})
     assert started.status_code == 200
     storage = dependencies.get_workflow_storage()
+    assert isinstance(storage, LocalWorkflowStorage)
     user = dependencies.get_user_context()
     for _attempt in range(100):
-        if load_harmonization_job(storage, user, file_id).job.status.value == "succeeded":
+        job = load_harmonization_job(storage, user, file_id)
+        assert job is not None
+        if job.job.status.value == "succeeded":
             break
         await asyncio.sleep(0.01)
-    assert load_harmonization_job(storage, user, file_id).job.status.value == "succeeded"
-    review = storage.read_json(user, file_id, WorkflowFile.REVIEW_OVERRIDES)
-    assert review is None or review.data["events"] == []
+    else:
+        pytest.fail("The harmonization job did not finish.")
+    review = load_review_overrides_record(storage, user, file_id)
+    assert review is None or not review.value.events
     assert storage.read_json(user, file_id, WorkflowFile.CDE_MAPPING) is not None
     assert storage.artifact_version(user, file_id, WorkflowFile.HARMONIZATION_MANIFEST_BASE) is not None
     if missing_history:
@@ -200,7 +209,9 @@ async def test_submission_error_cleans_up_only_a_confirmed_unaccepted_job(app_cl
     # Then job and source survive a lost receipt, while rejected submissions release both stores.
     [file_id] = affected
     assert (dependencies.get_upload_storage().load(file_id) is not None) == committed
+    assert isinstance(storage, LocalWorkflowStorage)
     assert (storage._read_metadata(file_id) is not None) == committed
     if committed:
-        assert load_harmonization_job(storage, _PROGRAMMATIC_USER, file_id).job.status.value == "queued"
+        saved_job = load_harmonization_job(storage, _PROGRAMMATIC_USER, file_id)
+        assert saved_job is not None and saved_job.job.status.value == "queued"
         assert storage.artifact_version(_PROGRAMMATIC_USER, file_id, WorkflowFile.ORIGINAL_UPLOAD) is not None

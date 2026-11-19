@@ -164,6 +164,7 @@ async def test_summary_scales_with_edits_and_keeps_health_responsive(app_client,
 
         def instrumented_review(storage, user, file_id):
             record = read_review(storage, user, file_id)
+            assert record is not None
             return replace(record, value=replace(record.value, events=CountedEvents(record.value.events)))
 
         with monkeypatch.context() as scoped:

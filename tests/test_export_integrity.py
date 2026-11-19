@@ -7,6 +7,7 @@ import re
 import zipfile
 from dataclasses import dataclass, replace
 from datetime import datetime
+from unittest.mock import Mock
 
 import pytest
 from openpyxl import load_workbook
@@ -50,6 +51,7 @@ def _install(provider, monkeypatch):
 
 def _allow(values):
     repository = deps.get_reference_data_repository()
+    assert isinstance(repository, Mock)
     previous = repository.load_model.return_value
     repository.load_model.return_value = replace(previous, pvs=previous.pvs.with_values({TARGET: frozenset(values)}))
 
@@ -131,7 +133,7 @@ async def test_excel_export_preserves_untouched_native_values(app_client, monkey
     if native:
         assert source["D2"] == ["f", "=A2+1"]
     # When the application harmonizes the worksheet and exports its ZIP.
-    mappings = {f"col_{i:04d}": None for i in range(5)}
+    mappings: dict[str, str | None] = {f"col_{i:04d}": None for i in range(5)}
     mappings["col_0004"] = TARGET if mapped else None
     package = await _run(app_client, content, "sample.xlsx", TEST_XLSX_CONTENT_TYPE, mappings)
     with deps.get_workflow_storage().materialize_artifact(

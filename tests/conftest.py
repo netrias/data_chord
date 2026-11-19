@@ -19,7 +19,7 @@ from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 from starlette.datastructures import Headers
 
-from src.domain.dataset_workflow_ids import DatasetWorkflowId
+from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_value
 from src.storage import UploadConstraints, UploadStorage
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -285,7 +285,7 @@ def upload_integrity_fields(content: bytes) -> dict[str, str]:
     }
 
 
-async def upload_file(client: AsyncClient, csv_path: Path) -> str:
+async def upload_file(client: AsyncClient, csv_path: Path) -> DatasetWorkflowId:
     """why: upload a file and return its file_id for use in subsequent test steps."""
     response = await client.post(
         "/stage-1/upload",
@@ -293,7 +293,7 @@ async def upload_file(client: AsyncClient, csv_path: Path) -> str:
         files={"file": (csv_path.name, csv_path.read_bytes(), TEST_CSV_CONTENT_TYPE)},
     )
     assert response.status_code == 201, f"Upload failed: {response.status_code} {response.text}"
-    return response.json()["file_id"]
+    return dataset_workflow_id_from_value(response.json()["file_id"])
 
 
 async def upload_content(
@@ -301,7 +301,7 @@ async def upload_content(
     content: bytes,
     filename: str = "test.csv",
     content_type: str = TEST_CSV_CONTENT_TYPE,
-) -> str:
+) -> DatasetWorkflowId:
     """why: upload raw content and return its file_id for dynamic test scenarios."""
     response = await client.post(
         "/stage-1/upload",
@@ -309,10 +309,10 @@ async def upload_content(
         files={"file": (filename, content, content_type)},
     )
     assert response.status_code == 201, f"Upload failed: {response.status_code} {response.text}"
-    return response.json()["file_id"]
+    return dataset_workflow_id_from_value(response.json()["file_id"])
 
 
-async def upload_and_analyze(client: AsyncClient, csv_path: Path) -> str:
+async def upload_and_analyze(client: AsyncClient, csv_path: Path) -> DatasetWorkflowId:
     """Upload, analyze, and confirm the current mapping plan."""
     file_id = await upload_file(client, csv_path)
     analysis = await client.post(
