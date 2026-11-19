@@ -38,7 +38,7 @@ from src.persistence.manifest_reader import read_manifest_parquet
 from src.persistence.manifest_writer import apply_column_renames_batch, apply_pv_adjustments_batch
 from src.persistence.pv_manifest_store import ColumnPvSets, save_pv_snapshot_if_unchanged
 from src.persistence.tabular_output import write_tabular_changes
-from src.persistence.workflow_artifacts import open_upload_artifact, save_harmonized_artifacts, upload_workspace
+from src.persistence.workflow_artifacts import open_upload_artifact, save_harmonized_artifacts
 from src.persistence.workflow_state_store import LoadedWorkflowState
 from src.storage import (
     UploadedFileMeta,
@@ -80,8 +80,8 @@ class HarmonizationWorkflow:
         use_cache: bool = True,
     ) -> HarmonizationWorkflowResult:
         with (
-            upload_workspace(self._upload_storage, self._workflow_storage),
             open_upload_artifact(self._upload_storage, self._workflow_storage, user, file_id) as meta,
+            self._upload_storage.private_workspace(),
         ):
             if meta is None:
                 raise FileNotFoundError(file_id)
@@ -112,8 +112,7 @@ class HarmonizationWorkflow:
 
         prepared_manifest = manifest.apply_choices(column_overrides, column_renames, reference_model.catalog)
         column_cde_map = prepared_manifest.column_cde_map()
-        managed_output_path = self._upload_storage.harmonized_path_for(file_id, meta.saved_path)
-        worker_output_path = _worker_scratch_path(managed_output_path, authority.worker_id)
+        worker_output_path = self._upload_storage.harmonized_path_for(file_id, meta.saved_path)
         selected_cde_keys = column_cde_map.cde_keys()
         pv_catalog = CdePvCatalog.from_mapping({
             cde_key: reference_model.pvs.values[cde_key] for cde_key in selected_cde_keys
@@ -180,17 +179,6 @@ class HarmonizationWorkflow:
                 self._workflow_storage, user, file_id, harmonized_output_path, result.manifest_path,
                 expected_harmonized_output_version=artifact_versions.harmonized_output,
                 expected_manifest_version=artifact_versions.manifest,
-            )
-            await run_file_operation(
-                self._upload_storage.save_harmonization_manifest,
-                file_id,
-                result.manifest_path,
-            )
-            await run_file_operation(
-                self._upload_storage.restore_harmonized_output,
-                file_id,
-                meta.saved_path,
-                harmonized_output_path,
             )
             authority.require_current()
             authority.require_plan_current()
@@ -286,10 +274,6 @@ async def _read_source_structure(
         return (), 0
     dataset = await run_file_operation(read_tabular, source_path, sheet_name)
     return resolve_tabular_columns(dataset, column_renames), len(dataset.rows)
-
-
-def _worker_scratch_path(managed_path: Path, worker_id: str) -> Path:
-    return managed_path.with_stem(f"{managed_path.stem}.{worker_id}")
 
 
 def _compute_row_adjustment(row: ManifestRow, pv_set: frozenset[str]) -> ManifestPvAdjustment | None:

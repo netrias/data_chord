@@ -463,3 +463,16 @@ const parseDelimitedRecords = (content, delimiter) => {
   if (recordStarted) records.push([...values, current]);
   return records;
 };
+
+export async function reviewParts(response) {
+  const headers = await response.headers();
+  return new Response(await response.body(), { headers }).formData();
+}
+
+export async function fulfillReview(route, summary, archive = new Blob(['zip-bytes'])) {
+  const parts = new FormData();
+  parts.set('summary', JSON.stringify(summary));
+  parts.set('download', archive, 'review.zip');
+  const reply = new Response(parts);
+  await route.fulfill({contentType: reply.headers.get('Content-Type'), body: Buffer.from(await reply.arrayBuffer())});
+}

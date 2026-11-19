@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Protocol
-from uuid import UUID
 
 from botocore.exceptions import ClientError
 
@@ -105,25 +104,6 @@ class S3WorkflowStorage:
                 raise ValueError("S3 returned a truncated workflow listing without a continuation token.")
             arguments["ContinuationToken"] = token
         self.client.delete_object(Bucket=self.bucket, Key=anchor)
-
-    def load_reviewed_export(self, user: UserContext, file_id: str, reference: UUID) -> bytes | None:
-        self._require_access(user, file_id)
-        key = self._workflow_key(file_id, "exports", reference.hex)
-        try:
-            return _body_bytes(self.client.get_object(Bucket=self.bucket, Key=key))
-        except ClientError as exc:
-            if _is_not_found(exc):
-                return None
-            raise
-
-    def save_reviewed_export(self, user: UserContext, file_id: str, reference: UUID, content: bytes) -> None:
-        self._require_access(user, file_id)
-        key = self._workflow_key(file_id, "exports", reference.hex)
-        try:
-            self.client.put_object(Bucket=self.bucket, Key=key, Body=content, IfNoneMatch="*")
-        except ClientError as exc:
-            if not _is_precondition_failed(exc):
-                raise
 
     def read_json(self, user: UserContext, file_id: str, kind: WorkflowFile) -> StoredJson | None:
         self._require_json_kind(kind)

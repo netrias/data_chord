@@ -19,8 +19,7 @@ import {
 } from '/assets/shared/storage-keys.js';
 import { mountChangeFlow } from './stage_5_change_flow.js';
 
-const _DEFAULT_SUMMARY_ENDPOINT = '/stage-5/summary';
-const _DEFAULT_DOWNLOAD_ENDPOINT = '/stage-5/download';
+const _DEFAULT_SUMMARY_ENDPOINT = '/stage-5/review';
 const _DEFAULT_STAGE_FOUR_URL = '/stage-4';
 const _DEFAULT_ZIP_FILENAME = 'harmonized_data.zip';
 const _REVOKE_DELAY_MS = 100;
@@ -29,7 +28,6 @@ const _SORT_KEYS = new Set(['column', 'original_value', 'final_value']);
 
 const _config = window.stageFiveConfig ?? {};
 const _summaryEndpoint = _config.summaryEndpoint ?? _DEFAULT_SUMMARY_ENDPOINT;
-const _downloadEndpoint = _config.downloadEndpoint ?? _DEFAULT_DOWNLOAD_ENDPOINT;
 const _stageFourUrl = _config.stageFourUrl ?? _DEFAULT_STAGE_FOUR_URL;
 
 const _downloadBtn = document.getElementById('downloadResults');
@@ -54,7 +52,7 @@ const _conformanceProceedButton = document.getElementById('conformanceProceedBut
 
 const _state = {
   fileId: null,
-  exportReference: null,
+  download: null,
   termMappings: [],
   sortColumn: null,
   sortDirection: 'asc',
@@ -80,13 +78,6 @@ const _extractFilename = (disposition) => {
     filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? null;
   }
   return filename && isSafeFilename(filename) ? filename : _DEFAULT_ZIP_FILENAME;
-};
-
-const _setDownloadButtonState = (isLoading) => {
-  if (!_downloadBtn) return;
-  _downloadBtn.disabled = isLoading;
-  const textTarget = _downloadBtn.querySelector('.btn-3d-front') ?? _downloadBtn;
-  textTarget.textContent = isLoading ? 'Preparing download...' : 'Download data';
 };
 
 const _triggerBrowserDownload = (blob, filename) => {
@@ -223,40 +214,17 @@ const _showConformanceWarning = (items) => {
 };
 
 const _handleDownload = async () => {
-  if (!_state.exportReference) {
-    _showError('Unable to locate this file. Restart the harmonization workflow.');
-    return;
-  }
-
+  if (!_state.download) return;
   _hideError();
-  _setDownloadButtonState(true);
   markTiming('stage5.download.start');
   try {
-    const response = await fetch(_downloadEndpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file_id: _state.fileId, export_reference: _state.exportReference }),
-    });
-    markTiming('stage5.download.response', { status: response.status });
-    measureTiming('stage5.download.request', 'stage5.download.start', 'stage5.download.response');
-    if (!response.ok) {
-      const detail = await readResponseDetail(response, 'Download failed. Try again.');
-      throw Object.assign(new Error(detail), { status: response.status });
-    }
-
-    const blob = await response.blob();
-    markTiming('stage5.download.blob_ready', { bytes: blob.size });
-    measureTiming('stage5.download.blob', 'stage5.download.response', 'stage5.download.blob_ready', {
-      bytes: blob.size,
-    });
-    _triggerBrowserDownload(blob, _extractFilename(response.headers.get('Content-Disposition') ?? ''));
+    _triggerBrowserDownload(_state.download.blob, _state.download.filename);
     _showStartOverAction();
   } catch (error) {
     console.error('Download failed:', error);
     const message = error.message || 'Download failed. Try again.';
     _showError(message, isReviewStateRecovery(message));
   } finally {
-    _setDownloadButtonState(false);
     await markAfterPaint('stage5.download.usable');
     measureTiming('stage5.download_to_usable', 'stage5.download.start', 'stage5.download.usable');
   }
@@ -610,7 +578,7 @@ const _fetchSummary = async () => {
     const response = await fetch(_summaryEndpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file_id: context.fileId, prepare_download: true }),
+      body: JSON.stringify({ file_id: context.fileId }),
     });
     markTiming('stage5.summary.fetch.response', { status: response.status });
     measureTiming('stage5.summary.request', 'stage5.summary.fetch.start', 'stage5.summary.fetch.response');
@@ -619,7 +587,13 @@ const _fetchSummary = async () => {
       throw Object.assign(new Error(detail), { status: response.status });
     }
 
-    const data = await response.json();
+    const parts = await response.formData();
+    const summary = parts.get('summary');
+    const blob = parts.get('download');
+    if (typeof summary !== 'string' || !(blob instanceof Blob)) {
+      throw new Error('The reviewed download is incomplete. Refresh the page to try again.');
+    }
+    const data = JSON.parse(summary);
     markTiming('stage5.summary.fetch.parsed', {
       column_count: data.column_summaries?.length ?? 0,
       term_mapping_count: data.term_mappings?.length ?? 0,
@@ -627,8 +601,8 @@ const _fetchSummary = async () => {
     measureTiming('stage5.summary.parse', 'stage5.summary.fetch.response', 'stage5.summary.fetch.parsed');
     markTiming('stage5.summary.render.start');
 
-    _state.exportReference = data.export_reference;
-    _setDownloadButtonState(false);
+    _state.download = { blob, filename: _extractFilename(response.headers.get('Content-Disposition') ?? '') };
+    if (_downloadBtn) _downloadBtn.disabled = false;
     const auditWarning = document.getElementById('auditWarning');
     auditWarning.hidden = !data.audit_warning;
     auditWarning.textContent = data.audit_warning ?? '';

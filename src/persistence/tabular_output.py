@@ -1,25 +1,29 @@
-"""Patch changed worksheet cells while retaining native workbook content."""
+"""Write dataset edits while preserving untouched native Excel cells and workbook parts."""
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
-from itertools import chain
 from pathlib import Path
 from shutil import copyfile, copyfileobj
 from tempfile import TemporaryDirectory
-from typing import NewType
-from xml.dom.minidom import Document, Element  # nosec B408: DOM node types only. defusedxml parses the input.
-from zipfile import ZipFile, ZipInfo
+from typing import IO, NewType
+from zipfile import ZipFile
 
-from defusedxml.minidom import parse
+from lxml import etree
 from netrias_client import TabularDataset, TabularFormat, write_tabular
 from openpyxl import load_workbook
+from openpyxl.formula.translate import Translator
 from openpyxl.utils.cell import coordinate_to_tuple, get_column_letter
 
-# SpreadsheetML uses one-based row and column numbers.
 _RowNumber = NewType("_RowNumber", int)
 _ColumnNumber = NewType("_ColumnNumber", int)
+_REFERENCE = "r"
+_TYPE = "t"
+_SHARED_FORMULA = "shared"
+_SHARED_INDEX = "si"
+_CONTENT_TYPES = "[Content_Types].xml"
+_CALC_CHAIN_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.calcChain+xml"
 
 
 class _Tag(StrEnum):
@@ -32,17 +36,6 @@ class _Tag(StrEnum):
     TEXT = "t"
 
 
-_REFERENCE = "r"
-_CELL_TYPE = "t"
-_INLINE_STRING_TYPE = "inlineStr"
-
-
-@dataclass(frozen=True)
-class _CellEdit:
-    column: _ColumnNumber
-    value: str
-
-
 def write_tabular_changes(output: Path, source: Path, before: TabularDataset, after: TabularDataset) -> None:
     if after.source_format != TabularFormat.XLSX:
         write_tabular(output, after)
@@ -53,37 +46,16 @@ def write_tabular_changes(output: Path, source: Path, before: TabularDataset, af
         return
     sheet_path = _worksheet_part(source, after.sheet_name)
     with _atomic_workbook(output) as edited, ZipFile(source) as original:
-        _copy_workbook_with_edits(original, edited, sheet_path, before, after)
+        _copy_workbook(original, edited, sheet_path, _SheetEdits(before, after))
 
 
 @contextmanager
 def _atomic_workbook(output: Path) -> Iterator[ZipFile]:
-    """Publish only after the new ZIP and the original workbook have both closed."""
     with TemporaryDirectory(dir=output.parent) as directory:
         temporary = Path(directory) / "output.xlsx"
         with ZipFile(temporary, "w") as archive:
             yield archive
         temporary.replace(output)
-
-
-def _copy_workbook_with_edits(
-    source: ZipFile, output: ZipFile, sheet_path: str, before: TabularDataset, after: TabularDataset,
-) -> None:
-    for part in source.infolist():
-        if part.filename == sheet_path:
-            _write_edited_sheet(source, output, part, before, after)
-            continue
-        with source.open(part) as reader, output.open(part, "w") as writer:
-            copyfileobj(reader, writer)
-
-
-def _write_edited_sheet(
-    source: ZipFile, output: ZipFile, part: ZipInfo, before: TabularDataset, after: TabularDataset,
-) -> None:
-    with source.open(part) as reader:
-        document = parse(reader)
-    _patch_rows(document, before, after)
-    output.writestr(part, document.toxml(encoding="UTF-8"))
 
 
 def _worksheet_part(source: Path, sheet_name: str | None) -> str:
@@ -98,83 +70,157 @@ def _worksheet_part(source: Path, sheet_name: str | None) -> str:
         workbook.close()
 
 
-def _elements(parent: Element, local_name: _Tag) -> Iterator[Element]:
-    return (node for node in parent.childNodes if isinstance(node, Element) and node.localName == local_name)
+def _xml(content: bytes) -> etree._Element:
+    return etree.fromstring(content, parser=etree.XMLParser(resolve_entities=False, no_network=True))
 
 
-def _append_element(parent: Element, name: _Tag) -> Element:
-    qualified = f"{parent.prefix}:{name}" if parent.prefix else name
-    assert parent.ownerDocument is not None
-    child = parent.ownerDocument.createElementNS(parent.namespaceURI, qualified)
-    parent.appendChild(child)
-    return child
-
-
-def _indexed_element[Position: int](
-    parent: Element, elements: dict[Position, Element], position: Position, tag: _Tag, reference: str,
-) -> Element:
-    existing = elements.get(position)
-    if existing is not None:
-        return existing
-    element = _append_element(parent, tag)
-    element.setAttribute(_REFERENCE, reference)
-    following = next((child for index, child in elements.items() if index > position), None)
-    if following is not None:
-        parent.insertBefore(element, following)
-    return element
-
-
-def _patch_rows(document: Document, before: TabularDataset, after: TabularDataset) -> None:
-    sheet_data = document.getElementsByTagNameNS("*", _Tag.SHEET_DATA)[0]
-    native_rows: dict[_RowNumber, Element] = {}
-    position = 0
-    for row in _elements(sheet_data, _Tag.ROW):
-        position = int(row.getAttribute(_REFERENCE) or position + 1)
-        native_rows[_RowNumber(position)] = row
-    old_rows = chain([before.headers], before.rows)
-    new_rows = chain([after.headers], after.rows)
-    for number, (old, new) in enumerate(zip(old_rows, new_rows, strict=True), 1):
-        if old == new:
+def _copy_workbook(source: ZipFile, output: ZipFile, sheet_path: str, edits: "_SheetEdits") -> None:
+    # Excel rebuilds its optional calculation chain. A stale chain can refer to a replaced formula.
+    types = _xml(source.read(_CONTENT_TYPES))
+    chains = {node.attrib["PartName"].lstrip("/") for node in types if node.get("ContentType") == _CALC_CHAIN_TYPE}
+    for part in source.infolist():
+        if part.filename in chains:
             continue
-        row_number = _RowNumber(number)
-        row = _indexed_element(sheet_data, native_rows, row_number, _Tag.ROW, str(row_number))
-        _patch_cells(row, row_number, _cell_edits(old, new))
+        with source.open(part) as reader, output.open(part, "w") as writer:
+            if part.filename == sheet_path:
+                _stream_worksheet(reader, writer, edits)
+            elif chains and (part.filename == _CONTENT_TYPES or part.filename.endswith(".rels")):
+                _write_without_calc_chain(reader, writer)
+            else:
+                copyfileobj(reader, writer)
 
 
-def _cell_edits(old: list[str], new: list[str]) -> Iterator[_CellEdit]:
-    for column, (previous, value) in enumerate(zip(old, new, strict=True), 1):
-        if previous != value:
-            yield _CellEdit(_ColumnNumber(column), value)
+def _write_without_calc_chain(reader: IO[bytes], writer: IO[bytes]) -> None:
+    root = _xml(reader.read())
+    for child in list(root):
+        if child.get("ContentType") == _CALC_CHAIN_TYPE or child.get("Type", "").endswith("/calcChain"):
+            root.remove(child)
+    writer.write(etree.tostring(root, encoding="utf-8"))
 
 
-def _cells_by_column(row: Element) -> dict[_ColumnNumber, Element]:
-    cells: dict[_ColumnNumber, Element] = {}
+def _stream_worksheet(reader: IO[bytes], writer: IO[bytes], edits: "_SheetEdits") -> None:
+    events = iter(etree.iterparse(reader, events=("start", "end", "comment", "pi"), resolve_entities=False,
+                                  load_dtd=False, no_network=True))
+    _, root = next((event, node) for event, node in events if event == "start")
+    if root.getroottree().docinfo.doctype:
+        raise ValueError("Worksheet XML must not contain a document type declaration.")
+    sheet_data_tag = etree.QName(root, _Tag.SHEET_DATA)
+    with etree.xmlfile(writer, encoding="utf-8") as xml, xml.element(root.tag, root.attrib, nsmap=root.nsmap):
+        for event, child in events:
+            if child.getparent() is not root:
+                continue
+            if event == "start" and child.tag == sheet_data_tag:
+                _stream_rows(events, child, xml, edits)
+            elif event != "start":
+                xml.write(child)
+            else:
+                continue
+            root.remove(child)
+
+
+def _stream_rows(events, sheet, xml, edits: "_SheetEdits") -> None:
+    last = 0
+    row_tag = etree.QName(sheet, _Tag.ROW)
+    with xml.element(sheet.tag, sheet.attrib, nsmap=sheet.nsmap):
+        for event, row in events:
+            if event == "end" and row is sheet:
+                break
+            if event == "start" or row.getparent() is not sheet:
+                continue
+            if row.tag == row_tag:
+                position = int(row.get(_REFERENCE, last + 1))
+                edits.write_missing(xml, row_tag, last + 1, position)
+                edits.apply(row, _RowNumber(position))
+                last = position
+            xml.write(row)
+            sheet.remove(row)
+        edits.write_missing(xml, row_tag, last + 1, len(edits.after.rows) + 2)
+
+
+@dataclass
+class _SheetEdits:
+    before: TabularDataset
+    after: TabularDataset
+    replaced_masters: dict[str, Translator] = field(default_factory=dict)
+
+    def changes(self, number: int) -> dict[_ColumnNumber, str]:
+        if number > len(self.after.rows) + 1:
+            return {}
+        old = self.before.headers if number == 1 else self.before.rows[number - 2]
+        new = self.after.headers if number == 1 else self.after.rows[number - 2]
+        if old == new:
+            return {}
+        return {
+            _ColumnNumber(index): value for index, (previous, value) in enumerate(zip(old, new, strict=True), 1)
+            if previous != value
+        }
+
+    def write_missing(self, xml, tag: etree.QName, start: int, stop: int) -> None:
+        for number in range(start, min(stop, len(self.after.rows) + 2)):
+            if self.changes(number):
+                row = etree.Element(tag, {_REFERENCE: str(number)})
+                self.apply(row, _RowNumber(number))
+                xml.write(row)
+
+    def apply(self, row: etree._Element, number: _RowNumber) -> None:
+        changes = self.changes(number)
+        if not changes and not self.replaced_masters:
+            return
+        column = 0
+        for cell in row.iterchildren(etree.QName(row, _Tag.CELL)):
+            ref = cell.get(_REFERENCE)
+            column = coordinate_to_tuple(ref)[1] if ref else column + 1
+            address = ref or f"{get_column_letter(column)}{number}"
+            value = changes.pop(_ColumnNumber(column), None)
+            self._preserve_formula(cell, address, value is not None)
+            if value is not None:
+                _write_text(cell, value)
+        _insert_cells(row, number, changes)
+
+    def _preserve_formula(self, cell: etree._Element, address: str, replacing: bool) -> None:
+        formula = cell.find(etree.QName(cell, _Tag.FORMULA))
+        if formula is None or formula.get(_TYPE) != _SHARED_FORMULA:
+            return
+        group = formula.attrib[_SHARED_INDEX]
+        if formula.text:
+            self.replaced_masters.pop(group, None)
+            if replacing:
+                self.replaced_masters[group] = Translator("=" + formula.text, origin=address)
+        elif group in self.replaced_masters and not replacing:
+            formula.text = self.replaced_masters[group].translate_formula(address)[1:]
+            del formula.attrib[_SHARED_INDEX], formula.attrib[_TYPE]
+
+
+def _insert_cells(row: etree._Element, number: _RowNumber, changes: dict[_ColumnNumber, str]) -> None:
+    if not changes:
+        return
+    # Missing cells come from padded dataset rows. Insert them before the next native column.
+    existing = iter(row.iterchildren(etree.QName(row, _Tag.CELL)))
+    following = next(existing, None)
     position = 0
-    for cell in _elements(row, _Tag.CELL):
-        address = cell.getAttribute(_REFERENCE)
-        if address:
-            _, position = coordinate_to_tuple(address)
+    for column, value in changes.items():
+        while following is not None:
+            ref = following.get(_REFERENCE)
+            index = coordinate_to_tuple(ref)[1] if ref else position + 1
+            if index > column:
+                break
+            position, following = index, next(existing, None)
+        cell = etree.Element(etree.QName(row, _Tag.CELL), {_REFERENCE: f"{get_column_letter(column)}{number}"})
+        if following is not None:
+            following.addprevious(cell)
         else:
-            position += 1
-        cells[_ColumnNumber(position)] = cell
-    return cells
+            row.append(cell)
+        _write_text(cell, value)
 
 
-def _patch_cells(row: Element, number: _RowNumber, edits: Iterator[_CellEdit]) -> None:
-    cells = _cells_by_column(row)
-    for edit in edits:
-        address = f"{get_column_letter(edit.column)}{number}"
-        cell = _indexed_element(row, cells, edit.column, _Tag.CELL, address)
-        _write_inline_text(cell, edit.value)
-
-
-def _write_inline_text(cell: Element, value: str) -> None:
-    for child in list(cell.childNodes):
-        if isinstance(child, Element) and child.localName in {_Tag.VALUE, _Tag.INLINE_STRING, _Tag.FORMULA}:
-            cell.removeChild(child)
-    cell.setAttribute(_CELL_TYPE, _INLINE_STRING_TYPE)
-    inline_string = _append_element(cell, _Tag.INLINE_STRING)
-    text = _append_element(inline_string, _Tag.TEXT)
-    text.setAttribute("xml:space", "preserve")
-    assert cell.ownerDocument is not None
-    text.appendChild(cell.ownerDocument.createTextNode(value))
+def _write_text(cell: etree._Element, value: str) -> None:
+    for tag in (_Tag.FORMULA, _Tag.VALUE, _Tag.INLINE_STRING):
+        child = cell.find(etree.QName(cell, tag))
+        if child is not None:
+            cell.remove(child)
+    cell.set(_TYPE, "inlineStr")
+    inline = etree.Element(etree.QName(cell, _Tag.INLINE_STRING))
+    cell.insert(0, inline)
+    text = etree.SubElement(inline, etree.QName(cell, _Tag.TEXT))
+    text.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+    text.text = value

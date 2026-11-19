@@ -1,4 +1,4 @@
-"""End-to-end evidence for bug hunt findings 1, 3 and 16 on main."""
+"""Preservation of native Excel values, prediction context and exact audit text."""
 
 import csv
 import io
@@ -116,7 +116,7 @@ def _native_cells(content):
     [(False, False), (True, False), (True, True)],
     ids=["text-control", "native-no-op", "native-with-target-change"],
 )
-async def test_01_excel(app_client, monkeypatch, native, mapped):
+async def test_excel_export_preserves_untouched_native_values(app_client, monkeypatch, native, mapped):
     # Given independently readable source cells and confirmed unmapped source positions.
     _install(ProviderMock(), monkeypatch)
     values = [12, True, datetime(2024, 1, 2), "=A2+1"] if native else ["12", "true", "2024-01-02", "A2+1"]
@@ -153,7 +153,7 @@ async def test_01_excel(app_client, monkeypatch, native, mapped):
     expected = dict(source)
     if mapped:
         expected["E2"] = ["s", "Lung Cancer"]
-    print(f"01 native={native} mapped={mapped} source={source!r} stage3={stage3!r} stage5={stage5!r}")
+
     assert stage3["E2"] == stage5["E2"] == expected["E2"]
     assert [stage3, stage5] == [expected, expected]
     if native:
@@ -173,7 +173,7 @@ async def _eval_header(client, header):
 @pytest.mark.parametrize(
     "first,second", [("positive", "negative"), ("negative", "positive")], ids=["positive-first", "negative-first"]
 )
-async def test_03_cache_equivalence(app_client, monkeypatch, first, second):
+async def test_prediction_cache_respects_source_column_context(app_client, monkeypatch, first, second):
     # Given known distinct uncached file and audit answers for identical terms under opposite headers.
     _allow(["Yes", "No"])
     provider = ProviderMock()
@@ -190,12 +190,12 @@ async def test_03_cache_equivalence(app_client, monkeypatch, first, second):
     opposite = await _eval_header(app_client, f"1 means {second}")
     # Then a same-context cache hit and an opposite-context lookup agree with uncached outputs.
     assert warm_first == identical == cold[first]
-    print(f"03 order={first},{second} cold={cold} identical={identical} opposite={opposite} calls={provider.contexts}")
+
     assert opposite == cold[second]
 
 
 @pytest.mark.parametrize("value", ["Other", " Other "], ids=["unpadded-control", "padded"])
-async def test_16_whitespace(app_client, monkeypatch, value):
+async def test_exact_value_whitespace_survives_export_and_audit(app_client, monkeypatch, value):
     # Given an approved exact value, including its significant whitespace.
     _allow([value])
     provider = ProviderMock()
@@ -222,6 +222,6 @@ async def test_16_whitespace(app_client, monkeypatch, value):
         summary["changed_rows"],
         summary["non_conformant_values"],
     ]
-    print(f"16 source={value!r} actual={actual!r} provider_calls={len(provider.contexts)}")
+
     assert provider.contexts == []
     assert actual == [value, value, value, False, True, value, 0, 0]

@@ -1,7 +1,6 @@
 """Red/green probes for accepted job durability and the documented export inventory."""
 
 import asyncio
-import json
 from io import BytesIO
 from zipfile import ZipFile
 
@@ -12,6 +11,7 @@ from src.app import dependencies
 from src.persistence.harmonization_job_store import load_harmonization_job
 from src.storage import WorkflowFile, WorkflowNotFoundError
 from tests.conftest import confirm_mapping_choices, upload_content
+from tests.review_package import ReviewPackage
 from tests.test_programmatic_harmonization_api import (
     _API_KEY,
     _PROGRAMMATIC_USER,
@@ -22,7 +22,7 @@ pytestmark = pytest.mark.asyncio
 
 
 @pytest.mark.parametrize("fault", [False, True], ids=["control", "response-read-fault"])
-async def test_11_accepted_job_preserves_owner_upload_and_result(app_client, monkeypatch, fault):
+async def test_accepted_job_preserves_owner_upload_and_result(app_client, monkeypatch, fault):
     # Given a valid local API workflow whose worker is paused after admission.
     service = dependencies.get_harmonization_job_service()
     storage = dependencies.get_workflow_storage()
@@ -103,7 +103,7 @@ async def test_11_accepted_job_preserves_owner_upload_and_result(app_client, mon
             "poll_http": poll.status_code,
             "poll_terminal": terminal,
         }
-        print("FINDING11", json.dumps(observed, sort_keys=True))
+
         assert observed["owner_after_submit"] == _PROGRAMMATIC_USER.user_id, observed
         assert observed["durable_queued_after_submit"] == "queued", observed
         assert observed["durable_source_after_submit"] and scratch, observed
@@ -149,16 +149,11 @@ async def test_partial_audit_download(app_client, tmp_path, missing_history, mis
         storage._json_path(file_id, WorkflowFile.CDE_MAPPING).rename(tmp_path / "held-cde-mapping.json")
 
     # When the reviewer opens the summary and downloads its available files.
-    summary = await app_client.post("/stage-5/summary", json={"file_id": file_id, "prepare_download": True})
-    assert summary.status_code == 200, summary.text
-    body = summary.json()
-    response = await app_client.post(
-        "/stage-5/download", json={"file_id": file_id, "export_reference": body.get("export_reference")}
-    )
+    review = ReviewPackage.read(await app_client.post("/stage-5/review", json={"file_id": file_id}))
+    body = review.summary
 
     # Then the ZIP contains the reviewed data and exactly the recoverable audit files.
-    assert response.status_code == 200
-    with ZipFile(BytesIO(response.content)) as archive:
+    with ZipFile(BytesIO(review.archive)) as archive:
         names = archive.namelist()
         (dataset,) = [name for name in names if name.endswith(".csv")]
         assert archive.read(dataset).decode().splitlines() == ["diagnosis", "Lung Cancer"]
@@ -177,3 +172,35 @@ async def test_partial_audit_download(app_client, tmp_path, missing_history, mis
             assert ("column mapping" in warning) == missing_mapping
             assert "run the workflow again" in warning
         assert set(names) == expected
+
+
+@pytest.mark.parametrize("committed", [False, True], ids=["before-job-write", "lost-write-receipt"])
+async def test_submission_error_cleans_up_only_a_confirmed_unaccepted_job(app_client, monkeypatch, committed):
+    # Given a job store that can lose the request or its receipt at the durable acceptance boundary.
+    storage = dependencies.get_workflow_storage()
+    write = storage.write_json
+    affected = []
+    monkeypatch.setenv("DATA_CHORD_API_KEY", _API_KEY)
+
+    def fail_job_write(user, file_id, kind, data, expected_version=None):
+        if kind != WorkflowFile.STAGE_THREE_JOB:
+            return write(user, file_id, kind, data, expected_version)
+        affected.append(file_id)
+        if committed:
+            write(user, file_id, kind, data, expected_version)
+        raise OSError("job storage interrupted")
+
+    monkeypatch.setattr(storage, "write_json", fail_job_write)
+
+    # When a valid programmatic submission encounters the storage interruption.
+    with pytest.raises(OSError, match="job storage interrupted"):
+        await app_client.post("/api/v1/jobs/harmonize", content=_harmonization_payload(),
+                              headers={"content-type": "application/octet-stream", "x-api-key": _API_KEY})
+
+    # Then job and source survive a lost receipt, while rejected submissions release both stores.
+    [file_id] = affected
+    assert (dependencies.get_upload_storage().load(file_id) is not None) == committed
+    assert (storage._read_metadata(file_id) is not None) == committed
+    if committed:
+        assert load_harmonization_job(storage, _PROGRAMMATIC_USER, file_id).job.status.value == "queued"
+        assert storage.artifact_version(_PROGRAMMATIC_USER, file_id, WorkflowFile.ORIGINAL_UPLOAD) is not None

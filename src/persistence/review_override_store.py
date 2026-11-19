@@ -103,6 +103,8 @@ def save_review_overrides_state(
         current = ReviewOverrides.from_store(existing.data, file_id) if existing is not None else None
     except InvalidReviewOverridesError as exc:
         raise ReviewOverridesUnreadableError(f"Unreadable review overrides for {file_id}.") from exc
+    if current and current.run_id and run_id and current.run_id != run_id:
+        raise ReviewOverridesStoreConflictError(file_id)
     if current is None:
         saved = ReviewOverrides.from_snapshot(
             file_id=file_id,

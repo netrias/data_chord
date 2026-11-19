@@ -607,3 +607,9 @@ after the migrated workflows pass the current app's readers and live checks.
 Verify the exact running image, login, CSV and XLSX workflows, edits, downloads,
 old-workflow reopening, and cross-user access denial. A successful ECS health
 check alone does not verify this migration.
+
+
+During shutdown the job service gives cancelled workers five seconds to finish. A synchronous
+provider can continue using its private files after that wait. The worker releases them when the
+provider returns. A forced container stop ends the process and its ephemeral storage. An accepted
+job interrupted before publication is recoverable through the existing lease-expiry path.

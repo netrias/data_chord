@@ -5,7 +5,6 @@ from __future__ import annotations
 import csv
 import hashlib
 import shutil
-import tempfile
 from collections.abc import AsyncGenerator, Generator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -409,13 +408,12 @@ def store_test_harmonization_manifest(
     rows: list[dict[str, Any]],
 ) -> Path:
     """Create complete Stage 3 evidence through the production storage boundaries."""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_path = Path(temp_dir) / f"{file_id}_test_manifest.parquet"
-        create_test_manifest_parquet(temp_path, rows)
-        stored_path = storage.save_harmonization_manifest(file_id, temp_path)
+    stored_path = storage._base_dir / f"{file_id}_fixture.parquet"
+    create_test_manifest_parquet(stored_path, rows)
     _seed_test_workflow_state(file_id, rows)
-    harmonized_path = storage.load_harmonized_path(file_id)
-    if harmonized_path is None:
+    meta = storage.load(file_id)
+    harmonized_path = storage.harmonized_path_for(file_id, meta.saved_path) if meta else None
+    if harmonized_path is None or not harmonized_path.exists():
         _store_test_harmonization_manifest(file_id, stored_path)
     elif _store_test_stage_three_artifacts(file_id, harmonized_path, stored_path):
         _store_test_completed_stage_three_job(file_id)

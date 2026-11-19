@@ -143,16 +143,6 @@ def _copy_file_atomic(source: Path, destination: Path) -> None:
         temp_path.unlink(missing_ok=True)
 
 
-def _remove_temp_file(source: Path, destination: Path) -> None:
-    """Clean up temporary SDK outputs after copying them into managed storage."""
-    if source.resolve() == destination.resolve():
-        return
-    try:
-        source.unlink()
-    except OSError:
-        logger.debug("Could not remove temp file", extra={"path": str(source)})
-
-
 def _harmonized_suffix_for(original_path: Path) -> str:
     return f".harmonized{original_path.suffix.lower() or '.csv'}"
 
@@ -198,7 +188,6 @@ class UploadStorage:
     def _ensure_workspace(self) -> None:
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._meta_dir.mkdir(parents=True, exist_ok=True)
-        self._manifest_dir.mkdir(parents=True, exist_ok=True)
         self._harmonized_dir.mkdir(parents=True, exist_ok=True)
 
     async def store(
@@ -334,19 +323,6 @@ class UploadStorage:
         self._write_metadata(meta)
         return meta
 
-    def restore_harmonization_manifest(self, file_id: str, source_path: Path) -> Path:
-        destination = self._manifest_dir / f"{file_id}_harmonization.parquet"
-        if source_path.resolve() != destination.resolve():
-            _copy_file_atomic(source_path, destination)
-        return destination
-
-    def restore_harmonized_output(self, file_id: str, original_path: Path, source_path: Path) -> Path:
-        destination = self.harmonized_path_for(file_id, original_path)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        if source_path.resolve() != destination.resolve():
-            _copy_file_atomic(source_path, destination)
-        return destination
-
     def select_sheet(self, file_id: str, sheet_name: str | None) -> UploadedFileMeta:
         meta = self.load(file_id)
         if meta is None:
@@ -358,27 +334,8 @@ class UploadStorage:
         self._write_metadata(updated)
         return updated
 
-    def save_harmonization_manifest(self, file_id: str, manifest_path: Path) -> Path:
-        destination = self._manifest_dir / f"{file_id}_harmonization.parquet"
-        if manifest_path.resolve() != destination.resolve():
-            _copy_file_atomic(manifest_path, destination)
-        _remove_temp_file(manifest_path, destination)
-        logger.info("Stored harmonization manifest", extra={"file_id": file_id, "path": str(destination)})
-        return destination
-
-    def load_harmonization_manifest_path(self, file_id: str) -> Path | None:
-        path = self._manifest_dir / f"{file_id}_harmonization.parquet"
-        return path if path.exists() else None
-
     def harmonized_path_for(self, file_id: str, original_path: Path) -> Path:
         return self._harmonized_dir / f"{file_id}{_harmonized_suffix_for(original_path)}"
-
-    def load_harmonized_path(self, file_id: str) -> Path | None:
-        meta = self.load(file_id)
-        if meta is None:
-            return None
-        path = self.harmonized_path_for(file_id, meta.saved_path)
-        return path if path.exists() else None
 
     def delete_workflow_files(self, file_id: DatasetWorkflowId) -> None:
         """Delete exact scratch paths for one validated workflow identity."""

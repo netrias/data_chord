@@ -10,7 +10,6 @@ from typing import BinaryIO
 
 from netrias_client import TabularFormat, dataset_from_rows, write_tabular
 
-from src.app.harmonization_job_state import HarmonizationCapacityError
 from src.app.harmonization_jobs import (
     HarmonizationJobRequest,
     HarmonizationJobService,
@@ -19,7 +18,7 @@ from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, new_dataset_workflow_id
 from src.domain.manifest import ColumnMappingManifest
 from src.domain.workflow_state import ConfirmedMappingChoices, WorkflowState
-from src.persistence.harmonization_job_store import LoadedHarmonizationJob
+from src.persistence.harmonization_job_store import LoadedHarmonizationJob, load_harmonization_job
 from src.persistence.workflow_artifacts import save_upload_artifacts, stage_upload
 from src.persistence.workflow_state_store import save_initial_workflow_state
 from src.storage import UploadStorage, UserContext, WorkflowStorage
@@ -116,15 +115,22 @@ async def submit_programmatic_harmonization(
             # would let request cancellation delete a job whose worker started.
             start_grace_seconds=0,
         )
-    except HarmonizationCapacityError:
-        _discard_rejected_workflow(
-            workflow_created=True,
-            workflow_storage=workflow_storage,
-            upload_storage=upload_storage,
-            user=user,
-            file_id=file_id,
-        )
+    except BaseException:
+        # A failed response can follow a committed job write. Delete only after a confirmed miss.
+        if _job_was_not_accepted(workflow_storage, user, file_id):
+            _discard_rejected_workflow(
+                workflow_created=True, workflow_storage=workflow_storage, upload_storage=upload_storage,
+                user=user, file_id=file_id,
+            )
         raise
+
+
+def _job_was_not_accepted(storage: WorkflowStorage, user: UserContext, file_id: DatasetWorkflowId) -> bool:
+    try:
+        return load_harmonization_job(storage, user, file_id) is None
+    except Exception:
+        logger.exception("Could not confirm job acceptance; preserving workflow", extra={"file_id": file_id})
+        return False
 
 
 def _discard_rejected_workflow(

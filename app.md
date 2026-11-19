@@ -70,3 +70,9 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for boundaries and state ownership,
 hosted deployment.
 
 If an audit file cannot be recovered, the summary names it. The ZIP includes the reviewed dataset, the available audit files, and a copy of that warning. A new workflow run may be needed to produce a complete audit.
+
+
+The Review page receives its summary and ZIP in one response. Each open tab keeps its own ZIP
+until the page reloads or closes. Download uses those bytes even if another reviewer has saved
+new edits. Refresh retrieves the current summary, warnings, and ZIP together. Callers that need
+the current package directly can post a file ID to `/stage-5/download`.

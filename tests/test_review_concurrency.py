@@ -1,4 +1,4 @@
-"""Isolated, deliberately red workflow concurrency proofs for findings 4, 6 and 7."""
+"""Concurrent changes to mapping plans, review decisions and exported revisions."""
 
 import asyncio
 import csv
@@ -16,6 +16,7 @@ from src.domain.harmonization import MatchFidelity
 from src.integrations.harmonize import FileHarmonizationService, TermHarmonizationResponse
 from src.storage import WorkflowFile
 from tests.conftest import create_csv_content, review_state_payload, upload_content
+from tests.review_package import ReviewPackage
 
 pytestmark = pytest.mark.asyncio
 
@@ -73,7 +74,7 @@ async def _export(client, file_id):
 
 
 @pytest.mark.parametrize("overlap", [False, True], ids=["control", "concurrent"])
-async def test_06_analysis_retains_later_confirmed_plan(app_client, monkeypatch, overlap):
+async def test_analysis_retains_later_confirmed_plan(app_client, monkeypatch, overlap):
     # Given an analyzed upload, synchronize a second analysis at the real recommender boundary.
     file_id = await _upload(app_client)
     entered, release = asyncio.Event(), asyncio.Event()
@@ -114,7 +115,7 @@ async def test_06_analysis_retains_later_confirmed_plan(app_client, monkeypatch,
 
 
 @pytest.mark.parametrize("competing", [False, True], ids=["control", "intervening-save"])
-async def test_07_start_runs_confirmed_plan(app_client, monkeypatch, competing):
+async def test_start_runs_confirmed_plan(app_client, monkeypatch, competing):
     # Given two views of the same analyzed file and a local deterministic provider.
     monkeypatch.setattr(deps, "_harmonize_service", FileHarmonizationService(ClinicalProvider()))
     file_id = await _upload(app_client)
@@ -155,7 +156,7 @@ def _review_headers(rows):
 
 
 @pytest.mark.parametrize("schedule", ["fresh", "during", "after"], ids=["control", "during-rerun", "after-rerun"])
-async def test_04_old_review_cannot_change_new_run(app_client, monkeypatch, schedule):
+async def test_old_review_cannot_change_new_run(app_client, monkeypatch, schedule):
     # Given a completed diagnosis run and the first-save precondition returned to its reviewer.
     monkeypatch.setattr(deps, "_harmonize_service", FileHarmonizationService(ClinicalProvider()))
     file_id = await _upload(app_client)
@@ -257,13 +258,9 @@ async def test_reviewed_export_survives_audit_loss_and_partial_export_keeps_manu
     }
     saved = await app_client.post("/stage-4/overrides", headers=_review_headers(rows), json=payload)
     assert saved.status_code == 200
-    request = {"file_id": file_id, "prepare_download": True}
-    complete = await app_client.post("/stage-5/summary", json=request)
-    assert complete.status_code == 200
-    reference = complete.json()["export_reference"]
-    assert [item["value"] for item in complete.json()["non_conformant_items"]] == ["X"]
-    second = await app_client.post("/stage-5/summary", json=request)
-    assert second.json()["export_reference"] == reference
+    request = {"file_id": file_id}
+    complete = ReviewPackage.read(await app_client.post("/stage-5/review", json=request))
+    assert [item["value"] for item in complete.summary["non_conformant_items"]] == ["X"]
 
     # When the durable transformation history becomes unavailable before downloading.
     storage = deps.get_workflow_storage()
@@ -271,25 +268,15 @@ async def test_reviewed_export_survives_audit_loss_and_partial_export_keeps_manu
         deps.get_user_context(), file_id, WorkflowFile.HARMONIZATION_MANIFEST_BASE
     ) as path:
         path.rename(tmp_path / "held-manifest.parquet")
-    old = await app_client.post("/stage-5/download", json={"file_id": file_id, "export_reference": reference})
-    partial = await app_client.post("/stage-5/summary", json=request)
-    assert partial.status_code == 200, partial.text
-    latest = await app_client.post(
-        "/stage-5/download", json={"file_id": file_id, "export_reference": partial.json()["export_reference"]}
-    )
-    denied = await app_client.post(
-        "/stage-5/download",
-        headers={"X-Data-Chord-User-ID": "other"},
-        json={"file_id": file_id, "export_reference": reference},
-    )
+    latest = ReviewPackage.read(await app_client.post("/stage-5/review", json=request))
+    denied = await app_client.post("/stage-5/review", headers={"X-Data-Chord-User-ID": "other"}, json=request)
 
-    # Then both ZIPs preserve the manual decision, only the older ZIP has history, and only the owner can read it.
-    assert old.status_code == latest.status_code == 200
+    # Then the first response retains the complete ZIP, the new one warns, and access still requires ownership.
     assert denied.status_code in {403, 404}
-    assert partial.json()["history_available"] is False
-    assert partial.json()["non_conformant_items"] == complete.json()["non_conformant_items"]
-    for reply, has_history in [(old, True), (latest, False)]:
-        with zipfile.ZipFile(io.BytesIO(reply.content)) as bundle:
+    assert latest.summary["history_available"] is False
+    assert latest.summary["non_conformant_items"] == complete.summary["non_conformant_items"]
+    for reply, has_history in [(complete, True), (latest, False)]:
+        with zipfile.ZipFile(io.BytesIO(reply.archive)) as bundle:
             (name,) = [n for n in bundle.namelist() if n.endswith(".csv")]
             assert list(csv.reader(io.StringIO(bundle.read(name).decode()))) == [["reviewed"], ["X"]]
             assert ("AUDIT-WARNING.txt" in bundle.namelist()) is not has_history

@@ -248,7 +248,6 @@ async def test_worker_with_superseded_plan_cannot_publish_scratch_results(
         job = job_response.json()
 
     assert job["status"] == "failed"
-    assert dependencies.get_upload_storage().load_harmonized_path(file_id) is None
     workflow_storage = dependencies.get_workflow_storage()
     user = dependencies.get_user_context()
     for kind in (WorkflowFile.HARMONIZED_OUTPUT, WorkflowFile.HARMONIZATION_MANIFEST_BASE):

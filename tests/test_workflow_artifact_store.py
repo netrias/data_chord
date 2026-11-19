@@ -170,8 +170,7 @@ async def test_generated_artifacts_restore_into_new_scratch_space(tmp_path: Path
     manifest_path.write_bytes(b"fake parquet bytes")
     save_harmonized_artifacts(workflow_storage, user, meta.file_id, harmonized_path, manifest_path)
 
-    assert second_scratch.load_harmonized_path(meta.file_id) is None
-    assert second_scratch.load_harmonization_manifest_path(meta.file_id) is None
+    assert not any(path.is_file() for path in second_scratch._base_dir.rglob("*"))
 
     # When another operation opens the published artifacts.
     with (
@@ -183,7 +182,7 @@ async def test_generated_artifacts_restore_into_new_scratch_space(tmp_path: Path
         # Then it can read both files without populating the second scratch directory.
         assert output and output.read_bytes() == b"diagnosis\nbeta\n"
         assert manifest and manifest.read_bytes() == b"fake parquet bytes"
-        assert second_scratch.load_harmonized_path(meta.file_id) is None
+        assert not any(path.is_file() for path in second_scratch._base_dir.rglob("*"))
 
 
 async def test_durable_stage_three_artifacts_override_unpublished_scratch(tmp_path: Path) -> None:
@@ -196,10 +195,9 @@ async def test_durable_stage_three_artifacts_override_unpublished_scratch(tmp_pa
     save_upload_artifacts(workflow_storage, user, scratch, meta)
 
     output_path = scratch.harmonized_path_for(meta.file_id, meta.saved_path)
-    generated_manifest = tmp_path / "generated.parquet"
+    manifest_path = tmp_path / "generated.parquet"
     output_path.write_bytes(b"diagnosis\napproved\n")
-    generated_manifest.write_bytes(b"approved manifest")
-    manifest_path = scratch.save_harmonization_manifest(meta.file_id, generated_manifest)
+    manifest_path.write_bytes(b"approved manifest")
     save_harmonized_artifacts(workflow_storage, user, meta.file_id, output_path, manifest_path)
 
     output_path.write_bytes(b"diagnosis\nstale worker\n")

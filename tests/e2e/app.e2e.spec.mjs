@@ -1,3 +1,4 @@
+import { fulfillReview, reviewParts } from './utils.mjs';
 import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -1248,23 +1249,6 @@ test('Stage 5 confirms start-over after successful download and clears browser w
    *        and confirm clears Data Chord workflow keys before returning to Stage 1.
    */
   await mockHarmonizeSuccess(page);
-  let downloadAttempts = 0;
-  await page.route('**/stage-5/download', async (route) => {
-    downloadAttempts += 1;
-    if (downloadAttempts === 1) {
-      await route.fulfill({ status: 500, body: 'Download failed' });
-      return;
-    }
-    await route.fulfill({
-      status: 200,
-      headers: {
-        'Content-Type': 'application/zip',
-        'Content-Disposition': 'attachment; filename="harmonized_data.zip"',
-      },
-      body: 'zip-bytes',
-    });
-  });
-
   const fileId = await uploadAndAnalyze(page, fileFixture('basic.csv'));
   await clickHarmonize(page);
   await expect(page.locator('#reviewButton')).toBeEnabled();
@@ -1294,6 +1278,15 @@ test('Stage 5 confirms start-over after successful download and clears browser w
   expect(keysBeforeStartOver.maxReachedStage).not.toBeNull();
   expect(keysBeforeStartOver.unrelatedKey).toBe('keep-me');
   await expect(page.locator('#uploadNavAction')).toHaveClass(/hidden/);
+
+  // Given the browser fails to create its first local download.
+  await page.evaluate(() => {
+    const create = URL.createObjectURL.bind(URL);
+    URL.createObjectURL = blob => {
+      URL.createObjectURL = create;
+      throw new Error('Download failed');
+    };
+  });
 
   // When: the download fails.
   await page.click('#downloadResults');
@@ -1349,13 +1342,12 @@ test('Stage 5 confirms start-over after successful download and clears browser w
   });
 });
 
-test('Stage 5 shows recovery detail for summary and download failures', async ({ page }) => {
+test('Stage 5 shows recovery detail when the reviewed download cannot be prepared', async ({ page }) => {
   const fileId = '0123456789abcdef0123456789abcdef';
   const recoveryDetail = 'The saved review state cannot be read. Return to Stage 3 and run harmonization again.';
-  const downloadDetail = 'The saved review state cannot be read. Return to Stage 3 and run harmonization again.';
 
-  // Given: the summary loads, but the next download reports an unreadable review state.
-  await page.route('**/stage-5/summary', async (route) => {
+  // Given: the review cannot be prepared because its saved state is unreadable.
+  await page.route('**/stage-5/review', async (route) => {
     await route.fulfill({
       status: 409,
       contentType: 'application/json',
@@ -1374,41 +1366,7 @@ test('Stage 5 shows recovery detail for summary and download failures', async ({
   const summaryRecoveryLink = summaryError.getByRole('link', { name: 'Return to Stage 3' });
   await expect(summaryRecoveryLink).toHaveAttribute('href', `/stage-3?file_id=${fileId}`);
 
-  // Given: the summary endpoint is healthy and the download endpoint reports server detail.
-  await page.unroute('**/stage-5/summary');
-  await page.route('**/stage-5/summary', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        history_available: true,
-        export_reference: "9df354a7-6998-4465-b1da-3a951ab7f859",
-        dataset: { filename: 'recovery.csv', tabular_format: 'csv', data_model_key: 'gc', external_version_number: '11.0.4' },
-        column_summaries: [],
-        term_mappings: [],
-        non_conformant_items: [],
-      }),
-    });
-  });
-  await page.reload();
-  await expect(page.locator('#downloadResults')).toBeEnabled();
-  await page.route('**/stage-5/download', async (route) => {
-    await route.fulfill({
-      status: 409,
-      contentType: 'application/json',
-      body: JSON.stringify({ detail: downloadDetail }),
-    });
-  });
 
-  // When: the reviewer requests the download.
-  await page.locator('#downloadResults').click();
-
-  // Then: the download error uses the server detail and keeps recovery available.
-  const downloadError = page.locator('#downloadError');
-  await expect(downloadError).toBeVisible();
-  await expect(downloadError).toContainText(downloadDetail);
-  await expect(downloadError.getByRole('link', { name: 'Return to Stage 3' }))
-    .toHaveAttribute('href', `/stage-3?file_id=${fileId}`);
 });
 
 test('Stage 2 list opens a takeover on row click', async ({ page }) => {
@@ -2389,13 +2347,9 @@ test('Stage 5 aggregates change impact and keeps filters keyboard accessible', a
     timestamp: null,
     review_status: 'needs_attention',
   }];
-  await page.route('**/stage-5/summary', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
+  await page.route('**/stage-5/review', async (route) => {
+    await fulfillReview(route, {
         history_available: true,
-        export_reference: "9df354a7-6998-4465-b1da-3a951ab7f859",
         dataset: {
           filename: 'attention.csv',
           tabular_format: 'csv',
@@ -2462,7 +2416,6 @@ test('Stage 5 aggregates change impact and keeps filters keyboard accessible', a
             column: 'diagnosis', source_column_index: 1, value: 'Worse', original: 'Worse',
           },
         ],
-      }),
     });
   });
 
@@ -2556,18 +2509,13 @@ const _FLOW_COLUMNS = [
 const _FLOW_FILE_ID = '0123456789abcdef0123456789abcdef';
 
 const _mockFlowSummary = async (page, columns = _FLOW_COLUMNS) => {
-  await page.route('**/stage-5/summary', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
+  await page.route('**/stage-5/review', async (route) => {
+    await fulfillReview(route, {
         history_available: true,
-        export_reference: "9df354a7-6998-4465-b1da-3a951ab7f859",
         dataset: { filename: 'flow.csv', tabular_format: 'csv', data_model_key: 'gc', external_version_number: '11.0.4' },
         column_summaries: columns,
         term_mappings: [],
         non_conformant_items: [],
-      }),
     });
   });
 };
@@ -3033,7 +2981,7 @@ test('stage 5 advance waits for the latest override save', async ({ page }) => {
     legacyConformanceRequests += 1;
     await route.continue();
   });
-  await page.route('**/stage-5/summary', async (route) => {
+  await page.route('**/stage-5/review', async (route) => {
     summaryRequests += 1;
     await route.continue();
   });
@@ -3386,7 +3334,7 @@ test('Stage 4 keeps the workflow id when Review is clicked before rows load', as
   await expect(reviewLink).toHaveAttribute('href', `/stage-5?file_id=${fileId}`);
 
   // When: the user clicks Review before the Stage 4 rows request completes
-  const summaryRequestPromise = page.waitForRequest('**/stage-5/summary');
+  const summaryRequestPromise = page.waitForRequest('**/stage-5/review');
   await reviewLink.click();
   const summaryRequest = await summaryRequestPromise;
   releaseRows();
@@ -3395,7 +3343,7 @@ test('Stage 4 keeps the workflow id when Review is clicked before rows load', as
   const stageFiveUrl = new URL(page.url());
   expect(stageFiveUrl.pathname).toBe('/stage-5');
   expect(stageFiveUrl.searchParams.get('file_id')).toBe(fileId);
-  expect(summaryRequest.postDataJSON()).toEqual({ file_id: fileId, prepare_download: true });
+  expect(summaryRequest.postDataJSON()).toEqual({ file_id: fileId });
   await expect(page.locator('#certificateTitle')).toHaveText('basic.csv');
   await expect(page.locator('.change-flow__summary')).toBeVisible();
 });
@@ -3608,9 +3556,10 @@ test('history dialog separates current output from accessible decision history',
   await clickHarmonize(page);
   await expect(page.locator('#reviewButton')).toBeEnabled();
   seedHarmonization(fileId, { 0: { col_0001: 'Changed Value' } });
-  await page.route('**/stage-5/summary', async (route) => {
+  await page.route('**/stage-5/review', async (route) => {
     const response = await route.fetch();
-    const summary = await response.json();
+    const parts = await reviewParts(response);
+    const summary = JSON.parse(parts.get('summary'));
     for (const mapping of summary.term_mappings) {
       mapping.history.push({
         value: mapping.final_value,
@@ -3620,7 +3569,7 @@ test('history dialog separates current output from accessible decision history',
         review_status: 'not_checked',
       });
     }
-    await route.fulfill({ response, json: summary });
+    await fulfillReview(route, summary, parts.get('download'));
   });
 
   // Navigate to Stage 5

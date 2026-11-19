@@ -12,7 +12,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import NAMESPACE_URL, UUID, uuid5
 
 from netrias_client import (
     TabularDataset,
@@ -63,7 +62,7 @@ from src.stage_5_review_summary.schemas import (
     TermMapping,
     TransformationStep,
 )
-from src.storage import UploadedFileMeta, UploadStorage, UserContext, VersionToken, WorkflowFile, WorkflowStorage
+from src.storage import UploadedFileMeta, UploadStorage, UserContext, WorkflowFile, WorkflowStorage
 
 
 @dataclass(frozen=True)
@@ -84,16 +83,6 @@ class ReviewedInputs:
     @property
     def overrides(self) -> ReviewOverrides | None:
         return self.review.value if self.review else None
-
-    @property
-    def reference(self) -> UUID:
-        versions = self.ready.artifacts
-        inputs = [self.meta.file_id, self.ready.job.version, self.ready.workflow.version,
-                  versions.output, versions.manifest, versions.pv_manifest, versions.cde_mapping,
-                  self.review.version if self.review else None]
-        return uuid5(NAMESPACE_URL, "data-chord/export/v1/" + json.dumps([
-            value.value if isinstance(value, VersionToken) else value for value in inputs
-        ]))
 
     def check_current(self, storage: WorkflowStorage, user: UserContext) -> None:
         with performance_span("stage5.summary.ready_check"):
@@ -130,22 +119,40 @@ def _load_inputs(file_id: str, uploads: UploadStorage, storage: WorkflowStorage,
 
 def build_summary(
     *, file_id: str, upload_storage: UploadStorage, workflow_storage: WorkflowStorage, user: UserContext,
-    prepare_download: bool = False,
-) -> StageFiveSummaryResponse:
-    try:
-        return _summary_for_current_inputs(file_id, upload_storage, workflow_storage, user, prepare_download)
-    except HarmonizationChangedError:
-        if not prepare_download:
-            raise
-    # A concurrent save can complete while we prepare a download. Capture the new review once.
-    return _summary_for_current_inputs(file_id, upload_storage, workflow_storage, user, prepare_download)
-
-
-def _summary_for_current_inputs(
-    file_id: str, upload_storage: UploadStorage, workflow_storage: WorkflowStorage, user: UserContext,
-    prepare_download: bool,
 ) -> StageFiveSummaryResponse:
     inputs = _load_inputs(file_id, upload_storage, workflow_storage, user)
+    summary = _summary(inputs, workflow_storage, user, allow_partial=False)
+    inputs.check_current(workflow_storage, user)
+    return summary
+
+
+@dataclass(frozen=True)
+class PreparedReview:
+    summary: StageFiveSummaryResponse
+    download: DownloadPackage
+
+
+def prepare_review(file_id: str, uploads: UploadStorage, storage: WorkflowStorage, user: UserContext) -> PreparedReview:
+    try:
+        return _capture_review(file_id, uploads, storage, user)
+    except HarmonizationChangedError:
+        # A concurrent save can finish during export. Retry once before asking for a refresh.
+        return _capture_review(file_id, uploads, storage, user)
+
+
+def _capture_review(
+    file_id: str, uploads: UploadStorage, storage: WorkflowStorage, user: UserContext,
+) -> PreparedReview:
+    inputs = _load_inputs(file_id, uploads, storage, user)
+    summary = _summary(inputs, storage, user, allow_partial=True)
+    package = _package_inputs(inputs, storage, user)
+    inputs.check_current(storage, user)
+    summary.audit_warning = package.audit_warning
+    return PreparedReview(summary, package)
+
+
+def _summary(inputs: ReviewedInputs, workflow_storage: WorkflowStorage, user: UserContext,
+             allow_partial: bool) -> StageFiveSummaryResponse:
     with performance_span("stage5.summary.pv_load"):
         pvs = column_pv_sets(
             workflow_storage, user, inputs.ready.workflow, (col.key for col in inputs.original.columns),
@@ -156,26 +163,12 @@ def _summary_for_current_inputs(
                 inputs.manifest, inputs.ready.workflow, inputs.meta, pvs, inputs.meta.uploaded_at,
                 inputs.overrides, len(inputs.original.rows),
             )
-        elif prepare_download:
+        elif allow_partial:
             response = _partial_summary(inputs, pvs, workflow_storage, user)
         else:
             raise HarmonizationNotReadyError(
                 "Harmonization results are incomplete. Return to Stage 3 and run harmonization again."
             )
-    if prepare_download:
-        reference = inputs.reference
-        cached = workflow_storage.load_reviewed_export(user, file_id, reference)
-        if cached is None:
-            package = _package_inputs(inputs, workflow_storage, user)
-            inputs.check_current(workflow_storage, user)
-            workflow_storage.save_reviewed_export(user, file_id, reference, package.content.getvalue())
-            response.audit_warning = package.audit_warning
-        else:
-            with zipfile.ZipFile(io.BytesIO(cached)) as archive:
-                if "AUDIT-WARNING.txt" in archive.namelist():
-                    response.audit_warning = archive.read("AUDIT-WARNING.txt").decode().strip()
-        response.export_reference = reference
-    inputs.check_current(workflow_storage, user)
     return response
 
 

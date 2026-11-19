@@ -18,7 +18,6 @@ from enum import Enum
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Protocol
-from uuid import UUID
 
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_value
 
@@ -239,10 +238,6 @@ class WorkflowStorage(Protocol):
         dataset_workflow_id: DatasetWorkflowId,
     ) -> None: ...
 
-    def load_reviewed_export(self, user: UserContext, file_id: str, reference: UUID) -> bytes | None: ...
-
-    def save_reviewed_export(self, user: UserContext, file_id: str, reference: UUID, content: bytes) -> None: ...
-
     def read_json(self, user: UserContext, file_id: str, kind: WorkflowFile) -> StoredJson | None: ...
 
     def write_json(
@@ -327,28 +322,6 @@ class LocalWorkflowStorage:
         with self._workflow_lock(dataset_workflow_id):
             self._require_access_locked(user, dataset_workflow_id)
             shutil.rmtree(self._path_for_workflow(dataset_workflow_id))
-
-    def load_reviewed_export(self, user: UserContext, file_id: str, reference: UUID) -> bytes | None:
-        with self._workflow_lock(file_id):
-            self._require_access_locked(user, file_id)
-            path = self._path_for_workflow(file_id) / "exports" / reference.hex
-            return path.read_bytes() if path.exists() else None
-
-    def save_reviewed_export(self, user: UserContext, file_id: str, reference: UUID, content: bytes) -> None:
-        with self._workflow_lock(file_id):
-            self._require_access_locked(user, file_id)
-            path = self._path_for_workflow(file_id) / "exports" / reference.hex
-            if path.exists():
-                return
-            path.parent.mkdir(exist_ok=True)
-            with NamedTemporaryFile(dir=path.parent, delete=False) as output:
-                temp = Path(output.name)
-                try:
-                    output.write(content)
-                    output.flush()
-                    temp.replace(path)
-                finally:
-                    temp.unlink(missing_ok=True)
 
     def read_json(self, user: UserContext, file_id: str, kind: WorkflowFile) -> StoredJson | None:
         self._require_json_kind(kind)

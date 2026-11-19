@@ -22,6 +22,7 @@ dependencies = [
     "urllib3>=2.8.0",  # PYSEC-2026-4175 through PYSEC-2026-4177
     "agent-experiment",
     "defusedxml>=0.7.1",
+    "lxml>=6.1.3",
 ]
 
 [project.optional-dependencies]
@@ -42,6 +43,7 @@ dev = [
     "filelock>=3.20.1",  # CVE-2025-68146 (via virtualenv/pre-commit)
     "virtualenv>=21.14.12",  # patched pip seed; includes PYSEC-2026-4011 through PYSEC-2026-4014
     "vulture>=2.16",
+    "types-lxml>=2026.2.16",
 ]
 
 [tool.pytest.ini_options]

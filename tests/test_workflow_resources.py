@@ -3,7 +3,6 @@
 import asyncio
 import errno
 import io
-import json
 import threading
 import zipfile
 from dataclasses import replace
@@ -66,12 +65,16 @@ def scratch_patch(app_client):
         yield patch
 
 
-async def test_hosted_scratch(app_client, temp_storage, scratch_patch, tmp_path):
+async def test_completed_hosted_workflows_release_temporary_space(app_client, temp_storage, scratch_patch, tmp_path):
     # Given a hosted app with the real S3 adapter, synthetic completed jobs and one current upload.
     s3 = S3WorkflowStorage("offline", FakeS3Client())
     scratch_patch.setattr(dependencies, "get_workflow_storage", lambda: s3)
     assert dependencies.get_runtime_profile().value == "hosted"
     content = b"primary_diagnosis\nDiabetes\n"
+    import tempfile
+    downloads = tmp_path / "system-temp"
+    downloads.mkdir()
+    scratch_patch.setattr(tempfile, "tempdir", str(downloads))
     # Fixed, pre-calibrated logical quota for this small fixture; observe actual scratch use at each write.
     capacity = 10_040
     root = temp_storage._base_dir
@@ -110,25 +113,12 @@ async def test_hosted_scratch(app_client, temp_storage, scratch_patch, tmp_path)
         assert archive.read(name).splitlines() == content.splitlines()
     fresh_upload = await _upload(app_client, content)
     assert fresh_upload.status_code == 201
-    print(
-        "SCRATCH",
-        json.dumps(
-            {
-                "finished_bytes": samples,
-                "quota": capacity,
-                "next_upload_status": response.status_code,
-                "fresh_download": recovered.status_code,
-                "fresh_upload": fresh_upload.status_code,
-                "active_intact": True,
-                "configured_cleanup": dependencies.get_workflow_cleanup() is not None,
-            }
-        ),
-    )
     assert response.status_code == 201, response.text
     assert samples == [0, 0, 0]
+    assert list(downloads.iterdir()) == []
 
 
-async def test_summary_work(app_client, temp_storage, monkeypatch):
+async def test_summary_scales_with_edits_and_keeps_health_responsive(app_client, temp_storage, monkeypatch):
     from src.stage_5_review_summary import router as routes
     from src.stage_5_review_summary import use_cases as uc
 
@@ -192,7 +182,7 @@ async def test_summary_work(app_client, temp_storage, monkeypatch):
             scoped.setattr(routes, "build_summary", partial(responsive_build, done))
             assert (await app_client.post("/stage-5/summary", json=payload)).status_code == 200
         records.append({"rows": size, "event_visits": count})
-    print("SUMMARY", json.dumps(records))
+
     assert records[-1]["event_visits"] <= 3 * records[-2]["event_visits"], records
 
 
@@ -232,7 +222,8 @@ async def test_failed_worker_scratch_releases_the_job_slot(app_client, temp_stor
     await _finish(app_client, next_file)
 
 
-async def test_worker_shutdown_keeps_files_until_the_provider_finishes(app_client, temp_storage, scratch_patch):
+@pytest.mark.parametrize("grace", [0.0, 5.0], ids=["return-while-draining", "finish-in-grace"])
+async def test_worker_shutdown_keeps_files_until_the_provider_finishes(app_client, temp_storage, scratch_patch, grace):
     # Given an S3 workflow whose provider is still reading the local source and writing its output.
     s3 = S3WorkflowStorage("offline", FakeS3Client())
     scratch_patch.setattr(dependencies, "get_workflow_storage", lambda: s3)
@@ -264,13 +255,17 @@ async def test_worker_shutdown_keeps_files_until_the_provider_finishes(app_clien
     assert started.is_set()
 
     # When shutdown cancels the worker while the provider holds both files.
-    shutdown = asyncio.create_task(dependencies.get_harmonization_job_service().shutdown())
+    service = dependencies.get_harmonization_job_service()
+    workers = list(service._tasks.values())
+    shutdown = asyncio.create_task(service.shutdown(grace_seconds=grace))
     try:
         await asyncio.sleep(0.02)
-        assert not shutdown.done()
+        assert shutdown.done() == (grace == 0)
+        assert source_paths[0].read_bytes() == content
     finally:
         release.set()
         await asyncio.wait_for(shutdown, timeout=5)
+        await asyncio.gather(*workers, return_exceptions=True)
 
     # Then the provider finished its file I/O before cleanup reclaimed the workspace and the source.
     assert observed == [content]

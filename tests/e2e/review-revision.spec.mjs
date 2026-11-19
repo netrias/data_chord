@@ -3,7 +3,7 @@ import path from 'node:path';
 import AdmZip from 'adm-zip';
 import { e2eEnv } from './runtime-env.mjs';
 import { test, expect } from '@playwright/test';
-import { uploadAndAnalyzeReal, fileFixture, clickHarmonize, parseDownloadedCsv } from './utils.mjs';
+import { uploadAndAnalyzeReal, fileFixture, clickHarmonize, parseDownloadedCsv, reviewParts } from './utils.mjs';
 
 const warning = '#conformanceWarningDialog';
 const reviewLink = '.progress-tracker [data-stage="review"] a';
@@ -23,23 +23,20 @@ async function start(page) {
 }
 
 async function summary(page, click) {
-  const response = waitPost(page, '/stage-5/summary');
+  const response = waitPost(page, '/stage-5/review');
   await click();
   const value = await response;
   expect(value.status()).toBe(200);
   await expect(page.locator('#changesTableSection')).toBeVisible();
-  return value.json();
+  return JSON.parse((await reviewParts(value)).get('summary'));
 }
 
 async function downloadArchive(page) {
   const download = page.waitForEvent('download');
-  const response = waitPost(page, '/stage-5/download');
   await page.click('#downloadResults');
   const archive = await download;
   const archivePath = await archive.path();
   expect(archive.suggestedFilename()).toMatch(/\.zip$/);
-  const r = await response;
-  expect(r.status()).toBe(200);
   return fs.readFile(archivePath);
 }
 
@@ -75,9 +72,11 @@ test('8. stale summary does not export newly nonconforming data without review',
   await expect(reviewer.locator(warning)).toContainText(term);
   expect(latest.non_conformant_items.map(item => item.value)).toEqual([term]);
 
-  // Then A downloads the reviewed value until refreshing the same tab.
+  // Then A can download the reviewed bytes even while offline, and refreshing loads B's revision.
+  await context.setOffline(true);
   expect(await uiDownload(page)).toEqual(['Breast Cancer',correction,'Diabetes']);
   await expect(page.locator(warning)).toBeHidden();
+  await context.setOffline(false);
   const refreshed = await summary(page, () => page.reload());
   expect(refreshed.non_conformant_items.map(item => item.value)).toEqual([term]);
   await expect(page.locator(warning)).toContainText(term);
@@ -104,7 +103,7 @@ for (const target of ['forward', 'failed save', 'tracker']) {
     // When the reviewer selects a permissible value and immediately uses the available navigation control.
     await card(page).locator('.pv-combobox-link').click();
     const next = target === 'tracker' ? reviewLink : '#stageFiveButton';
-    const completion = target === 'failed save' ? waitPost(page,'/stage-4/overrides') : waitPost(page,'/stage-5/summary');
+    const completion = target === 'failed save' ? waitPost(page,'/stage-4/overrides') : waitPost(page,'/stage-5/review');
     await page.locator('.pv-selection-option[data-value="Carcinoma NOS"]').click();
     await expect(card(page).locator('.pv-combobox-link')).toHaveText(correction);
     await page.locator(next).click();
@@ -113,14 +112,14 @@ for (const target of ['forward', 'failed save', 'tracker']) {
       expect(completed.status()).toBe(503);
       await expect(page).toHaveURL(/stage-4/);
       await expect(card(page).locator('.pv-combobox-link')).toHaveText(correction);
-      const retry = waitPost(page,'/stage-5/summary');
+      const retry = waitPost(page,'/stage-5/review');
       await page.click('#stageFiveButton');
       completed = await retry;
     }
 
     // Then the persisted row, the summary and downloaded cell must each contain the reviewer's decision.
     expect(completed.status()).toBe(200);
-    const result = await completed.json();
+    const result = JSON.parse((await reviewParts(completed)).get('summary'));
     const r = await page.request.post('/stage-4/rows', {data:{file_id:id}});
     const saved = (await r.json()).reviewState?.overrides?.['2']?.col_0001?.human_value ?? null;
     if (result.non_conformant_items.length) await page.click('#conformanceProceedButton');

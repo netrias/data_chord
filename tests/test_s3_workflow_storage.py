@@ -548,7 +548,6 @@ def _client_error(code: str) -> ClientError:
 
 def test_deleting_workflow_removes_all_pages_of_reviewed_exports(monkeypatch: pytest.MonkeyPatch) -> None:
     # Given two isolated workflows and a storage client that returns one key per page.
-    from uuid import UUID
     client = FakeS3Client()
     storage = S3WorkflowStorage("test", client)
     user = UserContext("reviewer")
@@ -556,7 +555,7 @@ def test_deleting_workflow_removes_all_pages_of_reviewed_exports(monkeypatch: py
     for workflow in (first, second):
         storage.create_workflow(user, workflow)
         for number in range(3):
-            storage.save_reviewed_export(user, workflow, UUID(int=number), bytes([number]))
+            client.put_object(Key=storage._workflow_key(workflow, "old-files", str(number)), Body=bytes([number]))
     def first_page(Bucket: str, Prefix: str, ContinuationToken: str = "") -> dict[str, object]:
         assert Bucket == storage.bucket
         keys = sorted(key for key in client.objects if key.startswith(Prefix) and key > ContinuationToken)
@@ -570,7 +569,7 @@ def test_deleting_workflow_removes_all_pages_of_reviewed_exports(monkeypatch: py
     # Then all its exports are gone and the other workflow still has all three.
     assert not any(first in key for key in client.objects)
     for number in range(3):
-        assert storage.load_reviewed_export(user, second, UUID(int=number)) == bytes([number])
+        assert client.objects[storage._workflow_key(second, "old-files", str(number))][0] == bytes([number])
 
 
 def test_overlapping_artifact_readers_clean_up_independently(tmp_path: Path) -> None:
