@@ -56,6 +56,45 @@ middleware. `src/app/dependencies.py` constructs concrete services.
 | `src/storage` | Authorization, artifact naming, version checks, local/S3 parity | Stage behavior |
 | `src/shared/static` | Small browser primitives used by several stages | Feature-specific UI behavior |
 
+## Optional reference-model nodes
+
+`ReferenceModel` keeps one `CDEInfo` and one permissible-value set per CDE key.
+A CDE can also have optional `CdeNodeRelation` values:
+
+```python
+from src.domain.cde import CDEInfo
+from src.domain.cde_node_relation import CdeNodeRelation, NodeName
+
+stage = CDEInfo(
+    cde_id=42,
+    cde_key="stage",
+    description="Shared stage definition",
+    node_relations=(
+        CdeNodeRelation(NodeName("diagnosis"), source_node_cde_id=2, is_required=True),
+        CdeNodeRelation(NodeName("sample"), source_node_cde_id=7, is_required=False),
+    ),
+)
+```
+
+The publisher supplies the CDE-wide ID separately from source relationship
+IDs. Node order and names do not select or generate the CDE-wide ID or
+description. A relationship may hold its own description, source data-type
+label, required flag, and key flag. These fields describe that node's use of
+the CDE; the approved values remain shared. Each CDE permits at most one
+relationship per node, and relationships have stable node-name order.
+
+`ReferenceModel.nodes` is a set of `NodeName` values. It includes the names
+from CDE relationships and any explicitly supplied nodes with no CDEs. Omitting
+all node metadata preserves existing constructors and behavior. Type refinement
+changes only the CDE's harmonization type and preserves its relationships.
+
+This is the shared domain foundation for node-aware adapters. The current JSON,
+SQLite, and DynamoDB publication formats do not persist node metadata yet. They
+reject an entire node-bearing batch before writing, using
+`ReferenceNodeMetadataUnsupportedError`, rather than silently dropping fields.
+Their existing schemas and node-free payloads remain unchanged. Node-aware
+publication and readback are separate work.
+
 ## Workflow
 
 ### 1. Upload and analyze

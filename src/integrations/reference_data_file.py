@@ -17,6 +17,7 @@ from src.domain.reference_data import (
     ReferenceModel,
     ReferenceModelNotFoundError,
 )
+from src.integrations.reference_publication import require_node_free_publication
 
 FILE_SCHEMA_VERSION = 1
 
@@ -43,6 +44,7 @@ class FileReferenceDataRepository:
 
 def save_reference_models(path: Path, models: Sequence[ReferenceModel]) -> None:
     """Write stable JSON that can rebuild any target environment."""
+    require_node_free_publication(models)
     model_payloads = [_model_to_payload(model) for model in sorted(models, key=_model_order)]
     payload = {
         "schema_version": FILE_SCHEMA_VERSION,

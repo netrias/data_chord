@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from src.domain.cde_node_relation import CdeNodeRelation
+
 NO_MAPPING_SENTINEL = "No Mapping"
 
 
@@ -16,7 +18,7 @@ class CdeType(StrEnum):
     explanatory card). Owner of assignment: ``cde_type_classification.classify_cde``.
     """
 
-    PV = "pv"                  # value must equal one of the CDE's permissible values
+    PV = "pv"  # value must equal one of the CDE's permissible values
     PASSTHROUGH = "passthrough"  # value is stored as-is; no validation
 
 
@@ -39,12 +41,20 @@ class DataModelSummary:
 
 @dataclass(frozen=True)
 class CDEInfo:
-    """Provider-independent CDE metadata."""
+    """One flat CDE with optional, unique node-specific relationships."""
 
     cde_id: int | None
     cde_key: str
     description: str | None
     cde_type: CdeType = field(default=CdeType.PV)
+    node_relations: tuple[CdeNodeRelation, ...] = ()
+
+    def __post_init__(self) -> None:
+        nodes = {relation.node for relation in self.node_relations}
+        if len(nodes) != len(self.node_relations):
+            raise ValueError(f"CDE node relationships must be unique per node: {self.cde_key}")
+        ordered = tuple(sorted(self.node_relations, key=lambda relation: relation.node))
+        object.__setattr__(self, "node_relations", ordered)
 
 
 @dataclass(frozen=True)

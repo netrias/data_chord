@@ -17,6 +17,7 @@ from src.domain.reference_data import (
     ReferenceModel,
     ReferenceModelNotFoundError,
 )
+from src.integrations.reference_publication import require_node_free_publication
 
 SCHEMA_VERSION = 1
 
@@ -120,6 +121,7 @@ class SqliteReferenceDataImporter:
         *,
         replace_existing: bool = False,
     ) -> None:
+        require_node_free_publication(models)
         _validate_import_batch(models)
         try:
             with closing(_connect(self._path)) as connection, connection:

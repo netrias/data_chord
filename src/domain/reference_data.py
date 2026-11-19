@@ -7,6 +7,7 @@ from typing import Protocol
 
 from src.domain.cde import CdeType, DataModelSummary
 from src.domain.cde_catalog import CdeCatalog
+from src.domain.cde_node_relation import NodeName
 from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.data_model_version_reference import DataModelVersionReference
 
@@ -27,14 +28,19 @@ class ReferenceDataCorruptError(ReferenceDataError):
     """Stored reference data failed its integrity checks."""
 
 
+class ReferenceNodeMetadataUnsupportedError(ReferenceDataError):
+    """The publication format cannot preserve optional node metadata yet."""
+
+
 @dataclass(frozen=True)
 class ReferenceModel:
-    """All CDE metadata and explicit value sets for one model version."""
+    """Flat CDEs and values, plus related and explicitly declared empty nodes."""
 
     version: DataModelVersionReference
     label: str
     catalog: CdeCatalog
     pvs: CdePvCatalog
+    nodes: frozenset[NodeName] = frozenset()
 
     def __post_init__(self) -> None:
         if not self.version.data_model_key.strip():
@@ -53,6 +59,11 @@ class ReferenceModel:
             if has_values != (cde.cde_type == CdeType.PV):
                 raise ValueError(f"Reference model CDE type does not match its values: {cde.cde_key}")
         object.__setattr__(self, "catalog", CdeCatalog.from_cdes(sorted(self.catalog, key=lambda cde: cde.cde_key)))
+        object.__setattr__(
+            self,
+            "nodes",
+            frozenset(self.nodes).union(relation.node for cde in self.catalog for relation in cde.node_relations),
+        )
 
 
 class ReferenceDataRepository(Protocol):
@@ -70,4 +81,5 @@ __all__ = [
     "ReferenceDataUnavailableError",
     "ReferenceModel",
     "ReferenceModelNotFoundError",
+    "ReferenceNodeMetadataUnsupportedError",
 ]

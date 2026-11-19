@@ -7,6 +7,8 @@ trust it.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from src.domain.cde import CDEInfo, CdeType
 from src.domain.cde_catalog import CdeCatalog
 from src.domain.cde_pv_catalog import CdePvCatalog
@@ -42,12 +44,5 @@ def refine_cde_types_from_pvs(
         if cde_type == cde.cde_type:
             refined.append(cde)
             continue
-        refined.append(
-            CDEInfo(
-                cde_id=cde.cde_id,
-                cde_key=cde.cde_key,
-                description=cde.description,
-                cde_type=cde_type,
-            )
-        )
+        refined.append(replace(cde, cde_type=cde_type))
     return CdeCatalog.from_cdes(refined)
