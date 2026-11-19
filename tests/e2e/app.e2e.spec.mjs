@@ -3456,6 +3456,10 @@ test('Stage 3 resumes a durable job and retries with only the workflow id', asyn
   // Then: the retry needs only the workflow id; model and mapping choices stay server-owned.
   await expect(page.locator('#reviewButton')).toBeEnabled();
   expect(harmonizePayload).toEqual({ file_id: currentFileId });
+  const verify = page.locator('.progress-tracker [data-stage="verify"] a');
+  await expect(verify).toHaveAttribute('href', `/stage-4?file_id=${currentFileId}&job_id=retry-job`);
+  await verify.click();
+  await expect(page).toHaveURL(new RegExp('job_id=retry-job'));
 });
 
 test('column tabs keep each source column and transformation separate', async ({ page }) => {

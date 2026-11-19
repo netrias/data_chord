@@ -1,7 +1,7 @@
 /** Stage 5 presents the current downloadable output and its separate decision history. */
 
 import {
-  bindReviewedJob,
+  bindJobToPage,
   buildNavUrl,
   initStepInstruction,
   setActiveStage,
@@ -600,7 +600,7 @@ const _fetchSummary = async () => {
       throw new Error('The reviewed download is incomplete. Refresh the page to try again.');
     }
     const data = JSON.parse(summary);
-    bindReviewedJob(response.headers.get('X-Harmonization-Job-Id'), 'review');
+    bindJobToPage(response.headers.get('X-Harmonization-Job-Id'), 'review');
     markTiming('stage5.summary.fetch.parsed', {
       column_count: data.column_summaries?.length ?? 0,
       term_mapping_count: data.term_mappings?.length ?? 0,

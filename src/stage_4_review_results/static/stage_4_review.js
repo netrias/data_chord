@@ -3,7 +3,7 @@
  * Delegates to review mode modules (column or row) based on user selection.
  * Manages state persistence, navigation, and user interactions.
  */
-import { bindReviewedJob, buildNavUrl, initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
+import { bindJobToPage, buildNavUrl, initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
 import { isValidFileId } from '/assets/shared/storage-keys.js';
 import { markAfterPaint, markTiming, measureTiming } from '/assets/shared/performance-timing.js';
 import {
@@ -237,7 +237,7 @@ const fetchRows = async () => {
       throw Object.assign(new Error(detail), { status: response.status });
     }
     const body = await response.json();
-    bindReviewedJob(body.job_id, 'verify');
+    bindJobToPage(body.job_id, 'verify');
     markTiming('stage4.rows.fetch.parsed', {
       column_count: body.columns?.length ?? 0,
     });

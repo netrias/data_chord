@@ -90,8 +90,8 @@ export function buildNavUrl(baseUrl) {
   return url.pathname + url.search;
 }
 
-/** Give a file-only review link the identity of the job that supplied its data. */
-export function bindReviewedJob(jobId, stage) {
+/** Keep this page and its tracker links on the job the server returned. */
+export function bindJobToPage(jobId, stage) {
   if (!jobId) return;
   const url = new URL(window.location.href);
   url.searchParams.set('job_id', jobId);
