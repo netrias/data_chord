@@ -1,10 +1,4 @@
-"""Strict DynamoDB storage for complete reference-model versions.
-
-Rows are stored per node-CDE placement, so the stored copy keeps the shape the
-source publishes and its row counts stay checkable against the publishing
-manifest. ``load_model`` collapses that to the flat view the application reads;
-``load_placements`` returns the stored form for verification and auditing.
-"""
+"""Read flat schema-2 CDEs and their node relationships from DynamoDB."""
 
 from __future__ import annotations
 
@@ -24,14 +18,13 @@ from boto3.dynamodb.types import Binary
 
 from src.domain.cde import DataModelSummary, DataModelVersionInfo
 from src.domain.data_model_version_reference import DataModelVersionReference
+from src.domain.reference_cdes import FlatReferenceModel, NodeCdeRelation, ReferenceCde
 from src.domain.reference_data import (
     ReferenceDataCorruptError,
     ReferenceDataUnavailableError,
     ReferenceModel,
     ReferenceModelNotFoundError,
 )
-from src.domain.reference_placements import CdePlacement, PlacedReferenceModel, PlacementKey
-from src.integrations import _dynamodb_reference_data_v1 as legacy
 
 SCHEMA_VERSION = 2
 MAX_UNCOMPRESSED_CHUNK_BYTES = 300 * 1024
@@ -72,8 +65,6 @@ class DynamoDbReferenceDataRepository:
         items = self._query_partition(_CATALOG_PK)
         if not items:
             return ()
-        if _required_int(items[0], "schema_version") == legacy.SCHEMA_VERSION:
-            return legacy.DynamoDbReferenceDataRepository(self._table).list_models()
         return _summaries_from_catalog(items)
 
     def load_model(self, version: DataModelVersionReference) -> ReferenceModel:
@@ -97,10 +88,7 @@ class DynamoDbReferenceDataRepository:
                     f"Reference model is not published: {version.data_model_key}/{version.external_version_number}"
                 )
             try:
-                if _required_int(items[0], "schema_version") == legacy.SCHEMA_VERSION:
-                    model = legacy.DynamoDbReferenceDataRepository(self._table).load_model(version)
-                else:
-                    model = _placed_from_items(version, items).collapse()
+                model = _flat_from_items(version, items).collapse()
             except ReferenceDataCorruptError:
                 raise
             except Exception as exc:
@@ -112,16 +100,15 @@ class DynamoDbReferenceDataRepository:
                     self._models.popitem(last=False)
                 return model
 
-    def load_placements(self, version: DataModelVersionReference) -> PlacedReferenceModel:
-        """The stored form, before any collapse. Every integrity rule runs here."""
-        partition = _model_partition(version)
-        items = self._query_partition(partition)
+    def load_cdes(self, version: DataModelVersionReference) -> FlatReferenceModel:
+        """Read the complete flat CDE form, including node-specific relationships."""
+        items = self._query_partition(_model_partition(version))
         if not items:
             raise ReferenceModelNotFoundError(
                 f"Reference model is not published: {version.data_model_key}/{version.external_version_number}"
             )
         try:
-            return _placed_from_items(version, items)
+            return _flat_from_items(version, items)
         except ReferenceDataCorruptError:
             raise
         except Exception as exc:
@@ -154,7 +141,7 @@ class DynamoDbReferenceDataRepository:
 
 
 def _summaries_from_catalog(items: list[Mapping[str, object]]) -> tuple[DataModelSummary, ...]:
-    """Validate the schema-version-2 catalog and return its model summaries."""
+    """Validate a complete catalog and return its model summaries."""
     by_sk = {_required_string(item, "sk"): item for item in items}
     if len(by_sk) != len(items):
         raise ReferenceDataCorruptError("Reference catalog contains duplicate rows")
@@ -232,36 +219,154 @@ def _catalog_payload(items: Sequence[Mapping[str, object]]) -> list[Mapping[str,
     )
 
 
-def _placed_from_items(
+def _flat_from_items(
     requested: DataModelVersionReference,
     items: list[Mapping[str, object]],
-) -> PlacedReferenceModel:
+) -> FlatReferenceModel:
+    """Decode flat rows without selecting a node's metadata for a CDE-wide field."""
     by_sk = _rows_by_sort_key(items)
     meta, import_seal = _model_markers(by_sk, requested)
-    node_rows, placement_rows, value_rows = _model_rows(by_sk)
-    unlisted = {node for node, _cde_key in placement_rows} - set(node_rows)
-    if unlisted:
-        raise ReferenceDataCorruptError(f"Reference placements name a node with no row: {min(unlisted)}")
-
-    model = PlacedReferenceModel(
-        version=requested,
-        label=_required_string(meta, "label"),
-        nodes=tuple(sorted(node_rows)),
-        placements=tuple(
-            _placement_from_metadata(key, metadata) for key, metadata in sorted(placement_rows.items())
-        ),
-        values={
-            cde_key: frozenset(_values_for_cde(cde_key, rows.metadata, rows.chunks))
-            for cde_key, rows in sorted(value_rows.items())
-        },
-    )
-    _check_node_rows(model, node_rows)
-    _check_model_counts(model, meta)
-    if _digest(_canonical_placed_payload(model)) != _required_string(meta, "digest"):
+    nodes = _flat_nodes(meta)
+    cde_rows = _flat_cde_rows(by_sk)
+    cdes = tuple(_flat_cde(requested, cde_key, rows) for cde_key, rows in sorted(cde_rows.items()))
+    try:
+        model = FlatReferenceModel(
+            version=requested,
+            label=_required_string(meta, "label"),
+            nodes=nodes,
+            cdes=cdes,
+        )
+    except ValueError as exc:
+        raise ReferenceDataCorruptError(str(exc)) from exc
+    expected = {
+        "node_count": len(model.nodes),
+        "node_cde_count": sum(len(cde.node_relations) for cde in model.cdes),
+        "cde_key_count": len(model.cdes),
+        "value_count": sum(len(cde.values) for cde in model.cdes),
+    }
+    for field, count in expected.items():
+        if _required_int(meta, field) != count:
+            raise ReferenceDataCorruptError(f"Reference {field.replace('_', ' ')} is invalid")
+    if _digest(_canonical_flat_payload(model)) != _required_string(meta, "digest"):
         raise ReferenceDataCorruptError("Reference model digest is invalid")
     if _required_string(import_seal, "digest") != _required_string(meta, "digest"):
         raise ReferenceDataCorruptError("Reference import seal does not match its model")
     return model
+
+
+def _flat_nodes(meta: Mapping[str, object]) -> tuple[str, ...]:
+    raw = meta.get("nodes")
+    if not isinstance(raw, list) or any(not isinstance(node, str) or not node.strip() for node in raw):
+        raise ReferenceDataCorruptError("Reference model nodes are invalid")
+    nodes = cast(list[str], raw)
+    if not nodes or len(nodes) != len(set(nodes)):
+        raise ReferenceDataCorruptError("Reference model nodes are invalid")
+    return tuple(nodes)
+
+
+def _flat_cde_rows(by_sk: Mapping[str, Mapping[str, object]]) -> dict[str, _ValueRows]:
+    """Group the CDE metadata and value chunks; reject all node-level row keys."""
+    metadata: dict[str, Mapping[str, object]] = {}
+    chunks: dict[str, list[Mapping[str, object]]] = {}
+    for sk, item in by_sk.items():
+        _validate_schema(item)
+        cde_key = _required_string(item, "cde_key")
+        prefix = _values_prefix(cde_key)
+        if sk == f"{prefix}#META":
+            metadata[cde_key] = item
+        elif sk.startswith(f"{prefix}#VALUES#"):
+            chunks.setdefault(cde_key, []).append(item)
+        else:
+            raise ReferenceDataCorruptError(f"Unknown reference row: {sk}")
+    if set(chunks) - set(metadata):
+        raise ReferenceDataCorruptError("Reference values exist for an unknown CDE")
+    return {key: _ValueRows(item, tuple(chunks.get(key, ()))) for key, item in metadata.items()}
+
+
+def _flat_cde(
+    version: DataModelVersionReference,
+    cde_key: str,
+    rows: _ValueRows,
+) -> ReferenceCde:
+    metadata = rows.metadata
+    cde_id = _required_int(metadata, "cde_id")
+    if cde_id != _generated_cde_id(version, cde_key):
+        raise ReferenceDataCorruptError(f"Reference CDE id is invalid: {cde_key}")
+    raw_relations = metadata.get("node_relations")
+    if not isinstance(raw_relations, list) or not raw_relations:
+        raise ReferenceDataCorruptError(f"Reference node relationships are invalid: {cde_key}")
+    relations = tuple(_flat_relation(version, cde_key, raw) for raw in cast(list[object], raw_relations))
+    return ReferenceCde(
+        cde_key=cde_key,
+        cde_id=cde_id,
+        values=frozenset(_values_for_cde(cde_key, metadata, rows.chunks)),
+        node_relations=relations,
+    )
+
+
+def _flat_relation(
+    version: DataModelVersionReference,
+    cde_key: str,
+    raw: object,
+) -> NodeCdeRelation:
+    if not isinstance(raw, Mapping):
+        raise ReferenceDataCorruptError(f"Reference node relationship is invalid: {cde_key}")
+    node_name = _required_string(raw, "node_name")
+    node_cde_id = _required_int(raw, "node_cde_id")
+    if node_cde_id != _generated_cde_id(version, cde_key, node_name):
+        raise ReferenceDataCorruptError(f"Reference node CDE id is invalid: {node_name}/{cde_key}")
+    source_node_cde_id = _required_string(raw, "source_node_cde_id")
+    if not source_node_cde_id.strip():
+        raise ReferenceDataCorruptError(f"Reference source node CDE id is invalid: {node_name}/{cde_key}")
+    description = _optional_string(raw, "description", cde_key)
+    data_type = _required_string(raw, "data_type")
+    if not data_type.strip():
+        raise ReferenceDataCorruptError(f"Reference data type is invalid: {node_name}/{cde_key}")
+    is_key, is_required = raw.get("is_key"), raw.get("is_required")
+    if not isinstance(is_key, bool) or not isinstance(is_required, bool):
+        raise ReferenceDataCorruptError(f"Reference node flags are invalid: {node_name}/{cde_key}")
+    return NodeCdeRelation(node_name, node_cde_id, source_node_cde_id, description, data_type, is_key, is_required)
+
+
+def _canonical_flat_payload(model: FlatReferenceModel) -> Mapping[str, object]:
+    """Canonical flat model data used for the publication digest."""
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "data_model_key": model.version.data_model_key,
+        "external_version_number": model.version.external_version_number,
+        "label": model.label,
+        "nodes": list(model.nodes),
+        "cdes": [
+            {
+                "cde_key": cde.cde_key,
+                "cde_id": cde.cde_id,
+                "values": sorted(cde.values),
+                "node_relations": [
+                    {
+                        "node_name": relation.node_name,
+                        "node_cde_id": relation.node_cde_id,
+                        "source_node_cde_id": relation.source_node_cde_id,
+                        "description": relation.description,
+                        "data_type": relation.data_type,
+                        "is_key": relation.is_key,
+                        "is_required": relation.is_required,
+                    }
+                    for relation in cde.node_relations
+                ],
+            }
+            for cde in model.cdes
+        ],
+    }
+
+
+def _generated_cde_id(version: DataModelVersionReference, cde_key: str, node_name: str | None = None) -> int:
+    """Generate a 63-bit ID from CDE identity, adding the node only for a relationship."""
+    parts = ["CDE", version.data_model_key, version.external_version_number]
+    if node_name is not None:
+        parts.append(node_name)
+    parts.append(cde_key)
+    digest = hashlib.sha256("|".join(parts).encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big") & 0x7FFFFFFFFFFFFFFF
 
 
 def _rows_by_sort_key(items: list[Mapping[str, object]]) -> dict[str, Mapping[str, object]]:
@@ -295,42 +400,6 @@ def _model_markers(
     return meta, import_seal
 
 
-def _model_rows(
-    by_sk: dict[str, Mapping[str, object]],
-) -> tuple[dict[str, Mapping[str, object]], dict[PlacementKey, Mapping[str, object]], dict[str, _ValueRows]]:
-    """Split a model's rows into its nodes, its per-placement metadata and its per-CDE values."""
-    node_rows: dict[str, Mapping[str, object]] = {}
-    placement_rows: dict[PlacementKey, Mapping[str, object]] = {}
-    value_metadata: dict[str, Mapping[str, object]] = {}
-    chunk_rows: dict[str, list[Mapping[str, object]]] = {}
-    for sk, item in by_sk.items():
-        _validate_schema(item)
-        node = _optional_string(item, "node", sk)
-        if node is not None and sk == _node_sort_key(node):
-            node_rows[node] = item
-            continue
-        cde_key = _required_string(item, "cde_key")
-        if node is not None:
-            if sk != f"{_placement_prefix((node, cde_key))}#META":
-                raise ReferenceDataCorruptError(f"Unknown reference row: {sk}")
-            placement_rows[(node, cde_key)] = item
-            continue
-        prefix = _values_prefix(cde_key)
-        if sk == f"{prefix}#META":
-            value_metadata[cde_key] = item
-        elif sk.startswith(f"{prefix}#VALUES#"):
-            chunk_rows.setdefault(cde_key, []).append(item)
-        else:
-            raise ReferenceDataCorruptError(f"Unknown reference row: {sk}")
-    if set(chunk_rows) - set(value_metadata):
-        raise ReferenceDataCorruptError("Reference values exist for an unknown CDE")
-    values = {
-        cde_key: _ValueRows(metadata=metadata, chunks=tuple(chunk_rows.get(cde_key, ())))
-        for cde_key, metadata in value_metadata.items()
-    }
-    return node_rows, placement_rows, values
-
-
 def _values_for_cde(
     cde_key: str,
     metadata: Mapping[str, object],
@@ -351,69 +420,6 @@ def _values_for_cde(
     if _digest(values) != _required_string(metadata, "digest"):
         raise ReferenceDataCorruptError(f"Reference value digest is invalid: {cde_key}")
     return values
-
-
-def _placement_from_metadata(key: PlacementKey, metadata: Mapping[str, object]) -> CdePlacement:
-    node, cde_key = key
-    label = f"{node}/{cde_key}"
-    raw_cde_id = metadata.get("cde_id")
-    return CdePlacement(
-        node=node,
-        cde_key=cde_key,
-        cde_id=None if raw_cde_id is None else _required_int(metadata, "cde_id"),
-        description=_optional_string(metadata, "description", label),
-        data_type=_optional_string(metadata, "data_type", label),
-        is_required=_optional_bool(metadata, "is_required", label),
-        is_key=_optional_bool(metadata, "is_key", label),
-    )
-
-
-def _cde_count_for_node(model: PlacedReferenceModel, node: str) -> int:
-    return sum(1 for placement in model.placements if placement.node == node)
-
-
-def _check_node_rows(model: PlacedReferenceModel, node_rows: Mapping[str, Mapping[str, object]]) -> None:
-    """A node's CDE count restates what the placements say, so it is checked, not trusted.
-
-    A count of zero is legitimate: a model can define a node that holds no CDEs.
-    """
-    for node, item in node_rows.items():
-        if _required_int(item, "cde_count") != _cde_count_for_node(model, node):
-            raise ReferenceDataCorruptError(f"Reference node CDE count is invalid: {node}")
-
-
-def _check_model_counts(model: PlacedReferenceModel, meta: Mapping[str, object]) -> None:
-    """Each count is stored and checked separately so one cannot mask another."""
-    expected = {
-        "node_count": len(model.nodes),
-        "cde_count": sum(_cde_count_for_node(model, node) for node in model.nodes),
-        "value_count": sum(len(values) for values in model.values.values()),
-    }
-    for field, actual in expected.items():
-        if _required_int(meta, field) != actual:
-            raise ReferenceDataCorruptError(f"Reference {field.replace('_', ' ')} is invalid")
-
-
-def _canonical_placed_payload(model: PlacedReferenceModel) -> Mapping[str, object]:
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "data_model_key": model.version.data_model_key,
-        "external_version_number": model.version.external_version_number,
-        "label": model.label,
-        "nodes": list(model.nodes),
-        "placements": [
-            ({
-                "node": placement.node,
-                "cde_key": placement.cde_key,
-                "cde_id": placement.cde_id,
-                "description": placement.description,
-                "data_type": placement.data_type,
-                "is_required": placement.is_required,
-            } | ({"is_key": placement.is_key} if placement.is_key is not None else {}))
-            for placement in model.placements
-        ],
-        "values": {cde_key: sorted(model.values[cde_key]) for cde_key in model.cde_keys},
-    }
 
 
 def _gunzip_values(payload: object, expected_size: int) -> list[str]:
@@ -454,17 +460,6 @@ def _model_partition(version: DataModelVersionReference) -> str:
     return f"MODEL#{_encode(version.data_model_key)}#VERSION#{_encode(version.external_version_number)}"
 
 
-def _placement_prefix(key: PlacementKey) -> str:
-    """Node leads the sort key so one node's rows read as a single range."""
-    node, cde_key = key
-    return f"NODE#{_encode(node)}#CDE#{_encode(cde_key)}"
-
-
-def _node_sort_key(node: str) -> str:
-    """A node's own row sorts directly above the placements that name it."""
-    return f"NODE#{_encode(node)}"
-
-
 def _values_prefix(cde_key: str) -> str:
     """Values sit outside the node prefix because they are stored once per CDE key."""
     return f"CDE#{_encode(cde_key)}"
@@ -495,15 +490,6 @@ def _optional_string(item: Mapping[str, object], field: str, label: str) -> str 
     return value
 
 
-def _optional_bool(item: Mapping[str, object], field: str, label: str) -> bool | None:
-    value = item.get(field)
-    if value is None:
-        return None
-    if not isinstance(value, bool):
-        raise ReferenceDataCorruptError(f"Reference CDE {field} is invalid: {label}")
-    return value
-
-
 def _required_sha256(item: Mapping[str, object], field: str) -> str:
     value = _required_string(item, field)
     if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
@@ -522,14 +508,10 @@ def _required_int(item: Mapping[str, object], field: str) -> int:
     raise ReferenceDataCorruptError(f"Reference field is invalid: {field}")
 
 
-ReferenceDataImporter = legacy.ReferenceDataImporter
-
-
 __all__ = [
     "DynamoDbReferenceDataRepository",
     "DynamoResource",
     "DynamoTable",
     "MAX_UNCOMPRESSED_CHUNK_BYTES",
-    "ReferenceDataImporter",
     "SCHEMA_VERSION",
 ]
