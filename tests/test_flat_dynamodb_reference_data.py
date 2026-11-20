@@ -27,13 +27,6 @@ class Table:
     items: dict[tuple[str, str], dict[str, object]] = field(default_factory=dict)
     query_calls: int = 0
 
-    def put_item(self, *, Item: Mapping[str, object], ConditionExpression: str | None = None) -> object:
-        raise AssertionError("A runtime reader must not write DynamoDB rows")
-
-    def get_item(self, *, Key: Mapping[str, object], ConsistentRead: bool) -> Mapping[str, object]:
-        row = self.items.get((str(Key["pk"]), str(Key["sk"])))
-        return {"Item": row} if row is not None else {}
-
     def query(self, **kwargs: object) -> dict[str, object]:
         self.query_calls += 1
         values = kwargs["ExpressionAttributeValues"]

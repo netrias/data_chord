@@ -24,7 +24,12 @@ from src.integrations.bedrock_cde_ranker import (
 )
 from src.integrations.cde_recommendation import CdeRecommendationAdapter
 from src.integrations.demo_harmonization_cache import DemoHarmonizationCache
-from src.integrations.dynamodb_harmonization_cache import DynamoDbHarmonizationCache
+from src.integrations.dynamodb_harmonization_cache import (
+    DynamoDbHarmonizationCache,
+)
+from src.integrations.dynamodb_harmonization_cache import (
+    DynamoResource as HarmonizationDynamoResource,
+)
 from src.integrations.dynamodb_reference_data import DynamoDbReferenceDataRepository, DynamoResource
 from src.integrations.harmonize import FileHarmonizationService, HarmonizeService, TermHarmonizationProvider
 from src.integrations.sqlite_reference_data import SqliteReferenceDataRepository
@@ -215,7 +220,7 @@ def get_harmonization_cache() -> HarmonizationCache:
         else:
             import boto3
 
-            resource = cast(DynamoResource, boto3.resource("dynamodb", region_name=get_aws_region()))
+            resource = cast(HarmonizationDynamoResource, boto3.resource("dynamodb", region_name=get_aws_region()))
             _harmonization_cache = DynamoDbHarmonizationCache(resource.Table(get_harmonization_cache_table_name()))
     return _harmonization_cache
 

@@ -35,15 +35,11 @@ _MAX_CACHED_MODELS = 4
 
 
 class DynamoTable(Protocol):
-    def put_item(self, *, Item: Mapping[str, object], ConditionExpression: str | None = None) -> object: ...
-
-    def get_item(self, *, Key: Mapping[str, object], ConsistentRead: bool) -> Mapping[str, object]: ...
-
     def query(self, **kwargs: object) -> Mapping[str, object]: ...
 
 
 class DynamoResource(Protocol):
-    def Table(self, table_name: str) -> DynamoTable: ...  # noqa: N802 - boto3 framework name
+    def Table(self, _table_name: str) -> DynamoTable: ...  # noqa: N802 - boto3 framework name
 
 
 @dataclass(frozen=True)
