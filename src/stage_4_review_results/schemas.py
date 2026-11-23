@@ -62,6 +62,7 @@ class SaveOverridesRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     file_id: DatasetWorkflowIdField
+    job_id: str | None = None
     overrides: dict[str, dict[str, CellOverrideSchema]]
     review_state: ReviewStateSchema
 
@@ -77,12 +78,14 @@ class StageFourResultsRequest(BaseModel):
     """Request payload for loading Stage 4 harmonized review rows."""
 
     file_id: DatasetWorkflowIdField
+    job_id: str | None = None
 
 
 class RowContextRequest(BaseModel):
     """Request payload for fetching original row context."""
 
     file_id: DatasetWorkflowIdField
+    job_id: str | None = None
     row_indices: list[Annotated[int, Field(ge=0)]] = Field(max_length=10000)
 
 
@@ -133,6 +136,7 @@ class ColumnReviewData(BaseModel):
 class StageFourResultsResponse(BaseModel):
     """Column-centric response for Stage 4 review UI."""
 
+    job_id: str
     columns: list[ColumnReviewData]
     columnPVs: dict[str, list[str]] = {}
     totalOriginalRows: int = 0

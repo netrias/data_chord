@@ -58,6 +58,7 @@ def test_cleanup_deletes_least_recently_accessed_workflow_after_upload(tmp_path:
         scratch_dir / "harmonized" / f"{_workflow_id('a')}.harmonized.csv",
     )
     for scratch_path in scratch_paths:
+        scratch_path.parent.mkdir(exist_ok=True)  # Older releases also kept manifest copies here.
         scratch_path.write_bytes(b"scratch")
     capacity_bytes = storage.workflow_inventory().usage_bytes
 

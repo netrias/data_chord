@@ -37,6 +37,7 @@ class HarmonizationJobRequest:
     file_id: DatasetWorkflowId
     polling_job_id: str | None = None
     use_cache: bool = True
+    plan_version: str | None = None
 
 
 class HarmonizationWorkflowRunner(Protocol):
@@ -93,6 +94,7 @@ class HarmonizationJobService:
                 user=user,
                 file_id=request.file_id,
                 polling_job_id=request.polling_job_id,
+                expected_plan_version=request.plan_version,
                 reserve_capacity=self._reserve_slot,
                 release_capacity=self._release_slot,
             )
@@ -118,11 +120,12 @@ class HarmonizationJobService:
                 lambda completed, job_id=accepted_job.polling_job_id: self._task_finished(job_id, completed)
             )
 
-        if start_grace_seconds > 0:
-            try:
-                await asyncio.wait_for(asyncio.shield(task), timeout=start_grace_seconds)
-            except TimeoutError:
-                pass
+        if start_grace_seconds <= 0:
+            return start.loaded_job
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=start_grace_seconds)
+        except TimeoutError:
+            pass
         return self.get(
             user=user,
             file_id=request.file_id,
@@ -144,13 +147,15 @@ class HarmonizationJobService:
             requested_job_id=requested_job_id,
         )
 
-    async def shutdown(self) -> None:
+    async def shutdown(self, grace_seconds: float = 5.0) -> None:
         """Stop local workers; durable lease recovery handles process loss."""
         tasks = tuple(self._tasks.values())
         for task in tasks:
             task.cancel()
         if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            _, draining = await asyncio.wait(tasks, timeout=grace_seconds)
+            if draining:
+                logger.warning("Provider calls still draining after shutdown grace", extra={"workers": len(draining)})
 
     def _reserve_slot(self) -> bool:
         if self._reserved_slots >= self._max_active_jobs:
@@ -162,12 +167,8 @@ class HarmonizationJobService:
         self._reserved_slots = max(0, self._reserved_slots - 1)
 
     async def _run(
-        self,
-        *,
-        start: HarmonizationStart,
-        request: HarmonizationJobRequest,
-        runner: HarmonizationWorkflowRunner,
-        user: UserContext,
+        self, start: HarmonizationStart, request: HarmonizationJobRequest,
+        runner: HarmonizationWorkflowRunner, user: UserContext,
     ) -> None:
         accepted_job = start.loaded_job.job
         stop_heartbeat = asyncio.Event()
@@ -219,13 +220,6 @@ class HarmonizationJobService:
         finally:
             stop_heartbeat.set()
             try:
-                self._cleanup_worker_output(request.file_id, accepted_job.worker_id)
-            except Exception:  # pragma: no cover - defensive cleanup boundary
-                logger.exception(
-                    "Could not remove harmonization scratch output",
-                    extra={"file_id": request.file_id, "job_id": accepted_job.polling_job_id},
-                )
-            try:
                 await heartbeat
             except Exception:  # pragma: no cover - defensive storage boundary
                 logger.exception(
@@ -240,15 +234,6 @@ class HarmonizationJobService:
             self._tasks.pop(job_id, None)
         if not task.cancelled():
             task.exception()
-
-    def _cleanup_worker_output(self, file_id: DatasetWorkflowId, worker_id: str) -> None:
-        meta = self._upload_storage.load(file_id)
-        if meta is None:
-            return
-        managed_path = self._upload_storage.harmonized_path_for(file_id, meta.saved_path)
-        worker_path = managed_path.with_stem(f"{managed_path.stem}.{worker_id}")
-        worker_path.unlink(missing_ok=True)
-
 
 __all__ = [
     "HarmonizationJobRequest",

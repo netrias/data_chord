@@ -90,9 +90,20 @@ class S3WorkflowStorage:
         """Delete all objects for a workflow that the caller owns."""
         self._require_access(user, dataset_workflow_id)
         workflow_prefix = f"{self._workflow_key(dataset_workflow_id)}/"
-        response = self.client.list_objects_v2(Bucket=self.bucket, Prefix=workflow_prefix)
-        for key in _listed_keys(response):
-            self.client.delete_object(Bucket=self.bucket, Key=key)
+        anchor = self._metadata_key(dataset_workflow_id)
+        arguments = {"Bucket": self.bucket, "Prefix": workflow_prefix}
+        while True:
+            response = self.client.list_objects_v2(**arguments)
+            for key in _listed_keys(response):
+                if key != anchor:
+                    self.client.delete_object(Bucket=self.bucket, Key=key)
+            if not response.get("IsTruncated"):
+                break
+            token = response.get("NextContinuationToken")
+            if not isinstance(token, str) or not token:
+                raise ValueError("S3 returned a truncated workflow listing without a continuation token.")
+            arguments["ContinuationToken"] = token
+        self.client.delete_object(Bucket=self.bucket, Key=anchor)
 
     def read_json(self, user: UserContext, file_id: str, kind: WorkflowFile) -> StoredJson | None:
         self._require_json_kind(kind)
@@ -271,13 +282,10 @@ class S3WorkflowStorage:
         suffix = Path(key).suffix
         # Downstream tabular readers operate on Paths, so S3 objects are exposed
         # through a short-lived local file at the storage boundary.
-        with NamedTemporaryFile("wb", suffix=suffix, delete=False) as temp_file:
-            temp_path = Path(temp_file.name)
+        with NamedTemporaryFile("wb", suffix=suffix, delete_on_close=False) as temp_file:
             temp_file.write(_body_bytes(response))
-        try:
-            yield temp_path
-        finally:
-            temp_path.unlink(missing_ok=True)
+            temp_file.close()
+            yield Path(temp_file.name)
 
     def _require_access(self, user: UserContext, file_id: str) -> WorkflowMetadata:
         try:

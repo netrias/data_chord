@@ -6,6 +6,7 @@ import asyncio
 import errno
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
 
@@ -22,7 +23,7 @@ from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.cde_recommendation import ProfiledColumn, RecommendationUnavailableError
 from src.domain.column_profile import ColumnProfile
 from src.domain.columns import ColumnIdentity, column_key_from_string
-from src.domain.dataset_workflow_ids import new_dataset_workflow_id
+from src.domain.dataset_workflow_ids import DatasetWorkflowId, new_dataset_workflow_id
 from src.domain.manifest import ColumnMappingManifest
 from src.domain.match_counts import column_value_overlap_ratio
 from src.domain.reference_data import ReferenceDataError
@@ -36,21 +37,28 @@ from src.observability.events import (
     log_workflow_event,
 )
 from src.persistence.workflow_artifacts import (
-    load_upload_artifact,
+    open_upload_artifact,
     save_upload_artifacts,
+    stage_upload,
 )
-from src.persistence.workflow_state_store import load_workflow_state, save_initial_workflow_state
+from src.persistence.workflow_state_store import (
+    load_workflow_state,
+    save_initial_workflow_state,
+)
 from src.settings import ApplicationMode, get_application_mode
 from src.shared.jinja import templates_for_stage
 from src.storage import (
     UnsupportedUploadError,
     UploadedFileMeta,
+    UploadStorage,
     UploadTooLargeError,
     UserContext,
+    WorkflowStorage,
     WorkflowStorageFullError,
     describe_constraints,
     resolve_selected_sheet,
 )
+from src.storage.file_operation import run_file_operation
 
 from .schemas import (
     AnalyzeRequest,
@@ -74,11 +82,10 @@ stage_one_router = APIRouter(prefix="/stage-1", tags=["Stage 1 Upload"])
 
 @stage_one_router.get("", response_class=HTMLResponse, name="stage_one_upload_page")
 async def render_stage_one(request: Request) -> HTMLResponse:
-    demo_upload = (
-        (await _upload_response(get_demo_upload())).model_dump(mode="json")
-        if get_application_mode() is ApplicationMode.DEMO
-        else None
-    )
+    demo_upload = None
+    if get_application_mode() is ApplicationMode.DEMO:
+        with get_demo_upload() as sample:
+            demo_upload = (await _upload_response(sample)).model_dump(mode="json")
     context = {
         "request": request,
         "ui_constraints": describe_constraints(_upload_constraints),
@@ -140,14 +147,12 @@ async def upload_dataset(
         if cleanup is not None:
             release_upload_lease = await run_in_threadpool(cleanup.acquire_upload_lease)
             await run_in_threadpool(cleanup.require_upload_space)
-        meta = await storage.store(file, dataset_workflow_id, UploadFingerprint(expected_sha256, expected_size_bytes))
-        dependencies.get_workflow_storage().create_workflow(user, meta.dataset_workflow_id)
-        save_upload_artifacts(
-            dependencies.get_workflow_storage(),
-            user,
-            storage,
-            meta,
-        )
+        workflow_storage = dependencies.get_workflow_storage()
+        expected = UploadFingerprint(expected_sha256, expected_size_bytes)
+        async with stage_upload(storage, workflow_storage, file, dataset_workflow_id, expected) as meta:
+            workflow_storage.create_workflow(user, meta.dataset_workflow_id)
+            save_upload_artifacts(workflow_storage, user, storage, meta)
+            response = await _upload_response(meta)
     except (WorkflowStorageFullError, OSError) as exc:
         if isinstance(exc, OSError) and exc.errno not in {errno.ENOSPC, errno.EDQUOT}:
             raise
@@ -187,7 +192,7 @@ async def upload_dataset(
     if cleanup is not None:
         background_tasks.add_task(cleanup.run_safely)
 
-    return await _upload_response(meta)
+    return response
 
 
 async def _upload_response(meta: UploadedFileMeta) -> UploadResponse:
@@ -201,7 +206,7 @@ async def _upload_response(meta: UploadedFileMeta) -> UploadResponse:
         sheet_names=meta.sheet_names,
         selected_sheet=meta.selected_sheet,
         verification=meta.verification,
-        sheet_previews=await run_in_threadpool(_load_sheet_previews_safe, meta),
+        sheet_previews=await run_file_operation(_load_sheet_previews_safe, meta),
     )
 
 
@@ -226,32 +231,17 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
         ),
         user,
     )
-    meta = load_upload_artifact(
-        storage,
-        dependencies.get_workflow_storage(),
-        user,
-        payload.file_id,
-    )
-    if not meta:
-        _log_analyze_failed(user, payload.file_id, "upload_not_found")
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please upload again.")
-
-    selected_sheet = _resolve_sheet_safe(meta, payload.sheet_name)
+    workflow_storage = dependencies.get_workflow_storage()
     data_model_version = payload.data_model_version()
-    analysis_task = asyncio.create_task(
-        run_in_threadpool(
-            _analyze_columns_safe,
-            meta.saved_path,
-            payload.file_id,
-            selected_sheet,
-        )
+    analysis_task = run_in_threadpool(
+        _profile_stored_upload, storage, workflow_storage, user, payload.file_id, payload.sheet_name,
     )
     reference_task = run_in_threadpool(
         dependencies.get_reference_data_repository().load_model,
         data_model_version,
     )
     try:
-        (total_rows, columns, profiles), reference_model = await asyncio.gather(
+        analysis, reference_model = await asyncio.gather(
             analysis_task,
             reference_task,
         )
@@ -262,9 +252,9 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
                         column_key_from_string(column.column_key),
                         column.header,
                     ),
-                    profile=profiles[column.column_key],
+                    profile=analysis.profiles[column.column_key],
                 )
-                for column in columns
+                for column in analysis.columns
             ],
             reference_model,
         )
@@ -283,23 +273,17 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     except Exception as exc:
         _log_analyze_failed(user, payload.file_id, type(exc).__name__)
         raise
-    save_initial_workflow_state(
-        dependencies.get_workflow_storage(),
-        user,
-        WorkflowState.from_data_model_version(
-            meta.dataset_workflow_id,
-            data_model_version,
-            mapping_manifest,
-            selected_sheet=selected_sheet,
-        ),
+    state = WorkflowState.from_data_model_version(
+        analysis.file_id, data_model_version, mapping_manifest, selected_sheet=analysis.selected_sheet,
     )
+    saved = save_initial_workflow_state(workflow_storage, user, state)
     column_summaries = _build_column_summaries(
-        profiles,
+        analysis.profiles,
         mapping_manifest,
         reference_model.catalog,
         reference_model.pvs,
     )
-    _log_analysis_results(payload.file_id, total_rows, columns, mapping_manifest)
+    _log_analysis_results(payload.file_id, analysis.total_rows, analysis.columns, mapping_manifest)
     log_workflow_event(
         WorkflowEvent(
             stage=WorkflowStage.STAGE_1,
@@ -307,8 +291,8 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
             outcome=WorkflowOutcome.COMPLETED,
             file_id=payload.file_id,
             metadata={
-                "total_rows": total_rows,
-                "column_count": len(columns),
+                "total_rows": analysis.total_rows,
+                "column_count": len(analysis.columns),
                 "mapped_columns": len(mapping_manifest.records),
             },
         ),
@@ -317,11 +301,12 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
 
     cde_targets = mapping_manifest.suggestions_by_column()
     return AnalyzeResponse(
-        file_id=meta.file_id,
-        file_name=meta.original_name,
+        file_id=analysis.file_id,
+        file_name=analysis.filename,
+        plan_version=saved.version.value,
         external_version_number=data_model_version.external_version_number,
-        total_rows=total_rows,
-        columns=columns,
+        total_rows=analysis.total_rows,
+        columns=analysis.columns,
         column_summaries=column_summaries,
         cde_targets=cde_targets,
     )
@@ -343,12 +328,9 @@ async def load_analysis_state(file_id: str) -> AnalyzeResponse:
     state = loaded_state.state
     if state.mapping_manifest is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Workflow analysis is incomplete.")
-    meta = load_upload_artifact(storage, workflow_storage, user, file_id)
-    if meta is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please upload again.")
     try:
-        (total_rows, columns, profiles), reference_model = await asyncio.gather(
-            run_in_threadpool(_analyze_columns_safe, meta.saved_path, file_id, state.selected_sheet),
+        analysis, reference_model = await asyncio.gather(
+            run_in_threadpool(_profile_stored_upload, storage, workflow_storage, user, file_id, state.selected_sheet),
             run_in_threadpool(
                 dependencies.get_reference_data_repository().load_model,
                 state.data_model_version,
@@ -361,13 +343,14 @@ async def load_analysis_state(file_id: str) -> AnalyzeResponse:
         ) from exc
     choices = state.mapping_choices
     return AnalyzeResponse(
-        file_id=meta.file_id,
-        file_name=meta.original_name,
+        file_id=analysis.file_id,
+        file_name=analysis.filename,
+        plan_version=loaded_state.version.value,
         external_version_number=state.data_model_version.external_version_number,
-        total_rows=total_rows,
-        columns=columns,
+        total_rows=analysis.total_rows,
+        columns=analysis.columns,
         column_summaries=_build_column_summaries(
-            profiles,
+            analysis.profiles,
             state.mapping_manifest,
             reference_model.catalog,
             reference_model.pvs,
@@ -384,6 +367,28 @@ async def load_analysis_state(file_id: str) -> AnalyzeResponse:
             else {}
         ),
     )
+
+
+@dataclass(frozen=True)
+class _UploadProfile:
+    file_id: DatasetWorkflowId
+    filename: str
+    selected_sheet: str | None
+    total_rows: int
+    columns: list[ColumnSummary]
+    profiles: dict[str, ColumnProfile]
+
+
+def _profile_stored_upload(
+    uploads: UploadStorage, storage: WorkflowStorage, user: UserContext, file_id: str, sheet_name: str | None,
+) -> _UploadProfile:
+    with open_upload_artifact(uploads, storage, user, file_id) as meta:
+        if meta is None:
+            _log_analyze_failed(user, file_id, "upload_not_found")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload not found. Please upload again.")
+        selected = _resolve_sheet_safe(meta, sheet_name)
+        rows, columns, profiles = _analyze_columns_safe(meta.saved_path, file_id, selected)
+        return _UploadProfile(meta.dataset_workflow_id, meta.original_name, selected, rows, columns, profiles)
 
 
 def _resolve_sheet_safe(meta: UploadedFileMeta, sheet_name: str | None) -> str | None:

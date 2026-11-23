@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
-from src.app.harmonization_readiness import HarmonizationNotReadyError
+from src.app.harmonization_readiness import HarmonizationNotReadyError, SupersededHarmonizationError
 from src.auth.user_context import current_user_context
 from src.domain.upload_integrity import UploadIntegrityError
 from src.observability.events import (
@@ -107,16 +107,17 @@ async def _harmonization_not_ready(request: Request, exc: Exception) -> Response
     """Return safe recovery guidance for a known workflow readiness state."""
     if not isinstance(exc, HarmonizationNotReadyError):
         raise exc
+    code = status.HTTP_410_GONE if isinstance(exc, SupersededHarmonizationError) else status.HTTP_409_CONFLICT
     log_api_request_failed(
         method=request.method,
         path=request.url.path,
-        status_code=status.HTTP_409_CONFLICT,
+        status_code=code,
         error_type=type(exc).__name__,
         request_id=_request_id_for_log(request),
         error_detail=exc.detail,
         user=current_user_context(),
     )
-    response = JSONResponse({"detail": exc.detail}, status_code=status.HTTP_409_CONFLICT)
+    response = JSONResponse({"detail": exc.detail}, status_code=code)
     request_id = _request_id_for_log(request)
     if request_id is not None:
         response.headers[REQUEST_ID_HEADER] = request_id

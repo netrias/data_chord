@@ -96,7 +96,7 @@ async def test_each_stage_renders_the_same_workflow_frame(
                 "/assets/stage-5/stage_5_review.css",
                 "/assets/stage-5/stage_5_review.js",
             ),
-            ("/stage-5/summary", "/stage-5/download", "/stage-1"),
+            ("/stage-5/review", "/stage-1"),
         ),
     ],
 )
