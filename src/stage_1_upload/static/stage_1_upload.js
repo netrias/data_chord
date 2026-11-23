@@ -1,5 +1,5 @@
-import { initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
-import { STAGE_2_PAYLOAD_KEY, STAGE_3_JOB_KEY, CURRENT_FILE_SESSION_KEY, removeFromSession, writeToSession, readFromSession } from '/assets/shared/storage-keys.js';
+import { initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage, resetMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
+import { STAGE_2_PAYLOAD_KEY, STAGE_3_JOB_KEY, CURRENT_FILE_SESSION_KEY, removeFromSession, writeToSession, readFromSession, isValidFileId } from '/assets/shared/storage-keys.js';
 import { reportApiError, reportFetchFailure } from '/assets/shared/client-events.js';
 import { showDataModelPopup, preloadDataModels } from './data_model_popup.js';
 import { fingerprintFile, verificationMatches, UploadVerificationError, UPLOAD_INTEGRITY_MESSAGE } from './upload-integrity.js';
@@ -178,13 +178,15 @@ const _handleFileSelection = (file) => {
     if (fileInput) fileInput.value = '';
     return;
   }
+  _clearStaleSessionData();
+  resetMaxReachedStage();
+  _replaceUploadWorkflowUrl(null);
+  _resetUploadState();
   const issues = _validateFile(file);
   if (issues.length) {
-    _showDropzoneCopy();
     _setStatus(issues.join(' '), 'error');
     return;
   }
-  _clearStaleSessionData();
   state.file = file;
   state.uploaded = null;
   _showDropzoneSummary(file, 'Ready to upload');
@@ -256,6 +258,7 @@ const _uploadDataset = async () => {
     state.sheetPreviews = _sheetPreviewsFromPayload(payload);
     state.selectedSheet = payload.selected_sheet ?? state.sheetNames[0] ?? null;
     _persistFileSession(payload, file.name);
+    _replaceUploadWorkflowUrl(payload.file_id);
     if (dropzone) dropzone.classList.add('has-file');
     _showDropzoneSummary(file, 'Uploaded');
     _renderSheetSelector();
@@ -283,6 +286,16 @@ const _clearStaleSessionData = () => {
   removeFromSession(CURRENT_FILE_SESSION_KEY);
 };
 
+/* A replacement owns this history entry; earlier explicit workflow links keep theirs. */
+const _replaceUploadWorkflowUrl = (fileId) => {
+  const url = new URL(window.location.href);
+  for (const key of ['file_id', 'data_model_key', 'external_version_number', 'job_id', 'status', 'detail']) {
+    url.searchParams.delete(key);
+  }
+  if (fileId) url.searchParams.set('file_id', fileId);
+  window.history.replaceState(window.history.state, '', url);
+};
+
 /* Enables navigation back to Stage 1 with file context. */
 const _persistFileSession = (uploadResponse, fileName) => {
   writeToSession(CURRENT_FILE_SESSION_KEY, {
@@ -299,7 +312,11 @@ const _persistFileSession = (uploadResponse, fileName) => {
 /* Restores file display from session when returning to Stage 1. */
 const _hydrateFromSession = () => {
   const session = readFromSession(CURRENT_FILE_SESSION_KEY);
-  if (!session || !session.file_id || !session.original_name) {
+  if (!session || !isValidFileId(session.file_id) || !session.original_name) {
+    return false;
+  }
+  const requestedIds = new URLSearchParams(window.location.search).getAll('file_id');
+  if (requestedIds.length > 0 && (requestedIds.length !== 1 || requestedIds[0] !== session.file_id)) {
     return false;
   }
 

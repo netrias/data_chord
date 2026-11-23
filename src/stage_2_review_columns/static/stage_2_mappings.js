@@ -139,7 +139,7 @@ const _completedJobForFile = (fileId) => {
   if (!fileId) return null;
   const job = readFromSession(STAGE_3_JOB_KEY);
   if (!job || !_isCompleteStatus(job.status)) return null;
-  return job.file_id === fileId ? job : null;
+  return job.file_id === fileId && job.plan_version === state.payload.plan_version ? job : null;
 };
 
 const _persistReviewChoices = () => {
@@ -1328,6 +1328,7 @@ const _submitHarmonize = async () => {
   }
   const choicesBody = {
     file_id: fileId,
+    plan_version: state.payload.plan_version,
     manual_overrides: overrides,
     column_renames: columnRenames,
   };
@@ -1341,15 +1342,19 @@ const _submitHarmonize = async () => {
     });
     const choicesResult = await choicesResponse.json().catch(() => ({}));
     if (!choicesResponse.ok) {
+      if (choicesResponse.status === 409) throw new Error('Mapping choices changed. Refresh the page to review them.');
       throw new Error(choicesResult.detail || 'Unable to save mapping choices. Please try again.');
     }
+    state.payload.plan_version = choicesResult.plan_version;
+    _savePayloadToStorage(state.payload);
     const response = await fetch(harmonizeEndpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file_id: fileId }),
+      body: JSON.stringify({ file_id: fileId, plan_version: choicesResult.plan_version }),
     });
     job = await response.json().catch(() => ({}));
     if (!response.ok) {
+      if (response.status === 409) throw new Error('The confirmed plan changed. Refresh the page to review it.');
       throw new Error(job.detail || 'Unable to start harmonization. Please try again.');
     }
     if (!job.job_id) {
@@ -1373,7 +1378,6 @@ const _submitHarmonize = async () => {
 };
 
 /* ─── Bootstrap ──────────────────────────────────────────── */
-const _payloadIsCurrent = (payload) => payload != null && 'column_summaries' in payload;
 
 const _fetchPayload = async (fileId) => {
   if (!fileId) return null;
@@ -1383,7 +1387,6 @@ const _fetchPayload = async (fileId) => {
     return {};
   });
   if (!response.ok) throw new Error(payload.detail || 'Unable to fetch mapping data');
-  _savePayloadToStorage(payload);
   return payload;
 };
 
@@ -1416,19 +1419,25 @@ const _init = async () => {
   let payload = _readPayloadFromStorage();
   const params = new URLSearchParams(window.location.search);
   const fileId = params.get('file_id') || payload?.file_id;
-  if (!_payloadIsCurrent(payload)) {
+  if (fileId) {
     try {
-      payload = await _fetchPayload(fileId);
+      const current = await _fetchPayload(fileId);
+      if (payload?.file_id !== fileId || !current || payload.plan_version !== current.plan_version) {
+        payload = current;
+      }
     } catch (err) {
-      console.error(err);
+      payload = null;
+      _showHarmonizeError(err.message);
     }
   }
   if (!payload) {
+    if (harmonizeButton) harmonizeButton.disabled = true;
     _renderLockBanner();
     renderFilterTrigger();
     renderRows();
     return;
   }
+  _savePayloadToStorage(payload);
   state.payload = payload;
   state.completedJob = _completedJobForFile(payload.file_id);
   state.overrides = new Map(

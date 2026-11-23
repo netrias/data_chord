@@ -6,12 +6,12 @@ HTTP or API-schema dependencies, so another interface can call the same run.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
-from netrias_client import read_tabular, write_tabular
+from netrias_client import read_tabular
 
 from src.app.harmonization_job_state import (
     HarmonizationArtifactVersions,
@@ -28,6 +28,7 @@ from src.domain.harmonization import HarmonizationManifestSummary, HarmonizeStat
 from src.domain.manifest import ColumnMappingManifest, ManifestPvAdjustment, ManifestRow
 from src.domain.pv_validation import compute_pv_adjustment
 from src.domain.reference_data import ReferenceDataRepository, ReferenceModel
+from src.domain.review_overrides import ReviewOverrides, ReviewProgressState
 from src.domain.tabular_column_renames import (
     ResolvedTabularColumn,
     apply_column_renames_to_dataset,
@@ -38,8 +39,8 @@ from src.persistence.cde_mapping_document_store import save_cde_mapping_document
 from src.persistence.manifest_reader import read_manifest_parquet
 from src.persistence.manifest_writer import apply_column_renames_batch, apply_pv_adjustments_batch
 from src.persistence.pv_manifest_store import ColumnPvSets, save_pv_snapshot_if_unchanged
-from src.persistence.review_override_store import delete_review_overrides_state
-from src.persistence.workflow_artifacts import load_upload_artifact, save_harmonized_artifacts
+from src.persistence.tabular_output import write_tabular_changes
+from src.persistence.workflow_artifacts import open_upload_artifact, save_harmonized_artifacts
 from src.persistence.workflow_state_store import LoadedWorkflowState
 from src.storage import (
     UploadedFileMeta,
@@ -50,6 +51,7 @@ from src.storage import (
     WorkflowFile,
     WorkflowStorage,
 )
+from src.storage.file_operation import run_file_operation
 
 logger = logging.getLogger(__name__)
 
@@ -97,31 +99,35 @@ class HarmonizationWorkflow:
         user: UserContext,
         use_cache: bool = True,
     ) -> HarmonizationWorkflowResult:
-        prepared = await self._prepare_run(file_id, loaded_state, user)
-        managed_path = self._upload_storage.harmonized_path_for(file_id, prepared.upload.saved_path)
-        worker_path = _worker_scratch_path(managed_path, authority.worker_id)
-        result = await self._run_harmonizer(
-            file_path=prepared.upload.saved_path,
-            data_model_version=loaded_state.state.data_model_version,
-            prepared_manifest=prepared.manifest,
-            column_pv_sets=prepared.column_pvs,
-            output_path=worker_path,
-            sheet_name=loaded_state.state.selected_sheet,
-            use_cache=use_cache,
-        )
-        return await self._finish_run(file_id, prepared, result, worker_path, authority, user)
+        with (
+            open_upload_artifact(self._upload_storage, self._workflow_storage, user, file_id) as meta,
+            self._upload_storage.private_workspace(),
+        ):
+            if meta is None:
+                raise FileNotFoundError(file_id)
+            prepared = await self._prepare_run(file_id, meta, loaded_state, user)
+            worker_path = self._upload_storage.harmonized_path_for(file_id, meta.saved_path)
+            result = await self._run_harmonizer(
+                file_path=meta.saved_path,
+                data_model_version=loaded_state.state.data_model_version,
+                prepared_manifest=prepared.manifest,
+                column_pv_sets=prepared.column_pvs,
+                output_path=worker_path,
+                sheet_name=loaded_state.state.selected_sheet,
+                use_cache=use_cache,
+            )
+            return await self._finish_run(file_id, prepared, result, worker_path, authority, user)
 
-    async def _prepare_run(self, file_id: str, loaded: LoadedWorkflowState, user: UserContext) -> _PreparedRun:
-        meta = load_upload_artifact(self._upload_storage, self._workflow_storage, user, file_id)
-        if meta is None:
-            raise FileNotFoundError(file_id)
+    async def _prepare_run(
+        self, file_id: str, meta: UploadedFileMeta, loaded: LoadedWorkflowState, user: UserContext,
+    ) -> _PreparedRun:
         versions = capture_harmonization_artifact_versions(self._workflow_storage, user, file_id)
         state = loaded.state
         choices = state.mapping_choices
         if choices is None:
             raise ValueError("Workflow mapping choices are incomplete")
         source = await _read_source_structure(meta.saved_path, choices.column_renames, state.selected_sheet)
-        reference = await asyncio.to_thread(self._reference_data_repository.load_model, state.data_model_version)
+        reference = await run_file_operation(self._reference_data_repository.load_model, state.data_model_version)
         manifest = state.mapping_manifest.apply_choices(
             choices.column_overrides, choices.column_renames, reference.catalog
         )
@@ -183,7 +189,7 @@ class HarmonizationWorkflow:
         assert state.mapping_choices is not None
         choices = state.mapping_choices
         authority.require_publication_authority()
-        await asyncio.to_thread(
+        await run_file_operation(
             save_pv_snapshot_if_unchanged,
             self._workflow_storage,
             user,
@@ -192,7 +198,7 @@ class HarmonizationWorkflow:
             expected_version=prepared.versions.pv_manifest,
         )
         authority.require_publication_authority()
-        await asyncio.to_thread(
+        await run_file_operation(
             save_cde_mapping_document,
             self._workflow_storage,
             user,
@@ -206,7 +212,7 @@ class HarmonizationWorkflow:
             expected_version=prepared.versions.cde_mapping,
         )
         authority.require_publication_authority()
-        await asyncio.to_thread(
+        await run_file_operation(
             save_harmonized_artifacts,
             self._workflow_storage,
             user,
@@ -216,17 +222,10 @@ class HarmonizationWorkflow:
             expected_harmonized_output_version=prepared.versions.harmonized_output,
             expected_manifest_version=prepared.versions.manifest,
         )
-        await asyncio.to_thread(self._upload_storage.save_harmonization_manifest, file_id, result.manifest_path)
-        await asyncio.to_thread(
-            self._upload_storage.restore_harmonized_output, file_id, prepared.upload.saved_path, output_path
-        )
         authority.require_publication_authority()
-        await asyncio.to_thread(
-            _invalidate_previous_stage_three_review,
-            self._workflow_storage,
-            user,
-            file_id,
-            prepared.versions.review_overrides,
+        await run_file_operation(
+            _start_new_review, self._workflow_storage, user, file_id,
+            prepared.versions.review_overrides, authority.worker_id,
         )
 
     async def _run_harmonizer(
@@ -241,7 +240,7 @@ class HarmonizationWorkflow:
         use_cache: bool,
     ) -> HarmonizeResult:
         """The provider is synchronous; keep its work off the event loop."""
-        return await asyncio.to_thread(
+        return await run_file_operation(
             self._harmonizer.run,
             file_path=file_path,
             data_model_version=data_model_version,
@@ -268,7 +267,7 @@ async def _read_and_adjust_manifest(
     manifest_data = read_manifest_parquet(manifest_path)
     if manifest_data is None:
         return None
-    renamed_count = await asyncio.to_thread(
+    renamed_count = await run_file_operation(
         apply_column_renames_batch,
         manifest_path,
         column_renames,
@@ -295,9 +294,9 @@ async def _apply_column_renames_to_output(
 ) -> None:
     if not column_renames.renames or not output_path.exists():
         return
-    dataset = await asyncio.to_thread(read_tabular, output_path, sheet_name)
+    dataset = await run_file_operation(read_tabular, output_path, sheet_name)
     renamed = apply_column_renames_to_dataset(dataset, column_renames)
-    await asyncio.to_thread(write_tabular, output_path, renamed, output_path)
+    await run_file_operation(write_tabular_changes, output_path, output_path, dataset, renamed)
 
 
 async def _read_source_structure(
@@ -307,12 +306,8 @@ async def _read_source_structure(
 ) -> _SourceStructure:
     if not source_path.exists():
         return _SourceStructure((), 0)
-    dataset = await asyncio.to_thread(read_tabular, source_path, sheet_name)
+    dataset = await run_file_operation(read_tabular, source_path, sheet_name)
     return _SourceStructure(resolve_tabular_columns(dataset, column_renames), len(dataset.rows))
-
-
-def _worker_scratch_path(managed_path: Path, worker_id: str) -> Path:
-    return managed_path.with_stem(f"{managed_path.stem}.{worker_id}")
 
 
 def _compute_row_adjustment(row: ManifestRow, pv_set: frozenset[str]) -> ManifestPvAdjustment | None:
@@ -364,25 +359,22 @@ async def _apply_pv_adjustments(manifest_path: Path, column_pv_map: ColumnPvSets
     adjustments = _apply_adjustments(summary.rows, column_pv_map)
     if not adjustments:
         return 0
-    return await asyncio.to_thread(apply_pv_adjustments_batch, manifest_path, adjustments)
+    return await run_file_operation(apply_pv_adjustments_batch, manifest_path, adjustments)
 
 
-def _invalidate_previous_stage_three_review(
-    workflow_storage: WorkflowStorage,
-    user: UserContext,
-    file_id: str,
-    expected_version: VersionToken | None,
+def _start_new_review(
+    workflow_storage: WorkflowStorage, user: UserContext, file_id: str,
+    expected_version: VersionToken | None, run_id: str,
 ) -> None:
-    if expected_version is not None:
-        try:
-            delete_review_overrides_state(workflow_storage, user, file_id, expected_version=expected_version)
-        except WorkflowConflictError:
-            logger.info("Preserving review overrides changed during harmonization", extra={"file_id": file_id})
-            raise StaleHarmonizationWorkerError(file_id) from None
-        if workflow_storage.read_json(user, file_id, WorkflowFile.REVIEW_OVERRIDES) is not None:
-            raise StaleHarmonizationWorkerError(file_id)
-    elif workflow_storage.read_json(user, file_id, WorkflowFile.REVIEW_OVERRIDES) is not None:
-        raise StaleHarmonizationWorkerError(file_id)
+    """Publish a unique empty review so an earlier first-save cannot match this run."""
+    now = datetime.now(UTC)
+    review = ReviewOverrides(file_id, now, now, (), ReviewProgressState(), run_id)
+    try:
+        workflow_storage.write_json(
+            user, file_id, WorkflowFile.REVIEW_OVERRIDES, review.to_store(), expected_version,
+        )
+    except WorkflowConflictError as exc:
+        raise StaleHarmonizationWorkerError(file_id) from exc
 
 
 def _log_harmonizer_result(file_id: str, result: HarmonizeResult) -> None:

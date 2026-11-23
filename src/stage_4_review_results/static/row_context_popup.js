@@ -6,7 +6,7 @@
 
 import { escapeHtml } from '/assets/shared/html.js';
 import { mountFixedRowVirtualTable } from './fixed_row_virtual_table.js';
-import { toExcelRowNumber } from './shared_review_utils.js';
+import { reviewJobFromUrl, toExcelRowNumber } from './shared_review_utils.js';
 
 /** Max rows per API request (backend limit). */
 const MAX_ROWS_PER_REQUEST = 10000;
@@ -22,7 +22,7 @@ async function _fetchRowContext(fileId, rowIndices, signal) {
   const response = await fetch('/stage-4/row-context', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ file_id: fileId, row_indices: rowIndices }),
+    body: JSON.stringify({ file_id: fileId, ...reviewJobFromUrl(), row_indices: rowIndices }),
     signal,
   });
 

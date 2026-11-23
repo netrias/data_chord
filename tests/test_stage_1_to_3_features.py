@@ -41,6 +41,7 @@ from tests.conftest import (
     create_csv_content,
     create_test_manifest_parquet,
     create_xlsx_content,
+    review_precondition,
     review_state_payload,
     upload_content,
     upload_integrity_fields,
@@ -889,7 +890,7 @@ async def test_stage3_rerun_removes_decisions_from_the_previous_result(
             await _wait_for_stage_three_job(app_client, first_run.json()["job_id"], file_id)
         saved = await app_client.post(
             "/stage-4/overrides",
-            headers={"If-None-Match": "*"},
+            headers=await review_precondition(app_client, file_id),
             json={
                 "file_id": file_id,
                 "overrides": {
@@ -1441,23 +1442,3 @@ async def test_stage2_mapping_page_includes_default_data_model_key(
     # Then: the data model key is embedded for client-side use
     assert response.status_code == 200
     assert 'dataModelKey: "test-data-model"' in response.text
-
-
-async def test_upload_storage_loads_managed_harmonized_output_path(
-    app_client: AsyncClient,
-    temp_storage: UploadStorage,
-) -> None:
-    """UploadStorage owns harmonized output lookup by file id."""
-
-    # Given: an uploaded file with no harmonized output yet
-    file_id = await upload_content(app_client, create_csv_content([["col_a"], ["alpha"]]), "managed.csv")
-    assert temp_storage.load_harmonized_path(file_id) is None
-
-    # When: harmonized output is written to the managed storage location
-    meta = temp_storage.load(file_id)
-    assert meta is not None
-    harmonized_path = temp_storage.harmonized_path_for(file_id, meta.saved_path)
-    harmonized_path.write_text("col_a\nbeta\n", encoding="utf-8")
-
-    # Then: callers can load it without knowing the storage layout
-    assert temp_storage.load_harmonized_path(file_id) == harmonized_path

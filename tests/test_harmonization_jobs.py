@@ -107,19 +107,11 @@ async def test_cleanup_failure_does_not_consume_the_next_job_slot(
     first_file_id = await _prepare_workflow(app_client, "cleanup-error-first.csv")
     second_file_id = await _prepare_workflow(app_client, "cleanup-error-second.csv")
 
-    async def complete_worker(**_: object) -> HarmonizationWorkflowResult:
-        return HarmonizationWorkflowResult(
-            job_id="provider-job",
-            status=HarmonizeStatus.FAILED,
-            detail="provider failed",
-        )
-
-    def fail_cleanup(*_: object) -> None:
-        raise OSError("scratch storage unavailable")
+    async def fail_cleanup(**_: object) -> HarmonizationWorkflowResult:
+        raise OSError("worker workspace cleanup failed")
 
     service = dependencies.get_harmonization_job_service()
-    monkeypatch.setattr(service, "_workflow_runner", complete_worker)
-    monkeypatch.setattr(service, "_cleanup_worker_output", fail_cleanup)
+    monkeypatch.setattr(service, "_workflow_runner", fail_cleanup)
     first = await service.submit(
         user=dependencies.get_user_context(),
         request=HarmonizationJobRequest(file_id=dataset_workflow_id_from_string(first_file_id)),

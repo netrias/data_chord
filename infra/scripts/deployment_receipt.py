@@ -338,6 +338,8 @@ def _require_customer_platform_forecast(
 ) -> None:
     for change in changes:
         address = cast(str, change["address"])
+        if address == "module.data_plane.aws_s3_bucket_versioning.workflow" and change["actions"] == ["forget"]:
+            continue
         if address not in _CUSTOMER_PLATFORM_ADDRESSES:
             raise ReceiptError(f"customer-platform plan contains unexpected resource: {address}")
 

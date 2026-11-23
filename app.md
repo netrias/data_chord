@@ -30,6 +30,9 @@ how it was produced.
 ## Behavior that matters
 
 - Supported inputs are CSV, TSV, and XLSX, including worksheet selection.
+- Replacing a file starts a new workflow and resets the tracker's progress.
+  Once the upload is verified, its URL and navigation identify the new file.
+  Saved links to earlier workflows still identify those earlier workflows.
 - Column identity is positional, so duplicate or blank headers do not merge.
 - Character differences such as case, whitespace, and punctuation remain
   meaningful.
@@ -46,9 +49,13 @@ how it was produced.
 - External failures are visible and retryable without exposing provider
   exception details.
 
+Verify opens the specific harmonization job selected for an upload. Running harmonization again on that upload supersedes the previous job. An old Verify link offers to open the current job. Uploading the same file again creates an independent workflow.
+
 ## Output
 
-The ZIP download includes three files:
+Download uses the revision shown on the open summary page. Refresh the page to review newer saved decisions and their warnings.
+
+A complete ZIP includes three files:
 
 - the final CSV, TSV, or XLSX dataset;
 - a JSON representation of the harmonization manifest;
@@ -66,3 +73,11 @@ Balancer, with durable workflow artifacts in S3.
 See [ARCHITECTURE.md](ARCHITECTURE.md) for boundaries and state ownership,
 [README.md](README.md) for local setup, and [DEPLOYMENT.md](DEPLOYMENT.md) for
 hosted deployment.
+
+If an audit file cannot be recovered, the summary names it. The ZIP includes the reviewed dataset, the available audit files, and a copy of that warning. A new workflow run may be needed to produce a complete audit.
+
+
+The Review page receives its summary and ZIP in one response. Each open tab keeps its own ZIP
+until the page reloads or closes. Download uses those bytes even if another reviewer has saved
+new edits. Refresh retrieves the current summary, warnings, and ZIP together. Callers that need
+the current package directly can post a file ID to `/stage-5/download`.

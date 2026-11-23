@@ -349,9 +349,10 @@ async def test_stage4_save_keeps_manifest_immutable_and_drives_export_history(
     assert meta is not None
     create_harmonized_csv(temp_storage, file_id, meta.saved_path, {0: {"col_a": "beta"}})
     create_manifest_for_file(temp_storage, file_id, meta.saved_path, {0: {"col_a": "beta"}})
-    manifest_path = temp_storage.load_harmonization_manifest_path(file_id)
-    assert manifest_path is not None
-    manifest_before_save = manifest_path.read_bytes()
+    storage = dependencies.get_workflow_storage()
+    manifest_before_save = storage.artifact_version(dependencies.get_user_context(), file_id,
+                                                    WorkflowFile.HARMONIZATION_MANIFEST_BASE)
+    assert manifest_before_save is not None
     before_summary = await app_client.post("/stage-5/summary", json={"file_id": file_id})
     assert before_summary.status_code == 200
     assert before_summary.json()["column_summaries"][0]["manual_changes"] == 0
@@ -371,7 +372,8 @@ async def test_stage4_save_keeps_manifest_immutable_and_drives_export_history(
 
     # Then: review JSON drives export and history without changing the Stage 3 manifest.
     assert save_response.status_code == 200
-    assert manifest_path.read_bytes() == manifest_before_save
+    assert storage.artifact_version(dependencies.get_user_context(), file_id,
+                                    WorkflowFile.HARMONIZATION_MANIFEST_BASE) == manifest_before_save
     assert [event["selected_value"] for event in _stored_review_events(file_id)] == ["gamma"]
 
     download_response = await app_client.post("/stage-5/download", json={"file_id": file_id})

@@ -1,4 +1,4 @@
-import { initStepInstruction, updateStepInstruction, setActiveStage, initNavigationEvents, isSafeRelativeUrl, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
+import { bindJobToPage, initStepInstruction, updateStepInstruction, setActiveStage, initNavigationEvents, isSafeRelativeUrl, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
 import { STAGE_3_JOB_KEY, readFromSession, writeToSession, removeFromSession } from '/assets/shared/storage-keys.js';
 import { renderColumnOutcomeTable } from '/assets/shared/column-outcome-table.js';
 import { formatStandardName, summarizeResult } from './result-summary.js';
@@ -524,6 +524,7 @@ const _startHarmonize = async (payloadOverride = null) => {
     if (!response.ok) {
       throw new Error(body.detail || 'Unable to start harmonization job.');
     }
+    bindJobToPage(body.job_id, 'harmonize');
     _renderJob(body, INITIAL_JOB_POLL_INTERVAL_MS);
   } catch (error) {
     console.error(error);

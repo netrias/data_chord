@@ -20,6 +20,7 @@ from tests.conftest import (
     create_harmonized_csv,
     create_manifest_for_file,
     create_manifest_with_manual_override,
+    review_precondition,
     review_state_payload,
     store_test_completed_harmonization,
     upload_integrity_fields,
@@ -254,7 +255,7 @@ async def test_full_pipeline_journey(
 
         saved = await app_client.post(
             "/stage-4/overrides",
-            headers={"If-None-Match": "*"},
+            headers=await review_precondition(app_client, file_id),
             json={
                 "file_id": file_id,
                 "overrides": {
@@ -333,7 +334,7 @@ async def test_manual_overrides_counted_in_summary(
             },
             "review_state": {},
         },
-        headers={"If-None-Match": "*"},
+        headers=await review_precondition(app_client, file_id),
     )
     assert save_response.status_code == 200
 

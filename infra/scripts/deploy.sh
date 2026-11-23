@@ -140,21 +140,31 @@ run_plan() {
 }
 
 apply_prerequisites() {
-  local plan_file="$PLAN_DIR/prerequisites.tfplan" state_path
-  log "Planning the application prerequisites"
-  create_saved_plan "$plan_file" \
-    -target=aws_codebuild_project.app_image \
-    -target=aws_iam_role_policy.application_build \
-    -target=aws_s3_bucket.workflow \
-    -target=module.data_plane.aws_s3_bucket.workflow \
-    -target=aws_s3_bucket_public_access_block.workflow \
-    -target=module.data_plane.aws_s3_bucket_public_access_block.workflow \
-    -target=aws_dynamodb_table.reference_data \
-    -target=module.data_plane.aws_dynamodb_table.reference_data \
-    -target=aws_dynamodb_table.harmonization_cache \
-    -target=module.data_plane.aws_dynamodb_table.harmonization_cache \
-    -target=aws_dynamodb_table.cde_recommendation_cache \
+  local initial_state="$1" plan_file="$PLAN_DIR/prerequisites.tfplan" state_path
+  local former_versioning="module.data_plane.aws_s3_bucket_versioning.workflow" state_addresses
+  local targets=(
+    -target=aws_codebuild_project.app_image
+    -target=aws_iam_role_policy.application_build
+    -target=aws_s3_bucket.workflow
+    -target=module.data_plane.aws_s3_bucket.workflow
+    -target=aws_s3_bucket_public_access_block.workflow
+    -target=module.data_plane.aws_s3_bucket_public_access_block.workflow
+    -target=aws_dynamodb_table.reference_data
+    -target=module.data_plane.aws_dynamodb_table.reference_data
+    -target=aws_dynamodb_table.harmonization_cache
+    -target=module.data_plane.aws_dynamodb_table.harmonization_cache
+    -target=aws_dynamodb_table.cde_recommendation_cache
     -target=module.data_plane.aws_dynamodb_table.cde_recommendation_cache
+  )
+  if [[ "$initial_state" != "-" ]]; then
+    state_addresses="$(tofu -chdir="$INFRA_DIR" state list)"
+    if grep -Fxq -- "$former_versioning" <<<"$state_addresses"; then
+      # OpenTofu requires both addresses when a targeted plan moves an existing resource.
+      targets+=("-target=$former_versioning" "-target=aws_s3_bucket_versioning.managed_workflow")
+    fi
+  fi
+  log "Planning the application prerequisites"
+  create_saved_plan "$plan_file" "${targets[@]}"
   check_internal_plan "$plan_file.json" prerequisite
   state_path="$(state_identity)"
   receipt_validate "$state_path" in_progress
@@ -279,7 +289,8 @@ apply_application() {
 }
 
 watch_ecs() {
-  local cluster service deadline fields state desired running pending
+  local cluster service deadline fields state desired running pending revision expected seen=0
+  expected="$(required_tofu_output application_task_definition_arn)"
   cluster="$(required_tofu_output ecs_cluster_name)"
   service="$(required_tofu_output ecs_service_name)"
   deadline=$((SECONDS + 900))
@@ -288,10 +299,16 @@ watch_ecs() {
     fields="$(aws ecs describe-services \
       --cluster "$cluster" \
       --services "$service" \
-      --query "services[0].deployments[?status=='PRIMARY'] | [0].[rolloutState,desiredCount,runningCount,pendingCount]" \
+      --query "services[0].deployments[?status=='PRIMARY'] | [0].[rolloutState,desiredCount,runningCount,pendingCount,taskDefinition]" \
       --output text)"
-    read -r state desired running pending <<<"$fields"
-    if [[ "$state" == "COMPLETED" && "$running" == "$desired" && "$pending" == "0" ]]; then
+    read -r state desired running pending revision <<<"$fields"
+    if [[ "$revision" == "$expected" ]]; then
+      seen=1
+      [[ "$state" != "FAILED" ]] || fail "ECS rollout failed for $expected."
+    elif ((seen)); then
+      fail "ECS rolled back $expected to $revision."
+    fi
+    if [[ "$revision" == "$expected" && "$state" == "COMPLETED" && "$running" == "$desired" && "$pending" == "0" ]]; then
       return 0
     fi
     sleep 15
@@ -324,7 +341,7 @@ run_deploy() {
   receipt_validate "$state_path" planned
   claim_deployment_root
   receipt_status planned in_progress
-  apply_prerequisites
+  apply_prerequisites "$state_path"
   ensure_image
   apply_application
   watch_ecs

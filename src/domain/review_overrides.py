@@ -206,6 +206,7 @@ class ReviewOverrides:
     updated_at: datetime
     events: tuple[ReviewOverrideEvent, ...]
     review_state: ReviewProgressState
+    run_id: str | None = None
 
     @classmethod
     def from_snapshot(
@@ -286,6 +287,7 @@ class ReviewOverrides:
         _validate_event_transitions(events)
         return ReviewOverrides(
             file_id=self.file_id,
+            run_id=self.run_id,
             created_at=self.created_at,
             updated_at=updated_at,
             events=events,
@@ -295,6 +297,7 @@ class ReviewOverrides:
     @classmethod
     def from_store(cls, payload: object, expected_file_id: str) -> ReviewOverrides:
         record = _review_record(payload, expected_file_id)
+        run_id = _stored_run_id(record)
         created_at = _datetime_from_payload(record.get("created_at"))
         updated_at = _datetime_from_payload(record.get("updated_at"))
         if created_at > updated_at:
@@ -302,6 +305,7 @@ class ReviewOverrides:
         events = _review_events(record.get("events"), created_at, updated_at)
         return cls(
             file_id=expected_file_id,
+            run_id=run_id,
             created_at=created_at,
             updated_at=updated_at,
             events=events,
@@ -310,6 +314,7 @@ class ReviewOverrides:
 
     def to_store(self) -> dict[str, object]:
         return {
+            **({"run_id": self.run_id} if self.run_id else {}),
             "schema_version": REVIEW_OVERRIDES_SCHEMA_VERSION,
             "file_id": self.file_id,
             "created_at": self.created_at.isoformat(),
@@ -331,6 +336,20 @@ class ReviewOverrides:
             },
             "review_state": self.review_state.to_payload(),
         }
+
+    @cached_property
+    def term_history(self) -> dict[ColumnKey, dict[str, list[ReviewOverrideEvent]]]:
+        history: dict[ColumnKey, dict[str, list[ReviewOverrideEvent]]] = {}
+        for event in self.events:
+            history.setdefault(event.column_key, {}).setdefault(event.original_value, []).append(event)
+        return history
+
+    @cached_property
+    def cell_history(self) -> dict[ColumnKey, dict[str, list[ReviewOverrideEvent]]]:
+        history: dict[ColumnKey, dict[str, list[ReviewOverrideEvent]]] = {}
+        for event in self.events:
+            history.setdefault(event.column_key, {}).setdefault(event.row_key, []).append(event)
+        return history
 
     @cached_property
     def overrides(self) -> Mapping[str, Mapping[ColumnKey, CellOverride]]:
@@ -365,6 +384,15 @@ class ReviewOverrides:
             _apply_row_override(row, row_overrides.get(str(index + 1), {}), column_lookup)
             for index, row in enumerate(rows)
         ]
+
+
+def _stored_run_id(payload: Mapping) -> str | None:
+    if "run_id" not in payload:
+        return None
+    value = payload["run_id"]
+    if not isinstance(value, str) or not value:
+        raise InvalidReviewOverridesError("Stored review run identity is invalid.")
+    return value
 
 
 def _parse_overrides(payload: object) -> dict[str, dict[ColumnKey, CellOverride]]:
@@ -464,7 +492,7 @@ def _review_record(payload: object, expected_file_id: str) -> Mapping[str, objec
     if not isinstance(payload, Mapping):
         raise InvalidReviewOverridesError("Stored review overrides must be an object.")
     fields = {"schema_version", "file_id", "created_at", "updated_at", "events", "review_state"}
-    if set(payload) != fields:
+    if set(payload).difference({"run_id"}) != fields:
         raise InvalidReviewOverridesError("Stored review override fields are invalid.")
     schema = payload.get("schema_version")
     if not isinstance(schema, int) or isinstance(schema, bool) or schema != REVIEW_OVERRIDES_SCHEMA_VERSION:

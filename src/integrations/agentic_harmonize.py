@@ -73,9 +73,10 @@ class AgenticTermHarmonizer:
         worker_count = min(self._config.max_workers, len(requests))
         work = iter(_TermWork(index, request) for index, request in enumerate(requests))
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
-            futures = {
-                self._submit_request(executor, item := next(work), indexes): item.index for _ in range(worker_count)
-            }
+            futures: dict[Future[TermHarmonizationResponse], int] = {}
+            for _ in range(worker_count):
+                item = next(work)
+                futures[self._submit_request(executor, item, indexes)] = item.index
             try:
                 self._complete_requests(executor, work, indexes, futures, responses)
             except Exception:

@@ -36,12 +36,14 @@ DatasetWorkflowIdField = Annotated[
 ]
 
 class HarmonizeRequest(BaseModel):
+    plan_version: str | None = None
     model_config = ConfigDict(extra="forbid")
 
     file_id: DatasetWorkflowIdField
 
 
 class HarmonizeResponse(BaseModel):
+    plan_version: str
     job_id: str
     status: HarmonizeStatus
     detail: str

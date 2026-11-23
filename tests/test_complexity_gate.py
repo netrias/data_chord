@@ -39,10 +39,16 @@ def test_gate_enforces_the_twenty_statement_boundary(tmp_path: Path, statements:
     assert {row["code"] for row in json.loads(result.stdout)} == expected
 
 
-def test_gate_accepts_complexity_at_the_limit(tmp_path: Path) -> None:
-    # Given seven branches plus one entry point, giving cyclomatic complexity eight.
+def test_gate_accepts_complexity_and_branches_at_the_limits(tmp_path: Path) -> None:
+    # Given seven decisions and one else, giving eight branches and complexity eight.
     source = tmp_path / "allowed.py"
-    source.write_text("def choose(x):\n" + "    if x:\n        x -= 1\n" * 7 + "    return x\n")
+    source.write_text(
+        "def choose(x):\n"
+        "    if x:\n        x -= 1\n"
+        "    else:\n        x = 1\n"
+        + "    if x:\n        x -= 1\n" * 6
+        + "    return x\n"
+    )
 
     # When the gate evaluates the boundary function.
     result = _check(source)

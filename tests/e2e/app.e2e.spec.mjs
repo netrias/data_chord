@@ -1,3 +1,4 @@
+import { fulfillReview, reviewParts } from './utils.mjs';
 import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -176,6 +177,7 @@ const _openStage2SearchHarness = async (page) => {
     },
   ];
 
+  await page.route(`**/stage-1/analysis/${payload.file_id}`, (route) => route.fulfill({ json: payload }));
   await page.addInitScript((stagePayload) => {
     sessionStorage.setItem('stage2Payload', JSON.stringify(stagePayload));
     sessionStorage.setItem('maxReachedStage', 'mapping');
@@ -794,7 +796,8 @@ test('happy path flow: upload → analyze → harmonize → review → summary �
     1: { col_0001: 'Baz' },
   });
 
-  // The completed Stage 3 view uses the durable production-shaped summary.
+  // Reopen the completed job from storage after replacing the initial mock with its saved summary.
+  await page.evaluate(() => sessionStorage.removeItem('stage3HarmonizeJob'));
   const durableJobId = `e2e-job-${fileId}`;
   await page.goto(`/stage-3?file_id=${fileId}&job_id=${durableJobId}`);
   const stageThreeTable = page.locator('[data-column-outcome-table] .column-outcome-table');
@@ -1247,23 +1250,6 @@ test('Stage 5 confirms start-over after successful download and clears browser w
    *        and confirm clears Data Chord workflow keys before returning to Stage 1.
    */
   await mockHarmonizeSuccess(page);
-  let downloadAttempts = 0;
-  await page.route('**/stage-5/download', async (route) => {
-    downloadAttempts += 1;
-    if (downloadAttempts === 1) {
-      await route.fulfill({ status: 500, body: 'Download failed' });
-      return;
-    }
-    await route.fulfill({
-      status: 200,
-      headers: {
-        'Content-Type': 'application/zip',
-        'Content-Disposition': 'attachment; filename="harmonized_data.zip"',
-      },
-      body: 'zip-bytes',
-    });
-  });
-
   const fileId = await uploadAndAnalyze(page, fileFixture('basic.csv'));
   await clickHarmonize(page);
   await expect(page.locator('#reviewButton')).toBeEnabled();
@@ -1293,6 +1279,15 @@ test('Stage 5 confirms start-over after successful download and clears browser w
   expect(keysBeforeStartOver.maxReachedStage).not.toBeNull();
   expect(keysBeforeStartOver.unrelatedKey).toBe('keep-me');
   await expect(page.locator('#uploadNavAction')).toHaveClass(/hidden/);
+
+  // Given the browser fails to create its first local download.
+  await page.evaluate(() => {
+    const create = URL.createObjectURL.bind(URL);
+    URL.createObjectURL = blob => {
+      URL.createObjectURL = create;
+      throw new Error('Download failed');
+    };
+  });
 
   // When: the download fails.
   await page.click('#downloadResults');
@@ -1348,13 +1343,12 @@ test('Stage 5 confirms start-over after successful download and clears browser w
   });
 });
 
-test('Stage 5 shows recovery detail for summary and download failures', async ({ page }) => {
+test('Stage 5 shows recovery detail when the reviewed download cannot be prepared', async ({ page }) => {
   const fileId = '0123456789abcdef0123456789abcdef';
   const recoveryDetail = 'The saved review state cannot be read. Return to Stage 3 and run harmonization again.';
-  const downloadDetail = 'The saved review state cannot be read. Return to Stage 3 and run harmonization again.';
 
-  // Given: the summary loads, but the next download reports an unreadable review state.
-  await page.route('**/stage-5/summary', async (route) => {
+  // Given: the review cannot be prepared because its saved state is unreadable.
+  await page.route('**/stage-5/review', async (route) => {
     await route.fulfill({
       status: 409,
       contentType: 'application/json',
@@ -1373,39 +1367,7 @@ test('Stage 5 shows recovery detail for summary and download failures', async ({
   const summaryRecoveryLink = summaryError.getByRole('link', { name: 'Return to Stage 3' });
   await expect(summaryRecoveryLink).toHaveAttribute('href', `/stage-3?file_id=${fileId}`);
 
-  // Given: the summary endpoint is healthy and the download endpoint reports server detail.
-  await page.unroute('**/stage-5/summary');
-  await page.route('**/stage-5/summary', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        dataset: { filename: 'recovery.csv', tabular_format: 'csv', data_model_key: 'gc', external_version_number: '11.0.4' },
-        column_summaries: [],
-        term_mappings: [],
-        non_conformant_items: [],
-      }),
-    });
-  });
-  await page.reload();
-  await expect(page.locator('#downloadResults')).toBeEnabled();
-  await page.route('**/stage-5/download', async (route) => {
-    await route.fulfill({
-      status: 409,
-      contentType: 'application/json',
-      body: JSON.stringify({ detail: downloadDetail }),
-    });
-  });
 
-  // When: the reviewer requests the download.
-  await page.locator('#downloadResults').click();
-
-  // Then: the download error uses the server detail and keeps recovery available.
-  const downloadError = page.locator('#downloadError');
-  await expect(downloadError).toBeVisible();
-  await expect(downloadError).toContainText(downloadDetail);
-  await expect(downloadError.getByRole('link', { name: 'Return to Stage 3' }))
-    .toHaveAttribute('href', `/stage-3?file_id=${fileId}`);
 });
 
 test('Stage 2 list opens a takeover on row click', async ({ page }) => {
@@ -1526,6 +1488,7 @@ test('Stage 2 rename search finds and selects a misspelled standard', async ({ p
 });
 
 test('Stage 2 splits picker sections by mapping kind', async ({ page }) => {
+  // Given columns with standard term lists, pass-through targets, and unmapped values.
   const payload = {
     file_id: 'abcdef0123456789abcdef0123456789',
     file_name: 'mixed.csv',
@@ -1565,6 +1528,7 @@ test('Stage 2 splits picker sections by mapping kind', async ({ page }) => {
     _stage2Cde('age_cde', 'passthrough'),
   ];
 
+  await page.route(`**/stage-1/analysis/${payload.file_id}`, (route) => route.fulfill({ json: payload }));
   await page.addInitScript((stagePayload) => {
     sessionStorage.setItem('stage2Payload', JSON.stringify(stagePayload));
     sessionStorage.setItem('maxReachedStage', 'mapping');
@@ -1615,9 +1579,11 @@ test('Stage 2 splits picker sections by mapping kind', async ({ page }) => {
   await expect(page.locator('.mapping-row', { hasText: 'notes' }).locator('.mapping-row-fit--na')).toHaveText('N/A');
   await expect(page.locator('.mapping-row', { hasText: 'age_value' }).locator('.mapping-row-fit--na')).toHaveText('N/A');
 
+  // When the reviewer opens the diagnosis column picker.
   await page.locator('.mapping-row', { hasText: 'diagnosis' }).click();
   await page.locator('#cdePicker').click();
 
+  // Then the picker separates targets with and without permissible values.
   await expect(page.locator('.dd-section-label', { hasText: 'Common data elements with permissible values' })).toBeVisible();
   await expect(page.locator('.dd-section-label', { hasText: 'Common data elements with no permissible values' })).toBeVisible();
   const passthroughRow = page.locator('.dd-section--rename-only .dd-opt', { hasText: 'notes_cde' });
@@ -1639,13 +1605,7 @@ test('Stage 2 splits picker sections by mapping kind', async ({ page }) => {
 });
 
 test('Stage 2 settings sidebar filters rows by mapping outcome', async ({ page }) => {
-  /*
-   * Given: Stage 2 with four columns covering each outcome — one PV-mapped,
-   *        two pass-through-mapped, and one unmapped.
-   * When:  the user changes visibility from the Settings sidebar.
-   * Then:  the list narrows by effective mapping outcome, and overrides update
-   *        the outcome counts.
-   */
+  // Given a mapping page with all three mapping outcomes.
   const payload = {
     file_id: 'abcdef0123456789abcdef0123456789',
     file_name: 'mixed.csv',
@@ -1678,6 +1638,7 @@ test('Stage 2 settings sidebar filters rows by mapping outcome', async ({ page }
     _stage2Cde('notes_cde', 'passthrough'),
   ];
 
+  await page.route(`**/stage-1/analysis/${payload.file_id}`, (route) => route.fulfill({ json: payload }));
   await page.addInitScript((stagePayload) => {
     sessionStorage.setItem('stage2Payload', JSON.stringify(stagePayload));
     sessionStorage.setItem('maxReachedStage', 'mapping');
@@ -1728,8 +1689,9 @@ test('Stage 2 settings sidebar filters rows by mapping outcome', async ({ page }
   await expect(page.locator('.fm-check[data-outcome="passthrough"] .fm-check-count')).toHaveText('2 / 4');
   await expect(page.locator('.fm-check[data-outcome="unchanged"] .fm-check-count')).toHaveText('1 / 4');
 
-  // Hiding pass-through rows leaves only the PV-mapped and unmapped rows.
+  // When the reviewer hides the pass-through outcome.
   await page.locator('.fm-check[data-outcome="passthrough"]').click();
+  // Then only the matching rows remain visible.
   await expect(page.locator('#mappingRows .mapping-row')).toHaveCount(2);
   await expect(page.locator('#mappingRows')).toContainText('dx_col');
   await expect(page.locator('#mappingRows')).toContainText('junk_col');
@@ -1758,11 +1720,7 @@ test('Stage 2 settings sidebar filters rows by mapping outcome', async ({ page }
 });
 
 test('Stage 2 empty-column filter uses full-column value presence', async ({ page }) => {
-  /*
-   * Given: one analyzed column has values and one is blank
-   * When:  Stage 2 renders with the default empty-column filter
-   * Then:  that column remains visible, while the truly blank column is hidden.
-   */
+  // Given one empty column and one with a value after the first displayed rows.
   const payload = {
     file_id: 'abcdef0123456789abcdef0123456789',
     file_name: 'late-values.csv',
@@ -1785,6 +1743,7 @@ test('Stage 2 empty-column filter uses full-column value presence', async ({ pag
     manifest: { column_mappings: {} },
   };
 
+  await page.route(`**/stage-1/analysis/${payload.file_id}`, (route) => route.fulfill({ json: payload }));
   await page.addInitScript((stagePayload) => {
     sessionStorage.setItem('stage2Payload', JSON.stringify(stagePayload));
     sessionStorage.setItem('maxReachedStage', 'mapping');
@@ -1797,8 +1756,10 @@ test('Stage 2 empty-column filter uses full-column value presence', async ({ pag
     });
   });
 
+  // When the reviewer opens the mapping page.
   await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&data_model_key=gc&external_version_number=11.0.4');
 
+  // Then only the column containing a value appears until empty columns are enabled.
   await expect(page.locator('#mappingRows .mapping-row')).toHaveCount(1);
   await expect(page.locator('#mappingRows')).toContainText('late_value');
   await expect(page.locator('#mappingRows')).not.toContainText('all_blank');
@@ -1810,12 +1771,7 @@ test('Stage 2 empty-column filter uses full-column value presence', async ({ pag
 });
 
 test('Stage 2 submits selected column renames for harmonization', async ({ page }) => {
-  /*
-   * Given: Stage 2 has a mapped column whose CDE label differs from the source header.
-   * When:  the user enables rename-to-standard and continues to harmonization.
-   * Then:  one request durably saves the choices and queues Stage 3, with
-   *        column_renames separate from CDE overrides.
-   */
+  // Given a column with a proposed output name and renaming initially disabled.
   const payload = {
     file_id: 'abcdef0123456789abcdef0123456789',
     file_name: 'rename.csv',
@@ -1843,6 +1799,7 @@ test('Stage 2 submits selected column renames for harmonization', async ({ page 
     cde_type: 'pv',
   }];
 
+  await page.route(`**/stage-1/analysis/${payload.file_id}`, (route) => route.fulfill({ json: payload }));
   await page.addInitScript((stagePayload) => {
     sessionStorage.setItem('stage2Payload', JSON.stringify(stagePayload));
     sessionStorage.setItem('maxReachedStage', 'mapping');
@@ -1887,12 +1844,13 @@ test('Stage 2 submits selected column renames for harmonization', async ({ page 
   const before = await page.evaluate(() => JSON.parse(sessionStorage.getItem('stage2Payload')).column_renames);
   expect(before).toBeUndefined();
 
-  // Enable renaming and continue.
+  // When the reviewer enables renaming and starts harmonization.
   await page.locator('#filterSidebarTrigger').click();
   await page.locator('.fs-rename-toggle').click();
   await page.locator('#harmonizeButton').click();
   await page.waitForURL(/\/stage-3/);
 
+  // Then the saved choices and job request use the reviewed column name and upload.
   expect(choicesRequests).toEqual([{
     file_id: 'abcdef0123456789abcdef0123456789',
     manual_overrides: {},
@@ -1909,6 +1867,7 @@ test('Stage 2 submits selected column renames for harmonization', async ({ page 
 });
 
 test('Stage 2 restores overridden column details one request at a time', async ({ page }) => {
+  // Given two saved overrides that need column details.
   const fileId = 'abcdef0123456789abcdef0123456789';
   const payload = {
     file_id: fileId,
@@ -1929,6 +1888,7 @@ test('Stage 2 restores overridden column details one request at a time', async (
   let maximumActiveRequests = 0;
   let completedRequests = 0;
 
+  await page.route(`**/stage-1/analysis/${payload.file_id}`, (route) => route.fulfill({ json: payload }));
   await page.addInitScript((stagePayload) => {
     sessionStorage.setItem('stage2Payload', JSON.stringify(stagePayload));
     sessionStorage.setItem('maxReachedStage', 'mapping');
@@ -1973,7 +1933,9 @@ test('Stage 2 restores overridden column details one request at a time', async (
     }
   });
 
+  // When the reviewer reopens the mapping page.
   await page.goto(`/stage-2?file_id=${fileId}&data_model_key=gc&external_version_number=11.0.4`);
+  // Then both details load in sequence and both rows appear.
   await expect.poll(() => completedRequests).toBe(2);
 
   expect(maximumActiveRequests).toBe(1);
@@ -1981,16 +1943,7 @@ test('Stage 2 restores overridden column details one request at a time', async (
 });
 
 test('Stage 2 picker surfaces all AI candidates as separate rows', async ({ page }) => {
-  /*
-   * Given: cde_targets["diagnosis"] contains two ranked AI candidates.
-   * When:  the user opens the picker for that column.
-   * Then:  both candidates render as suggestion rows in similarity order
-   *        (top first) under the "AI suggestions"
-   *        section header, and neither key appears in the lower sections
-   *        for CDEs with/without permissible values. Picking a candidate
-   *        updates the row's target CDE while preserving the rewrite
-   *        outcome for PV CDEs.
-   */
+  // Given two ranked suggestions for a diagnosis column.
   const payload = {
     file_id: 'abcdef0123456789abcdef0123456789',
     file_name: 'multi.csv',
@@ -2018,6 +1971,7 @@ test('Stage 2 picker surfaces all AI candidates as separate rows', async ({ page
     _stage2Cde('notes_cde', 'passthrough'),
   ];
 
+  await page.route(`**/stage-1/analysis/${payload.file_id}`, (route) => route.fulfill({ json: payload }));
   await page.addInitScript((stagePayload) => {
     sessionStorage.setItem('stage2Payload', JSON.stringify(stagePayload));
     sessionStorage.setItem('maxReachedStage', 'mapping');
@@ -2057,14 +2011,14 @@ test('Stage 2 picker surfaces all AI candidates as separate rows', async ({ page
     });
   });
 
+  // When the reviewer opens the mapped column and its picker.
   await page.goto('/stage-2?file_id=abcdef0123456789abcdef0123456789&data_model_key=gc&external_version_number=11.0.4');
 
   // Open takeover for the diagnosis column, then open the picker.
   await page.locator('.mapping-row', { hasText: 'diagnosis' }).click();
   await page.locator('#cdePicker').click();
 
-  // The suggestion section shows both candidates in overlap order. The
-  // per-row badge is absent because the section header conveys the source.
+  // Then both candidates appear under AI suggestions in their ranked order.
   await expect(
     page.locator('.dd-section-label', { hasText: 'AI suggestions' })
   ).toBeVisible();
@@ -2372,6 +2326,7 @@ test('no-change flow shows empty review state and zero outcome metrics', async (
 });
 
 test('Stage 5 aggregates change impact and keeps filters keyboard accessible', async ({ page }) => {
+  // Given a review with two warnings and both automated and manual changes.
   const fileId = '0123456789abcdef0123456789abcdef';
   const history = [{
     value: 'Bad',
@@ -2380,11 +2335,9 @@ test('Stage 5 aggregates change impact and keeps filters keyboard accessible', a
     timestamp: null,
     review_status: 'needs_attention',
   }];
-  await page.route('**/stage-5/summary', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
+  await page.route('**/stage-5/review', async (route) => {
+    await fulfillReview(route, {
+        history_available: true,
         dataset: {
           filename: 'attention.csv',
           tabular_format: 'csv',
@@ -2451,11 +2404,12 @@ test('Stage 5 aggregates change impact and keeps filters keyboard accessible', a
             column: 'diagnosis', source_column_index: 1, value: 'Worse', original: 'Worse',
           },
         ],
-      }),
     });
   });
 
+  // When the reviewer opens the summary.
   await page.goto(`/stage-5?file_id=${fileId}`);
+  // Then the warning identifies each column and the filters expose the matching changes.
   const warning = page.locator('#conformanceWarningDialog');
   await expect(warning).toBeVisible();
   await expect(warning).toContainText('2 values do not match the permissible value set');
@@ -2545,16 +2499,13 @@ const _FLOW_COLUMNS = [
 const _FLOW_FILE_ID = '0123456789abcdef0123456789abcdef';
 
 const _mockFlowSummary = async (page, columns = _FLOW_COLUMNS) => {
-  await page.route('**/stage-5/summary', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
+  await page.route('**/stage-5/review', async (route) => {
+    await fulfillReview(route, {
+        history_available: true,
         dataset: { filename: 'flow.csv', tabular_format: 'csv', data_model_key: 'gc', external_version_number: '11.0.4' },
         column_summaries: columns,
         term_mappings: [],
         non_conformant_items: [],
-      }),
     });
   });
 };
@@ -3020,7 +2971,7 @@ test('stage 5 advance waits for the latest override save', async ({ page }) => {
     legacyConformanceRequests += 1;
     await route.continue();
   });
-  await page.route('**/stage-5/summary', async (route) => {
+  await page.route('**/stage-5/review', async (route) => {
     summaryRequests += 1;
     await route.continue();
   });
@@ -3373,7 +3324,7 @@ test('Stage 4 keeps the workflow id when Review is clicked before rows load', as
   await expect(reviewLink).toHaveAttribute('href', `/stage-5?file_id=${fileId}`);
 
   // When: the user clicks Review before the Stage 4 rows request completes
-  const summaryRequestPromise = page.waitForRequest('**/stage-5/summary');
+  const summaryRequestPromise = page.waitForRequest('**/stage-5/review');
   await reviewLink.click();
   const summaryRequest = await summaryRequestPromise;
   releaseRows();
@@ -3397,10 +3348,11 @@ test('Stage 2 locks and Stage 5 is reachable after Stage 3 completes', async ({ 
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        job_id: 'e2e-job-locked',
+        job_id: `e2e-job-${fileId}`,
+        plan_version: payload.plan_version,
         status: 'succeeded',
         detail: 'Harmonization completed.',
-        next_stage_url: `/stage-4?file_id=${fileId}&job_id=e2e-job-locked&status=succeeded`,
+        next_stage_url: `/stage-4?file_id=${fileId}&job_id=e2e-job-${fileId}&status=succeeded`,
         job_id_available: true,
         manifest_summary: null,
       }),
@@ -3426,7 +3378,8 @@ test('Stage 2 locks and Stage 5 is reachable after Stage 3 completes', async ({ 
   expect(stageFiveUrl.searchParams.get('file_id')).toBe(fileId);
   await page.locator('.change-flow__summary').waitFor({ state: 'visible' });
 
-  // And: Stage 5 can load from the durable workflow id in the URL alone
+  // And the saved link reloads the same job.
+  expect(stageFiveUrl.searchParams.get('job_id')).toBe(`e2e-job-${fileId}`);
   await page.reload();
   await expect(page.locator('.change-flow__summary')).toBeVisible();
 
@@ -3503,6 +3456,10 @@ test('Stage 3 resumes a durable job and retries with only the workflow id', asyn
   // Then: the retry needs only the workflow id; model and mapping choices stay server-owned.
   await expect(page.locator('#reviewButton')).toBeEnabled();
   expect(harmonizePayload).toEqual({ file_id: currentFileId });
+  const verify = page.locator('.progress-tracker [data-stage="verify"] a');
+  await expect(verify).toHaveAttribute('href', `/stage-4?file_id=${currentFileId}&job_id=retry-job`);
+  await verify.click();
+  await expect(page).toHaveURL(new RegExp('job_id=retry-job'));
 });
 
 test('column tabs keep each source column and transformation separate', async ({ page }) => {
@@ -3594,9 +3551,10 @@ test('history dialog separates current output from accessible decision history',
   await clickHarmonize(page);
   await expect(page.locator('#reviewButton')).toBeEnabled();
   seedHarmonization(fileId, { 0: { col_0001: 'Changed Value' } });
-  await page.route('**/stage-5/summary', async (route) => {
+  await page.route('**/stage-5/review', async (route) => {
     const response = await route.fetch();
-    const summary = await response.json();
+    const parts = await reviewParts(response);
+    const summary = JSON.parse(parts.get('summary'));
     for (const mapping of summary.term_mappings) {
       mapping.history.push({
         value: mapping.final_value,
@@ -3606,7 +3564,7 @@ test('history dialog separates current output from accessible decision history',
         review_status: 'not_checked',
       });
     }
-    await route.fulfill({ response, json: summary });
+    await fulfillReview(route, summary, parts.get('download'));
   });
 
   // Navigate to Stage 5

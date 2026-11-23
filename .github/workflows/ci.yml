@@ -76,7 +76,7 @@ jobs:
       - name: Test OpenTofu behavior
         run: |
           tofu -chdir=infra test
-          tofu -chdir=infra/customer-platform test
+          tofu -chdir=infra/customer-platform test -verbose -json | python3 infra/tests/check_customer_plan.py
           tofu -chdir=infra/modules/data-plane test
 
       - name: Test deployment flow
@@ -337,7 +337,7 @@ jobs:
     if: >-
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
-    # The pinned Playwright release supports Ubuntu 24.04, not the moving latest image.
+    # The locked Chromium build supports Ubuntu 24.04.
     runs-on: ubuntu-24.04
     steps:
       - *prepare-action-node
