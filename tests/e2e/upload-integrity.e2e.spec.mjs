@@ -127,7 +127,7 @@ test('hash failure permits retry without submitting an unverified file', async (
   await expect(page.locator('#dropzoneFile .upload-error-mark')).toBeVisible();
   expect(uploads).toHaveLength(0);
   await expect(page.locator('#analyzeButton')).toBeDisabled();
-  await expect(page.locator('.progress-tracker [data-stage="mapping"] .step-link')).toHaveAttribute('aria-disabled', 'false');
+  await expect(page.locator('.progress-tracker [data-stage="mapping"] .step-link')).toHaveAttribute('aria-disabled', 'true');
   await page.setInputFiles(AGENT_FILE_INPUT, []);
   await page.setInputFiles(AGENT_FILE_INPUT, fileFixture('basic.csv'));
   // Then only the verified retry is uploaded and Map becomes available.
@@ -161,7 +161,7 @@ test('selection stays locked until the original file finishes hashing', async ({
   expect(uploads).toHaveLength(0);
   // When an old workflow link is clicked and another file is dropped before hashing is released.
   await mappingLink.click();
-  await expect(page).toHaveURL(new RegExp(`/stage-1\\?file_id=${previousFileId}$`));
+  await expect(page).toHaveURL(/\/stage-1$/);
   await page.evaluate(() => {
     const transfer = new DataTransfer();
     transfer.items.add(new File(['value\nwrong\n'], 'replacement.csv', { type: 'text/csv' }));
@@ -172,7 +172,7 @@ test('selection stays locked until the original file finishes hashing', async ({
   await expect(page.locator('#dropzoneFileStatus')).toHaveText('Uploaded');
   await expect(page.locator('#dropzoneFileName')).toHaveText('basic.csv');
   expect(uploads).toHaveLength(1);
-  await expect(mappingLink).toHaveAttribute('aria-disabled', 'false');
+  await expect(mappingLink).toHaveAttribute('aria-disabled', 'true');
   expect(await page.evaluate(async () => {
     const { readFromSession, CURRENT_FILE_SESSION_KEY } = await import('/assets/shared/storage-keys.js');
     return readFromSession(CURRENT_FILE_SESSION_KEY).original_name;

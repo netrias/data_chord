@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.schemas import DatasetWorkflowIdField
 from src.domain.column_outcomes import FinalValueReviewStatus, FinalValueSource
@@ -10,7 +10,12 @@ from src.domain.review_overrides import ReviewOverrideAction
 
 
 class StageFiveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     file_id: DatasetWorkflowIdField
+
+
+class PreparedReviewRequest(StageFiveRequest):
+    job_id: str | None = None
 
 
 class ColumnSummary(BaseModel):
@@ -70,6 +75,8 @@ class NonConformantItem(BaseModel):
 
 
 class StageFiveSummaryResponse(BaseModel):
+    audit_warning: str | None = None
+    history_available: bool = True
     dataset: DatasetSummary
     column_summaries: list[ColumnSummary]
     term_mappings: list[TermMapping]

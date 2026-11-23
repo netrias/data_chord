@@ -57,3 +57,8 @@ output "cognito_user_pool_id" {
   description = "Cognito user pool id for inviting app users."
   value       = aws_cognito_user_pool.auth.id
 }
+
+output "application_task_definition_arn" {
+  description = "Task revision the application deployment requested."
+  value       = aws_ecs_task_definition.application.arn
+}

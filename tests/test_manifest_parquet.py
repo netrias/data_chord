@@ -123,6 +123,7 @@ class TestManifestToJson:
 
     def test_manifest_to_json_handles_none_values(self) -> None:
         """Manifest JSON preserves nullable provider values."""
+        # Given a manifest with an absent ontology identifier.
         row = ManifestRow(
             job_id="job-789",
             column_id=0,
@@ -140,8 +141,12 @@ class TestManifestToJson:
             manifest_path = Path(tmpdir) / "test_manifest.parquet"
             _write_manifest_parquet(manifest_path, [row])
 
-            json_str = _manifest_to_json(manifest_path)
+            summary = read_manifest_parquet(manifest_path)
+            assert summary is not None
+            # When the parsed audit is exported as JSON.
+            json_str = _manifest_to_json(summary)
 
+            # Then the missing identifier survives the round trip as JSON null.
             assert json_str is not None
             data = json.loads(json_str)
             parsed = data[0]

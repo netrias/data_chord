@@ -137,6 +137,12 @@ export const getFileIdFromUrl = () => {
   return params.get('file_id');
 };
 
+/** Bind Verify reads and edits to the job shown in this tab. */
+export const reviewJobFromUrl = () => {
+  const jobId = new URLSearchParams(window.location.search).get('job_id');
+  return jobId === null ? {} : { job_id: jobId };
+};
+
 /**
  * Render leading/trailing whitespace as visible middle-dot markers.
  * Returns safe HTML — middle content is HTML-escaped, marker spans are trusted.

@@ -26,20 +26,21 @@ def _text(value: object, fallback: str) -> str:
 
 def _failed_phase(build: dict[str, object]) -> tuple[str, str]:
     phases = build.get("phases")
-    if isinstance(phases, list):
-        for raw_phase in phases:
-            phase = _object(raw_phase, "CodeBuild phase")
-            if phase.get("phaseStatus") not in _FAILURE_STATUSES:
-                continue
-            phase_name = _text(phase.get("phaseType"), "UNKNOWN")
-            contexts = phase.get("contexts")
-            if isinstance(contexts, list):
-                for raw_context in contexts:
-                    context = _object(raw_context, "CodeBuild failure context")
-                    message = context.get("message")
-                    if isinstance(message, str) and message:
-                        return phase_name, message
-            return phase_name, "no failure message was returned"
+    if not isinstance(phases, list):
+        phases = []
+    for raw_phase in phases:
+        phase = _object(raw_phase, "CodeBuild phase")
+        if phase.get("phaseStatus") not in _FAILURE_STATUSES:
+            continue
+        phase_name = _text(phase.get("phaseType"), "UNKNOWN")
+        contexts = phase.get("contexts")
+        if isinstance(contexts, list):
+            for raw_context in contexts:
+                context = _object(raw_context, "CodeBuild failure context")
+                message = context.get("message")
+                if isinstance(message, str) and message:
+                    return phase_name, message
+        return phase_name, "no failure message was returned"
     return _text(build.get("currentPhase"), "UNKNOWN"), "no failure message was returned"
 
 

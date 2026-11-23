@@ -5,7 +5,7 @@ Axis of change: how mutable Stage 4 review state is loaded, saved, and cleared.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
 from src.domain.review_overrides import (
@@ -88,6 +88,7 @@ def save_review_overrides_state(
     file_id: str,
     overrides: object,
     review_state: ReviewProgressState,
+    run_id: str | None = None,
     expected_version: VersionToken | None = None,
 ) -> SavedReviewOverrides:
     now = datetime.now(UTC)
@@ -102,6 +103,8 @@ def save_review_overrides_state(
         current = ReviewOverrides.from_store(existing.data, file_id) if existing is not None else None
     except InvalidReviewOverridesError as exc:
         raise ReviewOverridesUnreadableError(f"Unreadable review overrides for {file_id}.") from exc
+    if current and current.run_id and run_id and current.run_id != run_id:
+        raise ReviewOverridesStoreConflictError(file_id)
     if current is None:
         saved = ReviewOverrides.from_snapshot(
             file_id=file_id,
@@ -116,6 +119,7 @@ def save_review_overrides_state(
             review_state=review_state,
             updated_at=now,
         )
+    saved = replace(saved, run_id=run_id or saved.run_id)
     try:
         stored = storage.write_json(
             user,

@@ -6,16 +6,17 @@ Orchestrates file I/O, metadata tracking, and directory organization.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import logging
 import shutil
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from tempfile import NamedTemporaryFile
+from tempfile import NamedTemporaryFile, TemporaryDirectory
 from typing import Final, NotRequired, Protocol, TypedDict, cast
 
 from netrias_client import (
@@ -28,6 +29,7 @@ from netrias_client import (
 
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_value
 from src.domain.upload_integrity import UploadFingerprint
+from src.storage.file_operation import run_file_operation
 
 logger = logging.getLogger(__name__)
 
@@ -141,34 +143,51 @@ def _copy_file_atomic(source: Path, destination: Path) -> None:
         temp_path.unlink(missing_ok=True)
 
 
-def _remove_temp_file(source: Path, destination: Path) -> None:
-    """Clean up temporary SDK outputs after copying them into managed storage."""
-    if source.resolve() == destination.resolve():
-        return
-    try:
-        source.unlink()
-    except OSError:
-        logger.debug("Could not remove temp file", extra={"path": str(source)})
-
-
 def _harmonized_suffix_for(original_path: Path) -> str:
     return f".harmonized{original_path.suffix.lower() or '.csv'}"
 
 
 class UploadStorage:
     def __init__(self, base_dir: Path, constraints: UploadConstraints) -> None:
-        self._base_dir: Path = base_dir
-        self._data_dir: Path = base_dir / "files"
-        self._meta_dir: Path = base_dir / "meta"
-        self._constraints: UploadConstraints = constraints
-        self._manifest_dir: Path = base_dir / "manifests"
-        self._harmonized_dir: Path = base_dir / "harmonized"
+        self._shared_dir = base_dir
+        self._operation_dir: ContextVar[Path | None] = ContextVar("operation_upload_dir", default=None)
+        self._constraints = constraints
         self._ensure_workspace()
+
+    @contextmanager
+    def private_workspace(self) -> Generator[None]:
+        """Keep materialized S3 files alive until this reader or worker finishes."""
+        with TemporaryDirectory(dir=self._shared_dir, prefix="operation-") as directory:
+            token = self._operation_dir.set(Path(directory))
+            try:
+                self._ensure_workspace()
+                yield
+            finally:
+                self._operation_dir.reset(token)
+
+    @property
+    def _base_dir(self) -> Path:
+        return self._operation_dir.get() or self._shared_dir
+
+    @property
+    def _data_dir(self) -> Path:
+        return self._base_dir / "files"
+
+    @property
+    def _manifest_dir(self) -> Path:
+        return self._base_dir / "manifests"
+
+    @property
+    def _meta_dir(self) -> Path:
+        return self._base_dir / "meta"
+
+    @property
+    def _harmonized_dir(self) -> Path:
+        return self._base_dir / "harmonized"
 
     def _ensure_workspace(self) -> None:
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._meta_dir.mkdir(parents=True, exist_ok=True)
-        self._manifest_dir.mkdir(parents=True, exist_ok=True)
         self._harmonized_dir.mkdir(parents=True, exist_ok=True)
 
     async def store(
@@ -195,7 +214,7 @@ class UploadStorage:
                 await upload.close()
             verification = None
             if expected is not None:
-                verification = await asyncio.to_thread(_fingerprint_file, destination)
+                verification = await run_file_operation(_fingerprint_file, destination)
                 expected.verify(verification)
                 total_bytes = verification.size_bytes
             return self._create_and_save_metadata(
@@ -290,6 +309,10 @@ class UploadStorage:
             }
         return payload
 
+    def metadata_for_path(self, payload: Mapping[str, object], source: Path) -> UploadedFileMeta:
+        """Read durable metadata for the file supplied by its storage backend."""
+        return self._metadata_from_payload(cast(StoredMeta, payload), source)
+
     def restore_upload(self, payload: Mapping[str, object], source_path: Path) -> UploadedFileMeta:
         meta = self._metadata_from_payload(cast(StoredMeta, payload))
         meta.saved_path.parent.mkdir(parents=True, exist_ok=True)
@@ -299,19 +322,6 @@ class UploadStorage:
             _copy_file_atomic(source_path, meta.saved_path)
         self._write_metadata(meta)
         return meta
-
-    def restore_harmonization_manifest(self, file_id: str, source_path: Path) -> Path:
-        destination = self._manifest_dir / f"{file_id}_harmonization.parquet"
-        if source_path.resolve() != destination.resolve():
-            _copy_file_atomic(source_path, destination)
-        return destination
-
-    def restore_harmonized_output(self, file_id: str, original_path: Path, source_path: Path) -> Path:
-        destination = self.harmonized_path_for(file_id, original_path)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        if source_path.resolve() != destination.resolve():
-            _copy_file_atomic(source_path, destination)
-        return destination
 
     def select_sheet(self, file_id: str, sheet_name: str | None) -> UploadedFileMeta:
         meta = self.load(file_id)
@@ -324,27 +334,8 @@ class UploadStorage:
         self._write_metadata(updated)
         return updated
 
-    def save_harmonization_manifest(self, file_id: str, manifest_path: Path) -> Path:
-        destination = self._manifest_dir / f"{file_id}_harmonization.parquet"
-        if manifest_path.resolve() != destination.resolve():
-            _copy_file_atomic(manifest_path, destination)
-        _remove_temp_file(manifest_path, destination)
-        logger.info("Stored harmonization manifest", extra={"file_id": file_id, "path": str(destination)})
-        return destination
-
-    def load_harmonization_manifest_path(self, file_id: str) -> Path | None:
-        path = self._manifest_dir / f"{file_id}_harmonization.parquet"
-        return path if path.exists() else None
-
     def harmonized_path_for(self, file_id: str, original_path: Path) -> Path:
         return self._harmonized_dir / f"{file_id}{_harmonized_suffix_for(original_path)}"
-
-    def load_harmonized_path(self, file_id: str) -> Path | None:
-        meta = self.load(file_id)
-        if meta is None:
-            return None
-        path = self.harmonized_path_for(file_id, meta.saved_path)
-        return path if path.exists() else None
 
     def delete_workflow_files(self, file_id: DatasetWorkflowId) -> None:
         """Delete exact scratch paths for one validated workflow identity."""
@@ -368,13 +359,13 @@ class UploadStorage:
         if not is_supported_tabular_content_type(content_type, file_format):
             raise UnsupportedUploadError(f"Unsupported content type for {suffix}: {content_type}")
 
-    def _metadata_from_payload(self, payload: StoredMeta) -> UploadedFileMeta:
+    def _metadata_from_payload(self, payload: StoredMeta, source: Path | None = None) -> UploadedFileMeta:
         return UploadedFileMeta(
             dataset_workflow_id=dataset_workflow_id_from_value(payload[_META_FILE_ID]),
             original_name=payload[_META_ORIGINAL_NAME],
             content_type=payload[_META_CONTENT_TYPE],
             size_bytes=payload[_META_SIZE_BYTES],
-            saved_path=self._data_dir / payload[_META_SAVED_NAME],
+            saved_path=source if source is not None else self._data_dir / payload[_META_SAVED_NAME],
             uploaded_at=datetime.fromisoformat(payload[_META_UPLOADED_AT]),
             tabular_format=_tabular_format_from_metadata(payload),
             sheet_names=payload.get(_META_SHEET_NAMES, []),

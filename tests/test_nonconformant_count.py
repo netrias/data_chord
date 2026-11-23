@@ -10,7 +10,7 @@ import pytest
 from httpx import AsyncClient
 
 import src.app.dependencies as dependencies
-from src.storage import UploadStorage
+from src.storage import UploadStorage, WorkflowFile
 from tests.conftest import (
     create_csv_content,
     create_harmonized_csv,
@@ -21,6 +21,12 @@ from tests.conftest import (
 )
 
 pytestmark = pytest.mark.asyncio
+
+
+def _manifest_version(file_id):
+    return dependencies.get_workflow_storage().artifact_version(
+        dependencies.get_user_context(), file_id, WorkflowFile.HARMONIZATION_MANIFEST_BASE,
+    )
 
 
 def _manifest_row(
@@ -80,7 +86,7 @@ async def test_stage5_summary_requires_current_harmonization(
         create_csv_content([["diagnosis"], ["Bad Value"]]),
         "missing-manifest.csv",
     )
-    assert dependencies.get_upload_storage().load_harmonization_manifest_path(file_id) is None
+    assert _manifest_version(file_id) is None
 
     # When: Stage 5 asks for the final summary and conformance result
     response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
@@ -127,7 +133,7 @@ async def test_stage5_summary_returns_current_unique_bad_values(
         manifest_rows,
         {"col_0000": frozenset({"Allowed Diagnosis"})},
     )
-    assert dependencies.get_upload_storage().load_harmonization_manifest_path(file_id) is not None
+    assert _manifest_version(file_id) is not None
 
     # When: Stage 5 asks for the final summary
     response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
@@ -257,7 +263,7 @@ async def test_stage5_summary_owns_the_non_conformant_result(
         manifest_rows,
         {"col_0000": frozenset({"Allowed Diagnosis"})},
     )
-    assert dependencies.get_upload_storage().load_harmonization_manifest_path(file_id) is not None
+    assert _manifest_version(file_id) is not None
 
     # When: Stage 5 summarizes the final values and their conformance
     response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
@@ -298,7 +304,7 @@ async def test_stage5_summary_deduplicates_by_column_original_and_final(
         manifest_rows,
         {"col_0000": frozenset({"Allowed Diagnosis"})},
     )
-    assert dependencies.get_upload_storage().load_harmonization_manifest_path(file_id) is not None
+    assert _manifest_version(file_id) is not None
 
     # When: Stage 5 asks for the final summary
     response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
@@ -333,7 +339,7 @@ async def test_stage5_summary_ignores_columns_without_pvs_and_empty_values(
         manifest_rows,
         {"col_0000": frozenset({"Allowed Diagnosis"})},
     )
-    assert dependencies.get_upload_storage().load_harmonization_manifest_path(file_id) is not None
+    assert _manifest_version(file_id) is not None
 
     # When: Stage 5 asks for the final summary
     response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
