@@ -29,3 +29,11 @@ module "data_plane" {
   name_prefix       = local.name_prefix
   partition         = data.aws_partition.current.partition
 }
+
+# Existing deployments relinquish state ownership without an S3 versioning call.
+removed {
+  from = module.data_plane.aws_s3_bucket_versioning.workflow
+  lifecycle {
+    destroy = false
+  }
+}

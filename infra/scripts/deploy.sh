@@ -279,7 +279,8 @@ apply_application() {
 }
 
 watch_ecs() {
-  local cluster service deadline fields state desired running pending
+  local cluster service deadline fields state desired running pending revision expected seen=0
+  expected="$(required_tofu_output application_task_definition_arn)"
   cluster="$(required_tofu_output ecs_cluster_name)"
   service="$(required_tofu_output ecs_service_name)"
   deadline=$((SECONDS + 900))
@@ -288,10 +289,16 @@ watch_ecs() {
     fields="$(aws ecs describe-services \
       --cluster "$cluster" \
       --services "$service" \
-      --query "services[0].deployments[?status=='PRIMARY'] | [0].[rolloutState,desiredCount,runningCount,pendingCount]" \
+      --query "services[0].deployments[?status=='PRIMARY'] | [0].[rolloutState,desiredCount,runningCount,pendingCount,taskDefinition]" \
       --output text)"
-    read -r state desired running pending <<<"$fields"
-    if [[ "$state" == "COMPLETED" && "$running" == "$desired" && "$pending" == "0" ]]; then
+    read -r state desired running pending revision <<<"$fields"
+    if [[ "$revision" == "$expected" ]]; then
+      seen=1
+      [[ "$state" != "FAILED" ]] || fail "ECS rollout failed for $expected."
+    elif ((seen)); then
+      fail "ECS rolled back $expected to $revision."
+    fi
+    if [[ "$revision" == "$expected" && "$state" == "COMPLETED" && "$running" == "$desired" && "$pending" == "0" ]]; then
       return 0
     fi
     sleep 15
