@@ -141,7 +141,7 @@ run_plan() {
 
 apply_prerequisites() {
   local initial_state="$1" plan_file="$PLAN_DIR/prerequisites.tfplan" state_path
-  local former_versioning="module.data_plane.aws_s3_bucket_versioning.workflow" versioning_in_state
+  local former_versioning="module.data_plane.aws_s3_bucket_versioning.workflow" state_addresses
   local targets=(
     -target=aws_codebuild_project.app_image
     -target=aws_iam_role_policy.application_build
@@ -157,8 +157,8 @@ apply_prerequisites() {
     -target=module.data_plane.aws_dynamodb_table.cde_recommendation_cache
   )
   if [[ "$initial_state" != "-" ]]; then
-    versioning_in_state="$(tofu -chdir="$INFRA_DIR" state list "$former_versioning")"
-    if [[ "$versioning_in_state" == "$former_versioning" ]]; then
+    state_addresses="$(tofu -chdir="$INFRA_DIR" state list)"
+    if grep -Fxq -- "$former_versioning" <<<"$state_addresses"; then
       # OpenTofu requires both addresses when a targeted plan moves an existing resource.
       targets+=("-target=$former_versioning" "-target=aws_s3_bucket_versioning.managed_workflow")
     fi
