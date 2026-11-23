@@ -140,21 +140,31 @@ run_plan() {
 }
 
 apply_prerequisites() {
-  local plan_file="$PLAN_DIR/prerequisites.tfplan" state_path
-  log "Planning the application prerequisites"
-  create_saved_plan "$plan_file" \
-    -target=aws_codebuild_project.app_image \
-    -target=aws_iam_role_policy.application_build \
-    -target=aws_s3_bucket.workflow \
-    -target=module.data_plane.aws_s3_bucket.workflow \
-    -target=aws_s3_bucket_public_access_block.workflow \
-    -target=module.data_plane.aws_s3_bucket_public_access_block.workflow \
-    -target=aws_dynamodb_table.reference_data \
-    -target=module.data_plane.aws_dynamodb_table.reference_data \
-    -target=aws_dynamodb_table.harmonization_cache \
-    -target=module.data_plane.aws_dynamodb_table.harmonization_cache \
-    -target=aws_dynamodb_table.cde_recommendation_cache \
+  local initial_state="$1" plan_file="$PLAN_DIR/prerequisites.tfplan" state_path
+  local former_versioning="module.data_plane.aws_s3_bucket_versioning.workflow" versioning_in_state
+  local targets=(
+    -target=aws_codebuild_project.app_image
+    -target=aws_iam_role_policy.application_build
+    -target=aws_s3_bucket.workflow
+    -target=module.data_plane.aws_s3_bucket.workflow
+    -target=aws_s3_bucket_public_access_block.workflow
+    -target=module.data_plane.aws_s3_bucket_public_access_block.workflow
+    -target=aws_dynamodb_table.reference_data
+    -target=module.data_plane.aws_dynamodb_table.reference_data
+    -target=aws_dynamodb_table.harmonization_cache
+    -target=module.data_plane.aws_dynamodb_table.harmonization_cache
+    -target=aws_dynamodb_table.cde_recommendation_cache
     -target=module.data_plane.aws_dynamodb_table.cde_recommendation_cache
+  )
+  if [[ "$initial_state" != "-" ]]; then
+    versioning_in_state="$(tofu -chdir="$INFRA_DIR" state list "$former_versioning")"
+    if [[ "$versioning_in_state" == "$former_versioning" ]]; then
+      # OpenTofu requires both addresses when a targeted plan moves an existing resource.
+      targets+=("-target=$former_versioning" "-target=aws_s3_bucket_versioning.managed_workflow")
+    fi
+  fi
+  log "Planning the application prerequisites"
+  create_saved_plan "$plan_file" "${targets[@]}"
   check_internal_plan "$plan_file.json" prerequisite
   state_path="$(state_identity)"
   receipt_validate "$state_path" in_progress
@@ -331,7 +341,7 @@ run_deploy() {
   receipt_validate "$state_path" planned
   claim_deployment_root
   receipt_status planned in_progress
-  apply_prerequisites
+  apply_prerequisites "$state_path"
   ensure_image
   apply_application
   watch_ecs
