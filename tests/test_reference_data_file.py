@@ -20,10 +20,12 @@ def _model() -> ReferenceModel:
     return ReferenceModel(
         version=DataModelVersionReference("model", "1"),
         label="Model",
-        catalog=CdeCatalog.from_cdes([
-            CDEInfo(42, "valued", "Values", CdeType.PV),
-            CDEInfo(None, "empty", None, CdeType.PASSTHROUGH),
-        ]),
+        catalog=CdeCatalog.from_cdes(
+            [
+                CDEInfo(42, "valued", "Values", CdeType.PV),
+                CDEInfo(None, "empty", None, CdeType.PASSTHROUGH),
+            ]
+        ),
         pvs=CdePvCatalog.from_mapping({"valued": frozenset({"b", "a"}), "empty": frozenset()}),
     )
 
@@ -32,15 +34,15 @@ def test_canonical_export_round_trips_exact_reference_data(tmp_path: Path) -> No
     # Given one complete reference model.
     path = tmp_path / "reference.json"
 
-    # When it is exported and loaded again.
+    # When the model is exported, loaded, and exported again.
     save_reference_models(path, [_model()])
     loaded = load_reference_models(path)
+    first_bytes = path.read_bytes()
+    save_reference_models(path, [_model()])
 
     # Then the model and explicit empty value set are exact and the file is stable.
     assert loaded == (_model(),)
     assert loaded[0].catalog.get("valued") == CDEInfo(42, "valued", "Values", CdeType.PV)
-    first_bytes = path.read_bytes()
-    save_reference_models(path, [_model()])
     assert path.read_bytes() == first_bytes
 
 
@@ -68,9 +70,12 @@ def test_canonical_export_rejects_duplicate_model_versions(tmp_path: Path) -> No
     payload["digest"] = hashlib.sha256(encoded).hexdigest()
     path.write_text(json.dumps(payload), encoding="utf-8")
 
-    # When it is loaded, then ambiguous migration input is rejected.
-    with pytest.raises(ReferenceDataCorruptError, match="duplicate model"):
+    # When the file reader loads the duplicate model versions.
+    with pytest.raises(ReferenceDataCorruptError) as error:
         load_reference_models(path)
+
+    # Then the file reader reports the duplicate model identity.
+    assert "duplicate model" in str(error.value)
 
 
 def test_canonical_export_rejects_tampered_content(tmp_path: Path) -> None:
@@ -81,6 +86,9 @@ def test_canonical_export_rejects_tampered_content(tmp_path: Path) -> None:
     payload["models"][0]["label"] = "Changed"
     path.write_text(json.dumps(payload), encoding="utf-8")
 
-    # When it is loaded, then the aggregate integrity check rejects it.
-    with pytest.raises(ReferenceDataCorruptError, match="integrity"):
+    # When the file reader loads the changed model data.
+    with pytest.raises(ReferenceDataCorruptError) as error:
         load_reference_models(path)
+
+    # Then the file reader reports the failed integrity check.
+    assert "integrity" in str(error.value)

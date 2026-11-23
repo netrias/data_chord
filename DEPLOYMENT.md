@@ -492,46 +492,10 @@ the deployment.
 ## 6. Load reference data
 
 The deployment creates an empty reference-data table. Data Chord cannot run a
-workflow until you load an approved canonical reference-data file.
-
-Calculate the file's SHA-256 digest.
-
-On macOS:
-
-```bash
-shasum -a 256 approved-reference-data.json
-```
-
-On Linux:
-
-```bash
-sha256sum approved-reference-data.json
-```
-
-Use a profile that can write to the staging reference-data table:
-
-```bash
-AWS_PROFILE=example-data-loader uv run python -m scripts.reference_data sync \
-  --input approved-reference-data.json \
-  --expected-sha256 <sha256-from-the-command-above> \
-  --table data-chord-staging-reference-data \
-  --region us-east-2
-```
-
-The command checks the digest, loads the data, reads it back, and checks the
-published model count.
-
-If an authorized operator must create the canonical file from the legacy
-service, load `NETRIAS_API_KEY` from the approved secret source. Do not type its
-value in the command. Then run:
-
-```bash
-uv run python -m scripts.reference_data export \
-  --environment staging \
-  --output approved-reference-data.json
-```
-
-Review and approve the exported file before you sync it.
+workflow until standards data is published. Auto-Model owns DynamoDB publication;
+Data Chord provides the runtime reader for flat schema-2 CDE rows. Auto-Model
+must publish the flat CDE rows before Data Chord can read the standards table.
+Data Chord no longer provides `export` or `sync` commands for this DynamoDB table.
 
 ## 7. Invite a user and test one workflow
 
