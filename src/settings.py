@@ -258,6 +258,18 @@ def validate_required_config() -> None:
     identity_source = get_identity_source()
     if profile is RuntimeProfile.PORTABLE and identity_source is not IdentitySource.SHARED:
         raise ConfigurationError("portable profile requires shared identity")
+    _validate_profile_storage(profile)
+
+    get_agentic_workers()
+    get_programmatic_api_key()
+    get_max_active_jobs()
+
+    _validate_profile_identity(profile, identity_source)
+
+    get_aws_region()
+
+
+def _validate_profile_storage(profile: RuntimeProfile) -> None:
     if profile is RuntimeProfile.PORTABLE:
         get_workflow_storage_limit_bytes()
         database = get_reference_database_path()
@@ -276,10 +288,8 @@ def validate_required_config() -> None:
                     f"{_DATA_CHORD_S3_BUCKET_VAR} is required when {_DATA_CHORD_STORAGE_VAR}={StorageBackend.S3.value}"
                 )
 
-    get_agentic_workers()
-    get_programmatic_api_key()
-    get_max_active_jobs()
 
+def _validate_profile_identity(profile: RuntimeProfile, identity_source: IdentitySource) -> None:
     if (
         profile is RuntimeProfile.HOSTED
         and identity_source is IdentitySource.SHARED
@@ -297,5 +307,3 @@ def validate_required_config() -> None:
             f"{_DATA_CHORD_ALB_ARN_VAR} must not be set when "
             f"{_DATA_CHORD_IDENTITY_SOURCE_VAR}={IdentitySource.TRUSTED_PROXY.value}"
         )
-
-    get_aws_region()

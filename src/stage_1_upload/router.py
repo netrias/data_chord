@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import errno
 import logging
-from collections.abc import Callable
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
@@ -26,7 +27,7 @@ from src.domain.columns import ColumnIdentity, column_key_from_string
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, new_dataset_workflow_id
 from src.domain.manifest import ColumnMappingManifest
 from src.domain.match_counts import column_value_overlap_ratio
-from src.domain.reference_data import ReferenceDataError
+from src.domain.reference_data import ReferenceDataError, ReferenceModel
 from src.domain.upload_integrity import UploadFingerprint
 from src.domain.workflow_state import WorkflowState
 from src.observability.events import (
@@ -59,6 +60,7 @@ from src.storage import (
     resolve_selected_sheet,
 )
 from src.storage.file_operation import run_file_operation
+from src.storage.workflow_cleanup import WorkflowCleanup
 
 from .schemas import (
     AnalyzeRequest,
@@ -142,37 +144,18 @@ async def upload_dataset(
         ),
         user,
     )
-    release_upload_lease: Callable[[], None] | None = None
     try:
-        if cleanup is not None:
-            release_upload_lease = await run_in_threadpool(cleanup.acquire_upload_lease)
-            await run_in_threadpool(cleanup.require_upload_space)
         workflow_storage = dependencies.get_workflow_storage()
         expected = UploadFingerprint(expected_sha256, expected_size_bytes)
-        async with stage_upload(storage, workflow_storage, file, dataset_workflow_id, expected) as meta:
+        async with (
+            _upload_lease(cleanup),
+            stage_upload(storage, workflow_storage, file, dataset_workflow_id, expected) as meta,
+        ):
             workflow_storage.create_workflow(user, meta.dataset_workflow_id)
             save_upload_artifacts(workflow_storage, user, storage, meta)
             response = await _upload_response(meta)
-    except (WorkflowStorageFullError, OSError) as exc:
-        if isinstance(exc, OSError) and exc.errno not in {errno.ENOSPC, errno.EDQUOT}:
-            raise
-        _log_upload_failed(user, dataset_workflow_id, "workflow_storage_full")
-        raise HTTPException(
-            status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
-            detail="Storage is full. Please try again after older workflows are removed.",
-        ) from exc
-    except UnsupportedUploadError as exc:
-        _log_upload_failed(user, dataset_workflow_id, "unsupported_upload")
-        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(exc)) from exc
-    except UploadTooLargeError as exc:
-        _log_upload_failed(user, dataset_workflow_id, "upload_too_large")
-        raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(exc)) from exc
     except Exception as exc:
-        _log_upload_failed(user, dataset_workflow_id, type(exc).__name__)
-        raise
-    finally:
-        if release_upload_lease is not None:
-            await run_in_threadpool(release_upload_lease)
+        _raise_upload_error(exc, user, dataset_workflow_id)
     log_workflow_event(
         WorkflowEvent(
             stage=WorkflowStage.STAGE_1,
@@ -233,46 +216,10 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
     )
     workflow_storage = dependencies.get_workflow_storage()
     data_model_version = payload.data_model_version()
-    analysis_task = run_in_threadpool(
-        _profile_stored_upload, storage, workflow_storage, user, payload.file_id, payload.sheet_name,
-    )
-    reference_task = run_in_threadpool(
-        dependencies.get_reference_data_repository().load_model,
-        data_model_version,
-    )
-    try:
-        analysis, reference_model = await asyncio.gather(
-            analysis_task,
-            reference_task,
-        )
-        mapping_manifest = await dependencies.get_cde_recommender().recommend(
-            [
-                ProfiledColumn(
-                    identity=ColumnIdentity(
-                        column_key_from_string(column.column_key),
-                        column.header,
-                    ),
-                    profile=analysis.profiles[column.column_key],
-                )
-                for column in analysis.columns
-            ],
-            reference_model,
-        )
-    except ReferenceDataError as exc:
-        _log_analyze_failed(user, payload.file_id, type(exc).__name__)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Reference data is currently unavailable. Please try again later.",
-        ) from exc
-    except RecommendationUnavailableError as exc:
-        _log_analyze_failed(user, payload.file_id, type(exc).__name__)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="CDE recommendations are currently unavailable. Please try again later.",
-        ) from exc
-    except Exception as exc:
-        _log_analyze_failed(user, payload.file_id, type(exc).__name__)
-        raise
+    analyzed = await _analyze_with_reference(storage, workflow_storage, payload, user)
+    analysis = analyzed.profile
+    reference_model = analyzed.reference
+    mapping_manifest = analyzed.manifest
     state = WorkflowState.from_data_model_version(
         analysis.file_id, data_model_version, mapping_manifest, selected_sheet=analysis.selected_sheet,
     )
@@ -362,9 +309,7 @@ async def load_analysis_state(file_id: str) -> AnalyzeResponse:
             else {}
         ),
         column_renames=(
-            {str(key): value for key, value in choices.column_renames.renames.items()}
-            if choices is not None
-            else {}
+            {str(key): value for key, value in choices.column_renames.renames.items()} if choices is not None else {}
         ),
     )
 
@@ -436,9 +381,7 @@ def _build_column_summaries(
         cde = _top_catalog_cde(column_key, mapping_manifest, cde_catalog)
         distinct = frozenset(dv.value for dv in profile.distinct_values)
         ratio = (
-            column_value_overlap_ratio(distinct, cde.cde_type, pv_sets.get(cde.cde_key))
-            if cde is not None
-            else None
+            column_value_overlap_ratio(distinct, cde.cde_type, pv_sets.get(cde.cde_key)) if cde is not None else None
         )
         summaries[column_key] = ColumnOverlapRatio(value_overlap_ratio=ratio)
     return summaries
@@ -502,3 +445,88 @@ def _log_analyze_failed(user: UserContext, file_id: str, error_type: str) -> Non
         ),
         user,
     )
+
+
+@dataclass(frozen=True)
+class _AnalyzedDataset:
+    profile: _UploadProfile
+    reference: ReferenceModel
+    manifest: ColumnMappingManifest
+
+
+async def _analyze_with_reference(
+    storage: UploadStorage, workflow_storage: WorkflowStorage, payload: AnalyzeRequest, user: UserContext,
+) -> _AnalyzedDataset:
+    data_model_version = payload.data_model_version()
+    analysis_task = run_in_threadpool(
+        _profile_stored_upload, storage, workflow_storage, user, payload.file_id, payload.sheet_name,
+    )
+    reference_task = run_in_threadpool(
+        dependencies.get_reference_data_repository().load_model,
+        data_model_version,
+    )
+    try:
+        analysis, reference_model = await asyncio.gather(
+            analysis_task,
+            reference_task,
+        )
+        mapping_manifest = await dependencies.get_cde_recommender().recommend(
+            [
+                ProfiledColumn(
+                    identity=ColumnIdentity(
+                        column_key_from_string(column.column_key),
+                        column.header,
+                    ),
+                    profile=analysis.profiles[column.column_key],
+                )
+                for column in analysis.columns
+            ],
+            reference_model,
+        )
+    except ReferenceDataError as exc:
+        _log_analyze_failed(user, payload.file_id, type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Reference data is currently unavailable. Please try again later.",
+        ) from exc
+    except RecommendationUnavailableError as exc:
+        _log_analyze_failed(user, payload.file_id, type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="CDE recommendations are currently unavailable. Please try again later.",
+        ) from exc
+    except Exception as exc:
+        _log_analyze_failed(user, payload.file_id, type(exc).__name__)
+        raise
+    return _AnalyzedDataset(analysis, reference_model, mapping_manifest)
+
+
+@asynccontextmanager
+async def _upload_lease(cleanup: WorkflowCleanup | None) -> AsyncIterator[None]:
+    release = None
+    try:
+        if cleanup is not None:
+            release = await run_in_threadpool(cleanup.acquire_upload_lease)
+            await run_in_threadpool(cleanup.require_upload_space)
+        yield
+    finally:
+        if release is not None:
+            await run_in_threadpool(release)
+
+
+def _raise_upload_error(error: Exception, user: UserContext, file_id: str) -> NoReturn:
+    if isinstance(error, (WorkflowStorageFullError, OSError)):
+        if isinstance(error, OSError) and error.errno not in {errno.ENOSPC, errno.EDQUOT}:
+            raise error
+        _log_upload_failed(user, file_id, "workflow_storage_full")
+        raise HTTPException(
+            status_code=507, detail="Storage is full. Please try again after older workflows are removed."
+        ) from error
+    if isinstance(error, UnsupportedUploadError):
+        _log_upload_failed(user, file_id, "unsupported_upload")
+        raise HTTPException(status_code=415, detail=str(error)) from error
+    if isinstance(error, UploadTooLargeError):
+        _log_upload_failed(user, file_id, "upload_too_large")
+        raise HTTPException(status_code=413, detail=str(error)) from error
+    _log_upload_failed(user, file_id, type(error).__name__)
+    raise error

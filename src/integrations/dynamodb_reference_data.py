@@ -64,37 +64,40 @@ class DynamoDbReferenceDataRepository:
         return _summaries_from_catalog(items)
 
     def load_model(self, version: DataModelVersionReference) -> ReferenceModel:
+        cached = self._cached_model(version)
+        if cached is not None:
+            return cached
+
+        # Serialize cache misses so concurrent requests cannot build several full models.
+        with self._model_load_lock:
+            cached = self._cached_model(version)
+            if cached is not None:
+                return cached
+            model = self._load_uncached_model(version)
+            self._cache_model(version, model)
+            return model
+
+    def _cached_model(self, version: DataModelVersionReference) -> ReferenceModel | None:
         with self._models_lock:
             cached = self._models.get(version)
             if cached is not None:
                 self._models.move_to_end(version)
-                return cached
+            return cached
 
-        # A model and its DynamoDB rows can both be large. Serialize cache
-        # misses so concurrent requests cannot build several full models.
-        with self._model_load_lock:
-            with self._models_lock:
-                cached = self._models.get(version)
-                if cached is not None:
-                    self._models.move_to_end(version)
-                    return cached
-            items = self._query_partition(_model_partition(version))
-            if not items:
-                raise ReferenceModelNotFoundError(
-                    f"Reference model is not published: {version.data_model_key}/{version.external_version_number}"
-                )
-            try:
-                model = _flat_from_items(version, items).collapse()
-            except ReferenceDataCorruptError:
-                raise
-            except Exception as exc:
-                raise ReferenceDataCorruptError("Reference model is malformed") from exc
-            with self._models_lock:
-                self._models[version] = model
-                self._models.move_to_end(version)
-                if len(self._models) > _MAX_CACHED_MODELS:
-                    self._models.popitem(last=False)
-                return model
+    def _cache_model(self, version: DataModelVersionReference, model: ReferenceModel) -> None:
+        with self._models_lock:
+            self._models[version] = model
+            self._models.move_to_end(version)
+            if len(self._models) > _MAX_CACHED_MODELS:
+                self._models.popitem(last=False)
+
+    def _load_uncached_model(self, version: DataModelVersionReference) -> ReferenceModel:
+        try:
+            return self.load_cdes(version).collapse()
+        except (ReferenceDataCorruptError, ReferenceModelNotFoundError, ReferenceDataUnavailableError):
+            raise
+        except Exception as exc:
+            raise ReferenceDataCorruptError("Reference model is malformed") from exc
 
     def load_cdes(self, version: DataModelVersionReference) -> FlatReferenceModel:
         """Read the complete flat CDE form, including node-specific relationships."""
@@ -145,10 +148,16 @@ def _summaries_from_catalog(items: list[Mapping[str, object]]) -> tuple[DataMode
     if markers is None:
         return ()
     meta, import_seal = markers
+    entries = list(by_sk.values())
+    summaries = _catalog_model_summaries(entries)
+    _validate_catalog_publication(entries, meta, import_seal)
+    return summaries
+
+
+def _catalog_model_summaries(entries: list[Mapping[str, object]]) -> tuple[DataModelSummary, ...]:
     labels: dict[str, str] = {}
     versions_by_model: dict[str, set[str]] = {}
-    catalog_items: list[Mapping[str, object]] = []
-    for item in by_sk.values():
+    for item in entries:
         _validate_schema(item)
         key = _required_string(item, "data_model_key")
         label = _required_string(item, "label")
@@ -159,18 +168,6 @@ def _summaries_from_catalog(items: list[Mapping[str, object]]) -> tuple[DataMode
         if existing_label != label:
             raise ReferenceDataCorruptError(f"Reference catalog labels disagree: {key}")
         versions_by_model.setdefault(key, set()).add(version)
-        catalog_items.append(item)
-    if _required_int(meta, "model_count") != len(catalog_items):
-        raise ReferenceDataCorruptError("Reference catalog model count is invalid")
-    if _required_string(meta, "digest") != _digest(_catalog_payload(catalog_items)):
-        raise ReferenceDataCorruptError("Reference catalog digest is invalid")
-    source_digest = _required_sha256(meta, "source_digest")
-    if (
-        _required_sha256(import_seal, "source_digest") != source_digest
-        or _required_string(import_seal, "digest") != _required_string(meta, "digest")
-        or _required_int(import_seal, "model_count") != _required_int(meta, "model_count")
-    ):
-        raise ReferenceDataCorruptError("Reference catalog import seal does not match its catalog")
     return tuple(
         DataModelSummary(
             data_model_key=key,
@@ -180,6 +177,23 @@ def _summaries_from_catalog(items: list[Mapping[str, object]]) -> tuple[DataMode
         for key, versions in sorted(versions_by_model.items())
     )
 
+
+def _validate_catalog_publication(
+    entries: list[Mapping[str, object]],
+    meta: Mapping[str, object],
+    import_seal: Mapping[str, object],
+) -> None:
+    if _required_int(meta, "model_count") != len(entries):
+        raise ReferenceDataCorruptError("Reference catalog model count is invalid")
+    if _required_string(meta, "digest") != _digest(_catalog_payload(entries)):
+        raise ReferenceDataCorruptError("Reference catalog digest is invalid")
+    source_digest = _required_sha256(meta, "source_digest")
+    if (
+        _required_sha256(import_seal, "source_digest") != source_digest
+        or _required_string(import_seal, "digest") != _required_string(meta, "digest")
+        or _required_int(import_seal, "model_count") != _required_int(meta, "model_count")
+    ):
+        raise ReferenceDataCorruptError("Reference catalog import seal does not match its catalog")
 
 def _catalog_markers(
     by_sk: dict[str, Mapping[str, object]],

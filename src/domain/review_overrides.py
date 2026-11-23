@@ -173,15 +173,9 @@ class ReviewOverrideEvent:
         original_value = payload.get("original_value")
         if not isinstance(original_value, str):
             raise InvalidReviewOverridesError("Review event original value must be text.")
-        raw_kind = payload.get("kind")
-        try:
-            kind = ReviewOverrideAction(raw_kind)
-        except (TypeError, ValueError):
-            raise InvalidReviewOverridesError("Review event action is invalid.") from None
+        kind = _review_action(payload.get("kind"))
         selected_value = payload.get("selected_value")
-        if kind is ReviewOverrideAction.SET and (
-            not isinstance(selected_value, str) or not selected_value
-        ):
+        if kind is ReviewOverrideAction.SET and (not isinstance(selected_value, str) or not selected_value):
             raise InvalidReviewOverridesError("A set event selected value must be non-empty text.")
         if kind is ReviewOverrideAction.CLEAR and selected_value is not None:
             raise InvalidReviewOverridesError("A clear event selected value must be null.")
@@ -257,14 +251,8 @@ class ReviewOverrides:
             raise InvalidReviewOverridesError("Review override updates must be chronological.")
         requested = _parse_overrides(overrides)
         active = self.overrides
-        identities = {
-            (row_key, column_key)
-            for row_key, columns in active.items()
-            for column_key in columns
-        } | {
-            (row_key, column_key)
-            for row_key, columns in requested.items()
-            for column_key in columns
+        identities = {(row_key, column_key) for row_key, columns in active.items() for column_key in columns} | {
+            (row_key, column_key) for row_key, columns in requested.items() for column_key in columns
         }
         new_events: list[ReviewOverrideEvent] = []
         for row_key, column_key in sorted(identities, key=lambda item: (int(item[0]), str(item[1]))):
@@ -272,25 +260,29 @@ class ReviewOverrides:
             selected = requested.get(row_key, {}).get(column_key)
             if selected is None:
                 if current is not None:
-                    new_events.append(ReviewOverrideEvent(
-                        kind=ReviewOverrideAction.CLEAR,
-                        row_key=row_key,
-                        column_key=column_key,
-                        original_value=current.original_value,
-                        selected_value=None,
-                        timestamp=updated_at,
-                    ))
+                    new_events.append(
+                        ReviewOverrideEvent(
+                            kind=ReviewOverrideAction.CLEAR,
+                            row_key=row_key,
+                            column_key=column_key,
+                            original_value=current.original_value,
+                            selected_value=None,
+                            timestamp=updated_at,
+                        )
+                    )
                 continue
             if current is not None and current == selected:
                 continue
-            new_events.append(ReviewOverrideEvent(
-                kind=ReviewOverrideAction.SET,
-                row_key=row_key,
-                column_key=column_key,
-                original_value=selected.original_value,
-                selected_value=selected.human_value,
-                timestamp=updated_at,
-            ))
+            new_events.append(
+                ReviewOverrideEvent(
+                    kind=ReviewOverrideAction.SET,
+                    row_key=row_key,
+                    column_key=column_key,
+                    original_value=selected.original_value,
+                    selected_value=selected.human_value,
+                    timestamp=updated_at,
+                )
+            )
         events = (*self.events, *new_events)
         _validate_event_transitions(events)
         return ReviewOverrides(
@@ -304,52 +296,20 @@ class ReviewOverrides:
 
     @classmethod
     def from_store(cls, payload: object, expected_file_id: str) -> ReviewOverrides:
-        if not isinstance(payload, Mapping):
-            raise InvalidReviewOverridesError("Stored review overrides must be an object.")
-        expected_fields = {
-            "schema_version",
-            "file_id",
-            "created_at",
-            "updated_at",
-            "events",
-            "review_state",
-        }
-        run_id = _stored_run_id(payload)
-        if set(payload).difference({"run_id"}) != expected_fields:
-            raise InvalidReviewOverridesError("Stored review override fields are invalid.")
-        schema_version = payload.get("schema_version")
-        if (
-            not isinstance(schema_version, int)
-            or isinstance(schema_version, bool)
-            or schema_version != REVIEW_OVERRIDES_SCHEMA_VERSION
-        ):
-            raise InvalidReviewOverridesError("Stored review override schema version is invalid.")
-        file_id = payload.get("file_id")
-        if file_id != expected_file_id:
-            raise InvalidReviewOverridesError("Stored review override file identity is invalid.")
-        created_at = _datetime_from_payload(payload.get("created_at"))
-        updated_at = _datetime_from_payload(payload.get("updated_at"))
+        record = _review_record(payload, expected_file_id)
+        run_id = _stored_run_id(record)
+        created_at = _datetime_from_payload(record.get("created_at"))
+        updated_at = _datetime_from_payload(record.get("updated_at"))
         if created_at > updated_at:
             raise InvalidReviewOverridesError("Stored review override timestamps are out of order.")
-        raw_events = payload.get("events")
-        if not isinstance(raw_events, list):
-            raise InvalidReviewOverridesError("Stored review events must be a list.")
-        events = tuple(ReviewOverrideEvent.from_payload(item) for item in raw_events)
-        if any(event.timestamp < created_at or event.timestamp > updated_at for event in events):
-            raise InvalidReviewOverridesError("Stored review event timestamps are out of order.")
-        if any(
-            later.timestamp < earlier.timestamp
-            for earlier, later in zip(events, events[1:], strict=False)
-        ):
-            raise InvalidReviewOverridesError("Stored review events are not chronological.")
-        _validate_event_transitions(events)
+        events = _review_events(record.get("events"), created_at, updated_at)
         return cls(
             file_id=expected_file_id,
             run_id=run_id,
             created_at=created_at,
             updated_at=updated_at,
             events=events,
-            review_state=ReviewProgressState.from_payload(payload.get("review_state")),
+            review_state=ReviewProgressState.from_payload(record.get("review_state")),
         )
 
     def to_store(self) -> dict[str, object]:
@@ -406,17 +366,11 @@ class ReviewOverrides:
                 )
             if not columns:
                 active.pop(event.row_key, None)
-        return MappingProxyType({
-            row_key: MappingProxyType(columns)
-            for row_key, columns in active.items()
-        })
+        return MappingProxyType({row_key: MappingProxyType(columns) for row_key, columns in active.items()})
 
     def human_values_by_row(self) -> dict[str, dict[ColumnKey, str]]:
         return {
-            row_key: {
-                column_key: override.human_value
-                for column_key, override in columns.items()
-            }
+            row_key: {column_key: override.human_value for column_key, override in columns.items()}
             for row_key, columns in self.overrides.items()
         }
 
@@ -525,6 +479,39 @@ def _datetime_from_payload(value: object) -> datetime:
     if parsed.utcoffset() is None:
         raise InvalidReviewOverridesError("Review override timestamps must include a time zone.")
     return parsed
+
+
+def _review_action(raw: object) -> ReviewOverrideAction:
+    try:
+        return ReviewOverrideAction(raw)
+    except (TypeError, ValueError):
+        raise InvalidReviewOverridesError("Review event action is invalid.") from None
+
+
+def _review_record(payload: object, expected_file_id: str) -> Mapping[str, object]:
+    if not isinstance(payload, Mapping):
+        raise InvalidReviewOverridesError("Stored review overrides must be an object.")
+    fields = {"schema_version", "file_id", "created_at", "updated_at", "events", "review_state"}
+    if set(payload).difference({"run_id"}) != fields:
+        raise InvalidReviewOverridesError("Stored review override fields are invalid.")
+    schema = payload.get("schema_version")
+    if not isinstance(schema, int) or isinstance(schema, bool) or schema != REVIEW_OVERRIDES_SCHEMA_VERSION:
+        raise InvalidReviewOverridesError("Stored review override schema version is invalid.")
+    if payload.get("file_id") != expected_file_id:
+        raise InvalidReviewOverridesError("Stored review override file identity is invalid.")
+    return payload
+
+
+def _review_events(raw: object, created_at: datetime, updated_at: datetime) -> tuple[ReviewOverrideEvent, ...]:
+    if not isinstance(raw, list):
+        raise InvalidReviewOverridesError("Stored review events must be a list.")
+    events = tuple(ReviewOverrideEvent.from_payload(item) for item in raw)
+    if any(event.timestamp < created_at or event.timestamp > updated_at for event in events):
+        raise InvalidReviewOverridesError("Stored review event timestamps are out of order.")
+    if any(later.timestamp < earlier.timestamp for earlier, later in zip(events, events[1:], strict=False)):
+        raise InvalidReviewOverridesError("Stored review events are not chronological.")
+    _validate_event_transitions(events)
+    return events
 
 
 __all__ = [

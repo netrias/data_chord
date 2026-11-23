@@ -68,6 +68,37 @@ async def submit_programmatic_harmonization(
 ) -> LoadedHarmonizationJob:
     """Persist one canonical workflow, then submit it to the shared job service."""
     file_id = new_dataset_workflow_id()
+    await _persist_programmatic_workflow(submission, file_id, user, upload_storage, workflow_storage)
+
+    try:
+        return await job_service.submit(
+            user=user,
+            request=HarmonizationJobRequest(
+                file_id=file_id,
+                polling_job_id=str(file_id),
+                use_cache=submission.use_cache,
+            ),
+            # Return at the durable acceptance boundary. A startup grace wait
+            # would let request cancellation delete a job whose worker started.
+            start_grace_seconds=0,
+        )
+    except BaseException:
+        # A failed response can follow a committed job write. Delete only after a confirmed miss.
+        if _job_was_not_accepted(workflow_storage, user, file_id):
+            _discard_rejected_workflow(
+                workflow_created=True, workflow_storage=workflow_storage, upload_storage=upload_storage,
+                user=user, file_id=file_id,
+            )
+        raise
+
+
+async def _persist_programmatic_workflow(
+    submission: ProgrammaticHarmonizationRequest,
+    file_id: DatasetWorkflowId,
+    user: UserContext,
+    upload_storage: UploadStorage,
+    workflow_storage: WorkflowStorage,
+) -> None:
     source_format = TabularFormat(Path(submission.document.name).suffix.lower().lstrip("."))
     dataset = dataset_from_rows(
         headers=list(submission.document.header),
@@ -101,27 +132,6 @@ async def submit_programmatic_harmonization(
             user=user,
             file_id=file_id,
         )
-        raise
-
-    try:
-        return await job_service.submit(
-            user=user,
-            request=HarmonizationJobRequest(
-                file_id=file_id,
-                polling_job_id=str(file_id),
-                use_cache=submission.use_cache,
-            ),
-            # Return at the durable acceptance boundary. A startup grace wait
-            # would let request cancellation delete a job whose worker started.
-            start_grace_seconds=0,
-        )
-    except BaseException:
-        # A failed response can follow a committed job write. Delete only after a confirmed miss.
-        if _job_was_not_accepted(workflow_storage, user, file_id):
-            _discard_rejected_workflow(
-                workflow_created=True, workflow_storage=workflow_storage, upload_storage=upload_storage,
-                user=user, file_id=file_id,
-            )
         raise
 
 

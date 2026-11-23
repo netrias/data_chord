@@ -160,8 +160,7 @@ class ColumnMappingManifest:
     def to_payload(self) -> ManifestPayload:
         return {
             MANIFEST_FIELD_COLUMN_MAPPINGS: {
-                str(column_key): record.to_payload()
-                for column_key, record in self.records.items()
+                str(column_key): record.to_payload() for column_key, record in self.records.items()
             }
         }
 
@@ -267,22 +266,7 @@ def _record_from_payload(
         if strict:
             raise InvalidMappingManifestError(f"mapping manifest record is invalid: {column_key}")
         return None
-    for field in (MAPPING_FIELD_COLUMN_NAME, MAPPING_FIELD_HARMONIZATION, MAPPING_FIELD_ROUTE):
-        if strict and field in value and _str_or_none(value.get(field)) is None:
-            raise InvalidMappingManifestError(f"mapping manifest {field} is invalid: {column_key}")
-
-    raw_alternatives = value.get(MAPPING_FIELD_ALTERNATIVES)
-    if raw_alternatives is None:
-        raw_alternatives = []
-    elif not isinstance(raw_alternatives, list):
-        if strict:
-            raise InvalidMappingManifestError(f"mapping alternatives must be a list: {column_key}")
-        raw_alternatives = []
-    alternatives = tuple(
-        alternative
-        for raw in raw_alternatives
-        if (alternative := _alternative_from_payload(column_key, raw, strict=strict)) is not None
-    )
+    _validate_record_text(value, column_key, strict)
     return ColumnMappingRecord(
         column_key=column_key_from_string(column_key),
         cde_key=cde_key,
@@ -290,7 +274,7 @@ def _record_from_payload(
         column_name=_str_or_none(value.get(MAPPING_FIELD_COLUMN_NAME)),
         harmonization=_str_or_none(value.get(MAPPING_FIELD_HARMONIZATION)),
         route=_str_or_none(value.get(MAPPING_FIELD_ROUTE)),
-        alternatives=alternatives,
+        alternatives=_record_alternatives(value, column_key, strict),
         recommendation_source=_recommendation_source(value, column_key, strict=strict),
     )
 
@@ -358,6 +342,29 @@ def _alternative_from_payload(
 
 def _str_or_none(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _validate_record_text(value: Mapping[object, object], column_key: str, strict: bool) -> None:
+    for field in (MAPPING_FIELD_COLUMN_NAME, MAPPING_FIELD_HARMONIZATION, MAPPING_FIELD_ROUTE):
+        if strict and field in value and _str_or_none(value.get(field)) is None:
+            raise InvalidMappingManifestError(f"mapping manifest {field} is invalid: {column_key}")
+
+
+def _record_alternatives(
+    value: Mapping[object, object], column_key: str, strict: bool
+) -> tuple[MappingAlternative, ...]:
+    raw = value.get(MAPPING_FIELD_ALTERNATIVES)
+    if raw is None:
+        raw = []
+    elif not isinstance(raw, list):
+        if strict:
+            raise InvalidMappingManifestError(f"mapping alternatives must be a list: {column_key}")
+        raw = []
+    return tuple(
+        alternative
+        for item in raw
+        if (alternative := _alternative_from_payload(column_key, item, strict=strict)) is not None
+    )
 
 
 __all__ = [

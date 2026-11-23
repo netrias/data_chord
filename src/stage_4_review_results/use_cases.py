@@ -31,6 +31,7 @@ from src.persistence.cde_mapping_document_store import CdeMappingEntry, load_cde
 from src.persistence.manifest_reader import read_manifest_parquet
 from src.persistence.pv_manifest_store import ColumnPvSets, column_pv_sets, effective_column_cde_map
 from src.persistence.review_override_store import (
+    ReviewOverridesRecord,
     ReviewOverridesStoreConflictError,
     ReviewOverridesUnreadableError,
     save_review_overrides_state,
@@ -87,14 +88,13 @@ def build_stage_four_rows(
 ) -> StageFourRowsResult:
     with performance_span("stage4.rows.ready_capture"):
         ready = capture_ready_harmonization(workflow_storage, user, file_id, expected_job_id)
-    loaded_state = ready.workflow
-    with performance_span("stage4.rows.upload_artifact"), open_upload_artifact(
-        upload_storage, workflow_storage, user, file_id,
-    ) as meta:
-        if not meta:
-            raise HarmonizationNotReadyError("Upload not found. Return to Stage 1 and upload it again.")
-        with performance_span("stage4.rows.source_dataset_read"):
-            original_dataset = read_tabular(meta.saved_path, sheet_name=loaded_state.state.selected_sheet)
+    original_row_count = _original_row_count(
+        file_id,
+        upload_storage,
+        workflow_storage,
+        user,
+        ready.workflow.state.selected_sheet,
+    )
 
     with performance_span("stage4.rows.manifest_read"):
         manifest = _load_manifest(workflow_storage, user, file_id)
@@ -103,29 +103,24 @@ def build_stage_four_rows(
             "Harmonization results are incomplete. Return to Stage 3 and run harmonization again."
         )
 
-    with performance_span("stage4.rows.review_state"):
-        review_record = load_readable_review_overrides_record(workflow_storage, user, file_id)
-        review_overrides = review_record.value if review_record is not None else None
-        require_review_state_matches_manifest(review_overrides, manifest)
+    review_record = _stage_four_review_record(workflow_storage, user, file_id, manifest)
+    review_overrides = review_record.value if review_record is not None else None
     column_info = _extract_columns_from_manifest(manifest)
     with performance_span("stage4.rows.pv_load"):
         column_pv_map = column_pv_sets(
             workflow_storage,
             user,
-            loaded_state,
+            ready.workflow,
             [col.key for col in column_info],
         )
         column_pvs = _build_column_pvs(column_info, column_pv_map, file_id)
     with performance_span("stage4.rows.cde_mapping"):
         cde_mappings_by_column = load_cde_mapping_entries_by_column(file_id, workflow_storage, user)
-    has_progress = review_overrides is not None and (
-        bool(review_overrides.events) or review_overrides.review_state != ReviewProgressState()
-    )
     with performance_span("stage4.rows.response_build"):
         columns = _build_columns_from_manifest(
             manifest,
             column_pv_map,
-            effective_column_cde_map(loaded_state).mappings,
+            effective_column_cde_map(ready.workflow).mappings,
             cde_mappings_by_column,
             review_overrides,
         )
@@ -133,14 +128,8 @@ def build_stage_four_rows(
             job_id=ready.job.job.polling_job_id,
             columns=columns,
             columnPVs=column_pvs,
-            totalOriginalRows=len(original_dataset.rows),
-            reviewState=(
-                ReviewOverridesSchema.model_validate(
-                    review_record.value.to_snapshot_payload()
-                )
-                if review_record is not None and has_progress
-                else None
-            ),
+            totalOriginalRows=original_row_count,
+            reviewState=_review_snapshot(review_overrides),
         )
     with performance_span("stage4.rows.ready_check"):
         ready.require_unchanged(workflow_storage, user)
@@ -148,6 +137,12 @@ def build_stage_four_rows(
         response=response,
         review_state_version=review_record.version if review_record is not None else None,
     )
+
+
+def _review_snapshot(overrides: ReviewOverrides | None) -> ReviewOverridesSchema | None:
+    if overrides is None or (not overrides.events and overrides.review_state == ReviewProgressState()):
+        return None
+    return ReviewOverridesSchema.model_validate(overrides.to_snapshot_payload())
 
 
 def build_row_context(
@@ -317,16 +312,18 @@ def _build_columns_from_manifest(
         ]
         terms_with_changes = sum(1 for transformation in transformations if transformation.isChanged)
 
-        columns.append(ColumnReviewData(
-            columnKey=serialized_col_key,
-            columnLabel=column_labels[col_key] or "Unknown",
-            targetCdeKey=target_cde_key,
-            targetCdeLabel=target_cde_key,
-            sourceColumnIndex=column_indices[col_key],
-            termCount=len(transformations),
-            termsWithChanges=terms_with_changes,
-            transformations=transformations,
-        ))
+        columns.append(
+            ColumnReviewData(
+                columnKey=serialized_col_key,
+                columnLabel=column_labels[col_key] or "Unknown",
+                targetCdeKey=target_cde_key,
+                targetCdeLabel=target_cde_key,
+                sourceColumnIndex=column_indices[col_key],
+                termCount=len(transformations),
+                termsWithChanges=terms_with_changes,
+                transformations=transformations,
+            )
+        )
 
     return columns
 
@@ -361,8 +358,7 @@ def _build_transformation(
     grouped_row_indices = row.row_indices if row_indices is None else row_indices
     current_values = _active_values_for_indices(row, grouped_row_indices, review_overrides)
     active_review_values = [
-        _active_review_value_for_index(row, row_index, review_overrides)
-        for row_index in grouped_row_indices
+        _active_review_value_for_index(row, row_index, review_overrides) for row_index in grouped_row_indices
     ]
     distinct_manual_values = {value for value in active_review_values if value is not None}
     manual_override = (
@@ -494,14 +490,38 @@ def _validate_review_snapshot(
     for row_key, columns in overrides.items():
         for column_key, override in columns.items():
             valid_cell = valid_cells.get((row_key, column_key))
-            if (
-                valid_cell is None
-                or override.original_value != valid_cell[0]
-                or override.human_value == valid_cell[1]
-            ):
+            if valid_cell is None or override.original_value != valid_cell[0] or override.human_value == valid_cell[1]:
                 raise InvalidReviewOverrideSelectionError(
                     "A review choice does not match the current harmonization result. Reload Stage 4."
                 )
+
+
+def _original_row_count(
+    file_id: DatasetWorkflowId,
+    upload_storage: UploadStorage,
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+    sheet_name: str | None,
+) -> int:
+    with performance_span("stage4.rows.upload_artifact"), open_upload_artifact(
+        upload_storage, workflow_storage, user, file_id,
+    ) as meta:
+        if not meta:
+            raise HarmonizationNotReadyError("Upload not found. Return to Stage 1 and upload it again.")
+        with performance_span("stage4.rows.source_dataset_read"):
+            return len(read_tabular(meta.saved_path, sheet_name=sheet_name).rows)
+
+
+def _stage_four_review_record(
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+    file_id: DatasetWorkflowId,
+    manifest: ManifestSummary,
+) -> ReviewOverridesRecord | None:
+    with performance_span("stage4.rows.review_state"):
+        record = load_readable_review_overrides_record(workflow_storage, user, file_id)
+        require_review_state_matches_manifest(record.value if record is not None else None, manifest)
+    return record
 
 
 __all__ = [

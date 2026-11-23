@@ -23,7 +23,7 @@ from src.app.harmonization_job_state import (
 )
 from src.app.harmonization_results import HarmonizationWorkflowResult
 from src.domain.dataset_workflow_ids import DatasetWorkflowId
-from src.persistence.harmonization_job_store import LoadedHarmonizationJob
+from src.persistence.harmonization_job_store import HarmonizationJobState, LoadedHarmonizationJob
 from src.persistence.workflow_state_store import LoadedWorkflowState
 from src.storage import UploadStorage, UserContext, WorkflowStorage
 
@@ -218,16 +218,28 @@ class HarmonizationJobService:
                 accepted_job=accepted_job,
             )
         finally:
-            stop_heartbeat.set()
-            try:
-                await heartbeat
-            except Exception:  # pragma: no cover - defensive storage boundary
-                logger.exception(
-                    "Harmonization heartbeat failed during worker shutdown",
-                    extra={"file_id": request.file_id, "job_id": accepted_job.polling_job_id},
-                )
-            finally:
-                self._release_slot()
+            await self._finish_worker(request.file_id, accepted_job, stop_heartbeat, heartbeat)
+
+    async def _finish_worker(
+        self,
+        file_id: DatasetWorkflowId,
+        accepted_job: HarmonizationJobState,
+        stop: asyncio.Event,
+        heartbeat: asyncio.Task[None],
+    ) -> None:
+        stop.set()
+        try:
+            await heartbeat
+        except Exception:  # pragma: no cover - defensive storage boundary
+            logger.exception(
+                "Harmonization heartbeat failed during worker shutdown",
+                extra={
+                    "file_id": file_id,
+                    "job_id": accepted_job.polling_job_id,
+                },
+            )
+        finally:
+            self._release_slot()
 
     def _task_finished(self, job_id: str, task: asyncio.Task[None]) -> None:
         if self._tasks.get(job_id) is task:

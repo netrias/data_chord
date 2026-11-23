@@ -263,21 +263,25 @@ def _build_history(
     upload_ts_str = upload_timestamp.isoformat() if upload_timestamp else None
     steps: list[TransformationStep] = []
 
-    steps.append(TransformationStep(
-        value=row.to_harmonize,
-        source="original",
-        timestamp=upload_ts_str,
-        review_status=_value_review_status(row.to_harmonize, pv_set),
-    ))
+    steps.append(
+        TransformationStep(
+            value=row.to_harmonize,
+            source="original",
+            timestamp=upload_ts_str,
+            review_status=_value_review_status(row.to_harmonize, pv_set),
+        )
+    )
 
     effective_ai_value = row.baseline_value
     if effective_ai_value != row.to_harmonize:
-        steps.append(TransformationStep(
-            value=effective_ai_value,
-            source="ai",
-            timestamp=upload_ts_str,
-            review_status=_value_review_status(effective_ai_value, pv_set),
-        ))
+        steps.append(
+            TransformationStep(
+                value=effective_ai_value,
+                source="ai",
+                timestamp=upload_ts_str,
+                review_status=_value_review_status(effective_ai_value, pv_set),
+            )
+        )
 
     for event in _events_for_row(review_overrides, row, row_index):
         selected_value = _event_selected_value(event, effective_ai_value)
@@ -398,9 +402,7 @@ def _assemble_summary_response(
             filename=meta.original_name if meta else None,
             tabular_format=meta.tabular_format.value if meta else None,
             data_model_key=loaded_state.state.data_model_version.data_model_key,
-            external_version_number=(
-                loaded_state.state.data_model_version.external_version_number
-            ),
+            external_version_number=(loaded_state.state.data_model_version.external_version_number),
         ),
         column_summaries=[
             ColumnSummary(
@@ -526,10 +528,7 @@ def _track_current_mappings(
     if not row.to_harmonize:
         return
     pv_set = column_pv_map.get(row.column_key)
-    outcome_by_value = {
-        (outcome.final_value, outcome.final_value_source): outcome
-        for outcome in row_outcomes
-    }
+    outcome_by_value = {(outcome.final_value, outcome.final_value_source): outcome for outcome in row_outcomes}
     row_indices = list(row.row_indices) if row.row_indices else [None]
     for row_index in row_indices:
         current_value, current_source = _resolve_current_value(
@@ -548,9 +547,7 @@ def _track_current_mappings(
             final_value=outcome.final_value,
             final_value_source=outcome.final_value_source,
             review_status=outcome.review_status,
-            history_signature=tuple(
-                (step.value, step.source, step.action, step.timestamp) for step in history
-            ),
+            history_signature=tuple((step.value, step.source, step.action, step.timestamp) for step in history),
         )
         existing = mappings.get(key)
         if existing is None:
@@ -583,9 +580,7 @@ def _apply_review_overrides(
     # Stage 4 overrides apply only to export rows. The stored harmonized file
     # remains the AI/PV-adjusted artifact for audit and comparison.
     final_rows = (
-        overrides.apply_to_rows(harmonized_dataset.rows, original_dataset)
-        if overrides
-        else harmonized_dataset.rows
+        overrides.apply_to_rows(harmonized_dataset.rows, original_dataset) if overrides else harmonized_dataset.rows
     )
     return dataset_from_rows(
         columns=harmonized_dataset.columns,
@@ -638,10 +633,7 @@ def _manifest_row_projection(
         "error": row.error,
         "row_indices": row.row_indices,
         "active_values": active_values,
-        "review_events": [
-            _event_to_payload(event)
-            for event in _events_for_manifest_row(review_overrides, row)
-        ],
+        "review_events": [_event_to_payload(event) for event in _events_for_manifest_row(review_overrides, row)],
     }
 
 

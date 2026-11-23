@@ -128,17 +128,7 @@ def _require_ready_workflow_and_job(
     file_id: DatasetWorkflowId | str,
     expected_job_id: str | None = None,
 ) -> tuple[LoadedWorkflowState, LoadedHarmonizationJob]:
-    try:
-        workflow = load_workflow_state(storage, user, str(file_id))
-    except WorkflowStateUnreadableError as exc:
-        raise HarmonizationNotReadyError(
-            "The workflow state cannot be read. Return to Stage 2 and create the mapping again."
-        ) from exc
-    if workflow is None:
-        raise HarmonizationNotReadyError(
-            "The workflow is not ready. Return to Stage 2 and create the mapping first."
-        )
-
+    workflow = _require_workflow_state(storage, user, file_id)
     try:
         job = load_harmonization_job(storage, user, file_id)
     except HarmonizationJobUnreadableError as exc:
@@ -164,6 +154,22 @@ def _require_ready_workflow_and_job(
             "The harmonization result is out of date. Return to Stage 3 and run harmonization again."
         )
     return workflow, job
+
+
+def _require_workflow_state(
+    storage: WorkflowStorage, user: UserContext, file_id: DatasetWorkflowId | str,
+) -> LoadedWorkflowState:
+    try:
+        workflow = load_workflow_state(storage, user, str(file_id))
+    except WorkflowStateUnreadableError as exc:
+        raise HarmonizationNotReadyError(
+            "The workflow state cannot be read. Return to Stage 2 and create the mapping again."
+        ) from exc
+    if workflow is None:
+        raise HarmonizationNotReadyError(
+            "The workflow is not ready. Return to Stage 2 and create the mapping first."
+        )
+    return workflow
 
 
 def _ready_artifact_versions(

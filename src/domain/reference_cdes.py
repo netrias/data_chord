@@ -57,14 +57,9 @@ class FlatReferenceModel:
         relation_ids = [relation.node_cde_id for cde in self.cdes for relation in cde.node_relations]
         if len(set(relation_ids)) != len(relation_ids):
             raise ValueError("Reference node CDE ids must be unique")
+        allowed_nodes = frozenset(self.nodes)
         for cde in self.cdes:
-            if any(not value.strip() for value in cde.values):
-                raise ValueError(f"Reference CDE values must be nonempty: {cde.cde_key}")
-            if not cde.node_relations:
-                raise ValueError(f"Reference CDE node relationships are required: {cde.cde_key}")
-            names = [relation.node_name for relation in cde.node_relations]
-            if len(set(names)) != len(names) or not set(names) <= set(self.nodes):
-                raise ValueError(f"Reference CDE node relationships are invalid: {cde.cde_key}")
+            _validate_cde_relationships(cde, allowed_nodes)
         object.__setattr__(self, "nodes", tuple(sorted(self.nodes)))
         object.__setattr__(
             self,
@@ -96,6 +91,16 @@ class FlatReferenceModel:
             ),
             pvs=CdePvCatalog.from_mapping({cde.cde_key: cde.values for cde in self.cdes}),
         )
+
+
+def _validate_cde_relationships(cde: ReferenceCde, allowed_nodes: frozenset[str]) -> None:
+    if any(not value.strip() for value in cde.values):
+        raise ValueError(f"Reference CDE values must be nonempty: {cde.cde_key}")
+    if not cde.node_relations:
+        raise ValueError(f"Reference CDE node relationships are required: {cde.cde_key}")
+    names = [relation.node_name for relation in cde.node_relations]
+    if len(set(names)) != len(names) or not set(names) <= allowed_nodes:
+        raise ValueError(f"Reference CDE node relationships are invalid: {cde.cde_key}")
 
 
 __all__ = ["FlatReferenceModel", "NodeCdeRelation", "ReferenceCde"]
