@@ -183,8 +183,12 @@ arguments=" $* "
 case "$arguments" in
   *" init "*) ;;
   *" state list "*)
+    address='module.data_plane.aws_s3_bucket_versioning.workflow'
     if [[ "${MOCK_MOVED_VERSIONING:-0}" == 1 && ! -f "$MOCK_CALLS.versioning-moved" ]]; then
-      printf '%s\n' 'module.data_plane.aws_s3_bucket_versioning.workflow'
+      printf '%s\n' "$address"
+    elif [[ "${!#}" == "$address" ]]; then
+      printf '%s\n' 'Unknown resource' >&2
+      exit 1
     fi
     ;;
   *" state pull "*)
@@ -434,6 +438,7 @@ assert_absent "$deploy_calls" "--source-version"
 assert_contains "$deploy_calls" "sleep "
 assert_contains "$deploy_calls" "aws elbv2 describe-target-health"
 assert_absent "$deploy_calls" "aws_s3_bucket_versioning.workflow"
+assert_absent "$deploy_calls" "-target=aws_s3_bucket_versioning.managed_workflow"
 assert_absent "$deploy_calls" "sleep 900"
 assert_absent "$deploy_calls" "-auto-approve"
 assert_absent "$deploy_calls" "uv run"
