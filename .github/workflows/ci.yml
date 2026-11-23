@@ -76,7 +76,7 @@ jobs:
       - name: Test OpenTofu behavior
         run: |
           tofu -chdir=infra test
-          tofu -chdir=infra/customer-platform test
+          tofu -chdir=infra/customer-platform test -verbose -json | python3 infra/tests/check_customer_plan.py
           tofu -chdir=infra/modules/data-plane test
 
       - name: Test deployment flow

@@ -30,6 +30,9 @@ how it was produced.
 ## Behavior that matters
 
 - Supported inputs are CSV, TSV, and XLSX, including worksheet selection.
+- Replacing a file starts a new workflow and resets the tracker's progress.
+  Once the upload is verified, its URL and navigation identify the new file.
+  Saved links to earlier workflows still identify those earlier workflows.
 - Column identity is positional, so duplicate or blank headers do not merge.
 - Character differences such as case, whitespace, and punctuation remain
   meaningful.

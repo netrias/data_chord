@@ -81,10 +81,14 @@ function _getFileIdForNavigation() {
 export function buildNavUrl(baseUrl) {
   const fileId = _getFileIdForNavigation();
   const url = new URL(baseUrl, window.location.origin);
-  if (fileId) {
-    url.searchParams.set('file_id', fileId);
-    const jobId = new URLSearchParams(window.location.search).get('job_id');
-    if (jobId && ['/stage-4', '/stage-5'].includes(url.pathname)) url.searchParams.set('job_id', jobId);
+  url.searchParams.delete('file_id');
+  url.searchParams.delete('job_id');
+  if (fileId) url.searchParams.set('file_id', fileId);
+
+  const pageParams = new URLSearchParams(window.location.search);
+  const jobId = pageParams.get('job_id');
+  if (fileId && pageParams.get('file_id') === fileId && jobId && ['/stage-4', '/stage-5'].includes(url.pathname)) {
+    url.searchParams.set('job_id', jobId);
   }
   _addMappingContext(url);
   return url.pathname + url.search;
