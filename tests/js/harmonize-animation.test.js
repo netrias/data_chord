@@ -26,18 +26,35 @@ describe('Stage 3 harmonize animation', () => {
       </div>
     </body></html>`);
     const win = dom.window;
-    const scheduledFrames = [];
+    const scheduledFrames = new Map();
+    let nextFrame = 0;
+    let onResize;
     const canvas = win.document.querySelector('canvas');
     canvas.getContext = () => context;
     let width = canvasWidth;
     Object.defineProperty(canvas, 'clientWidth', { get: () => width });
     win.matchMedia = () => ({ matches: reducedMotion });
-    win.requestAnimationFrame = (callback) => scheduledFrames.push(callback);
+    win.requestAnimationFrame = (callback) => {
+      scheduledFrames.set(++nextFrame, callback);
+      return nextFrame;
+    };
+    win.cancelAnimationFrame = (id) => scheduledFrames.delete(id);
+    win.ResizeObserver = class {
+      constructor(callback) { onResize = callback; }
+      observe() {}
+      disconnect() { onResize = undefined; }
+    };
     return {
       win,
+      canvas,
       scheduledFrames,
       loadingState: win.document.getElementById('loadingState'),
-      hideCanvas: () => { width = 0; },
+      resizeCanvas: (nextWidth) => { width = nextWidth; onResize?.(); },
+      playFrame: () => {
+        const [id, callback] = scheduledFrames.entries().next().value;
+        scheduledFrames.delete(id);
+        callback(1000);
+      },
     };
   };
 
@@ -58,7 +75,7 @@ describe('Stage 3 harmonize animation', () => {
     // Then the state the CSS keys on is set, a frame is drawn, and the next frame is scheduled
     assert.equal(page.loadingState.dataset.animation, 'running');
     assert.ok(calls.includes('stroke') && calls.includes('fill'), `expected drawing calls, got ${[...new Set(calls)]}`);
-    assert.equal(page.scheduledFrames.length, 1);
+    assert.equal(page.scheduledFrames.size, 1);
   });
 
   it('draws one still frame and schedules no further frame when reduced motion is preferred', () => {
@@ -73,7 +90,7 @@ describe('Stage 3 harmonize animation', () => {
     // Then exactly one frame is drawn and nothing is scheduled
     assert.equal(calls.filter((name) => name === 'clearRect').length, 1);
     assert.ok(calls.includes('stroke') && calls.includes('fill'), `expected drawing calls, got ${[...new Set(calls)]}`);
-    assert.equal(page.scheduledFrames.length, 0);
+    assert.equal(page.scheduledFrames.size, 0);
     assert.equal(page.loadingState.dataset.animation, 'running');
   });
 
@@ -87,7 +104,7 @@ describe('Stage 3 harmonize animation', () => {
 
     // Then the state is not marked, so the spinner stays visible, and no frame is scheduled
     assert.equal(page.loadingState.dataset.animation, undefined);
-    assert.equal(page.scheduledFrames.length, 0);
+    assert.equal(page.scheduledFrames.size, 0);
   });
 
   for (const { name, framesBeforeFailure } of [
@@ -109,29 +126,50 @@ describe('Stage 3 harmonize animation', () => {
       // When the animation runs up to the failing frame
       const runToFailure = () => {
         startHarmonizeAnimation(page.win);
-        page.scheduledFrames[0](1000);
+        page.playFrame();
       };
       assert.throws(runToFailure, drawFailure);
 
       // Then the state is not marked, so the spinner is visible, and no further frame is scheduled
       assert.equal(page.loadingState.dataset.animation, undefined);
-      assert.equal(page.scheduledFrames.length, framesBeforeFailure);
+      assert.equal(page.scheduledFrames.size, 0);
     });
   }
 
-  it('draws nothing while the canvas is not rendered', () => {
-    // Given a running animation whose canvas has since been hidden
+  it('cancels hidden frames and resumes when the loading panel is shown again', () => {
+    // Given a visible animation with one scheduled frame
     const calls = [];
     const page = loadingPage({ context: mockContext(calls) });
     startHarmonizeAnimation(page.win);
-    page.hideCanvas();
-    const callsBeforeFrame = calls.length;
-    assert.ok(callsBeforeFrame > 0);
+    const callsBeforeHide = calls.length;
+    assert.equal(page.scheduledFrames.size, 1);
 
-    // When the next animation frame runs
-    page.scheduledFrames[0](1000);
+    // When the canvas disappears
+    page.resizeCanvas(0);
 
-    // Then nothing is drawn
-    assert.equal(calls.length, callsBeforeFrame);
+    // Then it cancels the queued frame without drawing again
+    assert.equal(page.scheduledFrames.size, 0);
+    assert.equal(calls.length, callsBeforeHide);
+
+    // When a retry shows the canvas again
+    page.resizeCanvas(680);
+
+    // Then it paints and queues exactly one frame
+    assert.ok(calls.length > callsBeforeHide);
+    assert.equal(page.scheduledFrames.size, 1);
+  });
+
+  it('restores the spinner and stops running when the canvas loses its context', () => {
+    // Given a visible animation with one frame queued
+    const page = loadingPage({ context: mockContext([]) });
+    startHarmonizeAnimation(page.win);
+    assert.equal(page.scheduledFrames.size, 1);
+
+    // When the browser signals that the canvas context was lost
+    page.canvas.dispatchEvent(new page.win.Event('contextlost'));
+
+    // Then the spinner marker is restored and no frame remains queued
+    assert.equal(page.loadingState.dataset.animation, undefined);
+    assert.equal(page.scheduledFrames.size, 0);
   });
 });

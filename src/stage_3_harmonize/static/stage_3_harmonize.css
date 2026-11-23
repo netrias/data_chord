@@ -477,6 +477,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .loading-spinner {
+    animation: none;
+  }
+
   .remaining-columns__chevron {
     transition: none;
   }

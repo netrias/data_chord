@@ -221,18 +221,29 @@ const readColors = (win) => {
  * Start the animation on the canvas inside #loadingState and mark the loading
  * state as running. Leaves the state unmarked (spinner visible) when there is
  * no 2D context, and unmarks it again if any frame cannot be drawn.
- * @param {Window} win
+ * @param {Window & typeof globalThis} win
  */
 export const startHarmonizeAnimation = (win) => {
   const loadingState = win.document.getElementById('loadingState');
   const canvas = /** @type {HTMLCanvasElement | null} */ (loadingState?.querySelector('.harmonize-animation'));
   const ctx = canvas?.getContext('2d');
-  if (!ctx) return;
+  if (!ctx || !win.ResizeObserver) return;
 
   const colors = readColors(win);
+  const reducedMotion = win.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  /** @type {number | null} */
+  let frame = null;
+
+  const stopFrame = () => {
+    if (frame !== null) win.cancelAnimationFrame(frame);
+    frame = null;
+  };
+  const showFallback = () => {
+    stopFrame();
+    observer.disconnect();
+    delete loadingState.dataset.animation;
+  };
   const paint = (seconds) => {
-    /* why: no layout box means the loading panel or the canvas is hidden, so there is nothing to draw on. */
-    if (canvas.clientWidth === 0) return;
     try {
       const dpr = Math.min(win.devicePixelRatio || 1, 2);
       const width = Math.round(canvas.clientWidth * dpr);
@@ -245,24 +256,32 @@ export const startHarmonizeAnimation = (win) => {
       ctx.clearRect(0, 0, W, H);
       drawChordFrame(ctx, seconds, colors);
     } catch (error) {
-      /* why: a failed frame brings the spinner back; rethrowing also stops the loop before it schedules again. */
-      delete loadingState.dataset.animation;
+      showFallback();
       throw error;
     }
   };
-
-  /* why: the CSS shows the canvas only once marked, so mark first to give it a layout box. */
-  loadingState.dataset.animation = RUNNING;
-  if (win.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    paint(STILL_FRAME_SECONDS);
-    win.addEventListener('resize', () => paint(STILL_FRAME_SECONDS));
-    return;
-  }
   const loop = (ms) => {
+    frame = null;
+    if (canvas.clientWidth === 0) return;
     paint(ms / 1000);
-    win.requestAnimationFrame(loop);
+    frame = win.requestAnimationFrame(loop);
   };
-  loop(win.performance.now());
+  const syncAnimation = () => {
+    if (canvas.clientWidth === 0) {
+      stopFrame();
+    } else if (reducedMotion) {
+      paint(STILL_FRAME_SECONDS);
+    } else if (frame === null) {
+      loop(win.performance.now());
+    }
+  };
+
+  /* A canvas with no layout box stops drawing and resumes when a retry shows it again. */
+  const observer = new win.ResizeObserver(syncAnimation);
+  canvas.addEventListener('contextlost', showFallback, { once: true });
+  loadingState.dataset.animation = RUNNING;
+  observer.observe(canvas);
+  syncAnimation();
 };
 
 if (typeof window !== 'undefined') {
