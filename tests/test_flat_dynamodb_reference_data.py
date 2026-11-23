@@ -438,6 +438,7 @@ def test_flat_reader_rejects_malformed_source_id(source_id: object) -> None:
     ("field", "value", "message"),
     [
         ("payload", b"not gzip", "payload is corrupt"),
+        ("payload", gzip.compress(b'["I","II"]', mtime=0)[:-8], "payload is corrupt"),
         ("uncompressed_size", 1, "payload size is invalid"),
     ],
 )

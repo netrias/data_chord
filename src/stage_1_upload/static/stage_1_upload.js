@@ -1,7 +1,7 @@
 import { initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage, resetMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
 import { STAGE_2_PAYLOAD_KEY, STAGE_3_JOB_KEY, CURRENT_FILE_SESSION_KEY, removeFromSession, writeToSession, readFromSession } from '/assets/shared/storage-keys.js';
 import { reportApiError, reportFetchFailure } from '/assets/shared/client-events.js';
-import { showDataModelPopup, preloadDataModels } from './data_model_popup.js';
+import { showDataModelPopup, preloadDataModels, refreshDataModels } from './data_model_popup.js';
 import { fingerprintFile, verificationMatches, UploadVerificationError, UPLOAD_INTEGRITY_MESSAGE } from './upload-integrity.js';
 
 const config = window.stageOneUploadConfig ?? {};
@@ -339,6 +339,15 @@ const _hydrateDemoUpload = () => {
 const _restoreForModelSelection = () => {
   _clearStaleSessionData();
   resetMaxReachedStage();
+  const url = new URL(window.location.href);
+  url.searchParams.delete('reselect_model');
+  url.searchParams.delete('file_id');
+  window.history.replaceState(window.history.state, '', url);
+  document.querySelectorAll('.progress-tracker .step-link').forEach((link) => {
+    const target = new URL(link.dataset.url, url);
+    target.searchParams.delete('file_id');
+    link.dataset.url = target.pathname + target.search;
+  });
   const upload = config.recoveryUpload;
   if (!upload) {
     _resetUploadState();
@@ -689,7 +698,10 @@ const _analyzeDataset = async () => {
         statusCode: response.status,
         serverRequestId: _responseRequestId(response),
       });
-      if (response.status === 409 && typeof payload.detail === 'string') failureMessage = payload.detail;
+      if (response.status === 409 && payload.code === 'model_version_retired') {
+        refreshDataModels();
+        failureMessage = payload.detail;
+      }
       throw new Error(failureMessage);
     }
     // Keep overlay visible during navigation - browser will replace the page
@@ -758,10 +770,6 @@ const _wireDemoDropProtection = () => {
 };
 
 const _init = () => {
-  setActiveStage('upload');
-  initStepInstruction('upload');
-  initNavigationEvents();
-
   if (isDemo) {
     _hydrateDemoUpload();
   } else if (config.reselectModel) {
@@ -769,6 +777,10 @@ const _init = () => {
   } else if (!_hydrateFromSession()) {
     _resetUploadState();
   }
+
+  setActiveStage('upload');
+  initStepInstruction('upload');
+  initNavigationEvents();
 
   if (isDemo) {
     _wireDemoDropProtection();

@@ -3167,16 +3167,20 @@ test('data model menus select models by pointer and keyboard and close on outsid
 });
 
 test('a retired model selection can be replaced with a current version for the same upload', async ({ page }) => {
-  // Given an uploaded file, a retired version in its mapping link, and no browser session data.
+  // Given an uploaded file, a retired mapping link, and a tracker that reached Review in another workflow.
   await page.goto('/stage-1');
   const uploaded = page.waitForResponse(response => response.url().endsWith('/stage-1/upload'));
   await page.setInputFiles(AGENT_FILE_INPUT, fileFixture('basic.csv'));
   const { file_id: fileId } = await (await uploaded).json();
   await expect(page.locator('#analyzeButton')).toBeEnabled();
-  await page.evaluate(() => sessionStorage.clear());
+  await page.evaluate(() => {
+    sessionStorage.clear();
+    sessionStorage.setItem('maxReachedStage', 'review');
+  });
   await page.goto(`/stage-2?file_id=${fileId}&data_model_key=gc&external_version_number=retired`);
   await expect(page.locator('#statusMessage')).toContainText('The previous model version is no longer available');
   await expect(page.locator('#dropzoneFileName')).toHaveText('basic.csv');
+  await expect(page.locator('[data-stage="review"] .step-link')).toHaveAttribute('aria-disabled', 'true');
   await page.locator('#analyzeButton').click();
   await expect(page.locator('#versionDropdownTrigger')).toHaveText('11.0.4');
 
@@ -3187,6 +3191,48 @@ test('a retired model selection can be replaced with a current version for the s
   await expect(page).toHaveURL(
     `/stage-2?file_id=${fileId}&data_model_key=gc&external_version_number=11.0.4`,
   );
+});
+
+test('the model picker refreshes after a version is retired during selection', async ({ page }) => {
+  // Given the picker loaded before the catalog retired its initially advertised version.
+  let listedVersion = 'retired';
+  await page.route('**/stage-1/data-models', route => route.fulfill({
+    json: [{ data_model_key: 'gc', label: 'General Commons', versions: [{ external_version_number: listedVersion }] }],
+  }));
+  await page.goto('/stage-1');
+  await page.setInputFiles(AGENT_FILE_INPUT, fileFixture('basic.csv'));
+  await page.locator('#analyzeButton').click();
+  await expect(page.locator('#versionDropdownTrigger')).toHaveText('retired');
+  listedVersion = '11.0.4';
+
+  // When the user submits the retired version and is prompted to choose again.
+  await page.locator('.data-model-confirm-btn').click();
+  await expect(page.locator('#statusMessage')).toContainText('Choose a current version');
+  await page.locator('#analyzeButton').click();
+
+  // Then the picker shows the current version without a page reload.
+  await expect(page.locator('#versionDropdownTrigger')).toHaveText('11.0.4');
+});
+
+test('refresh keeps a replacement upload after retired model recovery', async ({ page }) => {
+  // Given an upload was recovered and then replaced with another file.
+  await page.goto('/stage-1');
+  const uploaded = page.waitForResponse(response => response.url().endsWith('/stage-1/upload'));
+  await page.setInputFiles(AGENT_FILE_INPUT, fileFixture('basic.csv'));
+  const { file_id: fileId } = await (await uploaded).json();
+  await expect(page.locator('#analyzeButton')).toBeEnabled();
+  await page.goto(`/stage-2?file_id=${fileId}&data_model_key=gc&external_version_number=retired`);
+  await expect(page.locator('#statusMessage')).toContainText('The previous model version is no longer available');
+  await page.setInputFiles(AGENT_FILE_INPUT, fileFixture('multi-column.csv'));
+  await expect(page.locator('#dropzoneFileName')).toHaveText('multi-column.csv');
+  await expect(page.locator('#analyzeButton')).toBeEnabled();
+
+  // When the user refreshes the upload page.
+  await page.reload();
+
+  // Then the replacement remains selected and can be analyzed.
+  await expect(page.locator('#dropzoneFileName')).toHaveText('multi-column.csv');
+  await expect(page.locator('#analyzeButton')).toBeEnabled();
 });
 
 test('error handling: wrong file type and oversize upload', async ({ page }, testInfo) => {

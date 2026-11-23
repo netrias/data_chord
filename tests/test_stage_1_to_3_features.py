@@ -654,6 +654,7 @@ async def test_analysis_requests_reselection_when_catalog_version_disappears(
     # Then analysis requests a new selection and has not written a workflow.
     assert response.status_code == 409
     assert response.json() == {
+        "code": "model_version_retired",
         "detail": "This model version is no longer available. Choose a current version and run analysis again.",
     }
     assert _load_workflow_state(file_id) is None

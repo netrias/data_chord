@@ -296,7 +296,10 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse | JSONResp
     except ReferenceModelNotFoundError as exc:
         _log_analyze_failed(user, payload.file_id, type(exc).__name__)
         return JSONResponse(
-            {"detail": "This model version is no longer available. Choose a current version and run analysis again."},
+            {
+                "code": "model_version_retired",
+                "detail": "This model version is no longer available. Choose a current version and run analysis again.",
+            },
             status_code=status.HTTP_409_CONFLICT,
         )
     except ReferenceDataError as exc:
