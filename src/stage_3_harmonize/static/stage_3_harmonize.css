@@ -47,9 +47,7 @@
   margin-top: calc(-1 * var(--space-4));
 }
 
-/* Animation styles are in harmonize-animation.css */
-
-/* Fallback spinner - shown if animation CSS fails to load */
+/* Fallback spinner - shown until harmonize-animation.js marks the loading state as running */
 .loading-spinner {
   width: 64px;
   height: 64px;
@@ -63,9 +61,19 @@
   to { transform: rotate(360deg); }
 }
 
-/* Fallback spinner shown by default - animation CSS will hide it */
-.loading-spinner--fallback {
+/* Animation canvas - drawn by harmonize-animation.js; replaces the spinner only once it is running */
+.harmonize-animation {
+  display: none;
+  width: min(680px, 100%);
+  aspect-ratio: 680 / 320;
+}
+
+.loading-state[data-animation="running"] .harmonize-animation {
   display: block;
+}
+
+.loading-state[data-animation="running"] .loading-spinner--fallback {
+  display: none;
 }
 
 /* Empty state */
@@ -469,6 +477,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .loading-spinner {
+    animation: none;
+  }
+
   .remaining-columns__chevron {
     transition: none;
   }
