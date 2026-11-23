@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from src.domain.cde import CdeType, DataModelSummary
@@ -35,6 +35,7 @@ class ReferenceModel:
     label: str
     catalog: CdeCatalog
     pvs: CdePvCatalog
+    publication_digest: str | None = field(default=None, compare=False)
 
     def __post_init__(self) -> None:
         if not self.version.data_model_key.strip():

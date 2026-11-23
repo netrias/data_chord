@@ -63,7 +63,7 @@ class CdeRecommendationAdapter:
             ranker=self._ranker,
             cache=self._cache,
             data_model_key=reference_model.version.data_model_key,
-            catalog_revision=reference_model.version.external_version_number,
+            catalog_revision=reference_model.publication_digest or reference_model.version.external_version_number,
             concurrency=self._concurrency,
             top_k=top_k,
         )

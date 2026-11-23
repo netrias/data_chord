@@ -56,6 +56,15 @@ middleware. `src/app/dependencies.py` constructs concrete services.
 | `src/storage` | Authorization, artifact naming, version checks, local/S3 parity | Stage behavior |
 | `src/shared/static` | Small browser primitives used by several stages | Feature-specific UI behavior |
 
+## Reference models
+
+Harmonization uses a flat `ReferenceModel` with one record and one approved
+value set per CDE key. The Auto-Model adapter can attach optional node
+relationships to that model. Each relationship carries metadata for one node's
+use of a CDE, such as its source ID, description, type, and flags. A model may
+also declare nodes with no CDEs. The adapter passes the flat model to mapping
+and harmonization.
+
 ## Workflow
 
 ### 1. Upload and analyze

@@ -1,6 +1,6 @@
 import json
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import pytest
 
@@ -225,6 +225,29 @@ async def test_real_pipeline_reuses_identical_input_without_losing_column_identi
         column_key_from_string("col_0000"),
         column_key_from_string("col_0001"),
     }
+
+
+@pytest.mark.asyncio
+async def test_republished_catalog_gets_fresh_recommendations_for_the_same_version() -> None:
+    # Given cached recommendations for a publication whose diagnosis has approved values.
+    column = _column("col_0000", "Diagnosis", (DistinctValue("Lung", 1),))
+    adapter = CdeRecommendationAdapter(_UnusedRanker(), _MemoryCache())
+    before = replace(_reference_model(), publication_digest="a" * 64)
+    previous = await adapter.recommend([column], before)
+    assert previous.records[column.identity.key].harmonization == "harmonizable"
+    after = replace(
+        before,
+        publication_digest="b" * 64,
+        catalog=CdeCatalog.from_cdes([CDEInfo(42, "diagnosis", "Diagnosis", CdeType.PASSTHROUGH)]),
+        pvs=CdePvCatalog.from_mapping({"diagnosis": frozenset()}),
+    )
+
+    # When the same input is mapped against a new publication of that version.
+    result = await adapter.recommend([column], after)
+
+    # Then its recommendation reflects the current value set.
+    assert result.records[column.identity.key].cde_key == "diagnosis"
+    assert result.records[column.identity.key].harmonization == "no_permissible_values"
 
 
 @pytest.mark.asyncio

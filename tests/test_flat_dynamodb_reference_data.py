@@ -1,4 +1,4 @@
-"""Read independently specified flat schema-2 rows through Data Chord's adapter."""
+"""Read independently specified flat schema-3 rows through Data Chord's adapter."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from src.integrations.dynamodb_reference_data import DynamoDbReferenceDataReposi
 
 MODEL_PK = "MODEL#bW9kZWw#VERSION#MQ"
 VERSION = DataModelVersionReference("model", "1")
-MODEL_DIGEST = "e63938d8f4226ff222859f43121b06dec9eb8b6f7d9d3b03319c5798db932a00"
+MODEL_DIGEST = "6feaeeb15071466bfa85a54be5634ae1cece63fde630e1b8f1fa11357fc28127"
 CATALOG_DIGEST = "b24c91e696b581ca42db67c46a3b0830d794c5925bc9662b73554c2a434c2656"
 
 
@@ -49,7 +49,7 @@ def _published_table() -> Table:
     relations: list[dict[str, object]] = [
         {
             "node_name": "diagnosis",
-            "node_cde_id": 4268857500206703555,
+            "node_cde_id": 6354300659888498,
             "source_node_cde_id": "YuwtJC",
             "description": "Stage at diagnosis",
             "data_type": "string",
@@ -58,7 +58,7 @@ def _published_table() -> Table:
         },
         {
             "node_name": "sample",
-            "node_cde_id": 7337509294113026323,
+            "node_cde_id": 7395480636342982,
             "source_node_cde_id": "Abc123",
             "description": "Stage on sample",
             "data_type": "enum",
@@ -70,7 +70,7 @@ def _published_table() -> Table:
         {
             "pk": MODEL_PK,
             "sk": "IMPORT",
-            "schema_version": 2,
+            "schema_version": 3,
             "data_model_key": "model",
             "external_version_number": "1",
             "digest": MODEL_DIGEST,
@@ -78,20 +78,9 @@ def _published_table() -> Table:
         {
             "pk": MODEL_PK,
             "sk": "CDE#YWdl#META",
-            "schema_version": 2,
+            "schema_version": 3,
             "cde_key": "age",
-            "cde_id": 4690995584867433052,
-            "node_relations": [
-                {
-                    "node_name": "sample",
-                    "node_cde_id": 5946852043267552078,
-                    "source_node_cde_id": "Age123",
-                    "description": None,
-                    "data_type": "integer",
-                    "is_key": False,
-                    "is_required": False,
-                }
-            ],
+            "cde_id": 148808179147131,
             "value_count": 0,
             "chunk_count": 0,
             "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
@@ -99,9 +88,10 @@ def _published_table() -> Table:
         {
             "pk": MODEL_PK,
             "sk": "CDE#c3RhZ2U#META",
-            "schema_version": 2,
+            "schema_version": 3,
             "cde_key": "stage",
-            "cde_id": 2457258298240256618,
+            "cde_id": 8549938031380504,
+            "description": "Disease stage",
             "node_relations": relations,
             "value_count": 2,
             "chunk_count": 1,
@@ -110,7 +100,7 @@ def _published_table() -> Table:
         {
             "pk": MODEL_PK,
             "sk": "CDE#c3RhZ2U#VALUES#000000",
-            "schema_version": 2,
+            "schema_version": 3,
             "cde_key": "stage",
             "chunk_index": 0,
             "uncompressed_size": len(b'["I","II"]'),
@@ -119,21 +109,21 @@ def _published_table() -> Table:
         {
             "pk": MODEL_PK,
             "sk": "META",
-            "schema_version": 2,
+            "schema_version": 3,
             "data_model_key": "model",
             "external_version_number": "1",
             "label": "Model",
             "nodes": ["diagnosis", "sample", "unused"],
             "node_count": 3,
-            "node_cde_count": 3,
-            "cde_key_count": 2,
+            "node_cde_count": 2,
+            "cde_count": 2,
             "value_count": 2,
             "digest": MODEL_DIGEST,
         },
         {
             "pk": "CATALOG",
             "sk": "IMPORT",
-            "schema_version": 2,
+            "schema_version": 3,
             "model_count": 1,
             "digest": CATALOG_DIGEST,
             "source_digest": "a" * 64,
@@ -141,7 +131,7 @@ def _published_table() -> Table:
         {
             "pk": "CATALOG",
             "sk": "MODEL#bW9kZWw#VERSION#MQ",
-            "schema_version": 2,
+            "schema_version": 3,
             "data_model_key": "model",
             "external_version_number": "1",
             "label": "Model",
@@ -149,7 +139,7 @@ def _published_table() -> Table:
         {
             "pk": "CATALOG",
             "sk": "META",
-            "schema_version": 2,
+            "schema_version": 3,
             "model_count": 1,
             "digest": CATALOG_DIGEST,
             "source_digest": "a" * 64,
@@ -158,39 +148,67 @@ def _published_table() -> Table:
     return Table({(str(row["pk"]), str(row["sk"])): row for row in rows})
 
 
-def test_flat_reader_keeps_cde_identity_and_both_node_relationships() -> None:
-    # Given complete flat rows with a shared CDE, a second CDE under sample, and an empty node.
-    table = _published_table()
-    repository = DynamoDbReferenceDataRepository(table)
+def test_flat_reader_keeps_both_node_relationships() -> None:
+    # Given a shared CDE, an unrelated CDE and a declared node with no CDEs.
+    repository = DynamoDbReferenceDataRepository(_published_table())
 
-    # When the complete model and the node-independent application view are loaded.
-    model = repository.load_cdes(VERSION)
-    collapsed = repository.load_model(VERSION)
+    # When the integration loads the model and its node relationships.
+    reference = repository.load_cdes(VERSION)
+
+    # Then the node and relationship metadata survives under the shared CDE key.
+    assert {node.value for node in reference.nodes} == {"diagnosis", "sample", "unused"}
+    assert list(reference.node_relations) == ["stage"]
+    assert [
+        (r.node.value, r.node_cde_id, r.source_node_cde_id, r.description, r.data_type, r.is_key, r.is_required)
+        for r in reference.node_relations["stage"]
+    ] == [
+        ("diagnosis", 6354300659888498, "YuwtJC", "Stage at diagnosis", "string", True, True),
+        ("sample", 7395480636342982, "Abc123", "Stage on sample", "enum", False, False),
+    ]
+
+
+def test_application_projection_preserves_shared_identity_and_description() -> None:
+    # Given a shared CDE with a CDE-wide description and two distinct placement descriptions.
+    repository = DynamoDbReferenceDataRepository(_published_table())
+
+    # When the application loads the model without node context.
+    model = repository.load_model(VERSION)
+
+    # Then it receives one JSON-safe ID and shared description, values and publication digest.
+    stage = model.catalog.get("stage")
+    assert stage is not None
+    assert stage.cde_id == 8549938031380504
+    assert stage.description == "Disease stage"
+    assert model.pvs.get("stage") == frozenset({"I", "II"})
+    assert model.pvs.get("age") == frozenset()
+    assert model.publication_digest == MODEL_DIGEST
+
+
+def test_flat_catalog_lists_published_versions() -> None:
+    # Given a sealed catalog with model version 1.
+    repository = DynamoDbReferenceDataRepository(_published_table())
+
+    # When the model picker lists the published versions.
     summaries = repository.list_models()
 
-    # Then both relationships survive while the application sees one stable CDE ID.
-    assert model.nodes == ("diagnosis", "sample", "unused")
-    assert [cde.cde_key for cde in model.cdes] == ["age", "stage"]
-    assert [(r.node_name, r.node_cde_id, r.source_node_cde_id) for r in model.cdes[0].node_relations] == [
-        ("sample", 5946852043267552078, "Age123")
-    ]
-    assert [
-        (r.node_name, r.node_cde_id, r.source_node_cde_id, r.description, r.data_type, r.is_key, r.is_required)
-        for r in model.cdes[1].node_relations
-    ] == [
-        ("diagnosis", 4268857500206703555, "YuwtJC", "Stage at diagnosis", "string", True, True),
-        ("sample", 7337509294113026323, "Abc123", "Stage on sample", "enum", False, False),
-    ]
-    stage = collapsed.catalog.get("stage")
-    assert stage is not None
-    assert stage.cde_id == 2457258298240256618
-    assert stage.description is None
-    assert collapsed.pvs.get("stage") == frozenset({"I", "II"})
-    assert collapsed.pvs.get("age") == frozenset()
+    # Then it receives only the published model and version.
     assert [(s.data_model_key, [v.external_version_number for v in s.versions]) for s in summaries] == [
         ("model", ["1"])
     ]
-    assert table.query_calls >= 4
+
+
+def test_flat_catalog_rejects_old_node_first_schema() -> None:
+    # Given a catalog advertised under the previous schema version.
+    table = _published_table()
+    table.items[("CATALOG", "META")]["schema_version"] = 2
+    repository = DynamoDbReferenceDataRepository(table)
+
+    # When the model picker lists the catalog.
+    with pytest.raises(ReferenceDataCorruptError) as error:
+        repository.list_models()
+
+    # Then it rejects the old format before offering any models to the user.
+    assert str(error.value) == "Reference schema version is unsupported"
 
 
 def test_flat_reader_caches_the_complete_application_model() -> None:
@@ -218,16 +236,15 @@ def test_flat_reader_accepts_boto3_numbers_and_binary_values() -> None:
         key: {name: deserializer.deserialize(serializer.serialize(value)) for name, value in row.items()}
         for key, row in table.items.items()
     }
-    # When the runtime reader loads the model and catalog.
+    # When the runtime reader loads the model from the paginated table.
     repository = DynamoDbReferenceDataRepository(table)
     model = repository.load_cdes(VERSION)
-    summaries = repository.list_models()
 
-    # Then the model retains both CDE values and its catalog entry.
+    # Then both values survive and the reader has followed pagination.
     assert isinstance(table.items[(MODEL_PK, "META")]["node_cde_count"], Decimal)
     assert isinstance(table.items[(MODEL_PK, "CDE#c3RhZ2U#VALUES#000000")]["payload"], Binary)
-    assert next(cde.values for cde in model.cdes if cde.cde_key == "stage") == frozenset({"I", "II"})
-    assert [summary.data_model_key for summary in summaries] == ["model"]
+    assert model.model.pvs.get("stage") == frozenset({"I", "II"})
+    assert table.query_calls > 1
 
 
 def test_flat_catalog_rejects_an_identity_that_disagrees_with_its_key() -> None:
@@ -253,26 +270,26 @@ def test_renaming_a_node_does_not_change_the_cde_wide_id() -> None:
     assert isinstance(relations, list)
     renamed = relations[0]
     renamed["node_name"] = "zzz"
-    renamed["node_cde_id"] = 3896016226965161549
+    renamed["node_cde_id"] = 5878482677783671
     stage["node_relations"] = [relations[1], renamed]
     meta["nodes"] = ["sample", "unused", "zzz"]
-    renamed_digest = "8c3aa81f2434d062affc4948edf27e16714562a194e855ede49b8a5fe1981a72"
+    renamed_digest = "1161710d89160ca76e8581920d8054c4c168eaa6ce8ed9a1ed3e20eee867a805"
     meta["digest"] = renamed_digest
     table.items[(MODEL_PK, "IMPORT")]["digest"] = renamed_digest
 
-    # When the renamed model is read through the flat and application views.
     repository = DynamoDbReferenceDataRepository(table)
-    flat = repository.load_cdes(VERSION)
-    collapsed = repository.load_model(VERSION)
+
+    # When the renamed model is read with its relationship metadata.
+    reference = repository.load_cdes(VERSION)
 
     # Then the relationship changes identity but the shared CDE identity does not.
-    stage_cde = next(cde for cde in flat.cdes if cde.cde_key == "stage")
-    assert [relation.node_name for relation in stage_cde.node_relations] == ["sample", "zzz"]
-    assert stage_cde.node_relations[1].node_cde_id == 3896016226965161549
-    assert stage_cde.node_relations[1].source_node_cde_id == "YuwtJC"
-    collapsed_stage = collapsed.catalog.get("stage")
+    relations = reference.node_relations["stage"]
+    assert [relation.node.value for relation in relations] == ["sample", "zzz"]
+    assert relations[1].node_cde_id == 5878482677783671
+    assert relations[1].source_node_cde_id == "YuwtJC"
+    collapsed_stage = reference.model.catalog.get("stage")
     assert collapsed_stage is not None
-    assert collapsed_stage.cde_id == 2457258298240256618
+    assert collapsed_stage.cde_id == 8549938031380504
 
 
 @pytest.mark.parametrize(
@@ -305,7 +322,7 @@ def test_flat_reader_rejects_incomplete_or_corrupt_rows(damage: str, message: st
         relations = stage["node_relations"]
         assert isinstance(relations, list)
         relations[0]["node_name"] = "missing"
-        relations[0]["node_cde_id"] = 5658806991821127333
+        relations[0]["node_cde_id"] = 4303952171635402
     else:
         table.items[(MODEL_PK, "CDE#c3RhZ2U#META")]["cde_id"] = 1
     repository = DynamoDbReferenceDataRepository(table)
@@ -321,7 +338,7 @@ def test_flat_reader_rejects_incomplete_or_corrupt_rows(damage: str, message: st
     assert message in str(error.value)
 
 
-@pytest.mark.parametrize("field", ["node_count", "node_cde_count", "cde_key_count", "value_count"])
+@pytest.mark.parametrize("field", ["node_count", "node_cde_count", "cde_count", "value_count"])
 def test_flat_reader_checks_each_model_count_independently(field: str) -> None:
     # Given a complete flat model with one incorrect stored count.
     table = _published_table()
@@ -336,41 +353,48 @@ def test_flat_reader_checks_each_model_count_independently(field: str) -> None:
     assert f"Reference {field.replace('_', ' ')} is invalid" in str(error.value)
 
 
-@pytest.mark.parametrize("nodes", [None, []])
-def test_flat_reader_requires_a_nonempty_model_level_node_list(nodes: list[str] | None) -> None:
-    # Given flat rows with a missing or empty model-level nodes field.
+@pytest.mark.parametrize("omit_nodes", [True, False])
+def test_flat_reader_accepts_a_model_without_nodes(omit_nodes: bool) -> None:
+    # Given a published model without node relationships or declarations.
     table = _published_table()
-    if nodes is None:
-        del table.items[(MODEL_PK, "META")]["nodes"]
-    else:
-        table.items[(MODEL_PK, "META")]["nodes"] = nodes
+    meta = table.items[(MODEL_PK, "META")]
+    meta["nodes"] = []
+    if omit_nodes:
+        del meta["nodes"]
+    del meta["node_count"]
+    del meta["node_cde_count"]
+    del table.items[(MODEL_PK, "CDE#c3RhZ2U#META")]["node_relations"]
+    digest = "338fb6971d99934420570025ca55dad24091d4784757cb5789a403fb041e0fd3"
+    meta["digest"] = digest
+    table.items[(MODEL_PK, "IMPORT")]["digest"] = digest
     repository = DynamoDbReferenceDataRepository(table)
 
-    # When the application loads the model.
-    with pytest.raises(ReferenceDataCorruptError) as error:
-        repository.load_model(VERSION)
+    # When the integration loads the model.
+    reference = repository.load_cdes(VERSION)
 
-    # Then the reader rejects the incomplete flat layout without a legacy fallback.
-    assert "model nodes are invalid" in str(error.value)
+    # Then the flat CDE catalog is usable and contains no node metadata.
+    assert reference.nodes == frozenset()
+    assert dict(reference.node_relations) == {}
+    assert reference.model.catalog.keys() == ("age", "stage")
+    assert reference.model.pvs.get("stage") == frozenset({"I", "II"})
 
 
-@pytest.mark.parametrize("relations", [None, []])
-def test_flat_reader_requires_each_cde_to_have_node_relationships(relations: list[object] | None) -> None:
-    # Given a published CDE with its node relationships missing or empty.
+def test_flat_reader_infers_nodes_when_only_relationships_are_present() -> None:
+    # Given a model with relationships and no separately declared nodes.
     table = _published_table()
-    age = table.items[(MODEL_PK, "CDE#YWdl#META")]
-    if relations is None:
-        del age["node_relations"]
-    else:
-        age["node_relations"] = relations
+    meta = table.items[(MODEL_PK, "META")]
+    del meta["nodes"]
+    meta["node_count"] = 2
+    digest = "e60c594e340fd5d5d1a34cf798818b5f6cc74fff5f7c6febfbca16827a3b18d6"
+    meta["digest"] = digest
+    table.items[(MODEL_PK, "IMPORT")]["digest"] = digest
     repository = DynamoDbReferenceDataRepository(table)
 
-    # When the complete flat model is read.
-    with pytest.raises(ReferenceDataCorruptError) as error:
-        repository.load_cdes(VERSION)
+    # When the integration reads the model.
+    reference = repository.load_cdes(VERSION)
 
-    # Then the CDE without a node relationship is rejected.
-    assert "node relationships are invalid: age" in str(error.value)
+    # Then only the nodes named on relationships are present.
+    assert {node.value for node in reference.nodes} == {"diagnosis", "sample"}
 
 
 def test_flat_reader_rejects_duplicate_node_relationships() -> None:
@@ -391,27 +415,23 @@ def test_flat_reader_rejects_duplicate_node_relationships() -> None:
 
 
 @pytest.mark.parametrize(
-    ("source_id", "message"),
-    [(None, "field is invalid: source_node_cde_id"), (" ", "source node CDE id is invalid")],
+    "source_id", ["", " ", 17],
 )
-def test_flat_reader_rejects_missing_or_blank_source_id(source_id: str | None, message: str) -> None:
-    # Given a flat CDE row whose relationship lacks a usable source ID.
+def test_flat_reader_rejects_malformed_source_id(source_id: object) -> None:
+    # Given a CDE relationship with a source ID in an invalid form.
     table = _published_table()
     stage = table.items[(MODEL_PK, "CDE#c3RhZ2U#META")]
     relations = stage["node_relations"]
     assert isinstance(relations, list)
-    if source_id is None:
-        del relations[0]["source_node_cde_id"]
-    else:
-        relations[0]["source_node_cde_id"] = source_id
+    relations[0]["source_node_cde_id"] = source_id
     repository = DynamoDbReferenceDataRepository(table)
 
     # When the flat model is read.
     with pytest.raises(ReferenceDataCorruptError) as error:
         repository.load_cdes(VERSION)
 
-    # Then the missing or blank source ID is rejected.
-    assert message in str(error.value)
+    # Then the supplied invalid source ID is rejected.
+    assert "source_node_cde_id" in str(error.value)
 
 
 @pytest.mark.parametrize(
