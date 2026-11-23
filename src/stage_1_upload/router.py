@@ -11,7 +11,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 import src.app.dependencies as dependencies
 from src.app.demo_mode import get_demo_upload
@@ -22,10 +22,10 @@ from src.domain.cde_pv_catalog import CdePvCatalog
 from src.domain.cde_recommendation import ProfiledColumn, RecommendationUnavailableError
 from src.domain.column_profile import ColumnProfile
 from src.domain.columns import ColumnIdentity, column_key_from_string
-from src.domain.dataset_workflow_ids import new_dataset_workflow_id
+from src.domain.dataset_workflow_ids import dataset_workflow_id_from_string, new_dataset_workflow_id
 from src.domain.manifest import ColumnMappingManifest
 from src.domain.match_counts import column_value_overlap_ratio
-from src.domain.reference_data import ReferenceDataError
+from src.domain.reference_data import ReferenceDataError, ReferenceModelNotFoundError
 from src.domain.upload_integrity import UploadFingerprint
 from src.domain.workflow_state import WorkflowState
 from src.observability.events import (
@@ -73,7 +73,11 @@ stage_one_router = APIRouter(prefix="/stage-1", tags=["Stage 1 Upload"])
 
 
 @stage_one_router.get("", response_class=HTMLResponse, name="stage_one_upload_page")
-async def render_stage_one(request: Request) -> HTMLResponse:
+async def render_stage_one(
+    request: Request,
+    file_id: str | None = None,
+    reselect_model: bool = False,
+) -> HTMLResponse:
     demo_upload = (
         (await _upload_response(get_demo_upload())).model_dump(mode="json")
         if get_application_mode() is ApplicationMode.DEMO
@@ -83,6 +87,8 @@ async def render_stage_one(request: Request) -> HTMLResponse:
         "request": request,
         "ui_constraints": describe_constraints(_upload_constraints),
         "demo_upload": demo_upload,
+        "reselect_model": reselect_model,
+        "recovery_upload": await _recovery_upload(file_id) if reselect_model and file_id else None,
     }
     return _templates.TemplateResponse(request, "stage_1_upload.html", context)
 
@@ -205,12 +211,31 @@ async def _upload_response(meta: UploadedFileMeta) -> UploadResponse:
     )
 
 
+async def _recovery_upload(file_id: str) -> dict[str, object] | None:
+    try:
+        workflow_id = dataset_workflow_id_from_string(file_id)
+    except ValueError:
+        return None
+    user = dependencies.get_user_context()
+    workflow_storage = dependencies.get_workflow_storage()
+    meta = await run_in_threadpool(
+        load_upload_artifact, dependencies.get_upload_storage(), workflow_storage, user, workflow_id,
+    )
+    if meta is None:
+        return None
+    upload = await _upload_response(meta)
+    workflow = await run_in_threadpool(load_workflow_state, workflow_storage, user, workflow_id)
+    if workflow and workflow.state.selected_sheet:
+        upload.selected_sheet = workflow.state.selected_sheet
+    return upload.model_dump(mode="json")
+
+
 @stage_one_router.post(
     "/analyze",
     response_model=AnalyzeResponse,
     name="stage_one_upload_analyze",
 )
-async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
+async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse | JSONResponse:
     storage = dependencies.get_upload_storage()
     user = dependencies.get_user_context()
     log_workflow_event(
@@ -267,6 +292,12 @@ async def analyze_dataset(payload: AnalyzeRequest) -> AnalyzeResponse:
                 for column in columns
             ],
             reference_model,
+        )
+    except ReferenceModelNotFoundError as exc:
+        _log_analyze_failed(user, payload.file_id, type(exc).__name__)
+        return JSONResponse(
+            {"detail": "This model version is no longer available. Choose a current version and run analysis again."},
+            status_code=status.HTTP_409_CONFLICT,
         )
     except ReferenceDataError as exc:
         _log_analyze_failed(user, payload.file_id, type(exc).__name__)

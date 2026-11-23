@@ -3166,6 +3166,29 @@ test('data model menus select models by pointer and keyboard and close on outsid
   await expect(page.locator('.data-model-dropdown--version .data-model-dropdown-panel')).toBeHidden();
 });
 
+test('a retired model selection can be replaced with a current version for the same upload', async ({ page }) => {
+  // Given an uploaded file, a retired version in its mapping link, and no browser session data.
+  await page.goto('/stage-1');
+  const uploaded = page.waitForResponse(response => response.url().endsWith('/stage-1/upload'));
+  await page.setInputFiles(AGENT_FILE_INPUT, fileFixture('basic.csv'));
+  const { file_id: fileId } = await (await uploaded).json();
+  await expect(page.locator('#analyzeButton')).toBeEnabled();
+  await page.evaluate(() => sessionStorage.clear());
+  await page.goto(`/stage-2?file_id=${fileId}&data_model_key=gc&external_version_number=retired`);
+  await expect(page.locator('#statusMessage')).toContainText('The previous model version is no longer available');
+  await expect(page.locator('#dropzoneFileName')).toHaveText('basic.csv');
+  await page.locator('#analyzeButton').click();
+  await expect(page.locator('#versionDropdownTrigger')).toHaveText('11.0.4');
+
+  // When the user confirms the current version from the catalog.
+  await page.locator('.data-model-confirm-btn').click();
+
+  // Then the real analysis endpoint maps the original upload with that version.
+  await expect(page).toHaveURL(
+    `/stage-2?file_id=${fileId}&data_model_key=gc&external_version_number=11.0.4`,
+  );
+});
+
 test('error handling: wrong file type and oversize upload', async ({ page }, testInfo) => {
   await mockDataModels(page);
 

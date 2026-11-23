@@ -8,16 +8,17 @@ from __future__ import annotations
 
 from pathlib import Path as _Path
 from typing import Annotated
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 import src.app.dependencies as dependencies
 from src.api.schemas import DatasetWorkflowIdField
 from src.domain.cde import CDEInfo
 from src.domain.data_model_version_reference import DataModelVersionReference
-from src.domain.reference_data import ReferenceDataError
+from src.domain.reference_data import ReferenceDataError, ReferenceModelNotFoundError
 from src.persistence.workflow_state_store import WorkflowStateUnreadableError, load_workflow_state
 from src.shared.jinja import templates_for_stage
 
@@ -43,7 +44,7 @@ async def render_stage_two(
     file_id: Annotated[DatasetWorkflowIdField | None, Query()] = None,
     data_model_key: Annotated[str | None, Query(min_length=1)] = None,
     external_version_number: Annotated[str | None, Query(min_length=1)] = None,
-) -> HTMLResponse:
+) -> Response:
     cde_catalog: list[CDEInfo] = []
     try:
         data_model_version = _data_model_version_for_request(file_id, data_model_key, external_version_number)
@@ -62,6 +63,10 @@ async def render_stage_two(
                 data_model_version,
             )
             cde_catalog = model.catalog.to_list()
+        except ReferenceModelNotFoundError:
+            stage_one_path = request.url_for("stage_one_upload_page").path
+            query = urlencode({"file_id": file_id, "reselect_model": "true"})
+            return RedirectResponse(f"{stage_one_path}?{query}", status_code=status.HTTP_303_SEE_OTHER)
         except ReferenceDataError as exc:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

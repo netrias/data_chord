@@ -1,4 +1,4 @@
-import { initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
+import { initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage, resetMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
 import { STAGE_2_PAYLOAD_KEY, STAGE_3_JOB_KEY, CURRENT_FILE_SESSION_KEY, removeFromSession, writeToSession, readFromSession } from '/assets/shared/storage-keys.js';
 import { reportApiError, reportFetchFailure } from '/assets/shared/client-events.js';
 import { showDataModelPopup, preloadDataModels } from './data_model_popup.js';
@@ -336,6 +336,20 @@ const _hydrateDemoUpload = () => {
   _setAnalyzeButtonEnabled(true);
 };
 
+const _restoreForModelSelection = () => {
+  _clearStaleSessionData();
+  resetMaxReachedStage();
+  const upload = config.recoveryUpload;
+  if (!upload) {
+    _resetUploadState();
+    _setStatus('This upload is no longer available. Upload your file to start a new analysis.', 'error');
+    return;
+  }
+  _persistFileSession(upload, upload.file_name);
+  _hydrateFromSession();
+  _setStatus('The previous model version is no longer available. Select Map to choose a current version and run analysis again.');
+};
+
 /* Inline SVG check used inside each active tab; declared once to keep the
    render loop allocation-light. */
 const _SHEET_CHECK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>';
@@ -639,6 +653,7 @@ const _analyzeDataset = async () => {
   _showDropzoneSummary(state.file, 'Analyzing columns…');
   if (analyzeOverlay) analyzeOverlay.classList.remove('hidden');
 
+  let failureMessage = ANALYZE_API_ERROR_MESSAGE;
   try {
     let response;
     try {
@@ -674,7 +689,8 @@ const _analyzeDataset = async () => {
         statusCode: response.status,
         serverRequestId: _responseRequestId(response),
       });
-      throw new Error(ANALYZE_API_ERROR_MESSAGE);
+      if (response.status === 409 && typeof payload.detail === 'string') failureMessage = payload.detail;
+      throw new Error(failureMessage);
     }
     // Keep overlay visible during navigation - browser will replace the page
     _navigateToStageTwo(
@@ -683,16 +699,16 @@ const _analyzeDataset = async () => {
       selection.externalVersionNumber,
       payload,
     );
+    return;
   } catch (error) {
     console.error(error);
-    _setStatus(ANALYZE_API_ERROR_MESSAGE, 'error');
-    _setAnalyzeButtonEnabled(true);
-    _showDropzoneSummary(state.file, 'Uploaded');
-    // Only hide overlay and reset state on error
-    state.isAnalyzing = false;
-    _setFileInputDisabled(false);
-    if (analyzeOverlay) analyzeOverlay.classList.add('hidden');
   }
+  _setStatus(failureMessage, 'error');
+  _setAnalyzeButtonEnabled(true);
+  _showDropzoneSummary(state.file, 'Uploaded');
+  state.isAnalyzing = false;
+  _setFileInputDisabled(false);
+  if (analyzeOverlay) analyzeOverlay.classList.add('hidden');
 };
 
 const _wireDragEvents = () => {
@@ -748,6 +764,8 @@ const _init = () => {
 
   if (isDemo) {
     _hydrateDemoUpload();
+  } else if (config.reselectModel) {
+    _restoreForModelSelection();
   } else if (!_hydrateFromSession()) {
     _resetUploadState();
   }

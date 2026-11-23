@@ -23,6 +23,7 @@ from src.domain.columns import column_key_from_string
 from src.domain.harmonization import HarmonizeStatus, MatchFidelity
 from src.domain.harmonization_cache import EmptyHarmonizationCache
 from src.domain.manifest import ManifestPayload
+from src.domain.reference_data import ReferenceModelNotFoundError
 from src.domain.workflow_state import WorkflowState
 from src.integrations.harmonize import (
     FileHarmonizationService,
@@ -606,6 +607,56 @@ async def test_stage2_mapping_page_loads_selected_model_from_workflow_state(
     loaded_version = repository.load_model.call_args.args[0]
     assert loaded_version.data_model_key == "gc"
     assert loaded_version.external_version_number == "11.0.4"
+
+
+async def test_retired_model_returns_to_stage_one_with_the_original_upload(
+    app_client: AsyncClient,
+    mock_netrias_client: MagicMock,
+) -> None:
+    # Given an analyzed upload whose selected version was retired from the catalog.
+    file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "retired-model.csv")
+    analysis = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "data_model_key": "gc", "external_version_number": "11.0.4"},
+    )
+    assert analysis.status_code == 200
+    initial_workflow = _load_workflow_state(file_id)
+    assert initial_workflow is not None
+    mock_netrias_client.reference_repository.load_model.side_effect = ReferenceModelNotFoundError("retired version")
+
+    # When the user opens the mapping page for the saved workflow.
+    response = await app_client.get("/stage-2", params={"file_id": file_id}, follow_redirects=True)
+
+    # Then Stage 1 can offer model selection with the same file, and the saved analysis is intact.
+    assert len(response.history) == 1
+    assert response.history[0].status_code == 303
+    assert response.url.path == "/stage-1"
+    assert response.url.params["file_id"] == file_id
+    assert 'reselectModel: true' in response.text
+    assert '"file_name": "retired-model.csv"' in response.text
+    assert _load_workflow_state(file_id) == initial_workflow
+
+
+async def test_analysis_requests_reselection_when_catalog_version_disappears(
+    app_client: AsyncClient,
+    mock_netrias_client: MagicMock,
+) -> None:
+    # Given an upload and a version that disappeared after the model was offered.
+    file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "model-removed.csv")
+    mock_netrias_client.reference_repository.load_model.side_effect = ReferenceModelNotFoundError("removed")
+
+    # When the user tries to start analysis against the retired selection.
+    response = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "data_model_key": "gc", "external_version_number": "11.0.4"},
+    )
+
+    # Then analysis requests a new selection and has not written a workflow.
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "This model version is no longer available. Choose a current version and run analysis again.",
+    }
+    assert _load_workflow_state(file_id) is None
 
 
 async def test_stage2_analysis_state_recovers_without_replacing_confirmed_choices(
