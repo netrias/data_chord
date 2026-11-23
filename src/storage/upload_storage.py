@@ -6,14 +6,17 @@ Orchestrates file I/O, metadata tracking, and directory organization.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import shutil
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from tempfile import NamedTemporaryFile
+from tempfile import NamedTemporaryFile, TemporaryDirectory
 from typing import Final, NotRequired, Protocol, TypedDict, cast
 
 from netrias_client import (
@@ -25,6 +28,8 @@ from netrias_client import (
 )
 
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_value
+from src.domain.upload_integrity import UploadFingerprint
+from src.storage.file_operation import run_file_operation
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +59,7 @@ class StoredMeta(TypedDict):
     tabular_format: NotRequired[str]
     sheet_names: NotRequired[list[str]]
     selected_sheet: NotRequired[str | None]
+    verification: NotRequired[dict[str, str | int]]
 
 
 class UploadStream(Protocol):
@@ -88,6 +94,7 @@ class UploadedFileMeta:
     tabular_format: TabularFormat
     sheet_names: list[str]
     selected_sheet: str | None = None
+    verification: UploadFingerprint | None = None
 
     @property
     def file_id(self) -> DatasetWorkflowId:
@@ -136,58 +143,87 @@ def _copy_file_atomic(source: Path, destination: Path) -> None:
         temp_path.unlink(missing_ok=True)
 
 
-def _remove_temp_file(source: Path, destination: Path) -> None:
-    """Clean up temporary SDK outputs after copying them into managed storage."""
-    if source.resolve() == destination.resolve():
-        return
-    try:
-        source.unlink()
-    except OSError:
-        logger.debug("Could not remove temp file", extra={"path": str(source)})
-
-
 def _harmonized_suffix_for(original_path: Path) -> str:
     return f".harmonized{original_path.suffix.lower() or '.csv'}"
 
 
 class UploadStorage:
     def __init__(self, base_dir: Path, constraints: UploadConstraints) -> None:
-        self._base_dir: Path = base_dir
-        self._data_dir: Path = base_dir / "files"
-        self._meta_dir: Path = base_dir / "meta"
-        self._constraints: UploadConstraints = constraints
-        self._manifest_dir: Path = base_dir / "manifests"
-        self._harmonized_dir: Path = base_dir / "harmonized"
+        self._shared_dir = base_dir
+        self._operation_dir: ContextVar[Path | None] = ContextVar("operation_upload_dir", default=None)
+        self._constraints = constraints
         self._ensure_workspace()
+
+    @contextmanager
+    def private_workspace(self) -> Generator[None]:
+        """Keep materialized S3 files alive until this reader or worker finishes."""
+        with TemporaryDirectory(dir=self._shared_dir, prefix="operation-") as directory:
+            token = self._operation_dir.set(Path(directory))
+            try:
+                self._ensure_workspace()
+                yield
+            finally:
+                self._operation_dir.reset(token)
+
+    @property
+    def _base_dir(self) -> Path:
+        return self._operation_dir.get() or self._shared_dir
+
+    @property
+    def _data_dir(self) -> Path:
+        return self._base_dir / "files"
+
+    @property
+    def _manifest_dir(self) -> Path:
+        return self._base_dir / "manifests"
+
+    @property
+    def _meta_dir(self) -> Path:
+        return self._base_dir / "meta"
+
+    @property
+    def _harmonized_dir(self) -> Path:
+        return self._base_dir / "harmonized"
 
     def _ensure_workspace(self) -> None:
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._meta_dir.mkdir(parents=True, exist_ok=True)
-        self._manifest_dir.mkdir(parents=True, exist_ok=True)
         self._harmonized_dir.mkdir(parents=True, exist_ok=True)
 
-    async def store(self, upload: UploadStream, dataset_workflow_id: DatasetWorkflowId) -> UploadedFileMeta:
+    async def store(
+        self, upload: UploadStream, dataset_workflow_id: DatasetWorkflowId,
+        expected: UploadFingerprint | None = None,
+    ) -> UploadedFileMeta:
+        """Save an upload, verifying client expectations before publishing metadata.
+
+        Server-generated files may omit expectations. Browser HTTP uploads must
+        supply them at their request boundary. A failed or cancelled write leaves
+        no completed scratch file or upload metadata.
+        """
         filename, suffix, content_type = self._extract_upload_info(upload)
-        self._validate_upload(suffix, content_type)
-
         destination = self._data_dir / f"{dataset_workflow_id}{suffix}"
-
+        completed_write = False
         try:
-            total_bytes = await self._write_upload_chunks(upload, destination)
-        finally:
-            await upload.close()
-
-        try:
+            try:
+                self._validate_upload(suffix, content_type)
+                if expected is not None and expected.size_bytes > self._constraints.max_bytes:
+                    raise UploadTooLargeError("Declared file size exceeds the upload limit")
+                total_bytes = await self._write_upload_chunks(upload, destination)
+                completed_write = True
+            finally:
+                await upload.close()
+            verification = None
+            if expected is not None:
+                verification = await run_file_operation(_fingerprint_file, destination)
+                expected.verify(verification)
+                total_bytes = verification.size_bytes
             return self._create_and_save_metadata(
-                dataset_workflow_id,
-                filename,
-                content_type,
-                total_bytes,
-                destination,
+                dataset_workflow_id, filename, content_type, total_bytes, destination, verification,
             )
-        except (UnsupportedUploadError, OSError):
-            destination.unlink(missing_ok=True)
-            (self._meta_dir / f"{dataset_workflow_id}.json").unlink(missing_ok=True)
+        except BaseException:
+            if completed_write:
+                destination.unlink(missing_ok=True)
+                (self._meta_dir / f"{dataset_workflow_id}.json").unlink(missing_ok=True)
             raise
 
     def _extract_upload_info(self, upload: UploadStream) -> tuple[str, str, str]:
@@ -199,20 +235,18 @@ class UploadStorage:
     async def _write_upload_chunks(self, upload: UploadStream, destination: Path) -> int:
         """Stream in chunks to avoid loading entire file into memory."""
         total_bytes = 0
+        created = False
         try:
             with destination.open("wb") as target:
+                created = True
                 while chunk := await upload.read(self._constraints.chunk_size):
                     total_bytes += len(chunk)
                     if total_bytes > self._constraints.max_bytes:
                         raise UploadTooLargeError(f"File exceeds {self._constraints.max_bytes} bytes limit")
                     target.write(chunk)
-        except UploadTooLargeError:
-            destination.unlink(missing_ok=True)
-            logger.warning("Upload aborted because it was too large", extra={"destination": str(destination)})
-            raise
-        except OSError:
-            destination.unlink(missing_ok=True)
-            logger.exception("Upload write failed", extra={"destination": str(destination)})
+        except BaseException:
+            if created:
+                destination.unlink(missing_ok=True)
             raise
         return total_bytes
 
@@ -223,6 +257,7 @@ class UploadStorage:
         content_type: str,
         total_bytes: int,
         destination: Path,
+        verification: UploadFingerprint | None = None,
     ) -> UploadedFileMeta:
         file_format = get_tabular_format(destination, content_type)
         sheet_names = _sheet_names_for(destination)
@@ -237,6 +272,7 @@ class UploadStorage:
             tabular_format=file_format,
             sheet_names=sheet_names,
             selected_sheet=selected_sheet,
+            verification=verification,
         )
         self._write_metadata(meta)
         logger.info("Stored upload", extra={"file_id": dataset_workflow_id, "size_bytes": total_bytes})
@@ -255,7 +291,7 @@ class UploadStorage:
         meta_path.write_text(json.dumps(meta_payload, indent=2))
 
     def metadata_payload(self, meta: UploadedFileMeta) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             _META_FILE_ID: meta.dataset_workflow_id,
             _META_ORIGINAL_NAME: meta.original_name,
             _META_CONTENT_TYPE: meta.content_type,
@@ -266,6 +302,16 @@ class UploadStorage:
             _META_SHEET_NAMES: meta.sheet_names,
             _META_SELECTED_SHEET: meta.selected_sheet,
         }
+        if meta.verification is not None:
+            payload["verification"] = {
+                "sha256": meta.verification.sha256,
+                "size_bytes": meta.verification.size_bytes,
+            }
+        return payload
+
+    def metadata_for_path(self, payload: Mapping[str, object], source: Path) -> UploadedFileMeta:
+        """Read durable metadata for the file supplied by its storage backend."""
+        return self._metadata_from_payload(cast(StoredMeta, payload), source)
 
     def restore_upload(self, payload: Mapping[str, object], source_path: Path) -> UploadedFileMeta:
         meta = self._metadata_from_payload(cast(StoredMeta, payload))
@@ -276,19 +322,6 @@ class UploadStorage:
             _copy_file_atomic(source_path, meta.saved_path)
         self._write_metadata(meta)
         return meta
-
-    def restore_harmonization_manifest(self, file_id: str, source_path: Path) -> Path:
-        destination = self._manifest_dir / f"{file_id}_harmonization.parquet"
-        if source_path.resolve() != destination.resolve():
-            _copy_file_atomic(source_path, destination)
-        return destination
-
-    def restore_harmonized_output(self, file_id: str, original_path: Path, source_path: Path) -> Path:
-        destination = self.harmonized_path_for(file_id, original_path)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        if source_path.resolve() != destination.resolve():
-            _copy_file_atomic(source_path, destination)
-        return destination
 
     def select_sheet(self, file_id: str, sheet_name: str | None) -> UploadedFileMeta:
         meta = self.load(file_id)
@@ -301,27 +334,8 @@ class UploadStorage:
         self._write_metadata(updated)
         return updated
 
-    def save_harmonization_manifest(self, file_id: str, manifest_path: Path) -> Path:
-        destination = self._manifest_dir / f"{file_id}_harmonization.parquet"
-        if manifest_path.resolve() != destination.resolve():
-            _copy_file_atomic(manifest_path, destination)
-        _remove_temp_file(manifest_path, destination)
-        logger.info("Stored harmonization manifest", extra={"file_id": file_id, "path": str(destination)})
-        return destination
-
-    def load_harmonization_manifest_path(self, file_id: str) -> Path | None:
-        path = self._manifest_dir / f"{file_id}_harmonization.parquet"
-        return path if path.exists() else None
-
     def harmonized_path_for(self, file_id: str, original_path: Path) -> Path:
         return self._harmonized_dir / f"{file_id}{_harmonized_suffix_for(original_path)}"
-
-    def load_harmonized_path(self, file_id: str) -> Path | None:
-        meta = self.load(file_id)
-        if meta is None:
-            return None
-        path = self.harmonized_path_for(file_id, meta.saved_path)
-        return path if path.exists() else None
 
     def delete_workflow_files(self, file_id: DatasetWorkflowId) -> None:
         """Delete exact scratch paths for one validated workflow identity."""
@@ -345,17 +359,18 @@ class UploadStorage:
         if not is_supported_tabular_content_type(content_type, file_format):
             raise UnsupportedUploadError(f"Unsupported content type for {suffix}: {content_type}")
 
-    def _metadata_from_payload(self, payload: StoredMeta) -> UploadedFileMeta:
+    def _metadata_from_payload(self, payload: StoredMeta, source: Path | None = None) -> UploadedFileMeta:
         return UploadedFileMeta(
             dataset_workflow_id=dataset_workflow_id_from_value(payload[_META_FILE_ID]),
             original_name=payload[_META_ORIGINAL_NAME],
             content_type=payload[_META_CONTENT_TYPE],
             size_bytes=payload[_META_SIZE_BYTES],
-            saved_path=self._data_dir / payload[_META_SAVED_NAME],
+            saved_path=source if source is not None else self._data_dir / payload[_META_SAVED_NAME],
             uploaded_at=datetime.fromisoformat(payload[_META_UPLOADED_AT]),
             tabular_format=_tabular_format_from_metadata(payload),
             sheet_names=payload.get(_META_SHEET_NAMES, []),
             selected_sheet=payload.get(_META_SELECTED_SHEET),
+            verification=_verification_from_metadata(payload),
         )
 
 
@@ -411,7 +426,29 @@ def _with_selected_sheet(meta: UploadedFileMeta, selected_sheet: str) -> Uploade
         tabular_format=meta.tabular_format,
         sheet_names=meta.sheet_names,
         selected_sheet=selected_sheet,
+        verification=meta.verification,
     )
+
+
+def _fingerprint_file(path: Path) -> UploadFingerprint:
+    digest = hashlib.sha256()
+    size_bytes = 0
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+            size_bytes += len(chunk)
+    return UploadFingerprint(digest.hexdigest(), size_bytes)
+
+
+def _verification_from_metadata(payload: StoredMeta) -> UploadFingerprint | None:
+    raw = payload.get("verification")
+    if raw is None:
+        return None
+    sha256 = raw.get("sha256")
+    size_bytes = raw.get("size_bytes")
+    if not isinstance(sha256, str) or not isinstance(size_bytes, int) or size_bytes != payload[_META_SIZE_BYTES]:
+        raise ValueError("Upload verification metadata is invalid")
+    return UploadFingerprint(sha256, size_bytes)
 
 
 __all__ = [

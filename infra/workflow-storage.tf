@@ -2,7 +2,7 @@ removed {
   from = aws_s3_bucket_versioning.workflow
 
   lifecycle {
-    # Retire the legacy address without deleting data. The shared data plane
+    # Retire the legacy address without deleting data. The full deployment
     # explicitly suspends future workflow versions at its new address.
     destroy = false
   }
@@ -45,4 +45,17 @@ resource "aws_iam_role_policy" "application_task_bedrock_mantle" {
   role = aws_iam_role.application_task.id
 
   policy = module.data_plane.bedrock_policy_json
+}
+
+moved {
+  from = module.data_plane.aws_s3_bucket_versioning.workflow
+  to   = aws_s3_bucket_versioning.managed_workflow
+}
+
+resource "aws_s3_bucket_versioning" "managed_workflow" {
+  bucket = module.data_plane.workflow_bucket_name
+
+  versioning_configuration {
+    status = "Suspended"
+  }
 }

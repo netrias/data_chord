@@ -492,46 +492,10 @@ the deployment.
 ## 6. Load reference data
 
 The deployment creates an empty reference-data table. Data Chord cannot run a
-workflow until you load an approved canonical reference-data file.
-
-Calculate the file's SHA-256 digest.
-
-On macOS:
-
-```bash
-shasum -a 256 approved-reference-data.json
-```
-
-On Linux:
-
-```bash
-sha256sum approved-reference-data.json
-```
-
-Use a profile that can write to the staging reference-data table:
-
-```bash
-AWS_PROFILE=example-data-loader uv run python -m scripts.reference_data sync \
-  --input approved-reference-data.json \
-  --expected-sha256 <sha256-from-the-command-above> \
-  --table data-chord-staging-reference-data \
-  --region us-east-2
-```
-
-The command checks the digest, loads the data, reads it back, and checks the
-published model count.
-
-If an authorized operator must create the canonical file from the legacy
-service, load `NETRIAS_API_KEY` from the approved secret source. Do not type its
-value in the command. Then run:
-
-```bash
-uv run python -m scripts.reference_data export \
-  --environment staging \
-  --output approved-reference-data.json
-```
-
-Review and approve the exported file before you sync it.
+workflow until standards data is published. Auto-Model owns DynamoDB publication;
+Data Chord provides the runtime reader for flat schema-2 CDE rows. Auto-Model
+must publish the flat CDE rows before Data Chord can read the standards table.
+Data Chord no longer provides `export` or `sync` commands for this DynamoDB table.
 
 ## 7. Invite a user and test one workflow
 
@@ -588,8 +552,8 @@ delivery policy, public-access block, and 30-day expiration at the addresses
 defined in `infra/access-logs.tf`. Run `tofu import` once for the existing bucket
 and each of its three configurations before reviewing the full plan. Routine
 deployments need no import commands. Require no replacement or log-policy change.
-Workflow versioning is suspended to stop future history; S3's default SSE-S3
-encryption remains active. The foundation state bucket keeps versioning.
+In a full deployment, workflow versioning is suspended to stop future history; S3's default SSE-S3
+encryption remains active. The foundation state bucket keeps versioning. In a customer-platform deployment, the customer controls workflow bucket versioning. An upgrade relinquishes any previous versioning resource in state without changing the bucket setting.
 Remove obsolete ALB bypass rules before exposing the
 new application. Keep unrelated clients on shared endpoint security groups.
 Review all resource moves and require no VPC, ALB, Cognito, certificate, bucket,
@@ -607,3 +571,9 @@ after the migrated workflows pass the current app's readers and live checks.
 Verify the exact running image, login, CSV and XLSX workflows, edits, downloads,
 old-workflow reopening, and cross-user access denial. A successful ECS health
 check alone does not verify this migration.
+
+
+During shutdown the job service gives cancelled workers five seconds to finish. A synchronous
+provider can continue using its private files after that wait. The worker releases them when the
+provider returns. A forced container stop ends the process and its ephemeral storage. An accepted
+job interrupted before publication is recoverable through the existing lease-expiry path.

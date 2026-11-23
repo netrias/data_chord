@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import shutil
-import tempfile
 from collections.abc import AsyncGenerator, Generator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +19,7 @@ from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 from starlette.datastructures import Headers
 
+from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_value
 from src.storage import UploadConstraints, UploadStorage
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -33,6 +34,16 @@ SAMPLE_CSV_ROW_COUNT = 10
 SAMPLE_CSV_COLUMN_COUNT = 6
 MAX_EXAMPLES_LIMIT = 20
 MANUAL_COLUMN_CONFIDENCE = 0.2
+
+
+async def review_precondition(
+    client: AsyncClient, file_id: DatasetWorkflowId, headers: dict[str,str] | None = None,
+) -> dict[str,str]:
+    """Use the same conditional write contract as a reviewer opening Stage 4."""
+    rows = await client.post("/stage-4/rows", json={"file_id":file_id}, headers=headers)
+    assert rows.status_code == 200, rows.text
+    condition = {"If-Match":rows.headers["etag"]} if "etag" in rows.headers else {"If-None-Match":"*"}
+    return {**(headers or {}), **condition}
 
 
 def review_state_payload() -> dict[str, object]:
@@ -266,14 +277,23 @@ def create_xlsx_content(sheets: dict[str, list[list[object]]]) -> bytes:
     return output.getvalue()
 
 
-async def upload_file(client: AsyncClient, csv_path: Path) -> str:
+def upload_integrity_fields(content: bytes) -> dict[str, str]:
+    """Independent sender-side fingerprint used by HTTP upload callers."""
+    return {
+        "expected_sha256": hashlib.sha256(content).hexdigest(),
+        "expected_size_bytes": str(len(content)),
+    }
+
+
+async def upload_file(client: AsyncClient, csv_path: Path) -> DatasetWorkflowId:
     """why: upload a file and return its file_id for use in subsequent test steps."""
     response = await client.post(
         "/stage-1/upload",
+        data=upload_integrity_fields(csv_path.read_bytes()),
         files={"file": (csv_path.name, csv_path.read_bytes(), TEST_CSV_CONTENT_TYPE)},
     )
     assert response.status_code == 201, f"Upload failed: {response.status_code} {response.text}"
-    return response.json()["file_id"]
+    return dataset_workflow_id_from_value(response.json()["file_id"])
 
 
 async def upload_content(
@@ -281,17 +301,18 @@ async def upload_content(
     content: bytes,
     filename: str = "test.csv",
     content_type: str = TEST_CSV_CONTENT_TYPE,
-) -> str:
+) -> DatasetWorkflowId:
     """why: upload raw content and return its file_id for dynamic test scenarios."""
     response = await client.post(
         "/stage-1/upload",
+        data=upload_integrity_fields(content),
         files={"file": (filename, content, content_type)},
     )
     assert response.status_code == 201, f"Upload failed: {response.status_code} {response.text}"
-    return response.json()["file_id"]
+    return dataset_workflow_id_from_value(response.json()["file_id"])
 
 
-async def upload_and_analyze(client: AsyncClient, csv_path: Path) -> str:
+async def upload_and_analyze(client: AsyncClient, csv_path: Path) -> DatasetWorkflowId:
     """Upload, analyze, and confirm the current mapping plan."""
     file_id = await upload_file(client, csv_path)
     analysis = await client.post(
@@ -387,13 +408,12 @@ def store_test_harmonization_manifest(
     rows: list[dict[str, Any]],
 ) -> Path:
     """Create complete Stage 3 evidence through the production storage boundaries."""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_path = Path(temp_dir) / f"{file_id}_test_manifest.parquet"
-        create_test_manifest_parquet(temp_path, rows)
-        stored_path = storage.save_harmonization_manifest(file_id, temp_path)
+    stored_path = storage._base_dir / f"{file_id}_fixture.parquet"
+    create_test_manifest_parquet(stored_path, rows)
     _seed_test_workflow_state(file_id, rows)
-    harmonized_path = storage.load_harmonized_path(file_id)
-    if harmonized_path is None:
+    meta = storage.load(file_id)
+    harmonized_path = storage.harmonized_path_for(file_id, meta.saved_path) if meta else None
+    if harmonized_path is None or not harmonized_path.exists():
         _store_test_harmonization_manifest(file_id, stored_path)
     elif _store_test_stage_three_artifacts(file_id, harmonized_path, stored_path):
         _store_test_completed_stage_three_job(file_id)
@@ -571,7 +591,7 @@ def _store_test_completed_stage_three_job(file_id: str) -> None:
                 polling_job_id=job_id,
                 file_id=file_id,
                 plan_version=loaded_state.version.value,
-                worker_id="test-fixture-worker",
+                worker_id=existing_job.job.worker_id if existing_job else "test-fixture-worker",
                 now=now,
             ),
             status=HarmonizeStatus.SUCCEEDED,

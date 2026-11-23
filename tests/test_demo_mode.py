@@ -41,12 +41,12 @@ async def test_demo_bootstrap_loads_the_packaged_standard_and_upload(
 
     # Then the normal data clients expose the packaged standard and upload.
     models = dependencies.get_reference_data_repository().list_models()
-    upload = get_demo_upload()
     assert [(model.data_model_key, model.label) for model in models] == [
         ("data-chord-demo", "Data Chord Demo Standard")
     ]
-    assert upload.file_id == DEMO_WORKFLOW_ID
-    assert upload.original_name == "sample.csv"
+    with get_demo_upload() as upload:
+        assert upload.file_id == DEMO_WORKFLOW_ID
+        assert upload.original_name == "sample.csv"
     assert (demo_runtime / "standards.sqlite").is_file()
 
 

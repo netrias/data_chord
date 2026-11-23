@@ -19,6 +19,28 @@ and the column-mapping audit document.
 | Deploy or operate the application | [Deployment options](#deployment-options) |
 | Understand the product or code structure | [Product guide](app.md) and [architecture guide](ARCHITECTURE.md) |
 
+## Browser upload verification
+
+For browser uploads, Data Chord verifies the saved file's byte count and SHA-256
+checksum against values computed by the browser from the selected file. Uploads
+are accepted only when both match. This verifies transfer integrity relative to
+the selected file; it does not establish that the source dataset was complete or
+correct before upload. File-format and readability checks are separate.
+
+The Stage 1 multipart endpoint requires `file`, `expected_sha256` (64 hexadecimal
+characters), and `expected_size_bytes` (a nonnegative integer for the file's bytes,
+excluding the multipart envelope). Successful responses include `verification`
+with the server-verified `sha256` and `size_bytes`. Missing or malformed fields
+return 422, mismatching file fingerprints return 400, and files exceeding the
+25 MiB limit return 413. Rejected fingerprints create no workflow or durable
+upload artifacts.
+
+Browser verification uses native Web Crypto, so use HTTPS or localhost with a
+supported browser. Reload older open upload pages after deploying this contract.
+Existing workflows remain readable; files without a verification receipt are
+not retrospectively marked verified. The versioned programmatic API has its own
+submission contract and is unaffected by this browser endpoint change.
+
 ## Run the demo
 
 Choose the demo that matches the work you are doing:

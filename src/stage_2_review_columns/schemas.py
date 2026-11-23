@@ -33,9 +33,11 @@ class SaveMappingChoicesRequest(BaseModel):
     """Stage 2 choices to persist before the user enters harmonization."""
 
     file_id: DatasetWorkflowIdField
+    plan_version: str | None = None
     manual_overrides: dict[str, str | None] = Field(default_factory=dict)
     column_renames: dict[str, str] = Field(default_factory=dict)
 
 
 class SaveMappingChoicesResponse(BaseModel):
+    plan_version: str
     file_id: DatasetWorkflowIdField

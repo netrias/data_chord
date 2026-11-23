@@ -610,3 +610,15 @@ run "existing_production_network_is_retained" {
     error_message = "Adoption must preserve the exact ALB delivery permission and log prefix."
   }
 }
+
+run "workflow_writes_do_not_retain_object_history" {
+  # Given workflow objects need only their current value.
+  # When the full deployment is planned.
+  command = plan
+
+  # Then workflow versioning is explicitly suspended without touching state storage.
+  assert {
+    condition     = aws_s3_bucket_versioning.managed_workflow.versioning_configuration[0].status == "Suspended"
+    error_message = "Workflow storage must stop retaining future object versions."
+  }
+}

@@ -11,6 +11,8 @@ export const e2eEnv = {
   // explicit so production-like hosted processes still fail closed.
   DEV_MODE: 'true',
   DATA_CHORD_IDENTITY_SOURCE: 'shared',
+  // Independent Playwright workers can harmonize different fixtures concurrently.
+  DATA_CHORD_MAX_ACTIVE_JOBS: process.env.DATA_CHORD_MAX_ACTIVE_JOBS ?? '4',
   // Keep browser-driven tests out of the repo workspace so failed runs do not
   // leave uploads that affect later tests or local development.
   DATA_CHORD_UPLOAD_DIR: path.join(e2eRuntimeDir, 'uploads'),

@@ -103,7 +103,7 @@ test('performance journey: repeated Stage 4 and Stage 5 click-to-render timings'
     expect(run.browser_timing.stage5.navigation.response_end_ms).toBeGreaterThan(0);
     expect(run.browser_timing.stage5.resources).toEqual(expect.arrayContaining([
       expect.objectContaining({ path: '/assets/stage-5/stage_5_review.js' }),
-      expect.objectContaining({ path: '/stage-5/summary', initiator_type: 'fetch' }),
+      expect.objectContaining({ path: '/stage-5/review', initiator_type: 'fetch' }),
     ]));
   }
   const mappingCount = Math.max(...runs.map((run) => run.mapping_count ?? 0));

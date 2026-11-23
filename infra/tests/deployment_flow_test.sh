@@ -153,7 +153,23 @@ case "${1:-} ${2:-}" in
       printf '%s\n' '{"builds":[{"id":"build-1","buildStatus":"SUCCEEDED","currentPhase":"COMPLETED","phases":[]}],"buildsNotFound":[]}'
     fi
     ;;
-  "ecs describe-services") printf 'COMPLETED\t1\t1\t0\n' ;;
+  "ecs describe-services")
+    state=COMPLETED
+    revision=42
+    if [[ "${MOCK_ROLLBACK:-0}" == 1 ]]; then
+      if [[ -f "$MOCK_CALLS.ecs" ]]; then
+        revision=41
+      else
+        state=IN_PROGRESS
+        touch "$MOCK_CALLS.ecs"
+      fi
+    fi
+    printf '%s\t1\t1\t0' "$state"
+    if [[ "$*" == *taskDefinition* ]]; then
+      printf '\tarn:aws:ecs:us-east-2:123456789012:task-definition/data-chord:%s' "$revision"
+    fi
+    printf '\n'
+    ;;
   "elbv2 describe-target-health") printf '%s\n' "$MOCK_TARGET_STATES" ;;
   *) printf 'Unexpected AWS call: %s\n' "$*" >&2; exit 2 ;;
 esac
@@ -166,6 +182,15 @@ printf 'tofu %s\n' "$*" >>"$MOCK_CALLS"
 arguments=" $* "
 case "$arguments" in
   *" init "*) ;;
+  *" state list "*)
+    address='module.data_plane.aws_s3_bucket_versioning.workflow'
+    if [[ "${MOCK_MOVED_VERSIONING:-0}" == 1 && ! -f "$MOCK_CALLS.versioning-moved" ]]; then
+      printf '%s\n' "$address"
+    elif [[ "${!#}" == "$address" ]]; then
+      printf '%s\n' 'Unknown resource' >&2
+      exit 1
+    fi
+    ;;
   *" state pull "*)
     if [[ "${MOCK_EMPTY_STATE:-0}" != "1" ]]; then
       serial="${MOCK_STATE_SERIAL:-1}"
@@ -182,6 +207,12 @@ case "$arguments" in
     fi
     ;;
   *" plan "*)
+    if [[ "${MOCK_MOVED_VERSIONING:-0}" == 1 && "$arguments" == *prerequisites.tfplan* &&
+      ( "$arguments" != *" -target=module.data_plane.aws_s3_bucket_versioning.workflow "* ||
+        "$arguments" != *" -target=aws_s3_bucket_versioning.managed_workflow "* ) ]]; then
+      printf '%s\n' 'Moved resource instances excluded by targeting' >&2
+      exit 1
+    fi
     for argument in "$@"; do
       if [[ "$argument" == -out=* ]]; then
         : >"${argument#-out=}"
@@ -220,6 +251,9 @@ case "$arguments" in
     if [[ "${MOCK_APPLY_FAIL:-0}" == "1" && "$arguments" == *" prerequisites.tfplan "* ]]; then
       exit 23
     fi
+    if [[ "${MOCK_MOVED_VERSIONING:-0}" == 1 && "$arguments" == *prerequisites.tfplan* ]]; then
+      touch "$MOCK_CALLS.versioning-moved"
+    fi
     ;;
   *" output "*)
     if [[ "$arguments" == *" -json "* ]]; then
@@ -229,6 +263,7 @@ case "$arguments" in
         reference_data_table) printf 'data-chord-staging-reference-data\n' ;;
         ecr_repository_url) printf '945365518758.dkr.ecr.us-east-2.amazonaws.com/data-chord-staging\n' ;;
         codebuild_project_name) printf 'data-chord-staging-image\n' ;;
+        application_task_definition_arn) printf 'arn:aws:ecs:us-east-2:123456789012:task-definition/data-chord:42\n' ;;
         ecs_cluster_name | ecs_service_name) printf 'data-chord-staging\n' ;;
         target_group_arn) printf 'arn:aws:elasticloadbalancing:us-east-2:945365518758:targetgroup/app/1\n' ;;
         app_url) printf 'https://data-chord-staging.apps.netrias.com\n' ;;
@@ -278,6 +313,7 @@ run_command() {
     MOCK_FULL_STATE="${MOCK_FULL_STATE:-0}" \
     MOCK_SELECTED_ROOT="${MOCK_SELECTED_ROOT:-}" \
     MOCK_STATE_CHANGE_AFTER_PULL="${MOCK_STATE_CHANGE_AFTER_PULL:-0}" \
+    MOCK_MOVED_VERSIONING="${MOCK_MOVED_VERSIONING:-0}" \
     MOCK_CODEBUILD_FAILURE="${MOCK_CODEBUILD_FAILURE:-0}" \
     MOCK_CODEBUILD_NOT_FOUND="${MOCK_CODEBUILD_NOT_FOUND:-0}" \
     MOCK_CODEBUILD_NO_CONTEXT="${MOCK_CODEBUILD_NO_CONTEXT:-0}" \
@@ -402,6 +438,7 @@ assert_absent "$deploy_calls" "--source-version"
 assert_contains "$deploy_calls" "sleep "
 assert_contains "$deploy_calls" "aws elbv2 describe-target-health"
 assert_absent "$deploy_calls" "aws_s3_bucket_versioning.workflow"
+assert_absent "$deploy_calls" "-target=aws_s3_bucket_versioning.managed_workflow"
 assert_absent "$deploy_calls" "sleep 900"
 assert_absent "$deploy_calls" "-auto-approve"
 assert_absent "$deploy_calls" "uv run"
@@ -416,6 +453,17 @@ if MOCK_TARGET_STATES=draining \
   fail_test "Deploy accepted a target group with no healthy target"
 fi
 assert_contains "$draining_output" "The load balancer has no healthy targets."
+
+# Given a planned deployment requests task revision 42.
+run_command "$plan_calls" netrias staging plan >/dev/null
+# When ECS starts revision 42 and rolls back to healthy revision 41.
+if MOCK_ROLLBACK=1 run_command "$TEST_ROOT/rollback" netrias staging deploy >"$TEST_ROOT/rollback.log" 2>&1; then
+  fail_test "A rolled-back release reported success"
+fi
+# Then deployment stops with an incomplete receipt before checking target health.
+assert_contains "$TEST_ROOT/rollback.log" "rolled back"
+assert_absent "$TEST_ROOT/rollback" "aws elbv2 describe-target-health"
+python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["status"] == "in_progress"' "$TEST_ROOT/receipts/netrias-staging.json"
 
 # Given an existing deployment manages workflow bucket versioning and runs an older app revision.
 versioning_handoff='{"resource_changes":[{"address":"aws_ecs_service.app","change":{"actions":["update"]}},{"address":"aws_ecs_task_definition.application","change":{"actions":["delete","create"]}},{"address":"aws_s3_bucket_versioning.workflow","change":{"actions":["forget"]}}]}'
@@ -432,6 +480,19 @@ MOCK_FORECAST_JSON_OVERRIDE="$versioning_handoff" \
 assert_contains "$migration_deploy_calls" "application.tfplan"
 assert_absent "$migration_deploy_calls" "-target=aws_s3_bucket_versioning.workflow"
 assert_absent "$migration_deploy_calls" "sleep 900"
+
+# Given the full-deployment state still owns versioning at the shared module address.
+run_command "$plan_calls" netrias staging plan >/dev/null
+versioning_move_calls="$TEST_ROOT/versioning-move"
+state_only_move='{"resource_changes":[{"address":"aws_s3_bucket_versioning.managed_workflow","previous_address":"module.data_plane.aws_s3_bucket_versioning.workflow","change":{"actions":["no-op"]}}]}'
+# When deployment creates and applies its targeted prerequisite plan.
+MOCK_MOVED_VERSIONING=1 MOCK_PREREQUISITE_JSON_OVERRIDE="$state_only_move" \
+  run_command "$versioning_move_calls" netrias staging deploy >/dev/null
+# Then OpenTofu accepts both ends of the state move and deployment checks the new target.
+[[ -f "$versioning_move_calls.versioning-moved" ]] || fail_test "Versioning state move was not applied"
+assert_before "$versioning_move_calls" " apply -input=false" "aws elbv2 describe-target-health"
+python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["status"] == "complete"' \
+  "$TEST_ROOT/receipts/netrias-staging.json"
 
 # Given the saved prerequisite apply returns but the live policy stays stale.
 run_command "$plan_calls" netrias staging plan >/dev/null

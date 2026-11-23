@@ -26,7 +26,13 @@ from src.storage import (
     WorkflowFile,
     WorkflowJsonUnreadableError,
 )
-from tests.conftest import TEST_CSV_CONTENT_TYPE, TEST_TARGET_EXTERNAL_VERSION_NUMBER, TEST_TARGET_SCHEMA, upload_file
+from tests.conftest import (
+    TEST_CSV_CONTENT_TYPE,
+    TEST_TARGET_EXTERNAL_VERSION_NUMBER,
+    TEST_TARGET_SCHEMA,
+    upload_file,
+    upload_integrity_fields,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -110,6 +116,7 @@ async def test_demo_mode_rejects_replacement_uploads(
     # When a caller tries to replace it through the normal upload endpoint.
     response = await app_client.post(
         "/stage-1/upload",
+        data=upload_integrity_fields(b"value\nother\n"),
         files={"file": ("replacement.csv", b"value\nother\n", TEST_CSV_CONTENT_TYPE)},
     )
 
@@ -312,12 +319,14 @@ async def test_workflow_write_conflicts_are_globally_reported_as_retryable(
     sample_csv_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Given a concurrent write conflict from workflow storage.
     file_id = await upload_file(app_client, sample_csv_path)
     monkeypatch.setattr(
         "src.stage_1_upload.router.save_initial_workflow_state",
         MagicMock(side_effect=WorkflowConflictError(file_id)),
     )
 
+    # When analysis saves the workflow plan.
     response = await app_client.post(
         "/stage-1/analyze",
         json={
@@ -327,6 +336,7 @@ async def test_workflow_write_conflicts_are_globally_reported_as_retryable(
         },
     )
 
+    # Then the caller receives the retryable conflict response.
     assert response.status_code == 409
     assert response.json()["detail"] == GENERIC_API_ERROR_DETAIL
 
@@ -342,6 +352,7 @@ class TestUploadValidationErrors:
         # When: The file is uploaded
         response = await app_client.post(
             "/stage-1/upload",
+            data=upload_integrity_fields(b"fake xlsx content"),
             files={
                 "file": (
                     "test.xlsx",
@@ -363,6 +374,7 @@ class TestUploadValidationErrors:
         # When: The file is uploaded
         response = await app_client.post(
             "/stage-1/upload",
+            data=upload_integrity_fields(b'{"data": "test"}'),
             files={"file": ("test.json", b'{"data": "test"}', "application/json")},
         )
 
@@ -378,6 +390,7 @@ class TestUploadValidationErrors:
         # When: The oversized file is uploaded
         response = await app_client.post(
             "/stage-1/upload",
+            data=upload_integrity_fields(oversized_content),
             files={"file": ("large.csv", oversized_content, TEST_CSV_CONTENT_TYPE)},
         )
 
@@ -411,6 +424,7 @@ class TestUploadValidationErrors:
         # When: a valid upload starts.
         response = await app_client.post(
             "/stage-1/upload",
+            data=upload_integrity_fields(b"value\n1\n"),
             files={"file": ("sample.csv", b"value\n1\n", TEST_CSV_CONTENT_TYPE)},
         )
 
@@ -434,6 +448,7 @@ class TestUploadValidationErrors:
         # When a valid upload starts.
         response = await app_client.post(
             "/stage-1/upload",
+            data=upload_integrity_fields(b"value\n1\n"),
             files={"file": ("sample.csv", b"value\n1\n", TEST_CSV_CONTENT_TYPE)},
         )
 
@@ -466,6 +481,7 @@ class TestUploadValidationErrors:
         request = app_client.build_request(
             "POST",
             "/stage-1/upload",
+            data=upload_integrity_fields(b"value\n1\n"),
             files={"file": ("sample.csv", b"value\n1\n", TEST_CSV_CONTENT_TYPE)},
         )
         request_body = await request.aread()

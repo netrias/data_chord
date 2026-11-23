@@ -101,10 +101,13 @@ def save_confirmed_mapping_choices_to_state(
     user: UserContext,
     file_id: str,
     choices: ConfirmedMappingChoices,
+    expected_plan_version: str | None = None,
 ) -> LoadedWorkflowState:
     loaded = load_workflow_state(storage, user, file_id)
     if loaded is None:
         raise WorkflowStateNotFoundError(file_id)
+    if expected_plan_version is not None and expected_plan_version != loaded.version.value:
+        raise WorkflowStateConflictError(file_id)
     return save_workflow_state(
         storage,
         user,

@@ -33,6 +33,7 @@ from tests.conftest import (
     create_harmonized_csv,
     create_manifest_for_file,
     upload_content,
+    upload_integrity_fields,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -341,6 +342,7 @@ async def test_stage1_upload_emits_workflow_completion_event(
     # When: the user uploads the file
     response = await app_client.post(
         "/stage-1/upload",
+        data=upload_integrity_fields(content),
         files={"file": ("observability.csv", content, TEST_CSV_CONTENT_TYPE)},
     )
 
@@ -384,6 +386,7 @@ async def test_stage1_upload_logs_failure_after_file_storage(
     ) as non_raising_client:
         response = await non_raising_client.post(
             "/stage-1/upload",
+            data=upload_integrity_fields(content),
             files={"file": ("observability.csv", content, TEST_CSV_CONTENT_TYPE)},
         )
 

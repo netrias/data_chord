@@ -1,7 +1,8 @@
-import { initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
-import { STAGE_2_PAYLOAD_KEY, STAGE_3_JOB_KEY, CURRENT_FILE_SESSION_KEY, removeFromSession, writeToSession, readFromSession } from '/assets/shared/storage-keys.js';
+import { initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage, resetMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
+import { STAGE_2_PAYLOAD_KEY, STAGE_3_JOB_KEY, CURRENT_FILE_SESSION_KEY, removeFromSession, writeToSession, readFromSession, isValidFileId } from '/assets/shared/storage-keys.js';
 import { reportApiError, reportFetchFailure } from '/assets/shared/client-events.js';
 import { showDataModelPopup, preloadDataModels } from './data_model_popup.js';
+import { fingerprintFile, verificationMatches, UploadVerificationError, UPLOAD_INTEGRITY_MESSAGE } from './upload-integrity.js';
 
 const config = window.stageOneUploadConfig ?? {};
 const isDemo = Boolean(config.demoUpload);
@@ -13,6 +14,7 @@ const statusMessage = document.getElementById('statusMessage');
 const dropzoneCopy = document.getElementById('dropzoneCopy');
 const dropzoneUploading = document.getElementById('dropzoneUploading');
 const uploadingFileName = document.getElementById('uploadingFileName');
+const uploadingTitle = document.getElementById('uploadingTitle');
 const dropzoneFile = document.getElementById('dropzoneFile');
 const dropzoneFileName = document.getElementById('dropzoneFileName');
 const dropzoneFileSize = document.getElementById('dropzoneFileSize');
@@ -102,13 +104,16 @@ const _showDropzoneUploading = (file) => {
   }
 };
 
-const _showDropzoneSummary = (file, statusText) => {
+const _showDropzoneSummary = (file, statusText, tone = 'success') => {
   if (dropzoneCopy) dropzoneCopy.classList.add('hidden');
   if (dropzoneUploading) {
     dropzoneUploading.classList.add('hidden');
     dropzoneUploading.setAttribute('aria-hidden', 'true');
   }
-  if (dropzoneFile) dropzoneFile.classList.remove('hidden');
+  if (dropzoneFile) {
+    dropzoneFile.classList.remove('hidden');
+    dropzoneFile.classList.toggle('is-error', tone === 'error');
+  }
   if (dropzoneFileName) {
     dropzoneFileName.textContent = file.name;
     dropzoneFileName.title = file.name;
@@ -173,13 +178,15 @@ const _handleFileSelection = (file) => {
     if (fileInput) fileInput.value = '';
     return;
   }
+  _clearStaleSessionData();
+  resetMaxReachedStage();
+  _replaceUploadWorkflowUrl(null);
+  _resetUploadState();
   const issues = _validateFile(file);
   if (issues.length) {
-    _showDropzoneCopy();
     _setStatus(issues.join(' '), 'error');
     return;
   }
-  _clearStaleSessionData();
   state.file = file;
   state.uploaded = null;
   _showDropzoneSummary(file, 'Ready to upload');
@@ -192,18 +199,28 @@ const _uploadDataset = async () => {
     return;
   }
   state.isUploading = true;
+  const file = state.file;
   _setFileInputDisabled(true);
   _setAnalyzeButtonEnabled(false);
+  document.querySelectorAll('.progress-tracker .step-link').forEach((link) => {
+    link.setAttribute('aria-disabled', 'true');
+    link.setAttribute('tabindex', '-1');
+    link.removeAttribute('href');
+  });
   if (dropzone) {
     dropzone.classList.add('is-uploading');
     dropzone.setAttribute('aria-busy', 'true');
   }
-  _showDropzoneUploading(state.file);
-
-  const formData = new FormData();
-  formData.append('file', state.file);
+  _showDropzoneUploading(file);
+  if (uploadingTitle) uploadingTitle.textContent = 'Preparing upload…';
 
   try {
+    const expected = await fingerprintFile(file);
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('expected_sha256', expected.sha256);
+    formData.append('expected_size_bytes', String(expected.size_bytes));
+    if (uploadingTitle) uploadingTitle.textContent = 'Please wait while your file is uploaded';
     let response;
     try {
       response = await fetch(config.uploadEndpoint, {
@@ -228,23 +245,33 @@ const _uploadDataset = async () => {
         statusCode: response.status,
         serverRequestId: _responseRequestId(response),
       });
+      if (response.status === 400 && payload.detail === UPLOAD_INTEGRITY_MESSAGE) {
+        throw new UploadVerificationError(UPLOAD_INTEGRITY_MESSAGE);
+      }
       throw new Error(UPLOAD_API_ERROR_MESSAGE);
+    }
+    if (!verificationMatches(payload.verification, expected)) {
+      throw new UploadVerificationError(UPLOAD_INTEGRITY_MESSAGE);
     }
     state.uploaded = payload;
     state.sheetNames = Array.isArray(payload.sheet_names) ? payload.sheet_names : [];
     state.sheetPreviews = _sheetPreviewsFromPayload(payload);
     state.selectedSheet = payload.selected_sheet ?? state.sheetNames[0] ?? null;
-    _persistFileSession(payload, state.file.name);
+    _persistFileSession(payload, file.name);
+    _replaceUploadWorkflowUrl(payload.file_id);
     if (dropzone) dropzone.classList.add('has-file');
-    _showDropzoneSummary(state.file, 'Uploaded');
+    _showDropzoneSummary(file, 'Uploaded');
     _renderSheetSelector();
     _setAnalyzeButtonEnabled(true);
   } catch (error) {
     console.error(error);
-    _showDropzoneSummary(state.file, 'Upload failed');
-    _setStatus(UPLOAD_API_ERROR_MESSAGE, 'error');
+    state.uploaded = null;
+    removeFromSession(CURRENT_FILE_SESSION_KEY);
+    _showDropzoneSummary(file, 'Upload failed', 'error');
+    _setStatus(error instanceof UploadVerificationError ? error.message : UPLOAD_API_ERROR_MESSAGE, 'error');
   } finally {
     state.isUploading = false;
+    setActiveStage('upload');
     _setFileInputDisabled(false);
     if (dropzone) {
       dropzone.classList.remove('is-uploading');
@@ -257,6 +284,16 @@ const _clearStaleSessionData = () => {
   removeFromSession(STAGE_2_PAYLOAD_KEY);
   removeFromSession(STAGE_3_JOB_KEY);
   removeFromSession(CURRENT_FILE_SESSION_KEY);
+};
+
+/* A replacement owns this history entry; earlier explicit workflow links keep theirs. */
+const _replaceUploadWorkflowUrl = (fileId) => {
+  const url = new URL(window.location.href);
+  for (const key of ['file_id', 'data_model_key', 'external_version_number', 'job_id', 'status', 'detail']) {
+    url.searchParams.delete(key);
+  }
+  if (fileId) url.searchParams.set('file_id', fileId);
+  window.history.replaceState(window.history.state, '', url);
 };
 
 /* Enables navigation back to Stage 1 with file context. */
@@ -275,7 +312,11 @@ const _persistFileSession = (uploadResponse, fileName) => {
 /* Restores file display from session when returning to Stage 1. */
 const _hydrateFromSession = () => {
   const session = readFromSession(CURRENT_FILE_SESSION_KEY);
-  if (!session || !session.file_id || !session.original_name) {
+  if (!session || !isValidFileId(session.file_id) || !session.original_name) {
+    return false;
+  }
+  const requestedIds = new URLSearchParams(window.location.search).getAll('file_id');
+  if (requestedIds.length > 0 && (requestedIds.length !== 1 || requestedIds[0] !== session.file_id)) {
     return false;
   }
 

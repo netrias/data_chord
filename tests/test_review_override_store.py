@@ -455,3 +455,24 @@ async def test_stage4_save_does_not_replace_corrupt_review_state(
     assert unchanged is not None
     assert unchanged.data == corrupt_payload
     assert unchanged.version == stored.version
+
+
+def test_mismatched_run_cannot_relabel_existing_review(tmp_path: Path) -> None:
+    from src.persistence.review_override_store import ReviewOverridesStoreConflictError
+
+    # Given an existing review whose latest version belongs to the first run.
+    payload = _valid_stored_review_state()
+    payload["run_id"] = "first-run"
+    storage, user = _stored_review_state(tmp_path, payload)
+    original = storage.read_json(user, _FILE_ID, WorkflowFile.REVIEW_OVERRIDES)
+    assert original is not None
+
+    # When another run tries to save using the correct version but the wrong run identity.
+    with pytest.raises(ReviewOverridesStoreConflictError):
+        save_review_overrides_state(
+            storage, user, file_id=_FILE_ID, overrides={}, review_state=ReviewProgressState(),
+            run_id="second-run", expected_version=original.version,
+        )
+
+    # Then neither the stored decisions nor their run identity or version change.
+    assert storage.read_json(user, _FILE_ID, WorkflowFile.REVIEW_OVERRIDES) == original
