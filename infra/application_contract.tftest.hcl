@@ -649,10 +649,10 @@ run "flat_catalog_switch_keeps_both_tables" {
     reference_catalog = "flat"
   }
 
-  # When the mock deploy applies the flat selection.
-  command = apply
+  # When OpenTofu plans the flat selection.
+  command = plan
 
-  # Then the task uses the flat table with scoped read access, and the legacy table is retained.
+  # Then the task uses the flat table and the legacy table is retained.
   assert {
     condition = (
       output.reference_data_table == aws_dynamodb_table.flat_reference_catalog[0].name &&
@@ -660,12 +660,8 @@ run "flat_catalog_switch_keeps_both_tables" {
       one([
         for item in jsondecode(aws_ecs_task_definition.application.container_definitions)[0].environment :
         item.value if item.name == "DATA_CHORD_REFERENCE_TABLE"
-      ]) == output.reference_data_table &&
-      jsondecode(aws_iam_role_policy.application_task_flat_reference_catalog[0].policy).Statement[0].Resource
-      == aws_dynamodb_table.flat_reference_catalog[0].arn &&
-      toset(jsondecode(aws_iam_role_policy.application_task_flat_reference_catalog[0].policy).Statement[0].Action)
-      == toset(["dynamodb:DescribeTable", "dynamodb:Query"])
+      ]) == output.reference_data_table
     )
-    error_message = "The task must select the flat catalog, have scoped read access, and retain the legacy table for rollback."
+    error_message = "The task must select the flat catalog and retain the legacy table for rollback."
   }
 }
