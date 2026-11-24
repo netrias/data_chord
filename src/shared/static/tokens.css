@@ -687,6 +687,15 @@ button.linklike {
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: help;
+  /* room inside the clip for the inset focus ring, text position unchanged */
+  padding-inline: 3px;
+  margin-inline: -3px;
+}
+
+/* Inset so overflow: hidden on the one-line name cannot clip the ring */
+.step-instruction-file-name:focus-visible {
+  outline: 2px solid var(--netrias-500);
+  outline-offset: -2px;
 }
 
 .step-instruction-file-card {
