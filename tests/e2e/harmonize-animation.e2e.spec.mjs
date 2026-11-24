@@ -94,11 +94,15 @@ test('Stage 3 falls back to the spinner when a running canvas loses its context'
 });
 
 test('Stage 3 leaves the progress text alone when a poll is still in the same minute', async ({ page }) => {
-  // Given a running job whose elapsed time grows by 5 seconds on each poll, starting at 3 min
+  // Given a running job whose elapsed time grows by 5 seconds on each poll, starting at 3 min,
+  // and later polls held until the test is watching the progress text
   let polls = 0;
+  let releaseLaterPolls;
+  const observerReady = new Promise((resolve) => { releaseLaterPolls = resolve; });
   await page.route('**/stage-3/jobs/*', async (route) => {
     const elapsed = 180 + 5 * polls;
     polls += 1;
+    if (elapsed > 180) await observerReady;
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -114,7 +118,8 @@ test('Stage 3 leaves the progress text alone when a poll is still in the same mi
       .observe(node, { childList: true, characterData: true, subtree: true });
   });
 
-  // When the page has rendered the next poll, which answers with 3 min 5 s
+  // When the next poll is released and the page has rendered it, which answers with 3 min 5 s
+  releaseLaterPolls();
   await expect.poll(() => _storedElapsedSeconds(page), { timeout: 10_000 }).toBe(185);
 
   // Then the live-region text was not rewritten, so screen readers have nothing new to announce
