@@ -651,7 +651,7 @@ button.linklike {
 }
 
 .step-instruction-text:hover + .step-instruction-tooltip,
-.step-instruction-text:focus + .step-instruction-tooltip {
+.step-instruction:not(:has(.step-instruction-file:hover)) .step-instruction-text:focus + .step-instruction-tooltip {
   opacity: 1;
   visibility: visible;
 }
@@ -725,7 +725,7 @@ button.linklike {
 }
 
 .step-instruction-file:hover .step-instruction-file-card,
-.step-instruction-file-name:focus + .step-instruction-file-card {
+.step-instruction:not(:has(.step-instruction-text:hover)) .step-instruction-file-name:focus + .step-instruction-file-card {
   opacity: 1;
   visibility: visible;
 }

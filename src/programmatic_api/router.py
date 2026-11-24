@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import cast
 
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import JSONResponse
 
 import src.app.dependencies as dependencies
 from src.app.cde_recommendations import RecommendationColumn, recommend_cdes
@@ -12,7 +13,7 @@ from src.domain.cde_recommendation import RecommendationUnavailableError
 from src.domain.columns import column_key_for_index
 from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.manifest import ColumnMappingManifest, MappingAlternative
-from src.domain.reference_data import ReferenceDataError
+from src.domain.reference_data import ReferenceDataError, ReferenceModelNotFoundError
 from src.programmatic_api.harmonization_router import harmonization_router
 from src.programmatic_api.schemas import (
     HarmonizationKind,
@@ -21,6 +22,7 @@ from src.programmatic_api.schemas import (
     RecommendationRequest,
     RecommendationResponse,
 )
+from src.shared.model_recovery import retired_model_response
 
 programmatic_api_router = APIRouter(prefix="/api/v1", tags=["Programmatic API v1"])
 programmatic_api_router.include_router(harmonization_router)
@@ -31,7 +33,7 @@ programmatic_api_router.include_router(harmonization_router)
     response_model=RecommendationResponse,
     response_model_exclude_none=True,
 )
-async def recommend_columns(payload: RecommendationRequest) -> RecommendationResponse:
+async def recommend_columns(payload: RecommendationRequest) -> RecommendationResponse | JSONResponse:
     try:
         manifest = await recommend_cdes(
             columns=[
@@ -47,6 +49,8 @@ async def recommend_columns(payload: RecommendationRequest) -> RecommendationRes
             recommender=dependencies.get_cde_recommender(),
         )
         return _response_from_manifest(payload, manifest)
+    except ReferenceModelNotFoundError:
+        return retired_model_response()
     except ReferenceDataError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from src.app.harmonization_results import HarmonizationWorkflowResult
-from src.domain.harmonization import HarmonizeStatus
+from src.domain.harmonization import HarmonizationFailure, HarmonizeStatus
 from src.persistence.harmonization_job_store import (
     HarmonizationJobConflictError,
     HarmonizationJobState,
@@ -359,6 +359,7 @@ def fail_harmonization_job(
     workflow_storage: WorkflowStorage,
     user: UserContext,
     accepted_job: HarmonizationJobState,
+    failure: HarmonizationFailure | None = None,
 ) -> None:
     try:
         loaded = RunAuthority(workflow_storage, user, accepted_job).require_current()
@@ -366,6 +367,7 @@ def fail_harmonization_job(
             loaded.job,
             status=HarmonizeStatus.FAILED,
             detail="Harmonization failed. Please retry.",
+            failure=failure,
             job_id_available=False,
             lease_expires_at=datetime.now(UTC),
         )

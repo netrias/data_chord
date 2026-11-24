@@ -4,11 +4,19 @@
  */
 import { CURRENT_FILE_SESSION_KEY, readFromSession, removeFromSession, writeToSession } from './storage-keys.js';
 
-export const readFileSession = () => readFromSession(CURRENT_FILE_SESSION_KEY);
+// Once Upload changes the record, the current page stays usable even if storage refuses the write.
+let currentFileSession;
+export const readCurrentFileSession = () => currentFileSession === undefined
+  ? readFromSession(CURRENT_FILE_SESSION_KEY)
+  : currentFileSession;
 
-/** Start a new record from the upload response; the browser clock dates it only when the server did not. */
+export const readFileSession = (fileId) => {
+  const session = readCurrentFileSession();
+  return fileId && session?.file_id === fileId ? session : null;
+};
+
 export const saveFileSession = (uploadResponse, fileName) => {
-  writeToSession(CURRENT_FILE_SESSION_KEY, {
+  currentFileSession = {
     file_id: uploadResponse.file_id,
     original_name: fileName,
     uploaded_at: uploadResponse.uploaded_at ?? new Date().toISOString(),
@@ -17,17 +25,25 @@ export const saveFileSession = (uploadResponse, fileName) => {
     sheet_names: uploadResponse.sheet_names ?? [],
     sheet_previews: uploadResponse.sheet_previews ?? {},
     selected_sheet: uploadResponse.selected_sheet ?? null,
-  });
+  };
+  writeToSession(CURRENT_FILE_SESSION_KEY, currentFileSession);
+  return currentFileSession;
 };
 
-/** Merge fields into the stored record. Does nothing when no file is stored. */
-export const updateFileSession = (fields) => {
-  const session = readFileSession();
+/** Keep the page current without writing changes into another upload's stored record. */
+export const updateFileSession = (fileId, fields) => {
+  const session = readFileSession(fileId);
   if (!session) return;
-  writeToSession(CURRENT_FILE_SESSION_KEY, { ...session, ...fields });
+  currentFileSession = { ...session, ...fields };
+  if (readFromSession(CURRENT_FILE_SESSION_KEY)?.file_id === fileId) {
+    writeToSession(CURRENT_FILE_SESSION_KEY, currentFileSession);
+  }
 };
 
-export const clearFileSession = () => removeFromSession(CURRENT_FILE_SESSION_KEY);
+export const clearFileSession = () => {
+  currentFileSession = null;
+  removeFromSession(CURRENT_FILE_SESSION_KEY);
+};
 
 /**
  * Rows and columns come from Analyze, which reads one sheet.
@@ -40,5 +56,4 @@ export const selectedSheetShape = (session, sheetName = session?.selected_sheet)
   return { rows: shape.rows, columns: shape.columns };
 };
 
-/** One digit-grouping rule for every place that shows row or column counts. */
 export const formatCount = (count) => count.toLocaleString('en-US');

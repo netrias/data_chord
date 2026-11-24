@@ -6,31 +6,31 @@
 /* Module path aliases resolved at runtime by the web server */
 declare module '/assets/shared/step-instruction-ui.js' {
   export function initStepInstruction(instructionKey: string): void;
-  export function setActiveStage(stageKey: string): void;
+  export function setActiveStage(stageKey: string, availableThrough?: string): void;
   export function initNavigationEvents(): void;
   export function advanceMaxReachedStage(stageKey: string): void;
   export function resetMaxReachedStage(): void;
   export function renderFileContext(): void;
 }
 
-interface FileSession {
-  file_id: string;
-  original_name: string;
-  uploaded_at: string;
-  human_size: string;
-  tabular_format?: 'csv' | 'tsv' | 'xlsx' | null;
-  sheet_names?: string[];
-  sheet_previews?: Record<string, unknown>;
-  selected_sheet?: string | null;
-  dataset_shape?: { sheet_name: string | null; rows: number | null; columns: number | null };
-}
-
 declare module '/assets/shared/file-session.js' {
-  export function readFileSession(): FileSession | null;
-  export function saveFileSession(uploadResponse: Record<string, unknown>, fileName: string): void;
-  export function updateFileSession(fields: Partial<FileSession>): void;
+  interface FileSession {
+    file_id: string;
+    original_name: string;
+    uploaded_at?: string;
+    human_size?: string;
+    tabular_format?: string | null;
+    sheet_names?: string[];
+    sheet_previews?: Record<string, unknown>;
+    selected_sheet?: string | null;
+    dataset_shape?: { sheet_name: string | null; rows: number; columns: number | null };
+  }
+  export function readCurrentFileSession(): FileSession | null;
+  export function readFileSession(fileId: string | null | undefined): FileSession | null;
+  export function saveFileSession(uploadResponse: Record<string, unknown>, fileName: string): FileSession;
+  export function updateFileSession(fileId: string, fields: Partial<FileSession>): void;
   export function clearFileSession(): void;
-  export function selectedSheetShape(session: FileSession | null): { rows: number; columns: number } | null;
+  export function selectedSheetShape(session: FileSession | null, sheetName?: string | null): { rows: number; columns: number } | null;
   export function formatCount(count: number): string;
 }
 

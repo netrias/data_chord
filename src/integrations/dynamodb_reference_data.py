@@ -65,6 +65,7 @@ class DynamoDbReferenceDataRepository:
         return _summaries_from_catalog(items)
 
     def load_model(self, version: DataModelVersionReference) -> ReferenceModel:
+        self._require_published_version(version)
         cached = self._cached_model(version)
         if cached is not None:
             return cached
@@ -77,6 +78,21 @@ class DynamoDbReferenceDataRepository:
             model = self._load_uncached_model(version)
             self._cache_model(version, model)
             return model
+
+    def _require_published_version(self, version: DataModelVersionReference) -> None:
+        items = self._query_partition(_CATALOG_PK)
+        if not any(item.get("sk") == _META_SK for item in items):
+            raise ReferenceDataUnavailableError("Reference catalog is not published")
+        summaries = _summaries_from_catalog(items)
+        if any(
+            summary.data_model_key == version.data_model_key
+            and any(item.external_version_number == version.external_version_number for item in summary.versions)
+            for summary in summaries
+        ):
+            return
+        raise ReferenceModelNotFoundError(
+            f"Reference model is not published: {version.data_model_key}/{version.external_version_number}"
+        )
 
     def _cached_model(self, version: DataModelVersionReference) -> ReferenceModel | None:
         with self._models_lock:
@@ -95,7 +111,9 @@ class DynamoDbReferenceDataRepository:
     def _load_uncached_model(self, version: DataModelVersionReference) -> ReferenceModel:
         try:
             return self.load_cdes(version).collapse()
-        except (ReferenceDataCorruptError, ReferenceModelNotFoundError, ReferenceDataUnavailableError):
+        except ReferenceModelNotFoundError as exc:
+            raise ReferenceDataUnavailableError("Published reference model data is unavailable") from exc
+        except (ReferenceDataCorruptError, ReferenceDataUnavailableError):
             raise
         except Exception as exc:
             raise ReferenceDataCorruptError("Reference model is malformed") from exc

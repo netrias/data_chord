@@ -3,22 +3,25 @@
  * Shows short instruction text for active step, with hover tooltip for longer description.
  */
 import { STEP_INSTRUCTIONS, STAGE_ORDER } from './step-instructions.js';
-import { MAX_REACHED_STAGE_KEY, isValidFileId } from './storage-keys.js';
-import { formatCount, readFileSession, selectedSheetShape } from './file-session.js';
+import {
+  MAX_REACHED_STAGE_KEY,
+  isValidFileId,
+} from './storage-keys.js';
+import { formatCount, readCurrentFileSession, readFileSession, selectedSheetShape } from './file-session.js';
 
 /**
  * Update progress tracker UI to reflect the active stage.
  * Marks earlier stages as complete, current stage as active, future stages as unreachable.
  * @param {string} stage - The currently active stage identifier
  */
-export function setActiveStage(stage) {
+export function setActiveStage(stage, availableThrough = stage) {
   const targetIndex = STAGE_ORDER.indexOf(stage);
   if (targetIndex === -1) {
     console.warn(`[step-instruction-ui] Unknown stage: ${stage}. Valid stages: ${STAGE_ORDER.join(', ')}`);
     return;
   }
 
-  const maxReachedIndex = Math.max(_getMaxReachedStageIndex(), targetIndex);
+  const maxReachedIndex = Math.max(_getMaxReachedStageIndex(), targetIndex, STAGE_ORDER.indexOf(availableThrough));
   const progressSteps = document.querySelectorAll('.progress-tracker [data-stage]');
 
   progressSteps.forEach((step) => {
@@ -69,7 +72,7 @@ function _getFileIdForNavigation() {
 
   if (!_isStageOneUrl(window.location.href)) return null;
 
-  const fromSession = readFileSession()?.file_id;
+  const fromSession = readCurrentFileSession()?.file_id;
   return isValidFileId(fromSession) ? fromSession : null;
 }
 
@@ -82,6 +85,9 @@ export function buildNavUrl(baseUrl) {
   if (fileId) url.searchParams.set('file_id', fileId);
 
   const pageParams = new URLSearchParams(window.location.search);
+  if (fileId && url.pathname === '/stage-1' && _isStageOneUrl(window.location.href) && pageParams.has('reselect_model')) {
+    url.searchParams.set('reselect_model', 'true');
+  }
   const jobId = pageParams.get('job_id');
   if (fileId && pageParams.get('file_id') === fileId && jobId && ['/stage-4', '/stage-5'].includes(url.pathname)) {
     url.searchParams.set('job_id', jobId);
@@ -186,10 +192,9 @@ export function initStepInstruction(activeStage) {
 export function renderFileContext() {
   const container = document.getElementById('stepInstructionFile');
   if (!container) return;
-  const session = readFileSession();
-  const isCurrentFile = Boolean(session?.original_name) && session.file_id === _getFileIdForNavigation();
-  container.hidden = !isCurrentFile;
-  if (!isCurrentFile) return;
+  const session = readFileSession(_getFileIdForNavigation());
+  container.hidden = !session?.original_name;
+  if (!session?.original_name) return;
 
   container.querySelector('.step-instruction-file-name').textContent = session.original_name;
   container.querySelector('.step-instruction-file-card-name').textContent = session.original_name;

@@ -1,5 +1,6 @@
 // The uploaded file stays named in the step-instruction box on every stage.
 import fs from 'node:fs';
+import path from 'node:path';
 import { test, expect } from '@playwright/test';
 
 import {
@@ -12,6 +13,7 @@ import {
   uploadAndAnalyze,
   uploadAndAnalyzeReal,
 } from './utils.mjs';
+import { e2eEnv } from './runtime-env.mjs';
 
 const LONG_NAME = 'clinical_trial_participants_enrollment_export_with_a_very_long_descriptive_name_2026_final_v3.csv';
 const longNamedCsv = () => ({
@@ -248,11 +250,11 @@ test('a new upload replaces the earlier file and its counts', async ({ page }) =
 
   // Then the line names B and the card shows only B's upload facts
   await expect(fileName(page)).toHaveText('basic.csv');
-  const session = await sessionFile(page);
+  const fixtureSize = fs.statSync(fileFixture('basic.csv')).size;
   await page.mouse.move(1000, 600);
   await fileName(page).hover();
   expect(await cardFacts(page)).toEqual({
-    Size: `${session.human_size} · CSV`,
+    Size: `${fixtureSize.toFixed(1)} B · CSV`,
     Uploaded: expect.stringMatching(/\d{4}.*\d{1,2}:\d{2}/),
   });
 });
@@ -293,4 +295,150 @@ test('each part of the instruction box opens only its own tooltip', async ({ pag
   // Then only the instruction tooltip opens
   await expect(instructionTooltip).toBeVisible();
   await expect(fileCard(page)).toBeHidden();
+});
+
+test('reselecting a retired model restores the workbook name and recounts the same sheet', async ({ page }) => {
+  // Given a saved workbook whose model version retires while Map is open
+  const workbookName = LONG_NAME.replace(/\.csv$/, '.xlsx');
+  await page.goto('/stage-1');
+  await page.setInputFiles(AGENT_FILE_INPUT, {
+    name: workbookName,
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    buffer: fs.readFileSync(createWorkbookFixture()),
+  });
+  await page.getByRole('tab', { name: 'Patients' }).click();
+  await page.locator('#analyzeButton').click();
+  await page.locator('.data-model-confirm-btn').click();
+  await page.waitForURL(/\/stage-2/);
+  const { file_id: fileId, uploaded_at: uploadedAt, human_size: size } = await sessionFile(page);
+  const mappingRow = page.locator('#mappingRows .mapping-row').first();
+  await expect(mappingRow).toBeVisible();
+  const planPath = path.join(e2eEnv.DATA_CHORD_WORKFLOW_STORAGE_DIR, 'workflows', fileId, 'json', 'workflow_state.json');
+  const plan = JSON.parse(fs.readFileSync(planPath, 'utf8'));
+  expect(plan.selected_sheet).toBe('Patients');
+  fs.writeFileSync(planPath, JSON.stringify({ ...plan, external_version_number: 'retired' }));
+
+  // When the user opens a column's details after their browser file details were cleared
+  await page.evaluate(() => sessionStorage.clear());
+  await mappingRow.click();
+
+  // Then Stage 1 restores the same filename, worksheet, and original upload time
+  await expect(page.locator('#statusMessage')).toContainText('The previous model version is no longer available');
+  await expect(page.getByRole('tab', { name: 'Patients' })).toHaveAttribute('aria-selected', 'true');
+  await expect(fileName(page)).toHaveText(workbookName);
+  await fileName(page).hover();
+  await expect(fileCard(page)).toBeVisible();
+  const restoredFacts = await cardFacts(page);
+  expect(restoredFacts).toEqual({ Size: size + ' · XLSX', Uploaded: expect.any(String), Sheet: 'Patients' });
+  expect((await sessionFile(page)).uploaded_at).toBe(uploadedAt);
+
+  // When the user selects a current model version and runs Analyze
+  await page.locator('#analyzeButton').click();
+  await page.locator('.data-model-confirm-btn').click();
+
+  // Then Map names the same workbook and shows the new counts for Patients
+  await expect(page).toHaveURL('/stage-2?file_id=' + fileId + '&data_model_key=gc&external_version_number=11.0.4');
+  await expect(fileName(page)).toHaveText(workbookName);
+  await fileName(page).hover();
+  expect(await cardFacts(page)).toEqual({ Rows: '3', Columns: '2', ...restoredFacts });
+});
+
+
+test('hovering the filename closes a focused instruction tooltip', async ({ page }) => {
+  // Given a file is selected and the instruction is focused by a click.
+  await uploadAndAnalyzeReal(page, longNamedCsv());
+  const instruction = page.locator('.step-instruction-text');
+  const instructionTip = page.locator('#stepInstructionTooltip');
+  await instruction.click();
+  await expect(instruction).toBeFocused();
+  await expect(instructionTip).toBeVisible();
+
+  // When the pointer moves directly over the filename.
+  await fileName(page).hover();
+
+  // Then only the filename tooltip remains visible.
+  await expect(fileCard(page)).toBeVisible();
+  await expect(instructionTip).toBeHidden();
+});
+
+test('a rejected storage write does not keep the old worksheet counts visible', async ({ page }) => {
+  // Given Patients has been analyzed and the user is back on Upload.
+  await page.goto('/stage-1');
+  await page.setInputFiles(AGENT_FILE_INPUT, createWorkbookFixture());
+  await page.getByRole('tab', { name: 'Patients' }).click();
+  await page.locator('#analyzeButton').click();
+  await page.locator('.data-model-confirm-btn').click();
+  await page.waitForURL(/\/stage-2/);
+  await expect(page.locator('#mappingRows .mapping-row').first()).toBeVisible();
+  await page.locator('[data-stage="upload"] .step-link').click();
+  await page.waitForURL(/\/stage-1/);
+  const sizeLine = page.locator('#dropzoneFileSize');
+  const { human_size: size } = await sessionFile(page);
+  await expect(sizeLine).toHaveText(`${size} · 3 rows · 2 columns`);
+  await page.evaluate(() => {
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key === 'currentFileSession') throw new Error('Session storage is full');
+      return setItem.call(this, key, value);
+    };
+  });
+
+  // When the user switches to Keep and browser storage rejects the write.
+  await page.getByRole('tab', { name: 'Keep' }).click();
+
+  // Then both displays reflect the new, unanalyzed worksheet.
+  await expect(sizeLine).toHaveText(size);
+  await fileName(page).hover();
+  expect(await cardFacts(page)).toEqual({
+    Size: `${size} · XLSX`,
+    Uploaded: expect.any(String),
+    Sheet: 'Keep',
+  });
+});
+
+for (const pathKind of ['bare', 'different workflow']) {
+  test(`Stage 1 shows the stored upload only for its own URL or the ${pathKind} case`, async ({ page }) => {
+    // Given an analyzed file whose browser session is available.
+    const fileId = await uploadAndAnalyzeReal(page, longNamedCsv());
+    await expect(fileName(page)).toHaveText(LONG_NAME);
+    const differentFileId = 'f'.repeat(32);
+    expect(fileId).not.toBe(differentFileId);
+
+    // When the browser opens Stage 1 with this URL shape.
+    await page.goto(pathKind === 'bare' ? '/stage-1' : `/stage-1?file_id=${differentFileId}`);
+
+    // Then the dropzone and tracker agree on whether this page owns the uploaded file.
+    if (pathKind === 'bare') {
+      await expect(fileName(page)).toHaveText(LONG_NAME);
+      await expect(page.locator('#dropzoneFileName')).toHaveText(LONG_NAME);
+    } else {
+      await expect(fileLine(page)).toBeHidden();
+      await expect(page.locator('#analyzeButton')).toBeDisabled();
+    }
+  });
+}
+
+test('replacing a file keeps the new tracker name when storage refuses both changes', async ({ page }) => {
+  // Given an analyzed file and session storage that can only be read.
+  await uploadAndAnalyzeReal(page, longNamedCsv());
+  await page.locator('[data-stage="upload"] .step-link').click();
+  await page.waitForURL(/\/stage-1/);
+  await expect(fileName(page)).toHaveText(LONG_NAME);
+  await page.evaluate(() => {
+    const fail = () => { throw new Error('Session storage is read-only'); };
+    Storage.prototype.setItem = fail;
+    Storage.prototype.removeItem = fail;
+  });
+
+  // When the user replaces the file through the real upload route.
+  await page.setInputFiles(AGENT_FILE_INPUT, fileFixture('basic.csv'));
+  await expect(page.locator('#dropzoneFileStatus')).toHaveText('Uploaded');
+
+  // Then the page names the replacement and omits the old counts.
+  await expect(fileName(page)).toHaveText('basic.csv');
+  await fileName(page).hover();
+  expect(await cardFacts(page)).toEqual({
+    Size: `${fs.statSync(fileFixture('basic.csv')).size.toFixed(1)} B · CSV`,
+    Uploaded: expect.any(String),
+  });
 });

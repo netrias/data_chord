@@ -764,6 +764,13 @@ const _ensureColumnDetail = async (colKey) => {
   if (selected) url.searchParams.set('selected_cde_key', selected);
   try {
     const response = await fetch(url.toString());
+    if (response.status === 409) {
+      const payload = await response.json();
+      if (isSafeRelativeUrl(payload.recovery_url)) {
+        window.location.assign(payload.recovery_url);
+        return;
+      }
+    }
     if (!response.ok) {
       console.warn('column-detail fetch failed', response.status);
       return;
@@ -1367,6 +1374,10 @@ const _submitHarmonize = async () => {
     return;
   }
 
+  if (isSafeRelativeUrl(job.recovery_url)) {
+    window.location.assign(job.recovery_url);
+    return;
+  }
   const jobForSession = { ...job, file_id: fileId };
   removeFromSession(STAGE_3_JOB_KEY);
   writeToSession(STAGE_3_JOB_KEY, jobForSession);
@@ -1386,6 +1397,9 @@ const _fetchPayload = async (fileId) => {
     console.error('Failed to parse response JSON:', err);
     return {};
   });
+  if (response.status === 409 && isSafeRelativeUrl(payload.recovery_url)) {
+    window.location.assign(payload.recovery_url);
+  }
   if (!response.ok) throw new Error(payload.detail || 'Unable to fetch mapping data');
   return payload;
 };

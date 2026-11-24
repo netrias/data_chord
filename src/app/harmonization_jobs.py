@@ -23,6 +23,8 @@ from src.app.harmonization_job_state import (
 )
 from src.app.harmonization_results import HarmonizationWorkflowResult
 from src.domain.dataset_workflow_ids import DatasetWorkflowId
+from src.domain.harmonization import HarmonizationFailure
+from src.domain.reference_data import ReferenceDataError, ReferenceModelNotFoundError
 from src.persistence.harmonization_job_store import HarmonizationJobState, LoadedHarmonizationJob
 from src.persistence.workflow_state_store import LoadedWorkflowState
 from src.storage import UploadStorage, UserContext, WorkflowStorage
@@ -204,6 +206,17 @@ class HarmonizationJobService:
                 workflow_storage=self._workflow_storage,
                 user=user,
                 accepted_job=accepted_job,
+            )
+        except ReferenceDataError as exc:
+            fail_harmonization_job(
+                workflow_storage=self._workflow_storage,
+                user=user,
+                accepted_job=accepted_job,
+                failure=(
+                    HarmonizationFailure.MODEL_VERSION_RETIRED
+                    if isinstance(exc, ReferenceModelNotFoundError)
+                    else HarmonizationFailure.REFERENCE_UNAVAILABLE
+                ),
             )
         except asyncio.CancelledError:
             raise
