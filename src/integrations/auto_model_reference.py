@@ -1,4 +1,4 @@
-"""Node-independent CDEs and their required node relationships."""
+"""Auto-Model CDEs and their optional node relationships."""
 
 from __future__ import annotations
 
@@ -31,12 +31,12 @@ class ReferenceCde:
     cde_key: str
     cde_id: int
     values: frozenset[str]
-    node_relations: tuple[NodeCdeRelation, ...]
+    node_relations: tuple[NodeCdeRelation, ...] = ()
 
 
 @dataclass(frozen=True)
 class FlatReferenceModel:
-    """One model version with flat CDE records and an exhaustive node list."""
+    """One model version with flat CDE records and optional node metadata."""
 
     version: DataModelVersionReference
     label: str
@@ -44,10 +44,10 @@ class FlatReferenceModel:
     cdes: tuple[ReferenceCde, ...]
 
     def __post_init__(self) -> None:
-        if not self.label.strip() or not self.nodes:
-            raise ValueError("Reference model label and nodes are required")
+        if not self.label.strip():
+            raise ValueError("Reference model label is required")
         if any(not node.strip() for node in self.nodes) or len(set(self.nodes)) != len(self.nodes):
-            raise ValueError("Reference model nodes must be nonempty and unique")
+            raise ValueError("Reference model node names must be nonempty and unique")
         keys = [cde.cde_key for cde in self.cdes]
         if any(not key.strip() for key in keys) or len(set(keys)) != len(keys):
             raise ValueError("Reference model CDE keys must be nonempty and unique")
@@ -96,8 +96,6 @@ class FlatReferenceModel:
 def _validate_cde_relationships(cde: ReferenceCde, allowed_nodes: frozenset[str]) -> None:
     if any(not value.strip() for value in cde.values):
         raise ValueError(f"Reference CDE values must be nonempty: {cde.cde_key}")
-    if not cde.node_relations:
-        raise ValueError(f"Reference CDE node relationships are required: {cde.cde_key}")
     names = [relation.node_name for relation in cde.node_relations]
     if len(set(names)) != len(names) or not set(names) <= allowed_nodes:
         raise ValueError(f"Reference CDE node relationships are invalid: {cde.cde_key}")

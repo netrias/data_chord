@@ -496,6 +496,10 @@ workflow until standards data is published. Auto-Model owns DynamoDB publication
 Data Chord provides the runtime reader for flat schema-2 CDE rows. Auto-Model
 must publish the flat CDE rows before Data Chord can read the standards table.
 Data Chord no longer provides `export` or `sync` commands for this DynamoDB table.
+Schema-2 publications may omit their node list and CDE node relationships.
+Data Chord derives an omitted node list from the relationships and treats omitted
+relationship lists as empty when it checks the publication digest. Existing
+sealed schema-2 publications remain readable as published.
 
 ## 7. Invite a user and test one workflow
 

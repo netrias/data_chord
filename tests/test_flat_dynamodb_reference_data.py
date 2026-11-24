@@ -336,41 +336,76 @@ def test_flat_reader_checks_each_model_count_independently(field: str) -> None:
     assert f"Reference {field.replace('_', ' ')} is invalid" in str(error.value)
 
 
-@pytest.mark.parametrize("nodes", [None, []])
-def test_flat_reader_requires_a_nonempty_model_level_node_list(nodes: list[str] | None) -> None:
-    # Given flat rows with a missing or empty model-level nodes field.
+@pytest.mark.parametrize("omit_nodes", [True, False])
+def test_schema_two_reads_a_sealed_catalog_without_nodes(omit_nodes: bool) -> None:
+    # Given a schema-2 publication containing shared CDEs without node metadata.
     table = _published_table()
-    if nodes is None:
-        del table.items[(MODEL_PK, "META")]["nodes"]
+    meta = table.items[(MODEL_PK, "META")]
+    if omit_nodes:
+        del meta["nodes"]
     else:
-        table.items[(MODEL_PK, "META")]["nodes"] = nodes
+        meta["nodes"] = []
+    del meta["node_count"]
+    del meta["node_cde_count"]
+    del table.items[(MODEL_PK, "CDE#YWdl#META")]["node_relations"]
+    table.items[(MODEL_PK, "CDE#c3RhZ2U#META")]["node_relations"] = []
+    meta["digest"] = "656890ceb98a5070123018b160040fd3a91b8a66b0a4556db65bc6724569e960"
+    table.items[(MODEL_PK, "IMPORT")]["digest"] = meta["digest"]
     repository = DynamoDbReferenceDataRepository(table)
 
-    # When the application loads the model.
+    # When the normal repository entry point loads the reference model.
+    model = repository.load_model(VERSION)
+
+    # Then both shared fields retain their original identities and approved values.
+    assert [(cde.cde_key, cde.cde_id) for cde in model.catalog] == [
+        ("age", 4690995584867433052),
+        ("stage", 2457258298240256618),
+    ]
+    assert dict(model.pvs.values) == {"age": frozenset(), "stage": frozenset({"I", "II"})}
+
+
+def test_schema_two_accepts_fields_with_and_without_node_relationships() -> None:
+    # Given one field without relationships and another retaining two node relationships.
+    table = _published_table()
+    meta = table.items[(MODEL_PK, "META")]
+    del meta["nodes"]
+    meta["node_count"] = 2
+    meta["node_cde_count"] = 2
+    del table.items[(MODEL_PK, "CDE#YWdl#META")]["node_relations"]
+    meta["digest"] = "9dcf2c7e5b0508adad4bbab4679d11a31a8d124bc82769a95dd0667632878cea"
+    table.items[(MODEL_PK, "IMPORT")]["digest"] = meta["digest"]
+    repository = DynamoDbReferenceDataRepository(table)
+
+    # When the adapter loads the sealed publication.
+    reference = repository.load_cdes(VERSION)
+
+    # Then it derives the nodes from the supplied relationships and retains both fields.
+    assert reference.nodes == ("diagnosis", "sample")
+    assert [(cde.cde_key, [relation.node_name for relation in cde.node_relations]) for cde in reference.cdes] == [
+        ("age", []),
+        ("stage", ["diagnosis", "sample"]),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("row", "field", "message"),
+    [
+        ("META", "nodes", "Reference model nodes are invalid"),
+        ("CDE#YWdl#META", "node_relations", "Reference node relationships are invalid: age"),
+    ],
+)
+def test_schema_two_rejects_malformed_optional_node_fields(row: str, field: str, message: str) -> None:
+    # Given a published row supplying null for an optional list.
+    table = _published_table()
+    table.items[(MODEL_PK, row)][field] = None
+    repository = DynamoDbReferenceDataRepository(table)
+
+    # When the adapter decodes the publication.
     with pytest.raises(ReferenceDataCorruptError) as error:
         repository.load_model(VERSION)
 
-    # Then the reader rejects the incomplete flat layout without a legacy fallback.
-    assert "model nodes are invalid" in str(error.value)
-
-
-@pytest.mark.parametrize("relations", [None, []])
-def test_flat_reader_requires_each_cde_to_have_node_relationships(relations: list[object] | None) -> None:
-    # Given a published CDE with its node relationships missing or empty.
-    table = _published_table()
-    age = table.items[(MODEL_PK, "CDE#YWdl#META")]
-    if relations is None:
-        del age["node_relations"]
-    else:
-        age["node_relations"] = relations
-    repository = DynamoDbReferenceDataRepository(table)
-
-    # When the complete flat model is read.
-    with pytest.raises(ReferenceDataCorruptError) as error:
-        repository.load_cdes(VERSION)
-
-    # Then the CDE without a node relationship is rejected.
-    assert "node relationships are invalid: age" in str(error.value)
+    # Then the invalid field is rejected at the boundary.
+    assert str(error.value) == message
 
 
 def test_flat_reader_rejects_duplicate_node_relationships() -> None:

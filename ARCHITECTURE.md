@@ -56,6 +56,12 @@ middleware. `src/app/dependencies.py` constructs concrete services.
 | `src/storage` | Authorization, artifact naming, version checks, local/S3 parity | Stage behavior |
 | `src/shared/static` | Small browser primitives used by several stages | Feature-specific UI behavior |
 
+## Reference models
+
+The DynamoDB adapter validates the schema-2 catalog and gives mapping and
+harmonization a flat model with one record and approved-value set per CDE.
+Optional node metadata stays in the integration.
+
 ## Workflow
 
 ### 1. Upload and analyze

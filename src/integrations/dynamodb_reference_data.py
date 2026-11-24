@@ -18,13 +18,13 @@ from boto3.dynamodb.types import Binary
 
 from src.domain.cde import DataModelSummary, DataModelVersionInfo
 from src.domain.data_model_version_reference import DataModelVersionReference
-from src.domain.reference_cdes import FlatReferenceModel, NodeCdeRelation, ReferenceCde
 from src.domain.reference_data import (
     ReferenceDataCorruptError,
     ReferenceDataUnavailableError,
     ReferenceModel,
     ReferenceModelNotFoundError,
 )
+from src.integrations.auto_model_reference import FlatReferenceModel, NodeCdeRelation, ReferenceCde
 
 SCHEMA_VERSION = 2
 MAX_UNCOMPRESSED_CHUNK_BYTES = 300 * 1024
@@ -243,17 +243,26 @@ def _flat_from_items(
         model = FlatReferenceModel(
             version=requested,
             label=_required_string(meta, "label"),
-            nodes=nodes,
+            nodes=nodes if nodes is not None else _nodes_from_relationships(cdes),
             cdes=cdes,
         )
     except ValueError as exc:
         raise ReferenceDataCorruptError(str(exc)) from exc
+    _validate_model_seal(model, meta, import_seal)
+    return model
+
+
+def _validate_model_seal(
+    model: FlatReferenceModel, meta: Mapping[str, object], import_seal: Mapping[str, object],
+) -> None:
     expected = {
-        "node_count": len(model.nodes),
-        "node_cde_count": sum(len(cde.node_relations) for cde in model.cdes),
         "cde_key_count": len(model.cdes),
         "value_count": sum(len(cde.values) for cde in model.cdes),
     }
+    if "node_count" in meta:
+        expected["node_count"] = len(model.nodes)
+    if "node_cde_count" in meta:
+        expected["node_cde_count"] = sum(len(cde.node_relations) for cde in model.cdes)
     for field, count in expected.items():
         if _required_int(meta, field) != count:
             raise ReferenceDataCorruptError(f"Reference {field.replace('_', ' ')} is invalid")
@@ -261,17 +270,22 @@ def _flat_from_items(
         raise ReferenceDataCorruptError("Reference model digest is invalid")
     if _required_string(import_seal, "digest") != _required_string(meta, "digest"):
         raise ReferenceDataCorruptError("Reference import seal does not match its model")
-    return model
 
 
-def _flat_nodes(meta: Mapping[str, object]) -> tuple[str, ...]:
-    raw = meta.get("nodes")
+def _flat_nodes(meta: Mapping[str, object]) -> tuple[str, ...] | None:
+    if "nodes" not in meta:
+        return None
+    raw = meta["nodes"]
     if not isinstance(raw, list) or any(not isinstance(node, str) or not node.strip() for node in raw):
         raise ReferenceDataCorruptError("Reference model nodes are invalid")
     nodes = cast(list[str], raw)
-    if not nodes or len(nodes) != len(set(nodes)):
+    if len(nodes) != len(set(nodes)):
         raise ReferenceDataCorruptError("Reference model nodes are invalid")
     return tuple(nodes)
+
+
+def _nodes_from_relationships(cdes: tuple[ReferenceCde, ...]) -> tuple[str, ...]:
+    return tuple(sorted({relation.node_name for cde in cdes for relation in cde.node_relations}))
 
 
 def _flat_cde_rows(by_sk: Mapping[str, Mapping[str, object]]) -> dict[str, _ValueRows]:
@@ -302,8 +316,8 @@ def _flat_cde(
     cde_id = _required_int(metadata, "cde_id")
     if cde_id != _generated_cde_id(version, cde_key):
         raise ReferenceDataCorruptError(f"Reference CDE id is invalid: {cde_key}")
-    raw_relations = metadata.get("node_relations")
-    if not isinstance(raw_relations, list) or not raw_relations:
+    raw_relations = metadata.get("node_relations", [])
+    if not isinstance(raw_relations, list):
         raise ReferenceDataCorruptError(f"Reference node relationships are invalid: {cde_key}")
     relations = tuple(_flat_relation(version, cde_key, raw) for raw in cast(list[object], raw_relations))
     return ReferenceCde(
