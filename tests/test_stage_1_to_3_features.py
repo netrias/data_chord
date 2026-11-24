@@ -8,6 +8,7 @@ import io
 import shutil
 import time
 import zipfile
+from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
 from io import BytesIO
@@ -1024,12 +1025,19 @@ async def _completed_second_sheet_job(
     return loaded
 
 
+@pytest.fixture
+def stage4_storage_overrides(app_client: AsyncClient) -> Iterator[pytest.MonkeyPatch]:
+    # Unwind dependency overrides before the application fixture restores its own defaults.
+    with pytest.MonkeyPatch.context() as overrides:
+        yield overrides
+
+
 @pytest.mark.parametrize("scenario", ["saved", "saved-zero", "legacy"])
 async def test_stage4_row_count_when_resuming(
     app_client: AsyncClient,
     tmp_path: Path,
     test_constraints: UploadConstraints,
-    monkeypatch: pytest.MonkeyPatch,
+    stage4_storage_overrides: pytest.MonkeyPatch,
     scenario: str,
 ) -> None:
     # Given a completed second-sheet job reopened without its original scratch workspace.
@@ -1045,7 +1053,7 @@ async def test_stage4_row_count_when_resuming(
         legacy = replace(loaded.job, manifest_summary=summary.model_copy(update={"source_row_count": None}))
         save_harmonization_job(storage, user, legacy, expected_version=loaded.version)
     resumed_uploads = UploadStorage(tmp_path / "resumed-uploads", test_constraints)
-    monkeypatch.setattr(dependencies, "get_upload_storage", lambda: resumed_uploads)
+    stage4_storage_overrides.setattr(dependencies, "get_upload_storage", lambda: resumed_uploads)
     assert resumed_uploads.load(file_id) is None
 
     # When Stage 4 requests the completed job's review rows.
@@ -1068,7 +1076,7 @@ async def test_stage4_saved_count_still_requires_the_original_upload(
     app_client: AsyncClient,
     tmp_path: Path,
     test_constraints: UploadConstraints,
-    monkeypatch: pytest.MonkeyPatch,
+    stage4_storage_overrides: pytest.MonkeyPatch,
 ) -> None:
     # Given a completed job with a saved count but no original upload or scratch copy.
     loaded = await _completed_second_sheet_job(app_client, [["Lung"]])
@@ -1078,7 +1086,7 @@ async def test_stage4_saved_count_still_requires_the_original_upload(
     ) as original:
         original.rename(tmp_path / "missing-original.xlsx")
     resumed_uploads = UploadStorage(tmp_path / "scratch", test_constraints)
-    monkeypatch.setattr(dependencies, "get_upload_storage", lambda: resumed_uploads)
+    stage4_storage_overrides.setattr(dependencies, "get_upload_storage", lambda: resumed_uploads)
 
     # When Stage 4 opens the completed job.
     response = await app_client.post("/stage-4/rows", json={"file_id": file_id, "job_id": loaded.job.polling_job_id})
@@ -1092,17 +1100,17 @@ async def test_stage4_reads_the_saved_count_without_downloading_the_s3_upload(
     app_client: AsyncClient,
     tmp_path: Path,
     test_constraints: UploadConstraints,
-    monkeypatch: pytest.MonkeyPatch,
+    stage4_storage_overrides: pytest.MonkeyPatch,
 ) -> None:
     # Given a completed second-sheet job stored through the production S3 adapter.
     client = FakeS3Client()
     storage = S3WorkflowStorage("offline", client)
-    monkeypatch.setattr(dependencies, "get_workflow_storage", lambda: storage)
+    stage4_storage_overrides.setattr(dependencies, "get_workflow_storage", lambda: storage)
     loaded = await _completed_second_sheet_job(app_client, [["Lung"], ["Breast"]])
     file_id = loaded.job.file_id
     original_key, = [key for key in client.objects if key.endswith("/original_upload.xlsx")]
     resumed_uploads = UploadStorage(tmp_path / "scratch", test_constraints)
-    monkeypatch.setattr(dependencies, "get_upload_storage", lambda: resumed_uploads)
+    stage4_storage_overrides.setattr(dependencies, "get_upload_storage", lambda: resumed_uploads)
 
     assert resumed_uploads.load(file_id) is None
 
@@ -1126,18 +1134,18 @@ async def test_stage4_returns_the_missing_upload_message_for_a_missing_s3_origin
     app_client: AsyncClient,
     tmp_path: Path,
     test_constraints: UploadConstraints,
-    monkeypatch: pytest.MonkeyPatch,
+    stage4_storage_overrides: pytest.MonkeyPatch,
 ) -> None:
     # Given a completed S3-backed job whose original and scratch copy are gone.
     client = FakeS3Client()
     storage = S3WorkflowStorage("offline", client)
-    monkeypatch.setattr(dependencies, "get_workflow_storage", lambda: storage)
+    stage4_storage_overrides.setattr(dependencies, "get_workflow_storage", lambda: storage)
     loaded = await _completed_second_sheet_job(app_client, [["Lung"]])
     file_id = loaded.job.file_id
     (original_key,) = [key for key in client.objects if key.endswith("/original_upload.xlsx")]
     client.objects.pop(original_key)
     resumed_uploads = UploadStorage(tmp_path / "scratch", test_constraints)
-    monkeypatch.setattr(dependencies, "get_upload_storage", lambda: resumed_uploads)
+    stage4_storage_overrides.setattr(dependencies, "get_upload_storage", lambda: resumed_uploads)
     assert resumed_uploads.load(file_id) is None
 
     # When Stage 4 opens the job with its saved row count.

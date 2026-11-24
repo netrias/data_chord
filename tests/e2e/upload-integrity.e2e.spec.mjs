@@ -140,15 +140,18 @@ test('hash failure permits retry without submitting an unverified file', async (
 
 test('selection stays locked until the original file finishes hashing', async ({ page }) => {
   // Given hashing is held pending while the user can still interact with the page.
-  await page.addInitScript(() => {
+  const previousFileId = "a".repeat(32);
+  await page.addInitScript((fileId) => {
     const digest = crypto.subtle.digest.bind(crypto.subtle);
     const pending = new Promise((resolve) => { window.mockReleaseDigest = resolve; });
     crypto.subtle.digest = async (...args) => { await pending; return digest(...args); };
+    sessionStorage.setItem('currentFileSession', JSON.stringify({
+      file_id: fileId, original_name: 'previous.csv', human_size: '10 B',
+    }));
     sessionStorage.setItem('maxReachedStage', 'review');
-  });
+  }, previousFileId);
   const uploads = [];
   page.on('request', (request) => { if (request.url().endsWith('/stage-1/upload')) uploads.push(request); });
-  const previousFileId = 'a'.repeat(32);
   await page.goto(`/stage-1?file_id=${previousFileId}`);
   const mappingLink = page.locator('.progress-tracker [data-stage="mapping"] .step-link');
   await expect(mappingLink).toHaveAttribute('aria-disabled', 'false');
