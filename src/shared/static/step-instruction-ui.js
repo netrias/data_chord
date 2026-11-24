@@ -14,14 +14,14 @@ import { formatCount, readCurrentFileSession, readFileSession, selectedSheetShap
  * Marks earlier stages as complete, current stage as active, future stages as unreachable.
  * @param {string} stage - The currently active stage identifier
  */
-export function setActiveStage(stage, availableThrough = stage) {
+export function setActiveStage(stage, hasCompletedResults = false) {
   const targetIndex = STAGE_ORDER.indexOf(stage);
   if (targetIndex === -1) {
     console.warn(`[step-instruction-ui] Unknown stage: ${stage}. Valid stages: ${STAGE_ORDER.join(', ')}`);
     return;
   }
 
-  const maxReachedIndex = Math.max(_getMaxReachedStageIndex(), targetIndex, STAGE_ORDER.indexOf(availableThrough));
+  const maxReachedIndex = Math.max(_getMaxReachedStageIndex(), targetIndex);
   const progressSteps = document.querySelectorAll('.progress-tracker [data-stage]');
 
   progressSteps.forEach((step) => {
@@ -29,7 +29,8 @@ export function setActiveStage(stage, availableThrough = stage) {
     const stepIndex = STAGE_ORDER.indexOf(stepStage);
     const isActive = stepStage === stage;
     const isComplete = stepIndex >= 0 && stepIndex < targetIndex;
-    const isUnreachable = stepIndex > maxReachedIndex;
+    const canOpenResult = hasCompletedResults && ['verify', 'review'].includes(stepStage);
+    const isUnreachable = stepIndex > maxReachedIndex && !canOpenResult;
     step.classList.toggle('active', isActive);
     step.classList.toggle('complete', isComplete);
     step.classList.toggle('unreachable', isUnreachable);
@@ -85,7 +86,7 @@ export function buildNavUrl(baseUrl) {
   if (fileId) url.searchParams.set('file_id', fileId);
 
   const pageParams = new URLSearchParams(window.location.search);
-  if (fileId && url.pathname === '/stage-1' && _isStageOneUrl(window.location.href) && pageParams.has('reselect_model')) {
+  if (fileId && url.pathname === '/stage-1' && _isStageOneUrl(window.location.href) && pageParams.get('reselect_model') === 'true') {
     url.searchParams.set('reselect_model', 'true');
   }
   const jobId = pageParams.get('job_id');

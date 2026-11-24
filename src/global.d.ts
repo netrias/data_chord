@@ -6,7 +6,7 @@
 /* Module path aliases resolved at runtime by the web server */
 declare module '/assets/shared/step-instruction-ui.js' {
   export function initStepInstruction(instructionKey: string): void;
-  export function setActiveStage(stageKey: string, availableThrough?: string): void;
+  export function setActiveStage(stageKey: string, hasCompletedResults?: boolean): void;
   export function initNavigationEvents(): void;
   export function advanceMaxReachedStage(stageKey: string): void;
   export function resetMaxReachedStage(): void;
