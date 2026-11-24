@@ -210,7 +210,8 @@ export function renderFileContext() {
 
 /* why: older or partial session records omit facts that are unknown instead of showing placeholders. */
 function _fileFacts(session) {
-  const shape = selectedSheetShape(session);
+  const sheet = _isStageOneUrl(window.location.href) ? session.selected_sheet : session.dataset_shape?.sheet_name;
+  const shape = selectedSheetShape(session, sheet);
   const sizeAndType = [session.human_size, session.tabular_format?.toUpperCase()].filter(Boolean).join(' · ');
   const isWorkbook = Array.isArray(session.sheet_names) && session.sheet_names.length > 0;
   const facts = [
@@ -218,7 +219,7 @@ function _fileFacts(session) {
     { label: 'Columns', value: shape?.columns.toLocaleString('en-US') },
     { label: 'Size', value: sizeAndType },
     { label: 'Uploaded', value: _formatUploadTime(session.uploaded_at) },
-    { label: 'Sheet', value: isWorkbook ? session.selected_sheet : null },
+    { label: 'Sheet', value: isWorkbook ? sheet : null },
   ];
   return facts.filter((fact) => fact.value);
 }

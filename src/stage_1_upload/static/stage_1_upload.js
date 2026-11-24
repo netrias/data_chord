@@ -314,7 +314,7 @@ const _persistFileSession = (uploadResponse, fileName) => {
   writeToSession(CURRENT_FILE_SESSION_KEY, {
     file_id: uploadResponse.file_id,
     original_name: fileName,
-    uploaded_at: new Date().toISOString(),
+    uploaded_at: uploadResponse.uploaded_at ?? new Date().toISOString(),
     human_size: uploadResponse.human_size,
     tabular_format: uploadResponse.tabular_format ?? null,
     sheet_names: uploadResponse.sheet_names ?? [],
@@ -526,7 +526,7 @@ const _buildSheetPreviewTable = (preview) => {
 };
 
 const _selectSheet = (sheetName, { focus = false } = {}) => {
-  if (!state.sheetNames.includes(sheetName)) return;
+  if (state.isAnalyzing || !state.sheetNames.includes(sheetName)) return;
   if (state.selectedSheet === sheetName) {
     if (focus) _focusActiveTab();
     return;
@@ -661,6 +661,7 @@ const _analyzeDataset = async () => {
     _setFileInputDisabled(false);
     return;
   }
+  const submittedSheet = state.selectedSheet;
   state.isAnalyzing = true;
   _setFileInputDisabled(true);
   _setAnalyzeButtonEnabled(false);
@@ -679,7 +680,7 @@ const _analyzeDataset = async () => {
           file_id: state.uploaded.file_id,
           data_model_key: selection.dataModelKey,
           external_version_number: selection.externalVersionNumber,
-          sheet_name: state.selectedSheet,
+          sheet_name: submittedSheet,
         }),
       });
     } catch (error) {
@@ -705,9 +706,8 @@ const _analyzeDataset = async () => {
       throw new Error(ANALYZE_API_ERROR_MESSAGE);
     }
     updateFileSession({
-      selected_sheet: state.selectedSheet,
       dataset_shape: {
-        sheet_name: state.selectedSheet,
+        sheet_name: submittedSheet,
         rows: payload.total_rows,
         columns: Array.isArray(payload.columns) ? payload.columns.length : null,
       },
@@ -828,6 +828,10 @@ const _init = () => {
      same selection path that updates tabs, indicator, and session storage. */
   if (sheetSelect) {
     sheetSelect.addEventListener('change', (event) => {
+      if (state.isAnalyzing) {
+        sheetSelect.value = state.selectedSheet ?? '';
+        return;
+      }
       if (!event.isTrusted && sheetSelect.value === state.selectedSheet) return;
       if (sheetSelect.value && sheetSelect.value !== state.selectedSheet) {
         _selectSheet(sheetSelect.value);

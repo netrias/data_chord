@@ -158,9 +158,51 @@ test('the upload widget shows Analyze counts for the analyzed sheet only', async
   expect(Object.keys(facts)).toEqual(['Size', 'Uploaded', 'Sheet']);
   expect(facts.Sheet).toBe('Keep');
 
-  // When the user selects Patients again
-  await page.locator('.workbook-tab[data-sheet-name="Patients"]').click();
+  // When the user returns to the existing Map stage without analyzing Keep
+  await page.locator('.step[data-stage="mapping"] .step-link').click();
+  await page.waitForURL(/\/stage-2/);
+  await fileName(page).hover();
 
-  // Then the counts return
-  await expect(sizeLine).toHaveText(`${sizeOnly} · 3 rows · 2 columns`);
+  // Then downstream details describe the analyzed Patients sheet
+  const mappedFacts = await cardFacts(page);
+  expect(mappedFacts.Sheet).toBe('Patients');
+  expect(mappedFacts.Rows).toBe('3');
+  expect(mappedFacts.Columns).toBe('2');
+});
+
+test('the workbook sheet cannot change while Analyze is waiting', async ({ page }) => {
+  // Given Patients is selected and the Analyze response is held
+  await page.goto('/stage-1');
+  await page.setInputFiles(AGENT_FILE_INPUT, createWorkbookFixture());
+  const patients = page.getByRole('tab', { name: 'Patients' });
+  const keep = page.getByRole('tab', { name: 'Keep' });
+  await patients.click();
+  const responseGate = Promise.withResolvers();
+  await page.route('**/stage-1/analyze', async (route) => {
+    await responseGate.promise;
+    await route.continue();
+  });
+  await page.click('#analyzeButton');
+  const requestPending = page.waitForRequest('**/stage-1/analyze');
+  await page.locator('.data-model-confirm-btn').click();
+  const request = await requestPending;
+  expect(request.postDataJSON().sheet_name).toBe('Patients');
+
+  try {
+    // When the user tries to select Keep with the keyboard while Analyze is pending
+    await patients.press('ArrowLeft');
+
+    // Then Patients remains selected until its counts arrive
+    await expect(patients).toHaveAttribute('aria-selected', 'true');
+    await expect(keep).toHaveAttribute('aria-selected', 'false');
+  } finally {
+    responseGate.resolve();
+  }
+
+  await page.waitForURL(/\/stage-2/);
+  await fileName(page).hover();
+  const facts = await cardFacts(page);
+  expect(facts.Sheet).toBe('Patients');
+  expect(facts.Rows).toBe('3');
+  expect(facts.Columns).toBe('2');
 });

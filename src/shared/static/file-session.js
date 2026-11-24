@@ -17,10 +17,10 @@ export const updateFileSession = (fields) => {
  * Rows and columns come from Analyze, which reads one sheet.
  * Returns null when the counts are unknown for the selected sheet.
  */
-export const selectedSheetShape = (session) => {
+export const selectedSheetShape = (session, sheetName = session?.selected_sheet) => {
   const shape = session?.dataset_shape;
   if (!shape || !Number.isInteger(shape.rows) || !Number.isInteger(shape.columns)) return null;
-  if ((shape.sheet_name ?? null) !== (session.selected_sheet ?? null)) return null;
+  if ((shape.sheet_name ?? null) !== (sheetName ?? null)) return null;
   return { rows: shape.rows, columns: shape.columns };
 };
 
