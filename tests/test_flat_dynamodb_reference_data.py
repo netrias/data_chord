@@ -196,7 +196,7 @@ def test_flat_catalog_lists_published_versions() -> None:
     ]
 
 
-def test_flat_catalog_rejects_old_node_first_schema() -> None:
+def test_flat_catalog_rejects_schema_two() -> None:
     # Given a catalog advertised under the previous schema version.
     table = _published_table()
     table.items[("CATALOG", "META")]["schema_version"] = 2
