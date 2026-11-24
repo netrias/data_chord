@@ -500,12 +500,13 @@ def _original_row_count(
 ) -> int:
     state = ready.workflow.state
     summary = ready.job.job.manifest_summary
-    if (
-        summary is not None
-        and summary.source_row_count is not None
-        and upload_is_available(upload_storage, workflow_storage, user, state.file_id)
-    ):
-        return summary.source_row_count
+    with performance_span("stage4.rows.upload_available"):
+        if (
+            summary is not None
+            and summary.source_row_count is not None
+            and upload_is_available(upload_storage, workflow_storage, user, state.file_id)
+        ):
+            return summary.source_row_count
 
     with performance_span("stage4.rows.upload_artifact"), open_upload_artifact(
         upload_storage, workflow_storage, user, state.file_id,

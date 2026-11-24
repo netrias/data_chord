@@ -33,12 +33,13 @@ from src.integrations.harmonize import (
 )
 from src.persistence.harmonization_job_store import (
     HarmonizationJobState,
+    LoadedHarmonizationJob,
     load_harmonization_job,
     save_harmonization_job,
 )
 from src.persistence.workflow_artifacts import open_upload_artifact
 from src.persistence.workflow_state_store import load_workflow_state
-from src.storage import UploadConstraints, UploadStorage, WorkflowFile
+from src.storage import S3WorkflowStorage, UploadConstraints, UploadStorage, WorkflowFile
 from tests.conftest import (
     TEST_TARGET_SCHEMA,
     TEST_TSV_CONTENT_TYPE,
@@ -52,6 +53,7 @@ from tests.conftest import (
     upload_content,
     upload_integrity_fields,
 )
+from tests.test_s3_workflow_storage import FakeS3Client
 
 GENERIC_API_ERROR_DETAIL = "We couldn't process this request. Please try again."
 
@@ -750,16 +752,9 @@ async def test_stage3_harmonize_uses_stored_selection(
     assert context_response.json() == {"headers": ["diagnosis"], "rows": [["Lung"]]}
 
 
-@pytest.mark.parametrize("scenario", ["saved", "saved-zero", "legacy", "missing-upload"])
-async def test_stage4_row_count_when_resuming(
-    app_client: AsyncClient,
-    tmp_path: Path,
-    test_constraints: UploadConstraints,
-    monkeypatch: pytest.MonkeyPatch,
-    scenario: str,
-) -> None:
-    # Given a completed second-sheet job reopened without its original scratch workspace
-    selected_rows: list[list[object]] = [] if scenario == "saved-zero" else [["Lung"], ["Breast"]]
+async def _completed_second_sheet_job(
+    app_client: AsyncClient, selected_rows: list[list[object]]
+) -> LoadedHarmonizationJob:
     workbook = create_xlsx_content({
         "First": [["diagnosis"], ["Pancreas"]],
         "Selected": [["diagnosis"], *selected_rows],
@@ -782,35 +777,103 @@ async def test_stage4_row_count_when_resuming(
     assert loaded is not None
     summary = loaded.job.manifest_summary
     assert summary is not None and summary.source_row_count == len(selected_rows)
+    return loaded
+
+
+@pytest.mark.parametrize("scenario", ["saved", "saved-zero", "legacy"])
+async def test_stage4_row_count_when_resuming(
+    app_client: AsyncClient,
+    tmp_path: Path,
+    test_constraints: UploadConstraints,
+    monkeypatch: pytest.MonkeyPatch,
+    scenario: str,
+) -> None:
+    # Given a completed second-sheet job reopened without its original scratch workspace.
+    selected_rows: list[list[object]] = [] if scenario == "saved-zero" else [["Lung"], ["Breast"]]
+    loaded = await _completed_second_sheet_job(app_client, selected_rows)
+    file_id = loaded.job.file_id
+    job_id = loaded.job.polling_job_id
+    storage = dependencies.get_workflow_storage()
+    user = dependencies.get_user_context()
     if scenario == "legacy":
+        summary = loaded.job.manifest_summary
+        assert summary is not None
         legacy = replace(loaded.job, manifest_summary=summary.model_copy(update={"source_row_count": None}))
         save_harmonization_job(storage, user, legacy, expected_version=loaded.version)
-    if scenario == "missing-upload":
-        with storage.materialize_artifact(user, file_id, WorkflowFile.ORIGINAL_UPLOAD) as original:
-            original.rename(tmp_path / "missing-original.xlsx")
     resumed_uploads = UploadStorage(tmp_path / "resumed-uploads", test_constraints)
     monkeypatch.setattr(dependencies, "get_upload_storage", lambda: resumed_uploads)
     assert resumed_uploads.load(file_id) is None
 
-    # When Stage 4 requests the completed job's review rows
+    # When Stage 4 requests the completed job's review rows.
     with (
         patch("src.stage_4_review_results.use_cases.open_upload_artifact", wraps=open_upload_artifact) as source,
-        patch.object(storage, "artifact_version", wraps=storage.artifact_version) as artifact_version,
+        patch.object(storage, "artifact_version", wraps=storage.artifact_version) as version,
     ):
         response = await app_client.post("/stage-4/rows", json={"file_id": file_id, "job_id": job_id})
 
-    # Then Stage 4 uses the selected sheet count or returns the existing missing-upload response
-    if scenario == "missing-upload":
-        assert response.status_code == 409
-        assert response.json()["detail"] == "Upload not found. Return to Stage 1 and upload it again."
-        return
+    # Then Stage 4 reports the selected sheet count without reading the original, except for legacy jobs.
     assert response.status_code == 200
     assert response.json()["totalOriginalRows"] == len(selected_rows)
     assert source.call_count == (1 if scenario == "legacy" else 0)
     assert (resumed_uploads.load(file_id) is not None) == (scenario == "legacy")
-    for request in artifact_version.call_args_list:
-        assert WorkflowFile.ORIGINAL_UPLOAD not in request.args
-        assert WorkflowFile.ORIGINAL_UPLOAD not in request.kwargs.values()
+    checked = {call.args[2] for call in version.call_args_list}
+    assert checked == {WorkflowFile.HARMONIZED_OUTPUT, WorkflowFile.HARMONIZATION_MANIFEST_BASE}
+
+
+async def test_stage4_saved_count_still_requires_the_original_upload(
+    app_client: AsyncClient,
+    tmp_path: Path,
+    test_constraints: UploadConstraints,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given a completed job with a saved count but no original upload or scratch copy.
+    loaded = await _completed_second_sheet_job(app_client, [["Lung"]])
+    file_id = loaded.job.file_id
+    with dependencies.get_workflow_storage().materialize_artifact(
+        dependencies.get_user_context(), file_id, WorkflowFile.ORIGINAL_UPLOAD
+    ) as original:
+        original.rename(tmp_path / "missing-original.xlsx")
+    resumed_uploads = UploadStorage(tmp_path / "scratch", test_constraints)
+    monkeypatch.setattr(dependencies, "get_upload_storage", lambda: resumed_uploads)
+
+    # When Stage 4 opens the completed job.
+    response = await app_client.post("/stage-4/rows", json={"file_id": file_id, "job_id": loaded.job.polling_job_id})
+
+    # Then it gives the existing recovery instruction.
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Upload not found. Return to Stage 1 and upload it again."}
+
+
+async def test_stage4_reads_the_saved_count_without_downloading_the_s3_upload(
+    app_client: AsyncClient,
+    tmp_path: Path,
+    test_constraints: UploadConstraints,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given a completed second-sheet job stored through the production S3 adapter.
+    client = FakeS3Client()
+    storage = S3WorkflowStorage("offline", client)
+    monkeypatch.setattr(dependencies, "get_workflow_storage", lambda: storage)
+    loaded = await _completed_second_sheet_job(app_client, [["Lung"], ["Breast"]])
+    file_id = loaded.job.file_id
+    original_key, = [key for key in client.objects if key.endswith("/original_upload.xlsx")]
+    resumed_uploads = UploadStorage(tmp_path / "scratch", test_constraints)
+    monkeypatch.setattr(dependencies, "get_upload_storage", lambda: resumed_uploads)
+
+    # When Stage 4 reopens the result with an empty scratch directory.
+    with (
+        patch.object(client, "head_object", wraps=client.head_object) as head,
+        patch.object(client, "get_object", wraps=client.get_object) as get,
+    ):
+        response = await app_client.post(
+            "/stage-4/rows", json={"file_id": file_id, "job_id": loaded.job.polling_job_id}
+        )
+
+    # Then it checks the original exists and returns the saved count without downloading it.
+    assert response.status_code == 200
+    assert response.json()["totalOriginalRows"] == 2
+    assert original_key in {call.kwargs["Key"] for call in head.call_args_list}
+    assert original_key not in {call.kwargs["Key"] for call in get.call_args_list}
 
 
 async def test_stage3_http_workflow_runs_the_deterministic_term_provider(
