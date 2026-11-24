@@ -11,5 +11,5 @@
   "application_repository_url": "https://github.com/netrias/data_chord.git",
   "github_app_secret_name": "data-chord/build/github-app",
   "programmatic_api_key_secret_name": "data-chord/staging/programmatic-api-key",
-  "reference_catalog": "prepare_flat"
+  "reference_catalog": "flat"
 }
