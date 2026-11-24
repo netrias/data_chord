@@ -1,6 +1,6 @@
 """Tests for AI output whitespace stripping at the reader boundary.
 
-Validates that artifact whitespace from the harmonization service is stripped
+Validates that artifact whitespace from the harmonization service is preserved
 when reading manifest parquet, while user data (to_harmonize) is preserved.
 """
 
@@ -44,11 +44,11 @@ def _write_and_read_back(row: ManifestRow) -> ManifestRow:
     return summary.rows[0]
 
 
-class TestReaderStripsAIOutput:
-    """Reader strips leading/trailing whitespace from AI output fields."""
+class TestReaderPreservesExactValues:
+    """Read the exact strings recorded in the audit."""
 
-    def test_top_harmonization_is_stripped(self) -> None:
-        """Artifact whitespace on top_harmonization is removed at read time."""
+    def test_top_harmonization_is_preserved(self) -> None:
+        """Artifact whitespace on top_harmonization survives the audit round trip."""
         # Given: manifest row with whitespace in AI output
         row = _make_row(top_harmonization="  Lung Cancer  ")
         assert row.top_harmonization == "  Lung Cancer  "  # negative: whitespace exists
@@ -56,11 +56,11 @@ class TestReaderStripsAIOutput:
         # When: written to parquet and read back
         result = _write_and_read_back(row)
 
-        # Then: top_harmonization is stripped
-        assert result.top_harmonization == "Lung Cancer"
+        # Then: top_harmonization is preserved
+        assert result.top_harmonization == row.top_harmonization
 
-    def test_top_harmonizations_list_items_are_stripped(self) -> None:
-        """Each suggestion in the alternatives list is stripped."""
+    def test_top_harmonizations_list_items_are_preserved(self) -> None:
+        """Each suggestion in the alternatives list is preserved."""
         # Given: manifest with whitespace in suggestion list
         suggestions = [" Lung Cancer ", "  Breast Cancer"]
         row = _make_row(top_harmonizations=suggestions)
@@ -69,8 +69,8 @@ class TestReaderStripsAIOutput:
         # When: written and read back
         result = _write_and_read_back(row)
 
-        # Then: each suggestion is stripped
-        assert result.top_harmonizations == ["Lung Cancer", "Breast Cancer"]
+        # Then: each suggestion is preserved
+        assert result.top_harmonizations == suggestions
 
     def test_to_harmonize_is_NOT_stripped(self) -> None:
         """User data (to_harmonize) must preserve whitespace — it is semantically significant."""

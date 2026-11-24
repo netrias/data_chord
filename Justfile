@@ -11,6 +11,9 @@ sync:
 lint:
 	uv run pre-commit run --all-files --show-diff-on-failure
 
+complexity:
+	uv run --frozen ruff check --config ruff-complexity.toml --ignore-noqa src backend
+
 dead-code:
 	uv run vulture
 

@@ -321,8 +321,7 @@ export const mountChangeFlow = (rootEl, columns) => {
   const wrap = _html('div', 'change-flow__chart');
   const svg = _svg('svg', { class: 'change-flow__svg', role: 'group', 'aria-label': 'Unique values by column and outcome' }, wrap);
   const empty = _html('p', 'change-flow__empty hidden', 'No column values to show.');
-  const foot = _html('p', 'change-flow__foot', 'Band height is the number of unique values. Thin bands are drawn at least 3 px tall.');
-  content.append(legend, wrap, empty, foot);
+  content.append(legend, wrap, empty);
   inner.appendChild(content);
   body.appendChild(inner);
 

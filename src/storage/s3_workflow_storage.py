@@ -7,7 +7,7 @@ writes, conditional updates, and temporary local materialization.
 from __future__ import annotations
 
 import json
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -90,9 +90,20 @@ class S3WorkflowStorage:
         """Delete all objects for a workflow that the caller owns."""
         self._require_access(user, dataset_workflow_id)
         workflow_prefix = f"{self._workflow_key(dataset_workflow_id)}/"
-        response = self.client.list_objects_v2(Bucket=self.bucket, Prefix=workflow_prefix)
-        for key in _listed_keys(response):
-            self.client.delete_object(Bucket=self.bucket, Key=key)
+        anchor = self._metadata_key(dataset_workflow_id)
+        arguments = {"Bucket": self.bucket, "Prefix": workflow_prefix}
+        while True:
+            response = self.client.list_objects_v2(**arguments)
+            for key in _listed_keys(response):
+                if key != anchor:
+                    self.client.delete_object(Bucket=self.bucket, Key=key)
+            if not response.get("IsTruncated"):
+                break
+            token = response.get("NextContinuationToken")
+            if not isinstance(token, str) or not token:
+                raise ValueError("S3 returned a truncated workflow listing without a continuation token.")
+            arguments["ContinuationToken"] = token
+        self.client.delete_object(Bucket=self.bucket, Key=anchor)
 
     def read_json(self, user: UserContext, file_id: str, kind: WorkflowFile) -> StoredJson | None:
         self._require_json_kind(kind)
@@ -106,9 +117,7 @@ class S3WorkflowStorage:
         try:
             data = json.loads(_body_bytes(response).decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise WorkflowJsonUnreadableError(
-                f"Workflow JSON is unreadable: {kind.value}"
-            ) from exc
+            raise WorkflowJsonUnreadableError(f"Workflow JSON is unreadable: {kind.value}") from exc
         return StoredJson(data=data, version=_version_from_response(response))
 
     def write_json(
@@ -208,41 +217,58 @@ class S3WorkflowStorage:
         self._require_artifact_kind(kind)
         self._require_access(user, file_id)
         suffix = artifact_suffix(source_path)
-        existing_keys = self._existing_artifact_keys(file_id, kind)
-        if len(existing_keys) > 1:
-            raise WorkflowConflictError(f"Artifact has multiple suffix variants: {kind.value}")
-        if existing_keys:
-            existing_key = existing_keys[0]
-            if kind == WorkflowFile.ORIGINAL_UPLOAD:
-                raise WorkflowConflictError(f"Artifact is create-once: {kind.value}")
-            if Path(existing_key).suffix.lower() != suffix:
-                raise WorkflowConflictError(f"Artifact suffix changed: {kind.value}")
-            key = existing_key
-            current_version = self._object_version(key)
-            if current_version is None:
-                raise WorkflowConflictError(f"Artifact version changed: {kind.value}")
-            if expected_version is None or expected_version != current_version:
-                raise WorkflowConflictError(f"Artifact version changed: {kind.value}")
-            # The conditional put closes the list/head/put race. If another
-            # worker publishes after the head read, S3 rejects this write.
-            write_condition = {"IfMatch": expected_version.value}
-        else:
-            if expected_version is not None:
-                raise WorkflowConflictError(f"Artifact does not exist: {kind.value}")
-            key = self._artifact_key(file_id, kind, suffix)
-            write_condition = {"IfNoneMatch": "*"}
+        target = self._artifact_write_target(file_id, kind, suffix, expected_version)
         try:
             response = self.client.put_object(
                 Bucket=self.bucket,
-                Key=key,
+                Key=target.key,
                 Body=source_path.read_bytes(),
-                **write_condition,
+                **target.condition,
             )
         except ClientError as exc:
             if _is_precondition_failed(exc) or (expected_version is not None and _is_not_found(exc)):
                 raise WorkflowConflictError(f"Artifact version changed: {kind.value}") from exc
             raise
-        return StoredArtifact(kind=kind, version=_version_from_response(response), suffix=Path(key).suffix)
+        return StoredArtifact(kind=kind, version=_version_from_response(response), suffix=Path(target.key).suffix)
+
+    def _artifact_write_target(
+        self,
+        file_id: str,
+        kind: WorkflowFile,
+        suffix: str,
+        expected_version: VersionToken | None,
+    ) -> _ArtifactWriteTarget:
+        existing_keys = self._existing_artifact_keys(file_id, kind)
+        if len(existing_keys) > 1:
+            raise WorkflowConflictError(f"Artifact has multiple suffix variants: {kind.value}")
+        if existing_keys:
+            return self._existing_artifact_write(existing_keys[0], kind, suffix, expected_version)
+        else:
+            if expected_version is not None:
+                raise WorkflowConflictError(f"Artifact does not exist: {kind.value}")
+            key = self._artifact_key(file_id, kind, suffix)
+            return _ArtifactWriteTarget(key, {"IfNoneMatch": "*"})
+
+    def _existing_artifact_write(
+        self,
+        existing_key: str,
+        kind: WorkflowFile,
+        suffix: str,
+        expected_version: VersionToken | None,
+    ) -> _ArtifactWriteTarget:
+        if kind == WorkflowFile.ORIGINAL_UPLOAD:
+            raise WorkflowConflictError(f"Artifact is create-once: {kind.value}")
+        if Path(existing_key).suffix.lower() != suffix:
+            raise WorkflowConflictError(f"Artifact suffix changed: {kind.value}")
+        key = existing_key
+        current_version = self._object_version(key)
+        if current_version is None:
+            raise WorkflowConflictError(f"Artifact version changed: {kind.value}")
+        if expected_version is None or expected_version != current_version:
+            raise WorkflowConflictError(f"Artifact version changed: {kind.value}")
+        # The conditional put closes the list/head/put race. If another
+        # worker publishes after the head read, S3 rejects this write.
+        return _ArtifactWriteTarget(key, {"IfMatch": expected_version.value})
 
     def artifact_version(
         self,
@@ -271,13 +297,10 @@ class S3WorkflowStorage:
         suffix = Path(key).suffix
         # Downstream tabular readers operate on Paths, so S3 objects are exposed
         # through a short-lived local file at the storage boundary.
-        with NamedTemporaryFile("wb", suffix=suffix, delete=False) as temp_file:
-            temp_path = Path(temp_file.name)
+        with NamedTemporaryFile("wb", suffix=suffix, delete_on_close=False) as temp_file:
             temp_file.write(_body_bytes(response))
-        try:
-            yield temp_path
-        finally:
-            temp_path.unlink(missing_ok=True)
+            temp_file.close()
+            yield Path(temp_file.name)
 
     def _require_access(self, user: UserContext, file_id: str) -> WorkflowMetadata:
         try:
@@ -321,11 +344,7 @@ class S3WorkflowStorage:
     def _existing_artifact_keys(self, file_id: str, kind: WorkflowFile) -> list[str]:
         prefix = self._artifact_prefix(file_id, kind)
         response = self.client.list_objects_v2(Bucket=self.bucket, Prefix=prefix)
-        return [
-            key
-            for key in _listed_keys(response)
-            if artifact_suffix_from_name(kind, Path(key).name) is not None
-        ]
+        return [key for key in _listed_keys(response) if artifact_suffix_from_name(kind, Path(key).name) is not None]
 
     def _metadata_key(self, file_id: str) -> str:
         return self._workflow_key(file_id, _METADATA_KEY)
@@ -401,6 +420,12 @@ def _is_not_found(exc: ClientError) -> bool:
 def _is_precondition_failed(exc: ClientError) -> bool:
     code = str(exc.response.get("Error", {}).get("Code", ""))
     return code in {"ConditionalRequestConflict", "PreconditionFailed", "409", "412"}
+
+
+@dataclass(frozen=True)
+class _ArtifactWriteTarget:
+    key: str
+    condition: Mapping[str, str]
 
 
 __all__ = [

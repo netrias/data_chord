@@ -3,7 +3,7 @@
  * Delegates to review mode modules (column or row) based on user selection.
  * Manages state persistence, navigation, and user interactions.
  */
-import { initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
+import { bindJobToPage, buildNavUrl, initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
 import { isValidFileId } from '/assets/shared/storage-keys.js';
 import { markAfterPaint, markTiming, measureTiming } from '/assets/shared/performance-timing.js';
 import {
@@ -21,6 +21,7 @@ import {
 } from './review_mode_column.js';
 import {
   getFileIdFromUrl,
+  reviewJobFromUrl,
   createValueCard,
   formatRowReference,
   toExcelRowNumber,
@@ -140,6 +141,10 @@ const _showReviewError = (message, action = 'none', fileId = getFileIdFromUrl())
   if (!reviewError) return;
   if (action === 'stage3') {
     renderRecoveryError(reviewError, message, fileId);
+  } else if (action === 'current-job') {
+    const url = new URL(window.location.href);
+    url.search = new URLSearchParams({ file_id: fileId }).toString();
+    renderErrorLink(reviewError, message, url.href, 'Open current job');
   } else if (action === 'reload') {
     renderErrorLink(reviewError, message, window.location.href, 'Reload Stage 4');
   } else {
@@ -223,7 +228,7 @@ const fetchRows = async () => {
     const response = await fetch(resultsEndpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file_id: fileId }),
+      body: JSON.stringify({ file_id: fileId, ...reviewJobFromUrl() }),
     });
     markTiming('stage4.rows.fetch.response', { status: response.status });
     measureTiming('stage4.rows.request', 'stage4.rows.fetch.start', 'stage4.rows.fetch.response');
@@ -232,6 +237,7 @@ const fetchRows = async () => {
       throw Object.assign(new Error(detail), { status: response.status });
     }
     const body = await response.json();
+    bindJobToPage(body.job_id, 'verify');
     markTiming('stage4.rows.fetch.parsed', {
       column_count: body.columns?.length ?? 0,
     });
@@ -247,7 +253,7 @@ const fetchRows = async () => {
   } catch (error) {
     console.error('Unable to load harmonized results:', error);
     const message = error.message || 'Unable to load harmonized results.';
-    const action = isReviewStateRecovery(message) ? 'stage3' : 'none';
+    const action = error.status === 410 ? 'current-job' : isReviewStateRecovery(message) ? 'stage3' : 'none';
     _showReviewError(message, action);
     _setReviewBlocked(true, true);
     return false;
@@ -270,6 +276,7 @@ const _serializeModeState = (modeState) => ({
  */
 const _buildSavePayload = () => ({
   file_id: getFileIdFromUrl(),
+  ...reviewJobFromUrl(),
   overrides: state.pendingOverrides,
   review_state: {
     review_mode: state.reviewMode,
@@ -330,9 +337,9 @@ const saveOverrides = async () => {
         if (status >= 400 && status < 500) {
           overrideSaveNeeded = false;
           const isRecovery = isReviewStateRecovery(error.message);
-          const action = isRecovery ? 'stage3' : 'reload';
+          const action = status === 410 ? 'current-job' : isRecovery ? 'stage3' : 'reload';
           _showReviewError(error.message, action);
-          _setReviewBlocked(true, isRecovery);
+          _setReviewBlocked(true, isRecovery || status === 410);
         } else {
           overrideSaveNeeded = true;
           _showReviewError(error.message || 'Unable to save review changes.');
@@ -922,13 +929,12 @@ const _syncReviewControls = () => {
  * Flush overrides to the server, then navigate to Stage 5.
  * Awaiting ensures the manifest parquet write completes before the page transitions.
  */
-const navigateToStage5 = async () => {
-  if (state.reviewBlocked || !(await flushPendingSaves())) return;
-  const fileId = getFileIdFromUrl();
-  if (!fileId || !isValidFileId(fileId)) return;
-  advanceMaxReachedStage('review');
-  const url = `${stageFiveUrl}?file_id=${encodeURIComponent(fileId)}`;
-  window.location.assign(url);
+const navigateToStage5 = async (destination = buildNavUrl(stageFiveUrl)) => {
+  if (new URL(destination, window.location.origin).searchParams.has('file_id')) {
+    if (state.reviewBlocked || !(await flushPendingSaves())) return;
+    advanceMaxReachedStage('review');
+  }
+  window.location.assign(destination);
 };
 
 /**
@@ -939,7 +945,7 @@ const init = async () => {
   markTiming('stage4.init.start');
   setActiveStage('verify');
   initStepInstruction('verify');
-  initNavigationEvents();
+  initNavigationEvents({ review: navigateToStage5 });
 
   if (state.reviewBlocked || !(await fetchRows())) return;
   _syncReviewControls();

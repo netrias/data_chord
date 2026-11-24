@@ -9,6 +9,7 @@ declare module '/assets/shared/step-instruction-ui.js' {
   export function setActiveStage(stageKey: string): void;
   export function initNavigationEvents(): void;
   export function advanceMaxReachedStage(stageKey: string): void;
+  export function resetMaxReachedStage(): void;
 }
 
 declare module '/assets/shared/storage-keys.js' {

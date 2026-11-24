@@ -62,21 +62,7 @@ class TransformersModelRunner:
             )
             torch.nn.Module.to(model, device)
             model.eval()
-            loaded_at = time.perf_counter()
-            results = _run_batches(model, tokenizer, requests, device, model_config)
-            finished_at = time.perf_counter()
-            logger.info(
-                "Completed local model inference",
-                extra={
-                    "model_path": str(model_path),
-                    "architecture": model.config.model_type,
-                    "device": device.type,
-                    "terms": len(requests),
-                    "load_ms": round((loaded_at - started_at) * 1000, 1),
-                    "inference_ms": round((finished_at - loaded_at) * 1000, 1),
-                },
-            )
-            return results
+            return _infer_loaded_model(model_path, model, tokenizer, requests, device, model_config, started_at)
         except LocalInferenceError:
             raise
         except Exception as exc:
@@ -193,6 +179,42 @@ def _release_device_memory(device: torch.device) -> None:
         torch.cuda.empty_cache()
     elif device.type == "mps":
         torch.mps.empty_cache()
+
+
+def _log_inference(
+    path: Path,
+    model: PreTrainedModel,
+    device: torch.device,
+    terms: int,
+    started_at: float,
+    loaded_at: float,
+) -> None:
+    logger.info(
+        "Completed local model inference",
+        extra={
+            "model_path": str(path),
+            "architecture": model.config.model_type,
+            "device": device.type,
+            "terms": terms,
+            "load_ms": round((loaded_at - started_at) * 1000, 1),
+            "inference_ms": round((time.perf_counter() - loaded_at) * 1000, 1),
+        },
+    )
+
+
+def _infer_loaded_model(
+    path: Path,
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizerBase,
+    requests: tuple[TermHarmonizationRequest, ...],
+    device: torch.device,
+    config: LocalModelConfig,
+    started_at: float,
+) -> tuple[TermHarmonizationResponse, ...]:
+    loaded_at = time.perf_counter()
+    results = _run_batches(model, tokenizer, requests, device, config)
+    _log_inference(path, model, device, len(requests), started_at, loaded_at)
+    return results
 
 
 __all__ = ["TransformersModelRunner"]

@@ -7,6 +7,13 @@ repos:
         language: system
         types: [python]
 
+      - id: application-complexity
+        name: application complexity (8 complexity, 8 branches, 20 statements)
+        entry: uv run --frozen ruff check --config ruff-complexity.toml --ignore-noqa src backend
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: no-cross-stage-imports
         name: no cross-stage imports
         description: "Stages must depend on domain, not on each other"

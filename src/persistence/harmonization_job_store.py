@@ -138,19 +138,7 @@ class HarmonizationJobState:
     ) -> HarmonizationJobState:
         if not isinstance(payload, Mapping):
             raise HarmonizationJobUnreadableError("harmonization job must be an object")
-
-        schema_version = payload.get("schema_version")
-        if isinstance(schema_version, bool) or not isinstance(schema_version, int):
-            raise HarmonizationJobUnreadableError("harmonization job has an invalid schema version")
-        if schema_version != _CURRENT_SCHEMA_VERSION:
-            raise HarmonizationJobUnreadableError(
-                f"harmonization job schema {schema_version} is not supported"
-            )
-
-        expected_file_id = dataset_workflow_id_from_value(file_id)
-        stored_file_id = payload.get("file_id")
-        if stored_file_id != expected_file_id:
-            raise HarmonizationJobUnreadableError("harmonization job file identity does not match")
+        expected_file_id = _validate_job_identity(payload, file_id)
 
         polling_job_id = _required_non_empty_string(payload, "polling_job_id")
         job_id = _required_non_empty_string(payload, "job_id")
@@ -266,6 +254,18 @@ def _manifest_summary_from_store(value: object) -> HarmonizationManifestSummary 
         return HarmonizationManifestSummary.model_validate(value)
     except ValueError as exc:
         raise HarmonizationJobUnreadableError("harmonization job manifest summary is invalid") from exc
+
+
+def _validate_job_identity(payload: Mapping[str, object], file_id: DatasetWorkflowId | str) -> DatasetWorkflowId:
+    schema = payload.get("schema_version")
+    if isinstance(schema, bool) or not isinstance(schema, int):
+        raise HarmonizationJobUnreadableError("harmonization job has an invalid schema version")
+    if schema != _CURRENT_SCHEMA_VERSION:
+        raise HarmonizationJobUnreadableError(f"harmonization job schema {schema} is not supported")
+    expected = dataset_workflow_id_from_value(file_id)
+    if payload.get("file_id") != expected:
+        raise HarmonizationJobUnreadableError("harmonization job file identity does not match")
+    return expected
 
 
 __all__ = [

@@ -19,6 +19,7 @@ from tests.conftest import (
     create_csv_content,
     create_harmonized_csv,
     create_manifest_for_file,
+    review_precondition,
     review_state_payload,
     save_test_pvs_by_column,
     store_test_harmonization_manifest,
@@ -141,7 +142,7 @@ async def test_full_flow_overrides_propagate_within_column(
     }
     save_response = await app_client.post(
         "/stage-4/overrides",
-        headers={"If-None-Match": "*"},
+        headers=await review_precondition(app_client, file_id),
         json=overrides_payload,
     )
     assert save_response.status_code == 200
@@ -194,7 +195,7 @@ async def test_full_flow_two_files_isolated_overrides(
             },
             "review_state": review_state_payload(),
         },
-        headers={"If-None-Match": "*"},
+        headers=await review_precondition(app_client, file_one),
     )
     assert save_response.status_code == 200
 
@@ -255,7 +256,7 @@ async def test_full_flow_reharmonize_clears_overrides(
             },
             "review_state": review_state_payload(),
         },
-        headers={"If-None-Match": "*"},
+        headers=await review_precondition(app_client, file_id),
     )
     assert save_response.status_code == 200
 
@@ -322,7 +323,7 @@ async def test_reharmonize_cannot_clear_another_users_overrides(
     )
     save_response = await app_client.post(
         "/stage-4/overrides",
-        headers={**alice_headers, "If-None-Match": "*"},
+        headers=await review_precondition(app_client, file_id, alice_headers),
         json={
             "file_id": file_id,
             "overrides": {
@@ -454,6 +455,7 @@ async def test_full_flow_bom_overrides_apply(
                     row_indices.extend(t["rowIndices"])
     row_indices = sorted(set(row_indices))
 
+    # When the reviewer saves a correction for the repeated term.
     save_response = await app_client.post(
         "/stage-4/overrides",
         json={
@@ -466,7 +468,7 @@ async def test_full_flow_bom_overrides_apply(
             },
             "review_state": review_state_payload(),
         },
-        headers={"If-None-Match": "*"},
+        headers=await review_precondition(app_client, file_id),
     )
     assert save_response.status_code == 200
 
@@ -539,7 +541,7 @@ async def test_full_flow_duplicate_headers_keep_columns_separate(
             },
             "review_state": review_state_payload(),
         },
-        headers={"If-None-Match": "*"},
+        headers=await review_precondition(app_client, file_id),
     )
     assert save_response.status_code == 200
 

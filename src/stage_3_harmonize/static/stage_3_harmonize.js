@@ -1,4 +1,4 @@
-import { initStepInstruction, updateStepInstruction, setActiveStage, initNavigationEvents, isSafeRelativeUrl, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
+import { bindJobToPage, initStepInstruction, updateStepInstruction, setActiveStage, initNavigationEvents, isSafeRelativeUrl, advanceMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
 import { STAGE_3_JOB_KEY, readFromSession, writeToSession, removeFromSession } from '/assets/shared/storage-keys.js';
 import { renderColumnOutcomeTable } from '/assets/shared/column-outcome-table.js';
 import { formatStandardName, summarizeResult } from './result-summary.js';
@@ -18,7 +18,6 @@ const errorBanner = document.getElementById('stageThreeError');
 const stageThreeTitle = document.getElementById('stageThreeTitle');
 const stageThreeHeader = document.getElementById('stageThreeHeader');
 const returnToStageTwo = document.getElementById('returnToStageTwo');
-const harmonizeAnimation = document.querySelector('#loadingState .harmonize-animation');
 const harmonizeProgressMessage = document.getElementById('harmonizeProgressMessage');
 const columnOutcomePanel = document.querySelector('[data-column-outcome-panel]');
 const columnOutcomeContainer = document.querySelector('[data-column-outcome-table]');
@@ -291,17 +290,6 @@ const _toggleEmptyState = (show) => {
   emptyState.classList.toggle('hidden', !show);
 };
 
-/* why: animation is purely decorative - failures should not break page functionality. */
-const _toggleAnimation = (show) => {
-  try {
-    if (harmonizeAnimation) {
-      harmonizeAnimation.classList.toggle('hidden', !show);
-    }
-  } catch {
-    /* Animation toggle failed - page continues to work without it. */
-  }
-};
-
 
 const _clearError = () => {
   errorBanner.classList.add('hidden');
@@ -363,34 +351,24 @@ const _updateTitleForStatus = (status) => {
   if (stageThreeTitle) stageThreeTitle.textContent = 'Harmonizing';
 };
 
-const _formatElapsed = (elapsedSeconds) => {
-  if (!Number.isFinite(elapsedSeconds) || elapsedSeconds < 0) {
-    return null;
+/* why: whole minutes, so the live-region text changes at most once a minute instead of on every poll. */
+const _progressText = (elapsedSeconds) => {
+  const minutes = Number.isFinite(elapsedSeconds) ? Math.floor(elapsedSeconds / 60) : 0;
+  if (minutes >= 10) {
+    return `Still running after ${minutes} min. Large datasets can take a while; keep this tab open.`;
   }
-  const minutes = Math.floor(elapsedSeconds / 60);
-  const seconds = Math.floor(elapsedSeconds % 60);
-  if (minutes <= 0) {
-    return `${seconds}s`;
+  if (minutes >= 2) {
+    return `Still working after ${minutes} min. Larger datasets can take several minutes.`;
   }
-  return `${minutes}m ${seconds.toString().padStart(2, '0')}s`;
+  return 'This usually takes 1–2 minutes.';
 };
 
 const _updateProgressMessage = (job) => {
-  if (!harmonizeProgressMessage) {
-    return;
+  const text = _progressText(Number(job?.elapsed_seconds));
+  /* why: rewriting the same text can make screen readers announce it again. */
+  if (harmonizeProgressMessage && harmonizeProgressMessage.textContent !== text) {
+    harmonizeProgressMessage.textContent = text;
   }
-
-  const elapsedSeconds = Number(job?.elapsed_seconds);
-  const elapsedLabel = _formatElapsed(elapsedSeconds);
-  if (elapsedSeconds >= 600 && elapsedLabel) {
-    harmonizeProgressMessage.textContent = `Still running after ${elapsedLabel}. Large datasets can take a while; keep this tab open.`;
-    return;
-  }
-  if (elapsedSeconds >= 120 && elapsedLabel) {
-    harmonizeProgressMessage.textContent = `Still working after ${elapsedLabel}. Larger datasets can take several minutes.`;
-    return;
-  }
-  harmonizeProgressMessage.textContent = 'This usually takes 1-2 minutes.';
 };
 
 const _clearPollTimer = () => {
@@ -428,8 +406,8 @@ const _renderJob = (job, pollIntervalMs = JOB_POLL_INTERVAL_MS) => {
   _clearError();
 
   if (_isFailedStatus(normalized)) {
-    _toggleLoadingState(true);
-    _toggleAnimation(false);
+    /* why: a failed job shows the "Harmonization Failed" title and the error, not the "usually takes 1–2 minutes" text. */
+    _toggleLoadingState(false);
     _hideMetricsDashboard();
     _showError(jobForSession.detail || 'Harmonization failed. Please retry.');
     reviewButton.disabled = true;
@@ -444,7 +422,6 @@ const _renderJob = (job, pollIntervalMs = JOB_POLL_INTERVAL_MS) => {
     updateStepInstruction('harmonize_complete');
   } else {
     _toggleLoadingState(true);
-    _toggleAnimation(true);
     _updateProgressMessage(jobForSession);
     _hideMetricsDashboard();
     reviewButton.disabled = true;
@@ -507,6 +484,8 @@ const _startHarmonize = async (payloadOverride = null) => {
   _clearError();
   _hideMetricsDashboard();
   _toggleEmptyState(false);
+  /* why: a retry starts a new job, so the previous job's elapsed time must not show while the request is pending. */
+  _updateProgressMessage(null);
   _toggleLoadingState(true);
   reviewButton.disabled = true;
   retryButton.classList.add('hidden');
@@ -524,9 +503,11 @@ const _startHarmonize = async (payloadOverride = null) => {
     if (!response.ok) {
       throw new Error(body.detail || 'Unable to start harmonization job.');
     }
+    bindJobToPage(body.job_id, 'harmonize');
     _renderJob(body, INITIAL_JOB_POLL_INTERVAL_MS);
   } catch (error) {
     console.error(error);
+    _updateTitleForStatus('failed');
     _showError(error.message || 'Unexpected error while launching harmonization.');
     _toggleLoadingState(false);
     retryButton.classList.remove('hidden');

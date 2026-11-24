@@ -319,12 +319,14 @@ async def test_workflow_write_conflicts_are_globally_reported_as_retryable(
     sample_csv_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Given a concurrent write conflict from workflow storage.
     file_id = await upload_file(app_client, sample_csv_path)
     monkeypatch.setattr(
         "src.stage_1_upload.router.save_initial_workflow_state",
         MagicMock(side_effect=WorkflowConflictError(file_id)),
     )
 
+    # When analysis saves the workflow plan.
     response = await app_client.post(
         "/stage-1/analyze",
         json={
@@ -334,6 +336,7 @@ async def test_workflow_write_conflicts_are_globally_reported_as_retryable(
         },
     )
 
+    # Then the caller receives the retryable conflict response.
     assert response.status_code == 409
     assert response.json()["detail"] == GENERIC_API_ERROR_DETAIL
 

@@ -78,12 +78,12 @@ class DynamoDbReferenceDataRepository:
         if cached is not None:
             return cached
 
-        # Bound peak memory by serializing loads of uncached model partitions.
+        # Serialize cache misses so concurrent requests cannot build several full models.
         with self._model_load_lock:
             cached = self._cached_model(version)
             if cached is not None:
                 return cached
-            model = self.load_cdes(version).model
+            model = self._load_uncached_model(version)
             self._cache_model(version, model)
             return model
 
@@ -97,8 +97,17 @@ class DynamoDbReferenceDataRepository:
     def _cache_model(self, version: DataModelVersionReference, model: ReferenceModel) -> None:
         with self._models_lock:
             self._models[version] = model
+            self._models.move_to_end(version)
             if len(self._models) > _MAX_CACHED_MODELS:
                 self._models.popitem(last=False)
+
+    def _load_uncached_model(self, version: DataModelVersionReference) -> ReferenceModel:
+        try:
+            return self.load_cdes(version).model
+        except (ReferenceDataCorruptError, ReferenceModelNotFoundError, ReferenceDataUnavailableError):
+            raise
+        except Exception as exc:
+            raise ReferenceDataCorruptError("Reference model is malformed") from exc
 
     def load_cdes(self, version: DataModelVersionReference) -> AutoModelReference:
         """Read the verified model with its optional relationship metadata."""
@@ -182,6 +191,7 @@ def _catalog_summaries(entries: list[Mapping[str, str]]) -> tuple[DataModelSumma
             raise ReferenceDataCorruptError(f"Reference catalog labels disagree: {key}")
         versions_by_model.setdefault(key, []).append(DataModelVersionInfo(entry["external_version_number"]))
     return tuple(DataModelSummary(key, labels[key], versions) for key, versions in versions_by_model.items())
+
 
 
 def _catalog_markers(

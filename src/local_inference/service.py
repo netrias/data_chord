@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -37,46 +38,53 @@ class LocalTermHarmonizer:
         self,
         requests: tuple[TermHarmonizationRequest, ...],
     ) -> tuple[TermHarmonizationResponse, ...]:
-        assignments: dict[LocalModelConfig, list[tuple[int, TermHarmonizationRequest]]] = {
-            model: [] for model in self._catalog.models
-        }
+        assignments = self._assign_requests(requests)
+        ordered_results: list[TermHarmonizationResponse | None] = [None] * len(requests)
+        for model in self._catalog.models:
+            batch = assignments[model]
+            if batch:
+                self._run_model_batch(model, batch, ordered_results)
+        if any(result is None for result in ordered_results):
+            raise LocalInferenceError("Local inference did not return every requested result")
+        return tuple(cast(TermHarmonizationResponse, result) for result in ordered_results)
+
+    def _assign_requests(
+        self,
+        requests: tuple[TermHarmonizationRequest, ...],
+    ) -> dict[LocalModelConfig, list[_AssignedRequest]]:
+        assignments: dict[LocalModelConfig, list[_AssignedRequest]] = {model: [] for model in self._catalog.models}
         for index, request in enumerate(requests):
             try:
                 model = self._catalog.model_for(request.cde)
             except KeyError as exc:
                 raise UnsupportedCdeError(request.cde) from exc
-            assignments[model].append((index, request))
+            assignments[model].append(_AssignedRequest(index, request))
+        return assignments
 
-        ordered_results: list[TermHarmonizationResponse | None] = [None] * len(requests)
-        for model in self._catalog.models:
-            model_assignments = assignments[model]
-            if not model_assignments:
-                continue
-            model_requests = tuple(request for _index, request in model_assignments)
-            model_results = self._runner.harmonize(
-                self._catalog.model_path(model),
-                model,
-                model_requests,
+    def _run_model_batch(
+        self,
+        model: LocalModelConfig,
+        batch: list[_AssignedRequest],
+        ordered_results: list[TermHarmonizationResponse | None],
+    ) -> None:
+        requests = tuple(item.request for item in batch)
+        results = self._runner.harmonize(self._catalog.model_path(model), model, requests)
+        if len(results) != len(requests):
+            raise LocalInferenceError(
+                f"Local model {model.relative_path} returned {len(results)} results for {len(requests)} requests"
             )
-            if len(model_results) != len(model_requests):
+        for item, result in zip(batch, results, strict=True):
+            if result.matched_value is not None and result.matched_value not in item.request.permissible_values:
                 raise LocalInferenceError(
-                    f"Local model {model.relative_path} returned {len(model_results)} results "
-                    f"for {len(model_requests)} requests"
+                    f"Local model {model.relative_path} returned a value outside CDE {item.request.cde}"
                 )
-            for (request_index, request), result in zip(
-                model_assignments,
-                model_results,
-                strict=True,
-            ):
-                if result.matched_value is not None and result.matched_value not in request.permissible_values:
-                    raise LocalInferenceError(
-                        f"Local model {model.relative_path} returned a value outside CDE {request.cde}"
-                    )
-                ordered_results[request_index] = result
+            ordered_results[item.index] = result
 
-        if any(result is None for result in ordered_results):
-            raise LocalInferenceError("Local inference did not return every requested result")
-        return tuple(cast(TermHarmonizationResponse, result) for result in ordered_results)
+
+@dataclass(frozen=True)
+class _AssignedRequest:
+    index: int
+    request: TermHarmonizationRequest
 
 
 __all__ = [

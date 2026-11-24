@@ -19,7 +19,7 @@ from src.persistence.harmonization_job_store import (
     load_harmonization_job,
     save_harmonization_job,
 )
-from src.persistence.workflow_artifacts import load_upload_artifact
+from src.persistence.workflow_artifacts import upload_is_available
 from src.persistence.workflow_state_store import (
     LoadedWorkflowState,
     WorkflowStateUnreadableError,
@@ -106,11 +106,12 @@ def start_harmonization(
     user: UserContext,
     file_id: str,
     polling_job_id: str | None = None,
+    expected_plan_version: str | None = None,
     reserve_capacity: Callable[[], bool] | None = None,
     release_capacity: Callable[[], None] | None = None,
 ) -> HarmonizationStart:
     """Persist an accepted run before the endpoint returns success."""
-    if load_upload_artifact(upload_storage, workflow_storage, user, file_id) is None:
+    if not upload_is_available(upload_storage, workflow_storage, user, file_id):
         raise HarmonizationWorkflowNotFoundError(file_id)
 
     loaded_state = _load_current_workflow_state(
@@ -118,6 +119,8 @@ def start_harmonization(
         user=user,
         file_id=file_id,
     )
+    if expected_plan_version is not None and expected_plan_version != loaded_state.version.value:
+        raise HarmonizationStartConflictError(file_id)
     try:
         existing = load_harmonization_job(workflow_storage, user, file_id)
     except HarmonizationJobUnreadableError as exc:
@@ -247,6 +250,11 @@ class RunAuthority:
             raise StaleHarmonizationWorkerError(self._accepted_job.polling_job_id)
         return loaded
 
+    def require_publication_authority(self) -> None:
+        """Fence publication against both the current worker lease and workflow plan."""
+        self.require_current()
+        self.require_plan_current()
+
     def require_plan_current(self) -> LoadedWorkflowState:
         loaded = load_workflow_state(
             self._workflow_storage,
@@ -272,38 +280,48 @@ async def heartbeat_harmonization_job(
             return
         except TimeoutError:
             pass
-        try:
-            loaded = load_harmonization_job(workflow_storage, user, accepted_job.file_id)
-        except HarmonizationJobUnreadableError:
-            logger.exception(
-                "Harmonization heartbeat stopped because durable job state is unreadable",
-                extra={"file_id": accepted_job.file_id, "job_id": accepted_job.polling_job_id},
-            )
+        if not _keep_heartbeating(workflow_storage, user, accepted_job):
             return
-        except Exception:
-            logger.warning(
-                "Harmonization heartbeat read failed; retrying",
-                exc_info=True,
-                extra={"file_id": accepted_job.file_id, "job_id": accepted_job.polling_job_id},
-            )
-            continue
-        if loaded is None or not _same_worker(loaded.job, accepted_job) or not loaded.job.is_active():
-            return
-        try:
-            save_harmonization_job(
-                workflow_storage,
-                user,
-                loaded.job.with_heartbeat(),
-                expected_version=loaded.version,
-            )
-        except HarmonizationJobConflictError:
-            return
-        except Exception:
-            logger.warning(
-                "Harmonization heartbeat write failed; retrying",
-                exc_info=True,
-                extra={"file_id": accepted_job.file_id, "job_id": accepted_job.polling_job_id},
-            )
+
+
+def _keep_heartbeating(
+    workflow_storage: WorkflowStorage,
+    user: UserContext,
+    accepted_job: HarmonizationJobState,
+) -> bool:
+    try:
+        loaded = load_harmonization_job(workflow_storage, user, accepted_job.file_id)
+    except HarmonizationJobUnreadableError:
+        logger.exception(
+            "Harmonization heartbeat stopped because durable job state is unreadable",
+            extra={"file_id": accepted_job.file_id, "job_id": accepted_job.polling_job_id},
+        )
+        return False
+    except Exception:
+        logger.warning(
+            "Harmonization heartbeat read failed; retrying",
+            exc_info=True,
+            extra={"file_id": accepted_job.file_id, "job_id": accepted_job.polling_job_id},
+        )
+        return True
+    if loaded is None or not _same_worker(loaded.job, accepted_job) or not loaded.job.is_active():
+        return False
+    try:
+        save_harmonization_job(
+            workflow_storage,
+            user,
+            loaded.job.with_heartbeat(),
+            expected_version=loaded.version,
+        )
+    except HarmonizationJobConflictError:
+        return False
+    except Exception:
+        logger.warning(
+            "Harmonization heartbeat write failed; retrying",
+            exc_info=True,
+            extra={"file_id": accepted_job.file_id, "job_id": accepted_job.polling_job_id},
+        )
+    return True
 
 
 def complete_harmonization_job(

@@ -6,8 +6,6 @@
     <title>Data Chord · Harmonize</title>
     <link rel="stylesheet" href="{{ app_path_for(request, 'shared_static', path='tokens.css') }}?v={{ request.app.state.asset_version }}" />
     <link rel="stylesheet" href="{{ app_path_for(request, 'stage_three_static', path='stage_3_harmonize.css') }}?v={{ request.app.state.asset_version }}" />
-    <!-- Animation CSS loaded separately - page works without it -->
-    <link rel="stylesheet" href="{{ app_path_for(request, 'stage_three_static', path='harmonize-animation.css') }}?v={{ request.app.state.asset_version }}" />
   </head>
   <body>
     {% from "progress_tracker.html" import progress_tracker with context %}
@@ -26,63 +24,20 @@
         </header>
 
         <div id="stageThreeEmptyState" class="stage-empty hidden">
-          <p class="stage-empty-title">We need a harmonization job</p>
+          <h1 class="stage-empty-title">We need a harmonization job</h1>
           <p class="stage-empty-copy">
             Head back to Stage 2 to confirm your mappings and start harmonization.
           </p>
           <button id="returnToStageTwo" class="netrias-btn" type="button">Back to mappings</button>
         </div>
 
-        <div id="loadingState" class="loading-state" aria-live="assertive">
-          <!-- Fallback spinner - hidden when animation loads successfully -->
+        <div id="loadingState" class="loading-state" aria-live="polite">
+          <!-- Fallback spinner - stays visible until the animation script marks the loading state as running -->
           <div class="loading-spinner loading-spinner--fallback" aria-hidden="true"></div>
           <!-- Main animation - purely decorative, page works without it -->
-          <div class="harmonize-animation" role="presentation" aria-hidden="true">
-            <div class="transform-line">
-              <div class="transform-line__glow"></div>
-              <div class="plasma-tube">
-                <div class="plasma-tube__outer"></div>
-                <div class="plasma-tube__inner"></div>
-              </div>
-              <div class="ripple ripple--1"></div>
-              <div class="ripple ripple--2"></div>
-              <div class="ripple ripple--3"></div>
-            </div>
-            <div class="block block--1"></div>
-            <div class="block block--2"></div>
-            <div class="block block--3"></div>
-            <div class="block block--4"></div>
-            <div class="block block--5"></div>
-          </div>
-          <script>
-            /* Randomize block shapes and colors on page load */
-            (function() {
-              const COLORS = ['#e74c3c', '#3498db', '#f39c12', '#9b59b6', '#1abc9c'];
-              const SHAPES = [
-                { clip: 'polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)' },                    // square
-                { clip: 'polygon(50% 0%, 0% 100%, 100% 100%)' },                            // triangle
-                { clip: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)' },                    // diamond
-                { clip: 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)' },  // hexagon
-                { clip: 'polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%)' }, // octagon
-              ];
-              function shuffle(arr) {
-                const a = arr.slice();
-                for (let i = a.length - 1; i > 0; i--) {
-                  const j = Math.floor(Math.random() * (i + 1));
-                  [a[i], a[j]] = [a[j], a[i]];
-                }
-                return a;
-              }
-              const colors = shuffle(COLORS);
-              const shapes = shuffle(SHAPES);
-              document.querySelectorAll('.block').forEach((el, i) => {
-                el.style.setProperty('--block-color', colors[i % colors.length]);
-                el.style.setProperty('--block-clip', shapes[i % shapes.length].clip);
-              });
-            })();
-          </script>
-          <p class="loading-message loading-message--primary">Netrias is harmonizing your dataset</p>
-          <p id="harmonizeProgressMessage" class="loading-message loading-message--secondary">This usually takes 1-2 minutes.</p>
+          <canvas class="harmonize-animation" aria-hidden="true"></canvas>
+          <h1 class="loading-message loading-message--primary">Harmonizing your dataset</h1>
+          <p id="harmonizeProgressMessage" class="loading-message loading-message--secondary">This usually takes 1–2 minutes.</p>
         </div>
 
         <section id="stageThreeComplete" class="stage-three-complete hidden" data-column-outcome-panel aria-live="polite">
@@ -135,6 +90,8 @@
         stageTwoUrl: {{ app_path_for(request, 'stage_two_mapping_page') | tojson }},
       };
     </script>
+    {# why: its own module script, so an animation failure cannot stop the page script. #}
+    <script type="module" src="{{ app_path_for(request, 'stage_three_static', path='harmonize-animation.js') }}?v={{ request.app.state.asset_version }}"></script>
     <script type="module" src="{{ app_path_for(request, 'stage_three_static', path='stage_3_harmonize.js') }}?v={{ request.app.state.asset_version }}"></script>
   </body>
 </html>

@@ -195,10 +195,16 @@ Run `just --list` to see all shortcuts. These are the main development checks:
 | `just test` | Python tests |
 | `just js-test` | JavaScript unit tests |
 | `just lint` | Repository pre-commit checks |
+| `just complexity` | Application complexity, branches, and statements |
 | `just typecheck` | Python type check |
 | `npm run typecheck` | JavaScript and TypeScript type check |
 | `just test-e2e` | Local browser tests |
 | `just infra-test` | OpenTofu and deployment-script tests |
+
+Application functions in `src/` and `backend/` must have at most 8 cyclomatic
+complexity, 8 branches, and 20 statements. `just complexity` and the pre-commit
+checks enforce these limits, including functions with `noqa` comments. Tests
+and tooling retain the general lint rules.
 
 Pull requests from forks run the infrastructure tests, JavaScript syntax check,
 and JavaScript unit tests. GitHub does not give private dependency credentials
