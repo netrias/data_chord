@@ -48,6 +48,7 @@ from src.programmatic_api.schemas import (
     HarmonizationSubmissionRequest,
     HarmonizationSubmitResponse,
 )
+from src.shared.model_recovery import REFERENCE_UNAVAILABLE_DETAIL
 from src.storage import (
     UnsupportedUploadError,
     UploadTooLargeError,
@@ -217,7 +218,7 @@ def _job_failure_message(failure: HarmonizationFailure | None) -> str:
     if failure is HarmonizationFailure.MODEL_VERSION_RETIRED:
         return "This model version is no longer available. Choose a current version and submit a new job."
     if failure is HarmonizationFailure.REFERENCE_UNAVAILABLE:
-        return "Reference data is currently unavailable. Please try again later."
+        return REFERENCE_UNAVAILABLE_DETAIL
     return "Harmonization failed. Please retry."
 
 

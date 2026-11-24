@@ -782,6 +782,32 @@ async def test_completed_harmonization_still_opens_when_reference_data_changes(
     repository.load_model.assert_not_called()
 
 
+async def test_recovery_does_not_link_to_a_completed_job_for_another_plan(app_client: AsyncClient) -> None:
+    # Given a completed result belonging to an older mapping plan for the same upload.
+    file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "earlier.csv")
+    params = {"file_id": file_id, "data_model_key": "gc", "external_version_number": "11.0.4"}
+    assert (await app_client.post("/stage-1/analyze", json=params)).status_code == 200
+    await confirm_mapping_choices(app_client, file_id)
+    submitted = await app_client.post("/stage-3/harmonize", json={"file_id": file_id})
+    assert submitted.status_code == 200
+    result = await _wait_for_stage_three_job(app_client, submitted.json()["job_id"], file_id)
+    assert result["status"] == "succeeded"
+    storage = dependencies.get_workflow_storage()
+    user = dependencies.get_user_context()
+    saved = load_harmonization_job(storage, user, file_id)
+    assert saved is not None
+    earlier = replace(saved.job, plan_version="sha256:" + "0" * 64)
+    save_harmonization_job(storage, user, earlier, expected_version=saved.version)
+
+    # When the user opens model recovery for the current plan.
+    response = await app_client.get("/stage-1", params={"file_id": file_id, "reselect_model": "true"})
+
+    # Then the upload is still available and the earlier job ID is omitted.
+    assert response.status_code == 200
+    assert '"file_name": "earlier.csv"' in response.text
+    assert '"completedJobId": null' in response.text
+
+
 async def test_running_harmonization_can_be_reopened_after_model_retirement(
     app_client: AsyncClient, mock_netrias_client: MagicMock
 ) -> None:
