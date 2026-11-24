@@ -3127,6 +3127,7 @@ test('a retired model selection can be replaced with a current version for the s
   await page.locator('#analyzeButton').click();
   await page.locator('.data-model-confirm-btn').click();
   await page.waitForURL('**/stage-2?*');
+  await expect(page.locator('#mappingRows .mapping-row').first()).toBeVisible();
   const fileId = getFileIdFromUrl(page);
   const statePath = path.join(e2eEnv.DATA_CHORD_WORKFLOW_STORAGE_DIR, 'workflows', fileId, 'json', 'workflow_state.json');
   const plan = JSON.parse(fs.readFileSync(statePath, 'utf8'));
