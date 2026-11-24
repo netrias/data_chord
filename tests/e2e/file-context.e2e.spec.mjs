@@ -193,11 +193,8 @@ test('the upload widget shows Analyze counts for the analyzed sheet only', async
   await page.waitForURL(/\/stage-2/);
   await fileName(page).hover();
 
-  // Then downstream details describe the analyzed Patients sheet
-  const mappedFacts = await cardFacts(page);
-  expect(mappedFacts.Sheet).toBe('Patients');
-  expect(mappedFacts.Rows).toBe('3');
-  expect(mappedFacts.Columns).toBe('2');
+  // Then downstream details describe the analyzed Patients sheet, with the same upload facts
+  expect(await cardFacts(page)).toEqual(patientsFacts);
 });
 
 test('the workbook sheet cannot change while Analyze is waiting', async ({ page }) => {
