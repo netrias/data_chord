@@ -491,11 +491,26 @@ the deployment.
 
 ## 6. Load reference data
 
-The deployment creates an empty reference-data table. Data Chord cannot run a
-workflow until standards data is published. Auto-Model owns DynamoDB publication;
-Data Chord provides the runtime reader for flat schema-2 CDE rows. Auto-Model
-must publish the flat CDE rows before Data Chord can read the standards table.
-Data Chord no longer provides `export` or `sync` commands for this DynamoDB table.
+The deployment creates an empty reference-data table. Auto-Model publishes the
+catalog that Data Chord reads to offer models and run workflows.
+
+The hosted reader uses flat catalog schema 0. Each CDE has one metadata row and
+its value chunks under the same CDE key. The metadata may include
+`node_relations`. When supplied, the model's `nodes` list includes every node,
+including any that have no CDEs. Otherwise the reader derives the node list from
+the relationships. A CDE description and approved values describe the shared CDE.
+The description, type, required flag, and key flag under a relationship apply
+to that node's use of the CDE.
+
+Before upgrading an existing environment, publish a complete schema-0 catalog
+to a separate table and check its contents with the new reader. Plan the task's
+table setting and its read permissions together with the image. The managed
+deployment sets both from its provisioned table, so the cutover needs an
+infrastructure change. Retain the previous image and table for rollback. The
+service keeps a process-local cache of published models, so roll out a new
+task when switching publications for the same external model version.
+Verify model selection, mapping, harmonization, and export in staging before
+promoting further.
 
 ## 7. Invite a user and test one workflow
 
