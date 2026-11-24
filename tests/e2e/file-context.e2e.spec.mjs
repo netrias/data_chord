@@ -421,6 +421,7 @@ for (const pathKind of ['bare', 'different workflow']) {
 test('replacing a file keeps the new tracker name when storage refuses both changes', async ({ page }) => {
   // Given an analyzed file and session storage that can only be read.
   await uploadAndAnalyzeReal(page, longNamedCsv());
+  await page.evaluate(() => sessionStorage.setItem('maxReachedStage', 'review'));
   await page.locator('[data-stage="upload"] .step-link').click();
   await page.waitForURL(/\/stage-1/);
   await expect(fileName(page)).toHaveText(LONG_NAME);
@@ -434,7 +435,10 @@ test('replacing a file keeps the new tracker name when storage refuses both chan
   await page.setInputFiles(AGENT_FILE_INPUT, fileFixture('basic.csv'));
   await expect(page.locator('#dropzoneFileStatus')).toHaveText('Uploaded');
 
-  // Then the page names the replacement and omits the old counts.
+  // Then the page names the replacement and omits the previous counts and progress.
+  for (const stage of ['mapping', 'harmonize', 'verify', 'review']) {
+    await expect(page.locator(`[data-stage="${stage}"] .step-link`)).toHaveAttribute('aria-disabled', 'true');
+  }
   await expect(fileName(page)).toHaveText('basic.csv');
   await fileName(page).hover();
   expect(await cardFacts(page)).toEqual({
