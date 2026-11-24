@@ -746,6 +746,7 @@ const _analyzeDataset = async () => {
         columns: Array.isArray(payload.columns) ? payload.columns.length : null,
       },
     });
+    if (config.recovery) _replaceUploadWorkflowUrl(state.uploaded.file_id);
     // Keep overlay visible during navigation - browser will replace the page
     _navigateToStageTwo(
       state.uploaded.file_id,
