@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Sequence
+from dataclasses import replace
+from unittest.mock import patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -24,14 +26,14 @@ from src.observability.events import (
     request_id_from_header,
     reset_request_id,
 )
-from src.storage import UploadStorage, UserContext
+from src.persistence.harmonization_job_store import load_harmonization_job, save_harmonization_job
+from src.persistence.workflow_artifacts import open_upload_artifact
+from src.storage import UserContext
 from tests.conftest import (
     TEST_CSV_CONTENT_TYPE,
     TEST_TARGET_SCHEMA,
     confirm_mapping_choices,
     create_csv_content,
-    create_harmonized_csv,
-    create_manifest_for_file,
     upload_content,
     upload_integrity_fields,
 )
@@ -140,12 +142,13 @@ async def test_performance_span_logs_safe_failure_and_reraises(
     assert "private value" not in record.getMessage()
 
 
+@pytest.mark.parametrize("has_saved_count", [True, False], ids=["saved-count", "legacy-count"])
 async def test_review_workflow_logs_major_performance_spans(
     app_client: AsyncClient,
-    temp_storage: UploadStorage,
     caplog: pytest.LogCaptureFixture,
+    has_saved_count: bool,
 ) -> None:
-    # Given: one completed workflow is ready for Stage 4 and Stage 5 reads
+    # Given: a completed workflow with two source rows and a current or legacy job record
     rows = [["col_a"], ["alpha"], ["beta"]]
     file_id = await upload_content(app_client, create_csv_content(rows), "performance-spans.csv")
     analyze_response = await app_client.post(
@@ -160,19 +163,31 @@ async def test_review_workflow_logs_major_performance_spans(
     await confirm_mapping_choices(app_client, file_id)
     harmonize_response = await app_client.post("/stage-3/harmonize", json={"file_id": file_id})
     assert harmonize_response.status_code == 200
-    meta = temp_storage.load(file_id)
-    assert meta is not None
-    create_harmonized_csv(temp_storage, file_id, meta.saved_path, {})
-    create_manifest_for_file(temp_storage, file_id, meta.saved_path, {})
+    storage = dependencies.get_workflow_storage()
+    user = dependencies.get_user_context()
+    loaded_job = load_harmonization_job(storage, user, file_id)
+    assert loaded_job is not None
+    summary = loaded_job.job.manifest_summary
+    assert summary is not None
+    assert summary.source_row_count == 2
+    if not has_saved_count:
+        legacy_summary = summary.model_copy(update={"source_row_count": None})
+        save_harmonization_job(
+            storage, user, replace(loaded_job.job, manifest_summary=legacy_summary),
+            expected_version=loaded_job.version,
+        )
     caplog.clear()
     caplog.set_level(logging.INFO)
 
     # When: the app builds the Stage 4 screen and final Stage 5 summary
-    stage4_response = await app_client.post("/stage-4/rows", json={"file_id": file_id})
+    with patch("src.stage_4_review_results.use_cases.open_upload_artifact", wraps=open_upload_artifact) as source:
+        stage4_response = await app_client.post("/stage-4/rows", json={"file_id": file_id})
     stage5_response = await app_client.post("/stage-5/summary", json={"file_id": file_id})
 
-    # Then: each request succeeds and its major work is visible as request-correlated spans
+    # Then: only the legacy count requires the original upload, and each request logs its major work
     assert stage4_response.status_code == 200
+    assert stage4_response.json()["totalOriginalRows"] == 2
+    assert source.call_count == (0 if has_saved_count else 1)
     assert stage5_response.status_code == 200
     completed_spans = {
         str(_record_field(record, "span_name"))
@@ -181,8 +196,6 @@ async def test_review_workflow_logs_major_performance_spans(
     }
     assert {
         "stage4.rows.ready_capture",
-        "stage4.rows.upload_artifact",
-        "stage4.rows.source_dataset_read",
         "stage4.rows.manifest_read",
         "stage4.rows.review_state",
         "stage4.rows.pv_load",
@@ -197,6 +210,8 @@ async def test_review_workflow_logs_major_performance_spans(
         "stage5.summary.summary_build",
         "stage5.summary.ready_check",
     } <= completed_spans
+    source_spans = {"stage4.rows.upload_artifact", "stage4.rows.source_dataset_read"}
+    assert completed_spans & source_spans == (set() if has_saved_count else source_spans)
 
 
 async def test_request_id_header_is_returned(app_client: AsyncClient) -> None:
