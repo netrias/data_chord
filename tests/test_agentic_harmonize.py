@@ -580,3 +580,35 @@ def test_service_rejects_provider_value_outside_permissible_values(tmp_path: Pat
     # Then the job fails without publishing an invalid output.
     assert result.status is HarmonizeStatus.FAILED
     assert not output.exists()
+
+
+def test_malformed_explorer_call_cannot_publish_or_cache_no_match(monkeypatch, tmp_path: Path) -> None:
+    # Given one uncached term and an explorer that requests a search without the required query.
+    from unittest.mock import Mock
+
+    client = Mock()
+    client.converse.return_value = {
+        "output": {"message": {"role": "assistant", "content": [
+            {"toolUse": {"toolUseId": "bad", "name": "search", "input": {}}}
+        ]}},
+        "stopReason": "tool_use",
+    }
+    monkeypatch.setattr("src.integrations.agentic_harmonize.make_provider_client", lambda *_a, **_kw: client)
+    cache = _MemoryCache()
+    service = _agentic_file_service(AgenticHarmonizeConfig(region="us-east-2", exploration_turns=1), cache=cache)
+    source = tmp_path / "source.csv"
+    source.write_text("diagnosis,treatment\nunknown,\n", encoding="utf-8")
+    output = tmp_path / "output.csv"
+
+    # When the pinned library exhausts the explorer budget during a Stage 3 file job.
+    result = service.run(
+        file_path=source, data_model_version=MODEL_VERSION, prepared_manifest=_manifest(),
+        column_pv_sets=ColumnPvSets({column_key_for_index(0): frozenset({"Known"})}), output_path=output,
+    )
+
+    # Then the job fails without publishing a manifest, output, or cacheable no-match.
+    client.converse.assert_called_once()
+    assert result.status is HarmonizeStatus.FAILED
+    assert cache.save_calls == 0
+    assert not output.exists()
+    assert not output.with_name("output.manifest.parquet").exists()
