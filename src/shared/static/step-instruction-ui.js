@@ -11,6 +11,8 @@ import {
 } from './storage-keys.js';
 import { readFileSession, selectedSheetShape } from './file-session.js';
 
+let maxReachedStageAfterChange;
+
 /**
  * Update progress tracker UI to reflect the active stage.
  * Marks earlier stages as complete, current stage as active, future stages as unreachable.
@@ -23,7 +25,8 @@ export function setActiveStage(stage, hasCompletedResults = false) {
     return;
   }
 
-  const maxReachedIndex = Math.max(_getMaxReachedStageIndex(), targetIndex);
+  const canRestoreProgress = stage !== 'upload' || readFileSession(_getFileIdForNavigation());
+  const maxReachedIndex = Math.max(canRestoreProgress ? _getMaxReachedStageIndex() : 0, targetIndex);
   const progressSteps = document.querySelectorAll('.progress-tracker [data-stage]');
 
   progressSteps.forEach((step) => {
@@ -299,6 +302,7 @@ function _populateStepTooltips() {
 
 /* why: track highest stage reached to block skipping forward in progress tracker. */
 function _getMaxReachedStageIndex() {
+  if (maxReachedStageAfterChange !== undefined) return maxReachedStageAfterChange;
   try {
     const stored = sessionStorage.getItem(MAX_REACHED_STAGE_KEY);
     if (stored) {
@@ -322,6 +326,7 @@ export function advanceMaxReachedStage(stage) {
 
   const currentMax = _getMaxReachedStageIndex();
   if (newIndex > currentMax) {
+    maxReachedStageAfterChange = newIndex;
     try {
       sessionStorage.setItem(MAX_REACHED_STAGE_KEY, stage);
     } catch {
@@ -335,6 +340,7 @@ export function advanceMaxReachedStage(stage) {
  * Call this when starting a new workflow.
  */
 export function resetMaxReachedStage() {
+  maxReachedStageAfterChange = 0;
   try {
     sessionStorage.removeItem(MAX_REACHED_STAGE_KEY);
   } catch {
