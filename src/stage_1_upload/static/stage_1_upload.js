@@ -302,7 +302,7 @@ const _clearStaleSessionData = () => {
 /* A replacement owns this history entry; earlier explicit workflow links keep theirs. */
 const _replaceUploadWorkflowUrl = (fileId) => {
   const url = new URL(window.location.href);
-  for (const key of ['file_id', 'data_model_key', 'external_version_number', 'job_id', 'status', 'detail']) {
+  for (const key of ['file_id', 'data_model_key', 'external_version_number', 'job_id', 'status', 'detail', 'reselect_model']) {
     url.searchParams.delete(key);
   }
   if (fileId) url.searchParams.set('file_id', fileId);
@@ -377,23 +377,19 @@ const _hydrateDemoUpload = () => {
 const _restoreForModelSelection = () => {
   resetMaxReachedStage();
   const url = new URL(window.location.href);
-  url.searchParams.delete('reselect_model');
-  url.searchParams.delete('file_id');
-  window.history.replaceState(window.history.state, '', url);
-  document.querySelectorAll('.progress-tracker .step-link').forEach((link) => {
-    const target = new URL(link.dataset.url, url);
-    target.searchParams.delete('file_id');
-    link.dataset.url = target.pathname + target.search;
-  });
-  const upload = config.recoveryUpload;
-  if (!upload) {
+  const recovery = config.recovery;
+  if (!recovery) {
+    _replaceUploadWorkflowUrl(null);
     _clearStaleSessionData();
     _resetUploadState();
     _setStatus('This upload is no longer available. Upload your file to start a new analysis.', 'error');
     return;
   }
-  _replaceUploadWorkflowUrl(upload.file_id);
-  const session = _persistFileSession(upload, upload.file_name);
+  // Keep the recovery URL on refresh until a replacement owns this entry.
+  url.searchParams.delete('job_id');
+  if (recovery.completedJobId) url.searchParams.set('job_id', recovery.completedJobId);
+  window.history.replaceState(window.history.state, '', url);
+  const session = _persistFileSession(recovery.upload, recovery.upload.file_name);
   _showUploadedFile(session);
   _setStatus('The previous model version is no longer available. Select Map to choose a current version and run analysis again.');
 };
@@ -824,7 +820,7 @@ const _init = () => {
     _resetUploadState();
   }
 
-  setActiveStage('upload');
+  setActiveStage('upload', config.recovery?.completedJobId ? 'review' : 'upload');
   initStepInstruction('upload');
   initNavigationEvents();
 

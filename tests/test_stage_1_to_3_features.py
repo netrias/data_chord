@@ -774,6 +774,41 @@ async def test_completed_harmonization_still_opens_when_reference_data_changes(
     repository.load_model.assert_not_called()
 
 
+async def test_running_harmonization_can_be_reopened_after_model_retirement(
+    app_client: AsyncClient, mock_netrias_client: MagicMock
+) -> None:
+    # Given an analyzed workflow and an in-flight job whose lease is still valid.
+    file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "running.csv")
+    analysis = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "data_model_key": "gc", "external_version_number": "11.0.4"},
+    )
+    assert analysis.status_code == 200
+    await confirm_mapping_choices(app_client, file_id)
+    workflow = load_workflow_state(dependencies.get_workflow_storage(), dependencies.get_user_context(), file_id)
+    assert workflow is not None
+    job = HarmonizationJobState.queued(
+        polling_job_id="running-job",
+        file_id=workflow.state.file_id,
+        plan_version=workflow.version.value,
+        worker_id="active-worker",
+    )
+    save_harmonization_job(
+        dependencies.get_workflow_storage(), dependencies.get_user_context(), job, expected_version=None
+    )
+    repository = mock_netrias_client.reference_repository
+    repository.load_model.reset_mock()
+    repository.load_model.side_effect = ReferenceModelNotFoundError("retired")
+
+    # When the user reopens the active job.
+    response = await app_client.get("/stage-3", params={"file_id": file_id, "job_id": job.polling_job_id})
+
+    # Then Stage 3 stays available to poll the job without attempting a new reference load.
+    assert response.status_code == 200
+    assert "stage_3_harmonize.js?v=" in response.text
+    repository.load_model.assert_not_called()
+
+
 async def test_recovery_does_not_expose_another_users_upload(
     app_client: AsyncClient,
 ) -> None:

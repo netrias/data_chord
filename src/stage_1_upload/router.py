@@ -37,12 +37,14 @@ from src.observability.events import (
     WorkflowStage,
     log_workflow_event,
 )
+from src.persistence.harmonization_job_store import HarmonizationJobUnreadableError, load_harmonization_job
 from src.persistence.workflow_artifacts import (
     open_upload_artifact,
     save_upload_artifacts,
     stage_upload,
 )
 from src.persistence.workflow_state_store import (
+    LoadedWorkflowState,
     load_workflow_state,
     save_initial_workflow_state,
 )
@@ -98,7 +100,7 @@ async def render_stage_one(
         "ui_constraints": describe_constraints(_upload_constraints),
         "demo_upload": demo_upload,
         "reselect_model": reselect_model,
-        "recovery_upload": await _recovery_upload(file_id) if reselect_model and file_id else None,
+        "recovery": await _load_model_recovery(file_id) if reselect_model and file_id else None,
     }
     return _templates.TemplateResponse(request, "stage_1_upload.html", context)
 
@@ -200,7 +202,7 @@ async def _upload_response(meta: UploadedFileMeta) -> UploadResponse:
     )
 
 
-async def _recovery_upload(file_id: str) -> dict[str, object] | None:
+async def _load_model_recovery(file_id: str) -> dict[str, object] | None:
     try:
         workflow_id = dataset_workflow_id_from_string(file_id)
     except ValueError:
@@ -215,7 +217,22 @@ async def _recovery_upload(file_id: str) -> dict[str, object] | None:
     workflow = await run_in_threadpool(load_workflow_state, workflow_storage, user, workflow_id)
     if workflow and workflow.state.selected_sheet:
         upload.selected_sheet = workflow.state.selected_sheet
-    return upload.model_dump(mode="json")
+    completed_job = await run_in_threadpool(_completed_recovery_job, workflow_storage, user, workflow_id, workflow)
+    return {"upload": upload.model_dump(mode="json"), "completedJobId": completed_job}
+
+
+def _completed_recovery_job(
+    storage: WorkflowStorage, user: UserContext, file_id: DatasetWorkflowId, workflow: LoadedWorkflowState | None
+) -> str | None:
+    if workflow is None:
+        return None
+    try:
+        saved_job = load_harmonization_job(storage, user, file_id)
+    except HarmonizationJobUnreadableError:
+        return None
+    if saved_job is None or not saved_job.job.is_completed_for_plan(workflow.version.value):
+        return None
+    return saved_job.job.polling_job_id
 
 
 @stage_one_router.post(

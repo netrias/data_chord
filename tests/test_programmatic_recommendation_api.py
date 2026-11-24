@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from unittest.mock import MagicMock
 
 import pytest
 from httpx import AsyncClient
@@ -16,7 +17,7 @@ from src.domain.manifest import (
     ColumnMappingRecord,
     MappingAlternative,
 )
-from src.domain.reference_data import ReferenceModel
+from src.domain.reference_data import ReferenceModel, ReferenceModelNotFoundError
 
 pytestmark = pytest.mark.asyncio
 
@@ -281,3 +282,20 @@ async def test_recommendation_api_authenticates_before_reading_raw_body(
     assert response.status_code == 401
     assert response.json() == {"detail": "Invalid API key."}
     assert recommender.calls == []
+
+async def test_recommendation_api_reports_retired_model_as_conflict(
+    app_client: AsyncClient, mock_netrias_client: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Given an authenticated request for a version withdrawn from the catalog.
+    monkeypatch.setenv("DATA_CHORD_API_KEY", _API_KEY)
+    mock_netrias_client.reference_repository.load_model.side_effect = ReferenceModelNotFoundError("retired")
+
+    # When the client requests recommendations.
+    response = await app_client.post("/api/v1/recommend", headers={"x-api-key": _API_KEY}, json=_REQUEST)
+
+    # Then the response tells the caller to choose a current version.
+    assert response.status_code == 409
+    assert response.json() == {
+        "code": "model_version_retired",
+        "detail": "This model version is no longer available. Choose a current version and run analysis again.",
+    }

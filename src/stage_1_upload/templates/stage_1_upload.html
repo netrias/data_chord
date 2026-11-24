@@ -145,7 +145,7 @@
         maxBytes: {{ ui_constraints.max_bytes }},
         demoUpload: {{ demo_upload | tojson }},
         reselectModel: {{ reselect_model | tojson }},
-        recoveryUpload: {{ recovery_upload | tojson }},
+        recovery: {{ recovery | tojson }},
       };
     </script>
     <script type="module" src="{{ app_path_for(request, 'stage_one_static', path='stage_1_upload.js') }}?v={{ request.app.state.asset_version }}"></script>

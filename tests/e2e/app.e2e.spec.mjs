@@ -10,6 +10,7 @@ import {
   fileFixture,
   getFileIdFromUrl,
   uploadAndAnalyze,
+  uploadAndAnalyzeReal,
   uploadAndAnalyzeSheet,
   clickHarmonize,
   mockColumnDetail,
@@ -3155,18 +3156,22 @@ test('a retired model selection can be replaced with a current version for the s
       return setItem.call(this, key, value);
     };
   });
+  // When the user opens the retired workflow and refreshes the recovery page.
   await page.goto(`/stage-2?file_id=${fileId}`);
+  await expect(page.locator('#statusMessage')).toContainText('The previous model version is no longer available');
+  await page.reload();
+
+  // Then the same workbook and worksheet remain available even though storage refused the write.
   await expect(page.locator('#statusMessage')).toContainText('The previous model version is no longer available');
   await expect(page.locator('#dropzoneFileName')).toHaveText('workbook.xlsx');
   await expect(page.locator('#dropzoneFileSize')).toHaveText(uploadedSize);
   await expect(page.locator('#stepInstructionFile')).toBeHidden();
-  await expect(page.locator('[data-stage="upload"] .step-link')).toHaveAttribute('href', `/stage-1?file_id=${fileId}`);
+  await expect(page.locator('[data-stage="upload"] .step-link')).toHaveAttribute('href', `/stage-1?file_id=${fileId}&reselect_model=true`);
   await expect(page.locator('.workbook-tab[data-sheet-name="Patients"]')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('[data-stage="review"] .step-link')).toHaveAttribute('aria-disabled', 'true');
+  // When the user chooses the current version from the catalog.
   await page.locator('#analyzeButton').click();
   await expect(page.locator('#versionDropdownTrigger')).toHaveText('11.0.4');
-
-  // When the user confirms the current version from the catalog.
   await page.locator('.data-model-confirm-btn').click();
 
   // Then the new plan uses the current version and the same uploaded file and worksheet.
@@ -3177,6 +3182,32 @@ test('a retired model selection can be replaced with a current version for the s
   expect(recovered.external_version_number).toBe('11.0.4');
   expect(recovered.selected_sheet).toBe('Patients');
   expect(await page.evaluate(() => sessionStorage.getItem('currentFileSession'))).toBe(otherFile);
+});
+
+test('model recovery keeps completed results reachable for the same plan', async ({ page }) => {
+  // Given a completed workflow with a known job ID.
+  const fileId = await uploadAndAnalyzeReal(page, fileFixture('restore-original.csv'));
+  await clickHarmonize(page);
+  await expect(page.locator('#reviewButton')).toBeEnabled({ timeout: 20_000 });
+  await page.locator('#reviewButton').click();
+  await page.waitForURL(/\/stage-4/);
+  await page.locator('#stageFiveButton').click();
+  await page.waitForURL(/\/stage-5/);
+  const jobId = new URL(page.url()).searchParams.get('job_id');
+  expect(jobId).toBeTruthy();
+
+  // When the user follows the model recovery link for that workflow.
+  await page.goto(`/stage-1?file_id=${fileId}&reselect_model=true`);
+  await expect(page.locator('#statusMessage')).toContainText('The previous model version is no longer available');
+
+  // Then the tracker continues to link to Verify and Review for that same completed job.
+  await expect(page.locator('[data-stage="verify"] .step-link')).toHaveAttribute(
+    'href', `/stage-4?file_id=${fileId}&job_id=${jobId}`,
+  );
+  const review = page.locator('[data-stage="review"] .step-link');
+  await expect(review).toHaveAttribute('href', `/stage-5?file_id=${fileId}&job_id=${jobId}`);
+  await review.click();
+  await expect(page).toHaveURL(`/stage-5?file_id=${fileId}&job_id=${jobId}`);
 });
 
 test('the model picker refreshes after a version is retired during selection', async ({ page }) => {
@@ -3209,14 +3240,18 @@ test('refresh keeps a replacement upload after retired model recovery', async ({
   await expect(page.locator('#analyzeButton')).toBeEnabled();
   await page.goto(`/stage-2?file_id=${fileId}&data_model_key=gc&external_version_number=retired`);
   await expect(page.locator('#statusMessage')).toContainText('The previous model version is no longer available');
+  const replacementUpload = page.waitForResponse(response => response.url().endsWith('/stage-1/upload'));
   await page.setInputFiles(AGENT_FILE_INPUT, fileFixture('multi-column.csv'));
+  const { file_id: replacementId } = await (await replacementUpload).json();
+  expect(replacementId).not.toBe(fileId);
   await expect(page.locator('#dropzoneFileName')).toHaveText('multi-column.csv');
   await expect(page.locator('#analyzeButton')).toBeEnabled();
 
   // When the user refreshes the upload page.
   await page.reload();
 
-  // Then the replacement remains selected and can be analyzed.
+  // Then the URL and upload widget still identify the replacement.
+  await expect(page).toHaveURL(`/stage-1?file_id=${replacementId}`);
   await expect(page.locator('#dropzoneFileName')).toHaveText('multi-column.csv');
   await expect(page.locator('#analyzeButton')).toBeEnabled();
 });
