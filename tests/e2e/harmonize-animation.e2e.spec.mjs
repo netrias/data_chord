@@ -47,7 +47,7 @@ test('Stage 3 keeps the spinner when the animation script cannot load', async ({
   await _openStageThree(page);
 
   // Then the poll updates progress and the fallback stays visible without motion
-  await expect(page.locator('#harmonizeProgressMessage')).toContainText('Still working after 3m 00s');
+  await expect(page.locator('#harmonizeProgressMessage')).toHaveText('Still working after 3 min. Larger datasets can take several minutes.');
   await expect(_spinner(page)).toHaveCSS('animation-name', 'none');
   await expect(_spinner(page)).toBeVisible();
   await expect(_canvas(page)).toBeHidden();
@@ -80,4 +80,45 @@ test('Stage 3 falls back to the spinner when a running canvas loses its context'
   // Then the spinner is visible and the broken canvas is hidden
   await expect(_spinner(page)).toBeVisible();
   await expect(_canvas(page)).toBeHidden();
+});
+
+test('Stage 3 leaves the progress text alone when a poll is still in the same minute', async ({ page }) => {
+  // Given a running job whose elapsed time grows by 5 seconds on each poll, starting at 3 min
+  let polls = 0;
+  await page.route('**/stage-3/jobs/*', async (route) => {
+    const elapsed = 180 + 5 * polls;
+    polls += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ job_id: JOB_ID, status: 'running', job_id_available: true, elapsed_seconds: elapsed }),
+    });
+  });
+  await _openStageThree(page);
+  const message = page.locator('#harmonizeProgressMessage');
+  await expect(message).toHaveText('Still working after 3 min. Larger datasets can take several minutes.');
+  await message.evaluate((node) => {
+    window.progressMutations = 0;
+    new MutationObserver((records) => { window.progressMutations += records.length; })
+      .observe(node, { childList: true, characterData: true, subtree: true });
+  });
+
+  // When the next poll answers with 3 min 5 s
+  await page.waitForResponse((response) => response.url().includes('/stage-3/jobs/') && polls >= 2);
+  await page.evaluate(() => new Promise((resolve) => { setTimeout(resolve, 200); }));
+
+  // Then the live-region text was not rewritten, so screen readers have nothing new to announce
+  expect(await page.evaluate(() => window.progressMutations)).toBe(0);
+  await expect(message).toHaveText('Still working after 3 min. Larger datasets can take several minutes.');
+});
+
+test('Stage 3 shows only the empty-state heading when there is no job', async ({ page }) => {
+  // Given a Stage 3 URL with no file or job
+
+  // When Stage 3 loads
+  await page.goto('/stage-3');
+
+  // Then the empty-state message is the only visible heading, without the "Harmonizing" title
+  await expect(page.locator('#stageThreeEmptyState')).toBeVisible();
+  await expect(page.locator('h1:visible, h2:visible')).toHaveText(['We need a harmonization job']);
 });

@@ -13,8 +13,8 @@
   margin: 0;
 }
 
-/* why: the loading headline is the page heading while harmonizing, so the stage title would repeat it. */
-#stageThreeMetrics:has(#loadingState:not(.hidden)) #stageThreeHeader {
+/* why: the loading and empty states each have their own h1, so the stage title would repeat or contradict it. */
+#stageThreeMetrics:has(#loadingState:not(.hidden), #stageThreeEmptyState:not(.hidden)) #stageThreeHeader {
   display: none;
 }
 
@@ -90,7 +90,7 @@
 .stage-empty-title {
   font-size: 1.125rem;
   font-weight: 600;
-  margin-bottom: var(--space-2);
+  margin: 0 0 var(--space-2);
 }
 
 .stage-empty-copy {
