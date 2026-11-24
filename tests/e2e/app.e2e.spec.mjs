@@ -3165,7 +3165,7 @@ test('a retired model selection can be replaced with a current version for the s
   await expect(page.locator('#statusMessage')).toContainText('The previous model version is no longer available');
   await expect(page.locator('#dropzoneFileName')).toHaveText('workbook.xlsx');
   await expect(page.locator('#dropzoneFileSize')).toHaveText(uploadedSize);
-  await expect(page.locator('#stepInstructionFile')).toBeHidden();
+  await expect(page.locator('#stepInstructionFile .step-instruction-file-name')).toHaveText('workbook.xlsx');
   await expect(page.locator('[data-stage="upload"] .step-link')).toHaveAttribute('href', `/stage-1?file_id=${fileId}&reselect_model=true`);
   await expect(page.locator('.workbook-tab[data-sheet-name="Patients"]')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('[data-stage="review"] .step-link')).toHaveAttribute('aria-disabled', 'true');

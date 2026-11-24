@@ -14,10 +14,24 @@ declare module '/assets/shared/step-instruction-ui.js' {
 }
 
 declare module '/assets/shared/file-session.js' {
-  export function readFileSession(fileId: string | null | undefined): Record<string, any> | null;
-  export function updateFileSession(fileId: string, fields: Record<string, unknown>): void;
-  export function selectedSheetShape(session: Record<string, any> | null, sheetName?: string | null): { rows: number; columns: number } | null;
-  export function formatCount(count: number, noun: string): string;
+  interface FileSession {
+    file_id: string;
+    original_name: string;
+    uploaded_at?: string;
+    human_size?: string;
+    tabular_format?: string | null;
+    sheet_names?: string[];
+    sheet_previews?: Record<string, unknown>;
+    selected_sheet?: string | null;
+    dataset_shape?: { sheet_name: string | null; rows: number; columns: number | null };
+  }
+  export function readCurrentFileSession(): FileSession | null;
+  export function readFileSession(fileId: string | null | undefined): FileSession | null;
+  export function saveFileSession(uploadResponse: Record<string, unknown>, fileName: string): FileSession;
+  export function updateFileSession(fileId: string, fields: Partial<FileSession>, options?: { discardStaleOnFailure?: boolean }): void;
+  export function clearFileSession(): void;
+  export function selectedSheetShape(session: FileSession | null, sheetName?: string | null): { rows: number; columns: number } | null;
+  export function formatCount(count: number): string;
 }
 
 declare module '/assets/shared/storage-keys.js' {

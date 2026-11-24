@@ -4,12 +4,10 @@
  */
 import { STEP_INSTRUCTIONS, STAGE_ORDER } from './step-instructions.js';
 import {
-  CURRENT_FILE_SESSION_KEY,
   MAX_REACHED_STAGE_KEY,
   isValidFileId,
-  readFromSession,
 } from './storage-keys.js';
-import { readFileSession, selectedSheetShape } from './file-session.js';
+import { formatCount, readCurrentFileSession, readFileSession, selectedSheetShape } from './file-session.js';
 
 let maxReachedStageAfterChange;
 
@@ -78,7 +76,7 @@ function _getFileIdForNavigation() {
 
   if (!_isStageOneUrl(window.location.href)) return null;
 
-  const fromSession = readFromSession(CURRENT_FILE_SESSION_KEY)?.file_id;
+  const fromSession = readCurrentFileSession()?.file_id;
   return isValidFileId(fromSession) ? fromSession : null;
 }
 
@@ -221,8 +219,8 @@ function _fileFacts(session) {
   const sizeAndType = [session.human_size, session.tabular_format?.toUpperCase()].filter(Boolean).join(' · ');
   const isWorkbook = Array.isArray(session.sheet_names) && session.sheet_names.length > 0;
   const facts = [
-    { label: 'Rows', value: shape?.rows.toLocaleString('en-US') },
-    { label: 'Columns', value: shape?.columns.toLocaleString('en-US') },
+    { label: 'Rows', value: shape && formatCount(shape.rows) },
+    { label: 'Columns', value: shape && formatCount(shape.columns) },
     { label: 'Size', value: sizeAndType },
     { label: 'Uploaded', value: _formatUploadTime(session.uploaded_at) },
     { label: 'Sheet', value: isWorkbook ? sheet : null },
