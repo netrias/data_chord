@@ -449,10 +449,63 @@ def test_flat_reader_rejects_missing_or_blank_source_id(source_id: str | None, m
     assert message in str(error.value)
 
 
+def test_flat_reader_loads_values_from_multiple_published_chunks() -> None:
+    # Given the published stage values split into two chunks under the same model seal.
+    table = _published_table()
+    table.items[(MODEL_PK, "CDE#c3RhZ2U#META")]["chunk_count"] = 2
+    first = table.items[(MODEL_PK, "CDE#c3RhZ2U#VALUES#000000")]
+    second_key = "CDE#c3RhZ2U#VALUES#000001"
+    first.update(payload=gzip.compress(b'["I"]', mtime=0), uncompressed_size=len(b'["I"]'))
+    table.items[(MODEL_PK, second_key)] = {
+        **first,
+        "sk": second_key,
+        "chunk_index": 1,
+        "payload": gzip.compress(b'["II"]', mtime=0),
+        "uncompressed_size": len(b'["II"]'),
+    }
+    repository = DynamoDbReferenceDataRepository(table)
+
+    # When the published model is loaded through the application view.
+    model = repository.load_model(VERSION)
+
+    # Then the original ID and both published values are present.
+    stage = model.catalog.get("stage")
+    assert stage is not None
+    assert stage.cde_id == 2457258298240256618
+    assert model.pvs.get("stage") == frozenset({"I", "II"})
+
+
+@pytest.mark.parametrize(
+    ("sort_key", "field", "value", "message"),
+    [
+        ("CDE#c3RhZ2U#META", "chunk_count", Decimal("1.5"), "Reference field is invalid: chunk_count"),
+        ("CDE#c3RhZ2U#META", "chunk_count", 2, "Reference value chunks are incomplete: stage"),
+        ("CDE#c3RhZ2U#META", "chunk_count", 0, "Reference value chunks are incomplete: stage"),
+        ("CDE#c3RhZ2U#VALUES#000000", "chunk_index", 1, "Reference value chunks are incomplete: stage"),
+        ("CDE#c3RhZ2U#META", "digest", "a" * 64, "Reference value digest is invalid: stage"),
+    ],
+)
+def test_flat_reader_rejects_inconsistent_value_rows(
+    sort_key: str, field: str, value: object, message: str
+) -> None:
+    # Given published value rows with one incorrect metadata or chunk field.
+    table = _published_table()
+    table.items[(MODEL_PK, sort_key)][field] = value
+    repository = DynamoDbReferenceDataRepository(table)
+
+    # When the published model is loaded through the application view.
+    with pytest.raises(ReferenceDataCorruptError) as error:
+        repository.load_model(VERSION)
+
+    # Then the reader reports which catalog check failed.
+    assert str(error.value) == message
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
         ("payload", b"not gzip", "payload is corrupt"),
+        ("payload", gzip.compress(b'["I","II"]', mtime=0)[:-8], "payload is corrupt"),
         ("uncompressed_size", 1, "payload size is invalid"),
     ],
 )
