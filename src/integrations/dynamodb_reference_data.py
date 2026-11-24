@@ -7,6 +7,7 @@ import gzip
 import hashlib
 import io
 import json
+import zlib
 from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -430,8 +431,9 @@ def _values_for_cde(
     chunks: tuple[Mapping[str, object], ...],
 ) -> list[str]:
     ordered = sorted(chunks, key=lambda item: _required_int(item, "chunk_index"))
-    indexes = [_required_int(item, "chunk_index") for item in ordered]
-    if indexes != list(range(_required_int(metadata, "chunk_count"))):
+    if len(ordered) != _required_int(metadata, "chunk_count") or any(
+        _required_int(item, "chunk_index") != index for index, item in enumerate(ordered)
+    ):
         raise ReferenceDataCorruptError(f"Reference value chunks are incomplete: {cde_key}")
     values: list[str] = []
     for chunk in ordered:
@@ -461,7 +463,7 @@ def _gunzip_values(payload: object, expected_size: int) -> list[str]:
         if len(raw) != expected_size:
             raise ReferenceDataCorruptError("Reference value payload size is invalid")
         decoded = json.loads(raw)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (OSError, EOFError, zlib.error, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ReferenceDataCorruptError("Reference value payload is corrupt") from exc
     if not isinstance(decoded, list) or any(not isinstance(value, str) for value in decoded):
         raise ReferenceDataCorruptError("Reference value payload is invalid")
