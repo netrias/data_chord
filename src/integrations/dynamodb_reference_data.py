@@ -1,4 +1,4 @@
-"""Read flat schema-0 CDEs and their node relationships from DynamoDB."""
+"""Read flat schema-2 CDEs and their node relationships from DynamoDB."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import gzip
 import hashlib
 import io
 import json
-import zlib
 from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -17,9 +16,7 @@ from typing import Protocol, cast
 
 from boto3.dynamodb.types import Binary
 
-from src.domain.cde import CDEInfo, CdeType, DataModelSummary, DataModelVersionInfo
-from src.domain.cde_catalog import CdeCatalog
-from src.domain.cde_pv_catalog import CdePvCatalog
+from src.domain.cde import DataModelSummary, DataModelVersionInfo
 from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.reference_data import (
     ReferenceDataCorruptError,
@@ -27,9 +24,9 @@ from src.domain.reference_data import (
     ReferenceModel,
     ReferenceModelNotFoundError,
 )
-from src.integrations.auto_model_reference import AutoModelReference, CdeNodeRelation, NodeName
+from src.integrations.auto_model_reference import FlatReferenceModel, NodeCdeRelation, ReferenceCde
 
-SCHEMA_VERSION = 0
+SCHEMA_VERSION = 2
 MAX_UNCOMPRESSED_CHUNK_BYTES = 300 * 1024
 _CATALOG_PK = "CATALOG"
 _META_SK = "META"
@@ -49,13 +46,6 @@ class DynamoResource(Protocol):
 class _ValueRows:
     metadata: Mapping[str, object]
     chunks: tuple[Mapping[str, object], ...]
-
-
-@dataclass(frozen=True)
-class _DecodedCde:
-    info: CDEInfo
-    values: frozenset[str]
-    relations: tuple[CdeNodeRelation, ...]
 
 
 class DynamoDbReferenceDataRepository:
@@ -103,14 +93,14 @@ class DynamoDbReferenceDataRepository:
 
     def _load_uncached_model(self, version: DataModelVersionReference) -> ReferenceModel:
         try:
-            return self.load_cdes(version).model
+            return self.load_cdes(version).collapse()
         except (ReferenceDataCorruptError, ReferenceModelNotFoundError, ReferenceDataUnavailableError):
             raise
         except Exception as exc:
             raise ReferenceDataCorruptError("Reference model is malformed") from exc
 
-    def load_cdes(self, version: DataModelVersionReference) -> AutoModelReference:
-        """Read the verified model with its optional relationship metadata."""
+    def load_cdes(self, version: DataModelVersionReference) -> FlatReferenceModel:
+        """Read the complete flat CDE form, including node-specific relationships."""
         items = self._query_partition(_model_partition(version))
         if not items:
             raise ReferenceModelNotFoundError(
@@ -120,8 +110,8 @@ class DynamoDbReferenceDataRepository:
             return _flat_from_items(version, items)
         except ReferenceDataCorruptError:
             raise
-        except ValueError as exc:
-            raise ReferenceDataCorruptError(str(exc)) from exc
+        except Exception as exc:
+            raise ReferenceDataCorruptError("Reference model is malformed") from exc
 
     def _query_partition(self, pk: str) -> list[Mapping[str, object]]:
         items: list[Mapping[str, object]] = []
@@ -158,41 +148,52 @@ def _summaries_from_catalog(items: list[Mapping[str, object]]) -> tuple[DataMode
     if markers is None:
         return ()
     meta, import_seal = markers
-    entries = _catalog_payload(list(by_sk.values()))
-    _validate_catalog_seal(meta, import_seal, entries)
-    return _catalog_summaries(entries)
+    entries = list(by_sk.values())
+    summaries = _catalog_model_summaries(entries)
+    _validate_catalog_publication(entries, meta, import_seal)
+    return summaries
 
 
-def _validate_catalog_seal(
+def _catalog_model_summaries(entries: list[Mapping[str, object]]) -> tuple[DataModelSummary, ...]:
+    labels: dict[str, str] = {}
+    versions_by_model: dict[str, set[str]] = {}
+    for item in entries:
+        _validate_schema(item)
+        key = _required_string(item, "data_model_key")
+        label = _required_string(item, "label")
+        version = _required_string(item, "external_version_number")
+        if _required_string(item, "sk") != _catalog_sort_key(key, version):
+            raise ReferenceDataCorruptError("Reference catalog identity does not match its key")
+        existing_label = labels.setdefault(key, label)
+        if existing_label != label:
+            raise ReferenceDataCorruptError(f"Reference catalog labels disagree: {key}")
+        versions_by_model.setdefault(key, set()).add(version)
+    return tuple(
+        DataModelSummary(
+            data_model_key=key,
+            label=labels[key],
+            versions=[DataModelVersionInfo(version) for version in sorted(versions)],
+        )
+        for key, versions in sorted(versions_by_model.items())
+    )
+
+
+def _validate_catalog_publication(
+    entries: list[Mapping[str, object]],
     meta: Mapping[str, object],
     import_seal: Mapping[str, object],
-    entries: list[Mapping[str, str]],
 ) -> None:
-    digest = _required_string(meta, "digest")
     if _required_int(meta, "model_count") != len(entries):
         raise ReferenceDataCorruptError("Reference catalog model count is invalid")
-    if digest != _digest(entries):
+    if _required_string(meta, "digest") != _digest(_catalog_payload(entries)):
         raise ReferenceDataCorruptError("Reference catalog digest is invalid")
+    source_digest = _required_sha256(meta, "source_digest")
     if (
-        _required_sha256(import_seal, "source_digest") != _required_sha256(meta, "source_digest")
-        or _required_string(import_seal, "digest") != digest
-        or _required_int(import_seal, "model_count") != len(entries)
+        _required_sha256(import_seal, "source_digest") != source_digest
+        or _required_string(import_seal, "digest") != _required_string(meta, "digest")
+        or _required_int(import_seal, "model_count") != _required_int(meta, "model_count")
     ):
         raise ReferenceDataCorruptError("Reference catalog import seal does not match its catalog")
-
-
-def _catalog_summaries(entries: list[Mapping[str, str]]) -> tuple[DataModelSummary, ...]:
-    labels: dict[str, str] = {}
-    versions_by_model: dict[str, list[DataModelVersionInfo]] = {}
-    for entry in entries:
-        key = entry["data_model_key"]
-        label = entry["label"]
-        if labels.setdefault(key, label) != label:
-            raise ReferenceDataCorruptError(f"Reference catalog labels disagree: {key}")
-        versions_by_model.setdefault(key, []).append(DataModelVersionInfo(entry["external_version_number"]))
-    return tuple(DataModelSummary(key, labels[key], versions) for key, versions in versions_by_model.items())
-
-
 
 def _catalog_markers(
     by_sk: dict[str, Mapping[str, object]],
@@ -215,96 +216,76 @@ def _catalog_markers(
 
 
 def _catalog_payload(items: Sequence[Mapping[str, object]]) -> list[Mapping[str, str]]:
-    entries: list[Mapping[str, str]] = []
-    for item in items:
-        _validate_schema(item)
-        key = _required_string(item, "data_model_key")
-        version = _required_string(item, "external_version_number")
-        if _required_string(item, "sk") != _catalog_sort_key(key, version):
-            raise ReferenceDataCorruptError("Reference catalog identity does not match its key")
-        entries.append({
-            "data_model_key": key,
-            "external_version_number": version,
-            "label": _required_string(item, "label"),
-        })
-    return sorted(entries, key=lambda item: (item["data_model_key"], item["external_version_number"]))
+    return sorted(
+        [
+            {
+                "data_model_key": _required_string(item, "data_model_key"),
+                "external_version_number": _required_string(item, "external_version_number"),
+                "label": _required_string(item, "label"),
+            }
+            for item in items
+        ],
+        key=lambda item: (item["data_model_key"], item["external_version_number"]),
+    )
 
 
 def _flat_from_items(
     requested: DataModelVersionReference,
     items: list[Mapping[str, object]],
-) -> AutoModelReference:
-    """Decode and verify the model before exposing it to callers."""
+) -> FlatReferenceModel:
+    """Decode flat rows without selecting a node's metadata for a CDE-wide field."""
     by_sk = _rows_by_sort_key(items)
     meta, import_seal = _model_markers(by_sk, requested)
+    nodes = _flat_nodes(meta)
     cde_rows = _flat_cde_rows(by_sk)
-    cdes = [_flat_cde(requested, key, rows) for key, rows in sorted(cde_rows.items())]
-    reference = _build_reference(requested, meta, cdes)
-    _validate_model_seal(reference, meta, import_seal)
-    return reference
-
-
-def _build_reference(
-    requested: DataModelVersionReference, meta: Mapping[str, object], cdes: list[_DecodedCde],
-) -> AutoModelReference:
-    if len({cde.info.cde_id for cde in cdes}) != len(cdes):
-        raise ReferenceDataCorruptError("Reference model CDE ids must be unique")
-    model = ReferenceModel(
-        version=requested,
-        label=_required_string(meta, "label"),
-        catalog=CdeCatalog.from_cdes(cde.info for cde in cdes),
-        pvs=CdePvCatalog.from_mapping({cde.info.cde_key: cde.values for cde in cdes}),
-    )
-    declared_nodes = _flat_nodes(meta)
-    relations = {cde.info.cde_key: cde.relations for cde in cdes}
-    _validate_model_relationships(relations, declared_nodes)
-    return AutoModelReference(model, relations, declared_nodes or frozenset())
-
-
-def _validate_model_relationships(
-    by_cde: Mapping[str, tuple[CdeNodeRelation, ...]], declared_nodes: frozenset[NodeName] | None,
-) -> None:
-    seen: set[int] = set()
-    for cde_key, relations in by_cde.items():
-        for relation in relations:
-            if declared_nodes is not None and relation.node not in declared_nodes:
-                raise ReferenceDataCorruptError(f"Reference CDE node relationships are invalid: {cde_key}")
-            if relation.node_cde_id in seen:
-                raise ReferenceDataCorruptError("Reference node CDE ids must be unique")
-            seen.add(relation.node_cde_id)
+    cdes = tuple(_flat_cde(requested, cde_key, rows) for cde_key, rows in sorted(cde_rows.items()))
+    try:
+        model = FlatReferenceModel(
+            version=requested,
+            label=_required_string(meta, "label"),
+            nodes=nodes if nodes is not None else _nodes_from_relationships(cdes),
+            cdes=cdes,
+        )
+    except ValueError as exc:
+        raise ReferenceDataCorruptError(str(exc)) from exc
+    _validate_model_seal(model, meta, import_seal)
+    return model
 
 
 def _validate_model_seal(
-    reference: AutoModelReference, meta: Mapping[str, object], import_seal: Mapping[str, object],
+    model: FlatReferenceModel, meta: Mapping[str, object], import_seal: Mapping[str, object],
 ) -> None:
     expected = {
-        "cde_count": len(reference.model.catalog),
-        "value_count": sum(map(len, reference.model.pvs.values.values())),
+        "cde_key_count": len(model.cdes),
+        "value_count": sum(len(cde.values) for cde in model.cdes),
     }
     if "node_count" in meta:
-        expected["node_count"] = len(reference.nodes)
+        expected["node_count"] = len(model.nodes)
     if "node_cde_count" in meta:
-        expected["node_cde_count"] = sum(map(len, reference.node_relations.values()))
+        expected["node_cde_count"] = sum(len(cde.node_relations) for cde in model.cdes)
     for field, count in expected.items():
         if _required_int(meta, field) != count:
             raise ReferenceDataCorruptError(f"Reference {field.replace('_', ' ')} is invalid")
-    digest = _required_sha256(meta, "digest")
-    if _digest(_canonical_flat_payload(reference)) != digest:
+    if _digest(_canonical_flat_payload(model)) != _required_string(meta, "digest"):
         raise ReferenceDataCorruptError("Reference model digest is invalid")
-    if _required_string(import_seal, "digest") != digest:
+    if _required_string(import_seal, "digest") != _required_string(meta, "digest"):
         raise ReferenceDataCorruptError("Reference import seal does not match its model")
 
 
-def _flat_nodes(meta: Mapping[str, object]) -> frozenset[NodeName] | None:
+def _flat_nodes(meta: Mapping[str, object]) -> tuple[str, ...] | None:
     if "nodes" not in meta:
         return None
     raw = meta["nodes"]
     if not isinstance(raw, list) or any(not isinstance(node, str) or not node.strip() for node in raw):
         raise ReferenceDataCorruptError("Reference model nodes are invalid")
-    nodes = frozenset(NodeName(node) for node in cast(list[str], raw))
-    if len(nodes) != len(raw):
-        raise ReferenceDataCorruptError("Reference model nodes must be unique")
-    return nodes
+    nodes = cast(list[str], raw)
+    if len(nodes) != len(set(nodes)):
+        raise ReferenceDataCorruptError("Reference model nodes are invalid")
+    return tuple(nodes)
+
+
+def _nodes_from_relationships(cdes: tuple[ReferenceCde, ...]) -> tuple[str, ...]:
+    return tuple(sorted({relation.node_name for cde in cdes for relation in cde.node_relations}))
 
 
 def _flat_cde_rows(by_sk: Mapping[str, Mapping[str, object]]) -> dict[str, _ValueRows]:
@@ -330,7 +311,7 @@ def _flat_cde(
     version: DataModelVersionReference,
     cde_key: str,
     rows: _ValueRows,
-) -> _DecodedCde:
+) -> ReferenceCde:
     metadata = rows.metadata
     cde_id = _required_int(metadata, "cde_id")
     if cde_id != _generated_cde_id(version, cde_key):
@@ -338,13 +319,12 @@ def _flat_cde(
     raw_relations = metadata.get("node_relations", [])
     if not isinstance(raw_relations, list):
         raise ReferenceDataCorruptError(f"Reference node relationships are invalid: {cde_key}")
-    values = frozenset(_values_for_cde(cde_key, metadata, rows.chunks))
-    description = _optional_string(metadata, "description", cde_key)
-    cde_type = CdeType.PV if values else CdeType.PASSTHROUGH
-    return _DecodedCde(
-        info=CDEInfo(cde_id, cde_key, description, cde_type),
-        values=values,
-        relations=tuple(_flat_relation(version, cde_key, raw) for raw in cast(list[object], raw_relations)),
+    relations = tuple(_flat_relation(version, cde_key, raw) for raw in cast(list[object], raw_relations))
+    return ReferenceCde(
+        cde_key=cde_key,
+        cde_id=cde_id,
+        values=frozenset(_values_for_cde(cde_key, metadata, rows.chunks)),
+        node_relations=relations,
     )
 
 
@@ -352,73 +332,54 @@ def _flat_relation(
     version: DataModelVersionReference,
     cde_key: str,
     raw: object,
-) -> CdeNodeRelation:
+) -> NodeCdeRelation:
     if not isinstance(raw, Mapping):
         raise ReferenceDataCorruptError(f"Reference node relationship is invalid: {cde_key}")
-    fields = cast(Mapping[str, object], raw)
-    node = NodeName(_required_string(fields, "node_name"))
-    node_cde_id = _required_int(fields, "node_cde_id")
-    if node_cde_id != _generated_cde_id(version, cde_key, node.value):
-        raise ReferenceDataCorruptError(f"Reference node CDE id is invalid: {node.value}/{cde_key}")
-    return CdeNodeRelation(
-        node=node,
-        node_cde_id=node_cde_id,
-        source_node_cde_id=_optional_nonblank_string(fields, "source_node_cde_id", cde_key),
-        description=_optional_string(fields, "description", cde_key),
-        data_type=_optional_nonblank_string(fields, "data_type", cde_key),
-        is_key=_optional_bool(fields, "is_key"),
-        is_required=_optional_bool(fields, "is_required"),
-    )
+    node_name = _required_string(raw, "node_name")
+    node_cde_id = _required_int(raw, "node_cde_id")
+    if node_cde_id != _generated_cde_id(version, cde_key, node_name):
+        raise ReferenceDataCorruptError(f"Reference node CDE id is invalid: {node_name}/{cde_key}")
+    source_node_cde_id = _required_string(raw, "source_node_cde_id")
+    if not source_node_cde_id.strip():
+        raise ReferenceDataCorruptError(f"Reference source node CDE id is invalid: {node_name}/{cde_key}")
+    description = _optional_string(raw, "description", cde_key)
+    data_type = _required_string(raw, "data_type")
+    if not data_type.strip():
+        raise ReferenceDataCorruptError(f"Reference data type is invalid: {node_name}/{cde_key}")
+    is_key, is_required = raw.get("is_key"), raw.get("is_required")
+    if not isinstance(is_key, bool) or not isinstance(is_required, bool):
+        raise ReferenceDataCorruptError(f"Reference node flags are invalid: {node_name}/{cde_key}")
+    return NodeCdeRelation(node_name, node_cde_id, source_node_cde_id, description, data_type, is_key, is_required)
 
 
-def _optional_nonblank_string(fields: Mapping[str, object], field: str, key: str) -> str | None:
-    value = _optional_string(fields, field, key)
-    if value is not None and not value.strip():
-        raise ReferenceDataCorruptError(f"Reference field is invalid: {field}")
-    return value
-
-
-def _optional_bool(fields: Mapping[str, object], field: str) -> bool | None:
-    value = fields.get(field)
-    if value is None or isinstance(value, bool):
-        return value
-    raise ReferenceDataCorruptError(f"Reference field is invalid: {field}")
-
-
-def _canonical_flat_payload(reference: AutoModelReference) -> Mapping[str, object]:
+def _canonical_flat_payload(model: FlatReferenceModel) -> Mapping[str, object]:
     """Canonical flat model data used for the publication digest."""
-    model = reference.model
     return {
         "schema_version": SCHEMA_VERSION,
         "data_model_key": model.version.data_model_key,
         "external_version_number": model.version.external_version_number,
         "label": model.label,
-        "nodes": sorted(node.value for node in reference.nodes),
+        "nodes": list(model.nodes),
         "cdes": [
             {
                 "cde_key": cde.cde_key,
                 "cde_id": cde.cde_id,
-                "description": cde.description,
-                "values": sorted(model.pvs.values[cde.cde_key]),
+                "values": sorted(cde.values),
                 "node_relations": [
-                    _canonical_relation(relation)
-                    for relation in reference.node_relations.get(cde.cde_key, ())
+                    {
+                        "node_name": relation.node_name,
+                        "node_cde_id": relation.node_cde_id,
+                        "source_node_cde_id": relation.source_node_cde_id,
+                        "description": relation.description,
+                        "data_type": relation.data_type,
+                        "is_key": relation.is_key,
+                        "is_required": relation.is_required,
+                    }
+                    for relation in cde.node_relations
                 ],
             }
-            for cde in model.catalog
+            for cde in model.cdes
         ],
-    }
-
-
-def _canonical_relation(relation: CdeNodeRelation) -> Mapping[str, object]:
-    return {
-        "node_name": relation.node.value,
-        "node_cde_id": relation.node_cde_id,
-        "source_node_cde_id": relation.source_node_cde_id,
-        "description": relation.description,
-        "data_type": relation.data_type,
-        "is_key": relation.is_key,
-        "is_required": relation.is_required,
     }
 
 
@@ -469,9 +430,8 @@ def _values_for_cde(
     chunks: tuple[Mapping[str, object], ...],
 ) -> list[str]:
     ordered = sorted(chunks, key=lambda item: _required_int(item, "chunk_index"))
-    if len(ordered) != _required_int(metadata, "chunk_count") or any(
-        _required_int(item, "chunk_index") != index for index, item in enumerate(ordered)
-    ):
+    indexes = [_required_int(item, "chunk_index") for item in ordered]
+    if indexes != list(range(_required_int(metadata, "chunk_count"))):
         raise ReferenceDataCorruptError(f"Reference value chunks are incomplete: {cde_key}")
     values: list[str] = []
     for chunk in ordered:
@@ -501,9 +461,9 @@ def _gunzip_values(payload: object, expected_size: int) -> list[str]:
         if len(raw) != expected_size:
             raise ReferenceDataCorruptError("Reference value payload size is invalid")
         decoded = json.loads(raw)
-    except (OSError, EOFError, zlib.error, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ReferenceDataCorruptError("Reference value payload is corrupt") from exc
-    if not isinstance(decoded, list) or any(not isinstance(value, str) or not value.strip() for value in decoded):
+    if not isinstance(decoded, list) or any(not isinstance(value, str) for value in decoded):
         raise ReferenceDataCorruptError("Reference value payload is invalid")
     return cast(list[str], decoded)
 

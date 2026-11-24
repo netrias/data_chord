@@ -58,12 +58,9 @@ middleware. `src/app/dependencies.py` constructs concrete services.
 
 ## Reference models
 
-Harmonization uses a flat `ReferenceModel` with one record and one approved
-value set per CDE key. The Auto-Model adapter can attach optional node
-relationships to that model. Each relationship carries metadata for one node's
-use of a CDE, such as its source ID, description, type, and flags. A model may
-also declare nodes with no CDEs. The adapter passes the flat model to mapping
-and harmonization.
+The DynamoDB adapter validates the schema-2 catalog and gives mapping and
+harmonization a flat model with one record and approved-value set per CDE.
+Optional node metadata stays in the integration.
 
 ## Workflow
 
