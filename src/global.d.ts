@@ -10,6 +10,14 @@ declare module '/assets/shared/step-instruction-ui.js' {
   export function initNavigationEvents(): void;
   export function advanceMaxReachedStage(stageKey: string): void;
   export function resetMaxReachedStage(): void;
+  export function renderFileContext(): void;
+}
+
+declare module '/assets/shared/file-session.js' {
+  export function readFileSession(): Record<string, any> | null;
+  export function updateFileSession(fields: Record<string, unknown>): void;
+  export function selectedSheetShape(session: Record<string, any> | null): { rows: number; columns: number } | null;
+  export function formatCount(count: number, noun: string): string;
 }
 
 declare module '/assets/shared/storage-keys.js' {

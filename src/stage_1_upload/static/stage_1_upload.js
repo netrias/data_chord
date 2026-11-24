@@ -1,4 +1,5 @@
-import { initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage, resetMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
+import { initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage, resetMaxReachedStage, renderFileContext } from '/assets/shared/step-instruction-ui.js';
+import { readFileSession, updateFileSession, selectedSheetShape, formatCount } from '/assets/shared/file-session.js';
 import { STAGE_2_PAYLOAD_KEY, STAGE_3_JOB_KEY, CURRENT_FILE_SESSION_KEY, removeFromSession, writeToSession, readFromSession, isValidFileId } from '/assets/shared/storage-keys.js';
 import { reportApiError, reportFetchFailure } from '/assets/shared/client-events.js';
 import { showDataModelPopup, preloadDataModels } from './data_model_popup.js';
@@ -119,9 +120,19 @@ const _showDropzoneSummary = (file, statusText, tone = 'success') => {
     dropzoneFileName.title = file.name;
     dropzoneFileName.classList.toggle('file-name--long', file.name.length > LONG_NAME_THRESHOLD);
   }
-  /* Hydrated files have humanSize (pre-formatted); real Files have size (bytes). */
-  if (dropzoneFileSize) dropzoneFileSize.textContent = file.humanSize ?? _formatBytes(file.size);
+  _renderFileSize(file);
   if (dropzoneFileStatus) dropzoneFileStatus.textContent = statusText;
+};
+
+/* Rows and columns appear once Analyze has counted the selected sheet. */
+const _renderFileSize = (file) => {
+  if (!dropzoneFileSize || !file) return;
+  /* Hydrated files have humanSize (pre-formatted); real Files have size (bytes). */
+  const size = file.humanSize ?? _formatBytes(file.size);
+  const shape = state.uploaded ? selectedSheetShape(readFileSession()) : null;
+  dropzoneFileSize.textContent = shape
+    ? `${size} · ${formatCount(shape.rows, 'row')} · ${formatCount(shape.columns, 'column')}`
+    : size;
 };
 
 const _setFileInputDisabled = (disabled) => {
@@ -267,6 +278,7 @@ const _uploadDataset = async () => {
     console.error(error);
     state.uploaded = null;
     removeFromSession(CURRENT_FILE_SESSION_KEY);
+    renderFileContext();
     _showDropzoneSummary(file, 'Upload failed', 'error');
     _setStatus(error instanceof UploadVerificationError ? error.message : UPLOAD_API_ERROR_MESSAGE, 'error');
   } finally {
@@ -284,6 +296,7 @@ const _clearStaleSessionData = () => {
   removeFromSession(STAGE_2_PAYLOAD_KEY);
   removeFromSession(STAGE_3_JOB_KEY);
   removeFromSession(CURRENT_FILE_SESSION_KEY);
+  renderFileContext();
 };
 
 /* A replacement owns this history entry; earlier explicit workflow links keep theirs. */
@@ -303,10 +316,12 @@ const _persistFileSession = (uploadResponse, fileName) => {
     original_name: fileName,
     uploaded_at: new Date().toISOString(),
     human_size: uploadResponse.human_size,
+    tabular_format: uploadResponse.tabular_format ?? null,
     sheet_names: uploadResponse.sheet_names ?? [],
     sheet_previews: uploadResponse.sheet_previews ?? {},
     selected_sheet: uploadResponse.selected_sheet ?? null,
   });
+  renderFileContext();
 };
 
 /* Restores file display from session when returning to Stage 1. */
@@ -533,16 +548,12 @@ const _selectSheet = (sheetName, { focus = false } = {}) => {
   if (sheetSelect) sheetSelect.dispatchEvent(new Event('change', { bubbles: true }));
 };
 
+/* why: update in place so the upload time and Analyze counts survive a sheet change. */
 const _persistSelectedSheet = () => {
   if (!state.uploaded || !state.file) return;
-  _persistFileSession(
-    {
-      ...state.uploaded,
-      sheet_names: state.sheetNames,
-      selected_sheet: state.selectedSheet,
-    },
-    state.file.name,
-  );
+  updateFileSession({ selected_sheet: state.selectedSheet });
+  renderFileContext();
+  _renderFileSize(state.file);
 };
 
 const _updateSheetSubtitle = () => {
@@ -693,6 +704,14 @@ const _analyzeDataset = async () => {
       });
       throw new Error(ANALYZE_API_ERROR_MESSAGE);
     }
+    updateFileSession({
+      selected_sheet: state.selectedSheet,
+      dataset_shape: {
+        sheet_name: state.selectedSheet,
+        rows: payload.total_rows,
+        columns: Array.isArray(payload.columns) ? payload.columns.length : null,
+      },
+    });
     // Keep overlay visible during navigation - browser will replace the page
     _navigateToStageTwo(
       state.uploaded.file_id,

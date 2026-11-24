@@ -30,6 +30,13 @@
     <div id="stepInstruction" class="step-instruction">
       <p class="step-instruction-text"></p>
       <span class="step-instruction-tooltip" aria-hidden="true"></span>
+      <div id="stepInstructionFile" class="step-instruction-file" hidden>
+        <span class="step-instruction-file-name" tabindex="0" aria-describedby="stepInstructionFileCard"></span>
+        <div id="stepInstructionFileCard" class="step-instruction-file-card" role="tooltip">
+          <p class="step-instruction-file-card-name"></p>
+          <dl class="step-instruction-file-facts"></dl>
+        </div>
+      </div>
     </div>
   </nav>
 {%- endmacro %}
