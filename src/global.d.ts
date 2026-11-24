@@ -6,7 +6,7 @@
 /* Module path aliases resolved at runtime by the web server */
 declare module '/assets/shared/step-instruction-ui.js' {
   export function initStepInstruction(instructionKey: string): void;
-  export function setActiveStage(stageKey: string): void;
+  export function setActiveStage(stageKey: string, hasCompletedResults?: boolean): void;
   export function initNavigationEvents(): void;
   export function advanceMaxReachedStage(stageKey: string): void;
   export function resetMaxReachedStage(): void;
@@ -14,9 +14,9 @@ declare module '/assets/shared/step-instruction-ui.js' {
 }
 
 declare module '/assets/shared/file-session.js' {
-  export function readFileSession(): Record<string, any> | null;
-  export function updateFileSession(fields: Record<string, unknown>): void;
-  export function selectedSheetShape(session: Record<string, any> | null): { rows: number; columns: number } | null;
+  export function readFileSession(fileId: string | null | undefined): Record<string, any> | null;
+  export function updateFileSession(fileId: string, fields: Record<string, unknown>): void;
+  export function selectedSheetShape(session: Record<string, any> | null, sheetName?: string | null): { rows: number; columns: number } | null;
   export function formatCount(count: number, noun: string): string;
 }
 

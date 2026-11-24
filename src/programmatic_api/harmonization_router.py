@@ -31,7 +31,7 @@ from src.domain.dataset_workflow_ids import (
     DatasetWorkflowId,
     dataset_workflow_id_from_value,
 )
-from src.domain.harmonization import HarmonizeStatus
+from src.domain.harmonization import HarmonizationFailure, HarmonizeStatus
 from src.domain.manifest import (
     ColumnMappingManifest,
     ColumnMappingRecord,
@@ -48,6 +48,7 @@ from src.programmatic_api.schemas import (
     HarmonizationSubmissionRequest,
     HarmonizationSubmitResponse,
 )
+from src.shared.model_recovery import REFERENCE_UNAVAILABLE_DETAIL
 from src.storage import (
     UnsupportedUploadError,
     UploadTooLargeError,
@@ -205,15 +206,20 @@ def _job_response(request: Request, job: HarmonizationJobState) -> Harmonization
     if job.status is HarmonizeStatus.QUEUED:
         return HarmonizationJobResponse(status="QUEUED")
     if job.status is HarmonizeStatus.FAILED:
-        return HarmonizationJobResponse(
-            status="FAILED",
-            errorMessage="Harmonization failed. Please retry.",
-        )
+        return HarmonizationJobResponse(status="FAILED", errorMessage=_job_failure_message(job.failure))
     return HarmonizationJobResponse(
         status="SUCCEEDED",
         final_url=_signed_artifact_url(request, str(job.file_id), "harmonized"),
         manifest_url=_signed_artifact_url(request, str(job.file_id), "manifest"),
     )
+
+
+def _job_failure_message(failure: HarmonizationFailure | None) -> str:
+    if failure is HarmonizationFailure.MODEL_VERSION_RETIRED:
+        return "This model version is no longer available. Choose a current version and submit a new job."
+    if failure is HarmonizationFailure.REFERENCE_UNAVAILABLE:
+        return REFERENCE_UNAVAILABLE_DETAIL
+    return "Harmonization failed. Please retry."
 
 
 def _signed_artifact_url(request: Request, job_id: str, kind: str) -> str:

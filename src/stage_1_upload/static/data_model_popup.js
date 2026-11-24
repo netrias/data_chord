@@ -106,6 +106,11 @@ export function preloadDataModels() {
     });
 }
 
+export function refreshDataModels() {
+  _cachedDataModels = null;
+  preloadDataModels();
+}
+
 const _dropdownState = new WeakMap();
 
 /**

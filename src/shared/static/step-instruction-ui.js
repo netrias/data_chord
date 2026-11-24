@@ -11,19 +11,22 @@ import {
 } from './storage-keys.js';
 import { readFileSession, selectedSheetShape } from './file-session.js';
 
+let maxReachedStageAfterChange;
+
 /**
  * Update progress tracker UI to reflect the active stage.
  * Marks earlier stages as complete, current stage as active, future stages as unreachable.
  * @param {string} stage - The currently active stage identifier
  */
-export function setActiveStage(stage) {
+export function setActiveStage(stage, hasCompletedResults = false) {
   const targetIndex = STAGE_ORDER.indexOf(stage);
   if (targetIndex === -1) {
     console.warn(`[step-instruction-ui] Unknown stage: ${stage}. Valid stages: ${STAGE_ORDER.join(', ')}`);
     return;
   }
 
-  const maxReachedIndex = Math.max(_getMaxReachedStageIndex(), targetIndex);
+  const canRestoreProgress = stage !== 'upload' || readFileSession(_getFileIdForNavigation());
+  const maxReachedIndex = Math.max(canRestoreProgress ? _getMaxReachedStageIndex() : 0, targetIndex);
   const progressSteps = document.querySelectorAll('.progress-tracker [data-stage]');
 
   progressSteps.forEach((step) => {
@@ -31,7 +34,8 @@ export function setActiveStage(stage) {
     const stepIndex = STAGE_ORDER.indexOf(stepStage);
     const isActive = stepStage === stage;
     const isComplete = stepIndex >= 0 && stepIndex < targetIndex;
-    const isUnreachable = stepIndex > maxReachedIndex;
+    const canOpenResult = hasCompletedResults && ['verify', 'review'].includes(stepStage);
+    const isUnreachable = stepIndex > maxReachedIndex && !canOpenResult;
     step.classList.toggle('active', isActive);
     step.classList.toggle('complete', isComplete);
     step.classList.toggle('unreachable', isUnreachable);
@@ -87,6 +91,9 @@ export function buildNavUrl(baseUrl) {
   if (fileId) url.searchParams.set('file_id', fileId);
 
   const pageParams = new URLSearchParams(window.location.search);
+  if (fileId && url.pathname === '/stage-1' && _isStageOneUrl(window.location.href) && pageParams.get('reselect_model') === 'true') {
+    url.searchParams.set('reselect_model', 'true');
+  }
   const jobId = pageParams.get('job_id');
   if (fileId && pageParams.get('file_id') === fileId && jobId && ['/stage-4', '/stage-5'].includes(url.pathname)) {
     url.searchParams.set('job_id', jobId);
@@ -191,10 +198,9 @@ export function initStepInstruction(activeStage) {
 export function renderFileContext() {
   const container = document.getElementById('stepInstructionFile');
   if (!container) return;
-  const session = readFileSession();
-  const isCurrentFile = Boolean(session?.original_name) && session.file_id === _getFileIdForNavigation();
-  container.hidden = !isCurrentFile;
-  if (!isCurrentFile) return;
+  const session = readFileSession(_getFileIdForNavigation());
+  container.hidden = !session?.original_name;
+  if (!session?.original_name) return;
 
   container.querySelector('.step-instruction-file-name').textContent = session.original_name;
   container.querySelector('.step-instruction-file-card-name').textContent = session.original_name;
@@ -296,6 +302,7 @@ function _populateStepTooltips() {
 
 /* why: track highest stage reached to block skipping forward in progress tracker. */
 function _getMaxReachedStageIndex() {
+  if (maxReachedStageAfterChange !== undefined) return maxReachedStageAfterChange;
   try {
     const stored = sessionStorage.getItem(MAX_REACHED_STAGE_KEY);
     if (stored) {
@@ -319,6 +326,7 @@ export function advanceMaxReachedStage(stage) {
 
   const currentMax = _getMaxReachedStageIndex();
   if (newIndex > currentMax) {
+    maxReachedStageAfterChange = newIndex;
     try {
       sessionStorage.setItem(MAX_REACHED_STAGE_KEY, stage);
     } catch {
@@ -332,6 +340,7 @@ export function advanceMaxReachedStage(stage) {
  * Call this when starting a new workflow.
  */
 export function resetMaxReachedStage() {
+  maxReachedStageAfterChange = 0;
   try {
     sessionStorage.removeItem(MAX_REACHED_STAGE_KEY);
   } catch {

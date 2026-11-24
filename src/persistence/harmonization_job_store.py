@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Final
 
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_value
-from src.domain.harmonization import HarmonizationManifestSummary, HarmonizeStatus
+from src.domain.harmonization import HarmonizationFailure, HarmonizationManifestSummary, HarmonizeStatus
 from src.storage import (
     UserContext,
     VersionToken,
@@ -46,6 +46,7 @@ class HarmonizationJobState:
     lease_expires_at: datetime
     job_id_available: bool = False
     manifest_summary: HarmonizationManifestSummary | None = None
+    failure: HarmonizationFailure | None = None
 
     def __post_init__(self) -> None:
         for field_name, value in (
@@ -128,6 +129,8 @@ class HarmonizationJobState:
                 mode="json",
                 exclude_none=True,
             )
+        if self.failure is not None:
+            payload["failure"] = self.failure.value
         return payload
 
     @classmethod
@@ -164,7 +167,17 @@ class HarmonizationJobState:
             lease_expires_at=lease_expires_at,
             job_id_available=job_id_available,
             manifest_summary=_manifest_summary_from_store(payload.get("manifest_summary")),
+            failure=_failure_from_store(payload.get("failure")),
         )
+
+
+def _failure_from_store(value: object) -> HarmonizationFailure | None:
+    if value is None:
+        return None
+    try:
+        return HarmonizationFailure(value)
+    except ValueError as exc:
+        raise HarmonizationJobUnreadableError("harmonization job has invalid failure") from exc
 
 
 @dataclass(frozen=True)

@@ -48,6 +48,7 @@ class HarmonizeResponse(BaseModel):
     status: HarmonizeStatus
     detail: str
     next_stage_url: str
+    recovery_url: str | None = None
     job_id_available: bool = False
     elapsed_seconds: int | None = None
     manifest_summary: HarmonizationManifestSummary | None = None
