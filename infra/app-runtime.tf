@@ -86,6 +86,7 @@ resource "aws_ecs_task_definition" "application" {
     aws_iam_role_policy.application_task_cde_recommendation_cache,
     aws_iam_role_policy.application_task_harmonization_cache,
     aws_iam_role_policy.application_task_reference_data,
+    aws_iam_role_policy.application_task_flat_reference_catalog,
     aws_iam_role_policy.application_task_workflow_storage,
     aws_iam_role_policy.application_task_bedrock_mantle,
     aws_iam_role_policy_attachment.application_task_execution,
@@ -125,7 +126,7 @@ resource "aws_ecs_task_definition" "application" {
         },
         {
           name  = "DATA_CHORD_REFERENCE_TABLE"
-          value = module.data_plane.reference_data_table_name
+          value = local.active_reference_table
         },
         {
           name  = "DATA_CHORD_CDE_RECOMMENDATION_CACHE_TABLE"

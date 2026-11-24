@@ -26,7 +26,7 @@ _FIELDS = {
     "region",
     "state_bucket_name",
 }
-_OPTIONAL_FIELDS = {"local_developer_role_arn", "existing_network"}
+_OPTIONAL_FIELDS = {"local_developer_role_arn", "existing_network", "reference_catalog"}
 _HANDOFF_FIELDS = {
     "account_id",
     "application_role_boundary_arn",
@@ -101,6 +101,7 @@ class Environment:
     # A private-infrastructure role that may assume the task role for local staging use.
     local_developer_role_arn: str | None = None
     existing_network: ExistingNetwork | None = None
+    reference_catalog: str = "legacy"
 
     @property
     def partition(self) -> str:
@@ -140,6 +141,7 @@ class Environment:
             "hosted_zone_name": self.hosted_zone_name,
             "local_developer_role_arn": self.local_developer_role_arn,
             "programmatic_api_key_secret_name": self.programmatic_api_key_secret_name,
+            "reference_catalog": self.reference_catalog,
         }
         if self.existing_network is not None:
             variables["existing_network"] = self.existing_network.document()
@@ -211,8 +213,11 @@ def load_environment(path: Path, target: str, stage: str) -> Environment:
             _string(document, "local_developer_role_arn") if "local_developer_role_arn" in document else None
         ),
         existing_network=_existing_network(document),
+        reference_catalog=_string(document, "reference_catalog") if "reference_catalog" in document else "legacy",
     )
     _validate(environment)
+    if environment.reference_catalog not in {"legacy", "prepare_flat", "flat"}:
+        raise EnvironmentError("reference_catalog must be legacy, prepare_flat, or flat")
     return environment
 
 
@@ -280,6 +285,7 @@ def canonical_digest(environment: SelectedEnvironment) -> str:
                 "github_app_secret_name": environment.github_app_secret_name,
                 "hosted_zone_name": environment.hosted_zone_name,
                 "local_developer_role_arn": environment.local_developer_role_arn,
+                "reference_catalog": environment.reference_catalog,
                 "programmatic_api_key_secret_name": (environment.programmatic_api_key_secret_name),
             }
         )
