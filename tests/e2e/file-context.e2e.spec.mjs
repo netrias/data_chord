@@ -442,3 +442,21 @@ test('replacing a file keeps the new tracker name when storage refuses both chan
     Uploaded: expect.any(String),
   });
 });
+
+
+test('the keyboard-focused filename tooltip wins over a stationary pointer', async ({ page }) => {
+  // Given the pointer is over the focused instruction and its tooltip is open.
+  await uploadAndAnalyzeReal(page, longNamedCsv());
+  const instruction = page.locator('.step-instruction-text');
+  const instructionTip = page.locator('#stepInstructionTooltip');
+  await instruction.click();
+  await expect(instructionTip).toBeVisible();
+
+  // When the keyboard moves focus to the filename without moving the pointer.
+  await page.keyboard.press('Tab');
+
+  // Then the tooltip follows keyboard focus and the previous one is hidden.
+  await expect(fileName(page)).toBeFocused();
+  await expect(fileCard(page)).toBeVisible();
+  await expect(instructionTip).toBeHidden();
+});

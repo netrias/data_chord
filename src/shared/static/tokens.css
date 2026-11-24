@@ -633,7 +633,7 @@ button.linklike {
   box-shadow: var(--shadow-xl);
   opacity: 0;
   visibility: hidden;
-  transition: opacity var(--transition-normal), visibility var(--transition-normal);
+  transition: opacity var(--transition-normal);
   z-index: 1000;
   pointer-events: none;
   text-align: left;
@@ -650,7 +650,8 @@ button.linklike {
   border-bottom-color: var(--gray-800);
 }
 
-.step-instruction-text:hover + .step-instruction-tooltip,
+.step-instruction:not(:has(.step-instruction-file-name:focus-visible)) .step-instruction-text:hover + .step-instruction-tooltip,
+.step-instruction-text:focus-visible + .step-instruction-tooltip,
 .step-instruction:not(:has(.step-instruction-file:hover)) .step-instruction-text:focus + .step-instruction-tooltip {
   opacity: 1;
   visibility: visible;
@@ -724,7 +725,8 @@ button.linklike {
   margin: 0;
 }
 
-.step-instruction-file:hover .step-instruction-file-card,
+.step-instruction:not(:has(.step-instruction-text:focus-visible)) .step-instruction-file:hover .step-instruction-file-card,
+.step-instruction-file-name:focus-visible + .step-instruction-file-card,
 .step-instruction:not(:has(.step-instruction-text:hover)) .step-instruction-file-name:focus + .step-instruction-file-card {
   opacity: 1;
   visibility: visible;
