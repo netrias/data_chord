@@ -141,8 +141,9 @@ class Environment:
             "hosted_zone_name": self.hosted_zone_name,
             "local_developer_role_arn": self.local_developer_role_arn,
             "programmatic_api_key_secret_name": self.programmatic_api_key_secret_name,
-            "reference_catalog": self.reference_catalog,
         }
+        if self.reference_catalog != "legacy":
+            variables["reference_catalog"] = self.reference_catalog
         if self.existing_network is not None:
             variables["existing_network"] = self.existing_network.document()
         return variables
@@ -285,10 +286,11 @@ def canonical_digest(environment: SelectedEnvironment) -> str:
                 "github_app_secret_name": environment.github_app_secret_name,
                 "hosted_zone_name": environment.hosted_zone_name,
                 "local_developer_role_arn": environment.local_developer_role_arn,
-                "reference_catalog": environment.reference_catalog,
                 "programmatic_api_key_secret_name": (environment.programmatic_api_key_secret_name),
             }
         )
+        if environment.reference_catalog != "legacy":
+            document["reference_catalog"] = environment.reference_catalog
         if environment.existing_network is not None:
             document["existing_network"] = environment.existing_network.document()
     else:
