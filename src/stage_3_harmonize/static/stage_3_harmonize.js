@@ -390,7 +390,7 @@ const _updateProgressMessage = (job) => {
     harmonizeProgressMessage.textContent = `Still working after ${elapsedLabel}. Larger datasets can take several minutes.`;
     return;
   }
-  harmonizeProgressMessage.textContent = 'This usually takes 1-2 minutes.';
+  harmonizeProgressMessage.textContent = 'This usually takes 1–2 minutes.';
 };
 
 const _clearPollTimer = () => {
@@ -428,8 +428,8 @@ const _renderJob = (job, pollIntervalMs = JOB_POLL_INTERVAL_MS) => {
   _clearError();
 
   if (_isFailedStatus(normalized)) {
-    _toggleLoadingState(true);
-    _toggleAnimation(false);
+    /* why: a failed job shows the "Harmonization Failed" title and the error, not the "usually takes 1–2 minutes" text. */
+    _toggleLoadingState(false);
     _hideMetricsDashboard();
     _showError(jobForSession.detail || 'Harmonization failed. Please retry.');
     reviewButton.disabled = true;
