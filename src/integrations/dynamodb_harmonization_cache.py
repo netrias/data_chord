@@ -79,6 +79,7 @@ def _item(entry: HarmonizationCacheEntry) -> Mapping[str, object]:
     key = entry.key
     return {
         "cache_key": _digest(key),
+        # Keep positive rows readable by previous releases. Only no-matches need a new version.
         "schema_version": SCHEMA_VERSION if entry.matched_value is None else _LEGACY_SCHEMA_VERSION,
         "matched_value": entry.matched_value,
         "match_fidelity": entry.match_fidelity.value,

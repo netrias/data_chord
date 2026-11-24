@@ -98,4 +98,4 @@ exclude-newer = "7 days"
 exclude-newer-package = { certifi = "2026-10-21T00:00:00Z", pip = "2026-10-21T00:00:00Z", virtualenv = "2026-10-22T00:00:00Z" }
 
 [tool.uv.sources]
-agent-experiment = { git = "https://github.com/netrias/agentic_harmonization.git", rev = "3d6f1cddd9ff399ce01bb5490922d3997d264de7" }
+agent-experiment = { git = "https://github.com/netrias/agentic_harmonization.git", rev = "63c3c85b246fdf8ebff778976d91a99b66c69d27" }

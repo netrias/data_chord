@@ -107,13 +107,15 @@ def test_old_no_match_is_rechecked_without_discarding_existing_matches() -> None
     cache.save_many([no_match, match])
     old_row = next(item for item in table.items.values() if item["matched_value"] is None)
     old_row["schema_version"] = 1
+    assert all(row["schema_version"] == 1 for row in table.items.values())
+    original_rows = {key: dict(row) for key, row in table.items.items()}
 
     # When the new reader looks up both outcomes.
     loaded = cache.load_many([no_match.key, match.key])
 
     # Then only the verified match is reused and the old no-match is untouched.
     assert loaded == {match.key: match}
-    assert old_row["schema_version"] == 1
+    assert table.items == original_rows
 
 
 def test_new_no_match_is_reusable() -> None:

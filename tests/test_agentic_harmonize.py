@@ -605,7 +605,7 @@ def test_malformed_explorer_call_cannot_publish_or_cache_no_match(
     source.write_text("diagnosis,treatment\nunknown,\n", encoding="utf-8")
     output = tmp_path / "output.csv"
 
-    # When the pinned library exhausts the explorer budget during a Stage 3 file job.
+    # When Stage 3 runs the file and the explorer receives the malformed request.
     result = service.run(
         file_path=source, data_model_version=MODEL_VERSION, prepared_manifest=_manifest(),
         column_pv_sets=ColumnPvSets({column_key_for_index(0): frozenset({"Known"})}), output_path=output,
