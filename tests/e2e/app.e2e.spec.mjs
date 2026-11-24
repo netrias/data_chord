@@ -3191,8 +3191,7 @@ test('model recovery keeps completed results reachable for the same plan', async
   await expect(page.locator('#reviewButton')).toBeEnabled({ timeout: 20_000 });
   await page.locator('#reviewButton').click();
   await page.waitForURL(/\/stage-4/);
-  await page.locator('#stageFiveButton').click();
-  await page.waitForURL(/\/stage-5/);
+  await waitForReviewRows(page);
   const jobId = new URL(page.url()).searchParams.get('job_id');
   expect(jobId).toBeTruthy();
 
