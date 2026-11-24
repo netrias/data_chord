@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-
-import pytest
 from types import SimpleNamespace
 
+import pytest
 from netrias_client import read_tabular
 
 from src.domain.columns import column_key_for_index
