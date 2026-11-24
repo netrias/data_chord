@@ -81,15 +81,16 @@ async def stage_upload(
 
 
 def upload_is_available(uploads: UploadStorage, storage: WorkflowStorage, user: UserContext, file_id: str) -> bool:
-    """Check admission without downloading the source that the worker will open."""
+    """Check for the original upload without reading its contents."""
     try:
         if _read_upload_metadata(storage, user, file_id) is None:
             return False
-        if storage.artifact_version(user, file_id, WorkflowFile.ORIGINAL_UPLOAD) is not None:
-            return True
+        if isinstance(storage, S3WorkflowStorage):
+            return storage.artifact_version(user, file_id, WorkflowFile.ORIGINAL_UPLOAD) is not None
+        with _open_artifact(storage, user, file_id, WorkflowFile.ORIGINAL_UPLOAD) as source:
+            if source is not None:
+                return True
     except WorkflowNotFoundError:
-        return False
-    if isinstance(storage, S3WorkflowStorage):
         return False
     local = uploads.load(file_id)
     return local is not None and local.saved_path.is_file()

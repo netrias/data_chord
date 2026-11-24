@@ -40,6 +40,7 @@ from src.persistence.review_override_store import (
 from src.persistence.workflow_artifacts import (
     open_generated_artifact,
     open_upload_artifact,
+    upload_is_available,
 )
 from src.stage_4_review_results.schemas import (
     CellOverrideSchema,
@@ -497,11 +498,15 @@ def _original_row_count(
     workflow_storage: WorkflowStorage,
     user: UserContext,
 ) -> int:
+    state = ready.workflow.state
     summary = ready.job.job.manifest_summary
-    if summary is not None and summary.source_row_count is not None:
+    if (
+        summary is not None
+        and summary.source_row_count is not None
+        and upload_is_available(upload_storage, workflow_storage, user, state.file_id)
+    ):
         return summary.source_row_count
 
-    state = ready.workflow.state
     with performance_span("stage4.rows.upload_artifact"), open_upload_artifact(
         upload_storage, workflow_storage, user, state.file_id,
     ) as meta:
