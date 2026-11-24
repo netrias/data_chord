@@ -23,6 +23,7 @@ from src.domain.columns import column_key_from_string
 from src.domain.harmonization import HarmonizeStatus, MatchFidelity
 from src.domain.harmonization_cache import EmptyHarmonizationCache
 from src.domain.manifest import ManifestPayload
+from src.domain.reference_data import ReferenceDataUnavailableError, ReferenceModelNotFoundError
 from src.domain.workflow_state import WorkflowState
 from src.integrations.harmonize import (
     FileHarmonizationService,
@@ -32,7 +33,7 @@ from src.integrations.harmonize import (
 )
 from src.persistence.harmonization_job_store import HarmonizationJobState
 from src.persistence.workflow_state_store import load_workflow_state
-from src.storage import UploadStorage, WorkflowFile
+from src.storage import UploadStorage, UserContext, WorkflowFile
 from tests.conftest import (
     TEST_TARGET_SCHEMA,
     TEST_TSV_CONTENT_TYPE,
@@ -607,6 +608,138 @@ async def test_stage2_mapping_page_loads_selected_model_from_workflow_state(
     loaded_version = repository.load_model.call_args.args[0]
     assert loaded_version.data_model_key == "gc"
     assert loaded_version.external_version_number == "11.0.4"
+
+
+@pytest.mark.parametrize("stage", ["/stage-2", "/stage-3", "/stage-3?job_id=prior-job"])
+async def test_retired_model_returns_to_stage_one_with_the_original_upload(
+    app_client: AsyncClient,
+    mock_netrias_client: MagicMock,
+    stage: str,
+) -> None:
+    # Given an analyzed workbook whose selected version was retired from the catalog.
+    content = create_xlsx_content({"First": [["unused"], ["x"]], "Second": [["diagnosis"], ["Lung"]]})
+    file_id = await upload_content(app_client, content, "retired-model.xlsx", TEST_XLSX_CONTENT_TYPE)
+    analysis = await app_client.post(
+        "/stage-1/analyze",
+        json={
+            "file_id": file_id,
+            "data_model_key": "gc",
+            "external_version_number": "11.0.4",
+            "sheet_name": "Second",
+        },
+    )
+    assert analysis.status_code == 200
+    await confirm_mapping_choices(app_client, file_id)
+    initial_workflow = _load_workflow_state(file_id)
+    assert initial_workflow is not None
+    mock_netrias_client.reference_repository.load_model.side_effect = ReferenceModelNotFoundError("retired version")
+
+    # When the user opens Mapping or Harmonize for the saved workflow.
+    separator = "&" if "?" in stage else "?"
+    response = await app_client.get(f"{stage}{separator}file_id={file_id}", follow_redirects=True)
+
+    # Then Stage 1 can offer model selection with the same file, and the saved analysis is intact.
+    assert len(response.history) == 1
+    assert response.history[0].status_code == 303
+    assert response.url.path == "/stage-1"
+    assert response.url.params["file_id"] == file_id
+    assert 'reselectModel: true' in response.text
+    assert '"file_name": "retired-model.xlsx"' in response.text
+    assert '"selected_sheet": "Second"' in response.text
+    assert _load_workflow_state(file_id) == initial_workflow
+
+
+@pytest.mark.parametrize("retired", [True, False], ids=["retired", "outage"])
+async def test_failed_replacement_analysis_preserves_the_confirmed_plan(
+    app_client: AsyncClient,
+    mock_netrias_client: MagicMock,
+    retired: bool,
+) -> None:
+    # Given a confirmed plan and a replacement version that cannot load.
+    file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "model-removed.csv")
+    response = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "data_model_key": "gc", "external_version_number": "11.0.4"},
+    )
+    assert response.status_code == 200
+    await confirm_mapping_choices(app_client, file_id)
+    initial_workflow = _load_workflow_state(file_id)
+    assert initial_workflow is not None
+    mock_netrias_client.reference_repository.load_model.side_effect = (
+        ReferenceModelNotFoundError("removed") if retired else ReferenceDataUnavailableError("outage")
+    )
+
+    # When the user tries to analyze the same file with the replacement version.
+    response = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "data_model_key": "gc", "external_version_number": "12.0.0"},
+    )
+
+    # Then analysis distinguishes retirement from an outage and keeps the confirmed plan.
+    if retired:
+        assert response.status_code == 409
+        assert response.json() == {
+            "code": "model_version_retired",
+            "detail": "This model version is no longer available. Choose a current version and run analysis again.",
+        }
+    else:
+        assert response.status_code == 503
+        assert response.json() == {"detail": "Reference data is currently unavailable. Please try again later."}
+    assert _load_workflow_state(file_id) == initial_workflow
+
+
+@pytest.mark.parametrize("retired", [True, False], ids=["retired", "outage"])
+async def test_stage_three_job_preserves_reference_failure_on_resume(
+    app_client: AsyncClient,
+    mock_netrias_client: MagicMock,
+    retired: bool,
+) -> None:
+    # Given a confirmed plan and a reference load that fails in the worker.
+    file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "job-recovery.csv")
+    response = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "data_model_key": "gc", "external_version_number": "11.0.4"},
+    )
+    assert response.status_code == 200
+    await confirm_mapping_choices(app_client, file_id)
+    initial_workflow = _load_workflow_state(file_id)
+    repository = mock_netrias_client.reference_repository
+    repository.load_model.side_effect = (
+        ReferenceModelNotFoundError("retired") if retired else ReferenceDataUnavailableError("outage")
+    )
+
+    # When a client submits the plan and polls the accepted job through durable storage.
+    submitted = await app_client.post("/stage-3/harmonize", json={"file_id": file_id})
+    assert submitted.status_code == 200
+    job = await _wait_for_stage_three_job(app_client, submitted.json()["job_id"], file_id)
+
+    # Then only a retired selection offers recovery, and the confirmed plan is intact.
+    assert job["status"] == "failed"
+    if retired:
+        assert job["detail"] == (
+            "This model version is no longer available. Choose a current version and run analysis again."
+        )
+        assert job["recovery_url"] == f"/stage-1?file_id={file_id}&reselect_model=true"
+    else:
+        assert job["detail"] == "Reference data is currently unavailable. Please try again later."
+        assert job["recovery_url"] is None
+    assert _load_workflow_state(file_id) == initial_workflow
+
+
+async def test_recovery_does_not_expose_another_users_upload(
+    app_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given an upload owned by another user.
+    file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "private-upload.csv")
+    monkeypatch.setattr(dependencies, "get_user_context", lambda: UserContext("different-user"))
+
+    # When the user opens a model recovery URL for that upload.
+    response = await app_client.get("/stage-1", params={"file_id": file_id, "reselect_model": "true"})
+
+    # Then Stage 1 has no file metadata to restore.
+    assert response.status_code == 200
+    assert "recoveryUpload: null" in response.text
 
 
 async def test_stage2_analysis_state_recovers_without_replacing_confirmed_choices(

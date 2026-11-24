@@ -397,6 +397,10 @@ const _renderJob = (job, pollIntervalMs = JOB_POLL_INTERVAL_MS) => {
   _clearPollTimer();
   const jobForSession = _jobWithCurrentFile(job);
   state.job = jobForSession;
+  if (isSafeRelativeUrl(jobForSession.recovery_url)) {
+    window.location.assign(jobForSession.recovery_url);
+    return;
+  }
   _persistJobMeta(jobForSession);
 
   /* Default to 'running' when status is missing - job is in progress. */

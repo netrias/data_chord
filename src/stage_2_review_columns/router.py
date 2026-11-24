@@ -11,15 +11,16 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 import src.app.dependencies as dependencies
 from src.api.schemas import DatasetWorkflowIdField
 from src.domain.cde import CDEInfo
 from src.domain.data_model_version_reference import DataModelVersionReference
-from src.domain.reference_data import ReferenceDataError
+from src.domain.reference_data import ReferenceDataError, ReferenceModelNotFoundError
 from src.persistence.workflow_state_store import WorkflowStateUnreadableError, load_workflow_state
 from src.shared.jinja import templates_for_stage
+from src.shared.model_recovery import model_recovery_path
 
 from .schemas import ColumnDetailResponse, SaveMappingChoicesRequest, SaveMappingChoicesResponse
 from .use_cases import (
@@ -43,7 +44,7 @@ async def render_stage_two(
     file_id: Annotated[DatasetWorkflowIdField | None, Query()] = None,
     data_model_key: Annotated[str | None, Query(min_length=1)] = None,
     external_version_number: Annotated[str | None, Query(min_length=1)] = None,
-) -> HTMLResponse:
+) -> Response:
     cde_catalog: list[CDEInfo] = []
     try:
         data_model_version = _data_model_version_for_request(file_id, data_model_key, external_version_number)
@@ -62,6 +63,8 @@ async def render_stage_two(
                 data_model_version,
             )
             cde_catalog = model.catalog.to_list()
+        except ReferenceModelNotFoundError:
+            return RedirectResponse(model_recovery_path(request, file_id), status_code=status.HTTP_303_SEE_OTHER)
         except ReferenceDataError as exc:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

@@ -3,6 +3,7 @@ import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { e2eEnv } from './runtime-env.mjs';
 
 import {
   AGENT_FILE_INPUT,
@@ -3115,6 +3116,85 @@ test('data model menus select models by pointer and keyboard and close on outsid
   await expect(page.locator('.data-model-dropdown--version .data-model-dropdown-panel')).toBeVisible();
   await page.locator('.data-model-dialog-title').click();
   await expect(page.locator('.data-model-dropdown--version .data-model-dropdown-panel')).toBeHidden();
+});
+
+test('a retired model selection can be replaced with a current version for the same upload', async ({ page }) => {
+  // Given a workbook analyzed on its second sheet and a saved plan that now refers to a retired version.
+  await page.goto('/stage-1');
+  await page.setInputFiles(AGENT_FILE_INPUT, createWorkbookFixture());
+  await page.locator('.workbook-tab[data-sheet-name="Patients"]').click();
+  await page.locator('#analyzeButton').click();
+  await page.locator('.data-model-confirm-btn').click();
+  await page.waitForURL('**/stage-2?*');
+  const fileId = getFileIdFromUrl(page);
+  const statePath = path.join(e2eEnv.DATA_CHORD_WORKFLOW_STORAGE_DIR, 'workflows', fileId, 'json', 'workflow_state.json');
+  const plan = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  expect(plan.selected_sheet).toBe('Patients');
+  fs.writeFileSync(statePath, JSON.stringify({ ...plan, external_version_number: 'retired' }));
+  await page.evaluate(() => {
+    sessionStorage.clear();
+    sessionStorage.setItem('maxReachedStage', 'review');
+  });
+  await page.goto(`/stage-2?file_id=${fileId}`);
+  await expect(page.locator('#statusMessage')).toContainText('The previous model version is no longer available');
+  await expect(page.locator('#dropzoneFileName')).toHaveText('workbook.xlsx');
+  await expect(page.locator('.workbook-tab[data-sheet-name="Patients"]')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('[data-stage="review"] .step-link')).toHaveAttribute('aria-disabled', 'true');
+  await page.locator('#analyzeButton').click();
+  await expect(page.locator('#versionDropdownTrigger')).toHaveText('11.0.4');
+
+  // When the user confirms the current version from the catalog.
+  await page.locator('.data-model-confirm-btn').click();
+
+  // Then the new plan uses the current version and the same uploaded file and worksheet.
+  await expect(page).toHaveURL(
+    `/stage-2?file_id=${fileId}&data_model_key=gc&external_version_number=11.0.4`,
+  );
+  const recovered = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  expect(recovered.external_version_number).toBe('11.0.4');
+  expect(recovered.selected_sheet).toBe('Patients');
+});
+
+test('the model picker refreshes after a version is retired during selection', async ({ page }) => {
+  // Given the picker loaded before the catalog retired its initially advertised version.
+  let listedVersion = 'retired';
+  await page.route('**/stage-1/data-models', route => route.fulfill({
+    json: [{ data_model_key: 'gc', label: 'General Commons', versions: [{ external_version_number: listedVersion }] }],
+  }));
+  await page.goto('/stage-1');
+  await page.setInputFiles(AGENT_FILE_INPUT, fileFixture('basic.csv'));
+  await page.locator('#analyzeButton').click();
+  await expect(page.locator('#versionDropdownTrigger')).toHaveText('retired');
+  listedVersion = '11.0.4';
+
+  // When the user submits the retired version and is prompted to choose again.
+  await page.locator('.data-model-confirm-btn').click();
+  await expect(page.locator('#statusMessage')).toContainText('Choose a current version');
+  await page.locator('#analyzeButton').click();
+
+  // Then the picker shows the current version without a page reload.
+  await expect(page.locator('#versionDropdownTrigger')).toHaveText('11.0.4');
+});
+
+test('refresh keeps a replacement upload after retired model recovery', async ({ page }) => {
+  // Given an upload was recovered and then replaced with another file.
+  await page.goto('/stage-1');
+  const uploaded = page.waitForResponse(response => response.url().endsWith('/stage-1/upload'));
+  await page.setInputFiles(AGENT_FILE_INPUT, fileFixture('basic.csv'));
+  const { file_id: fileId } = await (await uploaded).json();
+  await expect(page.locator('#analyzeButton')).toBeEnabled();
+  await page.goto(`/stage-2?file_id=${fileId}&data_model_key=gc&external_version_number=retired`);
+  await expect(page.locator('#statusMessage')).toContainText('The previous model version is no longer available');
+  await page.setInputFiles(AGENT_FILE_INPUT, fileFixture('multi-column.csv'));
+  await expect(page.locator('#dropzoneFileName')).toHaveText('multi-column.csv');
+  await expect(page.locator('#analyzeButton')).toBeEnabled();
+
+  // When the user refreshes the upload page.
+  await page.reload();
+
+  // Then the replacement remains selected and can be analyzed.
+  await expect(page.locator('#dropzoneFileName')).toHaveText('multi-column.csv');
+  await expect(page.locator('#analyzeButton')).toBeEnabled();
 });
 
 test('error handling: wrong file type and oversize upload', async ({ page }, testInfo) => {

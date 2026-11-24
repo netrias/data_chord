@@ -1386,6 +1386,9 @@ const _fetchPayload = async (fileId) => {
     console.error('Failed to parse response JSON:', err);
     return {};
   });
+  if (response.status === 409 && isSafeRelativeUrl(payload.recovery_url)) {
+    window.location.assign(payload.recovery_url);
+  }
   if (!response.ok) throw new Error(payload.detail || 'Unable to fetch mapping data');
   return payload;
 };

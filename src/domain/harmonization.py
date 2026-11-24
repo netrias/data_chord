@@ -15,6 +15,11 @@ class HarmonizeStatus(str, Enum):
     FAILED = "failed"
 
 
+class HarmonizationFailure(StrEnum):
+    MODEL_VERSION_RETIRED = "model_version_retired"
+    REFERENCE_UNAVAILABLE = "reference_unavailable"
+
+
 class MatchFidelity(StrEnum):
     STRONG = "strong"
     PARTIAL = "partial"

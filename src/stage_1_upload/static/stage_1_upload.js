@@ -1,7 +1,7 @@
 import { initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxReachedStage, resetMaxReachedStage } from '/assets/shared/step-instruction-ui.js';
 import { STAGE_2_PAYLOAD_KEY, STAGE_3_JOB_KEY, CURRENT_FILE_SESSION_KEY, removeFromSession, writeToSession, readFromSession, isValidFileId } from '/assets/shared/storage-keys.js';
 import { reportApiError, reportFetchFailure } from '/assets/shared/client-events.js';
-import { showDataModelPopup, preloadDataModels } from './data_model_popup.js';
+import { showDataModelPopup, preloadDataModels, refreshDataModels } from './data_model_popup.js';
 import { fingerprintFile, verificationMatches, UploadVerificationError, UPLOAD_INTEGRITY_MESSAGE } from './upload-integrity.js';
 
 const config = window.stageOneUploadConfig ?? {};
@@ -353,6 +353,29 @@ const _hydrateDemoUpload = () => {
   _setAnalyzeButtonEnabled(true);
 };
 
+const _restoreForModelSelection = () => {
+  resetMaxReachedStage();
+  const url = new URL(window.location.href);
+  url.searchParams.delete('reselect_model');
+  url.searchParams.delete('file_id');
+  window.history.replaceState(window.history.state, '', url);
+  document.querySelectorAll('.progress-tracker .step-link').forEach((link) => {
+    const target = new URL(link.dataset.url, url);
+    target.searchParams.delete('file_id');
+    link.dataset.url = target.pathname + target.search;
+  });
+  const upload = config.recoveryUpload;
+  if (!upload) {
+    _clearStaleSessionData();
+    _resetUploadState();
+    _setStatus('This upload is no longer available. Upload your file to start a new analysis.', 'error');
+    return;
+  }
+  _persistFileSession(upload, upload.file_name);
+  _hydrateFromSession();
+  _setStatus('The previous model version is no longer available. Select Map to choose a current version and run analysis again.');
+};
+
 /* Inline SVG check used inside each active tab; declared once to keep the
    render loop allocation-light. */
 const _SHEET_CHECK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>';
@@ -618,6 +641,7 @@ const _persistStageTwoPayload = (payload) => {
 };
 
 const _navigateToStageTwo = (fileId, dataModelKey, externalVersionNumber, payload) => {
+  removeFromSession(STAGE_3_JOB_KEY);
   _persistStageTwoPayload(payload);
   advanceMaxReachedStage('mapping');
   const search = new URLSearchParams({ file_id: fileId, data_model_key: dataModelKey });
@@ -656,6 +680,7 @@ const _analyzeDataset = async () => {
   _showDropzoneSummary(state.file, 'Analyzing columns…');
   if (analyzeOverlay) analyzeOverlay.classList.remove('hidden');
 
+  let failureMessage = ANALYZE_API_ERROR_MESSAGE;
   try {
     let response;
     try {
@@ -691,7 +716,13 @@ const _analyzeDataset = async () => {
         statusCode: response.status,
         serverRequestId: _responseRequestId(response),
       });
-      throw new Error(ANALYZE_API_ERROR_MESSAGE);
+      if (response.status === 409 && payload.code === 'model_version_retired') {
+        refreshDataModels();
+        failureMessage = payload.detail;
+      } else if (response.status === 503 && typeof payload.detail === 'string') {
+        failureMessage = payload.detail;
+      }
+      throw new Error(failureMessage);
     }
     // Keep overlay visible during navigation - browser will replace the page
     _navigateToStageTwo(
@@ -700,16 +731,16 @@ const _analyzeDataset = async () => {
       selection.externalVersionNumber,
       payload,
     );
+    return;
   } catch (error) {
     console.error(error);
-    _setStatus(ANALYZE_API_ERROR_MESSAGE, 'error');
-    _setAnalyzeButtonEnabled(true);
-    _showDropzoneSummary(state.file, 'Uploaded');
-    // Only hide overlay and reset state on error
-    state.isAnalyzing = false;
-    _setFileInputDisabled(false);
-    if (analyzeOverlay) analyzeOverlay.classList.add('hidden');
   }
+  _setStatus(failureMessage, 'error');
+  _setAnalyzeButtonEnabled(true);
+  _showDropzoneSummary(state.file, 'Uploaded');
+  state.isAnalyzing = false;
+  _setFileInputDisabled(false);
+  if (analyzeOverlay) analyzeOverlay.classList.add('hidden');
 };
 
 const _wireDragEvents = () => {
@@ -759,15 +790,17 @@ const _wireDemoDropProtection = () => {
 };
 
 const _init = () => {
-  setActiveStage('upload');
-  initStepInstruction('upload');
-  initNavigationEvents();
-
   if (isDemo) {
     _hydrateDemoUpload();
+  } else if (config.reselectModel) {
+    _restoreForModelSelection();
   } else if (!_hydrateFromSession()) {
     _resetUploadState();
   }
+
+  setActiveStage('upload');
+  initStepInstruction('upload');
+  initNavigationEvents();
 
   if (isDemo) {
     _wireDemoDropProtection();

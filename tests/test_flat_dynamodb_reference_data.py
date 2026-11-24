@@ -11,7 +11,11 @@ import pytest
 from boto3.dynamodb.types import Binary, TypeDeserializer, TypeSerializer
 
 from src.domain.data_model_version_reference import DataModelVersionReference
-from src.domain.reference_data import ReferenceDataCorruptError
+from src.domain.reference_data import (
+    ReferenceDataCorruptError,
+    ReferenceDataUnavailableError,
+    ReferenceModelNotFoundError,
+)
 from src.integrations.dynamodb_reference_data import DynamoDbReferenceDataRepository
 
 MODEL_PK = "MODEL#bW9kZWw#VERSION#MQ"
@@ -203,10 +207,50 @@ def test_flat_reader_caches_the_complete_application_model() -> None:
     query_calls_after_first_load = table.query_calls
     second = repository.load_model(VERSION)
 
-    # Then the second load returns the cached model without another table query.
+    # Then the second load checks the catalog and reuses the cached model without reading its rows.
     assert first is second
     assert query_calls_after_first_load > 1
-    assert table.query_calls == query_calls_after_first_load
+    assert table.query_calls == query_calls_after_first_load + 2
+
+
+@pytest.mark.parametrize("warm_cache", [False, True], ids=["old-rows", "cached-model"])
+def test_flat_reader_requires_the_version_to_be_published(warm_cache: bool) -> None:
+    # Given a version whose model rows remain after it is removed from a sealed catalog.
+    table = _published_table()
+    repository = DynamoDbReferenceDataRepository(table)
+    if warm_cache:
+        repository.load_model(VERSION)
+    table.items.pop(("CATALOG", MODEL_PK))
+    for key in ("META", "IMPORT"):
+        table.items[("CATALOG", key)].update(
+            model_count=0, digest="4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        )
+
+    # When the application asks to load the withdrawn version.
+    with pytest.raises(ReferenceModelNotFoundError) as error:
+        repository.load_model(VERSION)
+
+    # Then the catalog determines retirement even when the model can still be read from its rows.
+    assert str(error.value) == "Reference model is not published: model/1"
+
+
+@pytest.mark.parametrize("failure", ["unpublished-catalog", "missing-model"])
+def test_flat_reader_reports_missing_publication_data_as_unavailable(failure: str) -> None:
+    # Given either an unpublished catalog or a listed version with no model rows.
+    table = _published_table()
+    repository = DynamoDbReferenceDataRepository(table)
+    missing_partition = "CATALOG" if failure == "unpublished-catalog" else MODEL_PK
+    table.items = {key: row for key, row in table.items.items() if key[0] != missing_partition}
+
+    # When a workflow asks for the version.
+    with pytest.raises(ReferenceDataUnavailableError) as error:
+        repository.load_model(VERSION)
+
+    # Then the repository reports an outage with the corresponding cause.
+    assert str(error.value) == {
+        "unpublished-catalog": "Reference catalog is not published",
+        "missing-model": "Published reference model data is unavailable",
+    }[failure]
 
 
 def test_flat_reader_accepts_boto3_numbers_and_binary_values() -> None:
