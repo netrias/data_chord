@@ -18,6 +18,17 @@ const _mockJob = async (page, status) => {
 };
 const _openStageThree = (page) => page.goto(`/stage-3?file_id=${STAGE_THREE_FILE_ID}&job_id=${JOB_ID}`);
 
+/** Proves the page has exactly one visible heading, with this level and name. */
+const _expectOnlyHeading = async (page, level, name) => {
+  await expect(page.getByRole('heading')).toHaveCount(1);
+  await expect(page.getByRole('heading', { level, name, exact: true })).toBeVisible();
+};
+
+/** Elapsed seconds of the job the page last rendered; the page stores it in the same step that updates the progress text. */
+const _storedElapsedSeconds = (page) => page.evaluate(
+  () => JSON.parse(sessionStorage.getItem('stage3HarmonizeJob') ?? 'null')?.elapsed_seconds ?? null,
+);
+
 const _canvas = (page) => page.locator('#loadingState canvas.harmonize-animation');
 const _spinner = (page) => page.locator('#loadingState .loading-spinner--fallback');
 
@@ -34,7 +45,7 @@ test('Stage 3 shows the animation in place of the spinner while a job runs', asy
   await expect(_spinner(page)).toBeHidden();
   // and the loading headline is the only visible heading, so the stage title does not repeat it
   await expect(page.locator('#stageThreeHeader')).toBeHidden();
-  await expect(page.locator('h1:visible, h2:visible')).toHaveText(['Harmonizing your dataset']);
+  await _expectOnlyHeading(page, 1, 'Harmonizing your dataset');
 });
 
 test('Stage 3 keeps the spinner when the animation script cannot load', async ({ page }) => {
@@ -61,9 +72,9 @@ test('Stage 3 shows only the failure, not the loading panel, when the job has fa
   await _openStageThree(page);
 
   // Then it shows the failure title and error, and hides the whole loading panel with its time estimate
+  await expect(page.locator('#stageThreeError')).toBeVisible();
   await expect(page.locator('#stageThreeError')).toHaveText('Mocked job state.');
-  await expect(page.locator('#stageThreeTitle')).toHaveText('Harmonization Failed');
-  await expect(page.locator('#stageThreeTitle')).toBeVisible();
+  await _expectOnlyHeading(page, 2, 'Harmonization Failed');
   await expect(page.locator('#loadingState')).toBeHidden();
   await expect(_canvas(page)).toBeHidden();
 });
@@ -103,9 +114,8 @@ test('Stage 3 leaves the progress text alone when a poll is still in the same mi
       .observe(node, { childList: true, characterData: true, subtree: true });
   });
 
-  // When the next poll answers with 3 min 5 s
-  await page.waitForResponse((response) => response.url().includes('/stage-3/jobs/') && polls >= 2);
-  await page.evaluate(() => new Promise((resolve) => { setTimeout(resolve, 200); }));
+  // When the page has rendered the next poll, which answers with 3 min 5 s
+  await expect.poll(() => _storedElapsedSeconds(page), { timeout: 10_000 }).toBe(185);
 
   // Then the live-region text was not rewritten, so screen readers have nothing new to announce
   expect(await page.evaluate(() => window.progressMutations)).toBe(0);
@@ -120,5 +130,38 @@ test('Stage 3 shows only the empty-state heading when there is no job', async ({
 
   // Then the empty-state message is the only visible heading, without the "Harmonizing" title
   await expect(page.locator('#stageThreeEmptyState')).toBeVisible();
-  await expect(page.locator('h1:visible, h2:visible')).toHaveText(['We need a harmonization job']);
+  await _expectOnlyHeading(page, 1, 'We need a harmonization job');
+});
+
+test('Stage 3 resets the progress text when Retry starts a new job', async ({ page }) => {
+  // Given a job that ran for 12 min and then failed, and a new start request that stays pending
+  let polls = 0;
+  await page.route('**/stage-3/jobs/*', async (route) => {
+    const status = polls === 0 ? 'running' : 'failed';
+    polls += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ job_id: JOB_ID, status, detail: 'Mocked job state.', job_id_available: true, elapsed_seconds: 720 }),
+    });
+  });
+  let releaseStart;
+  const startHeld = new Promise((resolve) => { releaseStart = resolve; });
+  await page.route('**/stage-3/harmonize', async (route) => {
+    await startHeld;
+    await route.abort();
+  });
+  await _openStageThree(page);
+  const message = page.locator('#harmonizeProgressMessage');
+  await expect(message).toHaveText('Still running after 12 min. Large datasets can take a while; keep this tab open.');
+  const retry = page.locator('#retryButton');
+  await expect(retry).toBeVisible({ timeout: 10_000 });
+
+  // When the user clicks Retry and the new job has not started yet
+  await retry.click();
+
+  // Then the loading panel shows the default estimate, not the old job's elapsed time
+  await expect(page.locator('#loadingState')).toBeVisible();
+  await expect(message).toHaveText('This usually takes 1–2 minutes.');
+  releaseStart();
 });

@@ -484,6 +484,8 @@ const _startHarmonize = async (payloadOverride = null) => {
   _clearError();
   _hideMetricsDashboard();
   _toggleEmptyState(false);
+  /* why: a retry starts a new job, so the previous job's elapsed time must not show while the request is pending. */
+  _updateProgressMessage(null);
   _toggleLoadingState(true);
   reviewButton.disabled = true;
   retryButton.classList.add('hidden');

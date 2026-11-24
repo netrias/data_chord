@@ -31,7 +31,7 @@
   text-align: center;
 }
 
-/* Same type as the completed-state headline, so loading and result read as one screen. */
+/* Same type as the result sentence (.stage-three-headline), including its phone size, so loading and result read as one screen. */
 .loading-message--primary {
   color: var(--gray-900);
   font-size: 1.75rem;
@@ -469,7 +469,8 @@
     text-align: center;
   }
 
-  .stage-three-headline {
+  .stage-three-headline,
+  .loading-message--primary {
     font-size: 1.4rem;
   }
 
