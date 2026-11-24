@@ -387,11 +387,16 @@ def test_schema_two_accepts_fields_with_and_without_node_relationships() -> None
     ]
 
 
-@pytest.mark.parametrize("field", ["nodes", "node_relations"])
-def test_schema_two_rejects_malformed_optional_node_fields(field: str) -> None:
+@pytest.mark.parametrize(
+    ("row", "field", "message"),
+    [
+        ("META", "nodes", "Reference model nodes are invalid"),
+        ("CDE#YWdl#META", "node_relations", "Reference node relationships are invalid: age"),
+    ],
+)
+def test_schema_two_rejects_malformed_optional_node_fields(row: str, field: str, message: str) -> None:
     # Given a published row supplying null for an optional list.
     table = _published_table()
-    row = "META" if field == "nodes" else "CDE#YWdl#META"
     table.items[(MODEL_PK, row)][field] = None
     repository = DynamoDbReferenceDataRepository(table)
 
@@ -400,8 +405,7 @@ def test_schema_two_rejects_malformed_optional_node_fields(field: str) -> None:
         repository.load_model(VERSION)
 
     # Then the invalid field is rejected at the boundary.
-    expected = "Reference model nodes are invalid" if field == "nodes" else "Reference node relationships are invalid: age"
-    assert str(error.value) == expected
+    assert str(error.value) == message
 
 
 def test_flat_reader_rejects_duplicate_node_relationships() -> None:

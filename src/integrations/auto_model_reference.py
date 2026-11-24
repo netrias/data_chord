@@ -47,7 +47,7 @@ class FlatReferenceModel:
         if not self.label.strip():
             raise ValueError("Reference model label is required")
         if any(not node.strip() for node in self.nodes) or len(set(self.nodes)) != len(self.nodes):
-            raise ValueError("Reference model nodes must be nonempty and unique")
+            raise ValueError("Reference model node names must be nonempty and unique")
         keys = [cde.cde_key for cde in self.cdes]
         if any(not key.strip() for key in keys) or len(set(keys)) != len(keys):
             raise ValueError("Reference model CDE keys must be nonempty and unique")
