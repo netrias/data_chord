@@ -13,38 +13,36 @@
   margin: 0;
 }
 
-/* Loading state - uses card system */
+/* why: the loading and empty states each have their own h1, so the stage title would repeat or contradict it. */
+#stageThreeMetrics:has(#loadingState:not(.hidden), #stageThreeEmptyState:not(.hidden)) #stageThreeHeader {
+  display: none;
+}
+
+/* Loading state - sits directly in the stage card, which is its only frame. */
 .loading-state {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: var(--space-6);
-  padding: var(--space-12) var(--space-8);
-  border: 1px solid var(--gray-200);
-  border-radius: var(--radius-2xl);
-  background-color: var(--white);
-  box-shadow: var(--shadow-sm);
-  min-height: 360px;
+  gap: var(--space-3);
 }
 
 .loading-message {
-  color: var(--gray-600);
-  font-size: 1rem;
   margin: 0;
   text-align: center;
 }
 
+/* Same type as the result sentence (.stage-three-headline), including its phone size, so loading and result read as one screen. */
 .loading-message--primary {
-  font-size: 1.25rem;
+  color: var(--gray-900);
+  font-size: 1.75rem;
   font-weight: 600;
-  color: var(--gray-800);
+  letter-spacing: -0.02em;
+  line-height: 1.25;
 }
 
 .loading-message--secondary {
-  font-size: 0.95rem;
   color: var(--gray-500);
-  margin-top: calc(-1 * var(--space-4));
+  font-size: 1rem;
 }
 
 /* Fallback spinner - shown until harmonize-animation.js marks the loading state as running */
@@ -54,6 +52,7 @@
   border-radius: 50%;
   border: 5px solid var(--gray-200);
   border-top-color: var(--netrias-500);
+  margin-bottom: var(--space-4);
   animation: spin 1s linear infinite;
 }
 
@@ -66,6 +65,9 @@
   display: none;
   width: min(680px, 100%);
   aspect-ratio: 680 / 320;
+  /* why: the drawing sits in the middle of the canvas, so its top band is empty; pull it up to balance the card.
+     The pull must stay smaller than the card's top padding, or the canvas sticks out of the card. */
+  margin: calc(-1 * min(var(--space-10), 6%)) 0 var(--space-4);
 }
 
 .loading-state[data-animation="running"] .harmonize-animation {
@@ -88,7 +90,7 @@
 .stage-empty-title {
   font-size: 1.125rem;
   font-weight: 600;
-  margin-bottom: var(--space-2);
+  margin: 0 0 var(--space-2);
 }
 
 .stage-empty-copy {
@@ -467,7 +469,8 @@
     text-align: center;
   }
 
-  .stage-three-headline {
+  .stage-three-headline,
+  .loading-message--primary {
     font-size: 1.4rem;
   }
 
@@ -490,5 +493,10 @@
 @media (max-width: 640px) {
   #stageThreeMetrics {
     padding: var(--space-6);
+  }
+
+  /* why: the card padding drops to --space-6 here, so the canvas pull must stay below it. */
+  .harmonize-animation {
+    margin-top: calc(-1 * min(var(--space-5), 6%));
   }
 }
