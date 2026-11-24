@@ -341,6 +341,15 @@ test('reselecting a retired model restores the workbook name and recounts the sa
   await expect(fileName(page)).toHaveText(workbookName);
   await fileName(page).hover();
   expect(await cardFacts(page)).toEqual({ Rows: '3', Columns: '2', ...restoredFacts });
+
+  // When the user goes back to Upload and reloads it after successful analysis.
+  await page.goBack();
+  await page.reload();
+
+  // Then the recovery marker is gone and the upload still has its new counts.
+  await expect(page).toHaveURL('/stage-1?file_id=' + fileId);
+  await expect(page.locator('#statusMessage')).toBeEmpty();
+  await expect(page.locator('#dropzoneFileSize')).toHaveText(size + ' · 3 rows · 2 columns');
 });
 
 
