@@ -1367,6 +1367,10 @@ const _submitHarmonize = async () => {
     return;
   }
 
+  if (isSafeRelativeUrl(job.recovery_url)) {
+    window.location.assign(job.recovery_url);
+    return;
+  }
   const jobForSession = { ...job, file_id: fileId };
   removeFromSession(STAGE_3_JOB_KEY);
   writeToSession(STAGE_3_JOB_KEY, jobForSession);

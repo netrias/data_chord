@@ -22,7 +22,11 @@ from src.app.harmonization_jobs import HarmonizationJobRequest
 from src.domain.dataset_workflow_ids import DatasetWorkflowId, dataset_workflow_id_from_value
 from src.domain.harmonization import HarmonizationFailure, HarmonizeStatus
 from src.domain.reference_data import ReferenceDataError, ReferenceModelNotFoundError
-from src.persistence.harmonization_job_store import HarmonizationJobState
+from src.persistence.harmonization_job_store import (
+    HarmonizationJobState,
+    HarmonizationJobUnreadableError,
+    load_harmonization_job,
+)
 from src.persistence.workflow_state_store import LoadedWorkflowState, WorkflowStateUnreadableError, load_workflow_state
 from src.shared.jinja import templates_for_stage
 from src.shared.model_recovery import REFERENCE_UNAVAILABLE_DETAIL, RETIRED_MODEL_DETAIL, model_recovery_path
@@ -39,15 +43,16 @@ stage_three_router = APIRouter(prefix="/stage-3", tags=["Stage 3 Harmonize"])
 async def render_stage_three(
     request: Request,
     file_id: Annotated[DatasetWorkflowIdField | None, Query()] = None,
+    job_id: str | None = None,
 ) -> Response:
     if file_id is not None:
         try:
-            await run_in_threadpool(_load_workflow_reference, file_id)
+            await run_in_threadpool(_check_reference_for_page, file_id, job_id)
         except ReferenceModelNotFoundError:
             return RedirectResponse(model_recovery_path(request, file_id), status_code=status.HTTP_303_SEE_OTHER)
         except ReferenceDataError as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, REFERENCE_UNAVAILABLE_DETAIL) from exc
-        except WorkflowStateUnreadableError as exc:
+        except (WorkflowStateUnreadableError, HarmonizationJobUnreadableError) as exc:
             raise HTTPException(
                 status.HTTP_409_CONFLICT, "Workflow state is unreadable. Please rerun analysis."
             ) from exc
@@ -58,10 +63,18 @@ async def render_stage_three(
     )
 
 
-def _load_workflow_reference(file_id: DatasetWorkflowId) -> None:
-    loaded = _load_user_workflow(file_id)
-    if loaded is not None:
-        dependencies.get_reference_data_repository().load_model(loaded.state.data_model_version)
+def _check_reference_for_page(file_id: DatasetWorkflowId, job_id: str | None) -> None:
+    storage = dependencies.get_workflow_storage()
+    user = dependencies.get_user_context()
+    workflow = load_workflow_state(storage, user, file_id)
+    if workflow is None:
+        return
+    stored = load_harmonization_job(storage, user, file_id)
+    if stored is not None and (job_id is None or stored.job.matches_request(job_id)):
+        job = stored.job
+        if job.plan_version == workflow.version.value and job.status != HarmonizeStatus.FAILED:
+            return  # Polling owns active jobs, and completed jobs already have their results.
+    dependencies.get_reference_data_repository().load_model(workflow.state.data_model_version)
 
 
 def _load_user_workflow(file_id: DatasetWorkflowId) -> LoadedWorkflowState | None:

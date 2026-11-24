@@ -298,7 +298,7 @@ const _replaceUploadWorkflowUrl = (fileId) => {
 
 /* Enables navigation back to Stage 1 with file context. */
 const _persistFileSession = (uploadResponse, fileName) => {
-  writeToSession(CURRENT_FILE_SESSION_KEY, {
+  const session = {
     file_id: uploadResponse.file_id,
     original_name: fileName,
     uploaded_at: new Date().toISOString(),
@@ -306,7 +306,9 @@ const _persistFileSession = (uploadResponse, fileName) => {
     sheet_names: uploadResponse.sheet_names ?? [],
     sheet_previews: uploadResponse.sheet_previews ?? {},
     selected_sheet: uploadResponse.selected_sheet ?? null,
-  });
+  };
+  writeToSession(CURRENT_FILE_SESSION_KEY, session);
+  return session;
 };
 
 /* Restores file display from session when returning to Stage 1. */
@@ -320,6 +322,11 @@ const _hydrateFromSession = () => {
     return false;
   }
 
+  _showUploadedFile(session);
+  return true;
+};
+
+const _showUploadedFile = (session) => {
   state.uploaded = {
     file_id: session.file_id,
     human_size: session.human_size,
@@ -334,7 +341,6 @@ const _hydrateFromSession = () => {
   _showDropzoneSummary(state.file, 'Uploaded');
   _renderSheetSelector();
   _setAnalyzeButtonEnabled(true);
-  return true;
 };
 
 const _hydrateDemoUpload = () => {
@@ -371,8 +377,8 @@ const _restoreForModelSelection = () => {
     _setStatus('This upload is no longer available. Upload your file to start a new analysis.', 'error');
     return;
   }
-  _persistFileSession(upload, upload.file_name);
-  _hydrateFromSession();
+  const session = _persistFileSession(upload, upload.file_name);
+  _showUploadedFile(session);
   _setStatus('The previous model version is no longer available. Select Map to choose a current version and run analysis again.');
 };
 
@@ -719,8 +725,8 @@ const _analyzeDataset = async () => {
       if (response.status === 409 && payload.code === 'model_version_retired') {
         refreshDataModels();
         failureMessage = payload.detail;
-      } else if (response.status === 503 && typeof payload.detail === 'string') {
-        failureMessage = payload.detail;
+      } else if (response.status === 503) {
+        failureMessage = 'Analysis is temporarily unavailable. Please try again later.';
       }
       throw new Error(failureMessage);
     }

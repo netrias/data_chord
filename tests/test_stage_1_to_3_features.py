@@ -33,7 +33,7 @@ from src.integrations.harmonize import (
 )
 from src.persistence.harmonization_job_store import HarmonizationJobState
 from src.persistence.workflow_state_store import load_workflow_state
-from src.storage import UploadStorage, UserContext, WorkflowFile
+from src.storage import UploadStorage, WorkflowFile
 from tests.conftest import (
     TEST_TARGET_SCHEMA,
     TEST_TSV_CONTENT_TYPE,
@@ -684,7 +684,7 @@ async def test_failed_replacement_analysis_preserves_the_confirmed_plan(
         }
     else:
         assert response.status_code == 503
-        assert response.json() == {"detail": "Reference data is currently unavailable. Please try again later."}
+        assert response.json() == {"detail": GENERIC_API_ERROR_DETAIL}
     assert _load_workflow_state(file_id) == initial_workflow
 
 
@@ -726,20 +726,59 @@ async def test_stage_three_job_preserves_reference_failure_on_resume(
     assert _load_workflow_state(file_id) == initial_workflow
 
 
+@pytest.mark.parametrize("retired", [True, False], ids=["retired", "outage"])
+async def test_completed_harmonization_still_opens_when_reference_data_changes(
+    app_client: AsyncClient,
+    mock_netrias_client: MagicMock,
+    retired: bool,
+) -> None:
+    # Given a finished job with stored results and a catalog that can no longer load its reference version.
+    file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "job-complete.csv")
+    analysis = await app_client.post(
+        "/stage-1/analyze",
+        json={"file_id": file_id, "data_model_key": "gc", "external_version_number": "11.0.4"},
+    )
+    assert analysis.status_code == 200
+    await confirm_mapping_choices(app_client, file_id)
+    submitted = await app_client.post("/stage-3/harmonize", json={"file_id": file_id})
+    assert submitted.status_code == 200
+    job_id = submitted.json()["job_id"]
+    completed = await _wait_for_stage_three_job(app_client, job_id, file_id)
+    assert completed["status"] == "succeeded"
+    repository = mock_netrias_client.reference_repository
+    repository.load_model.reset_mock()
+    repository.load_model.side_effect = (
+        ReferenceModelNotFoundError("retired") if retired else ReferenceDataUnavailableError("outage")
+    )
+
+    # When the user reopens the completed job's Stage 3 link.
+    page = await app_client.get("/stage-3", params={"file_id": file_id, "job_id": job_id})
+
+    # Then the page can resume from the completed job without loading reference data again.
+    assert page.status_code == 200
+    assert page.url.path == "/stage-3"
+    resumed = await _wait_for_stage_three_job(app_client, job_id, file_id)
+    assert resumed["status"] == "succeeded"
+    assert resumed["manifest_summary"] == completed["manifest_summary"]
+    repository.load_model.assert_not_called()
+
+
 async def test_recovery_does_not_expose_another_users_upload(
     app_client: AsyncClient,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Given an upload owned by another user.
     file_id = await upload_content(app_client, create_csv_content([["diagnosis"], ["Lung"]]), "private-upload.csv")
-    monkeypatch.setattr(dependencies, "get_user_context", lambda: UserContext("different-user"))
 
     # When the user opens a model recovery URL for that upload.
-    response = await app_client.get("/stage-1", params={"file_id": file_id, "reselect_model": "true"})
+    response = await app_client.get(
+        "/stage-1",
+        params={"file_id": file_id, "reselect_model": "true"},
+        headers={"X-Data-Chord-User-ID": "different-user"},
+    )
 
-    # Then Stage 1 has no file metadata to restore.
-    assert response.status_code == 200
-    assert "recoveryUpload: null" in response.text
+    # Then Stage 1 denies access without returning the upload metadata.
+    assert response.status_code == 403
+    assert response.text == "Forbidden"
 
 
 async def test_stage2_analysis_state_recovers_without_replacing_confirmed_choices(

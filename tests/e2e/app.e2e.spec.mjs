@@ -3119,7 +3119,7 @@ test('data model menus select models by pointer and keyboard and close on outsid
 });
 
 test('a retired model selection can be replaced with a current version for the same upload', async ({ page }) => {
-  // Given a workbook analyzed on its second sheet and a saved plan that now refers to a retired version.
+  // Given a workbook analyzed on its second sheet, a retired plan, and a failed browser session write.
   await page.goto('/stage-1');
   await page.setInputFiles(AGENT_FILE_INPUT, createWorkbookFixture());
   await page.locator('.workbook-tab[data-sheet-name="Patients"]').click();
@@ -3134,6 +3134,14 @@ test('a retired model selection can be replaced with a current version for the s
   await page.evaluate(() => {
     sessionStorage.clear();
     sessionStorage.setItem('maxReachedStage', 'review');
+  });
+  await page.addInitScript(() => {
+    if (!new URLSearchParams(location.search).has('reselect_model')) return;
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key === 'currentFileSession') throw new Error('Session storage is full');
+      return setItem.call(this, key, value);
+    };
   });
   await page.goto(`/stage-2?file_id=${fileId}`);
   await expect(page.locator('#statusMessage')).toContainText('The previous model version is no longer available');
