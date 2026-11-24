@@ -31,7 +31,7 @@ from src.integrations.harmonize import (
     TermHarmonizationRequest,
     TermHarmonizationResponse,
 )
-from src.persistence.harmonization_job_store import HarmonizationJobState
+from src.persistence.harmonization_job_store import HarmonizationJobState, save_harmonization_job
 from src.persistence.workflow_state_store import load_workflow_state
 from src.storage import UploadStorage, WorkflowFile
 from tests.conftest import (
@@ -610,7 +610,7 @@ async def test_stage2_mapping_page_loads_selected_model_from_workflow_state(
     assert loaded_version.external_version_number == "11.0.4"
 
 
-@pytest.mark.parametrize("stage", ["/stage-2", "/stage-3", "/stage-3?job_id=prior-job"])
+@pytest.mark.parametrize("stage", ["/stage-2", "/stage-3", "/stage-3?job_id=expired-job"])
 async def test_retired_model_returns_to_stage_one_with_the_original_upload(
     app_client: AsyncClient,
     mock_netrias_client: MagicMock,
@@ -630,8 +630,19 @@ async def test_retired_model_returns_to_stage_one_with_the_original_upload(
     )
     assert analysis.status_code == 200
     await confirm_mapping_choices(app_client, file_id)
-    initial_workflow = _load_workflow_state(file_id)
+    storage = dependencies.get_workflow_storage()
+    user = dependencies.get_user_context()
+    initial_workflow = load_workflow_state(storage, user, file_id)
     assert initial_workflow is not None
+    if "expired-job" in stage:
+        expired = HarmonizationJobState.queued(
+            polling_job_id="expired-job",
+            file_id=file_id,
+            plan_version=initial_workflow.version.value,
+            worker_id="expired-worker",
+            now=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+        save_harmonization_job(storage, user, expired, expected_version=None)
     mock_netrias_client.reference_repository.load_model.side_effect = ReferenceModelNotFoundError("retired version")
 
     # When the user opens Mapping or Harmonize for the saved workflow.
@@ -646,7 +657,7 @@ async def test_retired_model_returns_to_stage_one_with_the_original_upload(
     assert 'reselectModel: true' in response.text
     assert '"file_name": "retired-model.xlsx"' in response.text
     assert '"selected_sheet": "Second"' in response.text
-    assert _load_workflow_state(file_id) == initial_workflow
+    assert load_workflow_state(storage, user, file_id) == initial_workflow
 
 
 @pytest.mark.parametrize("retired", [True, False], ids=["retired", "outage"])

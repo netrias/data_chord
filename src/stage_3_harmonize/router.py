@@ -72,7 +72,9 @@ def _check_reference_for_page(file_id: DatasetWorkflowId, job_id: str | None) ->
     stored = load_harmonization_job(storage, user, file_id)
     if stored is not None and (job_id is None or stored.job.matches_request(job_id)):
         job = stored.job
-        if job.plan_version == workflow.version.value and job.status != HarmonizeStatus.FAILED:
+        if job.is_completed_for_plan(workflow.version.value) or (
+            job.plan_version == workflow.version.value and job.is_active() and not job.lease_expired()
+        ):
             return  # Polling owns active jobs, and completed jobs already have their results.
     dependencies.get_reference_data_repository().load_model(workflow.state.data_model_version)
 
