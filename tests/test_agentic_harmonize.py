@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+
+import pytest
 from types import SimpleNamespace
 
 from netrias_client import read_tabular
@@ -582,9 +584,13 @@ def test_service_rejects_provider_value_outside_permissible_values(tmp_path: Pat
     assert not output.exists()
 
 
-def test_malformed_explorer_call_cannot_publish_or_cache_no_match(monkeypatch, tmp_path: Path) -> None:
+def test_malformed_explorer_call_cannot_publish_or_cache_no_match(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     # Given one uncached term and an explorer that requests a search without the required query.
     from unittest.mock import Mock
+
+    from agent_experiment.agents.explore_candidates import ExplorerToolInputError
 
     client = Mock()
     client.converse.return_value = {
@@ -609,6 +615,8 @@ def test_malformed_explorer_call_cannot_publish_or_cache_no_match(monkeypatch, t
     # Then the job fails without publishing a manifest, output, or cacheable no-match.
     client.converse.assert_called_once()
     assert result.status is HarmonizeStatus.FAILED
+    assert result.manifest_path is None
+    assert [record.exc_info[0] for record in caplog.records if record.exc_info] == [ExplorerToolInputError]
     assert cache.save_calls == 0
     assert not output.exists()
     assert not output.with_name("output.manifest.parquet").exists()

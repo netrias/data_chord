@@ -22,7 +22,7 @@ virtualenv = "2026-10-22T00:00:00Z"
 [[package]]
 name = "agent-experiment"
 version = "0.1.0"
-source = { git = "https://github.com/netrias/agentic_harmonization.git?rev=38b05825a18a629f032f6eb6539c0981d4908fed#38b05825a18a629f032f6eb6539c0981d4908fed" }
+source = { git = "https://github.com/netrias/agentic_harmonization.git?rev=3d6f1cddd9ff399ce01bb5490922d3997d264de7#3d6f1cddd9ff399ce01bb5490922d3997d264de7" }
 dependencies = [
     { name = "aws-bedrock-token-generator" },
     { name = "boto3" },
@@ -499,7 +499,7 @@ local-inference = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agent-experiment", git = "https://github.com/netrias/agentic_harmonization.git?rev=38b05825a18a629f032f6eb6539c0981d4908fed" },
+    { name = "agent-experiment", git = "https://github.com/netrias/agentic_harmonization.git?rev=3d6f1cddd9ff399ce01bb5490922d3997d264de7" },
     { name = "anyio", specifier = ">=4.14.2" },
     { name = "bandit", marker = "extra == 'dev'", specifier = ">=1.7" },
     { name = "boto3", specifier = ">=1.40.69" },
