@@ -348,6 +348,18 @@ fi
 # Then it stops before AWS and OpenTofu.
 [[ ! -s "$bdf_calls" ]] || fail_test "Missing BDF development reached an external command"
 
+# Given BDF production is preparing its separate catalog.
+prepare_calls="$TEST_ROOT/prepare-prod-calls"
+prepare_output="$TEST_ROOT/prepare-prod-output"
+: >"$prepare_calls"
+# When an operator tries a normal production application deploy.
+if PATH="$MOCK_BIN:/usr/bin:/bin" MOCK_CALLS="$prepare_calls" "$DEPLOY_SCRIPT" bdf prod deploy >"$prepare_output" 2>&1; then
+  fail_test "Production deployed while preparing the catalog"
+fi
+# Then it points to the table-only command and stops before AWS and OpenTofu.
+assert_contains "$prepare_output" "prepare-bdf-prod-catalog.sh"
+[[ ! -s "$prepare_calls" ]] || fail_test "Production deploy reached an external command during catalog preparation"
+
 # Given BDF production retains its network and uses the current foundation.
 bdf_prod_calls="$TEST_ROOT/bdf-prod-calls"
 # When the normal plan command selects production.
