@@ -2,7 +2,16 @@
 import fs from 'node:fs';
 import { test, expect } from '@playwright/test';
 
-import { AGENT_FILE_INPUT, clickHarmonize, createWorkbookFixture, fileFixture, uploadAndAnalyzeReal } from './utils.mjs';
+import {
+  AGENT_FILE_INPUT,
+  clickHarmonize,
+  createWorkbookFixture,
+  fileFixture,
+  mockHarmonizeSuccess,
+  seedHarmonization,
+  uploadAndAnalyze,
+  uploadAndAnalyzeReal,
+} from './utils.mjs';
 
 const LONG_NAME = 'clinical_trial_participants_enrollment_export_with_a_very_long_descriptive_name_2026_final_v3.csv';
 const longNamedCsv = () => ({
@@ -29,17 +38,26 @@ const boxSize = (page) => page.locator('#stepInstruction').evaluate((box) => {
 const sessionFile = (page) => page.evaluate(() => JSON.parse(sessionStorage.getItem('currentFileSession')));
 
 test('the uploaded file name stays in the instruction box from Map to Review', async ({ page }) => {
-  // Given a long-named CSV that was uploaded and analyzed
-  await uploadAndAnalyzeReal(page, longNamedCsv());
+  // Given a long-named CSV that was uploaded and analyzed, with a stored harmonization result
+  // why: a mocked job and seeded result keep this test out of the server's shared job slots.
+  await mockHarmonizeSuccess(page);
+  const fileId = await uploadAndAnalyze(page, {
+    name: LONG_NAME,
+    mimeType: 'text/csv',
+    buffer: fs.readFileSync(fileFixture('basic.csv')),
+  });
   await expect(fileName(page)).toHaveText(LONG_NAME);
+  seedHarmonization(fileId);
 
   // When the user moves through Harmonize, Verify, and Review
   const namesByStage = {};
   await clickHarmonize(page);
-  await expect(page.locator('#reviewButton')).toBeEnabled({ timeout: 20_000 });
+  await expect(page.locator('#reviewButton')).toBeEnabled();
   namesByStage.harmonize = await fileName(page).textContent();
   await page.click('#reviewButton');
   await page.waitForURL(/\/stage-4/);
+  // Stage 4 wires its Review button only after its rows load.
+  await expect(page.locator('.column-mode-grid, .row-mode-wrapper, .review-empty').first()).toBeVisible();
   await expect(fileLine(page)).toBeVisible();
   namesByStage.verify = await fileName(page).textContent();
   await page.click('#stageFiveButton');
@@ -145,18 +163,30 @@ test('the upload widget shows Analyze counts for the analyzed sheet only', async
   await page.locator('.step[data-stage="upload"] .step-link').click();
   await page.waitForURL(/\/stage-1/);
 
-  // Then the line adds the counted rows and columns for Patients
+  // Then the line and the card add the counted rows and columns for Patients
   await expect(sizeLine).toHaveText(`${sizeOnly} · 3 rows · 2 columns`);
+  await fileName(page).hover();
+  const patientsFacts = await cardFacts(page);
+  expect(patientsFacts).toEqual({
+    Rows: '3',
+    Columns: '2',
+    Size: `${sizeOnly} · XLSX`,
+    Uploaded: expect.stringMatching(/\d{4}.*\d{1,2}:\d{2}/),
+    Sheet: 'Patients',
+  });
 
   // When the user selects the sheet Analyze did not count
+  await page.mouse.move(1000, 600);
   await page.locator('.workbook-tab[data-sheet-name="Keep"]').click();
 
-  // Then the line shows the size only, and the tracker card names that sheet without counts
+  // Then the line shows the size only, and the card names that sheet with the same upload facts and no counts
   await expect(sizeLine).toHaveText(sizeOnly);
   await fileName(page).hover();
-  const facts = await cardFacts(page);
-  expect(Object.keys(facts)).toEqual(['Size', 'Uploaded', 'Sheet']);
-  expect(facts.Sheet).toBe('Keep');
+  expect(await cardFacts(page)).toEqual({
+    Size: `${sizeOnly} · XLSX`,
+    Uploaded: patientsFacts.Uploaded,
+    Sheet: 'Keep',
+  });
 
   // When the user returns to the existing Map stage without analyzing Keep
   await page.locator('.step[data-stage="mapping"] .step-link').click();
@@ -205,4 +235,65 @@ test('the workbook sheet cannot change while Analyze is waiting', async ({ page 
   expect(facts.Sheet).toBe('Patients');
   expect(facts.Rows).toBe('3');
   expect(facts.Columns).toBe('2');
+});
+
+test('a new upload replaces the earlier file and its counts', async ({ page }) => {
+  // Given file A analyzed, with its counts in the tracker card
+  await uploadAndAnalyzeReal(page, longNamedCsv());
+  await fileName(page).hover();
+  expect(await cardFacts(page)).toMatchObject({ Rows: '3', Columns: '2' });
+  await page.locator('.step[data-stage="upload"] .step-link').click();
+  await page.waitForURL(/\/stage-1/);
+
+  // When file B is uploaded on Stage 1
+  await page.setInputFiles(AGENT_FILE_INPUT, fileFixture('basic.csv'));
+  await expect(page.locator('#dropzoneFileStatus')).toHaveText('Uploaded');
+
+  // Then the line names B and the card shows only B's upload facts
+  await expect(fileName(page)).toHaveText('basic.csv');
+  const session = await sessionFile(page);
+  await page.mouse.move(1000, 600);
+  await fileName(page).hover();
+  expect(await cardFacts(page)).toEqual({
+    Size: `${session.human_size} · CSV`,
+    Uploaded: expect.stringMatching(/\d{4}.*\d{1,2}:\d{2}/),
+  });
+});
+
+test('a page for another workflow does not name the stored file', async ({ page }) => {
+  // Given file A analyzed and named on its own Stage 2 page
+  const fileId = await uploadAndAnalyzeReal(page, longNamedCsv());
+  await expect(fileLine(page)).toBeVisible();
+  const otherFileId = 'f'.repeat(32);
+  expect(otherFileId).not.toBe(fileId);
+
+  // When the same tab opens a stage URL for a different workflow
+  await page.goto(`/stage-2?file_id=${otherFileId}`);
+  await expect(page.locator('.step-instruction-text')).not.toHaveText('');
+
+  // Then the file line stays hidden while A's record is still in the session
+  await expect(fileLine(page)).toBeHidden();
+  expect((await sessionFile(page)).file_id).toBe(fileId);
+});
+
+test('each part of the instruction box opens only its own tooltip', async ({ page }) => {
+  // Given an analyzed file on Stage 2 with both tooltips closed
+  await uploadAndAnalyzeReal(page, longNamedCsv());
+  const instructionTooltip = page.locator('.step-instruction-tooltip');
+  await expect(instructionTooltip).toBeHidden();
+  await expect(fileCard(page)).toBeHidden();
+
+  // When the pointer rests on the file name
+  await fileName(page).hover();
+
+  // Then only the file card opens
+  await expect(fileCard(page)).toBeVisible();
+  await expect(instructionTooltip).toBeHidden();
+
+  // When the pointer moves to the instruction text
+  await page.locator('.step-instruction-text').hover();
+
+  // Then only the instruction tooltip opens
+  await expect(instructionTooltip).toBeVisible();
+  await expect(fileCard(page)).toBeHidden();
 });
