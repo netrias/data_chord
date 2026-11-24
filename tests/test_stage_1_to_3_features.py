@@ -793,7 +793,10 @@ async def test_stage4_row_count_when_resuming(
     assert resumed_uploads.load(file_id) is None
 
     # When Stage 4 requests the completed job's review rows
-    with patch("src.stage_4_review_results.use_cases.open_upload_artifact", wraps=open_upload_artifact) as source:
+    with (
+        patch("src.stage_4_review_results.use_cases.open_upload_artifact", wraps=open_upload_artifact) as source,
+        patch.object(storage, "artifact_version", wraps=storage.artifact_version) as artifact_version,
+    ):
         response = await app_client.post("/stage-4/rows", json={"file_id": file_id, "job_id": job_id})
 
     # Then Stage 4 uses the selected sheet count or returns the existing missing-upload response
@@ -805,6 +808,9 @@ async def test_stage4_row_count_when_resuming(
     assert response.json()["totalOriginalRows"] == len(selected_rows)
     assert source.call_count == (1 if scenario == "legacy" else 0)
     assert (resumed_uploads.load(file_id) is not None) == (scenario == "legacy")
+    for request in artifact_version.call_args_list:
+        assert WorkflowFile.ORIGINAL_UPLOAD not in request.args
+        assert WorkflowFile.ORIGINAL_UPLOAD not in request.kwargs.values()
 
 
 async def test_stage3_http_workflow_runs_the_deterministic_term_provider(
