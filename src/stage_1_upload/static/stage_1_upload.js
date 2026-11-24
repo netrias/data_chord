@@ -735,7 +735,7 @@ const _analyzeDataset = async () => {
         rows: payload.total_rows,
         columns: Array.isArray(payload.columns) ? payload.columns.length : null,
       },
-    });
+    }, { discardStaleOnFailure: true });
     if (config.recovery) _replaceUploadWorkflowUrl(state.uploaded.file_id);
     // Keep overlay visible during navigation - browser will replace the page
     _navigateToStageTwo(
@@ -834,7 +834,6 @@ const _init = () => {
       changeFileButton.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
-        _resetUploadState();
         _openFilePicker();
       });
     }

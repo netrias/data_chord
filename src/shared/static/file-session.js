@@ -31,13 +31,13 @@ export const saveFileSession = (uploadResponse, fileName) => {
 };
 
 /** Keep the page current without writing changes into another upload's stored record. */
-export const updateFileSession = (fileId, fields) => {
+export const updateFileSession = (fileId, fields, { discardStaleOnFailure = false } = {}) => {
   const session = readFileSession(fileId);
   if (!session) return;
   currentFileSession = { ...session, ...fields };
-  if (readFromSession(CURRENT_FILE_SESSION_KEY)?.file_id === fileId) {
-    writeToSession(CURRENT_FILE_SESSION_KEY, currentFileSession);
-  }
+  if (readFromSession(CURRENT_FILE_SESSION_KEY)?.file_id !== fileId) return;
+  const saved = writeToSession(CURRENT_FILE_SESSION_KEY, currentFileSession);
+  if (!saved && discardStaleOnFailure) removeFromSession(CURRENT_FILE_SESSION_KEY);
 };
 
 export const clearFileSession = () => {

@@ -403,6 +403,16 @@ test('a rejected storage write does not keep the old worksheet counts visible', 
     Uploaded: expect.any(String),
     Sheet: 'Keep',
   });
+
+  // When the new analysis succeeds but the tracker still cannot save browser metadata.
+  await page.locator('#analyzeButton').click();
+  await page.locator('.data-model-confirm-btn').click();
+  await page.waitForURL(/\/stage-2/);
+
+  // Then Map uses the new sheet and does not display the previous sheet's facts.
+  await expect(page.locator('#mappingRows .mapping-row').first()).toContainText('status');
+  await expect(fileLine(page)).toBeHidden();
+
 });
 
 for (const pathKind of ['bare', 'different workflow']) {
@@ -472,4 +482,23 @@ test('the keyboard-focused filename tooltip wins over a stationary pointer', asy
   await expect(fileName(page)).toBeFocused();
   await expect(fileCard(page)).toBeVisible();
   await expect(instructionTip).toBeHidden();
+});
+
+test('canceling the replacement picker keeps the current upload', async ({ page }) => {
+  // Given the current upload has completed Analyze.
+  await uploadAndAnalyzeReal(page, longNamedCsv());
+  await page.locator('[data-stage="upload"] .step-link').click();
+  await page.waitForURL(/\/stage-1/);
+  await expect(fileName(page)).toHaveText(LONG_NAME);
+
+  // When the user opens the replacement picker and dismisses it without a selection.
+  const chooser = page.waitForEvent('filechooser');
+  await page.locator('#changeFileButton').click();
+  await chooser;
+  await page.locator('#fileInput').dispatchEvent('cancel');
+
+  // Then both Upload and the tracker still identify the analyzed file.
+  await expect(page.locator('#dropzoneFileName')).toHaveText(LONG_NAME);
+  await expect(page.locator('#dropzoneFileSize')).toContainText('3 rows · 2 columns');
+  await expect(fileName(page)).toHaveText(LONG_NAME);
 });
