@@ -20,7 +20,7 @@ from src.domain.data_model_version_reference import DataModelVersionReference
 from src.domain.reference_data import ReferenceDataError, ReferenceModelNotFoundError
 from src.persistence.workflow_state_store import WorkflowStateUnreadableError, load_workflow_state
 from src.shared.jinja import templates_for_stage
-from src.shared.model_recovery import model_recovery_path
+from src.shared.model_recovery import model_recovery_path, retired_model_response
 
 from .schemas import ColumnDetailResponse, SaveMappingChoicesRequest, SaveMappingChoicesResponse
 from .use_cases import (
@@ -122,10 +122,11 @@ def _cde_catalog_item(cde: CDEInfo) -> dict[str, object]:
     name="stage_two_column_detail",
 )
 async def get_column_detail(
+    request: Request,
     file_id: Annotated[DatasetWorkflowIdField, Path()],
     column_key: Annotated[str, Path(min_length=1)],
     selected_cde_key: Annotated[str | None, Query(min_length=1)] = None,
-) -> ColumnDetailResponse:
+) -> ColumnDetailResponse | Response:
     """Returns match counts, CDE types, and selected PVs for one column."""
     try:
         return await compute_column_detail(
@@ -137,6 +138,8 @@ async def get_column_detail(
             selected_cde_key=selected_cde_key,
             reference_repository=dependencies.get_reference_data_repository(),
         )
+    except ReferenceModelNotFoundError:
+        return retired_model_response(model_recovery_path(request, file_id))
     except ReferenceDataError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

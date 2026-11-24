@@ -764,6 +764,13 @@ const _ensureColumnDetail = async (colKey) => {
   if (selected) url.searchParams.set('selected_cde_key', selected);
   try {
     const response = await fetch(url.toString());
+    if (response.status === 409) {
+      const payload = await response.json();
+      if (isSafeRelativeUrl(payload.recovery_url)) {
+        window.location.assign(payload.recovery_url);
+        return;
+      }
+    }
     if (!response.ok) {
       console.warn('column-detail fetch failed', response.status);
       return;

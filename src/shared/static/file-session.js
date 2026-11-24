@@ -4,11 +4,14 @@
  */
 import { CURRENT_FILE_SESSION_KEY, readFromSession, writeToSession } from './storage-keys.js';
 
-export const readFileSession = () => readFromSession(CURRENT_FILE_SESSION_KEY);
+export const readFileSession = (fileId) => {
+  const session = readFromSession(CURRENT_FILE_SESSION_KEY);
+  return fileId && session?.file_id === fileId ? session : null;
+};
 
-/** Merge fields into the stored record. Does nothing when no file is stored. */
-export const updateFileSession = (fields) => {
-  const session = readFileSession();
+/** Merge fields only into the stored record for the active upload. */
+export const updateFileSession = (fileId, fields) => {
+  const session = readFileSession(fileId);
   if (!session) return;
   writeToSession(CURRENT_FILE_SESSION_KEY, { ...session, ...fields });
 };

@@ -210,7 +210,7 @@ test('the workbook sheet cannot change while Analyze is waiting', async ({ page 
 });
 
 test('reselecting a retired model restores the workbook name and recounts the same sheet', async ({ page }) => {
-  // Given a saved workbook whose selected model version has been retired
+  // Given a saved workbook whose model version retires while Map is open
   const workbookName = LONG_NAME.replace(/\.csv$/, '.xlsx');
   await page.goto('/stage-1');
   await page.setInputFiles(AGENT_FILE_INPUT, {
@@ -223,14 +223,16 @@ test('reselecting a retired model restores the workbook name and recounts the sa
   await page.locator('.data-model-confirm-btn').click();
   await page.waitForURL(/\/stage-2/);
   const { file_id: fileId, uploaded_at: uploadedAt, human_size: size } = await sessionFile(page);
+  const mappingRow = page.locator('#mappingRows .mapping-row').first();
+  await expect(mappingRow).toBeVisible();
   const planPath = path.join(e2eEnv.DATA_CHORD_WORKFLOW_STORAGE_DIR, 'workflows', fileId, 'json', 'workflow_state.json');
   const plan = JSON.parse(fs.readFileSync(planPath, 'utf8'));
   expect(plan.selected_sheet).toBe('Patients');
   fs.writeFileSync(planPath, JSON.stringify({ ...plan, external_version_number: 'retired' }));
 
-  // When the user opens the saved workflow with no browser file details
+  // When the user opens a column's details after their browser file details were cleared
   await page.evaluate(() => sessionStorage.clear());
-  await page.goto('/stage-2?file_id=' + fileId);
+  await mappingRow.click();
 
   // Then Stage 1 restores the same filename, worksheet, and original upload time
   await expect(page.locator('#statusMessage')).toContainText('The previous model version is no longer available');

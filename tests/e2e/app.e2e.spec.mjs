@@ -3123,6 +3123,7 @@ test('a retired model selection can be replaced with a current version for the s
   await page.goto('/stage-1');
   await page.setInputFiles(AGENT_FILE_INPUT, createWorkbookFixture());
   await page.locator('.workbook-tab[data-sheet-name="Patients"]').click();
+  const uploadedSize = await page.locator('#dropzoneFileSize').textContent();
   await page.locator('#analyzeButton').click();
   await page.locator('.data-model-confirm-btn').click();
   await page.waitForURL('**/stage-2?*');
@@ -3136,20 +3137,27 @@ test('a retired model selection can be replaced with a current version for the s
     sessionStorage.setItem('currentFileSession', JSON.stringify({
       file_id: '0'.repeat(32),
       original_name: 'different-upload.csv',
+      selected_sheet: 'Patients',
+      dataset_shape: { sheet_name: 'Patients', rows: 99, columns: 10 },
     }));
     sessionStorage.setItem('maxReachedStage', 'review');
   });
+  const otherFile = await page.evaluate(() => sessionStorage.getItem('currentFileSession'));
   await page.addInitScript(() => {
     if (!new URLSearchParams(location.search).has('reselect_model')) return;
     const setItem = Storage.prototype.setItem;
     Storage.prototype.setItem = function (key, value) {
-      if (key === 'currentFileSession') throw new Error('Session storage is full');
+      if (key === 'currentFileSession') {
+        Storage.prototype.setItem = setItem;
+        throw new Error('Session storage is full');
+      }
       return setItem.call(this, key, value);
     };
   });
   await page.goto(`/stage-2?file_id=${fileId}`);
   await expect(page.locator('#statusMessage')).toContainText('The previous model version is no longer available');
   await expect(page.locator('#dropzoneFileName')).toHaveText('workbook.xlsx');
+  await expect(page.locator('#dropzoneFileSize')).toHaveText(uploadedSize);
   await expect(page.locator('#stepInstructionFile')).toBeHidden();
   await expect(page.locator('[data-stage="upload"] .step-link')).toHaveAttribute('href', `/stage-1?file_id=${fileId}`);
   await expect(page.locator('.workbook-tab[data-sheet-name="Patients"]')).toHaveAttribute('aria-selected', 'true');
@@ -3167,6 +3175,7 @@ test('a retired model selection can be replaced with a current version for the s
   const recovered = JSON.parse(fs.readFileSync(statePath, 'utf8'));
   expect(recovered.external_version_number).toBe('11.0.4');
   expect(recovered.selected_sheet).toBe('Patients');
+  expect(await page.evaluate(() => sessionStorage.getItem('currentFileSession'))).toBe(otherFile);
 });
 
 test('the model picker refreshes after a version is retired during selection', async ({ page }) => {

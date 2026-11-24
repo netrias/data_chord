@@ -191,10 +191,9 @@ export function initStepInstruction(activeStage) {
 export function renderFileContext() {
   const container = document.getElementById('stepInstructionFile');
   if (!container) return;
-  const session = readFileSession();
-  const isCurrentFile = Boolean(session?.original_name) && session.file_id === _getFileIdForNavigation();
-  container.hidden = !isCurrentFile;
-  if (!isCurrentFile) return;
+  const session = readFileSession(_getFileIdForNavigation());
+  container.hidden = !session?.original_name;
+  if (!session?.original_name) return;
 
   container.querySelector('.step-instruction-file-name').textContent = session.original_name;
   container.querySelector('.step-instruction-file-card-name').textContent = session.original_name;

@@ -129,7 +129,7 @@ const _renderFileSize = (file) => {
   if (!dropzoneFileSize || !file) return;
   /* Hydrated files have humanSize (pre-formatted); real Files have size (bytes). */
   const size = file.humanSize ?? _formatBytes(file.size);
-  const shape = state.uploaded ? selectedSheetShape(readFileSession()) : null;
+  const shape = selectedSheetShape(readFileSession(state.uploaded?.file_id), state.selectedSheet);
   dropzoneFileSize.textContent = shape
     ? `${size} · ${formatCount(shape.rows, 'row')} · ${formatCount(shape.columns, 'column')}`
     : size;
@@ -581,7 +581,7 @@ const _selectSheet = (sheetName, { focus = false } = {}) => {
 /* why: update in place so the upload time and Analyze counts survive a sheet change. */
 const _persistSelectedSheet = () => {
   if (!state.uploaded || !state.file) return;
-  updateFileSession({ selected_sheet: state.selectedSheet });
+  updateFileSession(state.uploaded.file_id, { selected_sheet: state.selectedSheet });
   renderFileContext();
   _renderFileSize(state.file);
 };
@@ -743,7 +743,7 @@ const _analyzeDataset = async () => {
       }
       throw new Error(failureMessage);
     }
-    updateFileSession({
+    updateFileSession(state.uploaded.file_id, {
       dataset_shape: {
         sheet_name: submittedSheet,
         rows: payload.total_rows,
