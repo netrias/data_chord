@@ -3119,7 +3119,7 @@ test('data model menus select models by pointer and keyboard and close on outsid
 });
 
 test('a retired model selection can be replaced with a current version for the same upload', async ({ page }) => {
-  // Given a workbook analyzed on its second sheet, a retired plan, and a failed browser session write.
+  // Given a retired workbook plan and browser storage that keeps another file but rejects a new write.
   await page.goto('/stage-1');
   await page.setInputFiles(AGENT_FILE_INPUT, createWorkbookFixture());
   await page.locator('.workbook-tab[data-sheet-name="Patients"]').click();
@@ -3133,6 +3133,10 @@ test('a retired model selection can be replaced with a current version for the s
   fs.writeFileSync(statePath, JSON.stringify({ ...plan, external_version_number: 'retired' }));
   await page.evaluate(() => {
     sessionStorage.clear();
+    sessionStorage.setItem('currentFileSession', JSON.stringify({
+      file_id: '0'.repeat(32),
+      original_name: 'different-upload.csv',
+    }));
     sessionStorage.setItem('maxReachedStage', 'review');
   });
   await page.addInitScript(() => {
@@ -3146,6 +3150,8 @@ test('a retired model selection can be replaced with a current version for the s
   await page.goto(`/stage-2?file_id=${fileId}`);
   await expect(page.locator('#statusMessage')).toContainText('The previous model version is no longer available');
   await expect(page.locator('#dropzoneFileName')).toHaveText('workbook.xlsx');
+  await expect(page.locator('#stepInstructionFile')).toBeHidden();
+  await expect(page.locator('[data-stage="upload"] .step-link')).toHaveAttribute('href', `/stage-1?file_id=${fileId}`);
   await expect(page.locator('.workbook-tab[data-sheet-name="Patients"]')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('[data-stage="review"] .step-link')).toHaveAttribute('aria-disabled', 'true');
   await page.locator('#analyzeButton').click();

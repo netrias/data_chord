@@ -616,8 +616,9 @@ button.linklike {
   color: var(--azure-500);
 }
 
-/* Tooltip for long description on hover */
-.step-instruction-tooltip {
+/* Tooltip for long description on hover; the file details card shares its look */
+.step-instruction-tooltip,
+.step-instruction-file-card {
   position: absolute;
   left: 0;
   top: calc(100% + 8px);
@@ -639,7 +640,8 @@ button.linklike {
   white-space: pre-line;
 }
 
-.step-instruction-tooltip::before {
+.step-instruction-tooltip::before,
+.step-instruction-file-card::before {
   content: "";
   position: absolute;
   bottom: 100%;
@@ -648,8 +650,82 @@ button.linklike {
   border-bottom-color: var(--gray-800);
 }
 
-.step-instruction:hover .step-instruction-tooltip,
+.step-instruction-text:hover + .step-instruction-tooltip,
 .step-instruction-text:focus + .step-instruction-tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Uploaded file line: joins the bottom of the instruction box below a thin rule */
+.step-instruction:has(.step-instruction-file:not([hidden])) .step-instruction-text {
+  border-bottom: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.step-instruction-file {
+  position: relative;
+  padding: 2px var(--space-3);
+  border: 1px dashed var(--gray-300);
+  border-top: 1px solid var(--gray-200);
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  background: var(--gray-50);
+}
+
+.step-instruction-file[hidden] {
+  display: none;
+}
+
+/* gray-500 on gray-50 is 4.55:1, so this line keeps its background on hover */
+.step-instruction-file-name {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--gray-500);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: help;
+  /* room inside the clip for the inset focus ring, text position unchanged */
+  padding-inline: 3px;
+  margin-inline: -3px;
+}
+
+/* Inset so overflow: hidden on the one-line name cannot clip the ring */
+.step-instruction-file-name:focus-visible {
+  outline: 2px solid var(--netrias-500);
+  outline-offset: -2px;
+}
+
+.step-instruction-file-card {
+  max-width: 320px;
+  white-space: normal;
+}
+
+.step-instruction-file-card-name {
+  margin: 0 0 var(--space-2);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.step-instruction-file-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px var(--space-3);
+  margin: 0;
+}
+
+.step-instruction-file-facts dt {
+  color: var(--gray-400);
+}
+
+.step-instruction-file-facts dd {
+  margin: 0;
+}
+
+.step-instruction-file:hover .step-instruction-file-card,
+.step-instruction-file-name:focus + .step-instruction-file-card {
   opacity: 1;
   visibility: visible;
 }

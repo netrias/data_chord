@@ -9,6 +9,7 @@ import {
   isValidFileId,
   readFromSession,
 } from './storage-keys.js';
+import { readFileSession, selectedSheetShape } from './file-session.js';
 
 /**
  * Update progress tracker UI to reflect the active stage.
@@ -180,6 +181,53 @@ function _isStageOneUrl(url) {
 export function initStepInstruction(activeStage) {
   _populateInstructionBanner(activeStage);
   _populateStepTooltips();
+  renderFileContext();
+}
+
+/**
+ * Name the uploaded file under the step instruction, with a details card on hover or focus.
+ * The line stays hidden unless the stored file is the workflow this page shows.
+ */
+export function renderFileContext() {
+  const container = document.getElementById('stepInstructionFile');
+  if (!container) return;
+  const session = readFileSession();
+  const isCurrentFile = Boolean(session?.original_name) && session.file_id === _getFileIdForNavigation();
+  container.hidden = !isCurrentFile;
+  if (!isCurrentFile) return;
+
+  container.querySelector('.step-instruction-file-name').textContent = session.original_name;
+  container.querySelector('.step-instruction-file-card-name').textContent = session.original_name;
+  const facts = _fileFacts(session).flatMap(({ label, value }) => {
+    const term = document.createElement('dt');
+    term.textContent = label;
+    const detail = document.createElement('dd');
+    detail.textContent = value;
+    return [term, detail];
+  });
+  container.querySelector('.step-instruction-file-facts').replaceChildren(...facts);
+}
+
+/* why: older or partial session records omit facts that are unknown instead of showing placeholders. */
+function _fileFacts(session) {
+  const sheet = _isStageOneUrl(window.location.href) ? session.selected_sheet : session.dataset_shape?.sheet_name;
+  const shape = selectedSheetShape(session, sheet);
+  const sizeAndType = [session.human_size, session.tabular_format?.toUpperCase()].filter(Boolean).join(' · ');
+  const isWorkbook = Array.isArray(session.sheet_names) && session.sheet_names.length > 0;
+  const facts = [
+    { label: 'Rows', value: shape?.rows.toLocaleString('en-US') },
+    { label: 'Columns', value: shape?.columns.toLocaleString('en-US') },
+    { label: 'Size', value: sizeAndType },
+    { label: 'Uploaded', value: _formatUploadTime(session.uploaded_at) },
+    { label: 'Sheet', value: isWorkbook ? sheet : null },
+  ];
+  return facts.filter((fact) => fact.value);
+}
+
+function _formatUploadTime(isoTime) {
+  const time = new Date(isoTime ?? '');
+  if (Number.isNaN(time.getTime())) return null;
+  return time.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 /**
