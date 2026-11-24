@@ -30,8 +30,7 @@ mock_provider "aws" {
 
   mock_data "aws_route_table" {
     defaults = {
-      id     = "rtb-0123456789abcdef0"
-      vpc_id = "ryyXLP0q"
+      id = "rtb-0123456789abcdef0"
     }
   }
 
@@ -624,7 +623,7 @@ run "workflow_writes_do_not_retain_object_history" {
 }
 
 run "prepare_flat_catalog_keeps_the_legacy_table_selected" {
-  # Given a staging upgrade prepares a flat catalog beside the legacy catalog.
+  # Given a deployment prepares a flat catalog beside the legacy catalog.
   variables {
     reference_catalog = "prepare_flat"
   }
@@ -637,7 +636,8 @@ run "prepare_flat_catalog_keeps_the_legacy_table_selected" {
     condition = (
       output.reference_data_table == module.data_plane.reference_data_table_name &&
       aws_dynamodb_table.flat_reference_catalog[0].name == "data-chord-qa-reference-data-flat" &&
-      aws_dynamodb_table.flat_reference_catalog[0].deletion_protection_enabled
+      aws_dynamodb_table.flat_reference_catalog[0].deletion_protection_enabled &&
+      aws_dynamodb_table.flat_reference_catalog[0].point_in_time_recovery[0].enabled
     )
     error_message = "Preparing a flat catalog must keep the current table connected and create a protected destination."
   }
