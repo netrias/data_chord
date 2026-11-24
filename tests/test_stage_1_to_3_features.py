@@ -1078,6 +1078,8 @@ async def test_stage4_reads_the_saved_count_without_downloading_the_s3_upload(
     resumed_uploads = UploadStorage(tmp_path / "scratch", test_constraints)
     monkeypatch.setattr(dependencies, "get_upload_storage", lambda: resumed_uploads)
 
+    assert resumed_uploads.load(file_id) is None
+
     # When Stage 4 reopens the result with an empty scratch directory.
     with (
         patch.object(client, "head_object", wraps=client.head_object) as head,
@@ -1092,6 +1094,32 @@ async def test_stage4_reads_the_saved_count_without_downloading_the_s3_upload(
     assert response.json()["totalOriginalRows"] == 2
     assert original_key in {call.kwargs["Key"] for call in head.call_args_list}
     assert original_key not in {call.kwargs["Key"] for call in get.call_args_list}
+
+
+async def test_stage4_returns_the_missing_upload_message_for_a_missing_s3_original(
+    app_client: AsyncClient,
+    tmp_path: Path,
+    test_constraints: UploadConstraints,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given a completed S3-backed job whose original and scratch copy are gone.
+    client = FakeS3Client()
+    storage = S3WorkflowStorage("offline", client)
+    monkeypatch.setattr(dependencies, "get_workflow_storage", lambda: storage)
+    loaded = await _completed_second_sheet_job(app_client, [["Lung"]])
+    file_id = loaded.job.file_id
+    (original_key,) = [key for key in client.objects if key.endswith("/original_upload.xlsx")]
+    client.objects.pop(original_key)
+    resumed_uploads = UploadStorage(tmp_path / "scratch", test_constraints)
+    monkeypatch.setattr(dependencies, "get_upload_storage", lambda: resumed_uploads)
+    assert resumed_uploads.load(file_id) is None
+
+    # When Stage 4 opens the job with its saved row count.
+    response = await app_client.post("/stage-4/rows", json={"file_id": file_id, "job_id": loaded.job.polling_job_id})
+
+    # Then it asks the user to upload the source again.
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Upload not found. Return to Stage 1 and upload it again."}
 
 
 async def test_stage3_http_workflow_runs_the_deterministic_term_provider(
