@@ -15,7 +15,8 @@ from src.domain.harmonization_cache import (
     HarmonizationCacheUnavailableError,
 )
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+_LEGACY_SCHEMA_VERSION = 1
 _FIELDS = {
     "cache_key",
     "schema_version",
@@ -57,7 +58,9 @@ class DynamoDbHarmonizationCache:
                     continue
                 if not isinstance(item, Mapping):
                     raise HarmonizationCacheCorruptError("Harmonization cache row is not an object")
-                entries[key] = _entry_from_item(key, cast(Mapping[str, object], item))
+                entry = _entry_from_item(key, cast(Mapping[str, object], item))
+                if entry is not None:
+                    entries[key] = entry
         except HarmonizationCacheCorruptError:
             raise
         except Exception as exc:
@@ -76,7 +79,8 @@ def _item(entry: HarmonizationCacheEntry) -> Mapping[str, object]:
     key = entry.key
     return {
         "cache_key": _digest(key),
-        "schema_version": SCHEMA_VERSION,
+        # Keep positive rows readable by previous releases. Only no-matches need a new version.
+        "schema_version": SCHEMA_VERSION if entry.matched_value is None else _LEGACY_SCHEMA_VERSION,
         "matched_value": entry.matched_value,
         "match_fidelity": entry.match_fidelity.value,
     }
@@ -85,8 +89,9 @@ def _item(entry: HarmonizationCacheEntry) -> Mapping[str, object]:
 def _entry_from_item(
     requested_key: HarmonizationCacheKey,
     item: Mapping[str, object],
-) -> HarmonizationCacheEntry:
-    if set(item) != _FIELDS or item.get("schema_version") != SCHEMA_VERSION:
+) -> HarmonizationCacheEntry | None:
+    schema_version = item.get("schema_version")
+    if set(item) != _FIELDS or schema_version not in (_LEGACY_SCHEMA_VERSION, SCHEMA_VERSION):
         raise HarmonizationCacheCorruptError("Harmonization cache row has an unsupported shape")
     if item.get("cache_key") != _digest(requested_key):
         raise HarmonizationCacheCorruptError("Harmonization cache identity does not match its key")
@@ -94,13 +99,17 @@ def _entry_from_item(
     if raw_match is not None and not isinstance(raw_match, str):
         raise HarmonizationCacheCorruptError("Harmonization cache result is invalid")
     try:
-        return HarmonizationCacheEntry(
+        entry = HarmonizationCacheEntry(
             key=requested_key,
             matched_value=cast(str | None, raw_match),
             match_fidelity=MatchFidelity(_required_string(item, "match_fidelity")),
         )
     except ValueError as exc:
         raise HarmonizationCacheCorruptError("Harmonization cache result is invalid") from exc
+    # Older explorers could cache no-match after a malformed call prevented evaluation.
+    if schema_version == _LEGACY_SCHEMA_VERSION and entry.matched_value is None:
+        return None
+    return entry
 
 
 def _required_string(item: Mapping[str, object], field: str) -> str:
