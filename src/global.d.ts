@@ -13,11 +13,25 @@ declare module '/assets/shared/step-instruction-ui.js' {
   export function renderFileContext(): void;
 }
 
+interface FileSession {
+  file_id: string;
+  original_name: string;
+  uploaded_at: string;
+  human_size: string;
+  tabular_format?: 'csv' | 'tsv' | 'xlsx' | null;
+  sheet_names?: string[];
+  sheet_previews?: Record<string, unknown>;
+  selected_sheet?: string | null;
+  dataset_shape?: { sheet_name: string | null; rows: number | null; columns: number | null };
+}
+
 declare module '/assets/shared/file-session.js' {
-  export function readFileSession(): Record<string, any> | null;
-  export function updateFileSession(fields: Record<string, unknown>): void;
-  export function selectedSheetShape(session: Record<string, any> | null): { rows: number; columns: number } | null;
-  export function formatCount(count: number, noun: string): string;
+  export function readFileSession(): FileSession | null;
+  export function saveFileSession(uploadResponse: Record<string, unknown>, fileName: string): void;
+  export function updateFileSession(fields: Partial<FileSession>): void;
+  export function clearFileSession(): void;
+  export function selectedSheetShape(session: FileSession | null): { rows: number; columns: number } | null;
+  export function formatCount(count: number): string;
 }
 
 declare module '/assets/shared/storage-keys.js' {
