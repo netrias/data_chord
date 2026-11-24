@@ -2,7 +2,7 @@ import { initStepInstruction, setActiveStage, initNavigationEvents, advanceMaxRe
 import { readFileSession, updateFileSession, selectedSheetShape, formatCount } from '/assets/shared/file-session.js';
 import { STAGE_2_PAYLOAD_KEY, STAGE_3_JOB_KEY, CURRENT_FILE_SESSION_KEY, removeFromSession, writeToSession, readFromSession, isValidFileId } from '/assets/shared/storage-keys.js';
 import { reportApiError, reportFetchFailure } from '/assets/shared/client-events.js';
-import { showDataModelPopup, preloadDataModels } from './data_model_popup.js';
+import { showDataModelPopup, preloadDataModels, refreshDataModels } from './data_model_popup.js';
 import { fingerprintFile, verificationMatches, UploadVerificationError, UPLOAD_INTEGRITY_MESSAGE } from './upload-integrity.js';
 
 const config = window.stageOneUploadConfig ?? {};
@@ -129,7 +129,7 @@ const _renderFileSize = (file) => {
   if (!dropzoneFileSize || !file) return;
   /* Hydrated files have humanSize (pre-formatted); real Files have size (bytes). */
   const size = file.humanSize ?? _formatBytes(file.size);
-  const shape = state.uploaded ? selectedSheetShape(readFileSession()) : null;
+  const shape = selectedSheetShape(readFileSession(state.uploaded?.file_id), state.selectedSheet);
   dropzoneFileSize.textContent = shape
     ? `${size} · ${formatCount(shape.rows, 'row')} · ${formatCount(shape.columns, 'column')}`
     : size;
@@ -302,7 +302,7 @@ const _clearStaleSessionData = () => {
 /* A replacement owns this history entry; earlier explicit workflow links keep theirs. */
 const _replaceUploadWorkflowUrl = (fileId) => {
   const url = new URL(window.location.href);
-  for (const key of ['file_id', 'data_model_key', 'external_version_number', 'job_id', 'status', 'detail']) {
+  for (const key of ['file_id', 'data_model_key', 'external_version_number', 'job_id', 'status', 'detail', 'reselect_model']) {
     url.searchParams.delete(key);
   }
   if (fileId) url.searchParams.set('file_id', fileId);
@@ -311,7 +311,7 @@ const _replaceUploadWorkflowUrl = (fileId) => {
 
 /* Enables navigation back to Stage 1 with file context. */
 const _persistFileSession = (uploadResponse, fileName) => {
-  writeToSession(CURRENT_FILE_SESSION_KEY, {
+  const session = {
     file_id: uploadResponse.file_id,
     original_name: fileName,
     uploaded_at: uploadResponse.uploaded_at ?? new Date().toISOString(),
@@ -320,8 +320,10 @@ const _persistFileSession = (uploadResponse, fileName) => {
     sheet_names: uploadResponse.sheet_names ?? [],
     sheet_previews: uploadResponse.sheet_previews ?? {},
     selected_sheet: uploadResponse.selected_sheet ?? null,
-  });
+  };
+  writeToSession(CURRENT_FILE_SESSION_KEY, session);
   renderFileContext();
+  return session;
 };
 
 /* Restores file display from session when returning to Stage 1. */
@@ -335,6 +337,11 @@ const _hydrateFromSession = () => {
     return false;
   }
 
+  _showUploadedFile(session);
+  return true;
+};
+
+const _showUploadedFile = (session) => {
   state.uploaded = {
     file_id: session.file_id,
     human_size: session.human_size,
@@ -349,7 +356,6 @@ const _hydrateFromSession = () => {
   _showDropzoneSummary(state.file, 'Uploaded');
   _renderSheetSelector();
   _setAnalyzeButtonEnabled(true);
-  return true;
 };
 
 const _hydrateDemoUpload = () => {
@@ -366,6 +372,26 @@ const _hydrateDemoUpload = () => {
   _showDropzoneSummary(state.file, 'Ready for demo');
   _renderSheetSelector();
   _setAnalyzeButtonEnabled(true);
+};
+
+const _restoreForModelSelection = () => {
+  resetMaxReachedStage();
+  const url = new URL(window.location.href);
+  const recovery = config.recovery;
+  if (!recovery) {
+    _replaceUploadWorkflowUrl(null);
+    _clearStaleSessionData();
+    _resetUploadState();
+    _setStatus('This upload is no longer available. Upload your file to start a new analysis.', 'error');
+    return;
+  }
+  // Keep the recovery URL on refresh until a replacement owns this entry.
+  url.searchParams.delete('job_id');
+  if (recovery.completedJobId) url.searchParams.set('job_id', recovery.completedJobId);
+  window.history.replaceState(window.history.state, '', url);
+  const session = _persistFileSession(recovery.upload, recovery.upload.file_name);
+  _showUploadedFile(session);
+  _setStatus('The previous model version is no longer available. Select Map to choose a current version and run analysis again.');
 };
 
 /* Inline SVG check used inside each active tab; declared once to keep the
@@ -551,7 +577,7 @@ const _selectSheet = (sheetName, { focus = false } = {}) => {
 /* why: update in place so the upload time and Analyze counts survive a sheet change. */
 const _persistSelectedSheet = () => {
   if (!state.uploaded || !state.file) return;
-  updateFileSession({ selected_sheet: state.selectedSheet });
+  updateFileSession(state.uploaded.file_id, { selected_sheet: state.selectedSheet });
   renderFileContext();
   _renderFileSize(state.file);
 };
@@ -629,6 +655,7 @@ const _persistStageTwoPayload = (payload) => {
 };
 
 const _navigateToStageTwo = (fileId, dataModelKey, externalVersionNumber, payload) => {
+  removeFromSession(STAGE_3_JOB_KEY);
   _persistStageTwoPayload(payload);
   advanceMaxReachedStage('mapping');
   const search = new URLSearchParams({ file_id: fileId, data_model_key: dataModelKey });
@@ -668,6 +695,7 @@ const _analyzeDataset = async () => {
   _showDropzoneSummary(state.file, 'Analyzing columns…');
   if (analyzeOverlay) analyzeOverlay.classList.remove('hidden');
 
+  let failureMessage = ANALYZE_API_ERROR_MESSAGE;
   try {
     let response;
     try {
@@ -703,9 +731,15 @@ const _analyzeDataset = async () => {
         statusCode: response.status,
         serverRequestId: _responseRequestId(response),
       });
-      throw new Error(ANALYZE_API_ERROR_MESSAGE);
+      if (response.status === 409 && payload.code === 'model_version_retired') {
+        refreshDataModels();
+        failureMessage = payload.detail;
+      } else if (response.status === 503) {
+        failureMessage = 'Analysis is temporarily unavailable. Please try again later.';
+      }
+      throw new Error(failureMessage);
     }
-    updateFileSession({
+    updateFileSession(state.uploaded.file_id, {
       dataset_shape: {
         sheet_name: submittedSheet,
         rows: payload.total_rows,
@@ -719,16 +753,16 @@ const _analyzeDataset = async () => {
       selection.externalVersionNumber,
       payload,
     );
+    return;
   } catch (error) {
     console.error(error);
-    _setStatus(ANALYZE_API_ERROR_MESSAGE, 'error');
-    _setAnalyzeButtonEnabled(true);
-    _showDropzoneSummary(state.file, 'Uploaded');
-    // Only hide overlay and reset state on error
-    state.isAnalyzing = false;
-    _setFileInputDisabled(false);
-    if (analyzeOverlay) analyzeOverlay.classList.add('hidden');
   }
+  _setStatus(failureMessage, 'error');
+  _setAnalyzeButtonEnabled(true);
+  _showDropzoneSummary(state.file, 'Uploaded');
+  state.isAnalyzing = false;
+  _setFileInputDisabled(false);
+  if (analyzeOverlay) analyzeOverlay.classList.add('hidden');
 };
 
 const _wireDragEvents = () => {
@@ -778,15 +812,17 @@ const _wireDemoDropProtection = () => {
 };
 
 const _init = () => {
-  setActiveStage('upload');
-  initStepInstruction('upload');
-  initNavigationEvents();
-
   if (isDemo) {
     _hydrateDemoUpload();
+  } else if (config.reselectModel) {
+    _restoreForModelSelection();
   } else if (!_hydrateFromSession()) {
     _resetUploadState();
   }
+
+  setActiveStage('upload', config.recovery?.completedJobId ? 'review' : 'upload');
+  initStepInstruction('upload');
+  initNavigationEvents();
 
   if (isDemo) {
     _wireDemoDropProtection();

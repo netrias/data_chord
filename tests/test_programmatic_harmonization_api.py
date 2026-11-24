@@ -709,3 +709,27 @@ async def test_harmonization_api_has_no_unversioned_alias(
 
     # Then: no compatibility route exists.
     assert response.status_code == 404
+
+async def test_harmonization_api_reports_model_retirement_on_poll(
+    app_client: AsyncClient, mock_netrias_client: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Given an authenticated job whose selected reference model has retired.
+    from src.domain.reference_data import ReferenceModelNotFoundError
+
+    monkeypatch.setenv("DATA_CHORD_API_KEY", _API_KEY)
+    mock_netrias_client.reference_repository.load_model.side_effect = ReferenceModelNotFoundError("retired")
+    submitted = await app_client.post(
+        "/api/v1/jobs/harmonize",
+        headers={"content-type": "application/octet-stream", "x-api-key": _API_KEY},
+        content=_harmonization_payload(),
+    )
+    assert submitted.status_code == 202
+
+    # When the client polls for the terminal result.
+    response = await _wait_for_terminal_job(app_client, submitted.json()["job_id"])
+
+    # Then the failure asks the caller to submit a new job using a current version.
+    assert response.json() == {
+        "status": "FAILED",
+        "errorMessage": "This model version is no longer available. Choose a current version and submit a new job.",
+    }
