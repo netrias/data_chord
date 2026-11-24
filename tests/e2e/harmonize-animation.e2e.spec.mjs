@@ -32,6 +32,9 @@ test('Stage 3 shows the animation in place of the spinner while a job runs', asy
   await expect(page.locator('#loadingState')).toBeVisible();
   await expect(_canvas(page)).toBeVisible();
   await expect(_spinner(page)).toBeHidden();
+  // and the loading headline is the only visible heading, so the stage title does not repeat it
+  await expect(page.locator('#stageThreeHeader')).toBeHidden();
+  await expect(page.locator('h1:visible, h2:visible')).toHaveText(['Harmonizing your dataset']);
 });
 
 test('Stage 3 keeps the spinner when the animation script cannot load', async ({ page }) => {
@@ -50,15 +53,18 @@ test('Stage 3 keeps the spinner when the animation script cannot load', async ({
   await expect(_canvas(page)).toBeHidden();
 });
 
-test('Stage 3 hides the animation when the job has failed', async ({ page }) => {
+test('Stage 3 shows only the failure, not the loading panel, when the job has failed', async ({ page }) => {
   // Given a failed harmonization job
   await _mockJob(page, 'failed');
 
   // When Stage 3 loads and polls the job
   await _openStageThree(page);
 
-  // Then it displays the failure and hides the animation
-  await expect(page.locator('#stageThreeError')).toBeVisible();
+  // Then it shows the failure title and error, and hides the whole loading panel with its time estimate
+  await expect(page.locator('#stageThreeError')).toHaveText('Mocked job state.');
+  await expect(page.locator('#stageThreeTitle')).toHaveText('Harmonization Failed');
+  await expect(page.locator('#stageThreeTitle')).toBeVisible();
+  await expect(page.locator('#loadingState')).toBeHidden();
   await expect(_canvas(page)).toBeHidden();
 });
 

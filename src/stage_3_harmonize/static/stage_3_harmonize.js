@@ -18,7 +18,6 @@ const errorBanner = document.getElementById('stageThreeError');
 const stageThreeTitle = document.getElementById('stageThreeTitle');
 const stageThreeHeader = document.getElementById('stageThreeHeader');
 const returnToStageTwo = document.getElementById('returnToStageTwo');
-const harmonizeAnimation = document.querySelector('#loadingState .harmonize-animation');
 const harmonizeProgressMessage = document.getElementById('harmonizeProgressMessage');
 const columnOutcomePanel = document.querySelector('[data-column-outcome-panel]');
 const columnOutcomeContainer = document.querySelector('[data-column-outcome-table]');
@@ -291,17 +290,6 @@ const _toggleEmptyState = (show) => {
   emptyState.classList.toggle('hidden', !show);
 };
 
-/* why: animation is purely decorative - failures should not break page functionality. */
-const _toggleAnimation = (show) => {
-  try {
-    if (harmonizeAnimation) {
-      harmonizeAnimation.classList.toggle('hidden', !show);
-    }
-  } catch {
-    /* Animation toggle failed - page continues to work without it. */
-  }
-};
-
 
 const _clearError = () => {
   errorBanner.classList.add('hidden');
@@ -444,7 +432,6 @@ const _renderJob = (job, pollIntervalMs = JOB_POLL_INTERVAL_MS) => {
     updateStepInstruction('harmonize_complete');
   } else {
     _toggleLoadingState(true);
-    _toggleAnimation(true);
     _updateProgressMessage(jobForSession);
     _hideMetricsDashboard();
     reviewButton.disabled = true;

@@ -66,7 +66,7 @@
   width: min(680px, 100%);
   aspect-ratio: 680 / 320;
   /* why: the drawing sits in the middle of the canvas, so its top band is empty; pull it up to balance the card.
-     The percentage keeps the pull small when the canvas shrinks on narrow screens. */
+     The pull must stay smaller than the card's top padding, or the canvas sticks out of the card. */
   margin: calc(-1 * min(var(--space-10), 6%)) 0 var(--space-4);
 }
 
@@ -492,5 +492,10 @@
 @media (max-width: 640px) {
   #stageThreeMetrics {
     padding: var(--space-6);
+  }
+
+  /* why: the card padding drops to --space-6 here, so the canvas pull must stay below it. */
+  .harmonize-animation {
+    margin-top: calc(-1 * min(var(--space-5), 6%));
   }
 }
