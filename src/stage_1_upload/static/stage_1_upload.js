@@ -820,7 +820,7 @@ const _init = () => {
     _resetUploadState();
   }
 
-  setActiveStage('upload', config.recovery?.completedJobId ? 'review' : 'upload');
+  setActiveStage('upload', Boolean(config.recovery?.completedJobId));
   initStepInstruction('upload');
   initNavigationEvents();
 

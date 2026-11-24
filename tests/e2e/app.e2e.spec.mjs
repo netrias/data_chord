@@ -3191,8 +3191,7 @@ test('model recovery keeps completed results reachable for the same plan', async
   await expect(page.locator('#reviewButton')).toBeEnabled({ timeout: 20_000 });
   await page.locator('#reviewButton').click();
   await page.waitForURL(/\/stage-4/);
-  await page.locator('#stageFiveButton').click();
-  await page.waitForURL(/\/stage-5/);
+  await waitForReviewRows(page);
   const jobId = new URL(page.url()).searchParams.get('job_id');
   expect(jobId).toBeTruthy();
 
@@ -3200,7 +3199,9 @@ test('model recovery keeps completed results reachable for the same plan', async
   await page.goto(`/stage-1?file_id=${fileId}&reselect_model=true`);
   await expect(page.locator('#statusMessage')).toContainText('The previous model version is no longer available');
 
-  // Then the tracker continues to link to Verify and Review for that same completed job.
+  // Then the tracker still links to completed results and Map requires a new analysis.
+  await expect(page.locator('[data-stage="mapping"] .step-link')).toHaveAttribute('aria-disabled', 'true');
+  await expect(page.locator('#analyzeButton')).toBeEnabled();
   await expect(page.locator('[data-stage="verify"] .step-link')).toHaveAttribute(
     'href', `/stage-4?file_id=${fileId}&job_id=${jobId}`,
   );
