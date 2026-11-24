@@ -208,7 +208,6 @@ class HarmonizationJobService:
                 accepted_job=accepted_job,
             )
         except ReferenceDataError as exc:
-            logger.warning("Harmonization reference data could not be loaded", extra={"file_id": request.file_id})
             fail_harmonization_job(
                 workflow_storage=self._workflow_storage,
                 user=user,
