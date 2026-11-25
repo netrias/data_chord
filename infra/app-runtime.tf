@@ -206,7 +206,7 @@ resource "aws_ecs_service" "app" {
     container_port   = 8000
   }
 
-  depends_on = [aws_lb_listener.https, aws_iam_role_policy.application_task_flat_reference_catalog]
+  depends_on = [aws_lb_listener.https]
 
   tags = local.common_tags
 }
