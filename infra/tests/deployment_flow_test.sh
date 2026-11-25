@@ -348,6 +348,30 @@ fi
 # Then it stops before AWS and OpenTofu.
 [[ ! -s "$bdf_calls" ]] || fail_test "Missing BDF development reached an external command"
 
+# Given BDF production is preparing its separate catalog.
+prepare_calls="$TEST_ROOT/prepare-prod-calls"
+prepare_output="$TEST_ROOT/prepare-prod-output"
+prepare_repo="$TEST_ROOT/prepare-prod"
+mkdir -p "$prepare_repo/infra/scripts" "$prepare_repo/environments/bdf"
+cp "$TEST_DIR/../scripts/"{deploy.sh,lib.sh,environment.py} "$prepare_repo/infra/scripts/"
+python3 - "$TEST_DIR/../../environments/bdf/prod.json" "$prepare_repo/environments/bdf/prod.json" <<'PYTHON'
+import json
+import sys
+from pathlib import Path
+
+environment = json.loads(Path(sys.argv[1]).read_text())
+environment["reference_catalog"] = "prepare_flat"
+Path(sys.argv[2]).write_text(json.dumps(environment))
+PYTHON
+: >"$prepare_calls"
+# When an operator tries a normal production application deploy.
+if PATH="$MOCK_BIN:/usr/bin:/bin" MOCK_CALLS="$prepare_calls" "$prepare_repo/infra/scripts/deploy.sh" bdf prod deploy >"$prepare_output" 2>&1; then
+  fail_test "Production deployed while preparing the catalog"
+fi
+# Then it points to the table-only command and stops before AWS and OpenTofu.
+assert_contains "$prepare_output" "prepare-bdf-prod-catalog.sh"
+[[ ! -s "$prepare_calls" ]] || fail_test "Production deploy reached an external command during catalog preparation"
+
 # Given BDF production retains its network and uses the current foundation.
 bdf_prod_calls="$TEST_ROOT/bdf-prod-calls"
 # When the normal plan command selects production.

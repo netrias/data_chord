@@ -6,6 +6,26 @@ repository owns the AWS account foundation.
 
 See [../DEPLOYMENT.md](../DEPLOYMENT.md) for the operator procedure.
 
+## BDF production catalog preparation
+
+With `reference_catalog` set to `prepare_flat`, use the table-only command from
+a clean, pushed revision. It verifies that the saved plan only creates the
+protected replacement table. The existing application image and original
+reference table stay active. The plan may also record an already pending
+state-only move of the workflow bucket versioning address.
+
+```bash
+plan_dir="$(mktemp -d)"
+AWS_PROFILE=strides bash infra/scripts/prepare-bdf-prod-catalog.sh plan "$plan_dir/catalog.tfplan"
+# Review the table-only plan before applying it.
+AWS_PROFILE=strides bash infra/scripts/prepare-bdf-prod-catalog.sh apply "$plan_dir/catalog.tfplan"
+```
+
+After publication and verification, review a separate image and catalog switch
+with `reference_catalog` set to `flat`. Review a rollback plan before that
+switch. It must restore the previous image and its original catalog together and
+keep both tables. The preparation command only creates the new table.
+
 ## Ownership
 
 The account foundation provides:

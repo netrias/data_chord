@@ -18,6 +18,9 @@ case "$MODE" in
   plan | deploy) ;;
   *) fail "Use: just plan <target> <stage> or just deploy <target> <stage>." ;;
 esac
+if [[ "$MODE" == "deploy" && "$(environment_value reference_catalog)" == "prepare_flat" ]]; then
+  fail "Catalog preparation keeps the running image. Use infra/scripts/prepare-bdf-prod-catalog.sh."
+fi
 if [[ "$MODE" == "deploy" ]]; then
   export DEPLOYER_SESSION_SECONDS=14400
   export DEPLOYER_REQUIRED_REMAINING_SECONDS=10800

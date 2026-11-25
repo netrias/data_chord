@@ -30,8 +30,7 @@ mock_provider "aws" {
 
   mock_data "aws_route_table" {
     defaults = {
-      id     = "rtb-0123456789abcdef0"
-      vpc_id = "ryyXLP0q"
+      id = "rtb-0123456789abcdef0"
     }
   }
 
@@ -620,5 +619,53 @@ run "workflow_writes_do_not_retain_object_history" {
   assert {
     condition     = aws_s3_bucket_versioning.managed_workflow.versioning_configuration[0].status == "Suspended"
     error_message = "Workflow storage must stop retaining future object versions."
+  }
+}
+
+run "prepare_flat_catalog_keeps_the_legacy_table_selected" {
+  # Given a deployment prepares a flat catalog beside the legacy catalog.
+  variables {
+    reference_catalog = "prepare_flat"
+  }
+
+  # When OpenTofu plans the deployment.
+  command = plan
+
+  # Then the legacy source stays selected and the new destination is protected.
+  assert {
+    condition = (
+      output.reference_data_table == module.data_plane.reference_data_table_name &&
+      aws_dynamodb_table.flat_reference_catalog[0].name == "data-chord-qa-reference-data-flat" &&
+      aws_dynamodb_table.flat_reference_catalog[0].deletion_protection_enabled &&
+      aws_dynamodb_table.flat_reference_catalog[0].point_in_time_recovery[0].enabled
+    )
+    error_message = "Preparing a flat catalog must keep the current table connected and create a protected destination."
+  }
+}
+
+run "flat_catalog_switch_keeps_both_tables" {
+  # Given the flat table is ready to serve requests.
+  variables {
+    reference_catalog = "flat"
+  }
+
+  # When the mock deploy applies the flat selection.
+  command = apply
+
+  # Then the task uses the flat table with scoped read access, and the legacy table is retained.
+  assert {
+    condition = (
+      output.reference_data_table == aws_dynamodb_table.flat_reference_catalog[0].name &&
+      module.data_plane.reference_data_table_name == "data-chord-qa-reference-data" &&
+      one([
+        for item in jsondecode(aws_ecs_task_definition.application.container_definitions)[0].environment :
+        item.value if item.name == "DATA_CHORD_REFERENCE_TABLE"
+      ]) == output.reference_data_table &&
+      jsondecode(aws_iam_role_policy.application_task_flat_reference_catalog[0].policy).Statement[0].Resource
+      == aws_dynamodb_table.flat_reference_catalog[0].arn &&
+      toset(jsondecode(aws_iam_role_policy.application_task_flat_reference_catalog[0].policy).Statement[0].Action)
+      == toset(["dynamodb:DescribeTable", "dynamodb:Query"])
+    )
+    error_message = "The task must select the flat catalog, have scoped read access, and retain the legacy table for rollback."
   }
 }

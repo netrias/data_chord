@@ -10,7 +10,7 @@ output "workflow_bucket" {
 
 output "reference_data_table" {
   description = "DynamoDB table used for standard metadata and permissible values."
-  value       = module.data_plane.reference_data_table_name
+  value       = local.active_reference_table
 }
 
 output "harmonization_cache_table" {
