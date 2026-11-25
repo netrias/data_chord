@@ -25,6 +25,7 @@ def test_production_retains_its_existing_network() -> None:
     assert len(variables["existing_network"]["public_subnet_ids"]) == 3
     assert variables["local_developer_role_arn"] is None
     assert variables["environment"] == "prod"
+    assert variables["reference_catalog"] == "flat"
 
 
 def test_environment_derives_the_deployment_boundary(tmp_path: Path) -> None:
@@ -61,6 +62,7 @@ def test_environment_derives_the_deployment_boundary(tmp_path: Path) -> None:
         "hosted_zone_name": "apps.netrias.com",
         "local_developer_role_arn": None,
         "programmatic_api_key_secret_name": "data-chord/staging/programmatic-api-key",
+        "reference_catalog": "legacy",
     }
 
 
